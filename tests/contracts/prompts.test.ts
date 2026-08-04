@@ -696,8 +696,8 @@ describe("contracts/prompts compiler logic", () => {
 			"Harness model: direct tools are attached schemas; fleet agents are workers behind dispatch; skills are operator-activated workflows reached through context. Keep these capability sets distinct.",
 			'When answering capability-inventory questions, list direct tools without calls; add dispatch(list:true) only if agents or the fleet are requested; add context(scope="skills") only if skills are requested.',
 			"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
-			'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available and Scout is routable, explicit broad repository/codebase exploration goes to Scout before repo-wide reads.',
-			'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded Scout handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
+			'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available, explicit broad repository/codebase exploration uses agent:"auto" before repo-wide reads.',
+			'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded agent:"auto" handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
 			'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
 			'List installed skills with context(scope="skills") only when the task is skill-shaped or the operator asks about skills; if one matches, suggest the operator run /skill:<name>, and never load a skill the operator did not request.',
 			FLEET_ROUTING_GUIDANCE,
@@ -752,10 +752,10 @@ describe("contracts/prompts compiler logic", () => {
 		});
 		ok(withDispatch.systemPrompt.includes(FLEET_ROUTING_GUIDANCE));
 		for (const route of [
-			"explicit broad repo/codebase exploration -> scout before repo-wide reads",
-			"external docs/papers -> researcher",
-			"receipts/evidence -> provenance",
-			"bounded code changes -> coder",
+			'broad repo/codebase exploration -> agent:"auto" before repo-wide reads',
+			"external research, evidence, and bounded changes also use auto",
+			"when agent choice is not pinned",
+			"Give each dispatch a concrete handoff and synthesize its receipt",
 		]) {
 			ok(withDispatch.systemPrompt.includes(route), route);
 		}
@@ -792,7 +792,7 @@ describe("contracts/prompts compiler logic", () => {
 		// The deterministic routing order and failure recovery are static base
 		// lines, present regardless of which hinted tools are on the surface.
 		ok(prompt.includes("Routing order: use structured observe tools before bash for narrow inspection"));
-		ok(prompt.includes("treat broad reconnaissance as a bounded Scout handoff"));
+		ok(prompt.includes('treat broad reconnaissance as a bounded agent:"auto" handoff'));
 		ok(prompt.includes("dispatch other bounded parallel or delegated subwork, and synthesize receipts"));
 		ok(prompt.includes("validate with verify or git diff before final claims"));
 		ok(prompt.includes("do not retry the same shape blindly"));
@@ -1087,6 +1087,9 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 			getRun: () => null,
 			abort: () => {},
 			steer: () => {},
+			planAgentSelection: () => {
+				throw new Error("unexpected agent plan selection");
+			},
 			snapshot: () => ({
 				generatedAt: new Date().toISOString(),
 				running: [],
@@ -1095,7 +1098,7 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 			}),
 			drain: async () => {},
 		};
-		const spec = createDispatchTool({ dispatch });
+		const spec = createDispatchTool({ getAgentSpecs: () => [], dispatch });
 		strictEqual(spec.description.includes("handoff"), false);
 	});
 });

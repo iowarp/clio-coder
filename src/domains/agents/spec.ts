@@ -23,6 +23,10 @@ export type AgentCapabilityClass =
 	| "orchestration"
 	| "internal";
 
+/** Authority classes a bounded coordinator plan may grant to agent automation. */
+export const AGENT_AUTOMATION_AUTHORITIES = ["read-only", "verification", "artifact-write", "workspace-edit"] as const;
+export type AgentAutomationAuthority = (typeof AGENT_AUTOMATION_AUTHORITIES)[number];
+
 export type AgentLatencyClass = "fast" | "balanced" | "deep";
 
 /**

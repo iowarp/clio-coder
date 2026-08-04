@@ -209,14 +209,23 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		rootTask: prompt,
 		maxWorkers: contract.maxWorkers,
 		onFailure: contract.onFailure,
-		steps: contract.steps.map((step) => ({
-			id: step.id,
-			agentId: step.agent,
-			scope: step.scope,
-			dependencies: step.dependencies,
-			task: prompt,
-			executionRole: requestExecutionRole({ agentId: step.agent, resolveFacts: roleFacts }),
-		})),
+		steps: contract.steps.map((step) => {
+			const spec = agents.getSpec(step.agent);
+			if (spec === null || spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
+				throw new Error(`fleet step '${step.id}' has no automatable agent authority`);
+			}
+			return {
+				id: step.id,
+				agentId: step.agent,
+				scope: step.scope,
+				expectedResultContract: spec.resultContract.kind,
+				requestedAuthority: spec.capabilityClass,
+				approvedAuthority: spec.capabilityClass,
+				dependencies: step.dependencies,
+				task: prompt,
+				executionRole: requestExecutionRole({ agentId: step.agent, resolveFacts: roleFacts }),
+			};
+		}),
 	});
 	process.stderr.write(`fleet ${contract.name}: root=${fleetRootId} plan=${plan.hash} steps=${contract.steps.length}\n`);
 	const receipts: RunReceipt[] = [];

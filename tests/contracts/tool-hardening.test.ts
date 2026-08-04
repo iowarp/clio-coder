@@ -554,7 +554,7 @@ describe("contracts/tool-hardening finish-contract action-scoped trigger", () =>
 				"verify frontend",
 				[...editPair(), call("verify", { check: "frontend", path: "page.html" }, "v"), okResult("verify", "v")],
 			],
-			["dispatch", [...editPair(), call("dispatch", { agent_id: "coder", task: "do" }, "v"), dispatchResult("v")]],
+			["dispatch", [...editPair(), call("dispatch", { agent: "coder", task: "do" }, "v"), dispatchResult("v")]],
 			["protected-artifact", [...editPair(), protectedArtifact("report.md")]],
 		];
 		for (const [label, entries] of validated) {

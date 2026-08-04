@@ -77,12 +77,64 @@ describe("resolved dispatch plan admission", () => {
 		restoreDispatchState();
 	});
 
+	it("accepts only strict resolved plan version 3 artifacts", () => {
+		const task = {
+			agent: "coder",
+			task: "implement",
+			target: "primary",
+			model: "base-model",
+			node: "local",
+			nodeKind: "local",
+			routingIntent: {
+				posture: "balanced",
+				maxCostUsd: null,
+				deadlineMs: null,
+				minimumQuality: null,
+				requiredCapabilities: [],
+				locality: "any",
+				failover: "none",
+			},
+			failover: "none",
+			routeApproval: null,
+			agentSelection: null,
+			stepId: null,
+			dependencies: [],
+			executionRole: "builder",
+			expectedResultContract: null,
+			authorityGrant: null,
+			agentDecision: null,
+			wave: null,
+			role: "task",
+			position: 1,
+		} as const;
+		const current = {
+			version: 3,
+			topology: "parallel",
+			source: null,
+			maxWorkers: null,
+			onFailure: null,
+			tasks: [task],
+			costCeilingUsd: 5,
+			deadlineMs: null,
+		} as const;
+		strictEqual(resolvedDispatchPlanFromArgs({ [RESOLVED_DISPATCH_PLAN_ARGUMENT]: current })?.version, 3);
+		strictEqual(resolvedDispatchPlanFromArgs({ [RESOLVED_DISPATCH_PLAN_ARGUMENT]: { ...current, version: 2 } }), null);
+		const { source: _source, ...withoutSource } = current;
+		strictEqual(resolvedDispatchPlanFromArgs({ [RESOLVED_DISPATCH_PLAN_ARGUMENT]: withoutSource }), null);
+		const { deadlineMs: _deadlineMs, ...withoutDeadline } = current;
+		strictEqual(resolvedDispatchPlanFromArgs({ [RESOLVED_DISPATCH_PLAN_ARGUMENT]: withoutDeadline }), null);
+		strictEqual(resolvedDispatchPlanFromArgs({ [RESOLVED_DISPATCH_PLAN_ARGUMENT]: { ...current, legacy: true } }), null);
+	});
+
 	it("sanitizes control bytes in typed plan fields before overlay rendering", () => {
 		const plan = describeDispatchPlan({
 			tasks: ["one"],
 			[RESOLVED_DISPATCH_PLAN_ARGUMENT]: {
-				version: 2,
+				version: 3,
 				topology: "parallel",
+				source: null,
+				maxWorkers: null,
+				onFailure: null,
 				tasks: [
 					{
 						agent: "coder\nforged",
@@ -103,16 +155,25 @@ describe("resolved dispatch plan admission", () => {
 						},
 						failover: "none",
 						routeApproval: null,
+						agentSelection: null,
+						stepId: null,
+						dependencies: [],
+						executionRole: "builder",
+						expectedResultContract: null,
+						authorityGrant: null,
+						agentDecision: null,
+						wave: null,
 						role: "task",
 						position: 1,
 					},
 				],
 				costCeilingUsd: 5,
+				deadlineMs: null,
 			},
 		});
 		strictEqual(plan.text.includes("\u001b"), false);
 		strictEqual(plan.text.includes("\u0000"), false);
-		strictEqual(plan.text.split("\n").length, 3, "embedded line breaks cannot forge plan rows");
+		strictEqual(plan.text.split("\n").length, 4, "embedded line breaks cannot forge plan rows");
 		match(
 			plan.text,
 			/agent=coder\?forged target=primary\?\[2J model=model\?suffix node=blade\?forged kind=ssh host=host\?forged failover=none .* task="inspect\?the repo\?\[31m"/,
@@ -131,8 +192,11 @@ describe("resolved dispatch plan admission", () => {
 		const resolvedTask = (extra: Record<string, unknown>) => ({
 			tasks: ["route"],
 			[RESOLVED_DISPATCH_PLAN_ARGUMENT]: {
-				version: 2,
+				version: 3,
 				topology: "parallel",
+				source: null,
+				maxWorkers: null,
+				onFailure: null,
 				tasks: [
 					{
 						agent: "coder",
@@ -154,10 +218,19 @@ describe("resolved dispatch plan admission", () => {
 							failover: "approved",
 						},
 						routeApproval: null,
+						agentSelection: null,
+						stepId: null,
+						dependencies: [],
+						executionRole: "builder",
+						expectedResultContract: null,
+						authorityGrant: null,
+						agentDecision: null,
+						wave: null,
 						...extra,
 					},
 				],
 				costCeilingUsd: 5,
+				deadlineMs: null,
 			},
 		});
 		const c1 = { agentId: "coder", target: "primary", model: "base-model", node: "blade" };
@@ -186,7 +259,11 @@ describe("resolved dispatch plan admission", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const unpinned = tool.prepareAdmissionArguments?.({
 				tasks: ["one", "two"],
 				routing: { failover: "approved" },
@@ -267,7 +344,11 @@ describe("resolved dispatch plan admission", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const args = tool.prepareAdmissionArguments?.({
 				tasks: ["step one", "step two"],
 				mode: "pipeline",
@@ -350,7 +431,11 @@ describe("resolved dispatch plan admission", () => {
 			});
 			await bundle.extension.start();
 			try {
-				const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "auto-edit" });
+				const tool = createDispatchTool({
+					getAgentSpecs: () => [],
+					dispatch: bundle.contract,
+					getAutonomy: () => "auto-edit",
+				});
 				const registry = createRegistry({
 					safety: createWorkerSafety({ cwd: process.cwd() }),
 					autonomy: () => "auto-edit",
@@ -509,7 +594,7 @@ describe("resolved dispatch plan admission", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => autonomy });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract, getAutonomy: () => autonomy });
 			const registry = createRegistry({
 				safety: createWorkerSafety({ cwd: process.cwd() }),
 				autonomy: () => autonomy,
@@ -558,7 +643,11 @@ describe("resolved dispatch plan admission", () => {
 			});
 			await bundle.extension.start();
 			try {
-				const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "auto-edit" });
+				const tool = createDispatchTool({
+					getAgentSpecs: () => [],
+					dispatch: bundle.contract,
+					getAutonomy: () => "auto-edit",
+				});
 				const registry = createRegistry({
 					safety: createWorkerSafety({ cwd: process.cwd() }),
 					autonomy: () => "auto-edit",
@@ -600,7 +689,11 @@ describe("resolved dispatch plan admission", () => {
 		await bundle.extension.start();
 		try {
 			const args = { tasks: ["one", "two"] };
-			const fullTool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const fullTool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const fullRegistry = createRegistry({
 				safety: createWorkerSafety({ cwd: process.cwd() }),
 				autonomy: () => "full-auto",
@@ -619,7 +712,11 @@ describe("resolved dispatch plan admission", () => {
 			const fullReceipt = JSON.parse(readFileSync(fullEnvelope?.receiptPath ?? "", "utf8")) as RunReceipt;
 			strictEqual(fullReceipt.plan?.approval, "full-auto");
 
-			const headlessTool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "auto-edit" });
+			const headlessTool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "auto-edit",
+			});
 			const headlessRegistry = createRegistry({
 				safety: createWorkerSafety({ cwd: process.cwd() }),
 				autonomy: () => "auto-edit",

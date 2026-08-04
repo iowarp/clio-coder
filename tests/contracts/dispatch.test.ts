@@ -690,7 +690,7 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, bus: context.bus });
+			const tool = createDispatchTool({ dispatch: bundle.contract, bus: context.bus, getAgentSpecs: () => [] });
 			const result = await tool.run({ tasks: ["central progress"] }, {});
 			strictEqual(result.kind, "ok");
 			deepStrictEqual(enqueuedTasks, ["central progress"]);
@@ -4229,6 +4229,7 @@ rl.once("line", (line) => {
 				topology: "parallel" as const,
 				taskCount: 2,
 				approval: "operator" as const,
+				source: null,
 				costCeilingUsd: 1,
 			};
 			const personaOverride = { promptHash: "c".repeat(64) };
@@ -5526,7 +5527,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 		const bundle = makeDispatchBundle(context, { spawnWorker: instantWorker });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ dispatch: bundle.contract, getAgentSpecs: () => [] });
 			const result = await tool.run({ task: "impossible write task" }, undefined as never);
 			strictEqual(result.kind, "ok");
 			if (result.kind === "ok") {
@@ -5575,7 +5576,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ dispatch: bundle.contract, getAgentSpecs: () => [] });
 			const result = await tool.run(
 				{ tasks: [{ agent: "coder", task: "sleep well past the timeout" }], mode: "parallel", timeout_ms: 30 },
 				undefined as never,
@@ -5913,8 +5914,8 @@ describe("contracts/dispatch tool activity honesty", () => {
 	});
 });
 
-describe("contracts/dispatch agent alias precedence", () => {
-	async function captureRoutedAgents(args: Record<string, unknown>): Promise<Array<{ agentId: string; task: string }>> {
+describe("contracts/dispatch canonical agent field", () => {
+	async function captureRoutedAgents(args: Record<string, unknown>) {
 		const captured: Array<{ agentId: string; task: string }> = [];
 		const dispatch = {
 			dispatch: async (request: { agentId: string; task: string }) => {
@@ -5947,33 +5948,42 @@ describe("contracts/dispatch agent alias precedence", () => {
 			snapshot: () => ({}),
 			drain: async () => undefined,
 		};
-		const tool = createDispatchTool({ dispatch: dispatch as never });
+		const tool = createDispatchTool({ dispatch: dispatch as never, getAgentSpecs: () => [] });
 		const result = await tool.run(args, undefined as never);
-		ok(result.kind === "ok", `dispatch run failed: ${JSON.stringify(result)}`);
-		return captured;
+		return { captured, result };
 	}
 
-	it("task-level agent_id alias overrides the shared agent default (JSON-string tasks)", async () => {
-		const captured = await captureRoutedAgents({
+	it("retired task-level agent_id is rejected in JSON-string tasks", async () => {
+		const { captured, result } = await captureRoutedAgents({
 			tasks: '[{"agent_id":"scout","task":"BUG005_ALIAS_TASK"}]',
 			agent: "coder",
 			mode: "parallel",
 		});
-		deepStrictEqual(captured, [{ agentId: "scout", task: "BUG005_ALIAS_TASK" }]);
+		strictEqual(result.kind, "error");
+		deepStrictEqual(captured, []);
 	});
 
-	it("task-level agent_id alias overrides the shared agent default (object tasks)", async () => {
-		const captured = await captureRoutedAgents({ tasks: [{ agent_id: "scout", task: "t" }], agent: "coder" });
-		deepStrictEqual(captured, [{ agentId: "scout", task: "t" }]);
+	it("retired task-level agent_id is rejected in object tasks", async () => {
+		const { captured, result } = await captureRoutedAgents({
+			tasks: [{ agent_id: "scout", task: "t" }],
+			agent: "coder",
+		});
+		strictEqual(result.kind, "error");
+		deepStrictEqual(captured, []);
 	});
 
 	it("task-level agent still overrides the shared agent default", async () => {
-		const captured = await captureRoutedAgents({ tasks: [{ agent: "scout", task: "t" }], agent: "coder" });
+		const { captured, result } = await captureRoutedAgents({
+			tasks: [{ agent: "scout", task: "t" }],
+			agent: "coder",
+		});
+		ok(result.kind === "ok", `dispatch run failed: ${JSON.stringify(result)}`);
 		deepStrictEqual(captured, [{ agentId: "scout", task: "t" }]);
 	});
 
-	it("a shared agent_id applies when the task names no agent", async () => {
-		const captured = await captureRoutedAgents({ tasks: [{ task: "t" }], agent_id: "scout" });
-		deepStrictEqual(captured, [{ agentId: "scout", task: "t" }]);
+	it("retired shared agent_id is rejected", async () => {
+		const { captured, result } = await captureRoutedAgents({ tasks: [{ task: "t" }], agent_id: "scout" });
+		strictEqual(result.kind, "error");
+		deepStrictEqual(captured, []);
 	});
 });

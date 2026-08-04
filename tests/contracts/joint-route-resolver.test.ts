@@ -4,6 +4,7 @@ import {
 	emptyJointHardFilterVerdicts,
 	JOINT_ROUTE_FALLBACK_LIMIT,
 	JOINT_ROUTE_UNIVERSE_LIMIT,
+	type JointAgentDimension,
 	type JointNodeDimension,
 	type JointRouteResolverInput,
 	type JointTargetDimension,
@@ -66,6 +67,16 @@ function candidate(targetDimension: JointTargetDimension, node: JointNodeDimensi
 	};
 }
 
+function agent(latencyClass: "fast" | "balanced" | "deep" = "balanced"): JointAgentDimension {
+	return {
+		agentId: "coder",
+		specFingerprint: "spec",
+		executionRole: "builder",
+		latencyClass,
+		coldPrior: routePriorForLatencyClass(latencyClass),
+	};
+}
+
 function resolverInput(
 	options: {
 		targets?: JointTargetDimension[];
@@ -80,25 +91,45 @@ function resolverInput(
 	const targets = options.targets ?? [target("a")];
 	const nodes = options.nodes ?? [{ nodeId: "local" }];
 	const executedRoute = candidate(targets[0] as JointTargetDimension, nodes[0] as JointNodeDimension);
+	const selectedAgent = agent(options.latencyClass);
 	return {
 		mode: "shadow",
-		agentId: "coder",
-		executionRole: "builder",
+		agents: [selectedAgent],
+		agentSelection: {
+			request: "explicit",
+			baselineAgentId: "coder",
+			evaluations: [
+				{
+					agentId: selectedAgent.agentId,
+					specFingerprint: selectedAgent.specFingerprint,
+					executionRole: selectedAgent.executionRole,
+					authority: "workspace-edit",
+					rejections: [],
+					coldPrior: selectedAgent.coldPrior,
+					priorReasons: [],
+				},
+			],
+			authorityBasis: null,
+		},
 		executedRoute,
 		targets,
 		nodes,
 		intent: { ...intent, posture: options.posture ?? "balanced" },
 		independenceSubject: null,
 		...(options.universeLimit !== undefined ? { universeLimit: options.universeLimit } : {}),
-		project(targetDimension, node) {
+		project(projectedAgent, targetDimension, node) {
 			const filters = emptyJointHardFilterVerdicts();
 			const rejection = options.filter?.(targetDimension, node) ?? null;
 			if (rejection !== null) filters["endpoint-reachability"] = rejection;
 			return {
-				candidate: candidate(targetDimension, node),
+				candidate: {
+					...candidate(targetDimension, node),
+					agentId: projectedAgent.agentId,
+					specFingerprint: projectedAgent.specFingerprint,
+					executionRole: projectedAgent.executionRole,
+				},
 				hardFilters: filters,
 				observations: options.observations?.(targetDimension, node) ?? Array.from({ length: 6 }, () => observation()),
-				latencyClass: options.latencyClass ?? "balanced",
 				capabilities: [],
 				readiness: {
 					hardConstraintValidity: 1,
@@ -177,8 +208,8 @@ describe("joint route resolver", () => {
 	it("cooldown routes around one target without denying the dispatch", () => {
 		const input = resolverInput({ targets: [target("cool"), target("healthy")], nodes: [{ nodeId: "local" }] });
 		const originalProject = input.project;
-		input.project = (targetDimension, node) => {
-			const projection = originalProject(targetDimension, node);
+		input.project = (projectedAgent, targetDimension, node) => {
+			const projection = originalProject(projectedAgent, targetDimension, node);
 			const filters = { ...projection.hardFilters };
 			if (targetDimension.targetId === "cool") filters.cooldown = "target tuple cooling down";
 			return { ...projection, hardFilters: filters };
@@ -191,8 +222,8 @@ describe("joint route resolver", () => {
 	it("resource fit rejects only the node model tuple it describes", () => {
 		const input = resolverInput({ targets: [target("a"), target("b")], nodes: [{ nodeId: "gpu" }, { nodeId: "cpu" }] });
 		const originalProject = input.project;
-		input.project = (targetDimension, node) => {
-			const projection = originalProject(targetDimension, node);
+		input.project = (projectedAgent, targetDimension, node) => {
+			const projection = originalProject(projectedAgent, targetDimension, node);
 			const filters = { ...projection.hardFilters };
 			if (targetDimension.targetId === "b" && node.nodeId === "cpu")
 				filters["resource-fit"] = "VRAM requirement is not met";

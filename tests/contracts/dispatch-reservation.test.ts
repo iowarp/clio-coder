@@ -103,7 +103,11 @@ describe("dispatch batch reservations", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const parallel = tool.prepareAdmissionArguments?.({ tasks: ["one", "two"], mode: "parallel", node: "mini" });
 			ok(parallel);
 			match(String(parallel[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT]), /node 'mini' capacity exceeded \(2\/1\)/);
@@ -125,7 +129,11 @@ describe("dispatch batch reservations", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const one = tool.prepareAdmissionArguments?.({ tasks: ["one"], node: "mini" });
 			ok(one);
 			strictEqual(one[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined, "either task alone fits the remainder");
@@ -260,7 +268,9 @@ describe("dispatch batch reservations", () => {
 				safety: createWorkerSafety({ cwd: process.cwd() }),
 				autonomy: () => "auto-edit",
 			});
-			registry.register(createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "auto-edit" }));
+			registry.register(
+				createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract, getAutonomy: () => "auto-edit" }),
+			);
 			let requestId = "";
 			registry.onPermissionRequired((_call, _decision, meta) => {
 				requestId = meta.requestId;

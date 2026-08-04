@@ -1,4 +1,4 @@
-import type { ActiveRoutingPosture, ActiveRoutingRole } from "../../core/defaults.js";
+import type { ActiveAgentRole, ActiveRoutingPosture, ActiveRoutingRole } from "../../core/defaults.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 import {
 	type AssignmentAttemptStartEvent,
@@ -41,6 +41,7 @@ export interface AssignmentPolicy {
 export interface RoutingActivationSnapshot {
 	activeRoles: ReadonlyArray<ActiveRoutingRole>;
 	activePostures: ReadonlyArray<ActiveRoutingPosture>;
+	agentAutomation: { activeAgentRoles: ReadonlyArray<ActiveAgentRole> };
 }
 
 /** Activation is explicit in both dimensions and never widens mutation authority. */
@@ -66,8 +67,25 @@ export function applyActiveRouteSelection(req: DispatchRequest, decision: RouteD
 		throw new Error("dispatch: active decision selected and executed route identities differ");
 	}
 	const executionRole = withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0);
-	if (decision.selected.agentId !== req.agentId || decision.selected.executionRole !== executionRole) {
-		throw new Error("dispatch: active route selection cannot change agent or execution role");
+	const activeAutoRoot = req.lineage === undefined && req.agentSelection?.mode === "auto";
+	if (
+		decision.selected.executionRole !== executionRole &&
+		!(activeAutoRoot && decision.selected.executionRole !== "recovery")
+	) {
+		throw new Error("dispatch: active route selection cannot change execution role outside an approved auto root");
+	}
+	if (decision.selected.agentId !== req.agentId && !activeAutoRoot) {
+		throw new Error("dispatch: active route selection cannot change agent outside an approved auto root");
+	}
+	if (
+		activeAutoRoot &&
+		(decision.agentSelection.request !== "auto" ||
+			decision.agentSelection.baselineAgentId !== req.agentSelection?.baselineAgentId ||
+			(decision.selected.agentId !== decision.agentSelection.baselineAgentId &&
+				decision.agentSelection.authorityTransition?.basis !== "same-authority" &&
+				decision.agentSelection.authorityTransition?.basis !== req.agentSelection?.authorityBasis))
+	) {
+		throw new Error("dispatch: active auto selection lacks its trusted authority basis");
 	}
 	const envelope = [decision.selected, ...decision.approvedFallbacks].map((candidate) => ({
 		agentId: candidate.agentId,
@@ -77,6 +95,8 @@ export function applyActiveRouteSelection(req: DispatchRequest, decision: RouteD
 	}));
 	const selected: DispatchRequest = {
 		...req,
+		agentId: decision.selected.agentId,
+		executionRole: decision.selected.executionRole,
 		target: decision.selected.targetId,
 		model: decision.selected.modelId,
 		workerRuntime: decision.selected.runtimeId,

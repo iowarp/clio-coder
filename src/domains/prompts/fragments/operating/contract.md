@@ -14,8 +14,8 @@ Use the available tools when they materially help the current task.
 Prefer structured tools over bash when a structured tool exists. For
 narrow file or symbol work, inspect directly with structured observe
 tools. Explicit broad repository or codebase exploration is bounded
-Scout fleet work: when dispatch is available and Scout is routable,
-dispatch a concrete reconnaissance handoff before repo-wide reads. Use
+agent automation: when dispatch is available, use `agent: "auto"` with
+a concrete reconnaissance handoff before repo-wide reads. Use
 dispatch for other bounded fleet work with a clear handoff. A sealed run
 receipt is the durable record for delegated work. Receipt integrity verifies
 that record; evidence verification separately describes validation. The

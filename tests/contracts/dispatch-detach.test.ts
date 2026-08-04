@@ -153,7 +153,7 @@ describe("detached dispatch + collect", () => {
 		await bundle.extension.start();
 		try {
 			const runEvents = createDispatchRunEventRegistry();
-			const tool = createDispatchTool({ dispatch: bundle.contract, runEvents });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract, runEvents });
 			const sequential = (await tool.run({ tasks: ["a"], detach: true, mode: "sequential" }, {})) as ToolRunResult;
 			strictEqual(sequential.kind, "error");
 			ok(sequential.kind === "error" && sequential.message.includes("parallel"));
@@ -170,7 +170,7 @@ describe("detached dispatch + collect", () => {
 		await bundle.extension.start();
 		try {
 			const runEvents = createDispatchRunEventRegistry();
-			const tool = createDispatchTool({ dispatch: bundle.contract, runEvents });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract, runEvents });
 			const result = (await tool.run(
 				{ tasks: ["task one", "task two"], detach: true },
 				{ sessionId: "session-detach", ...approvedDispatch },
@@ -241,7 +241,7 @@ describe("detached dispatch + collect", () => {
 		await bundle.extension.start();
 		try {
 			const runEvents = createDispatchRunEventRegistry();
-			const dispatch = createDispatchTool({ dispatch: bundle.contract, runEvents });
+			const dispatch = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract, runEvents });
 			const synchronous = (await dispatch.run({ task: "synchronous missing final" }, approvedDispatch)) as ToolRunResult;
 			strictEqual(synchronous.kind, "error");
 			ok(synchronous.kind === "error");
@@ -286,13 +286,13 @@ describe("detached dispatch + collect", () => {
 		await bundle.extension.start();
 		try {
 			const runEvents = createDispatchRunEventRegistry();
-			const tool = createDispatchTool({ dispatch: bundle.contract, runEvents });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract, runEvents });
 			const monitor = createMonitorTool({ dispatch: bundle.contract, runEvents });
 			const steer = createSteerTool({ dispatch: bundle.contract });
 			// Direct concurrent ToolSpec calls emulate operator/TUI contract access;
 			// they do not imply that the sequential parent-model tool scheduler can
 			// interleave monitor or steer while synchronous dispatch is pending.
-			const syncResult = tool.run({ task: "stay active for guidance", agent_id: "coder" }, approvedDispatch);
+			const syncResult = tool.run({ task: "stay active for guidance", agent: "coder" }, approvedDispatch);
 			await waitFor(() => bundle.contract.listRuns().some((run) => run.status === "running"), "sync run admitted");
 			const active = bundle.contract.listRuns().find((run) => run.status === "running");
 			ok(active, "the synchronous run is operator-addressable through the dispatch contract");
@@ -380,7 +380,7 @@ describe("detached dispatch + collect", () => {
 				},
 			};
 			const runEvents = createDispatchRunEventRegistry();
-			const tool = createDispatchTool({ dispatch: failingContract, runEvents });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: failingContract, runEvents });
 			const result = (await tool.run({ tasks: ["already live"], detach: true }, approvedDispatch)) as ToolRunResult;
 			strictEqual(result.kind, "error");
 			ok(result.kind === "error" && result.message.includes("detached assignments started"));
@@ -407,7 +407,7 @@ describe("detached dispatch + collect", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => okWorker("alias answer") });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const monitor = createMonitorTool({ dispatch: bundle.contract });
 			const dispatched = (await tool.run({ tasks: ["monitor alias"], detach: true }, approvedDispatch)) as ToolRunResult;
 			strictEqual(dispatched.kind, "ok");
@@ -470,7 +470,7 @@ describe("detached dispatch + collect", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const monitor = createMonitorTool({ dispatch: bundle.contract });
 			const result = (await tool.run({ tasks: ["quick", "slow"], detach: true }, approvedDispatch)) as ToolRunResult;
 			strictEqual(result.kind, "ok");
@@ -539,7 +539,7 @@ describe("detached dispatch + collect", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => okWorker() });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const monitor = createMonitorTool({ dispatch: bundle.contract });
 			const registration = createDetachedDispatchNudgeRegistration({
 				getOpenBatches: () => openDetachedBatchViews(bundle.contract),
@@ -592,7 +592,7 @@ describe("detached dispatch + collect", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => gated.worker });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const monitor = createMonitorTool({ dispatch: bundle.contract });
 			const result = (await tool.run({ tasks: ["long haul"], detach: true }, {})) as ToolRunResult;
 			strictEqual(result.kind, "ok");
@@ -690,7 +690,7 @@ describe("detached dispatch + collect", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, bus });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract, bus });
 			const result = (await tool.run({ tasks: ["board visibility"], detach: true }, {})) as ToolRunResult;
 			strictEqual(result.kind, "ok");
 			await waitFor(
@@ -710,7 +710,7 @@ describe("detached dispatch + collect", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => okWorker("collect me") });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const result = (await tool.run({ tasks: ["mark failure"], detach: true }, {})) as ToolRunResult;
 			strictEqual(result.kind, "ok");
 			const batchId = result.details?.batchId as string;
@@ -755,7 +755,7 @@ describe("detached dispatch + collect", () => {
 		let batchId = "";
 		let runIds: string[] = [];
 		try {
-			const tool = createDispatchTool({ dispatch: first.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: first.contract });
 			const result = (await tool.run({ tasks: ["survive exit"], detach: true }, {})) as ToolRunResult;
 			strictEqual(result.kind, "ok");
 			batchId = result.details?.batchId as string;

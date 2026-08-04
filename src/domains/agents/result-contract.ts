@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { AGENT_AUTOMATION_AUTHORITIES, type AgentAutomationAuthority } from "./spec.js";
 
 export type ResultContract =
 	| { kind: "architect-plan"; path: string }
@@ -108,7 +109,16 @@ export interface ScoutResult {
 	/** Grounding locations projected from findings, in reported order. */
 	citations: ReadonlyArray<ScoutCitation>;
 	needsSplit: boolean;
-	proposedSubtasks: ReadonlyArray<string>;
+	proposedSubtasks: ReadonlyArray<ScoutSubtask>;
+}
+
+/** Strict Scout-authored data. Every execution/control field is coordinator-owned. */
+export interface ScoutSubtask {
+	id: string;
+	task: string;
+	dependencies: ReadonlyArray<string>;
+	expectedResultContract: ResultContract["kind"];
+	requestedAuthority: AgentAutomationAuthority;
 }
 
 export interface VerifierCheck {
@@ -149,7 +159,7 @@ export function resultContractDigest(contract: ResultContract): string {
 	return digest(contract);
 }
 
-function sourceId(contract: ResultContract): string {
+export function resultContractSourceId(contract: ResultContract): string {
 	return `agent-result-contract:${contract.kind}:${resultContractDigest(contract)}`;
 }
 
@@ -157,7 +167,7 @@ function failure(contract: ResultContract, quality: ResultContractQuality, reaso
 	return {
 		conformance: "fail",
 		quality,
-		sourceId: sourceId(contract),
+		sourceId: resultContractSourceId(contract),
 		validatorDigest: digest({ contract, reason }),
 		reason,
 	};
@@ -172,7 +182,7 @@ function success(
 	return {
 		conformance: "pass",
 		quality,
-		sourceId: sourceId(contract),
+		sourceId: resultContractSourceId(contract),
 		validatorDigest: digest({ contract, value }),
 		...extra,
 	};
@@ -224,9 +234,65 @@ function parseFindings(value: unknown): ScoutFinding[] | null {
 	return findings;
 }
 
-function parseSubtasks(value: unknown): string[] | null {
-	if (!Array.isArray(value) || value.length > 4 || value.some((entry) => !string(entry))) return null;
-	return [...value] as string[];
+const RESULT_CONTRACT_KINDS: ReadonlyArray<ResultContract["kind"]> = [
+	"architect-plan",
+	"scout-report",
+	"verifier-report",
+	"debugger-report",
+	"research-report",
+	"mutation-report",
+	"provenance-report",
+	"external-delegation",
+];
+
+function parseSubtasks(value: unknown): ScoutSubtask[] | null {
+	if (!Array.isArray(value) || value.length > 4) return null;
+	const subtasks: ScoutSubtask[] = [];
+	const ids = new Set<string>();
+	for (const entry of value) {
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
+		const subtask = entry as Record<string, unknown>;
+		if (
+			!hasOnlyKeys(subtask, ["id", "task", "dependencies", "expectedResultContract", "requestedAuthority"]) ||
+			!string(subtask.id) ||
+			!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(subtask.id) ||
+			ids.has(subtask.id) ||
+			!string(subtask.task) ||
+			Buffer.byteLength(subtask.task, "utf8") > 4096 ||
+			!Array.isArray(subtask.dependencies) ||
+			subtask.dependencies.length > 4 ||
+			subtask.dependencies.some((dependency) => !string(dependency)) ||
+			new Set(subtask.dependencies).size !== subtask.dependencies.length ||
+			!RESULT_CONTRACT_KINDS.includes(subtask.expectedResultContract as ResultContract["kind"]) ||
+			!AGENT_AUTOMATION_AUTHORITIES.includes(subtask.requestedAuthority as AgentAutomationAuthority)
+		) {
+			return null;
+		}
+		ids.add(subtask.id);
+		subtasks.push({
+			id: subtask.id,
+			task: subtask.task,
+			dependencies: [...subtask.dependencies] as string[],
+			expectedResultContract: subtask.expectedResultContract as ResultContract["kind"],
+			requestedAuthority: subtask.requestedAuthority as AgentAutomationAuthority,
+		});
+	}
+	for (const subtask of subtasks) {
+		if (subtask.dependencies.some((dependency) => dependency === subtask.id || !ids.has(dependency))) return null;
+	}
+	const remaining = new Set(ids);
+	const completed = new Set<string>();
+	while (remaining.size > 0) {
+		const ready = subtasks.filter(
+			(subtask) => remaining.has(subtask.id) && subtask.dependencies.every((dependency) => completed.has(dependency)),
+		);
+		if (ready.length === 0) return null;
+		for (const subtask of ready) {
+			remaining.delete(subtask.id);
+			completed.add(subtask.id);
+		}
+	}
+	return subtasks;
 }
 
 function isBootstrapScoutResult(value: Record<string, unknown>): boolean {
@@ -259,7 +325,7 @@ function validateScout(contract: ResultContract, output: string | null): ResultC
 		return failure(
 			contract,
 			"fail",
-			"Scout result must carry findings as {claim, path, line} objects, needsSplit, and 0..4 proposed subtasks",
+			"Scout result must carry findings as {claim, path, line} objects, needsSplit, and 0..4 typed proposed subtasks",
 		);
 	}
 	if (value.needsSplit !== proposedSubtasks.length > 0) {
@@ -270,6 +336,9 @@ function validateScout(contract: ResultContract, output: string | null): ResultC
 	// carries subtasks instead of findings.
 	if (findings.length === 0 && !value.needsSplit) {
 		return failure(contract, "fail", "Scout result must carry at least one cited finding, or set needsSplit");
+	}
+	if (value.needsSplit && findings.length > 0) {
+		return failure(contract, "fail", "Scout split recommendations carry typed subtasks instead of findings");
 	}
 	const scout: ScoutResult = {
 		findings,
@@ -520,7 +589,7 @@ export function validateRecipeResult(input: ValidateRecipeResultInput): RecipeRe
 		return {
 			applicable: false,
 			fact: {
-				sourceId: sourceId(input.contract),
+				sourceId: resultContractSourceId(input.contract),
 				validatorDigest: digest({ contract: input.contract, reached: false }),
 				conformance: "not-reached",
 				quality: "unmeasured",
@@ -567,7 +636,7 @@ export function resultContractShape(contract: ResultContract): string {
 		case "architect-plan":
 			return `a plan artifact written to ${contract.path}`;
 		case "scout-report":
-			return '{"findings":[{"claim":"what you observed","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]}';
+			return '{"findings":[{"claim":"what you observed","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]} or {"findings":[],"needsSplit":true,"proposedSubtasks":[{"id":"inspect","task":"Inspect the boundary","dependencies":[],"expectedResultContract":"scout-report","requestedAuthority":"read-only"}]}';
 		case "verifier-report":
 			return '{"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]}';
 		case "debugger-report":

@@ -13,7 +13,12 @@ import { canonicalResponseSchemaDigest, createRunReceiptQuality } from "../../sr
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { decideRoute, type RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
 import { createRouteHistoryStore } from "../../src/domains/dispatch/route-history.js";
-import { clearsPostureFloors, estimateRoute, type RouteObservation } from "../../src/domains/dispatch/route-policy.js";
+import {
+	clearsPostureFloors,
+	DEFAULT_ROUTE_PRIOR,
+	estimateRoute,
+	type RouteObservation,
+} from "../../src/domains/dispatch/route-policy.js";
 import { reduceRouteQuality, routeQualityEvalDigest } from "../../src/domains/dispatch/route-quality.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -344,6 +349,7 @@ describe("dispatch route quality", { concurrency: false }, () => {
 
 	it("active mode refuses unsatisfiable posture floors", () => {
 		const route = candidate();
+		const activeReadiness = { ready: true, gaps: [], labelsNeeded: 0 };
 		throws(
 			() =>
 				decideRoute({
@@ -354,7 +360,7 @@ describe("dispatch route quality", { concurrency: false }, () => {
 						{
 							candidate: route,
 							estimate: estimateRoute([]),
-							activeReadiness: { ready: true, gaps: [], labelsNeeded: 0 },
+							activeReadiness,
 							rejection: null,
 						},
 					],
@@ -362,6 +368,33 @@ describe("dispatch route quality", { concurrency: false }, () => {
 					hardConstraints: ["authority"],
 					maxFallbacks: 0,
 					decisionDurationMs: 0,
+					agentSelection: {
+						request: "explicit",
+						baselineAgentId: route.agentId,
+						evaluations: [
+							{
+								agentId: route.agentId,
+								specFingerprint: route.specFingerprint,
+								executionRole: route.executionRole,
+								authority: "workspace-edit",
+								rejections: [],
+								coldPrior: DEFAULT_ROUTE_PRIOR,
+								priorReasons: [],
+							},
+						],
+						readiness: [
+							{
+								agentId: route.agentId,
+								specFingerprint: route.specFingerprint,
+								executionRole: route.executionRole,
+								ready: true,
+								candidateCount: 1,
+								readyCandidateCount: 1,
+								routes: [{ candidate: route, report: activeReadiness }],
+							},
+						],
+						authorityBasis: null,
+					},
 				}),
 			/posture-floors-unsatisfiable/,
 		);

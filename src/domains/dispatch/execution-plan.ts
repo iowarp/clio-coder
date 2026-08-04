@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import type { ResultContract } from "../agents/result-contract.js";
+import type { AgentAutomationAuthority } from "../agents/spec.js";
 import type { ExecutionRole } from "./execution-role.js";
 
 export type ExecutionPlanTopology = "parallel" | "sequential" | "pipeline" | "review" | "compete" | "fleet";
@@ -10,11 +12,15 @@ export interface ExecutionPlanStep {
 	agentId: string;
 	executionRole: ExecutionRole;
 	scope: ExecutionPlanScope;
+	expectedResultContract: ResultContract["kind"];
+	requestedAuthority: AgentAutomationAuthority;
+	/** Required explicit grant; null means the plan is an approval request and cannot execute. */
+	approvedAuthority: AgentAutomationAuthority | null;
 	dependencies: ReadonlyArray<string>;
 	task: string;
 }
 export interface ExecutionPlan {
-	version: 1;
+	version: 2;
 	topology: ExecutionPlanTopology;
 	rootTask: string;
 	maxWorkers: number;
@@ -70,7 +76,7 @@ export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 	const steps = canonicalSteps(input.steps);
 	const waves = executionPlanWaves(steps, input.maxWorkers);
 	const canonical = {
-		version: 1 as const,
+		version: 2 as const,
 		topology: input.topology,
 		rootTask: input.rootTask,
 		maxWorkers: input.maxWorkers,

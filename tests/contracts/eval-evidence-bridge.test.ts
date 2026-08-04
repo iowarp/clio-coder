@@ -43,7 +43,7 @@ function receipt(partial: Partial<RunReceipt> = {}): RunReceipt {
 			resultContract: null,
 		},
 		sessionId: null,
-		integrity: { version: 14, algorithm: "sha256", digest: "d".repeat(64) },
+		integrity: { version: 15, algorithm: "sha256", digest: "d".repeat(64) },
 		...partial,
 	} as RunReceipt;
 }
@@ -147,7 +147,7 @@ describe("contracts/eval evidence bridge", () => {
 				type: "tool_execution_start",
 				toolCallId: "s2",
 				toolName: "dispatch",
-				args: { agent_id: "scout", tasks: JSON.stringify(["inspect one domain"]) },
+				args: { agent: "scout", tasks: JSON.stringify(["inspect one domain"]) },
 			}),
 		].join("\n");
 		strictEqual(scoutDispatchCountFromJsonl(stdout), 2);

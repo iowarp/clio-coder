@@ -8,10 +8,12 @@
  */
 
 import type { AgentLatencyClass } from "../agents/spec.js";
+import { type AgentCandidateEvaluation, agentRoleReadinessReport } from "./agent-candidates.js";
 import type { RouteCorrelationFacts } from "./execution-role.js";
 import {
 	decideRoute,
 	type RouteCandidate,
+	type RouteDecisionAgentSelectionInput,
 	type RouteDecisionInput,
 	type RouteDecisionV1,
 	routeCandidateKey,
@@ -19,6 +21,7 @@ import {
 import {
 	estimateRoute,
 	type RouteObservation,
+	type RoutePrior,
 	type RoutingPosture,
 	routePriorForLatencyClass,
 } from "./route-policy.js";
@@ -31,8 +34,10 @@ export const JOINT_ROUTE_FALLBACK_LIMIT = 3;
 export const JOINT_ROUTE_HARD_FILTERS = [
 	"manual-pins",
 	"approved-envelope",
+	"audience",
 	"authority",
 	"required-tools",
+	"required-skills",
 	"result-contract",
 	"response-schema-support",
 	"locality",
@@ -60,6 +65,24 @@ export interface JointTargetDimension {
 
 export interface JointNodeDimension {
 	nodeId: string;
+}
+
+export interface JointAgentDimension {
+	agentId: string;
+	specFingerprint: string;
+	executionRole: RouteCandidate["executionRole"];
+	latencyClass: AgentLatencyClass;
+	coldPrior: RoutePrior;
+}
+
+/** A single truthful role-quality label retires task-feature priors for this tuple. */
+export function routePriorForAgentEvidence(
+	agent: JointAgentDimension,
+	observations: ReadonlyArray<RouteObservation>,
+): RoutePrior {
+	return observations.some((observation) => observation.qualityLabel !== "unmeasured")
+		? routePriorForLatencyClass(agent.latencyClass)
+		: agent.coldPrior;
 }
 
 export function configuredJointTargets(
@@ -96,7 +119,6 @@ export interface JointTupleProjection {
 	candidate: RouteCandidate;
 	hardFilters: JointRouteHardFilterVerdicts;
 	observations: ReadonlyArray<RouteObservation>;
-	latencyClass: AgentLatencyClass;
 	capabilities: ReadonlyArray<string>;
 	readiness: {
 		hardConstraintValidity: number;
@@ -109,12 +131,14 @@ export interface JointTupleProjection {
 
 export interface JointRouteResolverInput {
 	mode: "shadow" | "active";
-	agentId: string;
-	executionRole: RouteCandidate["executionRole"];
+	agents: ReadonlyArray<JointAgentDimension>;
+	agentSelection: Omit<RouteDecisionAgentSelectionInput, "readiness"> & {
+		evaluations: ReadonlyArray<AgentCandidateEvaluation>;
+	};
 	executedRoute: RouteCandidate;
 	targets: ReadonlyArray<JointTargetDimension>;
 	nodes: ReadonlyArray<JointNodeDimension>;
-	project: (target: JointTargetDimension, node: JointNodeDimension) => JointTupleProjection;
+	project: (agent: JointAgentDimension, target: JointTargetDimension, node: JointNodeDimension) => JointTupleProjection;
 	intent: RoutingIntent;
 	independenceSubject: RouteCorrelationFacts | null;
 	posture?: RoutingPosture;
@@ -127,9 +151,11 @@ export interface JointRouteResolution {
 	/** Complete evaluated universe. No fallback bound is applied to this list. */
 	candidateCount: number;
 	readiness: ReadonlyArray<{ candidate: RouteCandidate; report: RouteReadinessReport }>;
+	agentReadiness: ReturnType<typeof agentRoleReadinessReport>;
 }
 
 export interface EnumeratedJointRoute {
+	agent: JointAgentDimension;
 	projection: JointTupleProjection;
 	rejection: string | null;
 }
@@ -150,12 +176,16 @@ function firstHardRejection(verdicts: JointRouteHardFilterVerdicts): string | nu
 }
 
 function assertProjectionIdentity(
-	input: JointRouteResolverInput,
+	agent: JointAgentDimension,
 	target: JointTargetDimension,
 	node: JointNodeDimension,
 	candidate: RouteCandidate,
 ): void {
-	if (candidate.agentId !== input.agentId || candidate.executionRole !== input.executionRole) {
+	if (
+		candidate.agentId !== agent.agentId ||
+		candidate.specFingerprint !== agent.specFingerprint ||
+		candidate.executionRole !== agent.executionRole
+	) {
 		throw new Error(
 			"dispatch routing configuration error: joint universe attempted to enumerate an alternate agent or role",
 		);
@@ -174,7 +204,7 @@ function assertProjectionIdentity(
 /** Enumerate every tuple and retain every hard-filter verdict before ranking. */
 export function enumerateJointRouteUniverse(input: JointRouteResolverInput): ReadonlyArray<EnumeratedJointRoute> {
 	const limit = Math.max(1, Math.floor(input.universeLimit ?? JOINT_ROUTE_UNIVERSE_LIMIT));
-	const universeSize = input.targets.length * input.nodes.length;
+	const universeSize = input.agents.length * input.targets.length * input.nodes.length;
 	if (universeSize > limit) {
 		throw new Error(
 			`dispatch routing configuration error: joint route universe overflow (${universeSize}/${limit}); narrow configured targets, models, runtimes, or nodes`,
@@ -183,14 +213,16 @@ export function enumerateJointRouteUniverse(input: JointRouteResolverInput): Rea
 	if (universeSize === 0) throw new Error("dispatch routing configuration error: joint route universe is empty");
 	const routes: EnumeratedJointRoute[] = [];
 	const seen = new Set<string>();
-	for (const target of input.targets) {
-		for (const node of input.nodes) {
-			const projection = input.project(target, node);
-			assertProjectionIdentity(input, target, node, projection.candidate);
-			const key = routeCandidateKey(projection.candidate);
-			if (seen.has(key)) continue;
-			seen.add(key);
-			routes.push({ projection, rejection: firstHardRejection(projection.hardFilters) });
+	for (const agent of input.agents) {
+		for (const target of input.targets) {
+			for (const node of input.nodes) {
+				const projection = input.project(agent, target, node);
+				assertProjectionIdentity(agent, target, node, projection.candidate);
+				const key = routeCandidateKey(projection.candidate);
+				if (seen.has(key)) continue;
+				seen.add(key);
+				routes.push({ agent, projection, rejection: firstHardRejection(projection.hardFilters) });
+			}
 		}
 	}
 	return routes;
@@ -199,8 +231,8 @@ export function enumerateJointRouteUniverse(input: JointRouteResolverInput): Rea
 /** Enumerate, filter, estimate, and rank the complete bounded universe. */
 export function resolveJointRoute(input: JointRouteResolverInput): JointRouteResolution {
 	const universe = enumerateJointRouteUniverse(input);
-	const candidates: RouteDecisionInput["candidates"][number][] = universe.map(({ projection, rejection }) => {
-		const estimate = estimateRoute(projection.observations, routePriorForLatencyClass(projection.latencyClass));
+	const candidates: RouteDecisionInput["candidates"][number][] = universe.map(({ agent, projection, rejection }) => {
+		const estimate = estimateRoute(projection.observations, routePriorForAgentEvidence(agent, projection.observations));
 		const intentRejection = routingIntentRejection({
 			intent: input.intent,
 			candidate: projection.candidate,
@@ -226,6 +258,11 @@ export function resolveJointRoute(input: JointRouteResolverInput): JointRouteRes
 		};
 	});
 
+	const readiness = candidates.map((entry) => ({
+		candidate: { ...entry.candidate },
+		report: { ...entry.activeReadiness, gaps: [...entry.activeReadiness.gaps] },
+	}));
+	const agentReadiness = agentRoleReadinessReport(readiness);
 	const decision = decideRoute({
 		mode: input.mode,
 		posture: input.posture ?? input.intent.posture,
@@ -235,13 +272,12 @@ export function resolveJointRoute(input: JointRouteResolverInput): JointRouteRes
 		hardConstraints: [...JOINT_ROUTE_HARD_FILTERS],
 		maxFallbacks: JOINT_ROUTE_FALLBACK_LIMIT,
 		decisionDurationMs: input.decisionDurationMs ?? 0,
+		agentSelection: { ...input.agentSelection, readiness: agentReadiness },
 	});
 	return {
 		decision,
 		candidateCount: candidates.length,
-		readiness: candidates.map((entry) => ({
-			candidate: { ...entry.candidate },
-			report: { ...entry.activeReadiness, gaps: [...entry.activeReadiness.gaps] },
-		})),
+		readiness,
+		agentReadiness,
 	};
 }

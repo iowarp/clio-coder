@@ -10,7 +10,7 @@ import { createSteerTool } from "../../src/tools/steer.js";
 describe("orchestration tool scheduling policy", () => {
 	it("keeps dispatch and steer sequential, so synchronous dispatch cannot offer parent-model interleaving", () => {
 		const dispatch = {} as DispatchContract;
-		const dispatchTool = createDispatchTool({ dispatch });
+		const dispatchTool = createDispatchTool({ getAgentSpecs: () => [], dispatch });
 		const monitorTool = createMonitorTool({ dispatch });
 		const steerTool = createSteerTool({ dispatch });
 

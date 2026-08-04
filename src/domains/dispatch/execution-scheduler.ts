@@ -33,6 +33,11 @@ export async function executePlan(
 	adapter: ExecutionSchedulerAdapter,
 	signal?: AbortSignal,
 ): Promise<ExecutionPlanResult> {
+	for (const step of plan.steps) {
+		if (step.approvedAuthority === null || step.approvedAuthority !== step.requestedAuthority) {
+			throw new Error(`execution plan: step '${step.id}' lacks its requested authority grant`);
+		}
+	}
 	// Resolve every hard admission fact before reservation or spawn.
 	const admissions = plan.steps.map((step) => adapter.preflight(step));
 	const reservation = adapter.reserve(plan, admissions);

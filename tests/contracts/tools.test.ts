@@ -35,6 +35,10 @@ import { writeTool } from "../../src/tools/write.js";
 
 const scratchRoots: string[] = [];
 
+const unexpectedAgentPlanSelection: DispatchContract["planAgentSelection"] = () => {
+	throw new Error("unexpected agent plan selection");
+};
+
 function scratchDir(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-tools-basic-"));
 	scratchRoots.push(root);
@@ -354,6 +358,7 @@ function fakeSequentialDispatch(
 			retrying: [],
 			totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 		}),
+		planAgentSelection: unexpectedAgentPlanSelection,
 		drain: async () => {},
 	};
 }
@@ -1036,7 +1041,7 @@ describe("contracts/tools result shaping and truncation", () => {
 
 describe("contracts/tools dispatch run paths", () => {
 	it("advertises the first-class singular task schema", () => {
-		const tool = createDispatchTool({ dispatch: {} as DispatchContract });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: {} as DispatchContract });
 		const schema = tool.parameters as { properties?: Record<string, unknown> };
 		ok(schema.properties?.task, "dispatch TypeBox schema must advertise top-level task");
 		ok(
@@ -1048,6 +1053,7 @@ describe("contracts/tools dispatch run paths", () => {
 	it("keeps singular task and briefing separate in the dispatched request", async () => {
 		const captured: DispatchRequest[] = [];
 		const tool = createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: fakeSequentialDispatch([{ runId: "run-singular", assistantText: "bounded answer" }], captured),
 		});
 		const result = await tool.run({
@@ -1065,6 +1071,7 @@ describe("contracts/tools dispatch run paths", () => {
 	it("applies shared briefing to batch tasks unless a task object overrides it", async () => {
 		const captured: DispatchRequest[] = [];
 		const tool = createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: fakeSequentialDispatch(
 				[
 					{ runId: "run-shared-string", assistantText: "one" },
@@ -1090,7 +1097,7 @@ describe("contracts/tools dispatch run paths", () => {
 	});
 
 	it("rejects ambiguous task plus tasks and explains that briefing cannot replace a task", async () => {
-		const tool = createDispatchTool({ dispatch: {} as DispatchContract });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: {} as DispatchContract });
 		const ambiguous = await tool.run({ task: "one", tasks: ["two"] });
 		strictEqual(ambiguous.kind, "error");
 		if (ambiguous.kind === "error") match(ambiguous.message, /either task .* or tasks .* not both/);
@@ -1100,13 +1107,13 @@ describe("contracts/tools dispatch run paths", () => {
 		if (briefingOnly.kind === "error") {
 			strictEqual(
 				briefingOnly.message,
-				'dispatch: missing task; pass task="..." for one run or tasks=[...] for a batch. briefing is optional context and cannot replace task. Example: {"agent":"scout","task":"map the modules that read fleet config and cite file paths"}',
+				'dispatch: missing task; pass task="..." for one run or tasks=[...] for a batch. briefing is optional context and cannot replace task. Example: {"agent":"auto","task":"map the modules that read fleet config and cite file paths"}',
 			);
 		}
 	});
 
 	it("keeps dispatch target schema examples environment-neutral", () => {
-		const tool = createDispatchTool({ dispatch: {} as DispatchContract });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: {} as DispatchContract });
 		const schemaText = JSON.stringify(tool.parameters);
 
 		for (const pattern of [/\bdynamo\b/i, /\bmini\b/i, /\bzbook\b/i, /\b192\.168\./]) {
@@ -1116,6 +1123,7 @@ describe("contracts/tools dispatch run paths", () => {
 
 	it("dispatch list:true returns the agent catalog without dispatching", async () => {
 		const tool = createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: {
 				dispatch: async () => {
 					throw new Error("dispatch must not run for list:true");
@@ -1128,7 +1136,7 @@ describe("contracts/tools dispatch run paths", () => {
 		if (result.kind === "ok") {
 			ok(result.output.includes("coder: bounded coding tasks"));
 		}
-		const noCatalog = createDispatchTool({ dispatch: {} as DispatchContract });
+		const noCatalog = createDispatchTool({ getAgentSpecs: () => [], dispatch: {} as DispatchContract });
 		const missing = await noCatalog.run({ list: true });
 		strictEqual(missing.kind, "error");
 	});
@@ -1157,12 +1165,13 @@ describe("contracts/tools dispatch run paths", () => {
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}),
+			planAgentSelection: unexpectedAgentPlanSelection,
 			drain: async () => {},
 		};
 
 		const runEvents = createDispatchRunEventRegistry();
-		const tool = createDispatchTool({ dispatch: mockDispatch, runEvents });
-		const result = await tool.run({ task: "do work", agent_id: "coder" });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: mockDispatch, runEvents });
+		const result = await tool.run({ task: "do work", agent: "coder" });
 
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
@@ -1210,9 +1219,12 @@ describe("contracts/tools dispatch run paths", () => {
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}),
+			planAgentSelection: unexpectedAgentPlanSelection,
 			drain: async () => {},
 		};
-		const result = await createDispatchTool({ dispatch: mockDispatch, bus }).run({ task: "once" });
+		const result = await createDispatchTool({ getAgentSpecs: () => [], dispatch: mockDispatch, bus }).run({
+			task: "once",
+		});
 		strictEqual(result.kind, "ok");
 		strictEqual(pulls, events.length, "the iterator has exactly one owner");
 		deepStrictEqual(
@@ -1237,7 +1249,11 @@ describe("contracts/tools dispatch run paths", () => {
 			getRun: () => runEnvelope("run-owned"),
 		};
 		const progressBeforeOwnedRun = progress.length;
-		strictEqual((await createDispatchTool({ dispatch: ownedDispatch, bus }).run({ task: "domain owned" })).kind, "ok");
+		strictEqual(
+			(await createDispatchTool({ getAgentSpecs: () => [], dispatch: ownedDispatch, bus }).run({ task: "domain owned" }))
+				.kind,
+			"ok",
+		);
 		strictEqual(progress.length, progressBeforeOwnedRun + 1, "the tool does not duplicate domain-owned progress");
 	});
 
@@ -1405,12 +1421,14 @@ describe("contracts/tools dispatch run paths", () => {
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}),
+			planAgentSelection: unexpectedAgentPlanSelection,
 			drain: async () => {},
 		};
-		const result = await createDispatchTool({ dispatch: mockDispatch, runEvents: observingRunEvents }).run(
-			{ tasks: ["background"], detach: true },
-			approvedDispatch,
-		);
+		const result = await createDispatchTool({
+			getAgentSpecs: () => [],
+			dispatch: mockDispatch,
+			runEvents: observingRunEvents,
+		}).run({ tasks: ["background"], detach: true }, approvedDispatch);
 		strictEqual(result.kind, "ok");
 		strictEqual(catchCalls, 1, "detached dispatch observes the exact registered completion immediately");
 
@@ -1456,11 +1474,12 @@ describe("contracts/tools dispatch run paths", () => {
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}),
+			planAgentSelection: unexpectedAgentPlanSelection,
 			drain: async () => {},
 		};
 		// This direct concurrency exercises the operator/contract surface, not
 		// parent-model scheduling while the sequential dispatch tool is pending.
-		const pending = createDispatchTool({ dispatch: mockDispatch }).run({ task: "ACP sync" });
+		const pending = createDispatchTool({ getAgentSpecs: () => [], dispatch: mockDispatch }).run({ task: "ACP sync" });
 		while (!active) await new Promise((resolve) => setImmediate(resolve));
 		const guided = await createSteerTool({ dispatch: mockDispatch }).run({
 			action: "guide",
@@ -1497,15 +1516,16 @@ describe("contracts/tools dispatch run paths", () => {
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}),
+			planAgentSelection: unexpectedAgentPlanSelection,
 			drain: async () => {},
 		};
 
-		const tool = createDispatchTool({ dispatch: mockDispatch });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: mockDispatch });
 		const result = await tool.run({
 			tasks: [
 				{
 					task: "audit the boundary",
-					agent_id: "coder",
+					agent: "coder",
 					persona: "# Boundary Auditor\nCheck imports and report risks.",
 					tool_profile: "minimal-local",
 				},
@@ -1521,6 +1541,7 @@ describe("contracts/tools dispatch run paths", () => {
 
 	it("rejects persona above the 8000 character cap at the tool boundary", async () => {
 		const tool = createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: {
 				dispatch: async () => {
 					throw new Error("dispatch must not run for oversized persona");
@@ -1529,7 +1550,7 @@ describe("contracts/tools dispatch run paths", () => {
 		});
 
 		const result = await tool.run({
-			tasks: [{ task: "do work", agent_id: "coder", persona: "x".repeat(8001) }],
+			tasks: [{ task: "do work", agent: "coder", persona: "x".repeat(8001) }],
 		});
 
 		strictEqual(result.kind, "error");
@@ -1566,11 +1587,12 @@ describe("contracts/tools dispatch run paths", () => {
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}),
+			planAgentSelection: unexpectedAgentPlanSelection,
 			drain: async () => {},
 		};
 
-		const tool = createDispatchTool({ dispatch: mockDispatch });
-		const result = await tool.run({ task: "fail work", agent_id: "coder" });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: mockDispatch });
+		const result = await tool.run({ task: "fail work", agent: "coder" });
 
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") {
@@ -1631,15 +1653,16 @@ describe("contracts/tools dispatch run paths", () => {
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}),
+			planAgentSelection: unexpectedAgentPlanSelection,
 			drain: async () => {},
 		};
 
-		const tool = createDispatchTool({ dispatch: mockDispatch });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: mockDispatch });
 		const result = await tool.run(
 			{
 				tasks: [
-					{ task: "task 1", agent_id: "coder" },
-					{ task: "task 2", agent_id: "coder" },
+					{ task: "task 1", agent: "coder" },
+					{ task: "task 2", agent: "coder" },
 				],
 			},
 			approvedDispatch,
@@ -1657,6 +1680,7 @@ describe("contracts/tools dispatch run paths", () => {
 	it("mode pipeline dispatches steps sequentially and threads previous assistant text", async () => {
 		const capturedRequests: DispatchRequest[] = [];
 		const tool = createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: fakeSequentialDispatch(
 				[
 					{ runId: "run-1", assistantText: "first worker answer" },
@@ -1671,9 +1695,9 @@ describe("contracts/tools dispatch run paths", () => {
 			{
 				mode: "pipeline",
 				tasks: [
-					{ task: "step 1", agent_id: "coder" },
-					{ task: "step 2", agent_id: "coder" },
-					{ task: "step 3", agent_id: "coder" },
+					{ task: "step 1", agent: "coder" },
+					{ task: "step 2", agent: "coder" },
+					{ task: "step 3", agent: "coder" },
 				],
 			},
 			approvedDispatch,
@@ -1700,6 +1724,7 @@ describe("contracts/tools dispatch run paths", () => {
 	it("mode pipeline preserves per-step persona and tool_profile", async () => {
 		const capturedRequests: DispatchRequest[] = [];
 		const tool = createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: fakeSequentialDispatch(
 				[
 					{ runId: "run-1", assistantText: "first specialist answer" },
@@ -1715,13 +1740,13 @@ describe("contracts/tools dispatch run paths", () => {
 				tasks: [
 					{
 						task: "summarize interface",
-						agent_id: "coder",
+						agent: "coder",
 						persona: "# Interface Specialist\nSummarize the public contract.",
 						tool_profile: "minimal-local",
 					},
 					{
 						task: "check implications",
-						agent_id: "coder",
+						agent: "coder",
 						persona: "# Risk Specialist\nIdentify integration risks.",
 						tool_profile: "science-local",
 					},
@@ -1748,6 +1773,7 @@ describe("contracts/tools dispatch run paths", () => {
 	it("mode pipeline halts after a failed middle step and reports skipped tasks", async () => {
 		const capturedRequests: DispatchRequest[] = [];
 		const tool = createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: fakeSequentialDispatch(
 				[
 					{ runId: "run-1", assistantText: "first worker answer" },
@@ -1771,9 +1797,9 @@ describe("contracts/tools dispatch run paths", () => {
 			{
 				mode: "pipeline",
 				tasks: [
-					{ task: "step 1", agent_id: "coder" },
-					{ task: "step 2", agent_id: "coder" },
-					{ task: "step 3", agent_id: "coder" },
+					{ task: "step 1", agent: "coder" },
+					{ task: "step 2", agent: "coder" },
+					{ task: "step 3", agent: "coder" },
 				],
 			},
 			approvedDispatch,
@@ -1824,6 +1850,7 @@ describe("contracts/tools dispatch run paths", () => {
 	it("surfaces pipeline, persona, and escalation provenance in output lines and details, absent on plain steps", async () => {
 		const capturedRequests: DispatchRequest[] = [];
 		const tool = createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: fakeSequentialDispatch(
 				[
 					{ runId: "run-1", assistantText: "first worker answer" },
@@ -1864,8 +1891,8 @@ describe("contracts/tools dispatch run paths", () => {
 			{
 				mode: "pipeline",
 				tasks: [
-					{ task: "step 1", agent_id: "coder" },
-					{ task: "step 2", agent_id: "coder" },
+					{ task: "step 1", agent: "coder" },
+					{ task: "step 2", agent: "coder" },
 				],
 			},
 			approvedDispatch,
@@ -1968,14 +1995,15 @@ describe("contracts/tools dispatch run paths", () => {
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}),
+			planAgentSelection: unexpectedAgentPlanSelection,
 			drain: async () => {},
 		};
-		const tool = createDispatchTool({ dispatch: mockDispatch, bus, runEvents });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: mockDispatch, bus, runEvents });
 		const result = await tool.run(
 			{
 				tasks: [
-					{ task: "task 1", agent_id: "coder" },
-					{ task: "task 2", agent_id: "reviewer" },
+					{ task: "task 1", agent: "coder" },
+					{ task: "task 2", agent: "reviewer" },
 				],
 			},
 			approvedDispatch,
@@ -2034,10 +2062,11 @@ describe("contracts/tools dispatch run paths", () => {
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}),
+			planAgentSelection: unexpectedAgentPlanSelection,
 			drain: async () => {},
 		};
-		const tool = createDispatchTool({ dispatch: mockDispatch, runEvents });
-		const result = await tool.run({ task: "flood", agent_id: "coder" });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: mockDispatch, runEvents });
+		const result = await tool.run({ task: "flood", agent: "coder" });
 		strictEqual(result.kind, "ok");
 		const tail = runEvents.eventTail(runId);
 		ok(tail !== null, "run tail exists");
@@ -2075,10 +2104,11 @@ describe("contracts/tools dispatch run paths", () => {
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}),
+			planAgentSelection: unexpectedAgentPlanSelection,
 			drain: async () => {},
 		};
-		const tool = createDispatchTool({ dispatch: mockDispatch });
-		const result = await tool.run({ task: "slow work", agent_id: "coder" });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: mockDispatch });
+		const result = await tool.run({ task: "slow work", agent: "coder" });
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") {
 			ok(result.message.includes("outcome=timed_out"), result.message);
@@ -2090,8 +2120,8 @@ describe("contracts/tools dispatch run paths", () => {
 	});
 
 	it("invalid dispatch mode error names all supported modes", async () => {
-		const tool = createDispatchTool({ dispatch: {} as DispatchContract });
-		const result = await tool.run({ mode: "serial", tasks: [{ task: "do work", agent_id: "coder" }] });
+		const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: {} as DispatchContract });
+		const result = await tool.run({ mode: "serial", tasks: [{ task: "do work", agent: "coder" }] });
 
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") {
@@ -2104,12 +2134,13 @@ describe("contracts/tools dispatch run paths", () => {
 	it("single-task pipeline dispatch sends no pipeline input", async () => {
 		const capturedRequests: DispatchRequest[] = [];
 		const tool = createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: fakeSequentialDispatch([{ runId: "run-1", assistantText: "single worker answer" }], capturedRequests),
 		});
 
 		const result = await tool.run({
 			mode: "pipeline",
-			tasks: [{ task: "single step", agent_id: "coder" }],
+			tasks: [{ task: "single step", agent: "coder" }],
 		});
 
 		strictEqual(result.kind, "ok");
@@ -2141,6 +2172,7 @@ describe("contracts/tools dispatch run paths", () => {
 					retrying: [],
 					totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 				}),
+				planAgentSelection: unexpectedAgentPlanSelection,
 				drain: async () => {},
 			} as DispatchContract & { resolveWorkerPermission(runId: string, requestId: string, decision: string): void },
 		});
@@ -2169,6 +2201,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 		tamper?: (receipt: RunReceipt) => RunReceipt,
 	) {
 		return createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: {
 				dispatch: async (req: DispatchRequest) => {
 					const sealed = runReceipt(runId, req.task, {
@@ -2203,6 +2236,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 					retrying: [],
 					totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 				}),
+				planAgentSelection: unexpectedAgentPlanSelection,
 				drain: async () => {},
 			},
 		});
@@ -2216,7 +2250,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 			// Post-seal forgery: promote unverified to verified without resealing.
 			(sealed) => ({ ...sealed, verification: { state: "verified", basis: "validation-tool" } }),
 		);
-		const result = await tool.run({ task: "tamper probe", agent_id: "coder" });
+		const result = await tool.run({ task: "tamper probe", agent: "coder" });
 		// Integrity failure is surfaced prominently but stays descriptive: the
 		// process outcome (exit 0) still shapes the result kind.
 		strictEqual(result.kind, "ok");
@@ -2234,7 +2268,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 			toolStats: [{ tool: "verify", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 5 }],
 			toolActivity: { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: true },
 		});
-		const result = await tool.run({ task: "fix and test", agent_id: "coder" });
+		const result = await tool.run({ task: "fix and test", agent: "coder" });
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			ok(result.output.includes("verification=verified/validation-tool"), result.output);
@@ -2250,7 +2284,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 			verification: { state: "unverified", basis: "no-validation-tool" },
 			toolActivity: { calls: 2, succeeded: 2, failed: 0, blocked: 0, mutatingSucceeded: true },
 		});
-		const result = await tool.run({ task: "quick edit", agent_id: "coder" });
+		const result = await tool.run({ task: "quick edit", agent: "coder" });
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			ok(result.output.includes("verification=unverified/no-validation-tool"), result.output);
@@ -2264,7 +2298,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 			verification: { state: "not_applicable", basis: "read-only-agent" },
 			toolActivity: { calls: 3, succeeded: 3, failed: 0, blocked: 0, mutatingSucceeded: false },
 		});
-		const result = await tool.run({ task: "map the dispatcher", agent_id: "scout" });
+		const result = await tool.run({ task: "map the dispatcher", agent: "scout" });
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			ok(result.output.includes("dispatch (parallel) total=1 failed=0"), result.output);
@@ -2283,7 +2317,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 			verification: { state: "not_applicable", basis: "read-only-agent" },
 			toolActivity: { calls: 2, succeeded: 2, failed: 0, blocked: 0, mutatingSucceeded: false },
 		});
-		const result = await tool.run({ task: "assess retries", agent_id: "scout" });
+		const result = await tool.run({ task: "assess retries", agent: "scout" });
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			ok(
@@ -2299,7 +2333,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 		const tool = singleRunTool("run-acp", "Delegated agent reports the migration is complete.", {
 			verification: { state: "unknown", basis: "acp-external-unobserved" },
 		});
-		const result = await tool.run({ task: "delegate migration", agent_id: "claude-cli" });
+		const result = await tool.run({ task: "delegate migration", agent: "claude-cli" });
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			ok(result.output.includes("verification=unknown/acp-external-unobserved"), result.output);
@@ -2316,7 +2350,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 			outcomeDetail: "completed without executing any tools",
 			toolActivity: { calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false },
 		});
-		const result = await tool.run({ task: "impossible task", agent_id: "coder" });
+		const result = await tool.run({ task: "impossible task", agent: "coder" });
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			ok(
@@ -2331,6 +2365,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 	it("notices failed and cap-exhausted runs as non-evidence", async () => {
 		const capturedRequests: DispatchRequest[] = [];
 		const tool = createDispatchTool({
+			getAgentSpecs: () => [],
 			dispatch: fakeSequentialDispatch(
 				[
 					{
@@ -2356,8 +2391,8 @@ describe("contracts/tools dispatch evidence labeling", () => {
 			{
 				mode: "sequential",
 				tasks: [
-					{ task: "refactor", agent_id: "coder" },
-					{ task: "explore", agent_id: "coder" },
+					{ task: "refactor", agent: "coder" },
+					{ task: "explore", agent: "coder" },
 				],
 			},
 			approvedDispatch,
@@ -2384,7 +2419,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 			verification: { state: "verified", basis: "validation-tool" },
 			toolStats: [{ tool: "verify", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 3 }],
 		});
-		const result = await tool.run({ task: "details probe", agent_id: "coder" });
+		const result = await tool.run({ task: "details probe", agent: "coder" });
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			const details = result.details as {

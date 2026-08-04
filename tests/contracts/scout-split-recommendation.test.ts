@@ -1,16 +1,46 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseScoutResult } from "../../src/domains/agents/result-contract.js";
+import { parseScoutResult, resultContractSourceId } from "../../src/domains/agents/result-contract.js";
+import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 
 const SCOUT_RESULT = JSON.stringify({
-	findings: [{ claim: "dispatch promotes one split recommendation", path: "src/tools/dispatch.ts", line: 576 }],
+	findings: [],
 	needsSplit: true,
-	proposedSubtasks: ["Inspect src/tools/dispatch.ts"],
+	proposedSubtasks: [
+		{
+			id: "inspect-dispatch",
+			task: "Inspect src/tools/dispatch.ts",
+			dependencies: [],
+			expectedResultContract: "scout-report",
+			requestedAuthority: "read-only",
+		},
+	],
 });
+
+const SCOUT_SPEC: AgentSpec = {
+	version: 1,
+	id: "scout",
+	name: "Scout",
+	description: "test Scout",
+	source: "builtin",
+	filepath: "scout.md",
+	tools: [],
+	toolRequirements: { required: [], optional: [] },
+	category: "explore",
+	capabilityClass: "read-only",
+	latencyClass: "fast",
+	projectContextTier: "none",
+	audience: "base",
+	tags: [],
+	skills: [],
+	resultContract: { kind: "scout-report" },
+	budget: { toolCalls: 1, readReserve: 0, synthesis: false },
+	body: "",
+};
 
 function receiptEnvelope(draft: RunReceiptDraft): RunEnvelope {
 	return {
@@ -86,7 +116,12 @@ function toolForAnswer(answer: string) {
 					version: 1,
 					typedValidations: [],
 					responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
-					resultContract: null,
+					resultContract: {
+						sourceId: resultContractSourceId({ kind: "scout-report" }),
+						validatorDigest: "a".repeat(64),
+						conformance: "pass",
+						quality: "pass",
+					},
 				},
 				output: { state: "final", text: answer, bytes: Buffer.byteLength(answer), truncated: false },
 			};
@@ -104,6 +139,9 @@ function toolForAnswer(answer: string) {
 		getRun: () => envelope,
 		abort: () => {},
 		steer: () => {},
+		planAgentSelection: () => {
+			throw new Error("unexpected agent plan selection");
+		},
 		snapshot: () => ({
 			generatedAt: "",
 			running: [],
@@ -112,34 +150,56 @@ function toolForAnswer(answer: string) {
 		}),
 		drain: async () => {},
 	};
-	return createDispatchTool({ dispatch });
+	return createDispatchTool({ dispatch, getAgentSpecs: () => [SCOUT_SPEC] });
 }
 
 describe("contracts/Scout structured result", () => {
 	it("accepts citation-bearing structured output and rejects prose sentinels", () => {
 		deepStrictEqual(parseScoutResult(SCOUT_RESULT), {
-			findings: [{ claim: "dispatch promotes one split recommendation", path: "src/tools/dispatch.ts", line: 576 }],
-			citations: [{ path: "src/tools/dispatch.ts", line: 576 }],
+			findings: [],
+			citations: [],
 			needsSplit: true,
-			proposedSubtasks: ["Inspect src/tools/dispatch.ts"],
+			proposedSubtasks: [
+				{
+					id: "inspect-dispatch",
+					task: "Inspect src/tools/dispatch.ts",
+					dependencies: [],
+					expectedResultContract: "scout-report",
+					requestedAuthority: "read-only",
+				},
+			],
 		});
 		strictEqual(parseScoutResult("SPLIT RECOMMENDATION: prose\n- inspect"), null);
 	});
 
-	it("promotes one integrity-valid structured Scout result", async () => {
-		const result = await toolForAnswer(SCOUT_RESULT).run({ task: "map", agent_id: "scout" });
+	it("exposes one integrity-valid structured Scout transition", async () => {
+		const result = await toolForAnswer(SCOUT_RESULT).run({ task: "map", agent: "scout" });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
-		deepStrictEqual(
-			(result.details as { splitRecommendation?: unknown }).splitRecommendation,
-			parseScoutResult(SCOUT_RESULT),
-		);
+		deepStrictEqual((result.details as { scoutTransition?: unknown }).scoutTransition, {
+			kind: "proposed",
+			sourceRunId: "run-scout",
+			sourceReceiptDigest: (result.details as { runs: Array<{ receiptIntegrity: { ok: boolean } }> }).runs
+				? (envelopeDigest(result.details) ?? "")
+				: "",
+			subtaskCount: 1,
+			continueWith: {
+				from_scout: { run_id: "run-scout", receipt_digest: envelopeDigest(result.details) ?? "" },
+			},
+		});
+		strictEqual("splitRecommendation" in (result.details ?? {}), false);
 		ok(result.output.includes(SCOUT_RESULT));
 	});
 
 	it("does not promote an identical structured result from another agent", async () => {
-		const result = await toolForAnswer(SCOUT_RESULT).run({ task: "map", agent_id: "coder" });
+		const result = await toolForAnswer(SCOUT_RESULT).run({ task: "map", agent: "coder" });
 		strictEqual(result.kind, "ok");
-		if (result.kind === "ok") strictEqual("splitRecommendation" in (result.details ?? {}), false);
+		if (result.kind === "ok") strictEqual("scoutTransition" in (result.details ?? {}), false);
 	});
 });
+
+function envelopeDigest(details: unknown): string | null {
+	if (typeof details !== "object" || details === null) return null;
+	const transition = (details as { scoutTransition?: { sourceReceiptDigest?: unknown } }).scoutTransition;
+	return typeof transition?.sourceReceiptDigest === "string" ? transition.sourceReceiptDigest : null;
+}

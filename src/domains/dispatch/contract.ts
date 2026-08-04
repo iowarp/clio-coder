@@ -1,4 +1,6 @@
 import type { SafeEventBus } from "../../core/event-bus.js";
+import type { ResultContract } from "../agents/result-contract.js";
+import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import type { AssignmentId, DispatchAssignment } from "./assignment.js";
@@ -7,6 +9,7 @@ import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-st
 import type { ExecutionRole } from "./execution-role.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { ApprovedAssignmentRoute } from "./route-approval.js";
+import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunReceipt, RunStatus } from "./types.js";
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 
@@ -18,6 +21,14 @@ export interface DispatchRequest extends JobSpec {
 	 * and recovery route statistics from each other.
 	 */
 	executionRole: ExecutionRole;
+	/** Concrete baseline plus trusted auto authority; the literal id "auto" never crosses this boundary. */
+	agentSelection?: {
+		version: 1;
+		mode: "auto";
+		baselineAgentId: string;
+		approvedAuthorities: ReadonlyArray<AgentAutomationAuthority>;
+		authorityBasis: "operator-plan-approval" | "full-auto-policy";
+	};
 	systemPrompt?: string;
 	/** Trusted side-store lease reference; never serialized into a worker spec or receipt. */
 	reservation?: { ownerId: string; memberId: string };
@@ -55,6 +66,19 @@ export interface DispatchPlanTaskResolution {
 	costUpperBoundKnown: boolean;
 	/** Required plan projection: null means this task remains shadow/fixed. */
 	routeApproval: ApprovedAssignmentRoute | null;
+}
+
+export interface DispatchAgentPlanResolution {
+	resolution: DispatchPlanTaskResolution;
+	decision: RouteDecisionV1;
+	agentSpec: AgentSpec;
+}
+
+export interface DispatchAgentPlanInput {
+	request: DispatchRequest;
+	expectedResultContract: ResultContract["kind"];
+	requestedAuthority: AgentAutomationAuthority;
+	authorization: "operator-plan-approval" | "full-auto-policy";
 }
 
 /**
@@ -129,6 +153,8 @@ export interface DispatchContract {
 	 * failure aborts rather than choosing a different unapproved node.
 	 */
 	preview?(req: DispatchRequest): DispatchPlanTaskResolution;
+	/** One shared joint-resolver proposal for a typed Scout successor; never a second agent selector. */
+	planAgentSelection(input: DispatchAgentPlanInput): DispatchAgentPlanResolution;
 	/**
 	 * Bounded, deterministic route envelope a plan may approve for this request:
 	 * the resolved route first, then hard-constraint-eligible alternates. Plan

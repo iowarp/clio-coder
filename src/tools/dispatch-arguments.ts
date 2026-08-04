@@ -1,0 +1,180 @@
+/** Pure model-argument parsing; every returned DispatchRequest has a concrete agent id. */
+
+import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
+import type { DispatchRequest } from "../domains/dispatch/contract.js";
+import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import { parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
+import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/dispatch/validation.js";
+import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
+
+const DEFAULT_AGENT_ID = "coder";
+const AUTO_BASELINE_AGENT_ID = "scout";
+const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
+const PERSONA_MAX_CHARS = 8_000;
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const VALID_THINKING = new Set<JobThinkingLevel>(THINKING_LEVELS);
+
+export interface DispatchArgumentParserOptions {
+	resolveFacts?: AgentRoleFactsResolver;
+	auto: {
+		approvedAuthorities: ReadonlyArray<AgentAutomationAuthority>;
+		authorityBasis: "operator-plan-approval" | "full-auto-policy";
+	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function stringArg(args: Record<string, unknown>, ...names: string[]): string | undefined {
+	for (const name of names) {
+		const value = args[name];
+		if (typeof value === "string" && value.trim().length > 0) return value.trim();
+	}
+	return undefined;
+}
+
+export function maxOutputBytesArg(args: Record<string, unknown>): number {
+	const value = args.max_output_bytes;
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_MAX_OUTPUT_BYTES;
+}
+
+export function timeoutMsArg(args: Record<string, unknown>): number | undefined {
+	const value = args.timeout_ms;
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+}
+
+function dispatchRequestFromArgs(
+	args: Record<string, unknown>,
+	options: DispatchArgumentParserOptions,
+): { ok: true; request: DispatchRequest } | { ok: false; message: string } {
+	const task = stringArg(args, "task");
+	if (!task) return { ok: false, message: "missing task (pass list:true to see available agents)" };
+	if (Object.hasOwn(args, "agent_id")) return { ok: false, message: "agent_id is unsupported; use agent" };
+	const requestedAgent = stringArg(args, "agent") ?? DEFAULT_AGENT_ID;
+	const auto = requestedAgent === "auto";
+	const agentId = auto ? AUTO_BASELINE_AGENT_ID : requestedAgent;
+	const request: DispatchRequest = {
+		agentId,
+		executionRole: requestExecutionRole({
+			agentId,
+			...(options.resolveFacts ? { resolveFacts: options.resolveFacts } : {}),
+		}),
+		task,
+		...(auto
+			? {
+					agentSelection: {
+						version: 1 as const,
+						mode: "auto" as const,
+						baselineAgentId: AUTO_BASELINE_AGENT_ID,
+						approvedAuthorities: [...options.auto.approvedAuthorities],
+						authorityBasis: options.auto.authorityBasis,
+					},
+				}
+			: {}),
+	};
+	if ("briefing" in args && args.briefing !== undefined) {
+		if (typeof args.briefing !== "string") return { ok: false, message: "briefing must be a string" };
+		const briefing = args.briefing.trim();
+		if (Buffer.byteLength(briefing, "utf8") > DISPATCH_BRIEFING_MAX_BYTES) {
+			return { ok: false, message: `briefing must be ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes or fewer` };
+		}
+		if (briefing.length > 0) request.briefing = briefing;
+	}
+	const target = stringArg(args, "target");
+	if (target) request.target = target;
+	const model = stringArg(args, "model");
+	if (model) request.model = model;
+	const node = stringArg(args, "node");
+	if (node) request.node = node;
+	if (args.failover !== undefined || args.allowed_candidates !== undefined || args.allowedCandidates !== undefined) {
+		return { ok: false, message: "use routing.failover; model-authored candidate envelopes are not accepted" };
+	}
+	const routing = parseRoutingIntent(args.routing, {
+		...(target ? { target } : {}),
+		...(model ? { model } : {}),
+		...(node ? { node } : {}),
+	});
+	if (!routing.ok) return { ok: false, message: routing.errors.join("; ") };
+	request.routingIntent = routing.intent;
+	request.failover = routing.intent.failover;
+	request.requiredCapabilities = routing.intent.requiredCapabilities;
+	const cwd = stringArg(args, "cwd");
+	if (cwd) request.cwd = cwd;
+	if ("persona" in args && args.persona !== undefined) {
+		if (typeof args.persona !== "string") return { ok: false, message: "persona must be a string" };
+		const persona = args.persona.trim();
+		if (persona.length > PERSONA_MAX_CHARS) {
+			return { ok: false, message: `persona must be ${PERSONA_MAX_CHARS} characters or fewer` };
+		}
+		if (persona.length > 0) request.systemPrompt = persona;
+	}
+	const toolProfile = stringArg(args, "tool_profile");
+	if (toolProfile) {
+		if (!isToolProfileName(toolProfile)) {
+			return { ok: false, message: `tool_profile must be one of ${TOOL_PROFILE_NAMES.join("|")}` };
+		}
+		request.toolProfile = toolProfile;
+	}
+	const thinkingLevel = stringArg(args, "thinking_level");
+	if (thinkingLevel) {
+		if (!VALID_THINKING.has(thinkingLevel as JobThinkingLevel)) {
+			return { ok: false, message: "thinking_level must be one of off|minimal|low|medium|high|xhigh|max" };
+		}
+		request.thinkingLevel = thinkingLevel as JobThinkingLevel;
+	}
+	return { ok: true, request };
+}
+
+export function dispatchRequestsFromArgs(
+	args: Record<string, unknown>,
+	options: DispatchArgumentParserOptions,
+): { ok: true; requests: DispatchRequest[] } | { ok: false; message: string } {
+	if (Object.hasOwn(args, "task") && Object.hasOwn(args, "tasks")) {
+		return { ok: false, message: "dispatch: pass either task for one run or tasks for a batch, not both" };
+	}
+	const tasks = args.tasks;
+	if (!Array.isArray(tasks) || tasks.length === 0) {
+		return {
+			ok: false,
+			message:
+				args.tasks === undefined
+					? 'dispatch: missing task; pass task="..." for one run or tasks=[...] for a batch. briefing is optional context and cannot replace task. Example: {"agent":"auto","task":"map the modules that read fleet config and cite file paths"}'
+					: "dispatch: tasks must be a non-empty array of task strings or {agent, task} objects",
+		};
+	}
+	const shared = { ...args };
+	Reflect.deleteProperty(shared, "tasks");
+	const requests: DispatchRequest[] = [];
+	for (let index = 0; index < tasks.length; index += 1) {
+		const item = tasks[index];
+		const itemArgs: Record<string, unknown> = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
+		const parsed = dispatchRequestFromArgs(itemArgs, options);
+		if (!parsed.ok) return { ok: false, message: `dispatch: task ${index + 1}: ${parsed.message}` };
+		requests.push(parsed.request);
+	}
+	return { ok: true, requests };
+}
+
+/** Normalize weak-model task containers. Pure and idempotent. */
+export function prepareDispatchArguments(args: Record<string, unknown>): Record<string, unknown> {
+	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
+	const next: Record<string, unknown> = { ...args };
+	if (typeof next.tasks === "string") {
+		const raw = next.tasks.trim();
+		if (raw.startsWith("[") || raw.startsWith("{")) {
+			try {
+				next.tasks = JSON.parse(raw) as unknown;
+			} catch {
+				// Leave the string; run() reports the shape error.
+			}
+		}
+	}
+	if (isRecord(next.tasks)) next.tasks = [next.tasks];
+	if (typeof next.tasks === "string") next.tasks = [next.tasks];
+	if (next.tasks === undefined && typeof next.task === "string") {
+		const { task: _task, ...rest } = next;
+		return { ...rest, tasks: [{ task: next.task }] };
+	}
+	return next;
+}

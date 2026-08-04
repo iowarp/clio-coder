@@ -507,7 +507,9 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (isValidLineage(spec.lineage)) out.lineage = spec.lineage;
 	if (isAutonomyLevel(spec.autonomy)) out.autonomy = spec.autonomy;
 	if (isValidGate(spec.gate)) out.gate = cloneGate(spec.gate);
-	if (isValidPlan(spec.plan)) out.plan = { ...spec.plan };
+	if (isValidPlan(spec.plan)) {
+		out.plan = { ...spec.plan, source: spec.plan.source === null ? null : { ...spec.plan.source } };
+	}
 	return { ok: true, spec: out };
 }
 
@@ -586,7 +588,7 @@ function isValidProtectedArtifactRemap(value: unknown): value is ProtectedArtifa
 
 const VALID_GATE_ROLES = new Set(["builder", "reviewer", "candidate", "judge"]);
 const VALID_GATE_VERDICTS = new Set(["pass", "fail", "revise"]);
-const VALID_PLAN_TOPOLOGIES = new Set(["parallel", "sequential", "pipeline", "review", "compete", "detached"]);
+const VALID_PLAN_TOPOLOGIES = new Set(["parallel", "sequential", "pipeline", "review", "compete", "detached", "fleet"]);
 const VALID_PLAN_APPROVALS = new Set(["operator", "full-auto"]);
 
 function isValidGate(value: unknown): value is RunGateProvenance {
@@ -624,6 +626,19 @@ function isValidPlan(value: unknown): value is RunPlanProvenance {
 	if (typeof value.topology !== "string" || !VALID_PLAN_TOPOLOGIES.has(value.topology)) return false;
 	if (typeof value.taskCount !== "number" || !Number.isInteger(value.taskCount) || value.taskCount < 1) return false;
 	if (typeof value.approval !== "string" || !VALID_PLAN_APPROVALS.has(value.approval)) return false;
+	if (value.source !== null) {
+		if (
+			!isPlainObject(value.source) ||
+			value.source.kind !== "scout-transition" ||
+			typeof value.source.runId !== "string" ||
+			value.source.runId.length === 0 ||
+			typeof value.source.receiptDigest !== "string" ||
+			!/^[0-9a-f]{64}$/u.test(value.source.receiptDigest) ||
+			typeof value.source.executionPlanHash !== "string" ||
+			!/^[0-9a-f]{64}$/u.test(value.source.executionPlanHash)
+		)
+			return false;
+	}
 	if (
 		value.approvalRequestId !== undefined &&
 		(typeof value.approvalRequestId !== "string" || value.approvalRequestId.length === 0)

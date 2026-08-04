@@ -1,9 +1,9 @@
 /** Stateful evidence adapter for the pure joint route resolver. */
 
-import type { AgentLatencyClass } from "../agents/spec.js";
 import type { DispatchRequest } from "./contract.js";
 import {
 	emptyJointHardFilterVerdicts,
+	type JointAgentDimension,
 	type JointNodeDimension,
 	type JointRouteResolverInput,
 	type JointTargetDimension,
@@ -17,11 +17,12 @@ export function adaptJointRouteInput(input: {
 	request: DispatchRequest;
 	exact: boolean;
 	executedRoute: RouteCandidate;
+	agents: JointRouteResolverInput["agents"];
+	agentSelection: JointRouteResolverInput["agentSelection"];
 	targets: ReadonlyArray<JointTargetDimension>;
 	nodes: ReadonlyArray<JointNodeDimension>;
 	intent: JointRouteResolverInput["intent"];
 	independenceSubject: JointRouteResolverInput["independenceSubject"];
-	latencyClass: AgentLatencyClass;
 	settingsFingerprint: string;
 	readiness: RouteReadinessEvidenceWindow;
 	cooldown(target: JointTargetDimension): string | null;
@@ -34,6 +35,7 @@ export function adaptJointRouteInput(input: {
 		unknowns: ReadonlyArray<string>;
 	};
 	preview(
+		agent: JointAgentDimension,
 		target: JointTargetDimension,
 		node: JointNodeDimension,
 	): {
@@ -41,23 +43,24 @@ export function adaptJointRouteInput(input: {
 		capabilities: string[];
 		costUpperBoundUsd: number | null;
 	};
+	envelopeRejection(candidate: RouteCandidate): string | null;
 }): JointRouteResolverInput {
 	return {
 		mode: input.mode,
-		agentId: input.request.agentId,
-		executionRole: input.executedRoute.executionRole,
+		agents: input.agents,
+		agentSelection: input.agentSelection,
 		executedRoute: input.executedRoute,
 		targets: input.targets,
 		nodes: input.nodes,
 		intent: input.intent,
 		independenceSubject: input.independenceSubject,
-		project(target, node) {
+		project(agent, target, node) {
 			const hardFilters = emptyJointHardFilterVerdicts();
 			Object.assign(
 				hardFilters,
 				routeBoundaryRejections(
 					input.request,
-					{ targetId: target.targetId, modelId: target.modelId, nodeId: node.nodeId },
+					{ agentId: agent.agentId, targetId: target.targetId, modelId: target.modelId, nodeId: node.nodeId },
 					input.exact,
 				),
 			);
@@ -67,6 +70,9 @@ export function adaptJointRouteInput(input: {
 			if (!facts.ok) hardFilters["endpoint-reachability"] = facts.reason ?? "route facts unavailable";
 			let candidate: RouteCandidate = {
 				...input.executedRoute,
+				agentId: agent.agentId,
+				specFingerprint: agent.specFingerprint,
+				executionRole: agent.executionRole,
 				targetId: target.targetId,
 				modelId: target.modelId,
 				runtimeId: target.runtimeId,
@@ -77,7 +83,7 @@ export function adaptJointRouteInput(input: {
 			let capabilities: string[] = [];
 			let costUpperBoundUsd: number | null = null;
 			try {
-				const projected = input.preview(target, node);
+				const projected = input.preview(agent, target, node);
 				candidate = projected.candidate;
 				capabilities = projected.capabilities;
 				costUpperBoundUsd = projected.costUpperBoundUsd;
@@ -91,6 +97,7 @@ export function adaptJointRouteInput(input: {
 			} catch (error) {
 				hardFilters.authority = error instanceof Error ? error.message : String(error);
 			}
+			hardFilters["approved-envelope"] = input.envelopeRejection(candidate);
 			const evidence = input.readiness.forRoute(candidate, {
 				costUpperBoundUsd,
 				factsFresh: facts.ok && facts.unknowns.length === 0,
@@ -99,7 +106,6 @@ export function adaptJointRouteInput(input: {
 				candidate,
 				hardFilters,
 				observations: evidence.observations,
-				latencyClass: input.latencyClass,
 				capabilities,
 				readiness: evidence.readiness,
 			};

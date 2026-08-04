@@ -25,7 +25,8 @@ export interface RetryDecision {
 	retry: boolean;
 	retryAfterMs?: number;
 	excludedRouteParts: RoutePart[];
-	mayEscalateQuality: boolean;
+	/** Typed authority to consider another agent; only model-quality evidence can carry it. */
+	qualityEscalation: null | { kind: "model-quality"; allowAgentChange: true };
 	reasonCode: string;
 }
 
@@ -67,10 +68,14 @@ export function classifyFailure(
 /** Pure bounded retry policy. attempt is the zero-based lineage attempt. */
 export function decideRetry(failureClass: FailureClass, attempt: number, maxRetries: number): RetryDecision {
 	const exhausted = maxRetries <= 0 || attempt >= maxRetries;
-	const base = (excludedRouteParts: RoutePart[], reasonCode: string, mayEscalateQuality = false): RetryDecision => ({
+	const base = (
+		excludedRouteParts: RoutePart[],
+		reasonCode: string,
+		qualityEscalation: RetryDecision["qualityEscalation"] = null,
+	): RetryDecision => ({
 		retry: !exhausted,
 		excludedRouteParts,
-		mayEscalateQuality,
+		qualityEscalation,
 		reasonCode: exhausted ? "retry-exhausted" : reasonCode,
 	});
 
@@ -82,11 +87,14 @@ export function decideRetry(failureClass: FailureClass, attempt: number, maxRetr
 			return {
 				retry: false,
 				excludedRouteParts: [],
-				mayEscalateQuality: false,
+				qualityEscalation: null,
 				reasonCode: `non-retryable-${failureClass}`,
 			};
 		case "model-quality":
-			return base(["model"], "retry-model-quality", true);
+			return base(["agent", "model"], "retry-model-quality", {
+				kind: "model-quality",
+				allowAgentChange: true,
+			});
 		case "node-channel":
 			return base(["node"], "retry-node-channel");
 		case "node-resource":
@@ -102,7 +110,7 @@ export function decideRetry(failureClass: FailureClass, attempt: number, maxRetr
 		case "capacity":
 			return base(["node"], "retry-capacity");
 		case "worker-runtime":
-			return base(["runtime"], "retry-worker-runtime", true);
+			return base(["runtime"], "retry-worker-runtime");
 		case "internal":
 			return base([], "retry-internal");
 	}

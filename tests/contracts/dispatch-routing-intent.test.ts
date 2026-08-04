@@ -1,7 +1,12 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { decideRoute, type RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
-import { estimateRoute } from "../../src/domains/dispatch/route-policy.js";
+import {
+	decideRoute,
+	type RouteCandidate,
+	type RouteCandidateInput,
+	type RouteDecisionInput,
+} from "../../src/domains/dispatch/route-decision.js";
+import { DEFAULT_ROUTE_PRIOR, estimateRoute } from "../../src/domains/dispatch/route-policy.js";
 import type { RouteReadinessReport } from "../../src/domains/dispatch/route-readiness.js";
 import {
 	explainRouteDecision,
@@ -31,6 +36,36 @@ const intent = () => {
 	if (!parsed.ok) throw new Error(parsed.errors.join("; "));
 	return parsed.intent;
 };
+const explicitAgentSelection = (
+	executed: RouteCandidate,
+	candidates: ReadonlyArray<RouteCandidateInput>,
+): RouteDecisionInput["agentSelection"] => ({
+	request: "explicit",
+	baselineAgentId: executed.agentId,
+	evaluations: [
+		{
+			agentId: executed.agentId,
+			specFingerprint: executed.specFingerprint,
+			executionRole: executed.executionRole,
+			authority: "workspace-edit",
+			rejections: [],
+			coldPrior: DEFAULT_ROUTE_PRIOR,
+			priorReasons: [],
+		},
+	],
+	readiness: [
+		{
+			agentId: executed.agentId,
+			specFingerprint: executed.specFingerprint,
+			executionRole: executed.executionRole,
+			ready: candidates.some((entry) => entry.activeReadiness.ready),
+			candidateCount: candidates.length,
+			readyCandidateCount: candidates.filter((entry) => entry.activeReadiness.ready).length,
+			routes: candidates.map((entry) => ({ candidate: entry.candidate, report: entry.activeReadiness })),
+		},
+	],
+	authorityBasis: null,
+});
 const decision = (executed = candidate()) =>
 	decideRoute({
 		mode: "shadow",
@@ -41,6 +76,9 @@ const decision = (executed = candidate()) =>
 		hardConstraints: ["authority"],
 		maxFallbacks: 3,
 		decisionDurationMs: 1,
+		agentSelection: explicitAgentSelection(executed, [
+			{ candidate: executed, estimate: estimateRoute([]), activeReadiness: READY, rejection: null },
+		]),
 	});
 
 describe("dispatch routing intent", () => {
@@ -103,23 +141,25 @@ describe("dispatch routing intent", () => {
 	it("shadow posture leaves the executed route byte-identical", () => {
 		const executed = candidate("local", "fixed");
 		const alternate = candidate("mini", "recommended");
+		const candidates: RouteCandidateInput[] = [
+			{ candidate: executed, estimate: estimateRoute([]), activeReadiness: READY, rejection: null },
+			{
+				candidate: alternate,
+				estimate: { ...estimateRoute([]), expectedCostUsd: 0 },
+				activeReadiness: READY,
+				rejection: null,
+			},
+		];
 		const routeDecision = decideRoute({
 			mode: "shadow",
 			posture: "economy",
 			executedRoute: executed,
-			candidates: [
-				{ candidate: executed, estimate: estimateRoute([]), activeReadiness: READY, rejection: null },
-				{
-					candidate: alternate,
-					estimate: { ...estimateRoute([]), expectedCostUsd: 0 },
-					activeReadiness: READY,
-					rejection: null,
-				},
-			],
+			candidates,
 			independenceSubject: null,
 			hardConstraints: [],
 			maxFallbacks: 1,
 			decisionDurationMs: 1,
+			agentSelection: explicitAgentSelection(executed, candidates),
 		});
 		deepStrictEqual(routeDecision.executedRoute, executed);
 	});
@@ -131,6 +171,15 @@ describe("dispatch routing intent", () => {
 
 	it("route explanations are bounded and redact endpoint secrets", () => {
 		const sealed = decision(candidate("local", `https://user:password@example.test/${"x".repeat(10_000)}`));
+		const template = sealed.agentSelection.evaluations[0];
+		if (template === undefined) throw new Error("missing agent evaluation");
+		sealed.agentSelection.evaluations.push(
+			...Array.from({ length: 32 }, (_, index) => ({
+				...template,
+				agentId: `https://password.example/${index}/${"agent".repeat(80)}`,
+				rejections: Array.from({ length: 8 }, () => `required-tool:${"x".repeat(128)}`),
+			})),
+		);
 		const explanation = explainRouteDecision(sealed, intent());
 		const encoded = JSON.stringify(explanation);
 		ok(Buffer.byteLength(encoded, "utf8") <= ROUTE_EXPLANATION_MAX_BYTES);

@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -110,14 +110,12 @@ describe("route observer durable history", () => {
 		roots.push(stateDir);
 		const history = createRouteHistoryStore({ stateDir });
 		const observer = createRouteObserver({
-			getAgents: () => [{ id: "coder", description: "coding" }],
 			history,
 			logDir: join(stateDir, "decisions"),
 		});
 		const route = candidate();
 		const handle = observer.observe({
 			task: "inspect the code",
-			requestedAgentId: "coder",
 			decision: fixedRouteDecision(route, "test-fixed-route"),
 		});
 		ok(handle);
@@ -151,18 +149,16 @@ describe("route observer durable history", () => {
 	it("observer failure seals a fixed decision instead of omitting routeDecision", () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "clio-route-observer-failure-"));
 		roots.push(stateDir);
+		const blockedLogDir = join(stateDir, "not-a-directory");
+		writeFileSync(blockedLogDir, "blocked", "utf8");
 		const observer = createRouteObserver({
-			getAgents: () => {
-				throw new Error("catalog unavailable");
-			},
 			stateDir,
-			logDir: join(stateDir, "decisions"),
+			logDir: blockedLogDir,
 		});
 		const route = candidate();
 		const shadow = { ...fixedRouteDecision(route, "shadow-source"), mode: "shadow" as const };
 		const handle = observer.observe({
 			task: "inspect the code",
-			requestedAgentId: "coder",
 			decision: shadow,
 		});
 		strictEqual(handle.decision.mode, "fixed");
@@ -170,7 +166,7 @@ describe("route observer durable history", () => {
 		deepStrictEqual(handle.decision.selected, route);
 		ok(handle.decision.reasonCodes.includes("observer-failure-fixed-route"));
 		const active = { ...shadow, mode: "active" as const };
-		const activeHandle = observer.observe({ task: "inspect", requestedAgentId: "coder", decision: active });
+		const activeHandle = observer.observe({ task: "inspect", decision: active });
 		strictEqual(activeHandle.decision, active);
 	});
 });

@@ -221,7 +221,7 @@ describe("ACP gate role authority", () => {
 			await bundle.extension.start();
 			try {
 				const contract = capturingContract(bundle.contract, requests);
-				const tool = createDispatchTool({ dispatch: contract, getAutonomy: () => autonomy });
+				const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: contract, getAutonomy: () => autonomy });
 				const result = (await tool.run(
 					// The reviewer now defaults to the builtin Verifier, so an ACP reviewer
 					// is an explicit operator pin rather than an inherited builder agent.
@@ -282,7 +282,7 @@ describe("ACP gate role authority", () => {
 		await bundle.extension.start();
 		try {
 			const contract = capturingContract(bundle.contract, requests);
-			const tool = createDispatchTool({ dispatch: contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: contract, getAutonomy: () => "full-auto" });
 			const result = (await tool.run(
 				{
 					tasks: [{ agent: "coder", task: "build the best change", cwd: repo }],
@@ -347,7 +347,11 @@ describe("ACP gate role authority", () => {
 			});
 			await bundle.extension.start();
 			try {
-				const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+				const tool = createDispatchTool({
+					getAgentSpecs: () => [],
+					dispatch: bundle.contract,
+					getAutonomy: () => "full-auto",
+				});
 				const args =
 					topology === "review"
 						? { tasks: ["build first"], review: { reviewer: "acp-gate" } }

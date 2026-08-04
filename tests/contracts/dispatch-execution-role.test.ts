@@ -85,7 +85,7 @@ describe("dispatch execution roles", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const result = (await tool.run(
 				{ tasks: ["fix the build"], review: true },
 				approvedDispatchOptions(),

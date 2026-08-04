@@ -91,7 +91,7 @@ function receipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
 		toolCalls: 2,
 		toolStats: [],
 		sessionId: null,
-		integrity: { version: 14, algorithm: "sha256", digest: "0".repeat(64) },
+		integrity: { version: 15, algorithm: "sha256", digest: "0".repeat(64) },
 		...overrides,
 	};
 }
@@ -128,6 +128,9 @@ function fakeDispatch(
 		getRun: () => null,
 		abort: () => {},
 		steer: () => {},
+		planAgentSelection: () => {
+			throw new Error("unexpected agent plan selection");
+		},
 		snapshot: () => ({
 			generatedAt: "2026-07-09T00:00:00.000Z",
 			running: [],

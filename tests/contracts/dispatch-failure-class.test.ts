@@ -90,8 +90,27 @@ describe("dispatch failure classification", () => {
 		strictEqual(affectsTargetBreaker("internal"), false);
 		strictEqual(affectsTargetBreaker("target-auth"), true);
 		strictEqual(affectsNodeBreaker("node-resource"), true);
-		deepStrictEqual(decideRetry("model-quality", 0, 2).excludedRouteParts, ["model"]);
-		strictEqual(decideRetry("model-quality", 0, 2).mayEscalateQuality, true);
+		deepStrictEqual(decideRetry("model-quality", 0, 2).excludedRouteParts, ["agent", "model"]);
+		deepStrictEqual(decideRetry("model-quality", 0, 2).qualityEscalation, {
+			kind: "model-quality",
+			allowAgentChange: true,
+		});
+		for (const failureClass of [
+			"operator-cancel",
+			"policy",
+			"permission",
+			"deterministic-task",
+			"target-auth",
+			"target-rate-limit",
+			"target-transient",
+			"capacity",
+			"node-channel",
+			"node-resource",
+			"worker-runtime",
+			"internal",
+		] as const) {
+			strictEqual(decideRetry(failureClass, 0, 2).qualityEscalation, null);
+		}
 		deepStrictEqual(decideRetry("node-channel", 0, 2).excludedRouteParts, ["node"]);
 		deepStrictEqual(decideRetry("node-resource", 0, 2).excludedRouteParts, ["node"]);
 		deepStrictEqual(decideRetry("target-auth", 0, 2).excludedRouteParts, ["target"]);

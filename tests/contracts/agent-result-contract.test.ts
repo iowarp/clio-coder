@@ -112,9 +112,17 @@ describe("contracts/agent result contract", () => {
 
 	it("scout structured citations validate and prose sentinels do not", () => {
 		const structured = JSON.stringify({
-			findings: [{ claim: "src/a.ts declares the boundary", path: "src/a.ts", line: 4 }],
+			findings: [],
 			needsSplit: true,
-			proposedSubtasks: ["Inspect src/a.ts"],
+			proposedSubtasks: [
+				{
+					id: "inspect-a",
+					task: "Inspect src/a.ts",
+					dependencies: [],
+					expectedResultContract: "scout-report",
+					requestedAuthority: "read-only",
+				},
+			],
 		});
 		strictEqual(parseScoutResult(structured)?.needsSplit, true);
 		strictEqual(
@@ -128,6 +136,29 @@ describe("contracts/agent result contract", () => {
 			"pass",
 		);
 		strictEqual(parseScoutResult("SPLIT RECOMMENDATION: prose\n- Inspect src/a.ts"), null);
+		strictEqual(
+			parseScoutResult(JSON.stringify({ findings: [], needsSplit: true, proposedSubtasks: ["Inspect src/a.ts"] })),
+			null,
+		);
+		strictEqual(
+			parseScoutResult(
+				JSON.stringify({
+					findings: [],
+					needsSplit: true,
+					proposedSubtasks: [
+						{
+							id: "inject",
+							task: "Inspect",
+							dependencies: [],
+							expectedResultContract: "scout-report",
+							requestedAuthority: "read-only",
+							agent: "coder",
+						},
+					],
+				}),
+			),
+			null,
+		);
 	});
 
 	it("rejects a scout citation to a real line the run never read", () => {
