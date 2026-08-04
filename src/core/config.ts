@@ -15,7 +15,7 @@
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { DEFAULT_SETTINGS } from "./defaults.js";
+import { ACTIVE_ROUTING_POSTURES, ACTIVE_ROUTING_ROLES, DEFAULT_SETTINGS } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { clioConfigDir, resolveClioDirs } from "./xdg.js";
 
@@ -713,6 +713,7 @@ const TOP_LEVEL_KEYS = [
 	"memory",
 	"workers",
 	"fleet",
+	"routing",
 	"scope",
 	"modelSelector",
 	"budget",
@@ -815,6 +816,46 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		settings.fleet = validateFleet(issues, raw.fleet);
 	}
 	const fleetNodeIds = new Set(settings.fleet.nodes.map((node) => node.id));
+
+	if ("routing" in raw) {
+		if (!isPlainObject(raw.routing)) {
+			issues.add("routing", `expected a map, got ${describe(raw.routing)}`);
+		} else {
+			issues.unknownKeys("routing", raw.routing, ["activeRoles", "activePostures"]);
+			const activeRoles = expectStringArray(issues, "routing.activeRoles", raw.routing.activeRoles);
+			if (activeRoles !== undefined) {
+				const allowed = new Set<string>(ACTIVE_ROUTING_ROLES);
+				const rawRoles = raw.routing.activeRoles as unknown[];
+				const stringRoles = rawRoles.filter((role): role is string => typeof role === "string");
+				const complete = activeRoles.length === rawRoles.length;
+				for (const role of activeRoles) {
+					if (!allowed.has(role)) issues.add("routing.activeRoles", `unsupported active role '${role}'`);
+				}
+				if (new Set(stringRoles).size !== stringRoles.length) {
+					issues.add("routing.activeRoles", "expected unique roles");
+				}
+				if (complete && activeRoles.every((role) => allowed.has(role))) {
+					settings.routing.activeRoles = activeRoles as typeof settings.routing.activeRoles;
+				}
+			}
+			const activePostures = expectStringArray(issues, "routing.activePostures", raw.routing.activePostures);
+			if (activePostures !== undefined) {
+				const allowed = new Set<string>(ACTIVE_ROUTING_POSTURES);
+				const rawPostures = raw.routing.activePostures as unknown[];
+				const stringPostures = rawPostures.filter((posture): posture is string => typeof posture === "string");
+				const complete = activePostures.length === rawPostures.length;
+				for (const posture of activePostures) {
+					if (!allowed.has(posture)) issues.add("routing.activePostures", `unsupported active posture '${posture}'`);
+				}
+				if (new Set(stringPostures).size !== stringPostures.length) {
+					issues.add("routing.activePostures", "expected unique postures");
+				}
+				if (complete && activePostures.every((posture) => allowed.has(posture))) {
+					settings.routing.activePostures = activePostures as typeof settings.routing.activePostures;
+				}
+			}
+		}
+	}
 
 	if ("workers" in raw) {
 		if (!isPlainObject(raw.workers)) {

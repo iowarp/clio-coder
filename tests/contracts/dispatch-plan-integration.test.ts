@@ -81,7 +81,7 @@ describe("resolved dispatch plan admission", () => {
 		const plan = describeDispatchPlan({
 			tasks: ["one"],
 			[RESOLVED_DISPATCH_PLAN_ARGUMENT]: {
-				version: 1,
+				version: 2,
 				topology: "parallel",
 				tasks: [
 					{
@@ -102,6 +102,7 @@ describe("resolved dispatch plan admission", () => {
 							failover: "none",
 						},
 						failover: "none",
+						routeApproval: null,
 						role: "task",
 						position: 1,
 					},
@@ -130,7 +131,7 @@ describe("resolved dispatch plan admission", () => {
 		const resolvedTask = (extra: Record<string, unknown>) => ({
 			tasks: ["route"],
 			[RESOLVED_DISPATCH_PLAN_ARGUMENT]: {
-				version: 1,
+				version: 2,
 				topology: "parallel",
 				tasks: [
 					{
@@ -150,8 +151,9 @@ describe("resolved dispatch plan admission", () => {
 							minimumQuality: null,
 							requiredCapabilities: [],
 							locality: "any",
-							failover: "none",
+							failover: "approved",
 						},
+						routeApproval: null,
 						...extra,
 					},
 				],
@@ -185,7 +187,10 @@ describe("resolved dispatch plan admission", () => {
 		await bundle.extension.start();
 		try {
 			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
-			const unpinned = tool.prepareAdmissionArguments?.({ tasks: ["one", "two"] });
+			const unpinned = tool.prepareAdmissionArguments?.({
+				tasks: ["one", "two"],
+				routing: { failover: "approved" },
+			});
 			ok(unpinned);
 			const unpinnedTasks = resolvedDispatchPlanFromArgs(unpinned)?.tasks ?? [];
 			ok(unpinnedTasks.length > 0);
@@ -198,7 +203,10 @@ describe("resolved dispatch plan admission", () => {
 				strictEqual(task.allowedCandidates[0]?.node, task.node);
 			}
 			// Enumeration is deterministic, so the same request seals the same hash.
-			const repeat = tool.prepareAdmissionArguments?.({ tasks: ["one", "two"] });
+			const repeat = tool.prepareAdmissionArguments?.({
+				tasks: ["one", "two"],
+				routing: { failover: "approved" },
+			});
 			ok(repeat);
 			deepStrictEqual(resolvedDispatchPlanFromArgs(repeat)?.tasks, unpinnedTasks);
 
@@ -260,7 +268,11 @@ describe("resolved dispatch plan admission", () => {
 		await bundle.extension.start();
 		try {
 			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
-			const args = tool.prepareAdmissionArguments?.({ tasks: ["step one", "step two"], mode: "pipeline" });
+			const args = tool.prepareAdmissionArguments?.({
+				tasks: ["step one", "step two"],
+				mode: "pipeline",
+				routing: { failover: "approved" },
+			});
 			ok(args);
 			const planned = resolvedDispatchPlanFromArgs(args)?.tasks ?? [];
 			strictEqual(planned.length, 2);

@@ -2,6 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { decideRoute, type RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
 import { estimateRoute } from "../../src/domains/dispatch/route-policy.js";
+import type { RouteReadinessReport } from "../../src/domains/dispatch/route-readiness.js";
 import {
 	explainRouteDecision,
 	parseRoutingIntent,
@@ -9,6 +10,8 @@ import {
 	ROUTE_EXPLANATION_MAX_BYTES,
 	routingIntentRejection,
 } from "../../src/domains/dispatch/routing-intent.js";
+
+const READY: RouteReadinessReport = { ready: true, gaps: [], labelsNeeded: 0 };
 
 const candidate = (nodeId = "local", targetId = "target"): RouteCandidate => ({
 	agentId: "coder",
@@ -33,7 +36,8 @@ const decision = (executed = candidate()) =>
 		mode: "shadow",
 		posture: "balanced",
 		executedRoute: executed,
-		candidates: [{ candidate: executed, estimate: estimateRoute([]), rejection: null }],
+		candidates: [{ candidate: executed, estimate: estimateRoute([]), activeReadiness: READY, rejection: null }],
+		independenceSubject: null,
 		hardConstraints: ["authority"],
 		maxFallbacks: 3,
 		decisionDurationMs: 1,
@@ -104,9 +108,15 @@ describe("dispatch routing intent", () => {
 			posture: "economy",
 			executedRoute: executed,
 			candidates: [
-				{ candidate: executed, estimate: estimateRoute([]), rejection: null },
-				{ candidate: alternate, estimate: { ...estimateRoute([]), expectedCostUsd: 0 }, rejection: null },
+				{ candidate: executed, estimate: estimateRoute([]), activeReadiness: READY, rejection: null },
+				{
+					candidate: alternate,
+					estimate: { ...estimateRoute([]), expectedCostUsd: 0 },
+					activeReadiness: READY,
+					rejection: null,
+				},
 			],
+			independenceSubject: null,
 			hardConstraints: [],
 			maxFallbacks: 1,
 			decisionDurationMs: 1,

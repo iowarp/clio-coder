@@ -6,6 +6,7 @@ import type { DurableAssignmentRecord } from "./assignment-store.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
 import type { ExecutionRole } from "./execution-role.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
+import type { ApprovedAssignmentRoute } from "./route-approval.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunReceipt, RunStatus } from "./types.js";
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 
@@ -20,6 +21,12 @@ export interface DispatchRequest extends JobSpec {
 	systemPrompt?: string;
 	/** Trusted side-store lease reference; never serialized into a worker spec or receipt. */
 	reservation?: { ownerId: string; memberId: string };
+	/** Registry-authenticated active approval; never accepted from model JSON. */
+	routeApproval?: ApprovedAssignmentRoute;
+	/** Resolver-authored active decision for this approved recovery attempt. */
+	routeAttemptDecision?: ApprovedAssignmentRoute["decision"];
+	/** Absolute root-assignment deadline derived once from the approved duration. */
+	assignmentDeadlineAt?: number;
 }
 
 /** Internal, non-serializable admission hook for transactional resource owners. */
@@ -44,6 +51,10 @@ export interface DispatchPlanTaskResolution {
 	settingsFingerprint: string;
 	/** Conservative effective-pricing estimate; unknown pricing is never zero. */
 	costUpperBoundUsd: number;
+	/** False when the numeric estimate is only the unknown-pricing admission sentinel. */
+	costUpperBoundKnown: boolean;
+	/** Required plan projection: null means this task remains shadow/fixed. */
+	routeApproval: ApprovedAssignmentRoute | null;
 }
 
 /**

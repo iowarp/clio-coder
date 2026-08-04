@@ -350,7 +350,15 @@ describe("dispatch route quality", { concurrency: false }, () => {
 					mode: "active",
 					posture: "balanced",
 					executedRoute: route,
-					candidates: [{ candidate: route, estimate: estimateRoute([]), rejection: null }],
+					candidates: [
+						{
+							candidate: route,
+							estimate: estimateRoute([]),
+							activeReadiness: { ready: true, gaps: [], labelsNeeded: 0 },
+							rejection: null,
+						},
+					],
+					independenceSubject: null,
 					hardConstraints: ["authority"],
 					maxFallbacks: 0,
 					decisionDurationMs: 0,

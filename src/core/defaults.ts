@@ -195,6 +195,19 @@ export interface FleetSettings {
 	nodes: FleetNodeSettings[];
 }
 
+/** Roles whose authority is narrow enough for Slice 9 active joint routing. */
+export const ACTIVE_ROUTING_ROLES = ["researcher", "verifier", "reviewer", "judge"] as const;
+export type ActiveRoutingRole = (typeof ACTIVE_ROUTING_ROLES)[number];
+
+/** Manual is exact rather than adaptive, so it is never an activated posture. */
+export const ACTIVE_ROUTING_POSTURES = ["quality", "balanced", "latency", "economy"] as const;
+export type ActiveRoutingPosture = (typeof ACTIVE_ROUTING_POSTURES)[number];
+
+export interface RoutingActivationSettings {
+	activeRoles: ActiveRoutingRole[];
+	activePostures: ActiveRoutingPosture[];
+}
+
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
@@ -238,6 +251,10 @@ export const DEFAULT_SETTINGS = {
 	fleet: {
 		nodes: [] as FleetNodeSettings[],
 	} as FleetSettings,
+	routing: {
+		activeRoles: [] as ActiveRoutingRole[],
+		activePostures: [] as ActiveRoutingPosture[],
+	} as RoutingActivationSettings,
 	scope: [] as string[],
 	modelSelector: {
 		favorites: [] as string[],
@@ -429,6 +446,12 @@ fleet:
   #   host: node-b.example.net
   #   maxWorkers: 1
   #   residency: observe
+
+# Joint route selection is shadow-only unless both the execution role and the
+# requested posture are named here. Manual pins remain exact and fail closed.
+routing:
+  activeRoles: []       # researcher | verifier | reviewer | judge
+  activePostures: []    # quality | balanced | latency | economy
 
 # Alt+J / Alt+K cycling order: plain target ids or "target/model" refs.
 scope: []

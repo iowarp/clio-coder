@@ -39,6 +39,7 @@ import {
 import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
+import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent, explainRouteDecision, parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
 import {
@@ -75,6 +76,7 @@ import {
 	type ResolvedDispatchPlanArtifact,
 	resolvedDispatchPlanFromArgs,
 	withResolvedDispatchPlan,
+	withResolvedPlanTaskPin,
 } from "./dispatch-plan.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
@@ -133,54 +135,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 type ResolvedPlanTask = ResolvedDispatchPlanArtifact["tasks"][number];
-
-function withResolvedTaskPin(
-	request: DispatchRequest,
-	task: ResolvedPlanTask | undefined,
-	options: { pinTask?: boolean } = {},
-): DispatchRequest {
-	if (task === undefined) return request;
-	// Drop the raw briefing and failover envelope before restoring the approved
-	// values. With exact optional properties, approved absence means the field
-	// must be absent, not present as undefined. This is the only thing standing
-	// between a post-approval raw argument and a widened envelope, so it stays:
-	// the artifact is authoritative for route policy, the raw call never is.
-	const {
-		briefing: _untrustedBriefing,
-		failover: _untrustedFailover,
-		allowedCandidates: _untrustedCandidates,
-		...requestWithoutUntrusted
-	} = request;
-	return {
-		...requestWithoutUntrusted,
-		agentId: task.agent,
-		...(request.reservation !== undefined && task.role !== undefined && task.position !== undefined
-			? { reservation: { ownerId: request.reservation.ownerId, memberId: `${task.role}-${task.position}` } }
-			: {}),
-		// A resolved task always carries a sealed mode, and carries candidates
-		// exactly when that mode is "approved".
-		routingIntent: structuredClone(task.routingIntent),
-		failover: task.failover,
-		...(task.allowedCandidates !== undefined
-			? { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }
-			: {}),
-		// Primary builder/candidate/task text comes from operator-controlled
-		// arguments and must be restored from the approved artifact. Reviewer and
-		// judge text is synthesized later from sealed run ids, receipts, and diff
-		// stats; for those roles the artifact pins the route while the coordinator
-		// retains the freshly generated task.
-		task: options.pinTask === false ? request.task : task.task,
-		...(task.briefing !== undefined ? { briefing: task.briefing } : {}),
-		target: task.target,
-		model: task.model,
-		node: task.node,
-		plannedNode: {
-			id: task.node,
-			kind: task.nodeKind,
-			...(task.nodeHost !== undefined ? { host: task.nodeHost } : {}),
-		},
-	};
-}
 
 // In-process rolling tail of recent worker events, per run. Fed by the
 // dispatch tool's event consumption (the same stream the dispatch board
@@ -1070,7 +1024,7 @@ async function runReviewGated(
 					: {}),
 			};
 			const builder = await runOne(
-				withResolvedTaskPin(
+				withResolvedPlanTaskPin(
 					builderRequest,
 					review.resolvedTasks?.find((task) => task.role === "builder" && task.position === cycle),
 				),
@@ -1114,7 +1068,7 @@ async function runReviewGated(
 					: {}),
 			};
 			const reviewer = await runOne(
-				withResolvedTaskPin(
+				withResolvedPlanTaskPin(
 					reviewerRequest,
 					review.resolvedTasks?.find((task) => task.role === "reviewer" && task.position === cycle),
 					{ pinTask: false },
@@ -1633,7 +1587,7 @@ async function runCompete(
 						gate: { role: "candidate", group, cycle: worktree.index },
 					};
 					return admitOwnedRun(
-						withResolvedTaskPin(
+						withResolvedPlanTaskPin(
 							request,
 							compete.resolvedTasks?.find((task) => task.role === "candidate" && task.position === worktree.index),
 						),
@@ -1700,7 +1654,7 @@ async function runCompete(
 			};
 			throwIfStopped();
 			const judgeOwned = await admitOwnedRun(
-				withResolvedTaskPin(
+				withResolvedPlanTaskPin(
 					judgeRequest,
 					compete.resolvedTasks?.find((task) => task.role === "judge"),
 					{ pinTask: false },
@@ -2186,7 +2140,12 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 		// operator saw. The plan hash covers the rendered candidate list, so
 		// distinct envelopes get distinct hashes.
 		const pinned = request.node !== undefined || request.target !== undefined || request.model !== undefined;
-		const approvedCandidates = pinned ? [] : (deps.dispatch.routeCandidates?.(request) ?? []);
+		const approvedCandidates =
+			pinned || request.failover !== "approved"
+				? []
+				: resolution.routeApproval === null
+					? (deps.dispatch.routeCandidates?.(request) ?? [])
+					: approvedRouteCandidates(resolution.routeApproval);
 		const failover: DispatchFailoverMode = pinned || approvedCandidates.length === 0 ? "none" : "approved";
 		const task: ResolvedDispatchPlanArtifact["tasks"][number] = {
 			agent: resolution.agentId,
@@ -2199,6 +2158,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			...(resolution.node.host !== undefined ? { nodeHost: resolution.node.host } : {}),
 			routingIntent: request.routingIntent ?? defaultRoutingIntent(request),
 			failover,
+			routeApproval: resolution.routeApproval,
 			...(failover === "approved" ? { allowedCandidates: approvedCandidates.map((candidate) => ({ ...candidate })) } : {}),
 			role,
 			position,
@@ -2263,7 +2223,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			try {
 				return markPrepared(
 					withResolvedDispatchPlan(args, {
-						version: 1,
+						version: 2,
 						topology: "compete",
 						tasks: [],
 						costCeilingUsd: resolvedCostCeiling(),
@@ -2370,10 +2330,13 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			}
 
 			const topology = describeDispatchPlan(args).topology;
-			const planScale = tasks.length > 1 || topology === "compete" || tasks.some((task) => task.node !== "local");
+			const planScale =
+				tasks.length > 1 ||
+				topology === "compete" ||
+				tasks.some((task) => task.node !== "local" || task.failover === "approved");
 			if (!planScale) return markPrepared(args);
 			return markReservedPlan(args, {
-				version: 1,
+				version: 2,
 				topology,
 				tasks,
 				costCeilingUsd: resolvedCostCeiling(),
@@ -2650,7 +2613,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				}
 				requests = requests.map((request, index) => {
 					const task = executionTasks[index];
-					const pinned = withResolvedTaskPin(request, task);
+					const pinned = withResolvedPlanTaskPin(request, task);
 					return reservationOwnerId !== undefined && task?.role !== undefined && task.position !== undefined
 						? { ...pinned, reservation: { ownerId: reservationOwnerId, memberId: `${task.role}-${task.position}` } }
 						: pinned;

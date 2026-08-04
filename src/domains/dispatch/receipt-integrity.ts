@@ -8,7 +8,7 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, Run
  * base, so there are no historical receipts to keep verifying: a receipt is
  * either this version or it is not a receipt.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 13;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 14;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";

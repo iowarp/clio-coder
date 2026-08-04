@@ -129,7 +129,7 @@ describe("contracts/receipt-integrity", () => {
 		const envelope = fixtureEnvelope("run-execution-role");
 		const draft = fixtureReceiptDraft(envelope);
 		strictEqual(RECEIPT_INTEGRITY_FIELD_COVERAGE.executionRole, true);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 13);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 14);
 
 		const sealed = withReceiptIntegrity(draft, envelope);
 		strictEqual(sealed.executionRole, "builder");
@@ -356,13 +356,20 @@ describe("contracts/receipt-integrity", () => {
 				posture: "balanced",
 				executedRoute: fixtureRouteCandidate(),
 				candidates: [
-					{ candidate: fixtureRouteCandidate(), estimate: estimateRoute([]), rejection: null },
+					{
+						candidate: fixtureRouteCandidate(),
+						estimate: estimateRoute([]),
+						activeReadiness: { ready: false, gaps: ["insufficient-quality-labels"], labelsNeeded: 6 },
+						rejection: null,
+					},
 					{
 						candidate: fixtureRouteCandidate({ targetId: "alt" }),
 						estimate: estimateRoute([]),
+						activeReadiness: { ready: false, gaps: ["insufficient-quality-labels"], labelsNeeded: 6 },
 						rejection: "node-eligibility",
 					},
 				],
+				independenceSubject: null,
 				hardConstraints: ["node-eligibility"],
 				maxFallbacks: 2,
 				decisionDurationMs: 1,

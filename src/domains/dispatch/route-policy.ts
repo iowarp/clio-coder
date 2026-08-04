@@ -8,7 +8,7 @@ import type { AgentLatencyClass } from "../agents/spec.js";
 import type { RouteHistoryRecord } from "./route-history.js";
 import type { RouteQualityLabel } from "./route-quality.js";
 
-export const ROUTE_POLICY_VERSION = "route-policy/2";
+export const ROUTE_POLICY_VERSION = "route-policy/3";
 export const MINIMUM_QUALITY_LABELED_OUTCOMES = 6;
 
 export type RoutingPosture = "manual" | "quality" | "balanced" | "latency" | "economy";

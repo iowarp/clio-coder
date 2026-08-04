@@ -175,6 +175,26 @@ describe("contracts/config", () => {
 		strictEqual(result.settings.budget.concurrency, "auto");
 	});
 
+	it("validates active routing roles and postures as strict unique lists", () => {
+		const valid = validateSettings({
+			routing: { activeRoles: ["researcher", "judge"], activePostures: ["balanced", "quality"] },
+		});
+		deepStrictEqual(valid.issues, []);
+		deepStrictEqual(valid.settings.routing, {
+			activeRoles: ["researcher", "judge"],
+			activePostures: ["balanced", "quality"],
+		});
+
+		const invalid = validateSettings({
+			routing: { activeRoles: ["builder", "judge", "judge"], activePostures: ["manual"] },
+		});
+		deepStrictEqual(
+			invalid.issues.map((issue) => issue.path),
+			["routing.activeRoles", "routing.activeRoles", "routing.activePostures"],
+		);
+		deepStrictEqual(invalid.settings.routing, DEFAULT_SETTINGS.routing);
+	});
+
 	it("validates the guardrails section and rejects bad values and unknown subkeys", () => {
 		const ok = validateSettings({ guardrails: { turnToolCallBudget: 30, readMaxBytes: 4096 } });
 		deepStrictEqual(ok.issues, []);

@@ -1,8 +1,14 @@
+import type { ActiveRoutingPosture, ActiveRoutingRole } from "../../core/defaults.js";
+import type { AgentCapabilityClass } from "../agents/spec.js";
 import {
 	type AssignmentAttemptStartEvent,
 	type AssignmentEventStream,
 	createAssignmentEventStream,
 } from "./assignment-events.js";
+import type { DispatchRequest } from "./contract.js";
+import { withAttemptRole } from "./execution-role.js";
+import { type RouteDecisionV1, routeCandidateKey } from "./route-decision.js";
+import type { RoutingPosture } from "./route-policy.js";
 import type { RunNodeIdentity, RunOutcome, RunReceipt } from "./types.js";
 import type { DispatchFailoverCandidate, DispatchFailoverMode } from "./validation.js";
 
@@ -30,6 +36,69 @@ export interface AssignmentPolicy {
 	maxRetries: number;
 	failover: DispatchFailoverMode;
 	allowedCandidates: ReadonlyArray<DispatchFailoverCandidate>;
+}
+
+export interface RoutingActivationSnapshot {
+	activeRoles: ReadonlyArray<ActiveRoutingRole>;
+	activePostures: ReadonlyArray<ActiveRoutingPosture>;
+}
+
+/** Activation is explicit in both dimensions and never widens mutation authority. */
+export function activeRoutingEnabled(input: {
+	settings: RoutingActivationSnapshot;
+	role: DispatchRequest["executionRole"];
+	posture: RoutingPosture;
+	capabilityClass: AgentCapabilityClass;
+	failover: DispatchFailoverMode;
+}): boolean {
+	if (input.posture === "manual" || input.failover !== "approved") return false;
+	if (input.capabilityClass !== "read-only" && input.capabilityClass !== "verification") return false;
+	return (
+		input.settings.activeRoles.includes(input.role as ActiveRoutingRole) &&
+		input.settings.activePostures.includes(input.posture as ActiveRoutingPosture)
+	);
+}
+
+/** Bind an admitted active decision back onto the exact dispatch tuple. */
+export function applyActiveRouteSelection(req: DispatchRequest, decision: RouteDecisionV1): DispatchRequest {
+	if (decision.mode !== "active") throw new Error("dispatch: cannot apply a non-active route decision");
+	if (routeCandidateKey(decision.selected) !== routeCandidateKey(decision.executedRoute)) {
+		throw new Error("dispatch: active decision selected and executed route identities differ");
+	}
+	const executionRole = withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0);
+	if (decision.selected.agentId !== req.agentId || decision.selected.executionRole !== executionRole) {
+		throw new Error("dispatch: active route selection cannot change agent or execution role");
+	}
+	const envelope = [decision.selected, ...decision.approvedFallbacks].map((candidate) => ({
+		agentId: candidate.agentId,
+		target: candidate.targetId,
+		model: candidate.modelId,
+		node: candidate.nodeId,
+	}));
+	const selected: DispatchRequest = {
+		...req,
+		target: decision.selected.targetId,
+		model: decision.selected.modelId,
+		workerRuntime: decision.selected.runtimeId,
+		node: decision.selected.nodeId,
+		failover: "approved",
+		allowedCandidates: envelope,
+	};
+	if (decision.selected.thinkingLevel === undefined) {
+		delete selected.thinkingLevel;
+	} else if (!["off", "minimal", "low", "medium", "high", "xhigh"].includes(decision.selected.thinkingLevel)) {
+		throw new Error(`dispatch: active route selected unsupported thinking level '${decision.selected.thinkingLevel}'`);
+	} else {
+		selected.thinkingLevel = decision.selected.thinkingLevel as NonNullable<DispatchRequest["thinkingLevel"]>;
+	}
+	return selected;
+}
+
+/** Fail closed if lifecycle or placement changed any sealed active identity field. */
+export function assertActiveRouteIdentity(decision: RouteDecisionV1, actual: RouteDecisionV1["selected"]): void {
+	if (routeCandidateKey(actual) !== routeCandidateKey(decision.selected)) {
+		throw new Error("dispatch: active route identity drifted after lifecycle or placement resolution");
+	}
 }
 
 export interface DispatchAssignment {

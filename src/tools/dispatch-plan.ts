@@ -9,13 +9,19 @@
  * the dispatch tool logs the same artifact's hash into every run's receipt
  * (RunPlanProvenance) so the chain records what would have been approved.
  *
- * Production calls carry a v1 resolved artifact attached by the dispatch
- * tool's admission planner. That artifact pins effective target/model/node
- * choices into execution. Raw-argument derivation remains only as a
- * compatibility fallback for direct unit-level tool calls.
+ * Production calls carry a strict v2 resolved artifact attached by the
+ * dispatch tool's admission planner. That artifact pins effective
+ * target/model/node choices and any active route approval into execution.
+ * Older artifact versions are rejected rather than interpreted.
  */
 
 import { createHash } from "node:crypto";
+import type { DispatchRequest } from "../domains/dispatch/contract.js";
+import {
+	type ApprovedAssignmentRoute,
+	cloneApprovedAssignmentRoute,
+	isApprovedAssignmentRoute,
+} from "../domains/dispatch/route-approval.js";
 import { isRoutingIntent, type RoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { DispatchFailoverCandidate, DispatchFailoverMode } from "../domains/dispatch/validation.js";
 import { prepareDispatchArguments } from "./dispatch.js";
@@ -45,6 +51,8 @@ export interface DispatchPlanTaskView {
 	failover?: DispatchFailoverMode;
 	/** Exact approved fallback tuples, order-significant, present only for approved failover. */
 	allowedCandidates?: ReadonlyArray<DispatchFailoverCandidate>;
+	/** Active authority is always explicit; null is the shadow/fixed posture. */
+	routeApproval: ApprovedAssignmentRoute | null;
 }
 
 export interface DispatchPlanView {
@@ -67,16 +75,56 @@ export const RESOLVED_DISPATCH_PLAN_ARGUMENT = "__clio_resolved_dispatch_plan";
 export const DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT = "__clio_dispatch_plan_preparation_error";
 
 export interface ResolvedDispatchPlanArtifact {
-	version: 1;
+	version: 2;
 	topology: DispatchPlanTopology;
 	tasks: Array<
 		Required<Pick<DispatchPlanTaskView, "agent" | "task" | "model" | "node" | "target">> &
 			Required<Pick<DispatchPlanTaskView, "nodeKind" | "failover">> &
 			Required<Pick<DispatchPlanTaskView, "routingIntent">> &
-			Pick<DispatchPlanTaskView, "briefing" | "nodeHost" | "role" | "position" | "allowedCandidates">
+			Pick<DispatchPlanTaskView, "briefing" | "nodeHost" | "role" | "position" | "allowedCandidates"> &
+			Required<Pick<DispatchPlanTaskView, "routeApproval">>
 	>;
 	costCeilingUsd: number;
 	confirmation?: { branch: string; group: string; index: number };
+}
+
+export function withResolvedPlanTaskPin(
+	request: DispatchRequest,
+	task: ResolvedDispatchPlanArtifact["tasks"][number] | undefined,
+	options: { pinTask?: boolean } = {},
+): DispatchRequest {
+	if (task === undefined) return request;
+	const {
+		briefing: _briefing,
+		failover: _failover,
+		allowedCandidates: _candidates,
+		routeApproval: _approval,
+		assignmentDeadlineAt: _deadline,
+		...base
+	} = request;
+	return {
+		...base,
+		agentId: task.agent,
+		...(request.reservation !== undefined && task.role !== undefined && task.position !== undefined
+			? { reservation: { ownerId: request.reservation.ownerId, memberId: `${task.role}-${task.position}` } }
+			: {}),
+		routingIntent: structuredClone(task.routingIntent),
+		failover: task.failover,
+		...(task.routeApproval === null ? {} : { routeApproval: cloneApprovedAssignmentRoute(task.routeApproval) }),
+		...(task.allowedCandidates === undefined
+			? {}
+			: { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }),
+		task: options.pinTask === false ? request.task : task.task,
+		...(task.briefing !== undefined ? { briefing: task.briefing } : {}),
+		target: task.target,
+		model: task.model,
+		node: task.node,
+		plannedNode: {
+			id: task.node,
+			kind: task.nodeKind,
+			...(task.nodeHost !== undefined ? { host: task.nodeHost } : {}),
+		},
+	};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -109,6 +157,7 @@ function taskViews(args: Record<string, unknown>): DispatchPlanTaskView[] {
 		const view: DispatchPlanTaskView = {
 			agent: str(record.agent) ?? str(record.agent_id) ?? sharedAgent,
 			task: str(item) ?? str(record.task) ?? "(invalid task)",
+			routeApproval: null,
 		};
 		const briefing = "briefing" in record ? str(record.briefing) : str(args.briefing);
 		if (briefing !== undefined) view.briefing = briefing;
@@ -200,6 +249,13 @@ function renderPlanText(
 				);
 			}
 		}
+		if (task.routeApproval !== null) {
+			const approval = task.routeApproval;
+			const selected = approval.decision.selected;
+			lines.push(
+				`    active policy=${safeField(approval.decision.policyVersion)} decision=${approval.decision.decisionHash} runtime=${safeField(selected.runtimeId)} thinking=${safeField(selected.thinkingLevel ?? "default")} totalCostUpperBoundUsd=${approval.totalCostUpperBoundUsd.toFixed(6)} deadlineMs=${approval.deadlineMs} maxAttempts=${approval.maxAttempts}`,
+			);
+		}
 		if (task.briefing !== undefined) {
 			lines.push(
 				`    briefing_bytes=${Buffer.byteLength(task.briefing, "utf8")} briefing_sha256=${createHash("sha256").update(task.briefing, "utf8").digest("hex")} briefing_preview=${JSON.stringify(safeField(task.briefing))}`,
@@ -230,6 +286,8 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		return false;
 	if (failoverModeOf(value.failover) === undefined) return false;
 	if (!isRoutingIntent(value.routingIntent)) return false;
+	if (value.routeApproval !== null && !isApprovedAssignmentRoute(value.routeApproval)) return false;
+	if (value.routeApproval !== null && value.failover !== "approved") return false;
 	if (value.failover === "approved") {
 		if (canonicalCandidates(value.allowedCandidates) === null) return false;
 	} else if (value.allowedCandidates !== undefined) {
@@ -242,7 +300,7 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 
 export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): ResolvedDispatchPlanArtifact | null {
 	const value = args[RESOLVED_DISPATCH_PLAN_ARGUMENT];
-	if (!isRecord(value) || value.version !== 1) return null;
+	if (!isRecord(value) || value.version !== 2) return null;
 	if (!Array.isArray(value.tasks) || !value.tasks.every(isResolvedTask)) return null;
 	let confirmation: ResolvedDispatchPlanArtifact["confirmation"];
 	if (value.confirmation !== undefined) {
@@ -278,7 +336,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 		return null;
 	}
 	return {
-		version: 1,
+		version: 2,
 		topology: value.topology,
 		tasks: value.tasks.map((task) => ({
 			agent: task.agent.trim(),
@@ -290,6 +348,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			target: task.target.trim(),
 			failover: task.failover,
 			routingIntent: structuredClone(task.routingIntent),
+			routeApproval: task.routeApproval === null ? null : cloneApprovedAssignmentRoute(task.routeApproval),
 			...(task.failover === "approved" && canonicalCandidates(task.allowedCandidates) !== null
 				? { allowedCandidates: canonicalCandidates(task.allowedCandidates) as DispatchFailoverCandidate[] }
 				: {}),
@@ -326,7 +385,12 @@ export function describeDispatchPlan(rawArgs: Record<string, unknown> | undefine
 	const planScale =
 		!preparationFailed &&
 		args.list !== true &&
-		(tasks.length > 1 || topology === "compete" || remote || confirmation !== undefined || isRecord(args.apply_winner));
+		(tasks.length > 1 ||
+			topology === "compete" ||
+			remote ||
+			tasks.some((task) => task.failover === "approved") ||
+			confirmation !== undefined ||
+			isRecord(args.apply_winner));
 	const text = renderPlanText(topology, tasks, costCeilingUsd, confirmation);
 	return {
 		topology,

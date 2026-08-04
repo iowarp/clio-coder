@@ -14,6 +14,9 @@ import {
 	type RouteObservation,
 	wilsonLowerBound,
 } from "../../src/domains/dispatch/route-policy.js";
+import type { RouteReadinessReport } from "../../src/domains/dispatch/route-readiness.js";
+
+const READY: RouteReadinessReport = { ready: true, gaps: [], labelsNeeded: 0 };
 
 function candidate(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
 	return {
@@ -52,13 +55,14 @@ function estimate(count: number, overrides: Partial<RouteObservation> = {}) {
 function input(overrides: Partial<RouteDecisionInput> = {}): RouteDecisionInput {
 	const executedRoute = overrides.executedRoute ?? candidate();
 	const candidates: ReadonlyArray<RouteCandidateInput> = overrides.candidates ?? [
-		{ candidate: executedRoute, estimate: estimateRoute([]), rejection: null },
+		{ candidate: executedRoute, estimate: estimateRoute([]), activeReadiness: READY, rejection: null },
 	];
 	return {
 		mode: "shadow",
 		posture: "balanced",
 		executedRoute,
 		candidates,
+		independenceSubject: null,
 		hardConstraints: ["target-auth-and-availability"],
 		maxFallbacks: 2,
 		decisionDurationMs: 0,
@@ -73,8 +77,13 @@ describe("route decision", () => {
 		const decision = decideRoute(
 			input({
 				candidates: [
-					{ candidate: executed, estimate: estimate(6, { completedCostUsd: 5 }), rejection: null },
-					{ candidate: rejected, estimate: estimate(6, { completedCostUsd: 0.001 }), rejection: "target-auth" },
+					{ candidate: executed, estimate: estimate(6, { completedCostUsd: 5 }), activeReadiness: READY, rejection: null },
+					{
+						candidate: rejected,
+						estimate: estimate(6, { completedCostUsd: 0.001 }),
+						activeReadiness: READY,
+						rejection: "target-auth",
+					},
 				],
 			}),
 		);
@@ -118,7 +127,7 @@ describe("route decision", () => {
 		const decision = decideRoute(
 			input({
 				executedRoute: executed,
-				candidates: [{ candidate: executed, estimate: estimateRoute([]), rejection: null }],
+				candidates: [{ candidate: executed, estimate: estimateRoute([]), activeReadiness: READY, rejection: null }],
 			}),
 		);
 		ok(decision.reasonCodes.includes("posture-floors-unsatisfiable"));
@@ -133,7 +142,7 @@ describe("route decision", () => {
 					input({
 						mode: "active",
 						executedRoute: executed,
-						candidates: [{ candidate: executed, estimate: estimateRoute([]), rejection: null }],
+						candidates: [{ candidate: executed, estimate: estimateRoute([]), activeReadiness: READY, rejection: null }],
 					}),
 				),
 			/posture-floors-unsatisfiable/,
@@ -151,8 +160,18 @@ describe("route decision", () => {
 				input({
 					executedRoute: executed,
 					candidates: [
-						{ candidate: executed, estimate: estimate(6, { completedCostUsd: 5 }), rejection: null },
-						{ candidate: alternate, estimate: estimate(6, { completedCostUsd: 0.01 }), rejection: null },
+						{
+							candidate: executed,
+							estimate: estimate(6, { completedCostUsd: 5 }),
+							activeReadiness: READY,
+							rejection: null,
+						},
+						{
+							candidate: alternate,
+							estimate: estimate(6, { completedCostUsd: 0.01 }),
+							activeReadiness: READY,
+							rejection: null,
+						},
 					],
 				}),
 			);
@@ -176,11 +195,18 @@ describe("route decision", () => {
 			mode: "shadow",
 			posture: "balanced",
 			executedRoute: builder,
+			independenceSubject: null,
 			candidates: [
-				{ candidate: builder, estimate: estimateRoute(Array.from({ length: 6 }, () => sample())), rejection: null },
+				{
+					candidate: builder,
+					estimate: estimateRoute(Array.from({ length: 6 }, () => sample())),
+					activeReadiness: READY,
+					rejection: null,
+				},
 				{
 					candidate: candidate({ executionRole: "recovery" }),
 					estimate: estimateRoute(Array.from({ length: 6 }, () => sample())),
+					activeReadiness: READY,
 					rejection: null,
 				},
 			],

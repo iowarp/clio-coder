@@ -184,6 +184,23 @@ export interface RouteCorrelationFacts {
 	nodeId: string;
 }
 
+/** Project a trusted run envelope into the bounded gate-correlation identity. */
+export function routeCorrelationFactsForRun(run: {
+	agentId: string;
+	targetId: string;
+	wireModelId: string;
+	runtimeId: string;
+	node?: { id: string } | null;
+}): RouteCorrelationFacts {
+	return {
+		agentId: run.agentId,
+		targetId: run.targetId,
+		wireModelId: run.wireModelId,
+		runtimeId: run.runtimeId,
+		nodeId: run.node?.id ?? "local",
+	};
+}
+
 export interface GateRouteCorrelation {
 	agent: boolean;
 	target: boolean;

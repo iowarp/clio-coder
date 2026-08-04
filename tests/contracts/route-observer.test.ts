@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
+import { fixedRouteDecision, type RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
 import { createRouteHistoryStore } from "../../src/domains/dispatch/route-history.js";
 import { createRouteObserver } from "../../src/domains/dispatch/route-observer.js";
 import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
@@ -118,10 +118,7 @@ describe("route observer durable history", () => {
 		const handle = observer.observe({
 			task: "inspect the code",
 			requestedAgentId: "coder",
-			executedRoute: route,
-			candidates: [{ candidate: route, rejection: null }],
-			hardConstraints: ["authority"],
-			maxFallbacks: 0,
+			decision: fixedRouteDecision(route, "test-fixed-route"),
 		});
 		ok(handle);
 		if (handle === null) return;
@@ -155,25 +152,25 @@ describe("route observer durable history", () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "clio-route-observer-failure-"));
 		roots.push(stateDir);
 		const observer = createRouteObserver({
-			getAgents: () => [{ id: "coder", description: "coding" }],
+			getAgents: () => {
+				throw new Error("catalog unavailable");
+			},
 			stateDir,
 			logDir: join(stateDir, "decisions"),
-			estimate: () => {
-				throw new Error("history unavailable");
-			},
 		});
 		const route = candidate();
+		const shadow = { ...fixedRouteDecision(route, "shadow-source"), mode: "shadow" as const };
 		const handle = observer.observe({
 			task: "inspect the code",
 			requestedAgentId: "coder",
-			executedRoute: route,
-			candidates: [{ candidate: route, rejection: null }],
-			hardConstraints: ["authority"],
-			maxFallbacks: 0,
+			decision: shadow,
 		});
 		strictEqual(handle.decision.mode, "fixed");
 		deepStrictEqual(handle.decision.executedRoute, route);
 		deepStrictEqual(handle.decision.selected, route);
 		ok(handle.decision.reasonCodes.includes("observer-failure-fixed-route"));
+		const active = { ...shadow, mode: "active" as const };
+		const activeHandle = observer.observe({ task: "inspect", requestedAgentId: "coder", decision: active });
+		strictEqual(activeHandle.decision, active);
 	});
 });
