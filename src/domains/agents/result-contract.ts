@@ -504,6 +504,79 @@ export function parseCodeReport(output: string | null): CodeReportResult | null 
 	};
 }
 
+/**
+ * Bytes of authored commit message a terminal result may carry. A commit
+ * subject and a short body fit; a pasted diff does not.
+ */
+export const RESULT_COMMIT_MESSAGE_MAX_BYTES = 1_000;
+
+/** Authored prose a work-product contract may carry beside its evidence. */
+export interface ResultAuthorship {
+	/** The agent's proposed commit message for the work it just produced. */
+	commitMessage: string | null;
+	/** One-line description, used to build a deterministic fallback message. */
+	summary: string | null;
+}
+
+const AUTHORSHIP_FIELDS: ReadonlyArray<keyof ResultAuthorship> = ["commitMessage", "summary"];
+
+function hasControlCharacters(value: string): boolean {
+	for (const character of value) {
+		const code = character.codePointAt(0) ?? 0;
+		if (code === 0x7f) return true;
+		if (code < 0x20 && character !== "\n" && character !== "\r" && character !== "\t") return true;
+	}
+	return false;
+}
+
+function normalizeAuthored(value: string): string {
+	return value.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").trim();
+}
+
+/**
+ * Optional authored fields, checked only for shape. Code owns committing; the
+ * agent only supplies the sentence, so the sentence is bounded and free of the
+ * control characters that would make a commit log unreadable.
+ */
+function validateAuthorship(value: Record<string, unknown>): string | null {
+	for (const field of AUTHORSHIP_FIELDS) {
+		const raw = value[field];
+		if (raw === undefined) continue;
+		if (!string(raw)) return `${field} must be a non-empty string when present`;
+		if (Buffer.byteLength(raw, "utf8") > RESULT_COMMIT_MESSAGE_MAX_BYTES) {
+			return `${field} must be at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} bytes`;
+		}
+		// Tab, newline, and carriage return are the only control bytes a message
+		// may carry; anything else would corrupt the log it lands in.
+		if (hasControlCharacters(raw)) return `${field} must not contain control characters`;
+	}
+	return null;
+}
+
+/**
+ * Read the authored commit message and summary from a terminal result.
+ *
+ * Only work-product contracts carry them: `mutation-report` validates them
+ * strictly as optional fields, and `architect-plan` reads them from a JSON
+ * answer if one was given, because that contract's postcondition is the plan
+ * artifact and its final text has never been constrained. Anything unreadable
+ * is simply absent, which the caller turns into its deterministic fallback
+ * rather than into a failed commit.
+ */
+export function resultContractAuthorship(contract: ResultContract, output: string | null): ResultAuthorship {
+	const empty: ResultAuthorship = { commitMessage: null, summary: null };
+	if (contract.kind !== "mutation-report" && contract.kind !== "architect-plan") return empty;
+	const parsed = parseJson(output);
+	if (!parsed.ok || validateAuthorship(parsed.value) !== null) return empty;
+	const read = (field: keyof ResultAuthorship): string | null => {
+		const raw = parsed.value[field];
+		if (typeof raw !== "string") return null;
+		const normalized = normalizeAuthored(raw);
+		return normalized.length === 0 ? null : normalized;
+	};
+	return { commitMessage: read("commitMessage"), summary: read("summary") };
+}
+
 function validateDebugger(contract: ResultContract, output: string | null): ResultContractValidation {
 	const parsed = parseJson(output);
 	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
@@ -565,12 +638,14 @@ function validateMutation(contract: ResultContract, output: string | null): Resu
 	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
 	const value = parsed.value;
 	if (
-		!hasOnlyKeys(value, ["mutatedPaths", "validations"]) ||
+		!hasOnlyKeys(value, ["mutatedPaths", "validations", "commitMessage", "summary"]) ||
 		!Array.isArray(value.mutatedPaths) ||
 		value.mutatedPaths.some((entry) => !string(entry))
 	) {
 		return failure(contract, "unmeasured", "Mutation result must carry mutatedPaths and validations");
 	}
+	const authorship = validateAuthorship(value);
+	if (authorship !== null) return failure(contract, "unmeasured", authorship);
 	const validations = parseChecks(value.validations);
 	if (validations === null)
 		return failure(contract, "unmeasured", "Mutation result must carry typed validation results");
@@ -707,7 +782,7 @@ export const RESULT_CONTRACT_ANCHOR_LIMIT = 12;
 export function resultContractShape(contract: ResultContract): string {
 	switch (contract.kind) {
 		case "architect-plan":
-			return `a plan artifact written to ${contract.path}`;
+			return `a plan artifact written to ${contract.path}, then optionally {"commitMessage":"...","summary":"..."} describing it`;
 		case "scout-report":
 			return '{"findings":[{"claim":"what you observed","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]} or {"findings":[],"needsSplit":true,"proposedSubtasks":[{"id":"inspect","task":"Inspect the boundary","dependencies":[],"expectedResultContract":"scout-report","requestedAuthority":"read-only"}]}';
 		case "verifier-report":
@@ -717,7 +792,7 @@ export function resultContractShape(contract: ResultContract): string {
 		case "research-report":
 			return '{"source":"local","findings":[{"claim":"...","evidence":"..."}]}';
 		case "mutation-report":
-			return '{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}]}';
+			return '{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"commitMessage":"optional: the commit message for this change","summary":"optional: one line"}';
 		case "provenance-report":
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
 		case "external-delegation":

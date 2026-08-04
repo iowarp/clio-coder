@@ -21,19 +21,37 @@ import {
 	AgentsDomainModule,
 	type FleetCommandRegistry,
 	type FleetContract,
+	type FleetContractStep,
 	listFleetContracts,
 	loadFleetCommands,
 	loadFleetContract,
 	renderFleetPrompt,
+	resultContractAuthorship,
 } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/index.js";
 import { runCodeStep } from "../domains/dispatch/code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "../domains/dispatch/code-step-store.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
-import { compileExecutionPlan, type ExecutionPlanStepInput } from "../domains/dispatch/execution-plan.js";
-import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
-import { executePlan } from "../domains/dispatch/execution-scheduler.js";
+import {
+	type ExecutionPlan,
+	type ExecutionPlanCodeStep,
+	executionPlanAncestors,
+} from "../domains/dispatch/execution-plan.js";
+import {
+	agentRoleFactsResolver,
+	gateRouteCorrelation,
+	requestExecutionRole,
+	withAttemptRole,
+} from "../domains/dispatch/execution-role.js";
+import { type ExecutionPlanResult, executePlan } from "../domains/dispatch/execution-scheduler.js";
+import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
+import {
+	decideReviewGate,
+	type GateDecisionCorrelation,
+	materializePendingGateDecision,
+	stagePendingGateDecision,
+} from "../domains/dispatch/gate-decisions.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { openLedger } from "../domains/dispatch/state.js";
@@ -94,6 +112,22 @@ function parseVars(args: ReadonlyArray<string>): { vars: Record<string, string>;
 	return { vars, rest };
 }
 
+/** Sealed independence facts between the work under review and its reviewer. */
+function fleetGateCorrelation(subject: RunReceipt, decider: RunReceipt): GateDecisionCorrelation {
+	const facts = (receipt: RunReceipt) => ({
+		agentId: receipt.agentId,
+		targetId: receipt.targetId,
+		wireModelId: receipt.wireModelId,
+		runtimeId: receipt.runtimeId,
+		nodeId: receipt.node?.id ?? "local",
+	});
+	const { agent, target, modelFamily, runtime, node, independent } = gateRouteCorrelation(
+		facts(subject),
+		facts(decider),
+	);
+	return { agent, target, modelFamily, runtime, node, independent };
+}
+
 function newFleetRootId(): string {
 	return `fleet-${randomBytes(6).toString("hex")}`;
 }
@@ -101,6 +135,13 @@ function newFleetRootId(): string {
 // ---------------------------------------------------------------------------
 // list
 // ---------------------------------------------------------------------------
+
+function renderStep(step: FleetContractStep): string {
+	if (step.kind === "code") return `code:${step.command}[${step.scope}]`;
+	if (step.kind === "agent") return `${step.agent}[${step.scope}]`;
+	const check = step.check.kind === "code" ? `code:${step.check.command}` : step.check.agent;
+	return `loop:${step.id}(${check} -> ${step.repair.agent} x${step.maxAttempts})`;
+}
 
 function runList(): number {
 	const listings = listFleetContracts(process.cwd());
@@ -110,16 +151,14 @@ function runList(): number {
 	}
 	for (const entry of listings) {
 		if (entry.contract !== null) {
-			const steps = entry.contract.steps
-				.map((step) => (step.kind === "code" ? `code:${step.command}[${step.scope}]` : `${step.agent}[${step.scope}]`))
-				.join(" -> ");
-			process.stdout.write(`${entry.name}  valid    ${steps}\n`);
+			const steps = entry.contract.steps.map(renderStep).join(" -> ");
+			process.stdout.write(`${entry.name}  ${entry.source}  valid    ${steps}\n`);
 			if (entry.contract.description.length > 0) {
 				process.stdout.write(`  ${entry.contract.description}\n`);
 			}
 			continue;
 		}
-		process.stdout.write(`${entry.name}  invalid  ${entry.error}\n`);
+		process.stdout.write(`${entry.name}  ${entry.source}  invalid  ${entry.error}\n`);
 	}
 	return 0;
 }
@@ -134,15 +173,31 @@ interface FleetPreflightDeps {
 	scheduling: SchedulingContract | undefined;
 }
 
-function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): string | null {
+/** Every agent a contract dispatches, including both halves of every loop. */
+function contractAgents(
+	contract: FleetContract,
+): Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> {
+	const agents: Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> = [];
 	for (const step of contract.steps) {
-		if (step.kind === "code") continue;
+		if (step.kind === "agent") agents.push({ id: step.id, agent: step.agent, scope: step.scope });
+		else if (step.kind === "loop") {
+			if (step.check.kind === "agent") {
+				agents.push({ id: `${step.id}.check`, agent: step.check.agent, scope: step.check.scope });
+			}
+			agents.push({ id: `${step.id}.repair`, agent: step.repair.agent, scope: step.repair.scope });
+		}
+	}
+	return agents;
+}
+
+function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): string | null {
+	for (const step of contractAgents(contract)) {
 		if (!deps.agents.get(step.agent)) {
-			return `unknown agent '${step.agent}' (step must name a recipe from 'clio agents')`;
+			return `unknown agent '${step.agent}' (step '${step.id}' must name a recipe from 'clio agents')`;
 		}
 		const requested = step.scope === "readonly" ? deps.safety.scopes.readonly : deps.safety.scopes.workspace;
 		if (!deps.safety.isSubset(requested, deps.safety.scopes.workspace)) {
-			return `step '${step.agent}' scope '${step.scope}' exceeds the orchestrator scope`;
+			return `step '${step.id}' scope '${step.scope}' exceeds the orchestrator scope`;
 		}
 	}
 	if (deps.scheduling) {
@@ -215,44 +270,67 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	const fleetRootId = newFleetRootId();
-	const plan = compileExecutionPlan({
-		topology: "fleet",
-		rootTask: prompt,
-		maxWorkers: contract.maxWorkers,
-		onFailure: contract.onFailure,
-		steps: contract.steps.map((step): ExecutionPlanStepInput => {
-			if (step.kind === "code") {
-				return {
-					kind: "code",
-					id: step.id,
-					commandId: step.command,
-					scope: step.scope,
-					dependencies: step.dependencies,
-				};
-			}
-			const spec = agents.getSpec(step.agent);
-			if (spec === null || spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
-				throw new Error(`fleet step '${step.id}' has no automatable agent authority`);
-			}
-			return {
-				kind: "agent",
-				id: step.id,
-				agentId: step.agent,
-				scope: step.scope,
-				expectedResultContract: spec.resultContract.kind,
-				requestedAuthority: spec.capabilityClass,
-				approvedAuthority: spec.capabilityClass,
-				dependencies: step.dependencies,
-				task: prompt,
-				executionRole: requestExecutionRole({ agentId: step.agent, resolveFacts: roleFacts }),
-			};
-		}),
-	});
-	process.stderr.write(`fleet ${contract.name}: root=${fleetRootId} plan=${plan.hash} steps=${contract.steps.length}\n`);
-	const receipts: RunReceipt[] = [];
-	const codeOutcomes: Array<{ stepId: string; passed: boolean }> = [];
+	let planOutcome: ExecutionPlanResult;
+	let plan: ExecutionPlan;
 	try {
-		await executePlan(plan, {
+		plan = compileFleetExecutionPlan({
+			contract,
+			task: prompt,
+			resolveAgent(context) {
+				const spec = agents.getSpec(context.agentId);
+				if (spec === null || spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
+					throw new Error(`fleet step '${context.stepId}' has no automatable agent authority`);
+				}
+				const requestRole = requestExecutionRole({
+					agentId: context.agentId,
+					resolveFacts: roleFacts,
+					...(context.gateRole !== undefined ? { gateRole: context.gateRole } : {}),
+				});
+				return {
+					requestedAuthority: spec.capabilityClass,
+					approvedAuthority: spec.capabilityClass,
+					// A gate decider answers the coordinator's question, so its
+					// postcondition is the gate result contract, not its recipe's.
+					expectedResultContract: context.gateRole === "reviewer" ? "verifier-report" : spec.resultContract.kind,
+					executionRole: withAttemptRole(requestRole, context.attempt),
+				};
+			},
+		});
+	} catch (err) {
+		await loaded.stop();
+		return fail(err instanceof Error ? err.message : String(err));
+	}
+	process.stderr.write(
+		`fleet ${contract.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
+	);
+	const receipts: RunReceipt[] = [];
+	const receiptsByStep = new Map<string, RunReceipt>();
+	const planStep = (stepId: string) => plan.steps.find((entry) => entry.id === stepId);
+
+	/**
+	 * The commit message is the words of the agent that produced the work, and
+	 * only that agent's. Candidates are consulted newest first; when none of
+	 * them authored one, code writes a deterministic line rather than inventing
+	 * a sentence or reusing somebody else's.
+	 */
+	const commitMessageFor = (
+		step: ExecutionPlanCodeStep,
+		priorResults: ReadonlyMap<string, { output: string }>,
+	): string => {
+		for (const candidate of step.commitFrom ?? []) {
+			const source = planStep(candidate);
+			const result = priorResults.get(candidate);
+			if (source === undefined || source.kind !== "agent" || result === undefined) continue;
+			const resultContract = agents.getSpec(source.agentId)?.resultContract ?? null;
+			if (resultContract === null) continue;
+			const authored = resultContractAuthorship(resultContract, result.output);
+			if (authored.commitMessage !== null) return authored.commitMessage;
+			if (authored.summary !== null) return `clio(${fleetRootId}): ${authored.summary}`;
+		}
+		return `clio(${fleetRootId}): ${contract.name} ${step.id}`;
+	};
+	try {
+		planOutcome = await executePlan(plan, {
 			preflight(step) {
 				const request: DispatchRequest = {
 					agentId: step.agentId,
@@ -283,14 +361,30 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				return { ownerId: reservation.ownerId };
 			},
 			async run(step, handoffs, reservation) {
+				// A loop repair is attempt n of the same logical work, so it enters
+				// the ledger as one: recovery evidence, not a fresh observation.
+				const attempt = step.loop?.role === "repair" ? step.loop.attempt : 0;
 				const request: DispatchRequest = {
 					agentId: step.agentId,
 					executionRole: step.executionRole,
 					task: step.task,
 					predecessorHandoffs: handoffs,
 					requestOrigin: "user",
-					lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
+					lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt, depth: 1 },
 					reservation,
+					...(step.loop?.role === "check"
+						? {
+								gate: {
+									role: "reviewer" as const,
+									group: `${fleetRootId}:${step.loop.loopId}`,
+									cycle: step.loop.attempt,
+									subjects: handoffs.map((handoff) => ({
+										runId: handoff.terminalRunId,
+										digest: handoff.receiptDigest,
+									})),
+								},
+							}
+						: {}),
 					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
 				};
 				const handle = await dispatch.dispatch(request);
@@ -303,6 +397,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					assignmentId: handle.runId,
 					result: handle.finalPromise.then((receipt) => {
 						receipts.push(receipt);
+						receiptsByStep.set(step.id, receipt);
 						const envelope = dispatch.getRun(receipt.runId);
 						const integrityValid = envelope !== null && verifyReceiptIntegrity(receipt, envelope).ok;
 						const succeeded = receipt.exitCode === 0 && (receipt.outcome === undefined || receipt.outcome === "succeeded");
@@ -323,18 +418,24 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					}),
 				};
 			},
-			async runCode(step, _handoffs, signal) {
+			async runCode(step, _handoffs, signal, priorResults) {
 				const command = commands?.commands.get(step.commandId);
 				if (command === undefined) throw new Error(`fleet code step '${step.id}' has no registered command`);
+				const isCommit = step.commitFrom !== undefined;
 				const outcome = await runCodeStep({
 					stepId: step.id,
 					command,
 					workspaceRoot: process.cwd(),
 					artifactDir: codeStepDir(fleetRootId),
 					signal,
+					...(isCommit
+						? {
+								substitutions: { commitMessage: commitMessageFor(step, priorResults) },
+								requireWorkspaceChanges: true,
+							}
+						: {}),
 				});
 				const recordPath = await writeCodeStepRecord(fleetRootId, outcome.record);
-				codeOutcomes.push({ stepId: step.id, passed: outcome.report.passed });
 				if (json) process.stdout.write(`${JSON.stringify({ codeStep: outcome.record })}\n`);
 				else
 					process.stdout.write(
@@ -352,6 +453,50 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					integrityValid: true,
 				};
 			},
+			async decideLoop({ loop, step, attempt, terminalAttempt, result }) {
+				// Reuse the coordinator's existing review policy verbatim: pass ends
+				// the loop, a failure with attempts left earns one repair, and the
+				// same failure at the bound is simply the terminal answer. `revise`
+				// is never a verdict the reviewed model authors.
+				const decider = receiptsByStep.get(step.id);
+				// The subject is the work under review: the most recent agent run
+				// upstream of this verification. A direct dependency is not enough,
+				// because a loop's declared dependency is another loop's
+				// deterministic check, which produced no receipt at all.
+				const ancestors = executionPlanAncestors(plan, step.id);
+				let subject: RunReceipt | undefined;
+				for (const [stepId, receipt] of receiptsByStep) {
+					if (ancestors.has(stepId)) subject = receipt;
+				}
+				if (decider === undefined || subject === undefined) {
+					return {
+						resolved: false,
+						findings: null,
+						needsDecision: `loop '${loop.id}' cycle ${attempt} has no sealed reviewer or subject receipt`,
+					};
+				}
+				const decided = decideReviewGate({
+					group: `${fleetRootId}:${loop.id}`,
+					cycle: attempt,
+					terminalCycle: terminalAttempt,
+					subjects: [{ runId: subject.runId, digest: subject.integrity.digest }],
+					decider: { runId: decider.runId, digest: decider.integrity.digest },
+					correlation: fleetGateCorrelation(subject, decider),
+					output: result.output,
+				});
+				const staged = stagePendingGateDecision(decided.draft);
+				const { path: decisionPath } = materializePendingGateDecision(staged);
+				if (!json) {
+					process.stdout.write(
+						`loop ${loop.id} cycle ${attempt}: ${decided.draft.outcome}${decided.draft.detail === undefined ? "" : ` (${decided.draft.detail})`} decision=${decisionPath}\n`,
+					);
+				}
+				return {
+					resolved: decided.verdict === "pass",
+					findings: decided.findings,
+					needsDecision: decided.needsDecision,
+				};
+			},
 			cancel: (assignmentId) => dispatch.abort(assignmentId),
 			release: (ownerId) => {
 				dispatch.reservations?.rollbackUnconsumed(ownerId);
@@ -367,20 +512,48 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	}
 	await dispatch.drain();
 	await loaded.stop();
-	const agentStepCount = contract.steps.filter((step) => step.kind === "agent").length;
-	const codeStepCount = contract.steps.length - agentStepCount;
-	if (!json) {
-		const spentUsd = receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0);
-		const succeeded =
-			receipts.filter((receipt) => (receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed")) === "succeeded")
-				.length + codeOutcomes.filter((outcome) => outcome.passed).length;
+	// A loop is judged by whether it converged, not attempt by attempt: a red
+	// verification that a later attempt fixed is the loop working as declared,
+	// and a node a resolved loop made unnecessary never had to run at all.
+	const required = plan.steps.filter((step) => step.loop === undefined && !planOutcome.unneeded.includes(step.id));
+	const failedLoops = planOutcome.loops.filter((loop) => !loop.resolved);
+	const succeededSteps = required.filter((step) => planOutcome.results.get(step.id)?.succeeded === true).length;
+	const resolvedLoops = planOutcome.loops.length - failedLoops.length;
+	if (json) {
 		process.stdout.write(
-			`fleet ${contract.name}: ${succeeded}/${contract.steps.length} steps succeeded, total cost $${spentUsd.toFixed(4)}\n`,
+			`${JSON.stringify({
+				fleet: contract.name,
+				rootId: fleetRootId,
+				planHash: plan.hash,
+				loops: planOutcome.loops,
+				revalidated: planOutcome.revalidated,
+				unneeded: planOutcome.unneeded,
+				skipped: planOutcome.skipped,
+				needsDecision: planOutcome.needsDecision,
+			})}\n`,
 		);
+	} else {
+		const spentUsd = receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0);
+		process.stdout.write(
+			`fleet ${contract.name}: ${succeededSteps}/${required.length} steps succeeded, ${resolvedLoops}/${planOutcome.loops.length} loops resolved, total cost $${spentUsd.toFixed(4)}\n`,
+		);
+		for (const loop of planOutcome.loops) {
+			process.stdout.write(
+				`  loop ${loop.loopId}: ${loop.reason} after ${loop.attempts} verification(s) and ${loop.repairs} repair(s)\n`,
+			);
+		}
+		if (planOutcome.revalidated.length > 0) {
+			process.stdout.write(
+				`  staleness: re-ran ${planOutcome.revalidated.join(", ")} because a workspace step landed after the last green\n`,
+			);
+		}
+		for (const message of planOutcome.needsDecision) process.stdout.write(`  needs operator decision: ${message}\n`);
 	}
-	const agentsClean = receipts.length === agentStepCount && receipts.every((receipt) => receipt.exitCode === 0);
-	const codeClean = codeOutcomes.length === codeStepCount && codeOutcomes.every((outcome) => outcome.passed);
-	return agentsClean && codeClean ? 0 : 1;
+	const cleanRun =
+		failedLoops.length === 0 &&
+		planOutcome.skipped.length === 0 &&
+		required.every((step) => planOutcome.results.get(step.id)?.succeeded === true);
+	return cleanRun ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------

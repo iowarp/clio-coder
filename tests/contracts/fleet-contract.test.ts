@@ -29,7 +29,10 @@ describe("fleet contracts", () => {
 		// original agent-only meaning and parses unchanged under either.
 		strictEqual(parseFleetContract(valid.replace("version: 1", "version: 2"), "fleet.md").version, 2);
 		throws(() => parseFleetContract(valid.replace("version: 1\n", ""), "fleet.md"), /version/);
-		throws(() => parseFleetContract(valid.replace("version: 1", "version: 3"), "fleet.md"), /version/);
+		// v3 adds bounded loops and commit steps; a v1 contract parses unchanged
+		// under it, and an undeclared version is still refused.
+		strictEqual(parseFleetContract(valid.replace("version: 1", "version: 3"), "fleet.md").version, 3);
+		throws(() => parseFleetContract(valid.replace("version: 1", "version: 4"), "fleet.md"), /version/);
 	});
 	it("unknown fleet keys are rejected", () =>
 		throws(
@@ -48,7 +51,7 @@ describe("fleet contracts", () => {
 					id: step.id,
 					agentId: step.kind === "agent" ? step.agent : "",
 					executionRole: "builder",
-					scope: step.scope,
+					scope: step.kind === "loop" ? "workspace" : step.scope,
 					expectedResultContract: "mutation-report",
 					requestedAuthority: "workspace-edit",
 					approvedAuthority: "workspace-edit",
@@ -65,7 +68,7 @@ describe("fleet contracts", () => {
 	});
 	it("readonly verifier retains verify while mutation remains denied", () => {
 		const contract = parseFleetContract(valid, "fleet.md");
-		strictEqual(contract.steps[1]?.scope, "readonly");
+		strictEqual(contract.steps[1]?.kind === "agent" ? contract.steps[1].scope : null, "readonly");
 		strictEqual(contract.steps[1]?.kind === "agent" ? contract.steps[1].agent : null, "verifier");
 	});
 	it("fleet preflight checks every agent runtime and tool contract", () => {

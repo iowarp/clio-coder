@@ -13,7 +13,7 @@
  * permission prompt, no shell.
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -31,6 +31,9 @@ export const CODE_STEP_EXCERPT_MAX_BYTES = 8_000;
 
 export const CODE_STEP_TIMEOUT_EXIT_CODE = 124;
 export const CODE_STEP_SPAWN_FAILURE_EXIT_CODE = 127;
+/** A commit step asked to record a tree with nothing in it. */
+export const CODE_STEP_EMPTY_DIFF_EXIT_CODE = 125;
+export const CODE_STEP_EMPTY_DIFF_MESSAGE = "nothing to commit: the workspace has no changes to record";
 
 export const CODE_STEP_TRUNCATION_MARKER = "\n[... output truncated, see artifact ...]\n";
 
@@ -43,6 +46,19 @@ export interface CodeStepRunInput {
 	artifactDir?: string;
 	/** Full process environment the allowlist is drawn from. Defaults to the orchestrator's. */
 	env?: NodeJS.ProcessEnv;
+	/**
+	 * Values for the registry's whole-token `{{name}}` argv placeholders. This
+	 * is how an agent's commit message reaches `git commit` without the agent
+	 * authoring a command: the repository declares the invocation, code fills
+	 * one declared slot, and the value is a single argv element that no shell
+	 * ever sees.
+	 */
+	substitutions?: Readonly<Record<string, string>>;
+	/**
+	 * Refuse to run against a clean tree. A commit that would record nothing is
+	 * a failure, not a no-op: it means the step it describes produced nothing.
+	 */
+	requireWorkspaceChanges?: boolean;
 	signal?: AbortSignal;
 }
 
@@ -127,6 +143,48 @@ export function codeStepEnv(command: FleetCommand, source: NodeJS.ProcessEnv): N
 	return env;
 }
 
+const ARGV_PLACEHOLDER = /^\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}$/u;
+
+/**
+ * Bind a registered command's argv.
+ *
+ * Substitution is whole-token only. `{{commitMessage}}` is one argv element and
+ * becomes exactly one argv element; a token that merely embeds a placeholder is
+ * refused, so a supplied value can never grow a flag or split into two
+ * arguments. An unbound placeholder is an error rather than an empty string:
+ * committing with an empty message is the failure this check exists to stop.
+ */
+export function resolveCommandArgv(
+	command: FleetCommand,
+	substitutions: Readonly<Record<string, string>> = {},
+): string[] {
+	return command.argv.map((token) => {
+		const match = ARGV_PLACEHOLDER.exec(token);
+		if (match === null) {
+			if (token.includes("{{")) {
+				throw new Error(`code step: command '${command.id}' argv token '${token}' embeds a placeholder`);
+			}
+			return token;
+		}
+		const name = match[1] ?? "";
+		const value = substitutions[name];
+		if (value === undefined || value.length === 0) {
+			throw new Error(`code step: command '${command.id}' has no value for placeholder '{{${name}}}'`);
+		}
+		return value;
+	});
+}
+
+/** Whether the checkout has anything a commit could record. */
+export function workspaceHasChanges(root: string): boolean {
+	const status = execFileSync("git", ["-C", root, "status", "--porcelain", "-uall"], {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+		timeout: 30_000,
+	});
+	return status.trim().length > 0;
+}
+
 function newCodeRunId(): string {
 	return `code-${createHash("sha256")
 		.update(`${process.pid}:${Date.now()}:${Math.random()}`)
@@ -143,9 +201,9 @@ interface SpawnOutcome {
 	spawnError: string | null;
 }
 
-async function spawnCommand(input: CodeStepRunInput, cwd: string): Promise<SpawnOutcome> {
+async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: ReadonlyArray<string>): Promise<SpawnOutcome> {
 	const command = input.command;
-	const [executable, ...args] = command.argv;
+	const [executable, ...args] = argv;
 	if (executable === undefined) throw new Error(`code step: command '${command.id}' has no executable`);
 	return await new Promise<SpawnOutcome>((resolvePromise) => {
 		const chunks: Buffer[] = [];
@@ -229,21 +287,34 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	}
 	const cwd = resolveCwd(command, input.workspaceRoot);
 	const runId = newCodeRunId();
+	const argv = resolveCommandArgv(command, input.substitutions);
 	const startedAtMs = Date.now();
 	const clock = process.hrtime.bigint();
 	const startedAt = new Date(startedAtMs).toISOString();
-	const spawned = await spawnCommand(input, cwd);
+	const emptyWorkspace = input.requireWorkspaceChanges === true && !workspaceHasChanges(cwd);
+	const spawned = emptyWorkspace
+		? {
+				exitCode: CODE_STEP_EMPTY_DIFF_EXIT_CODE,
+				signal: null,
+				timedOut: false,
+				captured: Buffer.from(`${CODE_STEP_EMPTY_DIFF_MESSAGE}\n`, "utf8"),
+				outputBytes: 0,
+				spawnError: null,
+			}
+		: await spawnCommand(input, cwd, argv);
 	const durationMs = Number((process.hrtime.bigint() - clock) / 1_000_000n);
 	const endedAt = new Date(startedAtMs + durationMs).toISOString();
 	const capturedText =
 		spawned.captured.toString("utf8") + (spawned.spawnError === null ? "" : `\n${spawned.spawnError}\n`);
 	const printed = Buffer.from(capturedText, "utf8");
 	const excerpt = tailUtf8(printed, CODE_STEP_EXCERPT_MAX_BYTES, CODE_STEP_TRUNCATION_MARKER);
-	const rendered = command.argv.join(" ");
+	const rendered = argv.join(" ");
 	const passed = spawned.exitCode === 0;
-	const evidence = spawned.timedOut
-		? `timed out after ${command.timeoutMs}ms (exit ${spawned.exitCode})`
-		: `exit ${spawned.exitCode} in ${durationMs}ms`;
+	const evidence = emptyWorkspace
+		? CODE_STEP_EMPTY_DIFF_MESSAGE
+		: spawned.timedOut
+			? `timed out after ${command.timeoutMs}ms (exit ${spawned.exitCode})`
+			: `exit ${spawned.exitCode} in ${durationMs}ms`;
 
 	const artifactPaths: string[] = [];
 	if (input.artifactDir !== undefined) {
@@ -277,7 +348,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		runId,
 		stepId: input.stepId,
 		commandId: command.id,
-		argv: [...command.argv],
+		argv: [...argv],
 		cwd,
 		envNames: [...FLEET_COMMAND_BASE_ENV, ...command.env],
 		timeoutMs: command.timeoutMs,

@@ -7,6 +7,34 @@ export type ExecutionPlanTopology = "parallel" | "sequential" | "pipeline" | "re
 export type ExecutionPlanScope = "readonly" | "workspace";
 export type ExecutionPlanFailurePolicy = "stop" | "continue";
 
+/**
+ * Membership of one statically unrolled bounded loop.
+ *
+ * A loop in a fleet contract compiles to `maxAttempts` conditional check nodes
+ * and `maxAttempts - 1` conditional repair nodes. Unrolling rather than
+ * interpreting keeps the plan a deterministic hashed DAG whose waves are
+ * computed once and whose every attempt owns a separate receipt; the only
+ * runtime decision is whether a declared node is still needed.
+ */
+export interface ExecutionPlanLoopMembership {
+	loopId: string;
+	role: "check" | "repair";
+	/** 1-based attempt ordinal within the loop. */
+	attempt: number;
+}
+
+/** Declared loop, sealed in the plan hash beside the nodes it unrolled to. */
+export interface ExecutionPlanLoop {
+	id: string;
+	/** What decides continuation: a command's exit code or a gate agent's verdict. */
+	checkKind: "code" | "agent";
+	maxAttempts: number;
+	/** Unrolled check node ids, attempt order. */
+	checkStepIds: ReadonlyArray<string>;
+	/** Unrolled repair node ids, attempt order; one shorter than the checks. */
+	repairStepIds: ReadonlyArray<string>;
+}
+
 /** A plan node a model executes. Authority, role, and route are all its own. */
 export interface ExecutionPlanAgentStep {
 	kind: "agent";
@@ -20,6 +48,8 @@ export interface ExecutionPlanAgentStep {
 	approvedAuthority: AgentAutomationAuthority | null;
 	dependencies: ReadonlyArray<string>;
 	task: string;
+	/** Set on nodes a bounded loop unrolled to. */
+	loop?: ExecutionPlanLoopMembership;
 }
 
 /**
@@ -34,6 +64,19 @@ export interface ExecutionPlanCodeStep {
 	commandId: string;
 	scope: ExecutionPlanScope;
 	dependencies: ReadonlyArray<string>;
+	loop?: ExecutionPlanLoopMembership;
+	/**
+	 * This node's green result measures the workspace at the moment it ran. Any
+	 * later step that can change the workspace makes that result stale, and the
+	 * scheduler re-runs the node before a dependent may treat it as verified.
+	 */
+	verification?: boolean;
+	/**
+	 * Commit node. Candidate step ids, most recent first; the message is the
+	 * first candidate that ran and authored one. A commit and a verification
+	 * both leave the tree they act on unchanged, so neither invalidates a green.
+	 */
+	commitFrom?: ReadonlyArray<string>;
 }
 
 export type ExecutionPlanStep = ExecutionPlanAgentStep | ExecutionPlanCodeStep;
@@ -44,18 +87,26 @@ export type ExecutionPlanStepInput =
 	| ExecutionPlanCodeStep;
 
 export interface ExecutionPlan {
-	/** v3 adds the step-kind discriminant; v2 plans were agent-only. */
-	version: 3;
+	/**
+	 * v4 adds bounded loops, verification staleness, and commit nodes; v3 added
+	 * the step-kind discriminant and v2 plans were agent-only. A reader that
+	 * does not understand loop membership would treat every unrolled node as
+	 * unconditional and run every declared attempt, so the version is a refusal
+	 * point rather than an optional field.
+	 */
+	version: 4;
 	topology: ExecutionPlanTopology;
 	rootTask: string;
 	maxWorkers: number;
 	onFailure: ExecutionPlanFailurePolicy;
 	steps: ReadonlyArray<ExecutionPlanStep>;
+	loops: ReadonlyArray<ExecutionPlanLoop>;
 	waves: ReadonlyArray<ReadonlyArray<string>>;
 	hash: string;
 }
-export type ExecutionPlanInput = Omit<ExecutionPlan, "version" | "waves" | "hash" | "steps"> & {
+export type ExecutionPlanInput = Omit<ExecutionPlan, "version" | "waves" | "hash" | "steps" | "loops"> & {
 	steps: ReadonlyArray<ExecutionPlanStepInput>;
+	loops?: ReadonlyArray<ExecutionPlanLoop>;
 };
 
 export function isCodeStep(step: ExecutionPlanStep): step is ExecutionPlanCodeStep {
@@ -133,19 +184,68 @@ export function executionPlanWaves(
 	return waves;
 }
 
+/** Reject a loop whose declared membership does not match the compiled nodes. */
+function checkLoops(steps: ReadonlyArray<ExecutionPlanStep>, loops: ReadonlyArray<ExecutionPlanLoop>): void {
+	const byId = new Map(steps.map((step) => [step.id, step]));
+	const seen = new Set<string>();
+	for (const loop of loops) {
+		if (seen.has(loop.id)) throw new Error(`execution plan: duplicate loop id '${loop.id}'`);
+		seen.add(loop.id);
+		if (!Number.isInteger(loop.maxAttempts) || loop.maxAttempts < 1) {
+			throw new Error(`execution plan: loop '${loop.id}' must declare a positive attempt bound`);
+		}
+		if (loop.checkStepIds.length !== loop.maxAttempts || loop.repairStepIds.length !== loop.maxAttempts - 1) {
+			throw new Error(`execution plan: loop '${loop.id}' membership does not match its bound of ${loop.maxAttempts}`);
+		}
+		for (const id of [...loop.checkStepIds, ...loop.repairStepIds]) {
+			const step = byId.get(id);
+			if (step === undefined) throw new Error(`execution plan: loop '${loop.id}' names unknown step '${id}'`);
+			if (step.loop?.loopId !== loop.id) {
+				throw new Error(`execution plan: step '${id}' is not a member of loop '${loop.id}'`);
+			}
+		}
+	}
+	for (const step of steps) {
+		if (step.loop !== undefined && !seen.has(step.loop.loopId)) {
+			throw new Error(`execution plan: step '${step.id}' belongs to undeclared loop '${step.loop.loopId}'`);
+		}
+	}
+}
+
 export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 	const steps = canonicalSteps(input.steps);
+	const loops = (input.loops ?? []).map((loop) => ({
+		...loop,
+		checkStepIds: [...loop.checkStepIds],
+		repairStepIds: [...loop.repairStepIds],
+	}));
+	checkLoops(steps, loops);
 	const waves = executionPlanWaves(steps, input.maxWorkers);
 	const canonical = {
-		version: 3 as const,
+		version: 4 as const,
 		topology: input.topology,
 		rootTask: input.rootTask,
 		maxWorkers: input.maxWorkers,
 		onFailure: input.onFailure,
 		steps,
+		loops,
 		waves,
 	};
 	return { ...canonical, hash: createHash("sha256").update(JSON.stringify(canonical)).digest("hex") };
+}
+
+/** Transitive dependency closure of one plan step. */
+export function executionPlanAncestors(plan: ExecutionPlan, stepId: string): ReadonlySet<string> {
+	const byId = new Map(plan.steps.map((step) => [step.id, step]));
+	const ancestors = new Set<string>();
+	const pending = [...(byId.get(stepId)?.dependencies ?? [])];
+	while (pending.length > 0) {
+		const next = pending.pop();
+		if (next === undefined || ancestors.has(next)) continue;
+		ancestors.add(next);
+		pending.push(...(byId.get(next)?.dependencies ?? []));
+	}
+	return ancestors;
 }
 
 /** A linear step declares no dependencies; the compiler chains them by position. */

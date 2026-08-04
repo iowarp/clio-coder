@@ -188,7 +188,7 @@ describe("fleet code steps", () => {
 		throws(() => parseFleetContract(v1, "fleet.md"), /steps/);
 		const v1Agent = contractWith(["  - id: look", "    agent: scout", "    scope: readonly", "    dependencies: []"], 1);
 		strictEqual(parseFleetContract(v1Agent, "fleet.md").steps[0]?.kind, "agent");
-		throws(() => parseFleetContract(contractWith([], 3), "fleet.md"), /version must be 1/);
+		throws(() => parseFleetContract(contractWith([], 4), "fleet.md"), /version must be 1/);
 	});
 
 	it("a command registry rejects an empty executable and an escaping cwd", () => {
