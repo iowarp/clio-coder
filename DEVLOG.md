@@ -14,6 +14,68 @@ its source documentation and release gate are finalized.
 
 ### Added
 
+- **Builtin SDLC fleets with bounded repair loops.** Clio had the primitives for
+  a software-development workflow and shipped none of it. Three fleets now run
+  out of the box from `src/domains/agents/fleets/`: `build-test` (builder, suite,
+  bounded fix loop), `build-review` (builder, review gate, bounded revise loop),
+  and `sdlc`, the full plan → build → test → review → document chain that commits
+  each work product separately. A project `.clio/fleets/<name>.md` shadows a
+  builtin of the same name, and `clio fleet list` shows which source each came
+  from. They name registry command ids rather than invocations, so a repo without
+  `.clio/fleets/commands.yaml` gets a hard, named error instead of a green
+  placeholder for a phase that never ran.
+
+  The loop is a declared construct, not an inference. A `loop` step carries
+  `maxAttempts`, a check (a registered command or a gate agent), and an agent
+  repair; the bound is required and capped, and contract validation also refuses
+  dependency cycles, ids that collide with the ones a loop generates, and a
+  commit whose message source it does not wait for. Compilation unrolls each loop
+  into `maxAttempts` conditional verifications and one fewer repair, chained so
+  attempt `n + 1` only exists behind repair `n`. The plan therefore stays one
+  deterministic hashed DAG (now `ExecutionPlan` version 4, sealing loop
+  membership) with whole-plan admission and reservation before the first spawn
+  and a separate receipt per attempt; the scheduler's only runtime decision is
+  whether a declared node is still needed. A resolved loop reports its remaining
+  nodes as `unneeded`, which is neither a skip nor a failure, and spending the
+  bound without a pass reports the typed `loop_bound_exhausted`.
+
+  An edge out of a verification is answered by the loop, never by that run's exit
+  status. A reviewer that ran perfectly and returned `fail` is a successful run
+  and an unmet condition, so reading its exit code downstream would let a rejected
+  review flow onward as approval; dependents of an unresolved loop are blocked and
+  a stop-policy plan ends there. Agent-checked loops reuse `decideReviewGate`
+  rather than growing a second revise mechanism: every cycle stages and
+  materializes a `GateDecisionArtifact` with sealed route correlation, and the
+  repair attempt receives the gate's structured findings instead of the reviewer's
+  transcript. Every repair is `recovery` work and enters the ledger as attempt `n`.
+
+  Staleness is enforced by the scheduler, not by prompt wording. A verification's
+  green measures the workspace at the moment it completed; any later workspace
+  step that is not itself a verification or a commit invalidates it, and the
+  verification runs again before a dependent may treat it as satisfied, bounded by
+  `STALENESS_REVALIDATION_LIMIT`. Only deterministic verifications are
+  revalidated, because re-running a model gate is a dispatch that has to be
+  declared and paid for. In the `sdlc` chain this is the rule that a revision
+  landing after the last green suite re-enters the suite before anything is
+  committed, so the tree that gets committed is the tree that was both tested and
+  approved.
+
+  Commits are code steps. `commitFrom` lists candidate authors newest first, a
+  loop standing for its repair attempts, and the message is the first candidate
+  that actually ran and answered the new optional `commitMessage` on its terminal
+  contract, falling back to a deterministic `clio(<rootId>): ...` line. Registry
+  argv binds whole-token `{{name}}` placeholders only, so a supplied value is
+  exactly one argv element that no shell ever sees, and an empty diff fails the
+  commit rather than recording nothing. The agent proposes the sentence; code
+  decides and runs git. A failed run therefore leaves the plan committed and the
+  working tree dirty on purpose, which a live `sdlc` run against a toy repo
+  reproduces: red suite, repair, green, revise, staleness re-run, and then a
+  review that never returned a valid verdict, ending with the code uncommitted.
+
+  Repositories that use the shipped commit step should register a command that
+  stages new files, for example
+  `argv: [sh, -c, "git add -A && git commit --message \"$0\"", "{{commitMessage}}"]`;
+  a bare `git commit --all` cannot record a plan artifact that does not exist yet.
 - **Deterministic code steps in fleet contracts and execution plans.** A known
   command is no longer an agent's job. Fleet contracts gain a discriminated step
   kind: `agent` steps behave exactly as before, and `code` steps name a command

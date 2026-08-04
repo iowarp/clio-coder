@@ -21,18 +21,29 @@ export type {
 	FleetContractAgentStep,
 	FleetContractCodeStep,
 	FleetContractListing,
+	FleetContractLoopCheck,
+	FleetContractLoopRepair,
+	FleetContractLoopStep,
+	FleetContractSource,
 	FleetContractStep,
 	FleetContractVersion,
 	FleetOnFailure,
 	FleetStepScope,
 } from "./fleet-contract.js";
 export {
+	builtinFleetsDir,
+	FLEET_LOOP_MAX_ATTEMPTS,
 	fleetCodeSteps,
+	fleetLoopCheckStepId,
+	fleetLoopRepairStepId,
+	fleetLoopSteps,
+	fleetStepAncestors,
 	listFleetContracts,
 	loadFleetContract,
 	parseFleetContract,
 	renderFleetPrompt,
 	validateFleetCommands,
+	validateFleetGraph,
 } from "./fleet-contract.js";
 export { AgentsManifest } from "./manifest.js";
 export type {
@@ -47,6 +58,7 @@ export { parseAgentBudget } from "./recipe.js";
 export { parseAgentRecipeSchema, recipeSchemaFieldNames } from "./recipe-schema.js";
 export type { AgentRecipeDiagnostic } from "./registry.js";
 export type {
+	ResultAuthorship,
 	ResultContract,
 	ResultContractQuality,
 	ResultContractValidation,
@@ -55,6 +67,7 @@ export type {
 export {
 	parseResultContract,
 	parseScoutResult,
+	resultContractAuthorship,
 	resultContractDigest,
 	validateRecipeResult,
 	validateResultContract,

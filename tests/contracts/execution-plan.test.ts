@@ -134,7 +134,7 @@ describe("execution plan", () => {
 		await executePlan(plan([step("a")]), fake, controller.signal);
 		strictEqual(fake.released.includes("reservation"), true);
 	});
-	it("version 3 seals authority grants and refuses a plan that lacks one", async () => {
+	it("version 4 seals authority grants and refuses a plan that lacks one", async () => {
 		const granted = plan([step("a")]);
 		const ungranted = compileExecutionPlan({
 			topology: "fleet",
@@ -143,8 +143,8 @@ describe("execution plan", () => {
 			onFailure: "stop",
 			steps: [{ ...step("a"), approvedAuthority: null }],
 		});
-		strictEqual(granted.version, 3);
-		strictEqual(ungranted.version, 3);
+		strictEqual(granted.version, 4);
+		strictEqual(ungranted.version, 4);
 		strictEqual(granted.hash === ungranted.hash, false);
 		const fake = adapter();
 		await rejects(() => executePlan(ungranted, fake), /lacks its requested authority grant/u);

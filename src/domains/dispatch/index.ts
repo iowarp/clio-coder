@@ -23,19 +23,28 @@ export type {
 } from "./assignment.js";
 export type { DurableAssignmentRecord } from "./assignment-store.js";
 export type { CodeStepOutcome, CodeStepRecord, CodeStepRunInput } from "./code-step.js";
-export { canonicalCodeReport, codeReportDigest, runCodeStep } from "./code-step.js";
+export {
+	canonicalCodeReport,
+	codeReportDigest,
+	resolveCommandArgv,
+	runCodeStep,
+	workspaceHasChanges,
+} from "./code-step.js";
 export { readCodeStepRecords, writeCodeStepRecord } from "./code-step-store.js";
 export type { DispatchContract, DispatchRequest } from "./contract.js";
 export type {
 	ExecutionPlan,
 	ExecutionPlanAgentStep,
 	ExecutionPlanCodeStep,
+	ExecutionPlanLoop,
+	ExecutionPlanLoopMembership,
 	ExecutionPlanStep,
 	ExecutionPlanStepInput,
 } from "./execution-plan.js";
 export {
 	compileExecutionPlan,
 	compileLinearExecutionPlan,
+	executionPlanAncestors,
 	executionPlanWaves,
 	isAgentStep,
 	isCodeStep,
@@ -59,8 +68,15 @@ export {
 	requestExecutionRole,
 	withAttemptRole,
 } from "./execution-role.js";
-export type { ExecutionPlanResult, ExecutionSchedulerAdapter } from "./execution-scheduler.js";
-export { executePlan } from "./execution-scheduler.js";
+export type { ExecutionSchedulerAdapter } from "./execution-scheduler.js";
+export {
+	type ExecutionLoopDecision,
+	type ExecutionLoopOutcome,
+	type ExecutionLoopReason,
+	type ExecutionPlanResult,
+	executePlan,
+	STALENESS_REVALIDATION_LIMIT,
+} from "./execution-scheduler.js";
 export {
 	affectsNodeBreaker,
 	affectsTargetBreaker,
@@ -70,6 +86,7 @@ export {
 	type RetryDecision,
 	type RoutePart,
 } from "./failure-classification.js";
+export { type CompileFleetPlanInput, compileFleetExecutionPlan } from "./fleet-plan.js";
 export type { GateDecisionArtifact, GateDecisionOutcome } from "./gate-decisions.js";
 export {
 	readGateDecisionArtifacts,

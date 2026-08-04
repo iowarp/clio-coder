@@ -104,9 +104,9 @@ Worker processes accept only WorkerSpec version 3 with a concrete `budget` block
 
 ## Execution plans and fleets
 
-- `src/domains/dispatch/execution-plan.ts` compiles orchestration into the one strict version 3, deterministic, hashed `ExecutionPlan` DAG and computes capacity-bounded waves. Steps are discriminated by kind. Every agent task carries requested and approved authority; the scheduler refuses a missing grant.
+- `src/domains/dispatch/execution-plan.ts` compiles orchestration into the one strict version 4, deterministic, hashed `ExecutionPlan` DAG and computes capacity-bounded waves. Steps are discriminated by kind. Every agent task carries requested and approved authority; the scheduler refuses a missing grant.
 - `src/domains/dispatch/execution-scheduler.ts` performs whole-plan preflight and reservation before spawning, then admits dependency-ready waves with stop/continue semantics.
-- Fleet contracts are strict DAGs with stable step ids, explicit dependencies, scopes, and `maxWorkers`; authenticated terminal outputs cross edges through bounded structured handoffs. Version 1 is agent-only; version 2 may also carry code steps.
+- Fleet contracts are strict DAGs with stable step ids, explicit dependencies, scopes, and `maxWorkers`; authenticated terminal outputs cross edges through bounded structured handoffs. Version 1 is agent-only; version 2 may also carry code steps; version 3 may also carry bounded loops and commit steps.
 - Logical work is named by assignment id. Terminal attempts are named separately as terminal run ids; `dispatchBatch` has no `runIds` compatibility alias.
 - Resolved dispatch plans are strict version 3 and require an explicit deadline field (`number` for fleet plans, `null` otherwise). Older or partial forms are rejected.
 
@@ -117,6 +117,16 @@ Worker processes accept only WorkerSpec version 3 with a concrete `budget` block
 - A code step is a plan node outside worker admission. It consumes no capacity lease, carries no execution role or authority grant, and never reaches route history or the routing quality reducer. `code-report` is always `unmeasured` quality, and no agent recipe or Scout subtask may declare it.
 - Under `onFailure: continue`, a failed code step's report still crosses its outgoing edges. The red suite's verbatim output is the input to the step that repairs it.
 - Provenance is recorded per run under `code-steps/<rootId>/` in the Clio state directory, beside the run ledger rather than inside it: a subprocess has no agent, runtime, token, or route facts to record there.
+
+## Bounded loops and the shipped SDLC chains
+
+- A `loop` step declares `maxAttempts` (1..`FLEET_LOOP_MAX_ATTEMPTS`), a check, and an agent repair. The bound is declared, never inferred; contract validation also refuses a dependency cycle, a generated-id collision, and a commit whose message source it does not depend on.
+- `src/domains/dispatch/fleet-plan.ts` unrolls each loop at compile time into `maxAttempts` conditional verifications and one fewer repair, so the plan stays one deterministic hashed DAG with whole-plan admission and a receipt per attempt. The scheduler decides only whether a declared node is still needed; a resolved loop reports its later nodes as `unneeded` rather than skipped or failed.
+- An edge out of a verification is answered by the loop, never by that run's exit status: a gate agent that ran perfectly and returned `fail` leaves its loop unresolved and blocks every dependent. A repair attempt is `recovery` and enters the ledger as attempt `n`.
+- Agent-checked loops reuse `decideReviewGate`; there is no second revise mechanism. Every cycle stages and materializes a `GateDecisionArtifact`, and the repair receives the gate's findings instead of the reviewer's raw transcript. Spending the bound without a pass reports `loop_bound_exhausted`.
+- Staleness is scheduler-enforced. A verification node's green measures the workspace at completion; any later workspace step that is not itself a verification or a commit invalidates it, and the verification re-runs before a dependent may treat it as satisfied, up to `STALENESS_REVALIDATION_LIMIT`. Only deterministic verifications are revalidated: re-running a model gate is a dispatch that must be declared.
+- A commit is a code step with `commitFrom`, whose message is the first listed candidate that ran and authored `commitMessage` on its terminal contract, falling back to `clio(<rootId>): ...`. Registry argv binds whole-token `{{name}}` placeholders only, and an empty diff fails the step rather than recording nothing.
+- `src/domains/agents/fleets/` ships `build-test`, `build-review`, and `sdlc`; a project `.clio/fleets/<name>.md` shadows a builtin of the same name. They name registry command ids, so a repo with no `commands.yaml` gets a hard error rather than a green placeholder.
 
 ## Transactional attempts and Scout escalation
 
