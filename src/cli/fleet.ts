@@ -56,6 +56,8 @@ import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
+import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
+import { createWriteBoundaryEnforcer, preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
@@ -127,6 +129,9 @@ function fleetGateCorrelation(subject: RunReceipt, decider: RunReceipt): GateDec
 	);
 	return { agent, target, modelFamily, runtime, node, independent };
 }
+
+/** Owner id for a plan with no model runs; it holds nothing to release. */
+const NO_WORKER_RESERVATION = "fleet-no-worker-reservation";
 
 function newFleetRootId(): string {
 	return `fleet-${randomBytes(6).toString("hex")}`;
@@ -300,6 +305,25 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		await loaded.stop();
 		return fail(err instanceof Error ? err.message : String(err));
 	}
+	// A declared boundary is verified against the checkout, so the checkout has
+	// to be one this can read. Refused here, before any spawn, rather than
+	// discovered as an unenforceable claim halfway through the run.
+	try {
+		preflightWriteBoundaries(plan, process.cwd());
+	} catch (err) {
+		await loaded.stop();
+		return fail(`preflight failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
+	const boundaryByStep = new Map(plan.steps.map((step) => [step.id, step.writes]));
+	const boundaryEnforcer = createWriteBoundaryEnforcer({
+		root: process.cwd(),
+		rootId: fleetRootId,
+		boundaryFor: (stepId) => boundaryByStep.get(stepId),
+		onVerdict(verdict, path) {
+			if (verdict.reason === null) return;
+			process.stderr.write(`write boundary ${verdict.window}: ${verdict.detail ?? verdict.reason} record=${path}\n`);
+		},
+	});
 	process.stderr.write(
 		`fleet ${contract.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
 	);
@@ -345,6 +369,10 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				return { step, costUpperBoundUsd: resolution.costUpperBoundUsd, nodeId: resolution.node.id };
 			},
 			reserve(_plan, admissions) {
+				// A fleet of deterministic steps admits no worker and holds no
+				// capacity. The reservation authority refuses an empty reservation,
+				// correctly: there is nothing to reserve, so nothing is asked of it.
+				if (admissions.length === 0) return { ownerId: NO_WORKER_RESERVATION };
 				const reservation = dispatch.reservations?.prepare({
 					topology: "parallel",
 					tasks: admissions.map((admission) => ({
@@ -497,11 +525,15 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					needsDecision: decided.needsDecision,
 				};
 			},
+			beginWriteBoundary: (window, stepIds) => boundaryEnforcer.begin(window, stepIds),
+			verifyWriteBoundary: (window, stepIds) => boundaryEnforcer.verify(window, stepIds),
 			cancel: (assignmentId) => dispatch.abort(assignmentId),
 			release: (ownerId) => {
+				if (ownerId === NO_WORKER_RESERVATION) return;
 				dispatch.reservations?.rollbackUnconsumed(ownerId);
 			},
 			releaseUnconsumed: (ownerId) => {
+				if (ownerId === NO_WORKER_RESERVATION) return;
 				dispatch.reservations?.rollbackUnconsumed(ownerId);
 			},
 		});
@@ -530,6 +562,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				unneeded: planOutcome.unneeded,
 				skipped: planOutcome.skipped,
 				needsDecision: planOutcome.needsDecision,
+				writeBoundaries: planOutcome.writeBoundaries,
 			})}\n`,
 		);
 	} else {
@@ -548,6 +581,10 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			);
 		}
 		for (const message of planOutcome.needsDecision) process.stdout.write(`  needs operator decision: ${message}\n`);
+		for (const boundary of planOutcome.writeBoundaries) {
+			if (!boundary.violated) continue;
+			process.stdout.write(`  write boundary ${boundary.window}: ${boundary.detail ?? WRITE_BOUNDARY_VIOLATION_REASON}\n`);
+		}
 	}
 	const cleanRun =
 		failedLoops.length === 0 &&

@@ -11,6 +11,27 @@ import {
 export interface ExecutionStepResult extends ExecutionHandoff {
 	succeeded: boolean;
 	integrityValid: boolean;
+	/**
+	 * The step changed the workspace outside its declared boundary. Sealed by
+	 * the orchestrator after the fact, never by the step: a run that reports on
+	 * its own writes is not a witness.
+	 */
+	boundaryViolated?: boolean;
+}
+
+/**
+ * The verdict on one scheduling window's write boundary, projected for the
+ * scheduler. The full record, with the offending paths and everything rolled
+ * back, is written durably by whoever performs the check.
+ */
+export interface ExecutionWriteBoundaryOutcome {
+	/** `wave-<n>` or `revalidate-<stepId>-<n>`; matches the durable record. */
+	window: string;
+	violated: boolean;
+	/** Steps that fail because of it. More than one means concurrent authorship. */
+	failedStepIds: ReadonlyArray<string>;
+	/** Operator-facing message naming the paths and the declaration. */
+	detail: string | null;
 }
 export interface ExecutionPlanAdmission {
 	step: ExecutionPlanAgentStep;
@@ -86,6 +107,20 @@ export interface ExecutionSchedulerAdapter {
 	 * has not said whether the work passes, and the scheduler refuses to guess.
 	 */
 	decideLoop?(input: ExecutionLoopDecisionInput): Promise<ExecutionLoopDecision>;
+	/**
+	 * Record the workspace as it stands before a window's steps run. Required
+	 * only for plans whose steps declare a boundary; a plan that declares one
+	 * and a scheduler that cannot check it is refused rather than run
+	 * unenforced.
+	 */
+	beginWriteBoundary?(window: string, stepIds: ReadonlyArray<string>): void;
+	/**
+	 * Compare the workspace against that snapshot, roll back what the window was
+	 * not allowed to change, and return the verdict. Runs before any result
+	 * crosses an edge: a step that wrote outside its boundary must not hand its
+	 * output to a dependent as though it had passed.
+	 */
+	verifyWriteBoundary?(window: string, stepIds: ReadonlyArray<string>): Promise<ExecutionWriteBoundaryOutcome>;
 	cancel(assignmentId: string): void;
 	release(ownerId: string): void;
 	releaseUnconsumed(ownerId: string): void;
@@ -100,6 +135,8 @@ export interface ExecutionPlanResult {
 	/** Verifications re-run because a later workspace step invalidated their green. */
 	revalidated: ReadonlyArray<string>;
 	needsDecision: ReadonlyArray<string>;
+	/** Every enforced window, in scheduling order, violated or not. */
+	writeBoundaries: ReadonlyArray<ExecutionWriteBoundaryOutcome>;
 }
 
 /**
@@ -145,6 +182,12 @@ export async function executePlan(
 			throw new Error(`execution plan: loop '${loop.id}' is agent-checked and this scheduler cannot decide one`);
 		}
 	}
+	// A declared boundary that nothing checks is worse than no boundary: the
+	// contract reads as confinement and the run has none. Fail closed.
+	const enforcesBoundaries = plan.steps.some((step) => step.writes !== undefined);
+	if (enforcesBoundaries && (adapter.beginWriteBoundary === undefined || adapter.verifyWriteBoundary === undefined)) {
+		throw new Error("execution plan: steps declare write boundaries and this scheduler cannot verify them");
+	}
 	// Resolve every hard admission fact before reservation or spawn. Code steps
 	// are outside admission entirely: they reserve nothing and spawn no worker.
 	// Loop attempts are admitted up front too, because the bound is the ceiling
@@ -164,6 +207,7 @@ export async function executePlan(
 	const repairsRun = new Map<string, number>();
 	const revalidations = new Map<string, number>();
 	const revalidated: string[] = [];
+	const writeBoundaries: ExecutionWriteBoundaryOutcome[] = [];
 	/** Monotonic completion order, the only clock staleness needs. */
 	let sequence = 0;
 	const completedAt = new Map<string, number>();
@@ -214,6 +258,10 @@ export async function executePlan(
 		if (unneeded.has(dependency)) return false;
 		if (skipped.has(dependency)) return true;
 		const result = results.get(dependency);
+		// A boundary violation severs every edge, including a loop's own repair
+		// path. The tree was rolled back or left for an operator; either way the
+		// answer is not "try again", it is "this step is not allowed to do that".
+		if (result?.boundaryViolated === true) return true;
 		const source = stepsById.get(dependency);
 		const loop = source?.loop?.role === "check" ? loopOf(source) : null;
 		if (loop !== null) {
@@ -254,6 +302,41 @@ export async function executePlan(
 		// ask.
 		if (step.loop?.role === "check" && step.loop.attempt === 1) return false;
 		return loopResolved(loop);
+	};
+
+	/**
+	 * Open an enforcement window over the steps of one scheduling unit. The
+	 * snapshot is taken before anything spawns, so every change the window
+	 * produces is inside it.
+	 */
+	const openBoundary = (window: string, steps: ReadonlyArray<ExecutionPlanStep>): string[] | null => {
+		const enforced = steps.filter((step) => step.writes !== undefined).map((step) => step.id);
+		if (enforced.length === 0 || adapter.beginWriteBoundary === undefined) return null;
+		adapter.beginWriteBoundary(window, enforced);
+		return enforced;
+	};
+
+	/**
+	 * Close the window before any result crosses an edge. A blamed step fails
+	 * whatever its exit status said: writing outside the declared boundary is
+	 * not a thing a successful run gets to have done, and it is not something a
+	 * loop repair can be asked to fix, so the failure is carried on the result
+	 * rather than folded into the loop's verdict.
+	 */
+	const closeBoundary = async (
+		window: string,
+		enforced: ReadonlyArray<string> | null,
+		settled: ReadonlyArray<{ step: ExecutionPlanStep; result: ExecutionStepResult }>,
+	): Promise<Array<{ step: ExecutionPlanStep; result: ExecutionStepResult }>> => {
+		const verify = adapter.verifyWriteBoundary;
+		if (enforced === null || verify === undefined) return [...settled];
+		const outcome = await verify(window, enforced);
+		writeBoundaries.push(outcome);
+		if (!outcome.violated) return [...settled];
+		const blamed = new Set(outcome.failedStepIds);
+		return settled.map(({ step, result }) =>
+			blamed.has(step.id) ? { step, result: { ...result, succeeded: false, boundaryViolated: true } } : { step, result },
+		);
 	};
 
 	const runCodeStepNode = async (
@@ -297,7 +380,11 @@ export async function executePlan(
 			}
 			revalidations.set(id, spent + 1);
 			revalidated.push(id);
-			const result = await runCodeStepNode(step, handoffsFor(step));
+			const window = `revalidate-${id}-${spent + 1}`;
+			const enforced = openBoundary(window, [step]);
+			const ran = await runCodeStepNode(step, handoffsFor(step));
+			const [checked] = await closeBoundary(window, enforced, [{ step, result: ran }]);
+			const result = checked?.result ?? ran;
 			recordCompletion(step, result);
 			const loop = loopOf(step);
 			if (step.loop?.role === "check") {
@@ -320,6 +407,7 @@ export async function executePlan(
 
 	/** Stop-policy verdict for one settled step. */
 	const isPlanFailure = (step: ExecutionPlanStep, result: ExecutionStepResult): boolean => {
+		if (result.boundaryViolated === true) return true;
 		if (result.succeeded && result.integrityValid) return false;
 		if (step.loop?.role !== "check" || !result.integrityValid) return true;
 		const loop = loopOf(step);
@@ -332,6 +420,12 @@ export async function executePlan(
 		if (loop === null || step.loop?.role !== "check") return;
 		const attempt = step.loop.attempt;
 		attemptsRun.set(loop.id, (attemptsRun.get(loop.id) ?? 0) + 1);
+		// A verification that wrote outside its boundary answered nothing: its
+		// verdict describes a tree that has since been rolled back under it.
+		if (result.boundaryViolated === true) {
+			checkPassed.set(step.id, false);
+			return;
+		}
 		if (loop.checkKind === "code") {
 			checkPassed.set(step.id, result.succeeded && result.integrityValid);
 			return;
@@ -374,7 +468,7 @@ export async function executePlan(
 		});
 
 	try {
-		for (const wave of plan.waves) {
+		for (const [waveIndex, wave] of plan.waves.entries()) {
 			if (stopped || signal?.aborted) break;
 			if (await revalidateFor(wave)) break;
 			const admitted = wave.flatMap((id) => {
@@ -396,6 +490,11 @@ export async function executePlan(
 			const codeWork = admitted.filter(
 				(entry): entry is { step: ExecutionPlanCodeStep; handoffs: ExecutionHandoff[] } => entry.step.kind === "code",
 			);
+			const boundaryWindow = `wave-${waveIndex}`;
+			const enforced = openBoundary(
+				boundaryWindow,
+				admitted.map((entry) => entry.step),
+			);
 			const started = await Promise.all(
 				launch.map(async ({ step, handoffs }) => ({
 					step,
@@ -413,7 +512,7 @@ export async function executePlan(
 					adapter.releaseUnconsumed(reservation.ownerId);
 				}
 			};
-			const settled = await Promise.all([
+			const ran = await Promise.all([
 				...started.map(async ({ step, handle }) => {
 					const result = await handle.result;
 					onSettled(step, result);
@@ -425,6 +524,10 @@ export async function executePlan(
 					return { step: step as ExecutionPlanStep, result };
 				}),
 			]);
+			// The boundary is settled before anything is recorded or handed on, so
+			// a rolled-back step never appears upstream of the work it would have
+			// contaminated.
+			const settled = await closeBoundary(boundaryWindow, enforced, ran);
 			for (const { step, result } of settled) {
 				running.set(step.id, { assignmentId: result.assignmentId });
 				recordCompletion(step, result);
@@ -456,6 +559,7 @@ export async function executePlan(
 			loops: loopOutcomes(),
 			revalidated: [...revalidated],
 			needsDecision: [...needsDecision],
+			writeBoundaries: [...writeBoundaries],
 		};
 	} catch (error) {
 		cancelOwned();
