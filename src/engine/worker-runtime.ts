@@ -58,6 +58,7 @@ import {
 	type WorkerPromptMessage,
 	type WorkerProtectedArtifactState,
 } from "../worker/spec-contract.js";
+import { createEngineAgent, type EngineAgentOptions } from "./agent.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { startAntigravityWorkerRun } from "./antigravity/subprocess-runtime.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./apis/index.js";
@@ -69,7 +70,7 @@ import {
 	sanitizeLockedSynthesisMessage,
 } from "./loop-guard.js";
 import { patchWorkerRequestPayload } from "./provider-payload.js";
-import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
+import type { AgentEvent, AgentMessage, Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
 
@@ -573,7 +574,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.runtimeResolution?.effectiveThinkingLevel ?? input.thinkingLevel,
 	);
 
-	const options: AgentOptions = {
+	const options: EngineAgentOptions = {
 		initialState: {
 			systemPrompt: input.systemPrompt,
 			model,
@@ -595,7 +596,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	};
 	if (input.sessionId) options.sessionId = input.sessionId;
 
-	const agent = new Agent(options);
+	const { agent } = createEngineAgent(options);
 	abortWorkerForBound = () => agent.abort();
 	const unsubscribe = agent.subscribe(async (event) => {
 		if (event.type === "turn_start") workerModelRound += 1;

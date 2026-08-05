@@ -106,10 +106,10 @@ export function createEngineAi(): EngineAi {
 	ensurePiAiRegistered();
 	return {
 		listProviders: () => getProviders(),
-		listModels: (provider) => getModels(provider) as unknown as Model<never>[],
+		listModels: (provider) => getModels(provider as never) as unknown as Model<never>[],
 		getModel: (provider, modelId) => {
 			try {
-				return piGetModel(provider, modelId as never) as unknown as Model<never>;
+				return piGetModel(provider as never, modelId as never) as unknown as Model<never>;
 			} catch {
 				return undefined;
 			}
