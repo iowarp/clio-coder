@@ -27,6 +27,7 @@ import {
 	readSessionEntriesForId,
 	type SessionEntry,
 } from "../session/index.js";
+import { attributeEvidenceFailure } from "./failure-attribution.js";
 import { extractRunProvenance, provenanceTranscriptLines } from "./provenance.js";
 import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";
 import { EVIDENCE_FILES, evidenceDirectory, findingsFile } from "./store.js";
@@ -306,7 +307,12 @@ function buildFindings(
 		}
 		const exitCode = receipt?.exitCode ?? source.envelope.exitCode;
 		if (exitCode !== null && exitCode !== 0) {
-			const tag = classifyFailure(source.envelope.task);
+			const tag = attributeEvidenceFailure({
+				outcome: receipt?.outcome ?? source.envelope.outcome ?? null,
+				outcomeCode: receipt?.outcomeCode ?? source.envelope.outcomeCode ?? null,
+				outcomeDetail: receipt?.outcomeDetail ?? source.envelope.outcomeDetail ?? null,
+				failureMessage: receipt?.failureMessage ?? null,
+			});
 			findings.push(finding(findings.length, "warn", tag, source.envelope.id, `run exited with code ${exitCode}`));
 		}
 	}
@@ -482,31 +488,6 @@ function finding(
 		runId,
 		message,
 	};
-}
-
-function classifyFailure(task: string): EvidenceTag {
-	const text = task.toLowerCase();
-	if (text.includes("auth") || text.includes("api key") || text.includes("credential")) return "auth-failure";
-	if (text.includes("context") && (text.includes("overflow") || text.includes("length"))) return "context-overflow";
-	if (text.includes("dependency") || text.includes("module not found") || text.includes("missing package")) {
-		return "missing-dependency";
-	}
-	if (text.includes("runtime") || text.includes("model mismatch")) return "wrong-runtime";
-	if (text.includes("timeout") || text.includes("timed out")) return "timeout";
-	if (text.includes("build")) return "build-failure";
-	if (looksLikeValidationTask(text)) return "test-failure";
-	return "unknown";
-}
-
-function looksLikeValidationTask(text: string): boolean {
-	return (
-		text.includes("test") ||
-		text.includes("lint") ||
-		text.includes("typecheck") ||
-		text.includes("verify") ||
-		text.includes("pytest") ||
-		text.includes("ctest")
-	);
 }
 
 async function writeEvidenceFiles(
