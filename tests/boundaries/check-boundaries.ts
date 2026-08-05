@@ -114,6 +114,16 @@ function resolveRelativeImport(fromFile: string, specifier: string): string {
 	return candidate;
 }
 
+/**
+ * The chat loop's turn state machine and its single-owner turn modules.
+ * Other interactive files (overlays, panels, the composition root in
+ * index.ts) legitimately know about entry-level wiring; these do not.
+ */
+function isChatLoopTurnModule(filePath: string): boolean {
+	const base = path.basename(filePath);
+	return base === "chat-loop.ts" || (base.startsWith("turn-") && base.endsWith(".ts"));
+}
+
 function domainOf(filePath: string, domainsRoot: string): string | null {
 	if (!isWithin(filePath, domainsRoot)) return null;
 	const rel = path.relative(domainsRoot, filePath);
@@ -131,14 +141,22 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
 }
 
 /**
- * Enforce the three static isolation rules:
- *   1. Only src/engine/** may value-import @earendil-works/pi-*. Type-only
- *      imports outside src/engine/** must be explicitly allowlisted above.
+ * Enforce the static isolation rules:
+ *   1. Only src/engine/** may import @earendil-works/pi-* at all. Since the
+ *      0.83.0 engine-boundary rework there is no type-only exception either:
+ *      domains take erased engine shapes from src/engine/types.ts.
  *   2. src/worker/** never value-imports src/domains/** EXCEPT the worker-safe
  *      provider runtime registry, builtin descriptors, and plugin loader used
  *      to rehydrate runtime descriptors from stdin. Type-only imports are
  *      allowed because they erase at compile time.
  *   3. src/domains/<x> never imports src/domains/<y>/extension.ts for y != x.
+ *   4. src/tools/** never imports src/interactive/**. The tool substrate is
+ *      surface-agnostic: headless, interactive, ACP, and worker runs share it,
+ *      so a tool reaching into TUI code would make one surface's presentation
+ *      a dependency of every surface's execution.
+ *   5. The chat loop's turn modules (src/interactive/turn-*.ts, chat-loop.ts)
+ *      never import src/entry/**. Composition flows one way: the entry point
+ *      composes the loop, never the reverse.
  */
 export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	const srcRoot = path.join(projectRoot, "src");
@@ -146,6 +164,9 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	const workerRoot = path.join(srcRoot, "worker");
 	const domainsRoot = path.join(srcRoot, "domains");
 	const providersDomainRoot = path.join(domainsRoot, "providers");
+	const toolsRoot = path.join(srcRoot, "tools");
+	const interactiveRoot = path.join(srcRoot, "interactive");
+	const entryRoot = path.join(srcRoot, "entry");
 
 	const violations: string[] = [];
 
@@ -157,6 +178,8 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		const inEngine = isWithin(filePath, engineRoot);
 		const inWorker = isWithin(filePath, workerRoot);
 		const fromDomain = domainOf(filePath, domainsRoot);
+		const inTools = isWithin(filePath, toolsRoot);
+		const isChatLoopModule = isWithin(filePath, interactiveRoot) && isChatLoopTurnModule(filePath);
 
 		const evaluate = (specifier: string, typeOnly: boolean, kind: "import" | "reference") => {
 			if (specifier.startsWith(piPackagePrefix)) {
@@ -182,6 +205,22 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 						`rule2: ${path.relative(projectRoot, filePath)} ${kind} ${specifier} which resolves inside src/domains (worker value imports are limited to provider runtime rehydration modules)`,
 					);
 				}
+				return;
+			}
+
+			if (inTools && isWithin(resolved, interactiveRoot)) {
+				const qualifier = typeOnly ? " (type-only)" : "";
+				violations.push(
+					`rule4: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} ${specifier} which resolves inside src/interactive; the tool substrate is surface-agnostic`,
+				);
+				return;
+			}
+
+			if (isChatLoopModule && isWithin(resolved, entryRoot)) {
+				const qualifier = typeOnly ? " (type-only)" : "";
+				violations.push(
+					`rule5: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} ${specifier} which resolves inside src/entry; the entry point composes the chat loop, never the reverse`,
+				);
 				return;
 			}
 
