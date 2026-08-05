@@ -11,7 +11,7 @@
  */
 
 import { stream } from "../../../engine/ai.js";
-import type { Model } from "../../../engine/types.js";
+import type { EngineModel, Model } from "../../../engine/types.js";
 import type { SessionEntry } from "../entries.js";
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
@@ -88,7 +88,7 @@ export interface CompactInput {
 	/** Ordered session entries to compact. The caller reads these from the session domain. */
 	entries: ReadonlyArray<SessionEntry>;
 	/** Resolved orchestrator or compaction-override model. */
-	model: Model<never>;
+	model: EngineModel;
 	/** API key for the model. Optional because local engines accept a fallback handled upstream. */
 	apiKey?: string;
 	/** Per-provider headers to pass through with the stream request. */
@@ -318,7 +318,7 @@ async function runSummaryStream(
 	};
 
 	const events = stream(
-		input.model as unknown as Parameters<typeof stream>[0],
+		input.model,
 		context as unknown as Parameters<typeof stream>[1],
 		options as unknown as Parameters<typeof stream>[2],
 	);

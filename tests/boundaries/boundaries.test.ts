@@ -35,13 +35,20 @@ describe("boundaries", () => {
 		strictEqual(result.violations.length, 0);
 	});
 
-	it("allows explicit non-engine pi-ai type imports", () => {
+	it("rejects non-engine pi-ai type imports since the engine boundary owns pi types", () => {
 		const root = fixtureProject({
 			"src/domains/providers/types/runtime-descriptor.ts":
 				'import type { Api, Model } from "@earendil-works/pi-ai";\nexport type RuntimeModel = Model<Api>;',
 		});
 
-		strictEqual(runBoundaryCheck(root).violations.length, 0);
+		const result = runBoundaryCheck(root);
+
+		ok(
+			result.violations.some(
+				(violation) => violation.includes("rule1") && violation.includes("type-only import is not explicitly allowed"),
+			),
+			result.violations.join("\n"),
+		);
 	});
 
 	it("rejects non-engine pi value imports", () => {

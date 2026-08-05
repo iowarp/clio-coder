@@ -4,7 +4,7 @@ import {
 	defaultAnthropicEffortForLevel,
 	type ThinkingEffortByLevel,
 } from "../domains/providers/thinking-control-policy.js";
-import type { Model } from "./types.js";
+import type { EngineModel } from "./types.js";
 
 function reasoningSummaryForLevel(level: ThinkingLevel | undefined): "concise" | "detailed" | undefined {
 	if (!level || level === "off") return undefined;
@@ -50,7 +50,7 @@ function numberValue(value: unknown): number | undefined {
 
 function patchOpenAIReasoningSummaryPayload(
 	payload: unknown,
-	model: Model<never>,
+	model: EngineModel,
 	thinkingLevel: ThinkingLevel | undefined,
 ): unknown | undefined {
 	if (!isOpenAIResponsesApi(model.api)) return undefined;
@@ -72,18 +72,18 @@ function isAnthropicMessagesApi(api: string): boolean {
 	return api === "anthropic-messages";
 }
 
-function anthropicThinkingLevelMap(model: Model<never>): ThinkingEffortByLevel | undefined {
+function anthropicThinkingLevelMap(model: EngineModel): ThinkingEffortByLevel | undefined {
 	return model.thinkingLevelMap as ThinkingEffortByLevel | undefined;
 }
 
-function anthropicUsesAdaptiveThinking(model: Model<never>): boolean {
+function anthropicUsesAdaptiveThinking(model: EngineModel): boolean {
 	const compat = model.compat as { forceAdaptiveThinking?: boolean } | undefined;
 	return compat?.forceAdaptiveThinking === true;
 }
 
 function patchAnthropicThinkingPayload(
 	payload: unknown,
-	model: Model<never>,
+	model: EngineModel,
 	thinkingLevel: ThinkingLevel | undefined,
 ): unknown | undefined {
 	if (!isAnthropicMessagesApi(model.api) || model.reasoning !== true) return undefined;
@@ -120,7 +120,7 @@ function patchAnthropicThinkingPayload(
  */
 export function patchProviderThinkingPayload(
 	payload: unknown,
-	model: Model<never>,
+	model: EngineModel,
 	thinkingLevel: ThinkingLevel | undefined,
 ): unknown | undefined {
 	return (
@@ -141,7 +141,7 @@ export function patchProviderThinkingPayload(
  * Returns undefined when the payload carries no tool surface (nothing to
  * lock) or is not a record (unknown provider shape; leave it alone).
  */
-export function patchToolChoiceNonePayload(payload: unknown, model: Model<never>): unknown | undefined {
+export function patchToolChoiceNonePayload(payload: unknown, model: EngineModel): unknown | undefined {
 	if (!isRecord(payload)) return undefined;
 	if (!("tools" in payload) || payload.tools === undefined || payload.tools === null) return undefined;
 	if (isAnthropicMessagesApi(model.api)) return { ...payload, tool_choice: { type: "none" } };
@@ -151,7 +151,7 @@ export function patchToolChoiceNonePayload(payload: unknown, model: Model<never>
 /** Require one exposed tool for the next provider round while preserving the full schema surface. */
 export function patchToolChoiceNamedPayload(
 	payload: unknown,
-	model: Model<never>,
+	model: EngineModel,
 	toolName: string,
 ): unknown | undefined {
 	if (!isRecord(payload) || toolName.trim().length === 0) return undefined;
@@ -243,7 +243,7 @@ export interface WorkerPayloadPatchOptions {
 /** Compose all worker-owned request mutations over one payload in a stable order. */
 export function patchWorkerRequestPayload(
 	payload: unknown,
-	model: Model<never>,
+	model: EngineModel,
 	options: WorkerPayloadPatchOptions,
 ): unknown | undefined {
 	let patched = payload;
@@ -280,7 +280,7 @@ export function patchWorkerRequestPayload(
 
 export function patchReasoningSummaryPayload(
 	payload: unknown,
-	model: Model<never>,
+	model: EngineModel,
 	thinkingLevel: ThinkingLevel | undefined,
 ): unknown | undefined {
 	return patchProviderThinkingPayload(payload, model, thinkingLevel);

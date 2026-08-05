@@ -16,7 +16,7 @@ import type { MessageEntry, SessionEntry } from "../../src/domains/session/entri
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { fauxAssistantMessage, registerFauxProvider } from "../../src/engine/ai.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
-import type { AgentEvent, AgentMessage, Model } from "../../src/engine/types.js";
+import type { AgentEvent, AgentMessage, EngineModel } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -39,7 +39,7 @@ function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSett
 	return value;
 }
 
-function providers(modelOverride?: Model<never>): ProvidersContract {
+function providers(modelOverride?: EngineModel): ProvidersContract {
 	const target: TargetDescriptor = {
 		id: "test-target",
 		runtime: "fake-runtime",
@@ -331,7 +331,7 @@ async function runProductionFailureScenario(
 					})
 				: fauxAssistantMessage("## Goal\nPersist the production summary."),
 		]);
-		const model = faux.getModel("model") as unknown as Model<never>;
+		const model = faux.getModel("model") as EngineModel;
 		const productionProviders = providers(model);
 		const currentSettings = settings({ threshold: 0.2 });
 		const loop = createChatLoop({
@@ -589,7 +589,7 @@ describe("contracts/production compaction failure wiring", () => {
 
 		try {
 			session.create({ cwd: isolated.dir, model: "model", target: "test-target" });
-			const model = faux.getModel("model") as unknown as Model<never>;
+			const model = faux.getModel("model") as EngineModel;
 			const productionProviders = providers(model);
 			const currentSettings = settings();
 			const loop = createChatLoop({

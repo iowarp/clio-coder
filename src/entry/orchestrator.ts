@@ -139,7 +139,7 @@ import {
 	readOrchTurnToolCallBudget,
 } from "../engine/loop-guard.js";
 import { openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
-import type { ImageContent, Model } from "../engine/types.js";
+import type { EngineModel, ImageContent, Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { buildReplayAgentMessagesFromTurns } from "../interactive/chat-renderer.js";
 import { type RunIo, startInteractive } from "../interactive/index.js";
@@ -246,7 +246,7 @@ function applyHeadlessSettingsOverlay(
 }
 
 interface CompactionResolution {
-	model: Model<never>;
+	model: EngineModel;
 	targetId: string;
 	apiKey?: string;
 }
@@ -298,11 +298,7 @@ function createBackgroundMemoryModelClient(
 		throw new Error(detail);
 	}
 	const kbHit = providers.knowledgeBase?.lookup(resolved.target.wireModelId) ?? null;
-	const model = resolved.target.runtime.synthesizeModel(
-		resolved.target.target,
-		resolved.target.wireModelId,
-		kbHit,
-	) as unknown as Model<never>;
+	const model = resolved.target.runtime.synthesizeModel(resolved.target.target, resolved.target.wireModelId, kbHit);
 	const refined = refineRuntimeTargetWithModelHints(resolved.target, model, providers.knowledgeBase);
 	applyModelCapabilityPatch(model, refined.capabilities);
 	return {
@@ -328,13 +324,13 @@ export function synthesizeOrchestratorModel(
 	providers: ProvidersContract,
 	target: TargetDescriptor,
 	wireModelId: string,
-): Model<never> | null {
+): EngineModel | null {
 	const runtime = providers.getRuntime(target.runtime);
 	if (!runtime) return null;
-	let model: Model<never>;
+	let model: EngineModel;
 	try {
 		const kbHit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
-		model = runtime.synthesizeModel(target, wireModelId, kbHit) as unknown as Model<never>;
+		model = runtime.synthesizeModel(target, wireModelId, kbHit);
 	} catch {
 		return null;
 	}

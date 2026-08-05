@@ -207,7 +207,7 @@ describe("contracts/alcf-oauth", () => {
 
 		strictEqual(alcfOAuthProvider.id, "alcf");
 		strictEqual(alcfOAuthProvider.usesCallbackServer, false);
-		strictEqual(alcfOAuthProvider.getApiKey({ access: "BEARER", refresh: "r", expires: 1 }), "BEARER");
+		strictEqual(await alcfOAuthProvider.getApiKey({ access: "BEARER", refresh: "r", expires: 1 }), "BEARER");
 	});
 
 	it("keeps the gateway client id and scope wired to clio-agent values", () => {

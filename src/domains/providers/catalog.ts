@@ -31,7 +31,7 @@ export function listCatalogModelsForRuntime(runtimeId: string): Model<Api>[] {
 	const provider = catalogProviderForRuntime(runtimeId);
 	if (!provider) return [];
 	try {
-		return engineAi.listModels(provider) as unknown as Model<Api>[];
+		return engineAi.listModels(provider);
 	} catch {
 		return [];
 	}
@@ -86,7 +86,7 @@ export function getCatalogModelForRuntime(runtimeId: string, wireModelId: string
 	const provider = catalogProviderForRuntime(runtimeId);
 	if (!provider) return undefined;
 	try {
-		return engineAi.getModel(provider, wireModelId) as unknown as Model<Api> | undefined;
+		return engineAi.getModel(provider, wireModelId);
 	} catch {
 		return undefined;
 	}

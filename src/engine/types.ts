@@ -34,12 +34,24 @@ export type MutableAgentState = Omit<PiAgentState, "errorMessage"> & {
 };
 
 export type {
+	AnthropicMessagesCompat,
 	Api,
 	ImageContent,
 	KnownProvider,
 	Model,
+	OpenAICompletionsCompat,
 	Usage,
 } from "@earendil-works/pi-ai";
+
+import type { Api as PiApi, Model as PiModel } from "@earendil-works/pi-ai";
+
+/**
+ * The one Clio-facing model shape. Runtime descriptors synthesize
+ * `Model<Api>` values and every consumer (chat loop, orchestrator, worker
+ * runtime, payload patchers) holds this erased view; `Model<never>` and the
+ * `as unknown as` casts it forced are banned.
+ */
+export type EngineModel = PiModel<PiApi>;
 export type {
 	EditorOptions,
 	EditorTheme,

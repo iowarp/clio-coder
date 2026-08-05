@@ -7,7 +7,7 @@ import { collectSessionEntries } from "../../src/domains/session/compaction/sess
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { fauxAssistantMessage, registerFauxProvider } from "../../src/engine/ai.js";
-import type { Model } from "../../src/engine/types.js";
+import type { EngineModel } from "../../src/engine/types.js";
 import { buildReplayAgentMessagesFromTurns, selectReplayEntries } from "../../src/interactive/chat-renderer.js";
 import { renderCompactionSummaryLine } from "../../src/interactive/renderers/compaction-summary.js";
 
@@ -264,7 +264,7 @@ describe("contracts/context compaction cumulative replay", () => {
 				assistant("07", [{ type: "text", text: "The active skill is loaded." }], "04"),
 			];
 
-			const model = faux.getModel(modelId) as unknown as Model<never>;
+			const model = faux.getModel(modelId) as EngineModel;
 			const first = await compact({ entries: firstEntries, model, keepRecentTokens: 1 });
 			strictEqual(first.firstKeptTurnId, "04");
 			strictEqual(first.isSplitTurn, false, "skill protection widens the first cut to the skill turn");
