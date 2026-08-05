@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe("boundaries", () => {
-	it("no rule1/rule2/rule3 violations across src/", () => {
+	it("no boundary violations across src/", () => {
 		const result = runBoundaryCheck(PROJECT_ROOT);
 		if (result.violations.length > 0) {
 			console.error("Boundary violations:");
@@ -49,6 +49,46 @@ describe("boundaries", () => {
 			),
 			result.violations.join("\n"),
 		);
+	});
+
+	it("rejects a tool reaching into interactive code", () => {
+		const root = fixtureProject({
+			"src/tools/read.ts":
+				'import { createChatPanel } from "../interactive/chat-panel.js";\nexport const panel = createChatPanel;',
+			"src/interactive/chat-panel.ts": "export function createChatPanel() {}",
+		});
+
+		const result = runBoundaryCheck(root);
+
+		ok(
+			result.violations.some((violation) => violation.includes("rule4")),
+			result.violations.join("\n"),
+		);
+	});
+
+	it("rejects a chat-loop turn module importing the entry point", () => {
+		const root = fixtureProject({
+			"src/interactive/turn-runtime.ts":
+				'import { bootOrchestrator } from "../entry/orchestrator.js";\nexport const boot = bootOrchestrator;',
+			"src/entry/orchestrator.ts": "export function bootOrchestrator() {}",
+		});
+
+		const result = runBoundaryCheck(root);
+
+		ok(
+			result.violations.some((violation) => violation.includes("rule5")),
+			result.violations.join("\n"),
+		);
+	});
+
+	it("allows a non-turn interactive module to import entry wiring", () => {
+		const root = fixtureProject({
+			"src/interactive/index.ts":
+				'import type { BootOptions } from "../entry/orchestrator.js";\nexport type Opts = BootOptions;',
+			"src/entry/orchestrator.ts": "export interface BootOptions { headless?: boolean }",
+		});
+
+		strictEqual(runBoundaryCheck(root).violations.length, 0);
 	});
 
 	it("rejects non-engine pi value imports", () => {
