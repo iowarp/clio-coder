@@ -113,9 +113,7 @@ async function startToolCallFixture(): Promise<{ server: Server; url: string }> 
 				})}\n\n`,
 			);
 		} else {
-			res.write(
-				`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { content: "finished" } }] })}\n\n`,
-			);
+			res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { content: "finished" } }] })}\n\n`);
 			res.write(
 				`data: ${JSON.stringify({
 					...base,

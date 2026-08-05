@@ -98,6 +98,8 @@ export const gitTool: ToolSpec = {
 		name_only: Type.Optional(Type.Boolean({ description: "diff: file names only." })),
 		limit: Type.Optional(Type.Number({ description: "log: commits to show (default 20, max 200)." })),
 		cwd: Type.Optional(Type.String({ description: "Working directory." })),
+		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in ms (default 120000)." })),
+		max_output_bytes: Type.Optional(Type.Number({ description: "Output cap in bytes (default 600000)." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",

@@ -636,7 +636,11 @@ export const webFetchTool: ToolSpec = {
 		body: Type.Optional(Type.String({ description: "Request body (POST/PUT)." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms (default 30000)." })),
 		max_bytes: Type.Optional(Type.Number({ description: "Max bytes returned (default 600000)." })),
-		format: Type.Optional(Type.String({ description: "auto (HTML to Markdown), markdown, or raw." })),
+		format: Type.Optional(
+			Type.String({
+				description: "auto (default: HTML is cleaned to Markdown, other content passes through) or raw (no conversion).",
+			}),
+		),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",

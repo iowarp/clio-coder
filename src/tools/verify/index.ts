@@ -43,6 +43,7 @@ export const verifyTool: ToolSpec = {
 		browser: Type.Optional(stringEnum(BROWSER_MODES, "check=frontend: headless browser mode (default auto).")),
 		cwd: Type.Optional(Type.String({ description: "Working directory." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in ms (default 120000)." })),
+		max_output_bytes: Type.Optional(Type.Number({ description: "Output cap in bytes (default 600000)." })),
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",
