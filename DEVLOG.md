@@ -58,7 +58,11 @@ boundaries enforced against the checkout.
   `unknown` cost provenance rather than fabricated price data. The scratch
   repositories are under `/tmp/clio-v029-*`; the isolated evidence store is
   `/tmp/clio-v029-evidence/state`, with its trace database at
-  `trace.sqlite`.
+  `trace.sqlite`. The unreconciled settings had been accepted silently:
+  `validateWorkerTarget()` in `src/core/config.ts` checks that a worker target
+  id exists and that its model is a string, but does not require that model to
+  occur in the selected target's `wireModels`. That validation gap remains a
+  reported defect; the live configuration itself is now consistent.
 
   Deterministic fleet validation rejected both an unknown command id and a
   missing registry with exit 2 before creating state or data directories. A
