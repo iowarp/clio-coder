@@ -70,7 +70,7 @@ import {
 	sanitizeLockedSynthesisMessage,
 } from "./loop-guard.js";
 import { patchWorkerRequestPayload } from "./provider-payload.js";
-import type { AgentEvent, AgentMessage, EngineModel, Model } from "./types.js";
+import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
 

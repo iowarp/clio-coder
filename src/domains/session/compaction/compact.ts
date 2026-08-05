@@ -11,7 +11,7 @@
  */
 
 import { stream } from "../../../engine/ai.js";
-import type { EngineModel, Model } from "../../../engine/types.js";
+import type { EngineModel } from "../../../engine/types.js";
 import type { SessionEntry } from "../entries.js";
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
