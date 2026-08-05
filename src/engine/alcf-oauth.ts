@@ -7,7 +7,8 @@
  * callback.
  */
 
-import type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderInterface } from "@earendil-works/pi-ai";
+import type { OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
+import type { EngineOAuthProvider } from "./oauth.js";
 
 export const AUTH_CLIENT_ID = "58fdd3bc-e1c3-4ce5-80ea-8d6b87cfb944";
 export const GATEWAY_CLIENT_ID = "681c10cc-f684-4540-bcd7-0b4df3bc26ef";
@@ -181,7 +182,7 @@ export async function loginAlcf(callbacks: OAuthLoginCallbacks): Promise<OAuthCr
 	return exchangeCode(code, verifier);
 }
 
-export const alcfOAuthProvider: OAuthProviderInterface = {
+export const alcfOAuthProvider: EngineOAuthProvider = {
 	id: "alcf",
 	name: "ALCF Inference (Globus)",
 	usesCallbackServer: false,
@@ -191,7 +192,7 @@ export const alcfOAuthProvider: OAuthProviderInterface = {
 	refreshToken(credentials) {
 		return refreshGatewayToken(credentials.refresh);
 	},
-	getApiKey(credentials) {
+	async getApiKey(credentials) {
 		return credentials.access;
 	},
 };

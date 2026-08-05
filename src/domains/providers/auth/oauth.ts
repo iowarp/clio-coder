@@ -1,19 +1,19 @@
 import {
+	type EngineOAuthProvider,
 	getEngineOAuthApiKey,
 	getEngineOAuthProvider,
 	listEngineOAuthProviders,
 	loginWithEngineOAuthProvider,
 	type OAuthCredentials,
 	type OAuthLoginCallbacks,
-	type OAuthProviderInterface,
 	refreshEngineOAuthCredentials,
 } from "../../../engine/oauth.js";
 
-export function getOAuthProvider(providerId: string): OAuthProviderInterface | undefined {
+export function getOAuthProvider(providerId: string): EngineOAuthProvider | undefined {
 	return getEngineOAuthProvider(providerId);
 }
 
-export function listOAuthProviders(): OAuthProviderInterface[] {
+export function listOAuthProviders(): EngineOAuthProvider[] {
 	return listEngineOAuthProviders();
 }
 
@@ -31,6 +31,6 @@ export async function refreshOAuthCredentials(
 	return refreshEngineOAuthCredentials(providerId, credentials);
 }
 
-export function getOAuthApiKey(providerId: string, credentials: OAuthCredentials): string {
+export function getOAuthApiKey(providerId: string, credentials: OAuthCredentials): Promise<string> {
 	return getEngineOAuthApiKey(providerId, credentials);
 }

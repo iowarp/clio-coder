@@ -401,7 +401,7 @@ export class AuthStorage {
 				return { result: null };
 			}
 			if (Date.now() < stored.expires) {
-				return { result: { apiKey: getOAuthApiKey(providerId, stored), credential: stored } };
+				return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored } };
 			}
 			const refreshed = await refreshOAuthCredentials(providerId, stored);
 			const next: OAuthCredential = {
@@ -412,7 +412,7 @@ export class AuthStorage {
 			const merged: AuthStorageData = { ...currentData, [providerId]: next };
 			this.data = merged;
 			return {
-				result: { apiKey: getOAuthApiKey(providerId, next), credential: next },
+				result: { apiKey: await getOAuthApiKey(providerId, next), credential: next },
 				next: serializeStorageData(merged),
 			};
 		});
@@ -467,7 +467,7 @@ export class AuthStorage {
 					credentialType: "oauth",
 					source: "stored-oauth",
 					detail: providerId,
-					apiKey: getOAuthApiKey(providerId, stored),
+					apiKey: await getOAuthApiKey(providerId, stored),
 				};
 			}
 			try {
@@ -493,7 +493,7 @@ export class AuthStorage {
 						credentialType: "oauth",
 						source: "stored-oauth",
 						detail: providerId,
-						apiKey: getOAuthApiKey(providerId, updated),
+						apiKey: await getOAuthApiKey(providerId, updated),
 					};
 				}
 			}
