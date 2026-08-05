@@ -139,7 +139,7 @@ import {
 	readOrchTurnToolCallBudget,
 } from "../engine/loop-guard.js";
 import { openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
-import type { EngineModel, ImageContent, Model } from "../engine/types.js";
+import type { EngineModel, ImageContent } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { buildReplayAgentMessagesFromTurns } from "../interactive/chat-renderer.js";
 import { type RunIo, startInteractive } from "../interactive/index.js";
