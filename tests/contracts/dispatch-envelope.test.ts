@@ -6,7 +6,7 @@ import type { DispatchRequest } from "../../src/domains/dispatch/index.js";
 import { firstAvailableRouteCandidate } from "../../src/domains/dispatch/route-candidates.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
-import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import { holdEventLoop, isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const TARGET = "route-target";
@@ -197,6 +197,9 @@ describe("dispatch failover envelopes", () => {
 			resilienceCooldownMs: 0,
 		});
 		await bundle.extension.start();
+		// Stall detection here is the unref'd heartbeat watchdog; the fake worker
+		// carries no handle of its own to keep the loop running until it fires.
+		const held = holdEventLoop();
 		try {
 			const handle = await bundle.contract.dispatch(request({ failover: "approved", allowedCandidates: candidates }));
 			const terminal = await handle.finalPromise;
@@ -204,6 +207,7 @@ describe("dispatch failover envelopes", () => {
 			strictEqual(terminal.node?.id, "local");
 			deepStrictEqual(spawns, ["blade", "local"]);
 		} finally {
+			held.release();
 			await bundle.extension.stop?.();
 		}
 	});

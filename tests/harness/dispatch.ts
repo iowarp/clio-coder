@@ -73,3 +73,28 @@ export function restoreDispatchState(): void {
 	isolated?.restore();
 	isolated = null;
 }
+
+/**
+ * Hold the event loop open for the duration of a test.
+ *
+ * The heartbeat watchdog is deliberately unref'd in production: a stall
+ * detector must never be the reason a finished CLI process stays alive. In a
+ * real dispatch the worker's own child-process handles keep the loop running
+ * long enough for the watchdog to fire, but a test whose worker is a plain
+ * object has no such handle. Node 22 then settles the loop while the test is
+ * still awaiting a promise only the watchdog can resolve, and the test is
+ * cancelled with "Promise resolution is still pending". Node 24 happens to
+ * keep a handle of its own, which is why this only ever showed up on 22.
+ *
+ * Any test that waits on stall detection, heartbeat classification, or another
+ * unref'd timer holds this and releases it in a `finally`.
+ */
+export function holdEventLoop(): { release(): void } {
+	const timer = setInterval(() => {}, 1_000);
+	timer.ref?.();
+	return {
+		release(): void {
+			clearInterval(timer);
+		},
+	};
+}

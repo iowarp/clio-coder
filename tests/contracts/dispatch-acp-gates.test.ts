@@ -13,7 +13,7 @@ import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import type { AcpDelegationRunHandle, AcpDelegationRunInput } from "../../src/engine/acp/adapter.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
-import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import { holdEventLoop, isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 type ToolRunResult =
@@ -427,6 +427,9 @@ describe("ACP gate role authority", () => {
 			startAcpDelegationRun: () => stalled.handle,
 		});
 		await stalledBundle.extension.start();
+		// The stall is detected by the unref'd heartbeat watchdog, and this
+		// bundle's ACP handle is a plain object with no handle of its own.
+		const held = holdEventLoop();
 		try {
 			const handle = await stalledBundle.contract.dispatch({
 				executionRole: "builder",
@@ -438,6 +441,7 @@ describe("ACP gate role authority", () => {
 			strictEqual(stalled.kills(), 1);
 			strictEqual(receipt.outcome, "stalled");
 		} finally {
+			held.release();
 			await stalledBundle.extension.stop?.();
 		}
 
