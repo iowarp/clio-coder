@@ -1234,6 +1234,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 	});
 
+	// Coordinated shutdown (SIGINT/SIGTERM, TUI quit) must abort any in-flight
+	// turn before domains stop. The agent abort fans out to every running
+	// tool's AbortSignal, and bash-exec answers it by signalling the tool's
+	// detached process group. Without this, a headless SIGINT exited the CLI
+	// while a running tool's children survived as orphans of init.
+	termination.onDrain(() => {
+		chat.dispose();
+	});
+
 	// A boot-time resume (CLIO_RESUME_SESSION_ID) must replay the resumed
 	// session into the chat loop the same way the interactive /resume overlay
 	// does. Without this, the first submit runs with an empty provider context
