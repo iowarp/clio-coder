@@ -1024,12 +1024,41 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const sessionOverrides: SessionOverrides = new Map(
 		options.headless?.autonomy === undefined ? [] : [["autonomy", options.headless.autonomy]],
 	);
+	// The effective view is derived by deep-cloning the saved snapshot, and it
+	// is read on the tool-admission hot path (every call resolves autonomy
+	// through it). Memoize on the two things it depends on: the config
+	// domain's snapshot identity (swapped wholesale on every update and
+	// external hot reload) and a generation counter bumped by every session
+	// routing/override mutation below. Without this, one tool call cost a full
+	// settings structuredClone.
+	let sessionStateGeneration = 0;
+	let cachedSettingsBase: Readonly<ClioSettings> | null = null;
+	let cachedSettingsGeneration = -1;
+	let cachedSettingsView: ClioSettings | null = null;
+	const bumpSessionState = (): void => {
+		sessionStateGeneration += 1;
+	};
 	const getCurrentSettings = (): ClioSettings => {
 		// Recents live in the data dir (core/recent-models.ts), never in
 		// settings.yaml; consumers that need them call listRecentModels
 		// directly, so an Alt+L pick in another session does not churn the
 		// config watcher here.
-		return applySessionRouting(applyOverrides(config?.get() ?? readSettings(), sessionOverrides), sessionRouting);
+		const base = config?.get();
+		// No config domain (unit tests, degraded boot): readSettings() returns a
+		// fresh object every call, so there is nothing stable to key a cache on.
+		if (base === undefined) return applySessionRouting(applyOverrides(readSettings(), sessionOverrides), sessionRouting);
+		if (
+			cachedSettingsView !== null &&
+			cachedSettingsBase === base &&
+			cachedSettingsGeneration === sessionStateGeneration
+		) {
+			return cachedSettingsView;
+		}
+		const view = applySessionRouting(applyOverrides(base, sessionOverrides), sessionRouting);
+		cachedSettingsBase = base;
+		cachedSettingsGeneration = sessionStateGeneration;
+		cachedSettingsView = view;
+		return view;
 	};
 	effectiveSettingsForDispatch = getCurrentSettings;
 	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
@@ -1095,6 +1124,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 */
 	const updateSessionRouting = (patch: RoutingPatch, mutateSaved?: (saved: ClioSettings) => void): void => {
 		applyRoutingPatch(sessionRouting, patch);
+		bumpSessionState();
 		persistSavedMutation((saved) => {
 			mergeRoutingPatchIntoSettings(saved, patch);
 			mutateSaved?.(saved);
@@ -1108,7 +1138,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 */
 	const applySettingsBlob = (next: ClioSettings): void => {
 		const patch = diffRouting(getCurrentSettings(), next);
-		if (patch) applyRoutingPatch(sessionRouting, patch);
+		if (patch) {
+			applyRoutingPatch(sessionRouting, patch);
+			bumpSessionState();
+		}
 		persistSavedMutation((fresh) => {
 			const persisted = structuredClone(next);
 			restoreRoutingFields(persisted, fresh);
@@ -1141,15 +1174,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const patch = routingPatchForId(id, next);
 			if (!patch) return;
 			applyRoutingPatch(sessionRouting, patch);
+			bumpSessionState();
 			if (scope === "global") persistSavedMutation((saved) => mergeRoutingPatchIntoSettings(saved, patch));
 			return;
 		}
 		const value = getAtPath(next, id);
 		if (scope === "session") {
 			sessionOverrides.set(id, value);
+			bumpSessionState();
 			return;
 		}
 		sessionOverrides.delete(id);
+		bumpSessionState();
 		persistSavedMutation((saved) => setAtPath(saved, id, value));
 	};
 	/** Alt+J / Alt+K: step this session's orchestrator through the scope list. */

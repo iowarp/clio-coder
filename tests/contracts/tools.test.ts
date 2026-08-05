@@ -11,7 +11,7 @@ import type { DispatchContract, DispatchRequest } from "../../src/domains/dispat
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
-import { resolveAgentTools } from "../../src/engine/worker-tools.js";
+import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { credentialPresentTool } from "../../src/tools/credential-present.js";

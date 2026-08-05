@@ -2,7 +2,8 @@ import { match, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { formatModelRejection, formatRejection } from "../../src/domains/safety/rejection-feedback.js";
-import { createWorkerSafety, createWorkerToolRegistry, invokeWorkerTool } from "../../src/engine/worker-tools.js";
+import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
+import { invokeRegisteredTool } from "../../src/tools/agent-tools.js";
 
 const PIVOT_LINE =
 	"Do not retry this action through another tool unless a hint above names one; pivot or report the blocker.";
@@ -88,7 +89,7 @@ describe("blocked tool errors surface recovery guidance to the model", () => {
 			"full-auto",
 		);
 		await rejects(
-			invokeWorkerTool(registry, ToolNames.Read, { path: ".env" }),
+			invokeRegisteredTool(registry, ToolNames.Read, { path: ".env" }),
 			(err: unknown) => {
 				ok(err instanceof Error);
 				match(err.message, /read blocked/, "the terse label still leads");

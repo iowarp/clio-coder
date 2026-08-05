@@ -9,8 +9,8 @@ import {
 } from "../../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type { RejectionMessage } from "../../domains/safety/rejection-feedback.js";
+import type { ToolFinishEvent, ToolStartEvent } from "../../tools/agent-tools.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
-import type { ToolFinishEvent, ToolStartEvent } from "../worker-tools.js";
 
 export interface MappedClaudeToolCall {
 	claudeToolName: string;

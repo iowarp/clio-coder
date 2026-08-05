@@ -417,7 +417,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		} else {
 			exitCode = 1;
 			failureMessage =
-				result.lastNotice !== null ? `clio run: no assistant response (${result.lastNotice})` : "clio run: no assistant response";
+				result.lastNotice !== null
+					? `clio run: no assistant response (${result.lastNotice})`
+					: "clio run: no assistant response";
 			stderrMessage = failureMessage;
 		}
 	} else if (mode === "text") {

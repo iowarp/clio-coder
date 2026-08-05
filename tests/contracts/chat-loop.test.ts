@@ -590,8 +590,7 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 		);
 		strictEqual(abortedEnds.length, 0, "the empty aborted message never reaches the live transcript");
 		const closingNotices = seen.filter(
-			(event) =>
-				event.type === "notice" && event.key === "turn.interrupted" && event.text.includes("loop guard stopped"),
+			(event) => event.type === "notice" && event.key === "turn.interrupted" && event.text.includes("loop guard stopped"),
 		);
 		strictEqual(closingNotices.length, 1, "the closing notice is shown live exactly once, as a typed notice");
 	});
