@@ -42,6 +42,9 @@ skills:
   - name: scientific-debugging
     version: 0.1.1
     sha256: d3e7888dcab6f0264c190a693522a33bfcb3ed3e091505db403852b351f9e255
+  - name: scientific-modernization
+    version: 0.1.0
+    sha256: 795ceb6f9c729833a07abdf8bcd5d89cac88dab1bb49143be2a4ca71005e89b9
   - name: skill-craft
     version: 0.1.0
     sha256: 09276e213488d8c08e45251e58b0c062791302460a0def23358f9cc92fe55c9e
