@@ -43,7 +43,6 @@ export async function runWithBudget(
 	let timer: NodeJS.Timeout | undefined;
 	const timeout = new Promise<"timeout">((resolve) => {
 		timer = setTimeout(() => resolve("timeout"), budgetMs);
-		timer.unref?.();
 	});
 	try {
 		const done = Promise.resolve()

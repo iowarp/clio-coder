@@ -52,7 +52,6 @@ export function createDelayedManualCodeInput(
 					timer = null;
 					beginPrompt();
 				}, delayMs);
-				timer.unref?.();
 			}),
 		cancel: () => {
 			if (cancelled) return;
