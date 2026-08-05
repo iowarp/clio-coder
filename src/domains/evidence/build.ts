@@ -78,6 +78,8 @@ interface AuditLinkResult {
 	readErrors: string[];
 }
 
+type EvidenceSource = { kind: "run"; runId: string } | { kind: "session"; sessionId: string };
+
 export async function buildEvidence(options: BuildEvidenceOptions): Promise<EvidenceBuildResult> {
 	if (options.runId !== undefined && options.sessionId !== undefined) {
 		throw new Error("build evidence accepts either runId or sessionId, not both");
@@ -85,15 +87,11 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 	if (options.runId === undefined && options.sessionId === undefined) {
 		throw new Error("build evidence requires runId or sessionId");
 	}
-	const ledger = await readRunLedger(options.stateDir);
-	const source =
+	const source: EvidenceSource =
 		options.runId !== undefined
-			? { kind: "run" as const, runId: options.runId }
-			: { kind: "session" as const, sessionId: options.sessionId ?? "" };
-	const envelopes =
-		source.kind === "run"
-			? ledger.filter((entry) => entry.id === source.runId)
-			: ledger.filter((entry) => entry.sessionId === source.sessionId);
+			? { kind: "run", runId: options.runId }
+			: { kind: "session", sessionId: options.sessionId ?? "" };
+	const envelopes = await readRunLedger(options.stateDir, source);
 	if (envelopes.length === 0) {
 		throw new Error(source.kind === "run" ? `run not found: ${source.runId}` : `session not found: ${source.sessionId}`);
 	}
@@ -1216,7 +1214,7 @@ function renderFindings(findings: ReadonlyArray<EvidenceFinding>): string {
 	return `${lines.join("\n")}\n`;
 }
 
-async function readRunLedger(stateDir: string): Promise<RunEnvelope[]> {
+async function readRunLedger(stateDir: string, source: EvidenceSource): Promise<RunEnvelope[]> {
 	const target = join(stateDir, "runs.json");
 	let raw: string;
 	try {
@@ -1228,7 +1226,14 @@ async function readRunLedger(stateDir: string): Promise<RunEnvelope[]> {
 	}
 	const parsed = parseJson(raw, target);
 	if (!Array.isArray(parsed)) throw new Error(`${target}: expected array`);
-	return parsed.map((entry, index) => parseRunEnvelope(entry, `${target}[${index}]`));
+	// Strictly validate the selected evidence source, not every retained row:
+	// older rows may use a retired envelope shape. Keep the original index so
+	// corruption in a selected row still fails with an actionable location.
+	return parsed.flatMap((entry, index) => {
+		if (!isRecord(entry)) return [];
+		const selected = source.kind === "run" ? entry.id === source.runId : entry.sessionId === source.sessionId;
+		return selected ? [parseRunEnvelope(entry, `${target}[${index}]`)] : [];
+	});
 }
 
 async function readReceipt(

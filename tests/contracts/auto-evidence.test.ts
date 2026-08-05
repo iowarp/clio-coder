@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
+import { buildEvidence } from "../../src/domains/evidence/index.js";
 import { readAccountabilitySummary } from "../../src/domains/observability/accountability.js";
 import { readEvidenceIndex } from "../../src/domains/observability/evidence-index.js";
 import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
@@ -499,6 +500,58 @@ describe("auto-build evidence on dispatch completion", { concurrency: false }, (
 		const rows = readEvidenceIndex(scratch.stateDir);
 		strictEqual(rows.length, runIds.length);
 		deepStrictEqual(rows.map((row) => row.runId).sort(), [...runIds].sort());
+	});
+
+	it("builds current run evidence when an unrelated legacy ledger row lacks an execution role", async () => {
+		const runId = "current-run-after-role";
+		const legacy = runEnvelope("legacy-run-before-role");
+		Reflect.deleteProperty(legacy, "executionRole");
+		writeFileSync(
+			join(scratch.stateDir, "runs.json"),
+			`${JSON.stringify([runEnvelope(runId), legacy], null, 2)}\n`,
+			"utf8",
+		);
+		const context = makeContext();
+		const bundle = createObservabilityBundle(context);
+		await bundle.extension.start();
+
+		context.bus.emit(BusChannels.DispatchCompleted, {
+			runId,
+			agentId: "agent-smoke",
+			targetId: "target-smoke",
+			wireModelId: "model-smoke",
+			runtimeId: "runtime-smoke",
+			runtimeKind: "subprocess",
+			requestOrigin: "user",
+			outcome: "succeeded",
+			outcomeCode: null,
+			outcomeDetail: null,
+			lineage: { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 },
+			tokenCount: 0,
+			inputTokenCount: 0,
+			outputTokenCount: 0,
+			cacheReadTokenCount: 0,
+			cacheWriteTokenCount: 0,
+			reasoningTokenCount: 0,
+			staticShellHash: null,
+			sessionShellHash: null,
+			dynamicHash: null,
+			costUsd: 0,
+			durationMs: 1000,
+			exitCode: 0,
+			toolActivity: null,
+		});
+
+		await bundle.extension.stop?.();
+
+		ok(existsSync(join(scratch.dataDir, "evidence", `run-${runId}`)));
+		const rows = readEvidenceIndex(scratch.stateDir);
+		strictEqual(rows.length, 1);
+		strictEqual(rows[0]?.runId, runId);
+		await rejects(
+			buildEvidence({ dataDir: scratch.dataDir, stateDir: scratch.stateDir, runId: "legacy-run-before-role" }),
+			/runs\.json\[1\]: executionRole is missing or not a known execution role/,
+		);
 	});
 
 	it("swallows a build that throws for an unknown runId and never crashes", async () => {
