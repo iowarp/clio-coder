@@ -12,7 +12,7 @@ The codewiki currently indexes 942 source files. Start orientation with these in
 
 ## Repository shape
 
-Largest indexed areas: src/domains (401), tests/contracts (259), src/interactive (83), src/cli (48), src/tools (44), src/engine (40), src/core (35), benchmarks/community (9). Treat this as an orientation hint, not a complete file map; refresh the codewiki after structural edits.
+Largest indexed areas: src/domains (401), tests/contracts (262), src/interactive (89), src/cli (48), src/tools (45), src/engine (40), src/core (35), benchmarks/community (9). Treat this as an orientation hint, not a complete file map; refresh the codewiki after structural edits.
 
 ## Verification expectations
 
@@ -88,6 +88,73 @@ Stored eval artifacts require complete `clio`, `environment`, and `paths` proven
 - The admitted recipe's contract rides the WorkerSpec. The worker validates its own terminal result and spends up to `RESULT_CONTRACT_REPAIR_LIMIT` bounded repair rounds, replaying the validator's reason, the accepted shape, and this run's live-read anchors; exhausting them fails the run with `result_contract_exhausted`. The orchestrator's sealed validation stays the authority.
 - A `scout-report` carries findings as `{claim, path, line}`. Grounding is structural, not a regex over prose, and a split recommendation is the one case that carries subtasks instead of findings.
 - Citation grounding needs the run's own read spans, which exist only in the worker. Where `observedReadRanges` is supplied, a cited line must fall inside a span this run actually read, so an estimated line number cannot pass as observation. The orchestrator revalidates without those spans and checks shape and file/line existence; a grounding failure has already ended the run at the worker.
+
+## Engine boundary
+
+- `src/engine/types.ts` is the one place pi types enter the codebase.
+  `EngineModel` is the erased `Model<Api>` view every consumer holds;
+  `Model<never>` and the `as unknown as Model<...>` casts it forced are gone.
+- No file outside `src/engine/**` imports `@earendil-works/*`, type-only
+  included. Domains take their shapes from the engine barrel.
+- `createEngineAgent` is the only agent construction site and owns the default
+  stream function that pi 0.83 requires explicitly.
+- `src/engine/oauth.ts` keeps a Clio-owned OAuth registry adapting pi's
+  per-provider `ProviderAuth.oauth` flows; pi's global registry is gone
+  upstream. `EngineOAuthProvider.getApiKey` is async.
+
+## The chat loop
+
+- `src/interactive/chat-loop.ts` is the turn's state machine and the ChatLoop
+  public surface. It composes single-owner modules that coordinate through one
+  shared `ChatTurnState` (`src/interactive/turn-state.ts`): `turn-runtime.ts`
+  (target resolution, hot-swap, agent construction, run-event enrichment),
+  `turn-context.ts` (prompt compile cache, snapshots, compaction),
+  `turn-recovery.ts` (overflow compact-and-retry, transient retries),
+  `turn-queues.ts` (steer/follow-up mirror, stranded-steer resubmit),
+  `turn-persistence.ts` (every ledger append), `turn-middleware.ts` (turn
+  hooks and the reminder buffer).
+- `runAutoCompact` in `turn-context.ts` is the one compaction entry point.
+- `ChatLoop.whenSettled()` resolves when the in-flight submit has fully
+  settled. Coordinated shutdown awaits it in the drain phase, so a
+  `session.append` after session stop is impossible by ordering rather than by
+  catching the throw.
+
+## Notices
+
+- Notices are the typed `notice` ChatLoopEvent variant carrying a `surface`
+  discriminator (`transcript` or `footer`). They are never assistant messages,
+  never carry usage, and never end a run.
+- Headless result derivation keys on event types and stop reasons, never on
+  text prefixes. An interrupted turn (notice keyed `turn.interrupted`) exits
+  nonzero with its abort reason even when partial assistant text landed.
+
+## Tool substrate
+
+- `src/tools/agent-tools.ts` is the one agent-tool adapter, owned by the
+  registry. The orchestrator and the worker both resolve their surface here,
+  so the attested tool signature and the executable surface are computed by
+  the same `effectiveToolNames` narrowing. `src/engine/worker-tools.ts` keeps
+  only worker-specific construction.
+- Tools are keyed by the `ToolName` union with no alias table;
+  `prepareArguments` normalizers are the only leniency layer.
+- The orchestrator's effective settings view is memoized on the config
+  snapshot identity plus a session-state generation counter, because tool
+  admission resolves autonomy through it on every call.
+- `resolveEffectiveAutonomy` / `resolveBaselineAutonomy` in
+  `src/entry/orchestrator.ts` are the one effective-autonomy resolution.
+
+## Boundaries
+
+Enforced by `npm run check:boundaries`:
+
+1. Only `src/engine/**` may import `@earendil-works/pi-*`, type-only included.
+2. `src/worker/**` never value-imports `src/domains/**` except the worker-safe
+   provider runtime rehydration modules.
+3. `src/domains/<x>` never imports `src/domains/<y>/extension.ts` for y != x.
+4. `src/tools/**` never imports `src/interactive/**`; the tool substrate is
+   surface-agnostic.
+5. The chat loop's turn modules never import `src/entry/**`; the entry point
+   composes the loop, never the reverse.
 
 ## Worker runtime
 

@@ -5,6 +5,167 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
+## Unreleased - v0.3.0 hardening session 4: the main loop, the tool substrate, and the engine seam
+
+Session 1 mapped the hot path. This session re-engineered it: the SDK moved
+forward, the engine seam got one owner, the chat loop became a state machine
+composed of single-owner modules, notices stopped pretending to be answers,
+and the tool adapter collapsed to one code path.
+
+### pi SDK 0.80.6 -> 0.83.0
+
+All three packages moved in lockstep. Two upstream removals drove real
+deletions rather than shims:
+
+- The implicit engine default stream function is gone. `createEngineAgent`
+  now owns Clio's default and `worker-runtime` constructs through it instead
+  of newing the pi `Agent` directly, so there is one construction site.
+- pi's global OAuth provider registry (`registerOAuthProvider`,
+  `getOAuthProvider`, `loginOpenAICodex`) was replaced upstream by
+  per-provider `ProviderAuth.oauth` flows. `src/engine/oauth.ts` now keeps a
+  Clio-owned registry adapting those flows, and the `loginOpenAICodex`
+  originator special-case is deleted: the 0.83 codex flow owns browser vs
+  device-code selection itself. `EngineOAuthProvider.getApiKey` became async
+  because pi derives request auth through the async `OAuthAuth.toAuth`.
+
+Payload patching (thinking summary, adaptive thinking, tool-choice
+none/named, llama.cpp response schema) was evaluated and deliberately kept:
+0.83.0 still exposes no per-round tool-choice or reasoning-summary
+pass-through through pi-agent-core.
+
+### The engine boundary owns every pi type
+
+`src/engine/types.ts` defines `EngineModel`, the erased `Model<Api>` view.
+`Model<never>` is gone from src and tests along with every
+`as unknown as Model<...>` cast it forced at the seam (chat-loop model
+synthesis, orchestrator boot, worker runtime, providers catalog, compaction
+stream input, capability hints). Provider runtime descriptors take their
+shapes from the engine barrel, so no file outside `src/engine/**` imports
+`@earendil-works/*` at all. The boundary check's type-only allowlist is
+deleted and rule 1 is now total.
+
+### The chat loop is a state machine again
+
+`chat-loop.ts` was 2,664 lines owning at least twelve concerns. It is now
+804 lines of public interface plus the numbered submit/cancel flow,
+composed from single-owner modules coordinating through one shared
+`ChatTurnState`:
+
+| module | owns |
+| --- | --- |
+| `turn-runtime.ts` | target resolution, model hot-swap, thinking reconciliation, probes, agent construction, run-event enrichment |
+| `turn-context.ts` | prompt compile cache, context snapshots, prompt-cache honesty, compaction |
+| `turn-recovery.ts` | overflow compact-and-retry, transient retry chain, retry countdown |
+| `turn-queues.ts` | steer/follow-up mirror, persisted-echo dedupe, stranded-steer resubmit |
+| `turn-persistence.ts` | every session-ledger append and the ledger cursor |
+| `turn-middleware.ts` | turn hooks and the reminder buffer |
+
+`runAutoCompact` is the one compaction entry point; the pre-submit trigger,
+the preflight overflow guard, overflow recovery, `/compact`, and the
+post-tool continuation guard all flow through it. Behavior is unchanged and
+pinned by the existing contract tests.
+
+### Notices are typed events, never fake assistant messages
+
+Notices used to be synthetic `message_end` assistant messages, and headless
+mode un-aliased them by sniffing `"[Clio Coder]"` and `"[/"` text prefixes.
+A notice that forgot its prefix became the turn's answer; an answer that
+started with a bracket became an error.
+
+`ChatLoopEvent`'s `notice` variant is now the only notice channel, carrying
+a `surface` discriminator (transcript or footer). Headless result derivation
+keys on event types and stop reasons only, and `isDiagnosticAssistantText`
+is deleted. An interrupted turn reports a nonzero exit with its abort reason
+even when partial text landed, and internal errors can never masquerade as
+answers.
+
+The shutdown persistence race behind the live-observed
+`session.append: no current session` wart is fixed by ordering, not by
+catching the throw: `ChatLoop.whenSettled()` resolves when the in-flight
+submit fully settles (aborted tool results and their ledger appends
+included), and the orchestrator's drain hook awaits it. Domains stop in the
+persist phase, strictly after drain.
+
+The orchestrator's effective-autonomy resolution chain, previously repeated
+in three closures, is now `resolveEffectiveAutonomy` /
+`resolveBaselineAutonomy`.
+
+### One tool adapter, admission off the clone path
+
+`src/tools/agent-tools.ts` is the one adapter: `toAgentTool`, the shared
+executor, `resolveAgentTools`, `effectiveToolNames`, `resolveSessionTools`,
+and `invokeRegisteredTool`. The orchestrator and the worker resolve their
+surface here, so the attested tool signature and the executable surface are
+computed by the same narrowing in one file. `src/engine/worker-tools.ts`
+keeps only worker-specific construction, and the duplicate
+`resolveSessionTools` in `chat-loop-messages.ts` is gone.
+
+Measured per-call overhead found one real cost: `registry.admit()` resolves
+effective autonomy on every tool call, and the orchestrator's effective
+settings view deep-cloned the whole settings blob each time (0.017 ms per
+clone, measured). `getCurrentSettings` now memoizes on the config snapshot
+identity plus a generation counter bumped by every session routing or
+override mutation.
+
+No tool alias or duplicate identity exists to remove: tools are keyed by the
+`ToolName` union with no alias table, and `prepareArguments` normalizers
+remain the only leniency layer.
+
+### Boundaries
+
+Rule 1 became total (no pi imports outside `src/engine/**`, type-only
+included). Two rules were added and pinned with fixture tests: `src/tools/**`
+never imports `src/interactive/**` (the substrate is surface-agnostic), and
+the chat loop's turn modules never import `src/entry/**` (the entry point
+composes the loop, never the reverse).
+
+### Measurements
+
+Micro-benchmarks (`tests/contracts/tool-admission-cost.test.ts`): 200
+admissions derive the settings view once; steady-state per-call admission
+stays under 1 ms; a batch of five 120 ms read-class tools completes in
+~137 ms end to end where serial would be ~600 ms, with every read tool
+declaring parallel execution.
+
+Headless turn latency, this build against the pre-session baseline
+(`a8fd1dab`), configured local target `mini` (llama.cpp,
+KAT-Coder-V2.5-Dev-IQ4_NL), isolated CLIO_HOME, order-alternated runs:
+
+| measurement | before | after | delta |
+| --- | --- | --- | --- |
+| tool turn, wall clock (median of 7) | 2681 ms | 2767 ms | +86 ms |
+| tool turn, first token (median of 7) | 1744 ms | 1817 ms | +73 ms |
+| no-tool turn, wall clock (median of 6) | 1331 ms | 1360 ms | +29 ms |
+| client-side only, stub server (median of 14) | 1145 ms | 1184 ms | +39 ms |
+| process boot (`--version`, avg of 10) | 53 ms | 48 ms | -5 ms |
+
+One thing did get slower, and it is upstream rather than the refactor. The
++39 ms per process is the `@earendil-works/pi-ai/compat` module graph
+growing between versions: importing it cold costs 229 ms on 0.80.6 and
+268 ms on 0.83.0, which accounts for the whole client-side delta. Clio's own
+code got faster on every axis measured: process boot is 5 ms quicker, the
+first provider stream is 9 ms quicker on 0.83.0, and the per-call settings
+clone is off the admission path entirely. Trimming Clio's eager pi-ai import
+surface is the follow-up that would recover the 39 ms; it was not attempted
+here because it touches the engine barrel's export shape.
+
+### Live journeys (configured local target `mini`, llama.cpp,
+KAT-Coder-V2.5-Dev-IQ4_NL, isolated CLIO_HOME under /tmp scratch)
+
+1. Plain headless turn: exact reply, exit 0.
+2. Tool-using turn: file read, correct codeword, exit 0.
+3. SIGINT during a running bash tool: exit 130, drain awaits turn
+   settlement before the session domain stops, no `session.append` throw,
+   no orphaned children, the tool's side effect never lands.
+4. Resume after a prior turn: the codeword is recalled through replayed
+   context and the ledger keeps a single tree root.
+
+### Verification
+
+`npm run ci` green. The full suite is green under Node 24.9.0 (2486 tests)
+and Node 22.22.3 (2490 tests; the difference is version-conditional cases,
+not skips). Boundaries, typecheck, lint, and build all clean.
+
 ## Unreleased - v0.3.0 hardening session 1: main orchestrator and tools
 
 One ordinary main-agent turn runs: CLI arg parsing (`src/cli/index.ts`) →
