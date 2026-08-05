@@ -13,6 +13,104 @@ above it graduates from agent-only fleets to deterministic code steps, bounded
 repair loops, shipped SDLC chains, a queryable run trace, and per-step write
 boundaries enforced against the checkout.
 
+### Post-release live verification
+
+- **Made the joint-route latency contract insensitive to host contention.**
+  The maximum-universe resolver check remains in the release gate with its
+  original 10 ms p95 bound because decision latency is an explicit active-route
+  readiness condition, not incidental benchmark trivia. The former 40-sample
+  wall-clock measurement could fail when the test process was merely
+  descheduled: one loaded release run reported 10.773 ms even though the whole
+  test passed quickly in isolation. The contract now discards 100 warmup
+  resolutions, takes 200 samples, and measures the process's user plus system
+  CPU time for each resolution. That preserves the real performance invariant
+  while removing scheduler delay from a correctness gate; simply raising the
+  threshold would have hidden both possibilities.
+
+- **Fixed two more handle-free timer liveness defects.** A production timer
+  sweep found two awaited operations whose only possible resolver had been
+  deliberately unreferenced. A hung shutdown hook could let
+  `runWithBudget()` disappear with unsettled top-level await instead of
+  returning `false`, and delayed manual OAuth input could exit before opening
+  its prompt. Both timers now remain referenced because they are foreground
+  deadlines, unlike heartbeat and telemetry timers that are genuinely
+  background work. Handle-free subprocess regressions reproduce the old Node
+  exit code 13 and pass on Node 22.22.3 and 24.9.0 with the fix. The rest of the
+  timer sweep found referenced child, pipe, queue-deadline, or explicit
+  keep-alive handles behind every awaited production path.
+
+- **Stopped unrelated retired ledger rows from poisoning current evidence.**
+  The first live fleet run completed successfully but automatic evidence
+  failed on `runs.json[401]: executionRole missing`: evidence for one current
+  run strictly parsed every retained historical envelope before selecting its
+  source. Evidence construction now selects raw rows by the requested run or
+  session first and strictly parses only those rows, preserving their original
+  indices in diagnostics. A current row beside an unrelated legacy row now
+  builds and indexes evidence; asking for the legacy row itself still fails
+  closed. Generated HumanEval run output is also excluded from Biome's input so
+  ignored benchmark artifacts cannot make lint depend on local scratch state.
+
+- **Verified the released fleet workflows against the configured local
+  worker.** The `dynamo` target's declared wire models were reconciled with its
+  live `kwaipilot_kat-coder-v2.5-dev` default. Live discovery, doctor, and
+  worker attestations all named `dynamo`, `lmstudio-native`, and that exact
+  model; receipts recorded nonzero token counts and zero local cost with
+  `unknown` cost provenance rather than fabricated price data. The scratch
+  repositories are under `/tmp/clio-v029-*`; the isolated evidence store is
+  `/tmp/clio-v029-evidence/state`, with its trace database at
+  `trace.sqlite`.
+
+  Deterministic fleet validation rejected both an unknown command id and a
+  missing registry with exit 2 before creating state or data directories. A
+  repairable `build-test` ran red, dispatched one repair, and then ran green.
+  An unfixable registry command ran exactly three checks and two repair workers
+  before reporting `loop_bound_exhausted`; its root is
+  `fleet-86191c45f94d` and its code-step records are under
+  `code-steps/fleet-86191c45f94d/`. The local model produced the same README
+  mutation on both repairs, and its last attempt consumed 117,815 tokens while
+  repeatedly revisiting blocked tool calls. No assertion or loop bound was
+  relaxed.
+
+  Write-boundary root `fleet-ece6ccf63141` preserved the authorized `src/`
+  edit, restored `docs/forbidden.txt`, failed with the exact unauthorized path
+  and declaration, and sealed a `rolled-back` verdict. Root
+  `fleet-056bf98db3b4` sealed `clean`. Root `fleet-f3718c42ac51` changed a file
+  that was dirty before the scheduling window and correctly sealed
+  `rollback-incomplete`, leaving the model's bytes in place and explaining why
+  the operator's prior content was unrecoverable. All three verdicts are under
+  `write-boundaries/<rootId>/wave-0.json` in the isolated state directory.
+
+  Two real `sdlc` attempts reached plan and the first commit, whose architect
+  supplied no `commitMessage`, so the deterministic fallbacks were
+  `clio(fleet-c54939f4c334): sdlc commit-plan` and
+  `clio(fleet-b0b3130fdf29): sdlc commit-plan`. Their builders then exhausted,
+  respectively, the 50-call worker cap and the repeated-tool loop guard before
+  suite or review. Consequently these runs did not live-verify staleness
+  revalidation, gate staging/materialization, or authored build/document
+  commit messages; no gate artifact was produced, and none is claimed. The
+  failure receipts are `receipts/107135nzmzgc.json` and
+  `receipts/2k2vhubdyvjn.json` in the isolated state directory.
+
+  The trace CLI exercised runs, phases, follow-tail, processes, and read-only
+  SQL during and after execution. The viewer's cursor advanced from row 2231
+  to 2232 without a gap or repeat; its waterfall timestamps matched receipt
+  `1jh4bzcimsnj`, and its spend data carried 27,551 real tokens, null component
+  dollar splits rendered as `not recorded`, and a zero local total. Gate
+  evidence was absent for the documented reason above. An operator abort killed
+  process group 1436868 and sealed cancellation in
+  `receipts/34b70335b6q0.json`, although the worker hit its tool cap during the
+  same race. SIGSTOP of process group 1437355 produced stalled receipt
+  `ck7iaj6x7u33`, then retry `20clrlt6l1nd` at attempt 1. The resilience
+  cooldown intentionally protects new assignments; an admitted retry chain
+  uses backoff and `maxRetries`, and the retry's deterministic tool-cap failure
+  correctly ended the chain.
+
+- **Keep the Node matrix continuously enforced.** The workflow already runs
+  Node 22 and 24, so no workflow rewrite is warranted. Protect `main` with both
+  `ci (22)` and `ci (24)` as required checks, disallow direct pushes, and do not
+  permit bypasses. That single repository-ruleset change prevents another
+  109-commit interval from merging without either supported runtime.
+
 ### Added
 
 - **Per-step write boundaries with post-run verification and rollback.** A tool
