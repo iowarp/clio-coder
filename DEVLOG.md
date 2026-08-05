@@ -5,7 +5,84 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
-## 0.2.9 - 2026-08-05
+## Unreleased - v0.3.0 hardening session 1: main orchestrator and tools
+
+One ordinary main-agent turn runs: CLI arg parsing (`src/cli/index.ts`) →
+`runClioRun`/`runClioCommand` → `bootOrchestrator` (`src/entry/orchestrator.ts`),
+which loads the domain bundle, builds the tool registry
+(`src/tools/registry.ts` + `registerAllTools`), and composes `createChatLoop`
+(`src/interactive/chat-loop.ts`). Headless turns run through
+`runHeadlessMainAgent` (`src/cli/modes/print.ts`), interactive through
+`startInteractive`, ACP through `serveClioAcpAgent`; all three drive the same
+chat loop, registry, and safety admission. The chat loop resolves the target
+per submit (`resolveRuntimeTarget`, fail-loud), compiles the session prompt
+once per compile key, preflights context pressure before committing the user
+turn, streams via `@earendil-works/pi-agent-core`, admits every tool call
+through safety → skill surface → autonomy → before_tool guards, and settles
+usage into session snapshots, observability, and the headless run receipt.
+
+### Live-verified defect fixes
+
+- **Replayed resumed session context at boot.** `CLIO_RESUME_SESSION_ID`
+  re-pointed the session ledger without replaying history into the chat loop:
+  the first submit ran with an empty provider context (a live resumed turn
+  denied any memory of the session's own prior tool exchange) and appended its
+  user turn with a null parent, growing a second session-tree root that
+  silently abandoned the resumed active path. Boot-time resume now mirrors the
+  interactive `/resume` overlay: leaf turn id plus rebuilt replay messages,
+  degrading to leaf-only when replay construction fails so parenting stays
+  correct. Regression: `tests/smoke/resume-replay.test.ts` (fails on the old
+  code at the replayed-context assertion).
+
+- **Aborted the in-flight turn on coordinated shutdown.** SIGINT/SIGTERM ran
+  drain → terminate → persist without ever aborting the live chat turn, so a
+  running bash tool's detached process group survived the CLI as orphans of
+  init (reproduced live: `/bin/bash -c sleep 60 && echo done` outlived exit
+  130). A drain hook now disposes the chat loop; the agent abort fans out to
+  every running tool's AbortSignal and bash-exec signals the group.
+  Regression: `tests/smoke/sigint-tool-children.test.ts` (fails on the old
+  code with a surviving marker process).
+
+### Live journeys (configured local target `mini`, llama.cpp,
+KAT-Coder-V2.5-Dev-IQ4_NL, isolated CLIO_HOME under /tmp scratch)
+
+1. Headless no-tool turn: exact reply, exit 0.
+2. Grounded read turn: correct file contents cited.
+3. Permitted edit + verify: file changed, re-read confirmed.
+4. Read-only autonomy mutation: auto-denied, file untouched, actionable
+   denial text.
+5. Unknown-tool request: model routed to bash, parked call denied headlessly
+   with the truthful no-operator reason; no repair loop.
+6. SIGINT during streaming (65 ms shutdown) and during a running tool
+   (children reaped post-fix).
+7. Resume after a tool exchange: prior context recalled post-fix; single
+   tree root.
+8. Forced compaction on a resumed session: `compactionSummary` persisted,
+   codeword still recalled through the summary bridge.
+9. Interactive TUI parity via pty: same prompt answered and persisted with
+   the same session-ledger shape as headless.
+10. Clean exits on every run above; no leaked workers, prompts, or timers
+    observed.
+
+### Tool schema audit
+
+A schema-vs-implementation sweep of every registered orchestrator tool found
+the surface almost entirely consistent (read, write, edit, bash, grep, find,
+ls, code_nav, context, artifact, tasks, ask_user, credential_present,
+monitor, steer, and the dispatch argument contract were clean). Two real
+gaps were fixed: `git` and `verify` honored `timeout_ms` and
+`max_output_bytes` through the shared safe-exec runner without declaring
+them, and `web_fetch` advertised a `markdown` format value the
+implementation never distinguished from `auto`. Schemas and descriptions now
+state exactly what the implementations accept.
+
+### Verification
+
+Both fix regressions fail on the pre-fix code and pass on the fix. The full
+gate (`npm run ci`) and the complete suite ran green under Node 24.9.0 and
+Node 22.22.3 with identical totals and no version-specific differences.
+
+
 
 Dispatch Primitives v2: the dispatch domain graduates from single-host
 workers to a measured, process-safe multi-node fleet, and the workflow layer
