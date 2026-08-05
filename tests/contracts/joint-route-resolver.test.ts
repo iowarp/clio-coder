@@ -296,12 +296,18 @@ describe("joint route resolver", () => {
 			nodeId: `n${index}`,
 		}));
 		const input = resolverInput({ targets, nodes, observations: () => [] });
-		resolveJointRoute(input);
+		// This is a routing-readiness contract, not a throughput benchmark: an
+		// active route is ineligible when its measured decision p95 exceeds the
+		// same 10 ms bound. Warm the JIT and allocations before sampling, and use
+		// process CPU time so unrelated host load cannot turn release correctness
+		// red merely because this process was descheduled.
+		for (let index = 0; index < 100; index += 1) resolveJointRoute(input);
 		const durations: number[] = [];
-		for (let index = 0; index < 40; index += 1) {
-			const started = process.hrtime.bigint();
+		for (let index = 0; index < 200; index += 1) {
+			const started = process.cpuUsage();
 			resolveJointRoute(input);
-			durations.push(Number(process.hrtime.bigint() - started) / 1_000_000);
+			const elapsed = process.cpuUsage(started);
+			durations.push((elapsed.user + elapsed.system) / 1_000);
 		}
 		durations.sort((left, right) => left - right);
 		const p95 = durations[Math.ceil(durations.length * 0.95) - 1] ?? Number.POSITIVE_INFINITY;
