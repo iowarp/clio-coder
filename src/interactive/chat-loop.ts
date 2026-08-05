@@ -72,9 +72,18 @@ export interface QueueUpdateEvent {
 	messages: QueuedChatMessage[];
 }
 
+/**
+ * First-class advisory event. `surface` says where the notice belongs:
+ * "transcript" notices are turn-adjacent chat lines (cancellations,
+ * compaction summaries, configuration errors) and "footer" notices are
+ * ambient status (nudge chips). Notices are never assistant messages: they
+ * carry no `message_end`, cannot become a headless turn's answer, and never
+ * end a run.
+ */
 export interface ChatNoticeEvent {
 	type: "notice";
 	level: "info" | "success" | "warning" | "error";
+	surface: "footer" | "transcript";
 	text: string;
 	key?: string;
 }
@@ -168,6 +177,14 @@ export interface ChatLoop {
 	resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
 	/** Abort the live agent and release pi-ai session-scoped resources before shutdown. */
 	dispose(): void;
+	/**
+	 * Resolves once the in-flight submit (if any) has fully settled, including
+	 * the aborted run's tool results and their ledger appends. Shutdown awaits
+	 * this after dispose() so domains (the session writer among them) never
+	 * stop while the turn is still persisting: `session.append` after session
+	 * stop is impossible by ordering.
+	 */
+	whenSettled(): Promise<void>;
 }
 
 export interface CreateChatLoopDeps {
@@ -296,19 +313,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const emitFooterNotice = (level: ChatNoticeEvent["level"], text: string, key: string): void => {
-		emit({ type: "notice", level, text, key });
+		emit({ type: "notice", level, surface: "footer", text, key });
 	};
 
 	/**
-	 * Notices are message_end-only. The synthetic agent_end this used to emit
-	 * rebuilt the status summary from just the notice message, wiping the real
-	 * run's usage on thrown paths where the engine's agent_end had already
-	 * landed. Run closure is the engine's job (handleRunFailure delivers
-	 * agent_end on abort and provider-failure paths) and RunAborted carries
-	 * abort provenance to the status reducer; a notice never ends a run.
+	 * Transcript notices are first-class `notice` events, never fake
+	 * `message_end` assistant messages: a notice can never become a headless
+	 * turn's answer, never carries usage, and never ends a run. Run closure is
+	 * the engine's job (handleRunFailure delivers agent_end on abort and
+	 * provider-failure paths) and RunAborted carries abort provenance to the
+	 * status reducer.
 	 */
-	const emitNotice = (text: string): void => {
-		emit({ type: "message_end", message: noticeMessage(text) });
+	const emitNotice = (text: string, level: ChatNoticeEvent["level"] = "info", key?: string): void => {
+		emit({ type: "notice", level, surface: "transcript", text, ...(key === undefined ? {} : { key }) });
 	};
 
 	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().retry);
@@ -415,6 +432,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}) ?? null;
 
 	// --- the state machine --------------------------------------------------
+
+	// Settlement tracking for whenSettled(): the latest submit's promise,
+	// coerced to never reject so shutdown ordering cannot throw.
+	let activeSubmit: Promise<void> = Promise.resolve();
 
 	const api: ChatLoop = {
 		steer: (text) => queues.steer(text),
@@ -684,7 +705,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// aborted" turn on top of the cancellation notice.
 				state.activeInterruptReason =
 					requestedReason && requestedReason.length > 0 ? requestedReason : "[Clio Coder] active response cancelled.";
-				emit({ type: "message_end", message: noticeMessage(state.activeInterruptReason) });
+				emitNotice(state.activeInterruptReason, "warning", "turn.interrupted");
 			}
 			state.runtime?.agent.abort();
 			if (wasStreaming && deps.bus) {
@@ -720,6 +741,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		contextUsage: () => context.contextUsage(),
 		contextLedger: () => context.contextLedger(),
+		whenSettled: () => activeSubmit,
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			if (state.runtime) {
@@ -788,6 +810,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice("[/compact] nothing to compact; session is empty or no cut crossed");
 			}
 		},
+	};
+
+	const submitInner = api.submit.bind(api);
+	api.submit = (text, options) => {
+		const run = submitInner(text, options);
+		activeSubmit = run.catch(() => {});
+		return run;
 	};
 
 	return api;

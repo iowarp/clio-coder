@@ -559,12 +559,7 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 			}, []),
 		} as never);
 		loop.onEvent((event) => {
-			if (event.type === "message_end" && event.message?.role === "assistant") {
-				const content = (event.message as { content?: Array<{ type?: string; text?: string }> }).content ?? [];
-				for (const part of content) {
-					if (part.type === "text" && typeof part.text === "string") notices.push(part.text);
-				}
-			}
+			if (event.type === "notice" && event.surface === "transcript") notices.push(event.text);
 		});
 
 		await loop.submit("implement the feature");
@@ -778,12 +773,7 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 			}, aborts),
 		} as never);
 		loop.onEvent((event) => {
-			if (event.type === "message_end" && event.message?.role === "assistant") {
-				const content = (event.message as { content?: Array<{ type?: string; text?: string }> }).content ?? [];
-				for (const part of content) {
-					if (part.type === "text" && typeof part.text === "string") notices.push(part.text);
-				}
-			}
+			if (event.type === "notice" && event.surface === "transcript") notices.push(event.text);
 		});
 
 		await loop.submit("first");

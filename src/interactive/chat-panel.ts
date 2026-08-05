@@ -4,6 +4,7 @@ import { estimateReasoningTextTokens, extractReasoningTokens } from "../domains/
 import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { codeInk } from "./renderers/code-ink.js";
+import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
 	classifyResourceRead,
@@ -972,6 +973,18 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		applyEvent(event: ChatLoopEvent): void {
 			if (event.type === "agent_status") {
+				return;
+			}
+			if (event.type === "notice") {
+				// Transcript notices are first-class advisory lines, not assistant
+				// messages: render with the bracketed-tag treatment replay lines get.
+				if (event.surface !== "transcript") return;
+				const text = event.text;
+				transcript.push({
+					role: "replayBlock",
+					renderBlock: (width) => wrapTextWithAnsi(styleTaggedNotice(text), width),
+				});
+				markDirty();
 				return;
 			}
 			if (event.type === "text_delta") {

@@ -234,7 +234,7 @@ function isAssistantMessageEntry(entry: SessionEntry): entry is Extract<SessionE
 }
 
 describe("contracts/chat-loop compaction and terminal notices", () => {
-	it("emits an out-of-run notice as message_end without fabricating agent_end", async () => {
+	it("emits an out-of-run notice as a typed notice event without fabricating agent_end", async () => {
 		const events: ChatLoopEvent[] = [];
 		const unconfigured = settings();
 		unconfigured.orchestrator.target = "";
@@ -254,11 +254,15 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		await loop.submit("hello");
 
 		const notices = events.filter(
-			(event): event is Extract<ChatLoopEvent, { type: "message_end" }> =>
-				event.type === "message_end" &&
-				JSON.stringify((event as { message?: unknown }).message ?? {}).includes("orchestrator not configured"),
+			(event): event is Extract<ChatLoopEvent, { type: "notice" }> =>
+				event.type === "notice" && event.surface === "transcript" && event.text.includes("orchestrator not configured"),
 		);
-		strictEqual(notices.length, 1, "the notice reaches consumers as a message_end");
+		strictEqual(notices.length, 1, "the notice reaches consumers as a typed notice event");
+		strictEqual(
+			events.filter((event) => event.type === "message_end").length,
+			0,
+			"a notice is never a fake assistant message_end",
+		);
 		strictEqual(events.filter((event) => event.type === "agent_end").length, 0, "notices never synthesize agent_end");
 	});
 
@@ -585,12 +589,11 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 				event.type === "message_end" && (event as { message?: { stopReason?: string } }).message?.stopReason === "aborted",
 		);
 		strictEqual(abortedEnds.length, 0, "the empty aborted message never reaches the live transcript");
-		const closingEnds = seen.filter(
+		const closingNotices = seen.filter(
 			(event) =>
-				event.type === "message_end" &&
-				JSON.stringify((event as { message?: unknown }).message ?? {}).includes("loop guard stopped"),
+				event.type === "notice" && event.key === "turn.interrupted" && event.text.includes("loop guard stopped"),
 		);
-		strictEqual(closingEnds.length, 1, "the closing message is shown live exactly once");
+		strictEqual(closingNotices.length, 1, "the closing notice is shown live exactly once, as a typed notice");
 	});
 
 	it("closes a bare operator cancel with the cancellation notice, not aborted noise", async () => {

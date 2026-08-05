@@ -910,17 +910,22 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.
 	let activeAcpSessionAutonomy: AutonomyLevel | null = null;
+	// The one effective-autonomy resolution. Every admission surface (registry
+	// admission, dispatch plan provenance, ACP session snapshot) resolves
+	// through these two functions so a fallback added to one surface cannot
+	// silently skip another.
+	const resolveBaselineAutonomy = (): AutonomyLevel =>
+		effectiveSettingsForDispatch?.().autonomy ??
+		options.headless?.autonomy ??
+		(config?.get() ?? readSettings()).autonomy ??
+		"auto-edit";
+	const resolveEffectiveAutonomy = (): AutonomyLevel => activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
 	const toolRegistry = createRegistry({
 		safety,
 		middleware,
 		onMiddlewareEffects: (effects) => middlewareToolChoice.apply(effects),
-		autonomy: () =>
-			activeAcpSessionAutonomy ??
-			effectiveSettingsForDispatch?.().autonomy ??
-			options.headless?.autonomy ??
-			(config?.get() ?? readSettings()).autonomy ??
-			"auto-edit",
+		autonomy: resolveEffectiveAutonomy,
 	});
 	const mainPermissionOrigin = acpMode ? "acp-server" : "main";
 	toolRegistry.onPermissionRequired((call, decision, meta) => {
@@ -990,12 +995,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
 		// Same effective-autonomy resolution the registry admission uses, so plan
 		// provenance and compete winner handling agree with the approval surface.
-		getAutonomy: () =>
-			activeAcpSessionAutonomy ??
-			effectiveSettingsForDispatch?.().autonomy ??
-			options.headless?.autonomy ??
-			(config?.get() ?? readSettings()).autonomy ??
-			"auto-edit",
+		getAutonomy: resolveEffectiveAutonomy,
 		getCostCeilingUsd: () => result.getContract<SchedulingContract>("scheduling")?.ceilingUsd() ?? 0,
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
@@ -1235,8 +1235,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// tool's AbortSignal, and bash-exec answers it by signalling the tool's
 	// detached process group. Without this, a headless SIGINT exited the CLI
 	// while a running tool's children survived as orphans of init.
-	termination.onDrain(() => {
+	termination.onDrain(async () => {
 		chat.dispose();
+		// The abort fans out to running tools, but their results still land and
+		// persist through the aborted run's subscribers. Domains (the session
+		// writer among them) stop in the persist phase, strictly after drain, so
+		// awaiting settlement here makes a session append after session stop
+		// impossible by ordering.
+		await chat.whenSettled();
 	});
 
 	// A boot-time resume (CLIO_RESUME_SESSION_ID) must replay the resumed
@@ -1307,7 +1313,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(session ? { session } : {}),
 				toolRegistry,
 				bus,
-				autonomy: () => getCurrentSettings().autonomy ?? "auto-edit",
+				autonomy: resolveBaselineAutonomy,
 				onActiveSessionAutonomyChange: (level) => {
 					activeAcpSessionAutonomy = level;
 				},
