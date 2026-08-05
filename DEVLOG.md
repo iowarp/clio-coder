@@ -5,12 +5,13 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
-## 0.2.9 (in progress)
+## 0.2.9 - 2026-08-05
 
 Dispatch Primitives v2: the dispatch domain graduates from single-host
-workers to a measured, process-safe multi-node fleet. Eleven audited routing
-and execution slices are integrated on `main`; 0.2.9 remains unreleased while
-its source documentation and release gate are finalized.
+workers to a measured, process-safe multi-node fleet, and the workflow layer
+above it graduates from agent-only fleets to deterministic code steps, bounded
+repair loops, shipped SDLC chains, a queryable run trace, and per-step write
+boundaries enforced against the checkout.
 
 ### Added
 
