@@ -397,10 +397,9 @@ list|propose|approve|reject|prune`. Design notes:
 
 ## Status
 
-Clio Coder is alpha software distributed from source. The current development
-version is **v0.2.9**; it has not yet been released or published to npm. Until
-the v0.2.9 tag is cut, use a source checkout of `main`. Interfaces may still
-move between minor versions, and model-specific behavior varies by target.
+Clio Coder is alpha software distributed from source. The current release is
+**v0.2.9**. Interfaces may still move between minor versions, and
+model-specific behavior varies by target.
 
 Release notes live in the [CHANGELOG](CHANGELOG.md), the detailed developer
 log lives in [DEVLOG.md](DEVLOG.md), and every release is gated by the

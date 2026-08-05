@@ -4,7 +4,7 @@
 
 # Clio Coder Documentation
 
-These pages document the unreleased `v0.2.9` development version of Clio Coder, an open-source coding orchestrator within the [IOWarp](https://iowarp.ai) scientific computing platform, created by the [Gnosis Research Center](https://grc.iit.edu) at the [Illinois Institute of Technology](https://www.iit.edu). Until the v0.2.9 tag is cut, the supported evaluation path is a source checkout of `main`.
+These pages document `v0.2.9` of Clio Coder, an open-source coding orchestrator within the [IOWarp](https://iowarp.ai) scientific computing platform, created by the [Gnosis Research Center](https://grc.iit.edu) at the [Illinois Institute of Technology](https://www.iit.edu).
 
 They are source-aligned guides: when prose and source disagree, prefer the
 current source, tests, and `CHANGELOG.md`.

@@ -8,12 +8,13 @@ notes, lives in [DEVLOG.md](DEVLOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 still change interfaces.
 
-## 0.2.9 (unreleased)
+## 0.2.9 - 2026-08-05
 
-Clio Coder 0.2.9 is still under development and has not been tagged, attached
-to a GitHub release, or published to npm. The supported evaluation path is a
-source checkout of `main`.
-
+- Added deterministic `code` steps to fleet contracts and execution plans. A step names a command id from the repo-owned registry at `.clio/fleets/commands.yaml`, never a shell string a model authored, and an unknown id or a missing registry fails contract validation before anything dispatches. A code step holds no capacity lease, carries no execution role or authority grant, and returns the typed `code-report` contract; under `onFailure: continue` its verbatim output is the input to the step that repairs it.
+- Added bounded check/repair loops and shipped three SDLC fleets. A `loop` declares `maxAttempts`, a check (a registered command or a gate agent), and an agent repair; compilation unrolls it into conditional nodes so the plan stays one deterministic hashed DAG with whole-plan admission and a receipt per attempt. Verification staleness is scheduler-enforced: a workspace step landing after a green re-runs it before any dependent may rely on it. `build-test`, `build-review`, and `sdlc` ship from `src/domains/agents/fleets/`, and a project `.clio/fleets/<name>.md` shadows a builtin.
+- Added a durable trace store: every run is mirrored into a rebuildable WAL SQLite database beside the ledger, with a fail-closed schema version, seven Clio-mapped tables, and one documented rowid-cursor query. Writes are bounded and secret-redacted, run off the worker event pump, and drop display-only progress before any lifecycle, terminal, tool, attempt, or usage fact; a trace failure degrades the mirror, never the dispatch it observes.
+- Added `clio trace` (`runs`, `phases`, `tail --follow`, `procs`, a single read-only `sql` SELECT, and `ui`) plus a no-build localhost-only waterfall viewer under `apps/trace-viewer`, outside the published package. Component dollar columns stay empty where no authoritative producer supplies them, and the viewer says "not recorded" rather than inventing a breakdown.
+- Added per-step write boundaries. Fleet contract v4 declares a `writes` path allowlist per step, `readonly` being the empty one, and the orchestrator verifies the claim after the fact by diffing the checkout against a pinned baseline, rolling back unauthorized changes, and failing the step with `writes_boundary_violation` naming the paths and the declaration. This is detect-and-rollback rather than sandboxing; a path that cannot be restored cleanly is reported and left for the operator instead of guessed at.
 - Updated the Pi engine dependencies to 0.80.6, including native `max` thinking-level support and upstream runtime, accounting, and protocol fixes.
 - Made singular `dispatch({agent, task, briefing, detach})` first-class while preserving batch `tasks`, pinned task/briefing separation through approval, and rejected briefing-only or ambiguous `task`+`tasks` calls.
 - Made native-worker initialization fail closed on the same `worker_announce` wire-version handshake locally and over SSH, then required a full identity and resource attestation before the first model call.
