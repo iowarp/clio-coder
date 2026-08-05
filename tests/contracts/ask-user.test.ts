@@ -10,9 +10,9 @@ import {
 	type TUI,
 	visibleWidth,
 } from "../../src/engine/tui.js";
-import { resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
+import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { createAskUserTool, normalizeAskUserCall } from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { type AskUserToolPolicy, createRegistry } from "../../src/tools/registry.js";

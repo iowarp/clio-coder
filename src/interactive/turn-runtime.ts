@@ -26,7 +26,7 @@ import {
 	patchToolChoiceNonePayload,
 } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
-import type { resolveAgentTools } from "../engine/worker-tools.js";
+import type { resolveAgentTools } from "../tools/agent-tools.js";
 import {
 	type AssistantCallTiming,
 	type BackendCacheVerdict,

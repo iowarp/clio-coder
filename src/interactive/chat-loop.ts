@@ -39,6 +39,7 @@ import { isRetryableErrorMessage, type RetrySettings } from "../domains/session/
 import { createEngineAgent } from "../engine/agent.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import type { AgentEvent, AgentMessage, ImageContent } from "../engine/types.js";
+import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterview } from "../tools/ask-user.js";
 import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import {
@@ -49,7 +50,6 @@ import {
 	notConfiguredNotice,
 	noticeMessage,
 	pendingSkillRequestPreamble,
-	resolveSessionTools,
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";

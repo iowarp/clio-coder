@@ -1161,10 +1161,7 @@ function targetToolCapability(target: ResolvedTarget): boolean {
 	return target.modelCapabilities?.tools ?? target.runtime.defaultCapabilities.tools === true;
 }
 
-function effectiveWorkerToolNames(
-	allowedTools: ReadonlyArray<ToolName>,
-	target: ResolvedTarget,
-): ReadonlyArray<ToolName> {
+function effectiveToolNames(allowedTools: ReadonlyArray<ToolName>, target: ResolvedTarget): ReadonlyArray<ToolName> {
 	if (!targetToolCapability(target)) return [];
 	const names = allowedTools.filter(
 		(tool): tool is ToolName =>
@@ -2755,7 +2752,7 @@ export function createDispatchBundle(
 		const cwd = req.cwd ?? process.cwd();
 		const sessionAutonomy = settings?.autonomy ?? "auto-edit";
 		const effectiveAutonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
-		const effectiveTools = effectiveWorkerToolNames(admission.allowedTools, target);
+		const effectiveTools = effectiveToolNames(admission.allowedTools, target);
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target);
 		const effectiveAdmission: DispatchAdmissionStage = {
 			...admission,
@@ -4718,7 +4715,7 @@ export function createDispatchBundle(
 			providers,
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
-		const effectiveTools = effectiveWorkerToolNames(admission.allowedTools, target);
+		const effectiveTools = effectiveToolNames(admission.allowedTools, target);
 		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema);

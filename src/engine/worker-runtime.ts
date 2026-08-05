@@ -48,6 +48,7 @@ import type { ActionClass } from "../domains/safety/action-classifier.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
+import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
@@ -72,7 +73,7 @@ import {
 import { patchWorkerRequestPayload } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
-import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
+import { createWorkerSafety, createWorkerToolRegistry } from "./worker-tools.js";
 
 export interface WorkerRunInput {
 	sessionId?: string;

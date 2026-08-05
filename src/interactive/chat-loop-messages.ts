@@ -14,8 +14,7 @@ import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
 import { extractReasoningTokens } from "../domains/session/context-accounting.js";
 import type { AgentMessage } from "../engine/types.js";
-import { resolveAgentTools } from "../engine/worker-tools.js";
-import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
+import type { AskUserToolPolicy } from "../tools/registry.js";
 
 /** Minimal structural view of the engine agent used by state-inspection helpers. */
 export interface AgentStateView {
@@ -497,22 +496,6 @@ export function toolResultSummary(result: unknown): Record<string, unknown> {
 
 export function runtimeSupportsTools(agentRuntime: RuntimeResolutionView): boolean {
 	return agentRuntime.runtimeResolution.capabilityDecisions.tools === true;
-}
-
-/**
- * The session tool surface: the full registry when the provider supports
- * tools, nothing otherwise. Deterministic and identical on every submit so
- * the serialized tool schemas stay byte-stable for provider prefix caching.
- * Per-tool gating (pending-skill policy, safety) happens at invoke time.
- */
-export function resolveSessionTools(
-	agentRuntime: RuntimeResolutionView,
-	toolRegistry: ToolRegistry | undefined,
-	invokeOptions?: () => Partial<ToolInvokeOptions>,
-): ReturnType<typeof resolveAgentTools> {
-	if (!toolRegistry || !runtimeSupportsTools(agentRuntime)) return [];
-	const input = { registry: toolRegistry };
-	return resolveAgentTools(invokeOptions ? { ...input, invokeOptions } : input);
 }
 
 export function detectTerminalFailureFromState(agent: AgentStateView): TerminalAssistantFailure | null {

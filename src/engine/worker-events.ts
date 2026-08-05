@@ -6,7 +6,7 @@
  */
 
 import type { RunOutcomeCode } from "../domains/dispatch/types.js";
-import type { ToolFinishEvent, ToolStartEvent } from "./worker-tools.js";
+import type { ToolFinishEvent, ToolStartEvent } from "../tools/agent-tools.js";
 
 export interface ClioToolStartEvent {
 	type: "clio_tool_start";

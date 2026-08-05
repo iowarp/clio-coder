@@ -37,7 +37,7 @@ import {
 	sanitizeLockedSynthesisMessage,
 } from "../../src/engine/loop-guard.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import { invokeWorkerTool, type ToolFinishEvent } from "../../src/engine/worker-tools.js";
+import { invokeRegisteredTool, type ToolFinishEvent } from "../../src/tools/agent-tools.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 const LOOP_THRESHOLD = createLoopState().maxRepeats;
@@ -1321,9 +1321,9 @@ describe("guard block receipt accounting", () => {
 		const finishes: ToolFinishEvent[] = [];
 		const telemetry = { onFinish: (event: ToolFinishEvent) => void finishes.push(event) };
 		for (let i = 1; i < LOOP_THRESHOLD; i++) {
-			await invokeWorkerTool(registry, ToolNames.Read, {}, { telemetry });
+			await invokeRegisteredTool(registry, ToolNames.Read, {}, { telemetry });
 		}
-		await rejects(invokeWorkerTool(registry, ToolNames.Read, {}, { telemetry }), /loop detected/);
+		await rejects(invokeRegisteredTool(registry, ToolNames.Read, {}, { telemetry }), /loop detected/);
 		strictEqual(finishes.length, LOOP_THRESHOLD);
 		strictEqual(finishes[0]?.decision, "allowed", "executed calls keep their allow decision");
 		const last = finishes.at(-1);
