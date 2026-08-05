@@ -70,7 +70,7 @@ import {
 	sanitizeLockedSynthesisMessage,
 } from "./loop-guard.js";
 import { patchWorkerRequestPayload } from "./provider-payload.js";
-import type { AgentEvent, AgentMessage, Model } from "./types.js";
+import type { AgentEvent, AgentMessage, EngineModel, Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
 
@@ -267,7 +267,7 @@ function getKnowledgeBase(): KnowledgeBase {
 	return kbSingleton;
 }
 
-function clampThinkingLevelForModel(model: Model<never>, requested: ThinkingLevel | undefined): ThinkingLevel {
+function clampThinkingLevelForModel(model: EngineModel, requested: ThinkingLevel | undefined): ThinkingLevel {
 	const level = requested ?? "off";
 	return resolveModelRuntimeCapabilitiesForModel(model, level).thinking.effectiveLevel;
 }
@@ -376,7 +376,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const kbHit = kb.lookup(input.wireModelId);
 	const synthesized = input.runtime.synthesizeModel(input.target, input.wireModelId, kbHit);
 	const model = applyModelCapabilityPatch(
-		input.target.runtime === "faux" && fauxModel ? fauxModel : (synthesized as unknown as Model<never>),
+		input.target.runtime === "faux" && fauxModel ? fauxModel : synthesized,
 		input.modelCapabilities,
 	);
 
@@ -584,7 +584,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		},
 		onPayload: async (payload, currentModel) => {
 			const middlewareChoice = middlewareToolChoice.current();
-			return patchWorkerRequestPayload(payload, currentModel as Model<never>, {
+			return patchWorkerRequestPayload(payload, currentModel, {
 				runtimeId: input.runtime.id,
 				thinkingLevel: effectiveThinkingLevel,
 				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),

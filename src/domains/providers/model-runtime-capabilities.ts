@@ -1,4 +1,4 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "../../engine/types.js";
 import { getCatalogModelForRuntime } from "./catalog.js";
 import type { ProvidersContract, TargetStatus } from "./contract.js";
 import { resolveModelCapabilities } from "./model-capabilities.js";
@@ -627,7 +627,7 @@ export function resolveModelRuntimeCapabilitiesForModel<TApi extends Api>(
 		apiFamily: model.api,
 		modelId: model.id,
 		capabilities: caps,
-		...thinkingHintsForModel(model as unknown as Model<Api>),
+		...thinkingHintsForModel(model),
 		...(metadata?.quirks ? { quirks: metadata.quirks } : {}),
 		kbHit: metadata?.family
 			? {

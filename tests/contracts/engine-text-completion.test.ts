@@ -1,7 +1,7 @@
 import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { completeEngineText, fauxAssistantMessage, registerFauxProvider } from "../../src/engine/ai.js";
-import type { Model } from "../../src/engine/types.js";
+import type { EngineModel } from "../../src/engine/types.js";
 
 describe("contracts/engine text completion", () => {
 	it("keeps one-shot prompt assembly and pi types behind the engine boundary", async () => {
@@ -24,7 +24,7 @@ describe("contracts/engine text completion", () => {
 				},
 			]);
 			const result = await completeEngineText({
-				model: faux.getModel() as unknown as Model<never>,
+				model: faux.getModel() as EngineModel,
 				systemPrompt: "memory system",
 				userPrompt: "memory input",
 				maxTokens: 1200,
@@ -53,7 +53,7 @@ describe("contracts/engine text completion", () => {
 				faux.setResponses([fauxAssistantMessage("", { stopReason, errorMessage: "isolated failure" })]);
 				await rejects(
 					completeEngineText({
-						model: faux.getModel() as unknown as Model<never>,
+						model: faux.getModel() as EngineModel,
 						systemPrompt: "system",
 						userPrompt: "user",
 						maxTokens: 50,

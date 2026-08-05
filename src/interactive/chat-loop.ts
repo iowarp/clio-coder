@@ -83,7 +83,7 @@ import {
 	patchToolChoiceNamedPayload,
 	patchToolChoiceNonePayload,
 } from "../engine/provider-payload.js";
-import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState, Usage } from "../engine/types.js";
+import type { AgentEvent, AgentMessage, EngineModel, ImageContent, MutableAgentState, Usage } from "../engine/types.js";
 import type { resolveAgentTools } from "../engine/worker-tools.js";
 import { finalizeAskUserInterview } from "../tools/ask-user.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
@@ -1110,7 +1110,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
-	const synthesizeModel = (target: ChatLoopTarget): Model<never> => {
+	const synthesizeModel = (target: ChatLoopTarget): EngineModel => {
 		const kbHit = deps.providers.knowledgeBase?.lookup(target.wireModelId) ?? null;
 		const synth = target.runtime.synthesizeModel(target.target, target.wireModelId, kbHit);
 		target.runtimeResolution = refineRuntimeTargetWithModelHints(
@@ -1119,7 +1119,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			deps.providers.knowledgeBase,
 		);
 		applyModelCapabilityPatch(synth, target.runtimeResolution.capabilities);
-		return synth as unknown as Model<never>;
+		return synth;
 	};
 	const ensureReasoningProbe = (target: ChatLoopTarget): void => {
 		if (deps.providers.getDetectedReasoning(target.target.id, target.wireModelId) !== null) return;
@@ -1308,20 +1308,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			},
 			maxRetryDelayMs: retrySettings().maxDelayMs,
 			onPayload: async (payload, currentModel) => {
-				const thinkingPatched = patchProviderThinkingPayload(payload, currentModel as Model<never>, currentThinkingLevel);
+				const thinkingPatched = patchProviderThinkingPayload(payload, currentModel, currentThinkingLevel);
 				const basePayload = thinkingPatched ?? payload;
 				if (synthesisToolLock) {
-					return patchToolChoiceNonePayload(basePayload, currentModel as Model<never>) ?? thinkingPatched;
+					return patchToolChoiceNonePayload(basePayload, currentModel) ?? thinkingPatched;
 				}
 				const middlewareChoice = middlewareToolChoice.current();
 				if (middlewareChoice.kind === "none") {
-					return patchToolChoiceNonePayload(basePayload, currentModel as Model<never>) ?? thinkingPatched;
+					return patchToolChoiceNonePayload(basePayload, currentModel) ?? thinkingPatched;
 				}
 				if (middlewareChoice.kind === "required") {
-					return (
-						patchToolChoiceNamedPayload(basePayload, currentModel as Model<never>, middlewareChoice.toolName) ??
-						thinkingPatched
-					);
+					return patchToolChoiceNamedPayload(basePayload, currentModel, middlewareChoice.toolName) ?? thinkingPatched;
 				}
 				return thinkingPatched;
 			},
@@ -1760,7 +1757,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return sessionPrompt;
 		}
 		const modelState = agentRuntime.agent.state.model as
-			| (Model<never> & { clio?: { quirks?: LocalModelQuirks } })
+			| (EngineModel & { clio?: { quirks?: LocalModelQuirks } })
 			| undefined;
 		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
 		const guidance = modelState?.clio?.quirks?.thinking?.guidance;

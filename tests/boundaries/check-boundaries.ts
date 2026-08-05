@@ -7,12 +7,10 @@ export interface BoundaryCheckResult {
 
 const jsSuffixRegex = /\.m?jsx?$/;
 const piPackagePrefix = "@earendil-works/pi-";
-const allowedPiTypeImportSpecifiersOutsideEngine = new Set([
-	// Provider runtime descriptors intentionally expose erased pi-ai Model<Api>
-	// shapes so domains can describe model/runtime capabilities without owning
-	// pi runtime values.
-	"@earendil-works/pi-ai",
-]);
+// Since the 0.83.0 engine-boundary rework, no file outside src/engine/** may
+// import @earendil-works/* at all, type-only included. Domains take erased
+// engine shapes (EngineModel, Api, Model) from src/engine/types.ts.
+const allowedPiTypeImportSpecifiersOutsideEngine = new Set<string>();
 
 function walk(dir: string): string[] {
 	let entries: import("node:fs").Dirent[];

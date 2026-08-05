@@ -2,7 +2,7 @@ import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { compact } from "../../src/domains/session/compaction/compact.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import type { Model } from "../../src/engine/types.js";
+import type { EngineModel } from "../../src/engine/types.js";
 
 describe("contracts/skill activation compaction protection", () => {
 	it("keeps the active skill turn instead of summarizing it away", async () => {
@@ -41,7 +41,7 @@ describe("contracts/skill activation compaction protection", () => {
 
 		const result = await compact({
 			entries,
-			model: {} as Model<never>,
+			model: {} as EngineModel,
 			keepRecentTokens: 1,
 		});
 

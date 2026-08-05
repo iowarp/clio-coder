@@ -414,9 +414,7 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 		if (spec) specs.push(spec);
 	}
 	specs.sort((a, b) => a.name.localeCompare(b.name));
-	return specs.map((spec) =>
-		toAgentTool(spec, input.registry, input.telemetry, input.invokeOptions),
-	) as unknown as AgentTool[];
+	return specs.map((spec) => toAgentTool(spec, input.registry, input.telemetry, input.invokeOptions));
 }
 
 /**

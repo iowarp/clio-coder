@@ -37,13 +37,14 @@ import {
 	registerBuiltInApiProviders,
 	registerFauxProvider,
 } from "@earendil-works/pi-ai/compat";
+import type { EngineModel } from "./types.js";
 
 export { fauxAssistantMessage, fauxToolCall, registerFauxProvider };
 
 export const stream = piStream;
 
 export interface EngineTextCompletionInput {
-	model: Model<never>;
+	model: EngineModel;
 	systemPrompt: string;
 	userPrompt: string;
 	maxTokens: number;
@@ -90,8 +91,8 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 
 export interface EngineAi {
 	listProviders(): KnownProvider[];
-	listModels<TProvider extends KnownProvider>(provider: TProvider): Model<never>[];
-	getModel<TProvider extends KnownProvider>(provider: TProvider, modelId: string): Model<never> | undefined;
+	listModels<TProvider extends KnownProvider>(provider: TProvider): EngineModel[];
+	getModel<TProvider extends KnownProvider>(provider: TProvider, modelId: string): EngineModel | undefined;
 }
 
 let registered = false;
@@ -106,10 +107,10 @@ export function createEngineAi(): EngineAi {
 	ensurePiAiRegistered();
 	return {
 		listProviders: () => getProviders(),
-		listModels: (provider) => getModels(provider as never) as unknown as Model<never>[],
+		listModels: (provider) => [...getModels(provider as never)] as EngineModel[],
 		getModel: (provider, modelId) => {
 			try {
-				return piGetModel(provider as never, modelId as never) as unknown as Model<never>;
+				return piGetModel(provider as never, modelId as never) as EngineModel;
 			} catch {
 				return undefined;
 			}
@@ -179,7 +180,7 @@ export function parseEngineStreamingJson<T = Record<string, unknown>>(partialJso
  *   CLIO_WORKER_FAUX_STOP_REASON   assistant stopReason (default "stop")
  *   CLIO_WORKER_FAUX_ERROR_MESSAGE optional assistant errorMessage
  */
-export function registerFauxFromEnv(): Model<never> | null {
+export function registerFauxFromEnv(): EngineModel | null {
 	if (process.env.CLIO_WORKER_FAUX !== "1") return null;
 	const modelId = process.env.CLIO_WORKER_FAUX_MODEL ?? "faux-model";
 	const text = process.env.CLIO_WORKER_FAUX_TEXT ?? "ok";
@@ -197,5 +198,5 @@ export function registerFauxFromEnv(): Model<never> | null {
 		response.errorMessage = errorMessage;
 	}
 	reg.setResponses([fauxAssistantMessage(text, response)]);
-	return reg.getModel(modelId) as unknown as Model<never>;
+	return reg.getModel(modelId) as EngineModel;
 }
