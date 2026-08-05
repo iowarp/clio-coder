@@ -1234,6 +1234,35 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 	});
 
+	// A boot-time resume (CLIO_RESUME_SESSION_ID) must replay the resumed
+	// session into the chat loop the same way the interactive /resume overlay
+	// does. Without this, the first submit runs with an empty provider context
+	// and parents its user turn at null, appending a second root that silently
+	// abandons the resumed session's active path. The leaf id is restored even
+	// when rebuilding replay messages fails, so parenting stays correct and
+	// only the provider context degrades.
+	if (resumedSessionAtBoot && session) {
+		const resumedMeta = session.current();
+		if (resumedMeta) {
+			let leafTurnId: string | null = null;
+			try {
+				leafTurnId = session.tree(resumedMeta.id).leafId;
+			} catch (err) {
+				process.stderr.write(
+					`Clio Coder: failed to read resumed session tree ${resumedMeta.id}: ${err instanceof Error ? err.message : String(err)}\n`,
+				);
+			}
+			try {
+				chat.resetForSession(leafTurnId, buildReplayAgentMessagesFromTurns(readCurrentSessionEntries()));
+			} catch (err) {
+				chat.resetForSession(leafTurnId);
+				process.stderr.write(
+					`Clio Coder: failed to replay resumed session context ${resumedMeta.id}: ${err instanceof Error ? err.message : String(err)}\n`,
+				);
+			}
+		}
+	}
+
 	if (options.acp) {
 		// ACP-served sessions get the same routing isolation as interactive
 		// ones, but ACP v1 has no channel for agent-initiated advisory text:
