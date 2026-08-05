@@ -50,6 +50,14 @@ interface HeadlessMainAgentResult {
 	 * response.
 	 */
 	sawTerminatingToolResult: boolean;
+	/**
+	 * The interrupt reason from a cancelled turn (`notice` event keyed
+	 * "turn.interrupted"). An interrupted turn always reports a nonzero exit
+	 * with this reason, never a fabricated answer.
+	 */
+	abortReason: string | null;
+	/** Most recent transcript notice; failure detail when the turn never answered. */
+	lastNotice: string | null;
 }
 
 interface HeadlessMainAgentReceiptStats {
@@ -76,10 +84,23 @@ function assistantError(message: AgentMessage | undefined): string | null {
 	return stopReason === "aborted" ? "request aborted" : "provider returned an error";
 }
 
+/**
+ * Fold one chat-loop event into the turn's result. Derivation keys on event
+ * types and stop reasons only: notices are typed `notice` events and can
+ * never masquerade as the assistant's answer, and an assistant message is
+ * the answer only when its stop reason is not a failure.
+ */
 function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult): HeadlessMainAgentResult {
 	if (event.type === "tool_execution_end") {
 		const terminate = (event.result as { terminate?: boolean } | undefined)?.terminate === true;
 		return { ...current, sawTerminatingToolResult: terminate && !event.isError };
+	}
+	if (event.type === "notice") {
+		if (event.surface !== "transcript") return current;
+		if (event.key === "turn.interrupted") {
+			return { ...current, lastNotice: event.text, abortReason: event.text };
+		}
+		return { ...current, lastNotice: event.text };
 	}
 	if (event.type !== "message_end") return current;
 	const message = event.message;
@@ -87,14 +108,7 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	if (error) return { ...current, text: "", error };
 	const text = assistantText(message).trimEnd();
 	if (text.length === 0) return current;
-	if (isDiagnosticAssistantText(text) && current.text.length > 0 && !isDiagnosticAssistantText(current.text)) {
-		return current;
-	}
 	return { ...current, text, error: null };
-}
-
-function isDiagnosticAssistantText(text: string): boolean {
-	return text.startsWith("[Clio Coder]") || text.startsWith("[/");
 }
 
 function blankToolStat(tool: string): ToolCallStat {
@@ -156,6 +170,7 @@ const TERMINAL_JSON_EVENT_TYPES = new Set([
 	"agent_start",
 	"agent_end",
 	"message_end",
+	"notice",
 	"tool_execution_start",
 	"tool_execution_end",
 ]);
@@ -288,7 +303,13 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	const mode = options.mode ?? "text";
 	const jsonEvents = options.jsonEvents ?? "full";
 	const startedAt = new Date().toISOString();
-	let result: HeadlessMainAgentResult = { text: "", error: null, sawTerminatingToolResult: false };
+	let result: HeadlessMainAgentResult = {
+		text: "",
+		error: null,
+		sawTerminatingToolResult: false,
+		abortReason: null,
+		lastNotice: null,
+	};
 	const receiptStats: HeadlessMainAgentReceiptStats = {
 		toolStats: new Map<string, ToolCallStat>(),
 		skillActivations: [],
@@ -380,7 +401,13 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	let failureMessage: string | null = null;
 	let stderrMessage: string | null = null;
 	let stdoutMessage: string | null = null;
-	if (result.error) {
+	if (result.abortReason !== null) {
+		// An interrupted turn never answered, no matter what partial text or
+		// internal error the abort left behind: nonzero exit, abort reason.
+		exitCode = 1;
+		failureMessage = result.abortReason;
+		stderrMessage = result.abortReason;
+	} else if (result.error) {
 		exitCode = 1;
 		failureMessage = result.error;
 		stderrMessage = result.error;
@@ -389,13 +416,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			exitCode = 0;
 		} else {
 			exitCode = 1;
-			failureMessage = "clio run: no assistant response";
+			failureMessage =
+				result.lastNotice !== null ? `clio run: no assistant response (${result.lastNotice})` : "clio run: no assistant response";
 			stderrMessage = failureMessage;
 		}
-	} else if (isDiagnosticAssistantText(result.text)) {
-		exitCode = 1;
-		failureMessage = result.text;
-		stderrMessage = result.text;
 	} else if (mode === "text") {
 		stdoutMessage = result.text;
 	}

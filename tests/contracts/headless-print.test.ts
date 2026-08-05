@@ -102,6 +102,43 @@ describe("contracts/headless-print", () => {
 		strictEqual(exitCode, 1);
 	});
 
+	it("an interrupted turn exits nonzero with the abort reason, never a fabricated answer", async () => {
+		// The interrupt notice is a typed notice event keyed "turn.interrupted";
+		// it must drive the exit code even when the aborted run also produced
+		// partial assistant text or an internal error message.
+		const chat = buildFakeChatLoop([
+			{
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: "partial thought" }], stopReason: "stop" },
+			},
+			{
+				type: "notice",
+				surface: "transcript",
+				level: "warning",
+				key: "turn.interrupted",
+				text: "[Clio Coder] active response cancelled.",
+			},
+		] as unknown as ChatLoopEvent[]);
+		const exitCode = await runHeadlessMainAgent(chat, { prompt: "long task" });
+		strictEqual(exitCode, 1);
+	});
+
+	it("a transcript notice is never the turn's answer", async () => {
+		// Pre-0.3.0 notices were fake assistant message_end events keyed off a
+		// "[Clio Coder]" text prefix; a notice without the prefix became the
+		// answer with exit 0. Typed notices cannot be mistaken for output.
+		const chat = buildFakeChatLoop([
+			{
+				type: "notice",
+				surface: "transcript",
+				level: "error",
+				text: "session.append: no current session",
+			},
+		] as unknown as ChatLoopEvent[]);
+		const exitCode = await runHeadlessMainAgent(chat, { prompt: "hi" });
+		strictEqual(exitCode, 1);
+	});
+
 	it("accumulates usage across agent segments in the run receipt", async () => {
 		// A headless turn can span several agent segments (middleware nudges and
 		// finish-contract reprompts start new agent runs); each agent_end

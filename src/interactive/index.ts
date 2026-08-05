@@ -1226,6 +1226,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	}
 	const unsubscribeChat = deps.chat.onEvent((event) => {
 		if (event.type === "notice") {
+			if (event.surface === "transcript") {
+				chatRenderer.applyEvent(event);
+				return;
+			}
 			notify(event.level, event.text, event.key);
 			return;
 		}
