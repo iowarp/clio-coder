@@ -15,6 +15,7 @@ import {
 	processInvariantMetrics,
 	readRunJournal,
 	receiptInvariantMetrics,
+	receiptUsageMetrics,
 	sessionInvariantMetrics,
 	streamInvariantMetrics,
 	writeBoundaryInvariantMetrics,
@@ -27,6 +28,10 @@ interface SealOptions {
 	exitCode?: number;
 	/** Seal a worker attestation naming this pid; omitted leaves the receipt unattested. */
 	attestedPid?: number;
+	/** Sealed token total for this run; distinguishable values let a sum be checked rather than assumed. */
+	tokenCount?: number;
+	/** Sealed cost for this run. */
+	costUsd?: number;
 }
 
 function attestation(pid: number): RunReceiptAttestation {
@@ -50,6 +55,8 @@ function attestation(pid: number): RunReceiptAttestation {
 async function sealRun(options: SealOptions = {}): Promise<string> {
 	const outcome: RunOutcome = options.outcome ?? "succeeded";
 	const exitCode = options.exitCode ?? 0;
+	const tokenCount = options.tokenCount ?? 12;
+	const costUsd = options.costUsd ?? 0;
 	const ledger = openLedger({ maxRuns: 20 });
 	const envelope = ledger.create({
 		agentId: "main-agent",
@@ -71,13 +78,13 @@ async function sealRun(options: SealOptions = {}): Promise<string> {
 		lineage,
 		endedAt,
 		exitCode,
-		tokenCount: 12,
+		tokenCount,
 		inputTokenCount: 8,
 		outputTokenCount: 4,
 		cacheReadTokenCount: 0,
 		cacheWriteTokenCount: 0,
 		reasoningTokenCount: 0,
-		costUsd: 0,
+		costUsd,
 	});
 	const draft: RunReceiptDraft = {
 		runId: envelope.id,
@@ -111,13 +118,13 @@ async function sealRun(options: SealOptions = {}): Promise<string> {
 		startedAt: envelope.startedAt,
 		endedAt,
 		exitCode,
-		tokenCount: 12,
+		tokenCount,
 		inputTokenCount: 8,
 		outputTokenCount: 4,
 		cacheReadTokenCount: 0,
 		cacheWriteTokenCount: 0,
 		reasoningTokenCount: 0,
-		costUsd: 0,
+		costUsd,
 		compiledPromptHash: null,
 		staticCompositionHash: null,
 		clioVersion: "test",
@@ -144,6 +151,17 @@ function receiptPath(root: string, runId: string): string {
 
 function metricsFor(root: string, processExitCode = 0): Record<string, number | boolean> {
 	return receiptInvariantMetrics(readRunJournal(stateDirOf(root)), processExitCode);
+}
+
+function usageMetricsFor(root: string): Record<string, number | boolean> {
+	return receiptUsageMetrics(readRunJournal(stateDirOf(root)));
+}
+
+/** Every count this family emits. An unmeasured reading carries none of them. */
+const RECEIPT_USAGE_COUNTS = ["receiptUsage.receiptCount", "receiptUsage.totalTokens", "receiptUsage.costUsd"] as const;
+
+function assertNoUsageCounts(metrics: Record<string, number | boolean>): void {
+	for (const key of RECEIPT_USAGE_COUNTS) strictEqual(key in metrics, false, `${key} must be absent, not zero`);
 }
 
 /** Seal one write-boundary verdict in the shape `writeWriteBoundaryVerdict` produces. */
@@ -773,6 +791,119 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 			// Absent, never zero: a run that enforced nothing answered none of
 			// these questions, and a threshold on an absent metric fails closed.
 			strictEqual(Object.keys(writeBoundaryInvariantMetrics(stateDirOf(isolated.dir))).length, 0);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("sums what the receipts sealed, and says so with its own provenance", async () => {
+		const isolated = isolateClioEnv("clio-soak-usage-sum-");
+		try {
+			// Two attempts, deliberately distinguishable, so a sum is checked
+			// rather than assumed from a single receipt.
+			await sealRun({ tokenCount: 700, costUsd: 0.25 });
+			await sealRun({ tokenCount: 300, costUsd: 0.75 });
+
+			const metrics = usageMetricsFor(isolated.dir);
+			strictEqual(metrics["receiptUsage.measured"], true);
+			strictEqual(metrics["receiptUsage.receiptCount"], 2);
+			strictEqual(metrics["receiptUsage.totalTokens"], 1000);
+			strictEqual(metrics["receiptUsage.costUsd"], 1);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("reports no receipt usage when a sealed receipt is edited after sealing", async () => {
+		const isolated = isolateClioEnv("clio-soak-usage-tampered-");
+		try {
+			const runId = await sealRun({ tokenCount: 700, costUsd: 0.25 });
+			strictEqual(usageMetricsFor(isolated.dir)["receiptUsage.measured"], true);
+
+			// The one edit that matters most here: the cost itself. The receipt
+			// still parses and still names its run; its digest no longer covers
+			// what it claims. A sum over that is a number nobody can vouch for.
+			const path = receiptPath(isolated.dir, runId);
+			const receipt = JSON.parse(readFileSync(path, "utf8")) as RunReceipt;
+			receipt.tokenCount = 999_999;
+			writeFileSync(path, JSON.stringify(receipt, null, 2), "utf8");
+
+			const metrics = usageMetricsFor(isolated.dir);
+			strictEqual(metrics["receiptUsage.measured"], false);
+			assertNoUsageCounts(metrics);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("reports no receipt usage when a receipt file no longer parses", async () => {
+		const isolated = isolateClioEnv("clio-soak-usage-unreadable-");
+		try {
+			const runId = await sealRun({ tokenCount: 700, costUsd: 0.25 });
+			await sealRun({ tokenCount: 300, costUsd: 0.75 });
+
+			// A seal Clio wrote that can no longer be read is a broken seal. The
+			// surviving receipt's counts are real, and reporting them alone would
+			// under-report the run's cost as though nothing were missing.
+			writeFileSync(receiptPath(isolated.dir, runId), "{ truncated", "utf8");
+
+			const metrics = usageMetricsFor(isolated.dir);
+			strictEqual(metrics["receiptUsage.measured"], false);
+			assertNoUsageCounts(metrics);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("reports no receipt usage when a receipt has no envelope to authenticate against", async () => {
+		const isolated = isolateClioEnv("clio-soak-usage-unauthenticated-");
+		try {
+			await sealRun({ tokenCount: 700, costUsd: 0.25 });
+			// No envelope means no authority to verify against. An unauthenticated
+			// receipt is a failure, never a cost to add up.
+			writeFileSync(join(stateDirOf(isolated.dir), "runs.json"), "[]", "utf8");
+
+			const metrics = usageMetricsFor(isolated.dir);
+			strictEqual(metrics["receiptUsage.measured"], false);
+			assertNoUsageCounts(metrics);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("reports a run that sealed nothing as unmeasured rather than free", async () => {
+		const isolated = isolateClioEnv("clio-soak-usage-unsealed-");
+		try {
+			// A readable journal with no receipts is an observation: the item ran
+			// and sealed nothing. That is unmeasured, and it is not a zero cost.
+			mkdirSync(stateDirOf(isolated.dir), { recursive: true });
+
+			const metrics = usageMetricsFor(isolated.dir);
+			strictEqual(metrics["receiptUsage.measured"], false);
+			assertNoUsageCounts(metrics);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("leaves receipt usage absent when there is no journal to read", () => {
+		// Absent, not false. A threshold on an absent metric fails closed; a
+		// false would claim this pass looked and found nothing sealed.
+		strictEqual(Object.keys(receiptUsageMetrics(null)).length, 0);
+	});
+
+	it("keeps stream-observed and receipt-sealed accounting as separate readings", async () => {
+		const isolated = isolateClioEnv("clio-soak-usage-provenance-");
+		try {
+			await sealRun({ tokenCount: 700, costUsd: 0.25 });
+
+			// The two families never merge. A surface whose stdout carries no
+			// `message_end` reports `tokens.measured: false` and still reads what
+			// it sealed, and neither name ever answers for the other.
+			const metrics = usageMetricsFor(isolated.dir);
+			strictEqual("tokens.measured" in metrics, false);
+			strictEqual("tokens.total" in metrics, false);
+			strictEqual(metrics["receiptUsage.measured"], true);
 		} finally {
 			isolated.restore();
 		}

@@ -124,6 +124,59 @@ export function receiptInvariantMetrics(
 	};
 }
 
+/**
+ * Receipt-derived token and cost accounting for one eval item.
+ *
+ * This is a different observation from `tokens.*`, which is folded live off
+ * the runner's stdout by `token-stream.ts` and means exactly one thing: usage
+ * a provider reported on an assistant `message_end` this runner watched cross
+ * the wire. Some surfaces publish no such stream. `clio fleet run --json`
+ * drains its workers' events and publishes receipts and one summary, so a
+ * bounded loop's cost never reaches that fold and `tokens.measured` is
+ * correctly false.
+ *
+ * The cost is still sealed. Every attempt writes a receipt carrying
+ * `tokenCount` and `costUsd`, authenticated against its own ledger envelope.
+ * That is an observation too, and an authenticated one, but its provenance is
+ * the journal rather than the wire: it is what Clio sealed, not what a
+ * provider was watched reporting. The two never merge and never reconcile.
+ * `tokens.*` keeps its single meaning, `receiptUsage.*` carries its own, and
+ * neither enters the artifact's `summary.tokens`.
+ *
+ * Reading is total and fails closed. An unreadable journal yields no metrics
+ * at all. A readable journal that sealed nothing yields `measured: false`,
+ * which is an observation rather than an absence. Anything that breaks the
+ * completeness or authenticity of the receipt set yields `measured: false`
+ * and no counts, because a sum over receipts that could not all be
+ * authenticated reports a cost nobody can vouch for.
+ *
+ * The optional per-field split (`inputTokenCount` and its siblings) is
+ * deliberately not exposed. It is optional on the receipt, so partial
+ * availability would need its own per-field coverage semantics, and the
+ * required totals already close the gap.
+ */
+export function receiptUsageMetrics(journal: EvalRunJournal | null): Record<string, number | boolean> {
+	if (journal === null) return {};
+	if (journal.receiptFiles === 0) return { "receiptUsage.measured": false };
+	if (!integrityValid(journal)) return { "receiptUsage.measured": false };
+	let totalTokens = 0;
+	let costUsd = 0;
+	for (const receipt of journal.receipts) {
+		totalTokens += finiteNumber(receipt.tokenCount);
+		costUsd += finiteNumber(receipt.costUsd);
+	}
+	return {
+		"receiptUsage.measured": true,
+		"receiptUsage.receiptCount": journal.receipts.length,
+		"receiptUsage.totalTokens": totalTokens,
+		"receiptUsage.costUsd": costUsd,
+	};
+}
+
+function finiteNumber(value: number): number {
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function integrityValid(journal: EvalRunJournal): boolean {
 	// A receipt file that did not parse never reaches the loop below, so the
 	// count has to agree first: an unreadable seal cannot be authenticated.
