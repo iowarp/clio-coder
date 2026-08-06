@@ -17,6 +17,7 @@ import {
 	receiptInvariantMetrics,
 	sessionInvariantMetrics,
 	streamInvariantMetrics,
+	writeBoundaryInvariantMetrics,
 } from "../../src/domains/eval/metrics/invariants.js";
 import { receiptProcessExitCode } from "../../src/domains/eval/suites/run.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -143,6 +144,31 @@ function receiptPath(root: string, runId: string): string {
 
 function metricsFor(root: string, processExitCode = 0): Record<string, number | boolean> {
 	return receiptInvariantMetrics(readRunJournal(stateDirOf(root)), processExitCode);
+}
+
+/** Seal one write-boundary verdict in the shape `writeWriteBoundaryVerdict` produces. */
+function writeVerdict(root: string, rootId: string, window: string, overrides: Record<string, unknown>): void {
+	const dir = join(stateDirOf(root), "write-boundaries", rootId);
+	mkdirSync(dir, { recursive: true });
+	const verdict = {
+		version: 1,
+		window,
+		stepIds: ["leak"],
+		allow: ["src/"],
+		baselineHead: "b".repeat(40),
+		capturedAt: "2026-08-06T12:00:00.000Z",
+		checkedAt: "2026-08-06T12:00:01.000Z",
+		changedPaths: [],
+		violations: [],
+		rolledBack: [],
+		unrecoverable: [],
+		status: "clean",
+		reason: null,
+		detail: null,
+		digest: "d".repeat(64),
+		...overrides,
+	};
+	writeFileSync(join(dir, `${window}.json`), `${JSON.stringify(verdict, null, 2)}\n`, "utf8");
 }
 
 function sessionEntry(role: "assistant" | "tool_call" | "tool_result", payload: Record<string, unknown> = {}): unknown {
@@ -657,6 +683,99 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		const metrics = streamInvariantMetrics(fold.invariants());
 		strictEqual(metrics["stream.segmentUsageMatchesMessages"], true);
 		strictEqual(metrics["stream.usageDoubleCounted"], false);
+	});
+
+	it("reads a sealed rollback verdict as a detected and repaired violation", () => {
+		const isolated = isolateClioEnv("clio-soak-boundary-rolled-");
+		try {
+			writeVerdict(isolated.dir, "root-1", "wave-1", {
+				status: "rolled-back",
+				reason: "writes_boundary_violation",
+				violations: ["out/leak.txt"],
+			});
+
+			const metrics = writeBoundaryInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["boundary.verdictCount"], 1);
+			strictEqual(metrics["boundary.verdictSealed"], true);
+			strictEqual(metrics["boundary.violationsDetected"], 1);
+			strictEqual(metrics["boundary.violationsRolledBack"], 1);
+			strictEqual(metrics["boundary.rollbackIncomplete"], 0);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("counts a rollback it could not complete separately from one it could", () => {
+		const isolated = isolateClioEnv("clio-soak-boundary-incomplete-");
+		try {
+			// A path already dirty when the snapshot was taken cannot be restored
+			// from content git has. That is the honest failure, and it must stay
+			// distinguishable from a clean rollback rather than reading as one.
+			writeVerdict(isolated.dir, "root-1", "wave-1", {
+				status: "rollback-incomplete",
+				reason: "writes_boundary_violation",
+				violations: ["out/leak.txt"],
+				unrecoverable: [{ path: "out/leak.txt", reason: "path was dirty at snapshot" }],
+			});
+
+			const metrics = writeBoundaryInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["boundary.violationsDetected"], 1);
+			strictEqual(metrics["boundary.rollbackIncomplete"], 1);
+			strictEqual(metrics["boundary.violationsRolledBack"], 0);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails boundary.verdictSealed when a verdict no longer parses", () => {
+		const isolated = isolateClioEnv("clio-soak-boundary-corrupt-");
+		try {
+			writeVerdict(isolated.dir, "root-1", "wave-1", { status: "clean", reason: null });
+			writeFileSync(join(stateDirOf(isolated.dir), "write-boundaries", "root-1", "wave-1.json"), "{ truncated", "utf8");
+
+			const metrics = writeBoundaryInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["boundary.verdictCount"], 1);
+			strictEqual(metrics["boundary.verdictSealed"], false, "a record that cannot be read cannot be audited");
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails boundary.verdictSealed when a verdict carries no baseline commit", () => {
+		const isolated = isolateClioEnv("clio-soak-boundary-baseline-");
+		try {
+			// A verdict without the commit it was computed against measured the
+			// checkout against nothing nameable.
+			writeVerdict(isolated.dir, "root-1", "wave-1", { status: "clean", reason: null, baselineHead: "" });
+
+			const metrics = writeBoundaryInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["boundary.verdictSealed"], false);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails boundary.verdictSealed when a verdict carries no digest", () => {
+		const isolated = isolateClioEnv("clio-soak-boundary-digest-");
+		try {
+			writeVerdict(isolated.dir, "root-1", "wave-1", { status: "clean", reason: null, digest: "" });
+
+			const metrics = writeBoundaryInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["boundary.verdictSealed"], false);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("leaves the boundary invariants absent when the run enforced no boundary", () => {
+		const isolated = isolateClioEnv("clio-soak-boundary-absent-");
+		try {
+			// Absent, never zero: a run that enforced nothing answered none of
+			// these questions, and a threshold on an absent metric fails closed.
+			strictEqual(Object.keys(writeBoundaryInvariantMetrics(stateDirOf(isolated.dir))).length, 0);
+		} finally {
+			isolated.restore();
+		}
 	});
 
 	it("ignores files that are not receipts and keeps a stray directory out of the count", async () => {

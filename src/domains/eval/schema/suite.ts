@@ -69,6 +69,15 @@ export const CANONICAL_METRICS = [
 	"continuity.turnsAfterCompaction",
 	"process.attestedWorkers",
 	"process.orphanedChildren",
+	// Write-boundary enforcement, read from the verdicts the run sealed. The
+	// promise is not that nothing escaped the allowlist; it is that Clio saw what
+	// did, named it, rolled back what git could restore, and left a signed record
+	// against the baseline it measured.
+	"boundary.verdictCount",
+	"boundary.verdictSealed",
+	"boundary.violationsDetected",
+	"boundary.violationsRolledBack",
+	"boundary.rollbackIncomplete",
 	"stream.messageUpdateCount",
 	"stream.usageDoubleCounted",
 	"stream.segmentUsageMatchesMessages",

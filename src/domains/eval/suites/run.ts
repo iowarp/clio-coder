@@ -8,6 +8,7 @@ import {
 	readRunJournal,
 	receiptInvariantMetrics,
 	sessionInvariantMetrics,
+	writeBoundaryInvariantMetrics,
 } from "../metrics/invariants.js";
 import { wallTimeMetric } from "../metrics/latency.js";
 import { tokenAccountingFrom } from "../metrics/tokens.js";
@@ -199,6 +200,7 @@ function invariantMetrics(stateDir: string, runnerExitCode: number): Record<stri
 		...receiptInvariantMetrics(journal, runnerExitCode),
 		...sessionInvariantMetrics(stateDir),
 		...processInvariantMetrics(journal),
+		...writeBoundaryInvariantMetrics(stateDir),
 	};
 }
 
