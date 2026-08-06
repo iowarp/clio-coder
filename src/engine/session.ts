@@ -40,7 +40,7 @@ import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { readClioVersion, readPiMonoVersion } from "../core/package-root.js";
 import { assertSafeId } from "../core/safe-id.js";
-import { safeResourceWrite } from "../core/safe-resource-write.js";
+import { fsyncDirectory, safeResourceWrite } from "../core/safe-resource-write.js";
 import { clioStateDir } from "../core/xdg.js";
 
 export interface ClioSessionMeta {
@@ -159,19 +159,6 @@ export interface SessionJsonlWriteOptions {
 
 function defaultSessionJsonlWarning(warning: SessionJsonlWarning): void {
 	process.stderr.write(`[clio:session] ${warning.path}:${warning.line}: ${warning.message}\n`);
-}
-
-function fsyncDirectory(path: string): void {
-	let fd: number | null = null;
-	try {
-		fd = openSync(path, "r");
-		fsyncSync(fd);
-	} catch {
-		// Some filesystems/platforms reject directory fsync. The temp-file
-		// fsync + rename still preserves the important no-torn-file property.
-	} finally {
-		if (fd !== null) closeSync(fd);
-	}
 }
 
 function serializeJsonl(entries: ReadonlyArray<unknown>): string {
