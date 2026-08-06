@@ -102,6 +102,16 @@ tb run -d terminal-bench-core==0.1.1 --n-concurrent 1 \
   --output-path benchmarks/community/terminal-bench/runs/smoke
 ```
 
+Terminal-Bench reports no token usage, and the manifest says so rather than
+printing a zero. The other adapters run `clio run --json` as their own child,
+keep the event stream in a file, and republish the usage they folded on their
+own stdout. This one hands the harness a `TerminalCommand` that runs inside the
+task container, so the harness owns the process and its terminal: no `--json`,
+no event stream this process can read, and no parent `clio eval` reading this
+adapter's stdout. Measuring usage here requires changing what terminal-bench
+executes and where it deposits the stream, which is a harness-integration
+change rather than an accounting fix.
+
 ## SciCode
 
 `scicode/scicode_clio.py` generates normal `clio eval` task files and grades

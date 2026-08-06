@@ -19,6 +19,24 @@ Tunables via `--agent-kwarg key=value` or env:
   main_target (CLIO_MAIN_TARGET), main_model (CLIO_MAIN_MODEL),
   worker_model (CLIO_WORKER_MODEL), timeout_sec (CLIO_TASK_TIMEOUT),
   CLIO_MAIN_URL, CLIO_WORKER_URL, CLIO_TARBALL_URL.
+
+Token accounting: this agent deliberately uses none of `clio_usage.py`, and
+that is not an oversight. The HumanEval, SciCode, and SWE-bench adapters run
+`clio run --json` as their own child, keep the event stream in a file, and
+republish the usage they folded on their own stdout so a parent `clio eval`
+observes it. This agent does neither half. `_run_agent_commands` returns a
+`TerminalCommand` that the terminal-bench harness executes inside the task
+container: the harness owns the process and its terminal, this agent never
+sees stdout, `--json` is not passed, and no event stream is written anywhere
+this process can read. There is no observed usage to fold, and no parent
+`clio eval` reads this module's stdout. Terminal-bench's own runner produces
+the episode's scoring.
+
+Making usage measurable here means changing what terminal-bench executes and
+where it deposits the stream, which is a separate, larger change to the
+harness integration rather than an accounting fix. Publishing an invented or
+zero count instead would be worse than the absence: an unobserved run was not
+a free one.
 """
 import os
 import shlex
