@@ -1,0 +1,6 @@
+version: 1
+commands:
+  test:
+    argv: ["node", "test/known-answers.test.mjs"]
+    timeoutMs: 30000
+    description: Known-answer CSV parsing test. Red before both fixes, green after them.

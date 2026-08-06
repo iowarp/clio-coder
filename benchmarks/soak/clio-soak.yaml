@@ -128,6 +128,103 @@ tasks:
         - stream.segmentUsageMatchesMessages
     timeoutMs: 660000
 
+  # The same two surfaces against a workload one file cannot answer. Two
+  # defects in two modules, so a repair that reads only the file the failure
+  # names cannot make it green. No new invariant family: the promises are the
+  # same ones, measured against work that is harder to fake.
+  - id: multi-file-bug.main-agent
+    tags: [offline, invariant, main-agent, multi-file]
+    workspace:
+      kind: temp-copy
+      path: fixtures/multi-file-bug
+      setup:
+        - git init -q -b main .
+        - git -c user.email=soak@clio.local -c user.name=Soak add -A
+        - git -c user.email=soak@clio.local -c user.name=Soak commit -q -m 'fixture baseline'
+    runner:
+      kind: clio-run
+      prompt: >-
+        `node test/known-answers.test.mjs` is red. Two defects cause it, one in
+        src/tokenize.mjs and one in src/coerce.mjs; src/parse.mjs is correct.
+        Fix both so the test passes. Do not modify anything under test/.
+      timeoutMs: 900000
+    verify:
+      measure:
+        - node test/known-answers.test.mjs
+      assertions:
+        - metric: ledger.formatVersion
+          op: eq
+          value: 3
+        - metric: ledger.toolPairsUnmatched
+          op: eq
+          value: 0
+        - metric: ledger.assistantBetweenCallAndResult
+          op: eq
+          value: 0
+        - metric: receipt.rootCount
+          op: eq
+          value: 1
+    metrics:
+      collect:
+        - receipt.sealed
+        - receipt.integrityValid
+        - receipt.outcomeMatchesExit
+        - ledger.formatVersion
+        - ledger.toolPairsUnmatched
+        - ledger.assistantBetweenCallAndResult
+        - ledger.sessionCount
+        - task.solved
+        - patch.filesChanged
+        - patch.testFilesModified
+        - tokens.measured
+        - stream.messageUpdateCount
+        - stream.cumulativeSnapshots
+        - stream.segmentUsageMatchesMessages
+    timeoutMs: 960000
+
+  - id: multi-file-bug.dispatch
+    tags: [offline, invariant, dispatch, multi-file]
+    workspace:
+      kind: temp-copy
+      path: fixtures/multi-file-bug
+      setup:
+        - git init -q -b main .
+        - git -c user.email=soak@clio.local -c user.name=Soak add -A
+        - git -c user.email=soak@clio.local -c user.name=Soak commit -q -m 'fixture baseline'
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        `node test/known-answers.test.mjs` is red. Two defects cause it, one in
+        src/tokenize.mjs and one in src/coerce.mjs; src/parse.mjs is correct.
+        Fix both so the test passes. Do not modify anything under test/.
+      timeoutMs: 900000
+    verify:
+      measure:
+        - node test/known-answers.test.mjs
+      assertions:
+        - metric: process.orphanedChildren
+          op: eq
+          value: 0
+        - metric: receipt.rootCount
+          op: eq
+          value: 1
+    metrics:
+      collect:
+        - receipt.sealed
+        - receipt.integrityValid
+        - receipt.outcomeMatchesExit
+        - task.solved
+        - patch.filesChanged
+        - patch.testFilesModified
+        - tokens.measured
+        - process.attestedWorkers
+        - process.orphanedChildren
+        - stream.messageUpdateCount
+        - stream.cumulativeSnapshots
+        - stream.segmentUsageMatchesMessages
+    timeoutMs: 960000
+
   - id: compaction-continuity.main-agent
     tags: [offline, invariant, main-agent, continuity]
     workspace:
