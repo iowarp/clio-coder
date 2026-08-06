@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { projectHeadlessJsonEvent } from "../../src/cli/modes/json-stream.js";
+import { projectDispatchJsonEvent, projectHeadlessJsonEvent } from "../../src/cli/modes/json-stream.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 
 function assistantMessage(text: string): unknown {
@@ -63,6 +63,38 @@ describe("contracts/headless-json-stream", () => {
 		strictEqual(projected.type, "turn_end");
 		ok(projected.message !== undefined, "stop reason and usage stay reachable");
 		strictEqual("toolResults" in projected, false);
+	});
+
+	it("drops the segment transcript from a dispatch stream's agent_end", () => {
+		// The dispatch surface forwards worker events, and its agent_end carried
+		// every message of the segment a second time: each had already crossed as
+		// its own message_end. Measured on a two-minute soak run: 24 KB of
+		// agent_end against 19 KB for the whole message_end stream it repeated.
+		const projected = projectDispatchJsonEvent({
+			type: "agent_end",
+			messages: [assistantMessage("first"), assistantMessage("second")],
+		}) as { type: string; messageCount: number; usage: Record<string, unknown> };
+
+		strictEqual(projected.type, "agent_end");
+		strictEqual(projected.messageCount, 2);
+		strictEqual(projected.usage.totalTokens, 250);
+		strictEqual(projected.usage.measured, true);
+		strictEqual("messages" in projected, false, "the transcript is not republished");
+	});
+
+	it("leaves a worker's slimmed increments and every other dispatch event alone", () => {
+		// A worker publishes increments as message_update deltas, already slimmed
+		// of their cumulative snapshots at the worker stdout seam. That is a
+		// different name for the same append-oriented promise, not a violation.
+		for (const event of [
+			{ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "The" } },
+			{ type: "message_end", message: assistantMessage("done") },
+			{ type: "clio_tool_finish", payload: { tool: "edit", outcome: "ok" } },
+			{ type: "attempt_start", attempt: 1 },
+			{ type: "agent_end", messageCount: 2, usage: { totalTokens: 250 } },
+		]) {
+			strictEqual(projectDispatchJsonEvent(event), event);
+		}
 	});
 
 	it("passes terminal and lifecycle events through unchanged", () => {

@@ -33,6 +33,7 @@ import { isToolProfileName } from "../tools/profiles.js";
 import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
 import { buildInitialMessage, readPipedStdin, shouldReadPipedStdin } from "./initial-message.js";
+import { projectDispatchJsonEvent } from "./modes/json-stream.js";
 import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { setupSteerChannel } from "./steer-channel.js";
 
@@ -422,7 +423,7 @@ async function runDispatch(
 		let lastAssistantText = "";
 		for await (const event of handle.events) {
 			if (parsed.json) {
-				process.stdout.write(`${JSON.stringify(event)}\n`);
+				process.stdout.write(`${JSON.stringify(projectDispatchJsonEvent(event))}\n`);
 				continue;
 			}
 			const e = event as { type?: string; text?: string };
