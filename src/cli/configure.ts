@@ -16,6 +16,7 @@ import {
 	resolveRuntimeAuthTarget,
 	supportGroupLabel,
 } from "../domains/providers/index.js";
+import { probeCapabilitiesForModel } from "../domains/providers/model-capabilities.js";
 import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
@@ -461,6 +462,30 @@ function setWorkerProfilePointer(
 	};
 }
 
+/**
+ * A target that was probed successfully and still reported no context window
+ * will run against the runtime descriptor's placeholder. Say so at the moment
+ * the target is written, because the alternative is a plausible-looking number
+ * the operator never chose and the server never claimed.
+ */
+function warnUndiscoveredContextWindow(descriptor: TargetDescriptor, probe: ProbeResult | null): void {
+	if (!probe?.ok) return;
+	if (typeof descriptor.capabilities?.contextWindow === "number" && descriptor.capabilities.contextWindow > 0) return;
+	const discovered = probeCapabilitiesForModel(
+		{
+			target: descriptor,
+			probeCapabilities: probe.discoveredCapabilities ?? null,
+			probeModelCapabilities: probe.modelCapabilities ?? null,
+			probeModelId: probe.capabilityModelId ?? null,
+		},
+		descriptor.defaultModel,
+	);
+	if (typeof discovered?.contextWindow === "number" && discovered.contextWindow > 0) return;
+	process.stdout.write(
+		"  warning: the target reported no context window; Clio will use the runtime default as a guess. Set one with --context-window.\n",
+	);
+}
+
 function printSummary(settings: ClioSettings, descriptor: TargetDescriptor, probe: ProbeResult | null): void {
 	process.stdout.write(`\nsaved target ${descriptor.id} (runtime=${descriptor.runtime})\n`);
 	if (descriptor.url) process.stdout.write(`  url        ${descriptor.url}\n`);
@@ -474,6 +499,7 @@ function printSummary(settings: ClioSettings, descriptor: TargetDescriptor, prob
 			: `probe failed: ${probe.error ?? "unknown"}`;
 		process.stdout.write(`  ${line}\n`);
 	}
+	warnUndiscoveredContextWindow(descriptor, probe);
 	if (settings.orchestrator.target === descriptor.id) process.stdout.write("  orchestrator target\n");
 	if (settings.background.target === descriptor.id) process.stdout.write("  background memory target\n");
 	if (settings.workers.default.target === descriptor.id) process.stdout.write("  fleet default\n");

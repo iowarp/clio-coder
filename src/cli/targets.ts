@@ -851,12 +851,24 @@ export function residentModelsSummary(states: TargetStatus["discoveredModelState
 	return resident.length > 0 ? `resident: ${resident.join(", ")}` : "resident: none";
 }
 
+/**
+ * A window nothing declared is the runtime descriptor's placeholder, not a
+ * capability the target reported. Saying so is the difference between a number
+ * a user can plan against and one they cannot.
+ */
+export function formatContextWindow(status: Pick<TargetStatus, "capabilities" | "contextWindowProvenance">): string {
+	const window = status.capabilities.contextWindow;
+	return status.contextWindowProvenance === "runtime-default"
+		? `ctx ${window} (unverified runtime default)`
+		: `ctx ${window}`;
+}
+
 function formatNotes(status: TargetStatus): string {
 	const parts: string[] = [];
 	if (status.target.gateway) parts.push("gateway");
 	if (status.runtime?.auth === "oauth") parts.push("oauth");
 	if (status.runtime?.auth === "claude-cli") parts.push("claude-cli");
-	if (status.capabilities.contextWindow > 0) parts.push(`ctx ${status.capabilities.contextWindow}`);
+	if (status.capabilities.contextWindow > 0) parts.push(formatContextWindow(status));
 	if (!status.available && status.reason) parts.push(status.reason);
 	const residency = residentModelsSummary(status.discoveredModelStates);
 	if (residency) parts.push(residency);
@@ -913,6 +925,7 @@ interface SerializedStatus {
 	reason: string;
 	health: TargetStatus["health"];
 	capabilities: TargetStatus["capabilities"];
+	contextWindowProvenance?: TargetStatus["contextWindowProvenance"];
 	probeCapabilities?: TargetStatus["probeCapabilities"];
 	probeModelId?: TargetStatus["probeModelId"];
 	probeNotes?: TargetStatus["probeNotes"];
@@ -943,6 +956,9 @@ function serializeStatus(
 		detectedReasoning: extras.detectedReasoning,
 		reasoningCandidateModelId: extras.candidateModelId,
 	};
+	if (status.contextWindowProvenance !== undefined) {
+		out.contextWindowProvenance = status.contextWindowProvenance;
+	}
 	if (status.discoveredModelsSource !== undefined) {
 		out.discoveredModelsSource = status.discoveredModelsSource;
 	}
