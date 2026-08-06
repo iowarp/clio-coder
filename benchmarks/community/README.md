@@ -91,9 +91,11 @@ Terminal-Bench with the adapter import path:
 
 ```sh
 npm run build
-npm pack --pack-destination /tmp/clio-pack
+# `npm pack` names the tarball after the current package version, so read the
+# name it printed rather than pinning one that goes stale on every release.
+CLIO_TARBALL=$(npm pack --pack-destination /tmp/clio-pack | tail -1)
 
-CLIO_TARBALL_URL=http://host.docker.internal:8899/iowarp-clio-coder-0.2.9.tgz \
+CLIO_TARBALL_URL=http://host.docker.internal:8899/"$CLIO_TARBALL" \
 CLIO_MAIN_URL=http://orchestrator.example:8080 \
 CLIO_WORKER_URL=http://worker.example:1234 \
 PYTHONPATH=benchmarks/community/terminal-bench \
