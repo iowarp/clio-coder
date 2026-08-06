@@ -18,6 +18,7 @@ import {
 	sessionInvariantMetrics,
 	streamInvariantMetrics,
 } from "../../src/domains/eval/metrics/invariants.js";
+import { receiptProcessExitCode } from "../../src/domains/eval/suites/run.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 interface SealOptions {
@@ -492,6 +493,24 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 			const metrics = metricsFor(isolated.dir, 1);
 			strictEqual(metrics["receipt.integrityValid"], true);
 			strictEqual(metrics["receipt.outcomeMatchesExit"], false);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("reconciles a nested SIGINT receipt against the measured chaos exit instead of the clean harness exit", async () => {
+		const isolated = isolateClioEnv("clio-soak-chaos-exit-");
+		try {
+			await sealRun({ outcome: "canceled", exitCode: 130 });
+			const journal = readRunJournal(stateDirOf(isolated.dir));
+			strictEqual(receiptInvariantMetrics(journal, 0)["receipt.outcomeMatchesExit"], false);
+
+			const processExitCode = receiptProcessExitCode({
+				exitCode: 0,
+				metrics: { "chaos.exitCode": 130 },
+			});
+			strictEqual(processExitCode, 130);
+			strictEqual(receiptInvariantMetrics(journal, processExitCode)["receipt.outcomeMatchesExit"], true);
 		} finally {
 			isolated.restore();
 		}
