@@ -75,7 +75,11 @@ describe("contracts/soak suite", { concurrency: false }, () => {
 		for (const task of loaded.suite.tasks) {
 			// Every soak task measures the outcome and asserts nothing about it.
 			ok((task.verify.measure ?? []).length > 0, `${task.id} must measure the task outcome`);
-			strictEqual((task.verify.assertions ?? []).length, 0, `${task.id} must not gate on the task outcome`);
+			// Task assertions carry surface-specific invariants and never the task
+			// outcome: a model that failed the workload must not fail the item.
+			for (const assertion of task.verify.assertions ?? []) {
+				strictEqual(assertion.metric.startsWith("task."), false, `${task.id} must not gate on ${assertion.metric}`);
+			}
 			ok((task.workspace.setup ?? []).length > 0, `${task.id} must seed its fixture`);
 		}
 		ok((loaded.suite.thresholds?.fail ?? []).length > 0, "the soak gates on invariants");

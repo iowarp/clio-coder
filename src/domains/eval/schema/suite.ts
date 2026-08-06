@@ -56,6 +56,8 @@ export const CANONICAL_METRICS = [
 	"receipt.sealed",
 	"receipt.integrityValid",
 	"receipt.outcomeMatchesExit",
+	"process.attestedWorkers",
+	"process.orphanedChildren",
 	"stream.messageUpdateCount",
 	"stream.usageDoubleCounted",
 	"stream.segmentUsageMatchesMessages",

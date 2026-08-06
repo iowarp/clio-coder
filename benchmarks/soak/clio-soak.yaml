@@ -10,9 +10,12 @@ suite:
     the moment Clio does not seal a receipt, cannot authenticate one it sealed,
     or reports an outcome its own exit status contradicts.
 
-    The two readings stay apart. `verify.measure` records whether the model
-    solved the task and gates nothing. `thresholds.fail` carries the invariants,
-    and an invariant a run could not measure fails the gate closed.
+    The readings stay in three layers. `verify.measure` records whether the
+    model solved the task and gates nothing. `thresholds.fail` carries the
+    invariants every surface answers. A task's own `verify.assertions` carry the
+    invariants only its surface can answer, because a worker attests processes
+    that the main agent, running in the orchestrator itself, never has. An
+    invariant a run could not measure fails closed in either layer.
   provenance:
     fixtures: benchmarks/soak/fixtures
     offline: true
@@ -78,6 +81,13 @@ tasks:
     verify:
       measure:
         - node test/known-answers.test.mjs
+      assertions:
+        # A worker leads its own process group and abort escalates against the
+        # whole group, so nothing it attested may outlive the run. Only the
+        # dispatch surface can answer this: the main agent attests no worker.
+        - metric: process.orphanedChildren
+          op: eq
+          value: 0
     metrics:
       collect:
         - receipt.sealed
@@ -87,6 +97,8 @@ tasks:
         - patch.filesChanged
         - patch.testFilesModified
         - tokens.measured
+        - process.attestedWorkers
+        - process.orphanedChildren
         - stream.messageUpdateCount
         - stream.cumulativeSnapshots
         - stream.segmentUsageMatchesMessages
