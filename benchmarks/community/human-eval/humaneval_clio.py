@@ -42,7 +42,7 @@ HUMANEVAL_URL = "https://raw.githubusercontent.com/openai/human-eval/master/data
 CLIO = os.environ.get("CLIO_BIN", "clio")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from clio_usage import emit_observed_usage, fold_message_end_usage, receipt_total_tokens
+from clio_usage import emit_observed_usage, fold_message_end_usage, receipt_total_tokens, run_id_from_events
 from result_manifest import target_profile, write_result_manifest
 from uv_command import uv_python_cmd, uv_script_cmd
 
@@ -284,23 +284,6 @@ def extract_python_from_events(events_path: Path) -> str | None:
     for chunk in chunks:
         matches.extend(match.group(1) for match in PYTHON_BLOCK_RE.finditer(chunk))
     return matches[-1].strip() + "\n" if matches else None
-
-
-def run_id_from_events(events_path: Path) -> str | None:
-    if not events_path.exists():
-        return None
-    with events_path.open("r", encoding="utf-8", errors="replace") as stream:
-        for line in stream:
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(event, dict):
-                continue
-            run_id = (event.get("session") or {}).get("runId") or event.get("runId")
-            if isinstance(run_id, str) and run_id:
-                return run_id
-    return None
 
 
 def completion_from_solution(problem: dict[str, Any], solution_text: str) -> str:

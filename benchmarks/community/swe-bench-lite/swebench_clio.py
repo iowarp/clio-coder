@@ -32,6 +32,7 @@ CLIO = os.environ.get("CLIO_BIN", "clio")
 # source of truth for fleet endpoints/model names. The import is guarded so the
 # adapter still runs if the config is missing; env vars override either way.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from clio_usage import emit_observed_usage, fold_message_end_usage, receipt_total_tokens, run_id_from_events
 from result_manifest import target_profile, write_result_manifest
 
 try:
@@ -124,43 +125,6 @@ def diff_against_base(checkout: Path) -> str:
     return r.stdout
 
 
-def tokens_from_events(events_path: Path):
-    total, run_id = 0, None
-    try:
-        for line in open(events_path):
-            try:
-                e = json.loads(line)
-            except Exception:
-                continue
-            if run_id is None:
-                run_id = (e.get("session") or {}).get("runId") or e.get("runId")
-            msg = e.get("message") or {}
-            usage = msg.get("usage") or {}
-            total = max(total, int(usage.get("totalTokens") or 0))
-    except FileNotFoundError:
-        pass
-    return total, run_id
-
-
-def tokens_from_receipt(run_id):
-    if not run_id:
-        return None
-    p = Path.home() / ".local/state/clio/receipts" / f"{run_id}.json"
-    if not p.exists():
-        return None
-    try:
-        r = json.load(open(p))
-    except Exception:
-        return None
-    for path in (("usage", "totalTokens"), ("tokens",), ("usage", "total")):
-        cur = r
-        for k in path:
-            cur = cur.get(k) if isinstance(cur, dict) else None
-        if isinstance(cur, (int, float)) and cur:
-            return int(cur)
-    return None
-
-
 def generate_one(inst, workdir: Path, cache_dir: Path, model_name, timeout_s, target, model):
     iid = inst["instance_id"]
     checkout = workdir / "checkouts" / iid
@@ -174,15 +138,41 @@ def generate_one(inst, workdir: Path, cache_dir: Path, model_name, timeout_s, ta
     )
     wall, code, timed_out = run_clio(checkout, task, events_path, timeout_s, target, model)
     patch = diff_against_base(checkout)
-    stream_tokens, run_id = tokens_from_events(events_path)
-    tokens = tokens_from_receipt(run_id) or stream_tokens or None
+    run_id = run_id_from_events(events_path)
+    observed_usage = fold_message_end_usage(events_path)
+    # The parent `clio eval` sees only this adapter's stdout, so the usage this
+    # adapter observed is republished there. Nothing is written when nothing was
+    # observed: the eval must report unmeasured rather than a zero.
+    emit_observed_usage(observed_usage)
+    stream_tokens = None if observed_usage is None else observed_usage["totalTokens"]
+    tokens = receipt_total_tokens(run_id) or stream_tokens
     pred = {"instance_id": iid, "model_name_or_path": model_name, "model_patch": patch}
     metric = {
         "instance_id": iid, "repo": inst["repo"], "wall_s": round(wall, 1),
-        "tokens": tokens, "exit": code, "timed_out": timed_out,
+        "tokens": tokens, "tokens_measured": stream_tokens is not None,
+        "exit": code, "timed_out": timed_out,
         "patch_bytes": len(patch), "empty_patch": not patch.strip(), "run_id": run_id,
     }
     return pred, metric
+
+
+def read_instances_file(path: Path):
+    """Instance rows from a local JSONL, for offline smokes and fixtures.
+
+    The dataset download needs `datasets` and network access. A local file
+    keeps the adapter's own wiring exercisable without either.
+    """
+    rows = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, 1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                rows.append(json.loads(stripped))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}:{line_no}: invalid JSONL: {exc}") from exc
+    return rows
 
 
 def select_instances(ds, args):
@@ -217,13 +207,21 @@ def main():
         default=os.environ.get("SWEBENCH_REPO_CACHE", str(Path.home() / ".cache/clio-community-bench/repos")),
         help="bare-repo cache dir shared across runs",
     )
+    ap.add_argument(
+        "--instances-file",
+        default=None,
+        help="JSONL of instance rows to use instead of downloading the dataset",
+    )
     args = ap.parse_args()
-    if not (args.instances or args.limit or args.all or args.repos):
-        ap.error("select instances with --instances, --limit, --repos, or --all")
+    if not (args.instances or args.limit or args.all or args.repos or args.instances_file):
+        ap.error("select instances with --instances, --limit, --repos, --all, or --instances-file")
 
-    from datasets import load_dataset
+    if args.instances_file:
+        ds = read_instances_file(Path(args.instances_file))
+    else:
+        from datasets import load_dataset
 
-    ds = load_dataset(DATASET, split="test")
+        ds = load_dataset(DATASET, split="test")
     chosen = select_instances(ds, args)
     if not chosen:
         print("no instances matched", file=sys.stderr)
@@ -266,6 +264,10 @@ def main():
         for metric in metrics_rows
         if not metric.get("error") and metric.get("exit") == 0 and not metric.get("empty_patch")
     )
+    # An instance whose stream reported no usage was not free, it was
+    # unobserved. Report the count beside how many instances it covers, and
+    # report absence rather than a zero the reader would sum as real.
+    measured_rows = [metric for metric in metrics_rows if metric.get("tokens_measured")]
     summary = {
         "suite": "swe-bench-lite",
         "dataset": DATASET,
@@ -277,7 +279,9 @@ def main():
         "emptyPatches": sum(1 for metric in metrics_rows if metric.get("empty_patch")),
         "timedOut": sum(1 for metric in metrics_rows if metric.get("timed_out")),
         "wallSeconds": round(sum(float(metric.get("wall_s") or 0) for metric in metrics_rows), 3),
-        "tokens": sum(int(metric.get("tokens") or 0) for metric in metrics_rows),
+        "tokens": sum(int(metric.get("tokens") or 0) for metric in measured_rows) if measured_rows else None,
+        "tokensMeasuredInstances": len(measured_rows),
+        "tokensTotalInstances": len(metrics_rows),
     }
     manifest_path, summary_path = write_result_manifest(
         workdir,

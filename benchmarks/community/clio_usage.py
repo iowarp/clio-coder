@@ -77,6 +77,32 @@ def fold_message_end_usage(events_path: Path | str) -> dict[str, int] | None:
     return total if measured else None
 
 
+def run_id_from_events(events_path: Path | str) -> str | None:
+    """The run id the stream reported, or None when it reported none.
+
+    Receipt lookup keys on this id, so guessing one would read another run's
+    receipt. Absence stays absence.
+    """
+    path = Path(events_path)
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8", errors="replace") as stream:
+        for line in stream:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            session = event.get("session")
+            run_id = (session or {}).get("runId") if isinstance(session, dict) else None
+            if not run_id:
+                run_id = event.get("runId")
+            if isinstance(run_id, str) and run_id:
+                return run_id
+    return None
+
+
 def emit_observed_usage(usage: dict[str, int] | None, stream: TextIO | None = None) -> None:
     """Republish observed usage on adapter stdout for a parent eval's fold.
 

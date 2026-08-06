@@ -1,6 +1,6 @@
 import { strictEqual } from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { type SpawnSyncReturns, spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SCICODE = join(REPO_ROOT, "benchmarks", "community", "scicode", "scicode_clio.py");
 const HUMANEVAL = join(REPO_ROOT, "benchmarks", "community", "human-eval", "humaneval_clio.py");
+const SWEBENCH = join(REPO_ROOT, "benchmarks", "community", "swe-bench-lite", "swebench_clio.py");
 const PYTHON = process.env.PYTHON ?? "python3";
 
 /**
@@ -214,5 +215,105 @@ describe("contracts/benchmark adapter token accounting", () => {
 		};
 		strictEqual(summary.tokens, 1_000);
 		strictEqual(summary.tokensMeasured, true);
+	});
+
+	/**
+	 * Seed the bare-repo cache the adapter clones from, so the instance
+	 * materializes offline and no dataset download is involved.
+	 */
+	function seedSweBenchInstance(root: string): { instancesFile: string; cacheDir: string } {
+		const source = join(root, "source");
+		const cacheDir = join(root, "cache");
+		mkdirSync(source, { recursive: true });
+		mkdirSync(cacheDir, { recursive: true });
+		writeFileSync(join(source, "widget.py"), "def add_one(x):\n    return x + 2\n", "utf8");
+		const git = (args: string[], cwd: string): string => spawnSync("git", args, { cwd, encoding: "utf8" }).stdout.trim();
+		git(["init", "-q", "."], source);
+		git(["add", "-A"], source);
+		git(["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "seed"], source);
+		const baseCommit = git(["rev-parse", "HEAD"], source);
+		spawnSync("git", ["clone", "-q", "--bare", source, join(cacheDir, "acme__widget.git")], { encoding: "utf8" });
+		const instancesFile = join(root, "instances.jsonl");
+		writeFileSync(
+			instancesFile,
+			`${JSON.stringify({
+				instance_id: "acme__widget-1",
+				repo: "acme/widget",
+				base_commit: baseCommit,
+				problem_statement: "add_one returns x + 2.",
+				patch: "",
+			})}\n`,
+			"utf8",
+		);
+		return { instancesFile, cacheDir };
+	}
+
+	function runSweBench(root: string, clioBin: string): SpawnSyncReturns<string> {
+		const { instancesFile, cacheDir } = seedSweBenchInstance(root);
+		return spawnSync(
+			PYTHON,
+			[SWEBENCH, "--instances-file", instancesFile, "--cache", cacheDir, "--out", join(root, "out")],
+			{
+				cwd: REPO_ROOT,
+				encoding: "utf8",
+				// An isolated state dir is the point: receipt accounting must follow
+				// the Clio that just ran, not whatever lives under the real $HOME.
+				env: { ...process.env, CLIO_BIN: clioBin, CLIO_STATE_DIR: join(root, "state") },
+			},
+		);
+	}
+
+	it("a SWE-bench instance sums its message_end usage and republishes it once", () => {
+		const fakeClio = join(scratch, "fake-clio");
+		writeFakeClio(fakeClio, [700, 300]);
+
+		const result = runSweBench(scratch, fakeClio);
+		strictEqual(result.status, 0, result.stderr);
+
+		const published = messageEndUsage(result.stdout);
+		strictEqual(published.length, 1, "one aggregate usage line per instance");
+		// The sum of the two completed messages. A maximum would report 999999
+		// from the republished agent_end, and the largest message alone is 700.
+		strictEqual(published[0]?.totalTokens, 1_000);
+
+		const metric = JSON.parse(readFileSync(join(scratch, "out", "metrics.jsonl"), "utf8").trim()) as {
+			tokens: number;
+			tokens_measured: boolean;
+		};
+		strictEqual(metric.tokens, 1_000);
+		strictEqual(metric.tokens_measured, true);
+
+		const summary = JSON.parse(readFileSync(join(scratch, "out", "summary.json"), "utf8")) as {
+			tokens: number | null;
+			tokensMeasuredInstances: number;
+			tokensTotalInstances: number;
+		};
+		strictEqual(summary.tokens, 1_000);
+		strictEqual(summary.tokensMeasuredInstances, 1);
+		strictEqual(summary.tokensTotalInstances, 1);
+	});
+
+	it("a SWE-bench instance whose run reported no usage publishes nothing rather than a zero", () => {
+		const silentClio = join(scratch, "silent-clio");
+		writeFileSync(silentClio, "#!/bin/sh\necho 'no events here'\n", "utf8");
+		chmodSync(silentClio, 0o755);
+
+		const result = runSweBench(scratch, silentClio);
+		strictEqual(result.status, 0, result.stderr);
+		strictEqual(messageEndUsage(result.stdout).length, 0, "unobserved usage publishes nothing");
+
+		const metric = JSON.parse(readFileSync(join(scratch, "out", "metrics.jsonl"), "utf8").trim()) as {
+			tokens: number | null;
+			tokens_measured: boolean;
+		};
+		strictEqual(metric.tokens, null, "absent, never zero");
+		strictEqual(metric.tokens_measured, false);
+
+		const summary = JSON.parse(readFileSync(join(scratch, "out", "summary.json"), "utf8")) as {
+			tokens: number | null;
+			tokensMeasuredInstances: number;
+		};
+		strictEqual(summary.tokens, null);
+		strictEqual(summary.tokensMeasuredInstances, 0);
 	});
 });
