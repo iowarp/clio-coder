@@ -3,7 +3,7 @@ import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir } from "../core/xdg.js";
 import { loadEvalArtifactV4, writeEvalArtifactV4 } from "../domains/eval/artifacts/store.js";
 import { compareEvalArtifactsV4, renderEvalComparisonV4 } from "../domains/eval/compare/compare.js";
-import { evaluateGate } from "../domains/eval/compare/gates.js";
+import { evaluateGate, renderGateFailure } from "../domains/eval/compare/gates.js";
 import { loadThresholds } from "../domains/eval/compare/thresholds.js";
 
 import { renderEvalJsonReportV4 } from "../domains/eval/reports/json.js";
@@ -212,7 +212,15 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 		const artifact = await runEvalSuiteV2({ ...loaded, suite }, { clioEntry });
 		const artifactPath = await writeEvalArtifactV4(clioDataDir(), artifact, parsed.out);
 		process.stdout.write(`${renderEvalTextReportV4(artifact)}artifact: ${artifactPath}\n`);
-		return artifact.summary.failed === 0 ? 0 : 1;
+		// A suite that declares thresholds is gated by them here, on the artifact
+		// it just produced. Declaring a gate that only a later `eval gate`
+		// invocation enforces means the run that broke it still exited zero.
+		const gate = suite.thresholds === undefined ? null : evaluateGate(artifact, suite.thresholds);
+		if (gate !== null && !gate.pass) {
+			process.stdout.write(`gate: fail (${gate.failures.length} threshold failure)\n`);
+			for (const failure of gate.failures) process.stdout.write(renderGateFailure(failure));
+		}
+		return artifact.summary.failed === 0 && (gate === null || gate.pass) ? 0 : 1;
 	} catch (error) {
 		return handleEvalLoadError(error, 1);
 	}
@@ -260,14 +268,7 @@ async function runEvalGateCommand(parsed: ParsedEvalArgs): Promise<number> {
 			return 0;
 		}
 		process.stdout.write(`gate: fail (${gate.failures.length} threshold failure)\n`);
-		for (const failure of gate.failures) {
-			const { metric, op, value } = failure.assertion;
-			process.stdout.write(
-				failure.unresolved
-					? `  ${metric}: unresolved metric (fail closed)\n`
-					: `  ${metric} ${op} ${JSON.stringify(value)}: actual ${JSON.stringify(failure.actual)}\n`,
-			);
-		}
+		for (const failure of gate.failures) process.stdout.write(renderGateFailure(failure));
 		return 1;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
