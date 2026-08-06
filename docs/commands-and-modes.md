@@ -50,6 +50,12 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
 | `clio eval validate\|run\|report\|compare\|gate` | Validate, run, report, compare, and gate local evaluation suites (Suite v2). |
 | `clio memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
+| `clio trace runs [--db PATH] [--limit N]` | List runs recorded in the durable trace mirror beside the ledger. |
+| `clio trace phases <runId> [--db PATH]` | Show one run's recorded phases. |
+| `clio trace tail <runId> [--follow] [--db PATH]` | Tail one run's recorded events; `--follow` streams as they land. |
+| `clio trace procs <runId> [--db PATH]` | Show the processes one run spawned. |
+| `clio trace sql <SELECT query> [--db PATH]` | Run one read-only SELECT against the mirror. Only SELECT is accepted. |
+| `clio trace ui [--db PATH] [--port N]` | Serve the localhost-only waterfall viewer. The viewer is not part of the published package. |
 | `clio evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. |
 | `clio skills list\|search\|inspect\|validate\|install\|update\|sync\|eval` | Manage discovered skills, Clio-native skills, and local marketplace installs. |
