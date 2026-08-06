@@ -1,6 +1,6 @@
 # Fleet Dispatch
 
-> **Interactive Spec Available:** An interactive fleet node topology planner, scout router, receipt verifier, and failure taxonomy simulator is located at [docs/html/fleet_dispatch_blueprint.html](html/fleet_dispatch_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive fleet node topology planner, scout router, receipt verifier, and failure taxonomy simulator is located at [docs/html/fleet_dispatch_blueprint.html](html/fleet_dispatch_blueprint.html) (Version: 0.3.0).
 
 Clio Coder dispatches bounded worker agents. With a fleet configured, those
 workers run on remote machines over SSH while the orchestrator keeps every
@@ -25,12 +25,14 @@ container or cloud tier implements the same `WorkerTransport` interface
 (`src/domains/dispatch/transport.ts`) without touching the protocol.
 
 Both local and SSH native workers must emit `worker_announce` as their first
-protocol event. The transport consumes it, checks the dispatched WorkerSpec
-version, and accepts ordinary events only after that check. The worker then
-attests protocol version, pid and process group, host, settings fingerprint,
-WorkerSpec digest, runtime, target, endpoint identity, wire model, effective
-tool signature, and bounded resource facts before any model call. Drift from
-the approved identity kills the whole process group. The announcement and
+protocol event over the structured stderr control lane. The transport consumes it,
+checks the dispatched WorkerSpec version, and accepts ordinary events only after
+that check. The worker then attests protocol version (WORKER_PROTOCOL_VERSION = 1),
+spec version, process ID, process group ID (or null), host, settings fingerprint,
+worker-computed spec digest, runtime ID, target ID, endpoint identity hash, wire
+model ID, effective tool signature, and bounded node resource facts (labels, CPU count,
+total memory, free memory, GPU count, VRAM, and resident models) before any model
+call. Drift from the approved identity kills the whole process group. The announcement and
 attestation are strict protocol evidence, not proof against a malicious child
 that controls its own process; SSH also uses the attested remote process group
 for bounded abort escalation.
@@ -134,18 +136,13 @@ Placement and admission are separate, deterministic authorities:
    pins fail closed; they never silently fall back.
 2. For unpinned eligible nodes, placement prefers lower durable lease usage
    read through the fleet registry; declaration order breaks ties.
-3. The capacity lease store decides under one cross-process state lock. A
-   stale placement preference cannot over-admit a node.
+3. The capacity lease store decides under one cross-process state lock (`dispatch-admission.json`).
+   A stale placement preference cannot over-admit a node.
 4. If a pinned or selected node is momentarily full, the bounded admission
    queue preserves priority/FIFO order until its finite deadline instead of
    silently selecting another node.
 
-The durable capacity file is version 2 and owns global/per-node leases,
-heartbeats, reservation transfer, retry rebinding, and the TTL-bounded
-operator drain. A lease is reclaimed only with owner-liveness evidence when a
-process birth token cannot prove death. A plan reserves its peak wave, and a
-retry rebinds the same assignment member to its actual node and cost bound so
-it cannot queue behind or outspend itself.
+The durable capacity state file (`dispatch-admission.json`) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (`DEFAULT_CAPACITY_DRAIN_TTL_MS` = 3,600,000 ms). A lease acts as durable expiring authority (`DEFAULT_CAPACITY_LEASE_TTL_MS` = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself.
 
 With no fleet configured and nothing requested, placement resolves to the
 implicit local path and optional fleet-node provenance may remain absent.
@@ -287,6 +284,56 @@ The registry boundary is resolved dispatch plan v3. `deadlineMs` is required:
 a fleet plan carries a positive finite number and a non-fleet plan carries
 explicit `null`. Older versions, missing fields, and compatibility shapes are
 rejected.
+
+### Shipped fleets and contract versions
+
+Clio ships three builtin fleet contracts under `src/domains/agents/fleets/`: `build-test`, `build-review`, and `sdlc`. Projects can declare custom fleet contracts or shadow builtin fleets by placing Markdown files under `.clio/fleets/<name>.md`. A file named `.clio/fleets/<name>.md` shadows a builtin fleet of the same name.
+
+Fleet contracts support schema versions 1 through 4:
+- Version 1: Supports agent steps only.
+- Version 2: Introduces deterministic code steps.
+- Version 3: Adds bounded check/repair loops and commit steps with `commitFrom` message sources.
+- Version 4 (`FLEET_WRITE_BOUNDARY_VERSION = 4`): Introduces per-step declared write boundaries (`writes`) and orchestrator post-step enforcement.
+
+### Per-step write boundaries (Contract v4)
+
+Contract v4 requires every step to declare its write boundary using the `writes` allowlist property. Steps with scope `readonly` declare an empty allowlist (`[]`).
+
+The grammar for declared write boundary entries requires repository-relative POSIX paths:
+- Trailing `/` indicates a directory subtree allowlist.
+- Exact relative paths without a trailing `/` permit changes to that single file.
+- Declarations must not contain glob characters (`*`, `?`, `[`, `]`, `{`, `}`), `..` or `.` segments, backslashes, or absolute paths.
+- Each step declaration is capped at a maximum of 32 entries (`WRITE_BOUNDARY_MAX_ENTRIES = 32`).
+
+Write boundary enforcement is detect-and-rollback, never OS or filesystem sandboxing. A step runs with whatever filesystem permissions its underlying execution environment possesses. Upon step completion, the orchestrator inspects the working tree to verify compliance:
+1. Snapshot baseline: Before a step executes, the orchestrator captures a snapshot (`captureWorkspaceSnapshot`) recording the baseline git HEAD commit and existing dirty path content tokens.
+2. Workspace diffing: After step completion, the orchestrator runs git status inspection (`diffWorkspace`) to identify changed paths relative to the snapshot baseline commit.
+3. Rollback execution: Unauthorized changes (modified paths not covered by the step's declared allowlist) are automatically rolled back (`rollbackPath`).
+4. Content source: Rollback restores content strictly from what git already has in the pinned baseline commit (`snapshot.head`). If a path was already dirty when the step snapshot was captured, its prior content is not stored in git, so in-place restoration cannot be guaranteed. The working tree is left as the step made it, and the status settles as `rollback-incomplete`.
+5. Violation handling: Any unauthorized change fails the step with the typed reason `writes_boundary_violation`.
+6. Window attribution: Enforcement evaluates scheduling windows (`wave-<n>` or `revalidate-<stepId>-<n>`). A wave window cannot combine steps with overlapping declared boundaries or multiple concurrent step writers, ensuring single-step attribution.
+7. Ignored paths and state subtraction: Enforcement evaluates paths reported by git status. Git-ignored paths remain outside enforcement. The Clio state directory (`.clio/` or `clioStateDir()`) is subtracted from status checks so orchestrator receipts, code step log artifacts, and boundary verdicts do not trigger false violations.
+8. Durable records: Verdicts are serialized as JSON records at `write-boundaries/<rootId>/<window>.json` under the Clio state directory, carrying the baseline HEAD commit, checked paths, violations, rollback actions, status, and SHA-256 digest.
+
+### Bounded check/repair loops
+
+Contract v3 and v4 support declared check/repair loops (`kind: loop`). A loop declares `id`, `maxAttempts` (an integer between 1 and `FLEET_LOOP_MAX_ATTEMPTS = 5`), `check` (a code command or agent reviewer), and `repair` (an agent coder).
+
+At plan compilation, the orchestrator unrolls each loop statically into a deterministic hashed DAG containing `maxAttempts` verification check steps (`<loopId>.check.<n>`) and `maxAttempts - 1` repair steps (`<loopId>.repair.<n>`).
+- Receipt per attempt: Every attempt in an unrolled loop executes as an independent plan node and produces its own receipt.
+- Recovery role: Repair attempts following the first check are assigned the `recovery` execution role.
+- Spent bounds: Reaching `maxAttempts` without a passing check settles the loop with the terminal reason `loop_bound_exhausted`.
+- Four terminal reasons: A loop concludes with one of four reasons: `resolved` (verification passed), `loop_bound_exhausted` (attempt ceiling spent), `loop_step_failed` (underlying step errored or was denied), or `loop_not_reached` (prior plan dependencies failed).
+- Node counting: Unneeded nodes (verifications or repairs remaining after a loop resolves) are counted separately from skipped nodes.
+- Verification staleness: The scheduler enforces verification staleness by re-running a check step if a subsequent workspace-editing step executes after it.
+
+### Deterministic code steps
+
+Deterministic code steps (`kind: code`) execute known commands directly as subprocesses rather than calling an agent model.
+- Registry binding: The `command` property must reference a command ID declared in `.clio/fleets/commands.yaml`. Invocation strings are never generated from model output.
+- Execution environment: Code steps run unattended with arguments bound from the command registry, fixed working directory, closed environment allowlist (`FLEET_COMMAND_BASE_ENV` plus declared command env), bounded timeout (`timeoutMs`), byte-capped output capture (`CODE_STEP_CAPTURE_MAX_BYTES` = 1 MB log artifact, `CODE_STEP_EXCERPT_MAX_BYTES` = 8 KB excerpt), no stdin pipe, no permission prompt, and no shell interpreter.
+- Commit message sources: A code step with `commitFrom` populates its `commitMessage` placeholder from the output of preceding agent steps.
+- Route quality: Code steps do not consume model tokens or cost estimates; their quality reports `unmeasured` rather than zero.
 
 ## Measured route selection and agent automation
 

@@ -1,17 +1,19 @@
 # Clio Coder Safety Model
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.3.0).
 
 Clio Coder's safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the [IOWarp](https://iowarp.ai) ecosystem developed by the [Gnosis Research Center](https://grc.iit.edu) at Illinois Tech under NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318), Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.
 
-Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, `src/tools/policy.ts`, and `damage-control-rules.yaml`.
+Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, `src/tools/policy.ts`, `src/entry/orchestrator.ts`, `src/domains/dispatch/write-boundary.ts`, and `damage-control-rules.yaml`.
 
 ---
 
 ## Two axes: autonomy and the safety net
 
 The `autonomy` setting (`read-only` | `suggest` | `auto-edit` | `full-auto`) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level. When a `[safety-net]` notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.
+
+In Clio Coder v0.3.0, effective autonomy resolution is strictly centralized in `src/entry/orchestrator.ts` through `resolveEffectiveAutonomy` and `resolveBaselineAutonomy`. Every admission surface (tool registry admission, dispatch plan provenance, and ACP session snapshots) delegates to this pair of functions so that fallback paths cannot diverge across execution contexts. `resolveBaselineAutonomy` evaluates dispatch settings overrides, headless CLI options, and configuration settings before applying the default `auto-edit` level. `resolveEffectiveAutonomy` combines any active ACP session autonomy level with the baseline resolution.
 
 ### Autonomy levels
 
@@ -198,6 +200,12 @@ The `edit` tool also carries conservative matching rules. It preserves
 unchanged bytes, handles common quote, dash, whitespace, and indentation drift
 for matching only, and rejects ambiguous or no-op edits rather than applying a
 guess.
+
+### Write boundaries: detect-and-rollback
+
+Post-run enforcement of declared write boundaries is strictly detect-and-rollback, never sandboxing. Nothing prevents a write during step execution: no container, no seccomp filter, no read-only mount, and no filesystem interception of the worker's tools. A step executes with whatever permissions its environment provides.
+
+After step execution, the orchestrator compares the working checkout against the git snapshot recorded before the step (`src/domains/dispatch/write-boundary.ts`). It identifies modifications outside declared write boundaries, rolls back unauthorized file changes, and fails the step with a typed failure reason (`WriteBoundaryViolation`). Operators requiring steps to be physically incapable of writing outside designated paths must employ OS-level isolation, which Clio Coder deliberately does not claim to provide.
 
 ---
 

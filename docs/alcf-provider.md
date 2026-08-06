@@ -1,7 +1,7 @@
 # ALCF Inference Provider
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive target configurator and Globus OAuth flow diagram is located at [docs/html/alcf_blueprint.html](html/alcf_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive target configurator and Globus OAuth flow diagram is located at [docs/html/alcf_blueprint.html](html/alcf_blueprint.html) (Version: 0.3.0).
 
 Clio can use Argonne's ALCF inference gateway as an OpenAI-compatible target
 backed by Globus OAuth. The runtime id is `alcf`; each configured target points
@@ -9,8 +9,8 @@ at one gateway cluster URL, such as Sophia or Metis.
 
 The login flow is SSH-friendly. `clio auth login alcf` opens a Globus authorize
 URL and asks you to paste back the displayed authorization code. Clio stores the
-resulting OAuth refresh/access credential in its normal credential store and
-refreshes it through the same provider auth path used by other OAuth runtimes.
+resulting OAuth refresh/access credential in `providers.auth` persisted through `openAuthStorage()`,
+refreshed through the same provider auth path used by other OAuth runtimes.
 
 ## Configure
 

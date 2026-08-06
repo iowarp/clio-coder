@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Documentation Hub (v0.2.9)</title>
+  <title>Clio Coder Documentation Hub (v0.3.0)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Unique homepage layouts */
@@ -95,7 +95,7 @@
     }
     .journeys-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       gap: 1.25rem;
     }
     .journey-card {
@@ -264,7 +264,7 @@
       <div class="meta-badges">
         <span class="meta-badge version">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-          v0.2.9 (Unreleased Alpha / Source Build)
+          v0.3.0
         </span>
         <span class="meta-badge" style="border-color: rgba(255,255,255,0.08); color: var(--text-muted);">
           CLI command: <code style="color: var(--color-orange); margin-left: 0.35rem;">clio docs [topic]</code>
@@ -282,18 +282,16 @@
     <!-- Filter Tags -->
     <div class="filter-section">
       <div class="filter-tags" id="filterTags">
-        <button type="button" class="filter-tag active" onclick="setCategory('all')">All blue prints</button>
-        <button type="button" class="filter-tag" onclick="setCategory('start')">Start</button>
-        <button type="button" class="filter-tag" onclick="setCategory('operate')">Operate</button>
-        <button type="button" class="filter-tag" onclick="setCategory('configure')">Configure</button>
-        <button type="button" class="filter-tag" onclick="setCategory('safety')">Safety</button>
-        <button type="button" class="filter-tag" onclick="setCategory('context')">Context</button>
+        <button type="button" class="filter-tag active" onclick="setCategory('all')">All blueprints</button>
+        <button type="button" class="filter-tag" onclick="setCategory('start')">Start &amp; Configure</button>
+        <button type="button" class="filter-tag" onclick="setCategory('operate')">Operate &amp; Tools</button>
+        <button type="button" class="filter-tag" onclick="setCategory('safety')">Safety &amp; Context</button>
         <button type="button" class="filter-tag" onclick="setCategory('fleet')">Agents &amp; Fleet</button>
-        <button type="button" class="filter-tag" onclick="setCategory('obs')">Evidence &amp; Obs</button>
+        <button type="button" class="filter-tag" onclick="setCategory('obs')">Observability &amp; Trace</button>
         <button type="button" class="filter-tag" onclick="setCategory('models')">Models &amp; Providers</button>
         <button type="button" class="filter-tag" onclick="setCategory('skills')">Extensions &amp; Skills</button>
-        <button type="button" class="filter-tag" onclick="setCategory('validation')">Validation &amp; Evals</button>
-        <button type="button" class="filter-tag" onclick="setCategory('reference')">Reference</button>
+        <button type="button" class="filter-tag" onclick="setCategory('validation')">Validation, Evals &amp; Soak</button>
+        <button type="button" class="filter-tag" onclick="setCategory('reference')">Reference &amp; Arch</button>
         <button type="button" class="filter-tag" onclick="setCategory('internal')">Internal/Historical</button>
       </div>
     </div>
@@ -301,51 +299,66 @@
     <!-- Operator Journeys -->
     <div class="glass-card journeys-panel">
       <h2 style="font-size: 1.1rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem; margin-bottom: 1rem; text-transform: uppercase; color: var(--text-dim);">
-        Operator Journeys
+        Learning Path &amp; Operator Journeys
       </h2>
       <div class="journeys-grid">
         <div class="journey-card">
           <div class="journey-title">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            First Run &amp; Setup
+            1. Install &amp; Configure
           </div>
           <div class="journey-links">
             <a href="lifecycle_blueprint.html">1. Installation &amp; Directory Layout</a>
             <a href="configuration_blueprint.html">2. Configuration Settings Profile</a>
-            <a href="alcf_blueprint.html">3. HPC / ALCF Inference setup</a>
+            <a href="alcf_blueprint.html">3. HPC / ALCF Inference Setup</a>
+            <a href="environment_blueprint.html">4. Environment Variables Matrix</a>
           </div>
         </div>
         <div class="journey-card">
           <div class="journey-title">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-            Safe Editing Session
+            2. Run Tasks &amp; Tools
           </div>
           <div class="journey-links">
-            <a href="safety_blueprint.html">1. Safety Postures &amp; Autonomy</a>
-            <a href="tools_blueprint.html">2. Seven-Plane Tool Limits</a>
-            <a href="tool_usage_blueprint.html">3. Detailed Tool Guide</a>
+            <a href="commands_blueprint.html">1. Commands &amp; Headless Flags</a>
+            <a href="tools_blueprint.html">2. Seven-Plane Tool Surface</a>
+            <a href="tool_usage_blueprint.html">3. Detailed Tool Usage Reference</a>
+            <a href="tui_design_blueprint.html">4. TUI Design &amp; Glyphs</a>
           </div>
         </div>
         <div class="journey-card">
           <div class="journey-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-            Models &amp; Providers
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            3. Safety &amp; Context
           </div>
           <div class="journey-links">
-            <a href="models_blueprint.html">1. Model Catalog &amp; Routing</a>
-            <a href="provider_adapter_blueprint.html">2. Custom Adapter cookbook</a>
-            <a href="context_blueprint.html">3. Compaction &amp; Tokens budget</a>
+            <a href="safety_blueprint.html">1. Safety Postures &amp; Autonomy</a>
+            <a href="context_blueprint.html">2. Context Window &amp; Compaction</a>
+            <a href="validation_blueprint.html">3. Scientific Validation Contracts</a>
+            <a href="architecture_blueprint.html">4. Architecture Boundary Rules</a>
           </div>
         </div>
         <div class="journey-card">
           <div class="journey-title">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-            Fleet &amp; Extensions
+            4. Multi-Node &amp; Fleets
           </div>
           <div class="journey-links">
-            <a href="agents_blueprint.html">1. Built-in Agent recipes</a>
-            <a href="skills_blueprint.html">2. Skills Hub Marketplace</a>
-            <a href="extensions_blueprint.html">3. Custom Extensions Manifest</a>
+            <a href="fleet_dispatch_blueprint.html">1. Multi-Node SSH Fleet Dispatch</a>
+            <a href="agents_blueprint.html">2. Built-in Agent Recipes</a>
+            <a href="worker_dispatch_blueprint.html">3. Worker Subprocess Mechanics</a>
+          </div>
+        </div>
+        <div class="journey-card">
+          <div class="journey-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            5. Measure, Trace &amp; Verify
+          </div>
+          <div class="journey-links">
+            <a href="trace_blueprint.html">1. WAL SQLite Trace Store</a>
+            <a href="soak_blueprint.html">2. Machinery Soak Benchmark</a>
+            <a href="eval_blueprint.html">3. Evaluation Runner &amp; Dual Tokens</a>
+            <a href="observability_blueprint.html">4. Observability &amp; Receipts</a>
           </div>
         </div>
       </div>
@@ -355,12 +368,12 @@
     <main class="hub-grid" id="hubGrid">
       
       <!-- Card: Safety Model -->
-      <a href="safety_blueprint.html" class="doc-card flagship" data-categories="safety,start" data-title="Safety Model" data-tags="safety security autonomy block rules gate bash">
+      <a href="safety_blueprint.html" class="doc-card flagship" data-categories="safety,start" data-title="Safety Model" data-tags="safety security autonomy block rules gate bash rollback">
         <div class="card-top">
           <h3 class="card-title">Safety Model</h3>
           <span class="card-badge badge-flagship">Core</span>
         </div>
-        <p class="card-desc">Autonomy dials, safety net rules, default-deny shell constraints, and interactive validation loops.</p>
+        <p class="card-desc">Autonomy dials, safety net rules, default-deny shell constraints, detect-and-rollback write boundaries, and interactive validation loops.</p>
         <div class="card-footer">
           <span class="path">safety-model.md</span>
           <span class="feature">Safety Simulator</span>
@@ -368,12 +381,12 @@
       </a>
 
       <!-- Card: Configuration & Targets -->
-      <a href="configuration_blueprint.html" class="doc-card flagship" data-categories="configure,start" data-title="Configuration &amp; Targets" data-tags="config target route settings yaml connection">
+      <a href="configuration_blueprint.html" class="doc-card flagship" data-categories="configure,start" data-title="Configuration &amp; Targets" data-tags="config target route settings yaml connection provenance">
         <div class="card-top">
           <h3 class="card-title">Configuration &amp; Targets</h3>
           <span class="card-badge badge-flagship">Core</span>
         </div>
-        <p class="card-desc">Profile definitions, environment variables, validation checkers, and settings routing details.</p>
+        <p class="card-desc">Profile definitions, context-window provenance, settings routing, and interactive validation checkers.</p>
         <div class="card-footer">
           <span class="path">configuration-and-targets.md</span>
           <span class="feature">YAML Validator</span>
@@ -381,25 +394,38 @@
       </a>
 
       <!-- Card: Commands & Modes -->
-      <a href="commands_blueprint.html" class="doc-card flagship" data-categories="operate" data-title="Commands &amp; Modes" data-tags="commands CLI slash steering keybindings postures">
+      <a href="commands_blueprint.html" class="doc-card flagship" data-categories="operate,start" data-title="Commands &amp; Modes" data-tags="commands CLI slash steering keybindings postures session continue json">
         <div class="card-top">
           <h3 class="card-title">Commands &amp; Modes</h3>
           <span class="card-badge badge-flagship">Core</span>
         </div>
-        <p class="card-desc">CLI flags, key steering triggers, slash actions, and operating mode states.</p>
+        <p class="card-desc">CLI flags, headless session continuity (--session/--continue), key steering triggers, slash actions, and operating mode states.</p>
         <div class="card-footer">
           <span class="path">commands-and-modes.md</span>
           <span class="feature">Command Palette</span>
         </div>
       </a>
 
+      <!-- Card: Architecture -->
+      <a href="architecture_blueprint.html" class="doc-card flagship" data-categories="reference,start" data-title="Architecture" data-tags="architecture boundaries rules direction flow domain loader engine worker">
+        <div class="card-top">
+          <h3 class="card-title">Architecture</h3>
+          <span class="card-badge badge-flagship">Core</span>
+        </div>
+        <p class="card-desc">Source layout, 5 enforced boundary rules (dependency direction vs import form), runtime flow, and detect-and-rollback boundaries.</p>
+        <div class="card-footer">
+          <span class="path">architecture.md</span>
+          <span class="feature">Boundary Check</span>
+        </div>
+      </a>
+
       <!-- Card: Context Engine -->
-      <a href="context_blueprint.html" class="doc-card" data-categories="context" data-title="Context Engine" data-tags="context window compaction token ledger prime prefix">
+      <a href="context_blueprint.html" class="doc-card" data-categories="safety,context" data-title="Context Engine" data-tags="context window compaction token ledger prime prefix">
         <div class="card-top">
           <h3 class="card-title">Context Engine</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">Sliding window mechanics, compaction thresholds, local masking overlays, and prefix cash audits.</p>
+        <p class="card-desc">Sliding window mechanics, compaction thresholds, model-driven init, format v3 session enforcement, and prefix cache audits.</p>
         <div class="card-footer">
           <span class="path">context-engine.md</span>
           <span class="feature">Compaction Calc</span>
@@ -407,12 +433,12 @@
       </a>
 
       <!-- Card: Prompt Envelope & Tools -->
-      <a href="tools_blueprint.html" class="doc-card" data-categories="safety,context" data-title="Prompt Envelope &amp; Tools" data-tags="tools envelope registry envelope results truncate">
+      <a href="tools_blueprint.html" class="doc-card" data-categories="safety,operate" data-title="Prompt Envelope &amp; Tools" data-tags="tools envelope registry envelope results truncate adapter">
         <div class="card-top">
           <h3 class="card-title">Prompt Envelope &amp; Tools</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">Envelopes structure, nineteen tools grouped into seven planes, observation budgets, and safety checks.</p>
+        <p class="card-desc">Envelopes structure, nineteen tools grouped into seven planes via single agent-tools.ts adapter, observation budgets, and safety checks.</p>
         <div class="card-footer">
           <span class="path">prompt-envelope-and-tools.md</span>
           <span class="feature">Tool Inspector</span>
@@ -420,12 +446,12 @@
       </a>
 
       <!-- Card: Installation & Lifecycle -->
-      <a href="lifecycle_blueprint.html" class="doc-card" data-categories="start" data-title="Installation &amp; Lifecycle" data-tags="install update bootstrap directories doctor repair reset">
+      <a href="lifecycle_blueprint.html" class="doc-card" data-categories="start" data-title="Installation &amp; Lifecycle" data-tags="install update bootstrap directories doctor repair reset permissions">
         <div class="card-top">
           <h3 class="card-title">Installation &amp; Lifecycle</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">Source install instructions, configuration directories layouts, validation repair, and residues cleaning.</p>
+        <p class="card-desc">Source install instructions, configuration directories layouts, permissions matrix (0o600 credentials), validation repair, and reset cleaning.</p>
         <div class="card-footer">
           <span class="path">installation-and-lifecycle.md</span>
           <span class="feature">Command Builder</span>
@@ -446,12 +472,12 @@
       </a>
 
       <!-- Card: Environment Variables -->
-      <a href="environment_blueprint.html" class="doc-card" data-categories="configure,reference" data-title="Environment Variables" data-tags="environment env vars knobs overrides debugging path">
+      <a href="environment_blueprint.html" class="doc-card" data-categories="start,reference" data-title="Environment Variables" data-tags="environment env vars knobs overrides debugging path">
         <div class="card-top">
           <h3 class="card-title">Environment Variables</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">Comprehensive reference of variables recognized by Clio runtime: settings overrides, paths, debug loggers.</p>
+        <p class="card-desc">Comprehensive reference of variables recognized by Clio runtime: settings overrides, directory paths, debug loggers.</p>
         <div class="card-footer">
           <span class="path">environment-variables.md</span>
           <span class="feature">Env Matrix</span>
@@ -464,7 +490,7 @@
           <h3 class="card-title">Tool Usage Reference</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">In-depth reference for all 19 worker tools including parameters, typical payloads, and error examples.</p>
+        <p class="card-desc">In-depth reference for all 19 worker tools including parameters, typical payloads, prepareArguments normalizers, and error examples.</p>
         <div class="card-footer">
           <span class="path">tool-usage.md</span>
           <span class="feature">Tool Atlas</span>
@@ -490,7 +516,7 @@
           <h3 class="card-title">Built-in Agents</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">Built-in recipes catalog, frontmatter config properties, fleet dispatching loops, and custom local additions.</p>
+        <p class="card-desc">Built-in recipes catalog, frontmatter config properties, fleet contract shadowing (.clio/fleets/<name>.md), and custom additions.</p>
         <div class="card-footer">
           <span class="path">built-in-agents.md</span>
           <span class="feature">Recipe Check</span>
@@ -498,15 +524,41 @@
       </a>
 
       <!-- Card: Fleet Dispatch -->
-      <a href="fleet_dispatch_blueprint.html" class="doc-card flagship" data-categories="fleet,operate" data-title="Fleet Dispatch" data-tags="fleet dispatch remote ssh doctor scout placement topology receipts failover">
+      <a href="fleet_dispatch_blueprint.html" class="doc-card flagship" data-categories="fleet,operate" data-title="Fleet Dispatch" data-tags="fleet dispatch remote ssh doctor capacity leases write boundary loops code steps attestation">
         <div class="card-top">
           <h3 class="card-title">Fleet Dispatch</h3>
           <span class="card-badge badge-flagship">Core</span>
         </div>
-        <p class="card-desc">Multi-node SSH execution, doctor preflight, advisory Scout routing, integrity-sealed receipts, and failover mechanics.</p>
+        <p class="card-desc">Multi-node SSH execution, process-safe capacity leases, Contract v4 per-step write boundaries (detect-and-rollback), bounded loops, deterministic code steps, and worker attestation.</p>
         <div class="card-footer">
           <span class="path">fleet-dispatch.md</span>
           <span class="feature">Fleet Simulator</span>
+        </div>
+      </a>
+
+      <!-- Card: Trace Store -->
+      <a href="trace_blueprint.html" class="doc-card flagship" data-categories="obs,validation" data-title="Trace Store" data-tags="trace sqlite wal runs phases procs sql subcommands">
+        <div class="card-top">
+          <h3 class="card-title">Trace Store</h3>
+          <span class="card-badge badge-flagship">Core</span>
+        </div>
+        <p class="card-desc">Durable WAL SQLite trace mirror database schema, rowid cursor queries, rebuildability, and the 6 `clio trace` subcommands (runs, phases, tail, procs, sql, ui).</p>
+        <div class="card-footer">
+          <span class="path">trace-store.md</span>
+          <span class="feature">Trace SQL Inspector</span>
+        </div>
+      </a>
+
+      <!-- Card: Soak Machinery Benchmark -->
+      <a href="soak_blueprint.html" class="doc-card flagship" data-categories="validation,obs" data-title="Soak Machinery Benchmark" data-tags="soak benchmark suites machinery reliability boundary chaos loop">
+        <div class="card-top">
+          <h3 class="card-title">Soak Machinery Benchmark</h3>
+          <span class="card-badge badge-flagship">Core</span>
+        </div>
+        <p class="card-desc">Offline benchmark suite measuring Clio machinery reliability (not model quality): core soak, write boundaries, SIGINT chaos, and loop bound exhaustion.</p>
+        <div class="card-footer">
+          <span class="path">evals-internal.md</span>
+          <span class="feature">Soak Suite Simulator</span>
         </div>
       </a>
 
@@ -529,7 +581,7 @@
           <h3 class="card-title">Skills Marketplace</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">Skills Hub discovery interface, local caching details, and publisher checklists.</p>
+        <p class="card-desc">Skills Hub discovery interface, remote marketplace cache timestamps, and publisher checklists.</p>
         <div class="card-footer">
           <span class="path">skills-marketplace.md</span>
           <span class="feature">Marketplace Lab</span>
@@ -537,12 +589,12 @@
       </a>
 
       <!-- Card: Model Catalog & Routing -->
-      <a href="models_blueprint.html" class="doc-card" data-categories="models" data-title="Model Catalog &amp; Routing" data-tags="models catalog routing thinking reasoners fallback details">
+      <a href="models_blueprint.html" class="doc-card" data-categories="models" data-title="Model Catalog &amp; Routing" data-tags="models catalog routing probeCapabilitiesForModel offline fallback details">
         <div class="card-top">
           <h3 class="card-title">Model Catalog &amp; Routing</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">Configured model capability matching, reasoning configurations, fallback settings, and model routing rules.</p>
+        <p class="card-desc">Model capability matching, exact-id selector `probeCapabilitiesForModel`, live probes (`--offline` toggle), reasoning configurations, and model routing rules.</p>
         <div class="card-footer">
           <span class="path">model-catalog.md</span>
           <span class="feature">Prober Lab</span>
@@ -550,12 +602,12 @@
       </a>
 
       <!-- Card: Evaluation Runner -->
-      <a href="eval_blueprint.html" class="doc-card" data-categories="validation" data-title="Evaluation Runner" data-tags="eval runner validation suites YAML baseline metrics">
+      <a href="eval_blueprint.html" class="doc-card" data-categories="validation" data-title="Evaluation Runner" data-tags="eval runner validation suites YAML baseline metrics dual tokens receiptUsage">
         <div class="card-top">
           <h3 class="card-title">Evaluation Runner</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">YAML eval configuration structure, execution workspaces, baseline-candidate scoring metrics.</p>
+        <p class="card-desc">YAML eval configuration, dual token accountings (wire `tokens.*` vs journal `receiptUsage.*`), EvalArtifactV4 format, and verify.measure task outcome recording.</p>
         <div class="card-footer">
           <span class="path">eval-runner.md</span>
           <span class="feature">Eval Planner</span>
@@ -589,15 +641,15 @@
       </a>
 
       <!-- Card: Middleware & Components -->
-      <a href="middleware_blueprint.html" class="doc-card" data-categories="fleet" data-title="Middleware &amp; Components" data-tags="middleware hooks register effect components snapshots">
+      <a href="middleware_blueprint.html" class="doc-card" data-categories="fleet" data-title="Middleware &amp; Components" data-tags="middleware hooks register effect components snapshots budget">
         <div class="card-top">
           <h3 class="card-title">Middleware &amp; Components</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">Subsystem hooks, middleware pipeline registration, effect kinds, and runtime component interfaces.</p>
+        <p class="card-desc">Subsystem hooks, phase-aware middleware hook budgets (DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS), effect kinds, and runtime component interfaces.</p>
         <div class="card-footer">
           <span class="path">middleware-and-components.md</span>
-          <span class="feature">Hook flow</span>
+          <span class="feature">Hook Flow</span>
         </div>
       </a>
 
@@ -641,12 +693,12 @@
       </a>
 
       <!-- Card: TUI Design System -->
-      <a href="tui_design_blueprint.html" class="doc-card" data-categories="operate,internal" data-title="TUI Design System" data-tags="tui UI colors glyphs formatting state choreograph visual">
+      <a href="tui_design_blueprint.html" class="doc-card" data-categories="operate,internal" data-title="TUI Design System" data-tags="tui UI colors glyphs formatting state choreograph visual contextReserve">
         <div class="card-top">
           <h3 class="card-title">TUI Design System</h3>
           <span class="card-badge badge-internal">Internal</span>
         </div>
-        <p class="card-desc">Interface layout colors palette, Unicode character vocabulary, terminal state drawing choreographies.</p>
+        <p class="card-desc">Interface layout colors palette, Unicode character vocabulary (contextReserve ▒), terminal state drawing choreographies.</p>
         <div class="card-footer">
           <span class="path">tui-design.md</span>
           <span class="feature">Color Lab</span>
@@ -654,12 +706,12 @@
       </a>
 
       <!-- Card: Worker Dispatch Mechanics -->
-      <a href="worker_dispatch_blueprint.html" class="doc-card" data-categories="fleet,internal" data-title="Worker Dispatch Mechanics" data-tags="worker processes environment NDJSON protocol heartbeats exit">
+      <a href="worker_dispatch_blueprint.html" class="doc-card" data-categories="fleet,internal" data-title="Worker Dispatch Mechanics" data-tags="worker processes environment NDJSON protocol heartbeats exit attestation">
         <div class="card-top">
           <h3 class="card-title">Worker Dispatch Mechanics</h3>
           <span class="card-badge badge-internal">Internal</span>
         </div>
-        <p class="card-desc">NDJSON parent-child socket stream protocols, timeout watchdog timing, and exit status mapping.</p>
+        <p class="card-desc">NDJSON parent-child socket stream protocols, 13-field worker attestation frame, timeout watchdog timing, and exit status mapping.</p>
         <div class="card-footer">
           <span class="path">worker-dispatch-mechanics.md</span>
           <span class="feature">Protocol Sim</span>
@@ -712,7 +764,7 @@ clio docs --no-open</code></pre>
     </div>
 
     <footer>
-      <p>Clio Coder Visual Documentation Center &bull; Version 0.2.9 (Unreleased Alpha / Source Build)</p>
+      <p>Clio Coder Visual Documentation Center &bull; Version 0.3.0</p>
       <p>Maintainer: Illinois Institute of Technology / Gnosis Research Center &bull; iowarp.ai</p>
     </footer>
   </div>

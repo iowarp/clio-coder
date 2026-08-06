@@ -1,7 +1,7 @@
 # Environment Variables
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive searchable env var matrix and effective path resolver is located at [docs/html/environment_blueprint.html](html/environment_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive searchable env var matrix and effective path resolver is located at [docs/html/environment_blueprint.html](html/environment_blueprint.html) (Version: 0.3.0).
 
 Every environment variable the shipped `src/` tree reads, grouped by role. Settings.yaml is the durable home for operator policy; env vars exist for per-process overrides (CI, one-off experiments), directory layout, debugging, and internal plumbing. When prose and source disagree, prefer the source; the table cites the read site.
 

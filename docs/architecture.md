@@ -1,7 +1,7 @@
 # Clio Coder Architecture and Boundaries
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/architecture_blueprint.html](html/architecture_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/architecture_blueprint.html](html/architecture_blueprint.html) (Version: 0.3.0).
 
 Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. CLIO stands for Context Layer for Input/Output; the project is named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.
 
@@ -44,27 +44,37 @@ Important domain directories include:
 
 ## Boundary invariants
 
-`npm run check:boundaries` executes the boundaries test suite under `tests/boundaries/boundaries.test.ts`. Treat these checks as the executable specification.
+`npm run check:boundaries` executes the boundary check suite (`tests/boundaries/check-boundaries.ts`). Treat these checks as executable specifications.
 
-### Rule 1: pi-ai value imports stay in `src/engine/**`
+These five enforced boundary rules constrain dependency **direction**, never import **form** (whether static vs dynamic, default vs named):
 
-Only files under `src/engine/**` may value-import `@earendil-works/pi-*` packages. Outside `src/engine`, type-only imports are not generally open-ended; the current explicit allowlist is limited to provider runtime descriptor shapes from `@earendil-works/pi-ai`.
+### Rule 1: `@earendil-works/*` imports stay in `src/engine/**`
 
-Why: provider SDKs and pi-ai runtime values should be swappable behind one engine boundary. Domains and the TUI should work against Clio contracts, not vendor/runtime implementations.
+Only files under `src/engine/**` may import `@earendil-works/*` packages. Since the 0.83.0 engine-boundary rework, no file outside `src/engine/**` may import `@earendil-works/*` at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from `src/engine/types.ts`.
 
-### Rule 2: workers do not value-import domains except runtime rehydration
+Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations.
 
-`src/worker/**` may not value-import `src/domains/**` except the worker-safe provider runtime rehydration modules:
+### Rule 2: Workers do not value-import domains except runtime rehydration
+
+Files under `src/worker/**` may not value-import `src/domains/**`, with the sole exception of worker-safe provider runtime rehydration modules:
 
 - `src/domains/providers/plugins.ts`
 - `src/domains/providers/registry.ts`
 - `src/domains/providers/runtimes/builtins.ts`
 
-Type-only imports erase at compile time and are permitted. Workers receive a serializable `WorkerSpec` envelope, rehydrate only the target/runtime pieces they need, and avoid pulling interactive state or domain stores into the subprocess.
+Type-only imports erase at compile time and are permitted. Workers receive a serializable `WorkerSpec` envelope, rehydrate only necessary target/runtime descriptors, and avoid pulling interactive state or domain stores into worker subprocesses.
 
-### Rule 3: domains do not import each other's `extension.ts`
+### Rule 3: Domains do not import each other's `extension.ts`
 
-A file under `src/domains/<x>/**` must not import `src/domains/<y>/extension.ts` for `y != x`. Cross-domain behavior flows through contracts exported from domain indexes, the domain loader, event buses, snapshots, or serialized manifests.
+A file under `src/domains/<x>/**` must not import `src/domains/<y>/extension.ts` for `y != x`. Cross-domain behavior flows through public contracts exported from domain index files (`src/domains/<y>/index.ts`), the domain loader, event buses, or serialized manifests.
+
+### Rule 4: Tool substrate is surface-agnostic (`src/tools/**` never imports `src/interactive/**`)
+
+Files under `src/tools/**` may never import `src/interactive/**` (neither value nor type-only imports). The tool substrate is surface-agnostic across headless, interactive, ACP, and worker runs. Allowing tools to import TUI presentation modules would couple execution logic to presentation code.
+
+### Rule 5: One-way entry point composition (`chat-loop.ts` never imports `src/entry/**`)
+
+Turn modules and state machine files in the chat loop (`src/interactive/turn-*.ts`, `chat-loop.ts`) may never import `src/entry/**`. Composition flows in one direction only: the entry point composes the chat loop, never the reverse.
 
 ---
 
@@ -101,7 +111,7 @@ Core data paths:
 Clio uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:
 
 - Provider capability resolution decides whether tool schemas are sent at all; tool-capable sessions receive the full registry as one deterministic session tool surface.
-- `src/domains/safety/policy-engine.ts` evaluates damage-control rules, project policy, Bash default-deny, and path policy.
+- `src/domains/safety/policy-engine.ts` evaluates damage-control rules, project policy, Bash default-deny, and path policy. Write boundaries are detect-and-rollback mechanisms (such as change tracking and rollbacks), never OS-level sandboxing.
 - `src/tools/registry.ts` is the admission point for every tool invocation.
 - `src/domains/dispatch/receipt-integrity.ts` and related dispatch files persist receipts used by evidence and cost surfaces.
 

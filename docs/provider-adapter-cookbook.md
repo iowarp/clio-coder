@@ -1,7 +1,7 @@
 # Provider Adapter Cookbook
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive runtime adapter descriptor builder and probe sequence capability checklist is located at [docs/html/provider_adapter_blueprint.html](html/provider_adapter_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive runtime adapter descriptor builder and probe sequence capability checklist is located at [docs/html/provider_adapter_blueprint.html](html/provider_adapter_blueprint.html) (Version: 0.3.0).
 
 This cookbook guides developers through implementing custom model runtimes and inference server integrations within Clio Coder. It explains the runtime descriptor interfaces, probing protocols, model synthesis, and how to configure reasoning and thinking behaviors.
 
@@ -9,6 +9,7 @@ Source of truth:
 - Runtime descriptor types: [src/domains/providers/types/runtime-descriptor.ts](../src/domains/providers/types/runtime-descriptor.ts)
 - Registry loader: [src/domains/providers/registry.ts](../src/domains/providers/registry.ts)
 - Probe reasoning helpers: [src/domains/providers/probe/reasoning.ts](../src/domains/providers/probe/reasoning.ts)
+- Model capabilities resolver: [src/domains/providers/model-capabilities.ts](../src/domains/providers/model-capabilities.ts)
 - Inference capability flags: [src/domains/providers/types/capability-flags.ts](../src/domains/providers/types/capability-flags.ts)
 - Model target resolution: [src/domains/providers/runtime-resolution.ts](../src/domains/providers/runtime-resolution.ts)
 
@@ -88,6 +89,9 @@ For local endpoints where models are loaded dynamically, the runtime can supply 
 
 Clio caches this result under the session's provider cache, preventing redundant network requests.
 
+### 2.3 Exact-ID Capability Selection (`probeCapabilitiesForModel`)
+`probeCapabilitiesForModel` is the one exact-id selector during capability resolution. When a router target serves several models, `probeCapabilitiesForModel` matches `probeModelCapabilities` keyed strictly to the requested wire model ID. A router serving multiple models thus answers only from the `/v1/models` row keyed to its own wire model, preventing capability flags or token limits from bleeding across different models on the same target.
+
 ---
 
 ## 3. Model Synthesis
@@ -103,7 +107,7 @@ The `synthesizeModel` method acts as the factory that creates the `pi-ai` compat
   ): Model<Api>
   ```
 * **Tasks:**
-  1. Retrieve the configured API credentials.
+  1. Retrieve configured API credentials using `providers.auth` persisted through `openAuthStorage()`.
   2. Instantiate the adapter client (e.g., building a `pi-ai` OpenAI or Anthropic provider instance).
   3. Bind custom prompt templates and FIM (Fill-in-the-Middle) properties where supported.
 

@@ -3,7 +3,7 @@
 Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, mode, tools, optional target/model hints, and thinking level; the Markdown body is the agent instruction text.
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard for the agent registry and dispatch admission check gates is located at [docs/html/agents_blueprint.html](html/agents_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive dashboard for the agent registry and dispatch admission check gates is located at [docs/html/agents_blueprint.html](html/agents_blueprint.html) (Version: 0.3.0).
 
 The source of truth is `src/domains/agents/**`. Clio's agent dispatch engine and execution boundaries are built upon the [@earendil-works/pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core) library.
 
@@ -34,6 +34,7 @@ Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Rec
 *   **Built-in Protection**: Project agents cannot override any shipped built-ins; they are strictly treated as custom/domain agents.
 *   **Reserved IDs**: The IDs `worker` and `delegate` are strictly reserved for custom/internal contexts and cannot be registered as custom agent IDs.
 *   **Local Ignored Custom Examples**: Local examples (e.g., `benchmark-runner`, `clio-dev`, `implementer`, `scientific-validator`) may exist under `.clio/agents` for documentation or test purposes, but are ignored if they collide with reserved/built-in rules.
+*   **Fleet Contracts**: Shipped builtin fleet contracts (`build-test`, `build-review`, `sdlc`) live under `src/domains/agents/fleets/*.md`. Project-level fleet contracts placed at `.clio/fleets/<name>.md` shadow builtin fleets of the same name. Deterministic code steps reference commands declared in `.clio/fleets/commands.yaml`. Contract v4 requires per-step write boundaries (`writes`).
 
 ---
 
