@@ -412,7 +412,19 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		writeJsonHeader(true);
 		writeRawStdout(serializeJsonLine({ type: "turn_start", startedAt }));
 	};
+	// A text-mode run has no `session` event, so the id a later `--session`
+	// would name is written to stderr the moment it exists. Stdout stays the
+	// assistant's answer alone.
+	let textSessionIdWritten = false;
+	const writeTextSessionId = (): void => {
+		if (textSessionIdWritten || mode !== "text") return;
+		const sessionId = chat.getSessionId();
+		if (sessionId === null) return;
+		textSessionIdWritten = true;
+		process.stderr.write(`clio run: session ${sessionId}\n`);
+	};
 	const unsubscribe = chat.onEvent((event) => {
+		writeTextSessionId();
 		if (mode === "json") {
 			const projected = projectHeadlessJsonEvent(event);
 			if (jsonEvents === "terminal") {

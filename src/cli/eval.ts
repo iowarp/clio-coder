@@ -1,17 +1,17 @@
 import { resolve } from "node:path";
 import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir } from "../core/xdg.js";
-import { loadEvalArtifactV3, writeEvalArtifactV3 } from "../domains/eval/artifacts/store.js";
-import { compareEvalArtifactsV3, renderEvalComparisonV3 } from "../domains/eval/compare/compare.js";
+import { loadEvalArtifactV4, writeEvalArtifactV4 } from "../domains/eval/artifacts/store.js";
+import { compareEvalArtifactsV4, renderEvalComparisonV4 } from "../domains/eval/compare/compare.js";
 import { evaluateGate } from "../domains/eval/compare/gates.js";
 import { loadThresholds } from "../domains/eval/compare/thresholds.js";
 
-import { renderEvalJsonReportV3 } from "../domains/eval/reports/json.js";
-import { renderEvalJunitReportV3 } from "../domains/eval/reports/junit.js";
-import { renderEvalMarkdownReportV3 } from "../domains/eval/reports/markdown.js";
-import { renderEvalSweJsonlReportV3 } from "../domains/eval/reports/swe-jsonl.js";
-import { renderEvalTextReportV3 } from "../domains/eval/reports/text.js";
-import type { EvalArtifactV3 } from "../domains/eval/schema/artifact.js";
+import { renderEvalJsonReportV4 } from "../domains/eval/reports/json.js";
+import { renderEvalJunitReportV4 } from "../domains/eval/reports/junit.js";
+import { renderEvalMarkdownReportV4 } from "../domains/eval/reports/markdown.js";
+import { renderEvalSweJsonlReportV4 } from "../domains/eval/reports/swe-jsonl.js";
+import { renderEvalTextReportV4 } from "../domains/eval/reports/text.js";
+import type { EvalArtifactV4 } from "../domains/eval/schema/artifact.js";
 import { EvalSuiteFileError, loadEvalSuiteFile, loadV1TaskFileAsSuite } from "../domains/eval/suites/load.js";
 import { resolveSuiteForRun } from "../domains/eval/suites/resolve.js";
 import { runEvalSuiteV2 } from "../domains/eval/suites/run.js";
@@ -210,8 +210,8 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 		// relative --clio-entry must be pinned to the invoking directory here.
 		const clioEntry = resolve(parsed.clioEntry ?? process.argv[1] ?? "dist/cli/index.js");
 		const artifact = await runEvalSuiteV2({ ...loaded, suite }, { clioEntry });
-		const artifactPath = await writeEvalArtifactV3(clioDataDir(), artifact, parsed.out);
-		process.stdout.write(`${renderEvalTextReportV3(artifact)}artifact: ${artifactPath}\n`);
+		const artifactPath = await writeEvalArtifactV4(clioDataDir(), artifact, parsed.out);
+		process.stdout.write(`${renderEvalTextReportV4(artifact)}artifact: ${artifactPath}\n`);
 		return artifact.summary.failed === 0 ? 0 : 1;
 	} catch (error) {
 		return handleEvalLoadError(error, 1);
@@ -221,7 +221,7 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 async function runEvalReportCommand(parsed: ParsedEvalArgs): Promise<number> {
 	try {
 		const dataDir = clioDataDir();
-		const artifact = await loadEvalArtifactV3(dataDir, parsed.evalId ?? "");
+		const artifact = await loadEvalArtifactV4(dataDir, parsed.evalId ?? "");
 		process.stdout.write(renderArtifactReport(artifact, parsed.format, dataDir));
 		return 0;
 	} catch (error) {
@@ -235,9 +235,9 @@ async function runEvalCompareCommand(parsed: ParsedEvalArgs): Promise<number> {
 	const candidateEvalId = parsed.compareIds[1] ?? "";
 	try {
 		const dataDir = clioDataDir();
-		const baseline = await loadEvalArtifactV3(dataDir, baselineEvalId);
-		const candidate = await loadEvalArtifactV3(dataDir, candidateEvalId);
-		process.stdout.write(renderEvalComparisonV3(compareEvalArtifactsV3(baseline, candidate)));
+		const baseline = await loadEvalArtifactV4(dataDir, baselineEvalId);
+		const candidate = await loadEvalArtifactV4(dataDir, candidateEvalId);
+		process.stdout.write(renderEvalComparisonV4(compareEvalArtifactsV4(baseline, candidate)));
 		return 0;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
@@ -248,8 +248,8 @@ async function runEvalCompareCommand(parsed: ParsedEvalArgs): Promise<number> {
 async function runEvalGateCommand(parsed: ParsedEvalArgs): Promise<number> {
 	try {
 		const dataDir = clioDataDir();
-		const candidate = await loadEvalArtifactV3(dataDir, parsed.evalId ?? "");
-		await loadEvalArtifactV3(dataDir, parsed.baseline ?? "");
+		const candidate = await loadEvalArtifactV4(dataDir, parsed.evalId ?? "");
+		await loadEvalArtifactV4(dataDir, parsed.baseline ?? "");
 		const thresholds =
 			parsed.thresholds === undefined
 				? { fail: [{ metric: "result.pass", op: "eq" as const, value: false }] }
@@ -275,12 +275,12 @@ async function runEvalGateCommand(parsed: ParsedEvalArgs): Promise<number> {
 	}
 }
 
-function renderArtifactReport(artifact: EvalArtifactV3, format: EvalReportFormat, _dataDir: string): string {
-	if (format === "json") return renderEvalJsonReportV3(artifact);
-	if (format === "md") return renderEvalMarkdownReportV3(artifact);
-	if (format === "swe-jsonl") return renderEvalSweJsonlReportV3(artifact);
-	if (format === "junit") return renderEvalJunitReportV3(artifact);
-	return renderEvalTextReportV3(artifact);
+function renderArtifactReport(artifact: EvalArtifactV4, format: EvalReportFormat, _dataDir: string): string {
+	if (format === "json") return renderEvalJsonReportV4(artifact);
+	if (format === "md") return renderEvalMarkdownReportV4(artifact);
+	if (format === "swe-jsonl") return renderEvalSweJsonlReportV4(artifact);
+	if (format === "junit") return renderEvalJunitReportV4(artifact);
+	return renderEvalTextReportV4(artifact);
 }
 
 function handleEvalLoadError(error: unknown, fallback = 2): number {

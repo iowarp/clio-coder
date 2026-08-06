@@ -1,14 +1,17 @@
-import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { parseEvalArtifactV4 } from "../../src/domains/eval/artifacts/store.js";
+import { evaluateMetricAssertion, metricValue } from "../../src/domains/eval/compare/thresholds.js";
 import { tokenMeasurementCoverage } from "../../src/domains/eval/metrics/coverage.js";
 import {
 	createTokenUsageFold,
 	tokenMetricEntries,
 	tokenUsageFromJsonl,
 } from "../../src/domains/eval/metrics/token-stream.js";
-import { renderEvalTextReportV3 } from "../../src/domains/eval/reports/text.js";
+import { tokenAccountingFrom } from "../../src/domains/eval/metrics/tokens.js";
+import { renderEvalTextReportV4 } from "../../src/domains/eval/reports/text.js";
 import { runExternalCommandRunner } from "../../src/domains/eval/runners/external-command.js";
-import type { EvalArtifactResultV3, EvalArtifactV3 } from "../../src/domains/eval/schema/artifact.js";
+import type { EvalArtifactResultV4, EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 
 function usage(total: number): unknown {
 	return {
@@ -88,7 +91,7 @@ describe("contracts/eval token accounting", () => {
 	});
 
 	it("the text report states measurement coverage instead of asserting a zero total", () => {
-		const result = (measured: boolean): EvalArtifactResultV3 => ({
+		const result = (measured: boolean): EvalArtifactResultV4 => ({
 			assignmentId: null,
 			terminalReceiptDigest: null,
 			taskId: "t",
@@ -96,11 +99,11 @@ describe("contracts/eval token accounting", () => {
 			target: { id: "local", model: null, thinking: null },
 			pass: true,
 			failureClass: null,
-			metrics: { "tokens.measured": measured },
+			metrics: measured ? { "tokens.measured": true, "tokens.total": 900 } : { "tokens.measured": false },
 			artifacts: {},
 		});
-		const artifact = (results: EvalArtifactResultV3[], total: number): EvalArtifactV3 => ({
-			version: 3,
+		const artifact = (results: EvalArtifactResultV4[]): EvalArtifactV4 => ({
+			version: 4,
 			evalId: "eval-1",
 			suite: { id: "v1-task-file", hash: "h" },
 			clio: { version: "0.3.0", commit: null, entry: "dist/cli/index.js" },
@@ -111,21 +114,99 @@ describe("contracts/eval token accounting", () => {
 				passed: results.length,
 				failed: 0,
 				passRate: 1,
-				tokens: { input: 0, output: 0, total, cacheRead: 0, cacheWrite: 0 },
+				tokens: tokenAccountingFrom(results),
 				wallTimeMs: 10,
 			},
 			results,
 		});
 
-		const none = renderEvalTextReportV3(artifact([result(false), result(false)], 0));
-		match(none, /tokens total: unmeasured \(0 of 2 runs reported usage\)/);
+		const unmeasured = artifact([result(false), result(false)]);
+		match(renderEvalTextReportV4(unmeasured), /tokens total: unmeasured \(0 of 2 runs reported usage\)/);
 
-		const partial = renderEvalTextReportV3(artifact([result(true), result(false)], 900));
-		match(partial, /tokens total: 900 \(measured in 1 of 2 runs\)/);
+		const partial = artifact([result(true), result(false)]);
+		match(renderEvalTextReportV4(partial), /tokens total: 900 \(measured in 1 of 2 runs\)/);
 
-		const full = renderEvalTextReportV3(artifact([result(true)], 900));
-		match(full, /tokens total: 900\n/);
+		const full = artifact([result(true)]);
+		match(renderEvalTextReportV4(full), /tokens total: 900\n/);
 
 		deepStrictEqual(tokenMeasurementCoverage([result(true), result(false)]), { total: 2, measured: 1 });
+	});
+
+	it("an unmeasured artifact carries no counts at all, in the stored artifact as well as the report", () => {
+		const unmeasured = tokenAccountingFrom([{ metrics: { "tokens.measured": false } }, { metrics: {} }]);
+		deepStrictEqual(unmeasured, { measured: false, runs: 2, measuredRuns: 0 });
+		ok(!("total" in unmeasured), "an unmeasured total is absent, never zero");
+
+		const partial = tokenAccountingFrom([
+			{ metrics: { "tokens.measured": true, "tokens.input": 100, "tokens.output": 20, "tokens.total": 120 } },
+			{ metrics: { "tokens.measured": false } },
+		]);
+		deepStrictEqual(partial, {
+			measured: true,
+			runs: 2,
+			measuredRuns: 1,
+			input: 100,
+			output: 20,
+			total: 120,
+			cacheRead: 0,
+			cacheWrite: 0,
+		});
+	});
+
+	it("a stored artifact that claims counts beside an unmeasured flag is refused", () => {
+		const base = {
+			version: 4,
+			evalId: "eval-1",
+			suite: { id: "s", hash: "h" },
+			clio: { version: "0.3.0", commit: null, entry: "dist/cli/index.js" },
+			environment: { platform: "linux", node: "v22" },
+			matrix: { target: "local", model: null, thinking: null },
+			results: [],
+		};
+		const summary = (tokens: unknown): unknown => ({
+			...base,
+			summary: { runs: 1, passed: 1, failed: 0, passRate: 1, tokens, wallTimeMs: 1 },
+		});
+		throws(
+			() => parseEvalArtifactV4(summary({ measured: false, runs: 1, measuredRuns: 0, total: 0 }), "artifact"),
+			/unmeasured accounting carries no counts/,
+		);
+		throws(
+			() =>
+				parseEvalArtifactV4(
+					summary({ measured: true, runs: 1, measuredRuns: 0, input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 }),
+					"artifact",
+				),
+			/expected a positive count when measured/,
+		);
+		deepStrictEqual(
+			parseEvalArtifactV4(summary({ measured: false, runs: 1, measuredRuns: 0 }), "artifact").summary.tokens,
+			{ measured: false, runs: 1, measuredRuns: 0 },
+		);
+	});
+
+	it("a token threshold on an unmeasured artifact fails closed instead of reading zero", () => {
+		const artifact = parseEvalArtifactV4(
+			{
+				version: 4,
+				evalId: "eval-1",
+				suite: { id: "s", hash: "h" },
+				clio: { version: "0.3.0", commit: null, entry: "dist/cli/index.js" },
+				environment: { platform: "linux", node: "v22" },
+				matrix: { target: "local", model: null, thinking: null },
+				summary: {
+					runs: 1,
+					passed: 1,
+					failed: 0,
+					passRate: 1,
+					tokens: { measured: false, runs: 1, measuredRuns: 0 },
+					wallTimeMs: 1,
+				},
+				results: [],
+			},
+			"artifact",
+		);
+		strictEqual(metricValue("tokens.total", {}, artifact), null);
+		strictEqual(evaluateMetricAssertion({ metric: "tokens.total", op: "lt", value: 1_000 }, {}, artifact), false);
 	});
 });

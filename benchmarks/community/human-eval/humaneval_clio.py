@@ -42,6 +42,7 @@ HUMANEVAL_URL = "https://raw.githubusercontent.com/openai/human-eval/master/data
 CLIO = os.environ.get("CLIO_BIN", "clio")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from clio_usage import emit_observed_usage, fold_message_end_usage, receipt_total_tokens
 from result_manifest import target_profile, write_result_manifest
 from uv_command import uv_python_cmd, uv_script_cmd
 
@@ -285,42 +286,20 @@ def extract_python_from_events(events_path: Path) -> str | None:
     return matches[-1].strip() + "\n" if matches else None
 
 
-def tokens_from_events(events_path: Path) -> tuple[int | None, str | None]:
-    total, run_id = 0, None
+def run_id_from_events(events_path: Path) -> str | None:
     if not events_path.exists():
-        return None, None
-    for line in events_path.read_text(encoding="utf-8", errors="replace").splitlines():
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if run_id is None:
+        return None
+    with events_path.open("r", encoding="utf-8", errors="replace") as stream:
+        for line in stream:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
             run_id = (event.get("session") or {}).get("runId") or event.get("runId")
-        message = event.get("message") or {}
-        usage = message.get("usage") or {}
-        try:
-            total = max(total, int(usage.get("totalTokens") or 0))
-        except (TypeError, ValueError):
-            pass
-    return (total or None), run_id
-
-
-def tokens_from_receipt(run_id: str | None) -> int | None:
-    if not run_id:
-        return None
-    path = Path.home() / ".local/state/clio/receipts" / f"{run_id}.json"
-    if not path.exists():
-        return None
-    try:
-        receipt = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    for key_path in (("usage", "totalTokens"), ("tokens",), ("usage", "total")):
-        cursor: Any = receipt
-        for key in key_path:
-            cursor = cursor.get(key) if isinstance(cursor, dict) else None
-        if isinstance(cursor, (int, float)) and cursor:
-            return int(cursor)
+            if isinstance(run_id, str) and run_id:
+                return run_id
     return None
 
 
@@ -406,11 +385,19 @@ def generate_attempt(
 
     completion = completion_from_solution(problem, solution_text)
     (run_dir / "completion.py").write_text(completion, encoding="utf-8")
-    stream_tokens, run_id = tokens_from_events(run_dir / "events" / "clio.jsonl")
+    events_path = run_dir / "events" / "clio.jsonl"
+    run_id = run_id_from_events(events_path)
+    observed_usage = fold_message_end_usage(events_path)
+    # The parent `clio eval` sees only this adapter's stdout, so the usage this
+    # adapter observed is republished there. Nothing is written when nothing was
+    # observed: the eval must report unmeasured rather than a zero.
+    emit_observed_usage(observed_usage)
+    stream_tokens = None if observed_usage is None else observed_usage["totalTokens"]
     metric.update(
         {
             "task_id": problem["task_id"],
-            "tokens": tokens_from_receipt(run_id) or stream_tokens,
+            "tokens": receipt_total_tokens(run_id) or stream_tokens,
+            "tokens_measured": stream_tokens is not None,
             "run_id": run_id,
             "solution_bytes": len(solution_text.encode("utf-8")),
             "completion_bytes": len(completion.encode("utf-8")),
@@ -579,7 +566,12 @@ def suite_summary(
             + sum(float(row.get("wall_s") or 0) for row in grade_rows),
             3,
         ),
-        "tokens": sum(int(metric.get("tokens") or 0) for metric in metrics_rows),
+        # Counted only over the attempts that actually reported usage, and
+        # reported next to that coverage: a suite total of 0 across unobserved
+        # attempts would claim the work was free.
+        "tokens": sum(int(metric.get("tokens") or 0) for metric in metrics_rows if metric.get("tokens")),
+        "tokensMeasuredAttempts": sum(1 for metric in metrics_rows if metric.get("tokens")),
+        "tokensTotalAttempts": len(metrics_rows),
         "scoringRule": "HumanEval pass means the generated completion passes the task's check(entry_point).",
     }
 
@@ -729,6 +721,9 @@ def run_task(args: argparse.Namespace) -> int:
         "resolved": 0,
         "errors": 1 if metric.get("timed_out") or metric.get("exit") not in (0, None) or metric.get("empty_completion") else 0,
         "emptyCompletion": bool(metric.get("empty_completion")),
+        # Absent rather than zero when the attempt's run reported no usage.
+        "tokens": metric.get("tokens"),
+        "tokensMeasured": bool(metric.get("tokens_measured")),
     }
     write_suite_manifest(
         run_dir,

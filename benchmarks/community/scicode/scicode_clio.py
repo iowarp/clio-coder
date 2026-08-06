@@ -28,19 +28,54 @@ import sys
 import tempfile
 import textwrap
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_DATA = Path(
-    os.environ.get("SCICODE_DATA", REPO_ROOT / "benchmarks" / "community" / "scicode" / "problems_all.jsonl")
+# The SciCode corpus and its 1 GB target artifact are external and ignored, but
+# a checkout that already has them under benchmarks/data/science-problems is the
+# common case. Defaulting to the adapter directory made a repo holding the data
+# report faithful_scoring_ready: false, which reads as missing data rather than
+# a path the adapter never looked at.
+SCICODE_DATA_DIR = Path(
+    os.environ.get("SCICODE_DATA_DIR", REPO_ROOT / "benchmarks" / "data" / "science-problems")
 )
+ADAPTER_DIR = Path(__file__).resolve().parent
+
+
+def _first_existing(*candidates: Path) -> Path:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[-1]
+
+
+DEFAULT_DATA = Path(
+    os.environ.get("SCICODE_DATA")
+    or _first_existing(SCICODE_DATA_DIR / "problems_all.jsonl", ADAPTER_DIR / "problems_all.jsonl")
+)
+DEFAULT_H5 = Path(os.environ.get("SCICODE_H5", SCICODE_DATA_DIR / "test_data.h5"))
 DEFAULT_TEMPLATE = Path(
-    os.environ.get("SCICODE_TEMPLATE", REPO_ROOT / "benchmarks" / "community" / "scicode" / "background_comment_template.txt")
+    os.environ.get("SCICODE_TEMPLATE")
+    or _first_existing(
+        SCICODE_DATA_DIR / "background_comment_template.txt",
+        ADAPTER_DIR / "background_comment_template.txt",
+    )
 )
 CLIO = os.environ.get("CLIO_BIN", "clio")
+# The official SciCode package is not published on PyPI, so the HDF5 scoring
+# path installs it from source. Grading through `--h5py-file` imports
+# `scicode.parse.parse`, and without this the graded subprocess dies on
+# ModuleNotFoundError before it executes a single line of generated code, which
+# reads as a scientific-code failure when it is an environment failure.
+SCICODE_PACKAGE = os.environ.get(
+    "SCICODE_PIP_SPEC", "scicode @ git+https://github.com/scicode-bench/SciCode.git"
+)
+GRADER_PACKAGES = ("h5py", "numpy", "scipy")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from clio_usage import add_usage, emit_observed_usage, empty_usage, fold_message_end_usage
 from result_manifest import target_profile, write_result_manifest
 from uv_command import uv_python_cmd, uv_script_cmd
 
@@ -338,12 +373,26 @@ def inspect_data(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_clio_step(prompt: str, cwd: Path, events_path: Path, timeout: int, target: str | None, model: str | None) -> dict[str, Any]:
+def run_clio_step(
+    prompt: str,
+    cwd: Path,
+    events_path: Path,
+    timeout: int,
+    target: str | None,
+    model: str | None,
+    agent: str | None = None,
+) -> dict[str, Any]:
     cmd = [CLIO, "--no-context-files", "run", "--json"]
     if target:
         cmd.extend(["--target", target])
     if model:
         cmd.extend(["--model", model])
+    # Without --agent a sub-step is one main-agent turn: no worker is spawned
+    # and no dispatch is recorded. Naming a recipe dispatches the step to a
+    # worker instead, which is what makes the run comparable to how an
+    # operator would actually delegate the work.
+    if agent:
+        cmd.extend(["--agent", agent])
     cmd.append(prompt)
     env = {**os.environ}
     started = time.time()
@@ -394,6 +443,45 @@ def collect_strings(value: Any, out: list[str]) -> None:
             collect_strings(item, out)
 
 
+def defined_symbols(source: str) -> list[str]:
+    try:
+        parsed = ast.parse(source)
+    except SyntaxError:
+        return []
+    return [
+        node.name
+        for node in parsed.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    ]
+
+
+def merge_step_code(existing: str, extracted: str) -> str:
+    """Accumulate a step's answer into the running solution file.
+
+    A sub-step's test calls that step's function, which in turn calls the
+    functions earlier steps defined. An agent that answers with a code block
+    usually emits only the new function, so replacing the file wholesale would
+    drop every prior definition and the step would fail with a NameError
+    against its own dependencies. The extracted block is used wholesale only
+    when it already carries everything the file had.
+    """
+    if not existing.strip():
+        return extracted
+    have = set(defined_symbols(existing))
+    incoming = set(defined_symbols(extracted))
+    if have and have.issubset(incoming):
+        return extracted
+    if incoming and incoming.issubset(have):
+        return existing
+    return f"{existing.rstrip()}\n\n\n{extracted.lstrip()}"
+
+
+def solution_written_by_step(run_dir: Path, since: float) -> bool:
+    """Did this step's agent write solution.py itself?"""
+    solution = run_dir / "solution.py"
+    return solution.exists() and solution.stat().st_mtime >= since
+
+
 def snapshot_step_code(problem: dict[str, Any], run_dir: Path, step_id: str) -> None:
     generated_dir = run_dir / "generated_code"
     generated_dir.mkdir(parents=True, exist_ok=True)
@@ -419,11 +507,13 @@ def run_problem(args: argparse.Namespace) -> int:
     metrics_path = run_dir / "metrics.jsonl"
     failures = 0
     records: list[dict[str, Any]] = []
+    problem_usage: dict[str, int] | None = None
     with metrics_path.open("w", encoding="utf-8") as metrics:
         for index, step in enumerate(problem.get("sub_steps", [])):
             step_id = step_number(step)
             prompt = render_prompt(problem, step, index, run_dir / "generated_code", template, args.with_background)
             (run_dir / "prompts" / f"{step_id}.md").write_text(prompt, encoding="utf-8")
+            prompt_started = time.time()
             if args.dry_run:
                 metric = {"step_id": step_id, "dry_run": True, "exit": 0}
             else:
@@ -434,13 +524,28 @@ def run_problem(args: argparse.Namespace) -> int:
                     timeout=args.timeout,
                     target=args.target,
                     model=args.model,
+                    agent=getattr(args, "agent", None),
                 )
-                if not (run_dir / "solution.py").exists():
-                    extracted = extract_python_from_events(Path(metric["events"]))
-                    if extracted:
-                        (run_dir / "solution.py").write_text(extracted, encoding="utf-8")
+                # A step's code may arrive two ways: the agent edits
+                # solution.py with a tool, or it answers with a code block and
+                # writes nothing. A dispatched worker often does the latter, so
+                # the stream is read every step and not only when the file is
+                # absent. Reading it once left every later step graded against
+                # the first step's code, which reads as the model failing to
+                # define its own function.
+                extracted = extract_python_from_events(Path(metric["events"]))
+                metric["wrote_solution_file"] = solution_written_by_step(run_dir, prompt_started)
+                if extracted and not metric["wrote_solution_file"]:
+                    solution = run_dir / "solution.py"
+                    previous = solution.read_text(encoding="utf-8") if solution.exists() else ""
+                    solution.write_text(merge_step_code(previous, extracted), encoding="utf-8")
                 if metric["exit"] != 0:
                     failures += 1
+                step_usage = fold_message_end_usage(Path(metric["events"]))
+                metric["tokens"] = None if step_usage is None else step_usage["totalTokens"]
+                metric["tokens_measured"] = step_usage is not None
+                if step_usage is not None:
+                    problem_usage = add_usage(problem_usage or empty_usage(), step_usage)
             snapshot_step_code(problem, run_dir, step_id)
             record = {"problem_id": problem["problem_id"], "step_id": step_id, **metric}
             records.append(record)
@@ -449,6 +554,10 @@ def run_problem(args: argparse.Namespace) -> int:
             if failures and not args.continue_on_error:
                 break
     (run_dir / "problem.json").write_text(json.dumps(problem, indent=2) + "\n", encoding="utf-8")
+    # A parent `clio eval` observes only this adapter's stdout, so the usage
+    # summed across the problem's sub-step runs is republished there. A problem
+    # whose steps reported no usage publishes nothing and stays unmeasured.
+    emit_observed_usage(problem_usage)
     errors = sum(1 for record in records if record.get("timed_out") or record.get("exit") not in (0, None))
     resolved = sum(1 for record in records if record.get("exit") == 0)
     summary = {
@@ -461,6 +570,12 @@ def run_problem(args: argparse.Namespace) -> int:
         "errors": errors,
         "dryRun": bool(args.dry_run),
         "wallSeconds": round(sum(float(record.get("wall_s") or 0) for record in records), 3),
+        # Absent rather than zero when no sub-step reported usage, and always
+        # reported next to how many steps the count covers.
+        "tokens": None if problem_usage is None else problem_usage["totalTokens"],
+        "agent": getattr(args, "agent", None),
+        "tokensMeasuredSteps": sum(1 for record in records if record.get("tokens_measured")),
+        "tokensTotalSteps": len(records),
     }
     manifest_path, summary_path = write_result_manifest(
         run_dir,
@@ -563,14 +678,30 @@ def build_step_assertion_script(
     return "\n".join(lines)
 
 
-def run_python_script(script: str, cwd: Path, timeout: int) -> dict[str, Any]:
+def grader_packages(h5py_file: Path | None) -> list[str]:
+    """Packages the graded subprocess needs, given the target artifact in use."""
+    return [*GRADER_PACKAGES, *([SCICODE_PACKAGE] if h5py_file is not None else [])]
+
+
+def scicode_package_available(timeout: int = 300) -> tuple[bool, str]:
+    """Resolve the scicode import once, before grading every step with it."""
+    proc = subprocess.run(
+        [*uv_python_cmd([SCICODE_PACKAGE]), "-c", "from scicode.parse.parse import process_hdf5_to_tuple"],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    return proc.returncode == 0, (proc.stderr or proc.stdout)[-2000:]
+
+
+def run_python_script(script: str, cwd: Path, timeout: int, packages: Iterable[str] = GRADER_PACKAGES) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="clio-scicode-") as tmp:
         path = Path(tmp) / "assert_step.py"
         path.write_text(script, encoding="utf-8")
         started = time.time()
         try:
             proc = subprocess.run(
-                [*uv_python_cmd(["h5py", "numpy", "scipy"]), str(path)],
+                [*uv_python_cmd(list(packages)), str(path)],
                 cwd=cwd,
                 capture_output=True,
                 text=True,
@@ -609,7 +740,7 @@ def grade_step_result(
         return {"step_id": step_id, "status": "blocked", "pass": False, "reason": str(exc)}
     except FileNotFoundError as exc:
         return {"step_id": step_id, "status": "fail", "pass": False, "reason": str(exc)}
-    result = run_python_script(script, run_dir, timeout)
+    result = run_python_script(script, run_dir, timeout, grader_packages(h5py_file))
     return {
         "step_id": step_id,
         "status": "pass" if result["exit"] == 0 else "fail",
@@ -624,6 +755,16 @@ def grade_problem(args: argparse.Namespace) -> int:
     refs = load_json_references(Path(args.references) if args.references else None)
     h5py_file = Path(args.h5py_file) if args.h5py_file else None
     run_dir = Path(args.run)
+    # The scicode import is resolved once, before grading. Without this every
+    # sub-step reports the same ModuleNotFoundError as a failed step, and an
+    # environment gap reads as bad generated science.
+    if h5py_file is not None:
+        available, detail = scicode_package_available(args.timeout)
+        if not available:
+            raise DataBlocked(
+                f"the SciCode package required by --h5py-file grading is unavailable: {detail.strip()}\n"
+                f"install it with SCICODE_PIP_SPEC or make {SCICODE_PACKAGE!r} resolvable"
+            )
     results = [
         grade_step_result(problem, step, run_dir, h5py_file, refs, args.timeout)
         for step in problem.get("sub_steps", [])
@@ -698,6 +839,15 @@ def grade_step(args: argparse.Namespace) -> int:
     return 0 if result["pass"] else 1
 
 
+def default_h5() -> str | None:
+    """The repo's target artifact when it is present, else nothing.
+
+    Defaulting to a path that does not exist would turn every grading run into
+    a blocked-data error naming a file the operator never chose.
+    """
+    return str(DEFAULT_H5) if DEFAULT_H5.exists() else None
+
+
 def add_common_data_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--data", default=str(DEFAULT_DATA), help="SciCode problems JSONL")
 
@@ -708,7 +858,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     inspect = sub.add_parser("inspect-data", help="summarize dataset and scoring readiness")
     add_common_data_args(inspect)
-    inspect.add_argument("--h5py-file", default=None, help="official SciCode test_data.h5")
+    inspect.add_argument("--h5py-file", default=default_h5(), help="official SciCode test_data.h5")
     inspect.add_argument("--references", default=None, help="small JSON target manifest")
     inspect.set_defaults(func=inspect_data)
 
@@ -721,7 +871,7 @@ def build_parser() -> argparse.ArgumentParser:
     tasks.add_argument("--timeout", type=int, default=1800)
     tasks.add_argument("--target", default=None)
     tasks.add_argument("--model", default=None)
-    tasks.add_argument("--h5py-file", default=None)
+    tasks.add_argument("--h5py-file", default=default_h5())
     tasks.add_argument("--references", default=None)
     tasks.add_argument("--with-background", action="store_true")
     tasks.set_defaults(func=generate_tasks)
@@ -733,6 +883,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--timeout", type=int, default=1800)
     run.add_argument("--target", default=None)
     run.add_argument("--model", default=None)
+    run.add_argument("--agent", default=None, help="dispatch each sub-step to this agent recipe instead of the main agent")
     run.add_argument("--template", default=None)
     run.add_argument("--with-background", action="store_true")
     run.add_argument("--continue-on-error", action="store_true")
@@ -744,7 +895,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_data_args(grade)
     grade.add_argument("--problem-id", required=True)
     grade.add_argument("--run", required=True)
-    grade.add_argument("--h5py-file", default=None)
+    grade.add_argument("--h5py-file", default=default_h5())
     grade.add_argument("--references", default=None)
     grade.add_argument("--timeout", type=int, default=1800)
     grade.add_argument("--report", default=None)
@@ -755,7 +906,7 @@ def build_parser() -> argparse.ArgumentParser:
     grade_one.add_argument("--problem-id", required=True)
     grade_one.add_argument("--step-number", required=True)
     grade_one.add_argument("--run", required=True)
-    grade_one.add_argument("--h5py-file", default=None)
+    grade_one.add_argument("--h5py-file", default=default_h5())
     grade_one.add_argument("--references", default=None)
     grade_one.add_argument("--timeout", type=int, default=1800)
     grade_one.set_defaults(func=grade_step)

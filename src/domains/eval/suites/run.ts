@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { evaluateMetricAssertion } from "../compare/thresholds.js";
 import { collectContextMetrics } from "../metrics/context.js";
+import { readRunJournal, receiptInvariantMetrics } from "../metrics/invariants.js";
 import { wallTimeMetric } from "../metrics/latency.js";
 import { tokenAccountingFrom } from "../metrics/tokens.js";
 import { zeroToolCallMetrics } from "../metrics/tool-calls.js";
@@ -109,6 +110,9 @@ async function runMatrixItem(
 			// A runner may have exact measurements from command output. Those win
 			// over the generic post-run artifact collector.
 			...runner.metrics,
+			// Read after the runner returned and before the journal is removed:
+			// what Clio sealed for this item, judged against its own ledger.
+			...receiptInvariantMetrics(readRunJournal(stateDir), runner.exitCode),
 			"patch.bytes": patch.bytes,
 			"patch.filesChanged": patch.filesChanged,
 			"patch.testFilesModified": patch.testFilesModified,

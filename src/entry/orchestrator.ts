@@ -195,6 +195,15 @@ export interface BootOptions {
 		noSkills?: boolean;
 		skillPaths?: ReadonlyArray<string>;
 		steerChannel?: string;
+		/**
+		 * Append this turn to an existing session instead of starting a fresh
+		 * one. `latest` means the most recent session recorded for this
+		 * workspace. A named session that cannot be resumed fails the run
+		 * rather than silently starting a new one, because a caller that asked
+		 * to continue a conversation would otherwise get an answer with no
+		 * history behind it.
+		 */
+		resumeSession?: { kind: "id"; id: string } | { kind: "latest" };
 	};
 	/** Serve Clio as an Agent Client Protocol v1 agent over JSON-RPC stdio. */
 	acp?: {
@@ -720,19 +729,42 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 	}
 
-	const resumeId = process.env.CLIO_RESUME_SESSION_ID?.trim();
+	// A headless `--session`/`--continue` resolves here, where the session
+	// domain exists. It is a hard requirement rather than a hint: a caller that
+	// asked to continue a conversation must not receive an answer written
+	// without that conversation's history.
+	const requestedResume = options.headless?.resumeSession;
+	let headlessResumeFailure: string | null = null;
+	let resolvedResumeId: string | undefined;
+	if (requestedResume !== undefined) {
+		if (!session) {
+			headlessResumeFailure = "session continuation requires the session domain, which is not loaded";
+		} else if (requestedResume.kind === "id") {
+			resolvedResumeId = requestedResume.id;
+		} else {
+			const latest = session.history()[0];
+			if (latest === undefined) headlessResumeFailure = `no previous session recorded for ${process.cwd()}`;
+			else resolvedResumeId = latest.id;
+		}
+	}
+	const resumeId = resolvedResumeId ?? process.env.CLIO_RESUME_SESSION_ID?.trim();
 	let resumedSessionAtBoot = false;
-	if (resumeId && session) {
+	if (resumeId && session && headlessResumeFailure === null) {
 		try {
 			session.resume(resumeId);
 			resumedSessionAtBoot = true;
 		} catch (err) {
-			process.stderr.write(
-				`Clio Coder: failed to resume session ${resumeId}: ${err instanceof Error ? err.message : String(err)}\n`,
-			);
+			const detail = err instanceof Error ? err.message : String(err);
+			if (requestedResume !== undefined) headlessResumeFailure = `failed to resume session ${resumeId}: ${detail}`;
+			else process.stderr.write(`Clio Coder: failed to resume session ${resumeId}: ${detail}\n`);
 		}
 	}
 	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
+	if (headlessResumeFailure !== null) {
+		process.stderr.write(`clio run: ${headlessResumeFailure}\n`);
+		await termination.shutdown(2);
+		return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
+	}
 
 	// Hook diagnostics ride the typed bus. The domain loader constructed the
 	// bundle with the stderr default; swap in a sink that publishes

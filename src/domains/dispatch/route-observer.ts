@@ -19,7 +19,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
-import { parseEvalArtifactV3 } from "../eval/artifacts/store.js";
+import { parseEvalArtifactV4 } from "../eval/artifacts/store.js";
 import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
 import { readGateDecisionArtifacts } from "./gate-decisions.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
@@ -255,7 +255,7 @@ function durableQualitySources(stateDir: string): {
 				.filter((entry) => entry.endsWith(".json"))
 				.sort()) {
 				try {
-					const artifact = parseEvalArtifactV3(JSON.parse(readFileSync(join(evalDirectory, name), "utf8")) as unknown, name);
+					const artifact = parseEvalArtifactV4(JSON.parse(readFileSync(join(evalDirectory, name), "utf8")) as unknown, name);
 					evals.push({ artifact, digest: routeQualityEvalDigest(artifact) });
 				} catch {
 					// Retired or malformed artifact formats are not routing evidence.

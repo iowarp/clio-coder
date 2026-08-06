@@ -5,6 +5,54 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
+## Unreleased - v0.3.0 hardening session 5: truthful eval accounting, headless continuity, benchmark grading
+
+- Eval artifacts moved to version 4. `summary.tokens` is now a discriminated
+  accounting block carrying `measured`, `runs`, and `measuredRuns`, with the
+  five counts present only when a run actually reported usage. The stored
+  artifact no longer prints a numeric zero for work it could not observe; the
+  parser refuses counts beside `measured: false`, a `tokens.total` threshold on
+  an unmeasured artifact fails closed, and a comparison against an unmeasured
+  side reports an unmeasured delta.
+- Added `benchmarks/community/clio_usage.py`, the one fold that closes the
+  adapter blind spot. The HumanEval and SciCode adapters run Clio as their own
+  child, so a parent `clio eval` observed nothing; they now republish the usage
+  they did observe as one aggregate `message_end` line on stdout, and publish
+  nothing when nothing was observed. The HumanEval fold also replaced a `max`
+  over any event carrying usage, which understated multi-segment turns, and its
+  receipt lookup now resolves the state directory Clio itself resolves instead
+  of a hardcoded `~/.local/state`.
+- Added `clio run --session <id>` and `--continue`. Headless runs had no
+  scriptable way to continue a conversation, so session compaction could not be
+  exercised end to end by any supported path. Continuation fails closed on an
+  unresumable session, and the session id is reported on stderr in text mode.
+- SciCode grading is no longer environment-blocked. The HDF5 scoring path
+  imports `scicode.parse.parse`, which is not on PyPI and was never installed,
+  so every sub-step died on ModuleNotFoundError before executing a line of
+  generated code. The grader now installs the package from source, resolves the
+  import once as a preflight so an environment gap is reported as blocked data
+  rather than as failed science, and defaults its data paths to the
+  repository's `benchmarks/data/science-problems` directory.
+- SciCode step capture was reading the event stream only when `solution.py`
+  was absent, so a run whose agent answers with a code block instead of editing
+  a file captured the first step and graded every later step against it. That
+  showed up as each step failing with a NameError against its own function.
+  Capture now runs every step and accumulates by defined symbol, and
+  `run-problem --agent <recipe>` dispatches each sub-step to a worker instead
+  of the main agent.
+- Measured problem 10 across four configurations. gpt-5.6-luna scored 6/11 with
+  clean AssertionError failures; KAT-Coder scored 1/11 through the main agent
+  and 2/11 through `--agent coder`, with failures including undefined symbols
+  and array-shape errors. The gap is model capability: the harness, the
+  grader, and the target artifact are identical across all four. A dispatched
+  worker completed without executing any tools, because a SciCode prompt asks
+  for a code block rather than a workspace edit.
+- Verified live against a local KAT-Coder target: a two-task `clio eval run`
+  sealed a v4 artifact with 199,275 measured tokens across 2 of 2 runs, a
+  headless `--continue` turn recalled the prior turn's content, and SciCode
+  problem 10 graded 2/11 sub-steps passing with zero blocked steps, the
+  failures being genuine numerical and symbol errors in generated code.
+
 ## Unreleased - v0.3.0 hardening session 4: the main loop, the tool substrate, and the engine seam
 
 Session 1 mapped the hot path. This session re-engineered it: the SDK moved

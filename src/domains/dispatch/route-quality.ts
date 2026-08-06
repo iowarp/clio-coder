@@ -38,7 +38,7 @@ export interface RouteQualityReceiptSource {
 
 /** The current eval artifact projection consumed by routing. Older formats are not evidence. */
 export interface RouteQualityEvalArtifact {
-	version: 3;
+	version: 4;
 	evalId: string;
 	results: ReadonlyArray<{
 		assignmentId: string | null;
@@ -183,7 +183,7 @@ export function reduceRouteQuality(input: ReduceRouteQualityInput): RouteQuality
 	}
 
 	for (const source of input.evalArtifacts ?? []) {
-		if (source.artifact.version !== 3 || !/^[0-9a-f]{64}$/u.test(source.digest)) continue;
+		if (source.artifact.version !== 4 || !/^[0-9a-f]{64}$/u.test(source.digest)) continue;
 		for (const result of source.artifact.results) {
 			if (result.assignmentId !== evalAssignmentId(subject) || result.terminalReceiptDigest !== subject.integrity.digest)
 				continue;

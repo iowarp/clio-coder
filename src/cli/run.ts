@@ -37,7 +37,7 @@ import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js
 import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
-	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--session <id>|--continue] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio run [flags] "<task>"
 
@@ -60,6 +60,8 @@ Flags:
   --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
   --json-events <mode>      main-agent JSON stream mode: full|terminal; implies --json
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
+  --session <id>            append this turn to an existing session
+  --continue                append this turn to the most recent session for this cwd
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
   --agent-profile <name>    named fleet profile for dispatch
   --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
@@ -67,6 +69,11 @@ Flags:
   --require <capability>    capability the dispatch target must advertise (repeatable)
   --skill <path>            load one explicit skill for this run, repeatable
   --no-skills               disable skill discovery while still honoring --skill
+
+A headless turn starts a fresh session unless --session or --continue names one
+to append to. A named session that cannot be resumed fails the run: an answer
+written without the history the caller asked for is worse than no answer. The
+session id is reported on stderr, and as the "session" event under --json.
 
 There is no operator in a headless run: permission asks are denied, and the
 ask_user interview tool is not registered. Skills that interview fall back to
@@ -175,6 +182,18 @@ export async function runClioRun(
 				process.stderr.write(USAGE);
 				return 2;
 			}
+			if (parsed.sessionId !== undefined && parsed.continueSession) {
+				process.stderr.write("clio run: --session and --continue name different sessions; pass one\n");
+				process.stderr.write(USAGE);
+				return 2;
+			}
+			// A dispatched agent runs in its own worker with its own transcript,
+			// so there is no main-agent session for it to continue.
+			if ((parsed.sessionId !== undefined || parsed.continueSession) && parsed.agentId !== undefined) {
+				process.stderr.write("clio run: --session and --continue apply to the main agent, not --agent dispatch\n");
+				process.stderr.write(USAGE);
+				return 2;
+			}
 
 			const noSkills = options.noSkills === true || parsed.noSkills === true;
 			const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
@@ -224,6 +243,11 @@ export async function runClioRun(
 							...(parsed.autonomy !== undefined ? { autonomy: parsed.autonomy } : {}),
 							...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
 							...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
+							...(parsed.sessionId !== undefined
+								? { resumeSession: { kind: "id" as const, id: parsed.sessionId } }
+								: parsed.continueSession
+									? { resumeSession: { kind: "latest" as const } }
+									: {}),
 						},
 					});
 					await flushRawStdout();

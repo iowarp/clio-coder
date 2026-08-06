@@ -9,8 +9,18 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SCRIPT = join(REPO_ROOT, "benchmarks", "community", "scicode", "scicode_clio.py");
 const PYTHON = process.env.PYTHON ?? "python3";
 
+/**
+ * The adapter defaults to the repository's SciCode data directory when it
+ * exists. These tests are fixture-only, so the directory is pointed at an
+ * empty scratch path: otherwise a developer checkout that holds the real
+ * 1 GB corpus grades fixture problems against real targets.
+ */
+function hermeticEnv(): NodeJS.ProcessEnv {
+	return { ...process.env, SCICODE_DATA_DIR: join(tmpdir(), "clio-scicode-absent-data") };
+}
+
 function runPython(args: string[], cwd = REPO_ROOT): string {
-	return execFileSync(PYTHON, [SCRIPT, ...args], { cwd, encoding: "utf8" });
+	return execFileSync(PYTHON, [SCRIPT, ...args], { cwd, encoding: "utf8", env: hermeticEnv() });
 }
 
 describe("contracts/SciCode Clio adapter", () => {
@@ -128,6 +138,7 @@ describe("contracts/SciCode Clio adapter", () => {
 		const result = spawnSync(PYTHON, [SCRIPT, "grade-problem", "--data", data, "--problem-id", "1", "--run", runDir], {
 			cwd: REPO_ROOT,
 			encoding: "utf8",
+			env: hermeticEnv(),
 		});
 		strictEqual(result.status, 2);
 		const parsed = JSON.parse(result.stdout) as {

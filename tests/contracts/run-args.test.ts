@@ -129,4 +129,33 @@ describe("contracts/run CLI args", () => {
 			else process.env[RUN_OVERRIDES_ENV] = previous;
 		}
 	});
+	it("session continuity is a named flag, and the two forms are mutually exclusive", async () => {
+		const byId = parseRunCliArgs(["--session", "abc123", "keep going"]);
+		strictEqual(byId.sessionId, "abc123");
+		strictEqual(byId.continueSession, false);
+		deepStrictEqual(byId.diagnostics, []);
+
+		const latest = parseRunCliArgs(["--continue", "keep going"]);
+		strictEqual(latest.sessionId, undefined);
+		strictEqual(latest.continueSession, true);
+
+		const fresh = parseRunCliArgs(["do work"]);
+		strictEqual(fresh.sessionId, undefined);
+		strictEqual(fresh.continueSession, false);
+
+		const { result: bothForms } = await captureStdout(() =>
+			runClioRun(["--session", "abc123", "--continue", "keep going"]),
+		);
+		strictEqual(bothForms, 2, "naming two different sessions is refused, not resolved");
+
+		const { result: withDispatch } = await captureStdout(() =>
+			runClioRun(["--continue", "--agent", "scout", "keep going"]),
+		);
+		strictEqual(withDispatch, 2, "a dispatched agent has no main-agent session to continue");
+
+		const { result, stdout } = await captureStdout(() => runClioRun(["--help"]));
+		strictEqual(result, 0);
+		ok(stdout.includes("--session <id>"));
+		ok(stdout.includes("--continue"));
+	});
 });

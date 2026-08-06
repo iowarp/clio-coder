@@ -4,17 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
-	loadEvalArtifactV3,
-	parseEvalArtifactV3,
-	writeEvalArtifactV3,
+	loadEvalArtifactV4,
+	parseEvalArtifactV4,
+	writeEvalArtifactV4,
 } from "../../src/domains/eval/artifacts/store.js";
-import type { EvalArtifactV3 } from "../../src/domains/eval/schema/artifact.js";
+import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 import { loadEvalArtifact } from "../../src/domains/eval/store.js";
 import type { EvalRunArtifact } from "../../src/domains/eval/types.js";
 
-function artifact(): EvalArtifactV3 {
+function artifact(): EvalArtifactV4 {
 	return {
-		version: 3,
+		version: 4,
 		evalId: "eval-explicit-link",
 		suite: { id: "contract", hash: "suite-hash" },
 		clio: { version: "test", commit: null, entry: "/tmp/clio" },
@@ -25,7 +25,7 @@ function artifact(): EvalArtifactV3 {
 			passed: 1,
 			failed: 0,
 			passRate: 1,
-			tokens: { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 },
+			tokens: { measured: true, runs: 1, measuredRuns: 1, input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 },
 			wallTimeMs: 1,
 		},
 		results: [
@@ -85,8 +85,8 @@ describe("contracts/eval artifacts", () => {
 	it("records explicit assignment and terminal receipt linkage", async () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-eval-artifact-v3-"));
 		try {
-			await writeEvalArtifactV3(join(root, "data"), artifact());
-			const loaded = await loadEvalArtifactV3(join(root, "data"), "eval-explicit-link");
+			await writeEvalArtifactV4(join(root, "data"), artifact());
+			const loaded = await loadEvalArtifactV4(join(root, "data"), "eval-explicit-link");
 			strictEqual(loaded.results[0]?.assignmentId, "assignment-1");
 			strictEqual(loaded.results[0]?.terminalReceiptDigest, "a".repeat(64));
 			const raw = readFileSync(join(root, "data", "evals", "eval-explicit-link.json"), "utf8");
@@ -97,11 +97,11 @@ describe("contracts/eval artifacts", () => {
 	});
 
 	it("rejects the retired artifact shape", () => {
-		const retired = { ...artifact(), version: 2 };
-		throws(() => parseEvalArtifactV3(retired, "retired"), /current version 3/);
+		const retired = { ...artifact(), version: 3 };
+		throws(() => parseEvalArtifactV4(retired, "retired"), /current version 4/);
 		const missingReference = structuredClone(artifact());
 		delete (missingReference.results[0] as { assignmentId?: string }).assignmentId;
-		throws(() => parseEvalArtifactV3(missingReference, "missing-reference"), /assignmentId/);
+		throws(() => parseEvalArtifactV4(missingReference, "missing-reference"), /assignmentId/);
 	});
 
 	for (const field of ["clio", "environment", "paths"] as const) {
