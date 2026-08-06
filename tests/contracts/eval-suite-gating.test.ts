@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { evaluateGate } from "../../src/domains/eval/compare/gates.js";
+import type { EvalArtifactResultV4, EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 import type { EvalMetricAssertion, EvalSuiteTaskV2, LoadedEvalSuiteV2 } from "../../src/domains/eval/schema/suite.js";
 import { runEvalSuiteV2 } from "../../src/domains/eval/suites/run.js";
 
@@ -34,6 +36,45 @@ function quietTask(id: string, assertions: EvalMetricAssertion[]): EvalSuiteTask
 	};
 }
 
+function intact(taskId: string, repeatIndex: number): EvalArtifactResultV4 {
+	return {
+		assignmentId: null,
+		terminalReceiptDigest: null,
+		taskId,
+		repeatIndex,
+		target: { id: "mini", model: null, thinking: null },
+		pass: true,
+		failureClass: null,
+		metrics: { "result.pass": true, "receipt.sealed": true, "receipt.integrityValid": true },
+		artifacts: {},
+	};
+}
+
+function brokenMetrics(): EvalArtifactResultV4["metrics"] {
+	return { "result.pass": true, "receipt.sealed": true, "receipt.integrityValid": false };
+}
+
+function artifactWith(results: EvalArtifactResultV4[]): EvalArtifactV4 {
+	const passed = results.filter((result) => result.pass).length;
+	return {
+		version: 4,
+		evalId: "eval-gating",
+		suite: { id: "gating", hash: "0".repeat(64) },
+		clio: { version: "test", commit: null, entry: "dist/cli/index.js" },
+		environment: { platform: "linux-x64", node: process.version },
+		matrix: { target: "mini", model: null, thinking: null },
+		summary: {
+			runs: results.length,
+			passed,
+			failed: results.length - passed,
+			passRate: results.length === 0 ? 0 : passed / results.length,
+			tokens: { measured: false, runs: results.length, measuredRuns: 0 },
+			wallTimeMs: 0,
+		},
+		results,
+	};
+}
+
 describe("contracts/eval suite gating", { concurrency: false }, () => {
 	it("fails a task assertion whose metric this run never produced", async () => {
 		const workspace = mkdtempSync(join(tmpdir(), "clio-eval-gating-"));
@@ -52,6 +93,46 @@ describe("contracts/eval suite gating", { concurrency: false }, () => {
 		} finally {
 			rmSync(workspace, { recursive: true, force: true });
 		}
+	});
+
+	it("gates on a per-run invariant, naming the run that broke it", () => {
+		const thresholds = { fail: [{ metric: "receipt.integrityValid", op: "eq" as const, value: false }] };
+
+		const clean = evaluateGate(artifactWith([intact("solved", 0), intact("unsolved", 1)]), thresholds);
+		strictEqual(clean.pass, true);
+
+		// One run in a two-run matrix sealed a receipt its ledger cannot
+		// authenticate. Whole-artifact aggregation would average it away.
+		const broken = evaluateGate(
+			artifactWith([intact("solved", 0), { ...intact("unsolved", 1), metrics: brokenMetrics() }]),
+			thresholds,
+		);
+		strictEqual(broken.pass, false);
+		strictEqual(broken.failures.length, 1);
+		strictEqual(broken.failures[0]?.taskId, "unsolved");
+		strictEqual(broken.failures[0]?.repeatIndex, 1);
+		strictEqual(broken.failures[0]?.unresolved, false);
+	});
+
+	it("fails the gate closed when a run never measured the invariant at all", () => {
+		const gate = evaluateGate(
+			artifactWith([intact("measured", 0), { ...intact("silent", 1), metrics: { "result.pass": true } }]),
+			{ fail: [{ metric: "receipt.sealed", op: "eq", value: false }] },
+		);
+
+		strictEqual(gate.pass, false);
+		strictEqual(gate.failures.length, 1);
+		strictEqual(gate.failures[0]?.unresolved, true);
+		strictEqual(gate.failures[0]?.taskId, "silent");
+	});
+
+	it("fails the gate closed when the matrix produced no runs to read", () => {
+		const gate = evaluateGate(artifactWith([]), {
+			fail: [{ metric: "receipt.integrityValid", op: "eq", value: false }],
+		});
+
+		strictEqual(gate.pass, false);
+		strictEqual(gate.failures[0]?.unresolved, true);
 	});
 
 	it("passes a task assertion the run actually measured", async () => {
