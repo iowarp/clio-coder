@@ -24,7 +24,7 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 			join(evalDir, "eval-smoke.json"),
 			`${JSON.stringify(
 				{
-					version: 3,
+					version: 4,
 					evalId: "eval-smoke",
 					suite: { id: "smoke", hash: "abc123" },
 					clio: { version: "test", commit: null, entry: "dist/cli/index.js" },
@@ -35,7 +35,7 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 						passed: 1,
 						failed: 0,
 						passRate: 1,
-						tokens: { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 },
+						tokens: { measured: false, runs: 1, measuredRuns: 0 },
 						wallTimeMs: 12,
 					},
 					results: [
@@ -116,7 +116,7 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 			matrix?: { target?: unknown; model?: unknown; thinking?: unknown };
 			results?: Array<{ artifacts?: { verifierStdout?: unknown; verifierStderr?: unknown } }>;
 		};
-		strictEqual(parsed.version, 3);
+		strictEqual(parsed.version, 4);
 		strictEqual(parsed.suite?.id, "v1-task-file");
 		strictEqual(typeof parsed.suite?.hash, "string");
 		strictEqual(typeof parsed.clio?.version, "string");

@@ -46,6 +46,16 @@ export const CANONICAL_METRICS = [
 	// Behavioral checkpoints for the bounded reconnaissance live suite.
 	"dispatch.count",
 	"wiki.staleAcknowledged",
+	// Invariant checks: what Clio promised about its own machinery, read from
+	// the journal the item's run left behind. These are true or false about
+	// Clio and say nothing about whether the model solved the task. A check
+	// the runner could not compute is absent, so a threshold on it fails
+	// closed rather than reading silence as compliance.
+	"receipt.count",
+	"receipt.rootCount",
+	"receipt.sealed",
+	"receipt.integrityValid",
+	"receipt.outcomeMatchesExit",
 ] as const;
 
 export type EvalMetricName = (typeof CANONICAL_METRICS)[number];

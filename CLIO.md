@@ -56,6 +56,16 @@ Stored eval artifacts require complete `clio`, `environment`, and `paths` proven
 
 Eval token accounting is observed, never assumed. `src/domains/eval/metrics/token-stream.ts` folds provider usage out of a runner's live stdout as it arrives, so truncation of the operator-facing artifact cannot erase it. A runner that observed no usage emits `tokens.measured: false` and no counts at all, and reports say how many runs the total covers rather than printing a zero for work they could not see.
 
+Eval artifacts are version 4, and their summary accounting is a discriminated shape rather than a number block. `summary.tokens` carries `measured`, `runs`, and `measuredRuns`, and carries the five counts only when at least one run reported usage. An artifact that observed nothing carries no counts at all, `parseEvalArtifactV4` refuses counts beside `measured: false`, and a `tokens.total` threshold on an unmeasured artifact resolves to null so the gate fails closed instead of reading a zero as thrift. A comparison against an unmeasured side reports an unmeasured delta rather than a signed number.
+
+A benchmark adapter runs Clio as its own child and keeps the event stream in a file, so a parent `clio eval` observes nothing on its stdout. `benchmarks/community/clio_usage.py` is the one fold for that gap: it sums `message_end` usage exactly as the TypeScript fold does, republishes one aggregate `message_end` line on adapter stdout so the eval's accounting is measured, and publishes nothing at all when nothing was observed. Adapter summaries report their counts next to how many attempts or steps those counts cover.
+
+## Headless session continuity
+
+- `clio run --session <id>` appends its turn to an existing session and `--continue` appends to the most recent session for the working directory. The two forms are mutually exclusive, and neither applies to `--agent` dispatch, which runs in a worker with its own transcript.
+- Continuation is a hard requirement, not a hint. A session that cannot be resumed exits 2 before any model call, because an answer written without the history the caller asked for is worse than no answer.
+- The session id is discoverable from the surface that ran the turn: the `session` event under `--json`, and a `clio run: session <id>` line on stderr in text mode. Stdout stays the assistant's answer alone.
+
 ## Process-safe dispatch admission
 
 - `src/domains/dispatch/capacity-lease.ts` is the durable, expiring global and per-node capacity authority. Lease acquisition, retry rebinding, heartbeat, drain state, and reservation transfer are serialized by one cross-process state lock. The lease bound fails admission closed rather than dropping a lease, and lease reclamation needs owner-liveness evidence wherever a process birth token cannot prove death.

@@ -261,7 +261,7 @@ describe("dispatch route quality", { concurrency: false }, () => {
 			quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null }),
 		});
 		const artifact = {
-			version: 3 as const,
+			version: 4 as const,
 			evalId: "eval-1",
 			results: [
 				{ assignmentId: subject.receipt.runId, terminalReceiptDigest: subject.receipt.integrity.digest, pass: true },
@@ -270,7 +270,7 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		const source = { artifact, digest: routeQualityEvalDigest(artifact) };
 		strictEqual(reduceRouteQuality({ subject, receipts: [subject], evalArtifacts: [source] }).label, "pass");
 		const wrong = {
-			version: 3 as const,
+			version: 4 as const,
 			evalId: artifact.evalId,
 			results: [{ assignmentId: subject.receipt.runId, terminalReceiptDigest: "b".repeat(64), pass: true }],
 		};

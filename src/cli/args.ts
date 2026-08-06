@@ -37,6 +37,10 @@ export interface RunCliArgs {
 	maxContextTokens?: number;
 	kvCacheMode?: string;
 	steerChannel?: string;
+	/** Resume this exact session and append the turn to it. */
+	sessionId?: string;
+	/** Resume the most recent session for this workspace. */
+	continueSession: boolean;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
@@ -51,6 +55,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		jsonEvents: "full",
 		required: [],
 		noSkills: false,
+		continueSession: false,
 		skillPaths: [],
 		fileArgs: [],
 		messages: [],
@@ -205,6 +210,17 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			if (value !== null) {
 				parsed.kvCacheMode = value;
 			}
+			continue;
+		}
+		if (arg === "--session") {
+			const value = need(arg);
+			if (value !== null) {
+				parsed.sessionId = value;
+			}
+			continue;
+		}
+		if (arg === "--continue") {
+			parsed.continueSession = true;
 			continue;
 		}
 		if (arg === "--steer-channel") {
