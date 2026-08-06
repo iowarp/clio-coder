@@ -5,6 +5,130 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
+## 0.3.0 - hardening session 8: the loop's cost, three proofs, and the release cut
+
+The gap session 7 reported rather than hid, the proof tasks it deferred, and
+the version bump. Codex ran this session; the launch that session 7's command
+policy refused now works, and it produced the H1 design recommendation.
+
+### A loop's cost was sealed and never read
+
+`clio-soak-loop.yaml` passed with `tokens.measured: false`. That was the
+contract working: `clio fleet run --json` drains its workers' events and
+publishes step receipts plus one summary, so no `message_end` ever crosses the
+runner's stdout and the token fold correctly saw nothing. The suite gated a
+bounded loop's bound while being blind to what the loop cost.
+
+The information was sealed all along, in the `tokenCount` and `costUsd` of
+receipts the suite already reads for `receipt.*`. The question was not
+plumbing, it was governance: a sealed receipt is an observation too, and an
+authenticated one, but merging it into `tokens.*` would make
+`tokens.measured: true` mean two different things depending on which surface
+ran.
+
+`receiptUsage.*` is the answer, and Codex and Claude reached it independently.
+It carries its own name and its own provenance, never merges with `tokens.*`,
+and never enters `summary.tokens`. It is authenticated rather than watched, so
+it reports `measured: false` and no counts whenever the receipt set is
+incomplete or any receipt fails `verifyReceiptIntegrity`: a partial sum
+under-reports a cost while looking exactly like a complete one.
+
+Candidate 2, forwarding worker usage onto fleet stdout so the existing fold
+sees it, was rejected with evidence rather than by preference. The fleet path
+publishes no worker events at all, so it was a wire-contract expansion taking
+on ordering, volume, and compatibility obligations unrelated to accounting,
+against a projection whose whole promise is that content crosses once.
+
+Recorded because it is the thing someone will want to undo: the two families
+must never be reconciled or presented as interchangeable. `receiptUsage` has
+weaker epistemic provenance than the live stream and is not a fallback for it.
+
+### The suite failed for the one reason it exists to never fail for
+
+The first live run failed, and the failure was the suite's, not Clio's. The
+repair worker tripped a loop guard, so the scheduler typed the ending
+`loop_step_failed` after one verification and one repair. Clio kept every
+promise: it detected the spin, killed the worker, sealed an authenticated
+recovery receipt, stopped the plan as `onFailure: stop` declares, and named the
+ending with the reason that distinguishes "a step broke" from "the bound is
+spent". The suite asserted `loop.reasonExhausted`, which is true only for the
+two endings that reach the bound, so a model's worker failure read as Clio
+breaking.
+
+`loop.reasonDeclared` is the promise that holds across all four endings, and it
+catches strictly more than the old assertion did on the endings both can see: a
+loop claiming resolved beside a reason saying it never converged, and a summary
+naming a reason the scheduler does not type. `loop.reasonExhausted` keeps its
+meaning and stays collected. This is not a weakened gate, and a future reader
+should not restore the old assertion: it was a false positive that would fail
+the suite whenever a local model spins.
+
+### Three proofs passed, one item closed, one dropped
+
+- **P1, directory fsync.** The proof was cheaper than expected: `engine/session.ts`
+  already imports `safeResourceWrite` from the module holding the other copy, so
+  the shared owner points along an edge that exists rather than opening one.
+  Bodies are textually identical once the parameter name is normalized. The
+  surviving comment states the rule both copies were half-stating.
+- **P2, POSIX shell quoting.** The proof needed was that three different
+  consumers want the same semantics and always will, and they do for a reason
+  independent of them: all three build a string a POSIX shell parses, where the
+  escaping is fixed by the grammar. Exercised for real rather than by
+  inspection, including a live ssh to localhost through the actual transport
+  path carrying a label containing a single quote. The shared owner documents
+  the shape dependency the copies did not: `fleet-preflight` slices the outer
+  quotes off, so a bare word for safe input would break it silently.
+- **P3, auth storage shapes.** The language service reports two rename
+  locations each, all inside the file. The challenge's proposed
+  `AuthStorageV1Shape` was **not** adopted: it buries the version mid-name
+  against the repository's trailing-suffix convention. `AuthStorageShapeV1` is
+  consistent with `AuthStorageData` beside it. The persisted discriminator is
+  untouched, exercised with V1, version-less V1, and V2 files.
+- **S4, barrel imports: closed, not deferred a third time.** Measured 179
+  cross-domain subpath imports against 28 barrel imports, and all five enforced
+  boundary rules constrain dependency direction rather than import form. Direct
+  subpath imports are the repository's convention. A barrel-only sixth rule
+  would widen many barrels, each a public-surface addition justified by nothing
+  but style. This is a decision; do not reopen it as a deferral.
+- **P4, redundant exports: dropped.** Optional and first to drop by the
+  session's own terms. The ~4,000-row inventory is not evidence and was not
+  used.
+- **P5** produced an architecture proof under `.superpowers/audits/phase2/`
+  rather than a move. The finding that matters: the invariants in `dispatch`
+  cross the seams a responsibility-labelled split would use. Write-boundary
+  attribution and loop unrolling are both properties of a scheduling *wave*,
+  computed by the plan compiler and enforced by the scheduler, so splitting
+  those two puts the halves of one invariant on opposite sides of a boundary.
+  A future split should be argued from the wave contract outward.
+
+### The release cut
+
+`package.json` now reports 0.3.0. Nothing in the source hardcodes a version, so
+the bump is mechanical in code; prose was audited claim by claim instead of
+swept, and "in v0.2.9" statements are history that stayed. The benchmark
+README's pinned tarball filename was the one genuinely wrong number, and it now
+reads the name `npm pack` prints so it cannot rot again.
+
+Auditing the README found a real gap: `clio trace` shipped in 0.2.9 and was
+documented nowhere under `docs/`. It is now in the command reference.
+
+Left deliberately, and recorded so it is not mistaken for an oversight: the
+`docs/html/**` blueprints still say v0.2.9, roughly ninety badges across thirty
+files. They are versioned design documents, and advancing the number without
+re-reviewing what they assert would claim an alignment nobody checked.
+
+### Measured
+
+Full CI green at 2602 + 4 tests, up from session 7's 2592 by the ten new
+fail-closed tests. All four soak suites live and offline against `mini`: clean
+5/5 with 242,930 measured tokens, chaos 1/1, boundary 2/2, loop 1/1 now
+reporting `receiptUsage.totalTokens` beside a correctly-false
+`tokens.measured`. Five-command baseline 5/5. The packed tarball was installed
+into a clean directory and run against `mini`; it ships no benchmark fixtures
+or test scaffolding and carries every runtime asset. `clio doctor` correctly
+reports the state metadata as stale after the bump and `--fix` migrates it,
+verified in an isolated state directory.
+
 ## Unreleased - v0.3.0 hardening session 7: cleanup, consolidation, and the rest of the soak
 
 A pre-release pass over accumulated evidence. Phase 1's six inventories were
