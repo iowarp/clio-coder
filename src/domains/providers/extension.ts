@@ -9,9 +9,10 @@ import type { ConfigContract } from "../config/contract.js";
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
 import { mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
-import type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
+import type { ContextWindowProvenance, ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
 import { resolveProviderKnowledgeBaseRoots } from "./knowledge-base-path.js";
+import { probeCapabilitiesForModel } from "./model-capabilities.js";
 import { loadPluginRuntimes } from "./plugins.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
@@ -63,22 +64,56 @@ function availabilityFor(
 	return { available: true, reason: desc.auth };
 }
 
-function capabilitiesFor(
+export interface MergedCapabilities {
+	capabilities: CapabilityFlags;
+	contextWindowProvenance: ContextWindowProvenance;
+}
+
+function positiveWindow(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * Merge the four capability layers for a target's own default model and record
+ * which of them answered the context window.
+ *
+ * The probe layer is selected by `probeCapabilitiesForModel`, the one exact-id
+ * selector every other consumer already uses. A router that serves several
+ * models publishes a `/v1/models` row per model, and only the row keyed to this
+ * target's wire model may answer for it; a sibling model's window is another
+ * model's fact. Reading that row also means a router whose `/props` reports
+ * `n_ctx: 0` still discovers the window it did publish, instead of silently
+ * falling back to the runtime descriptor's placeholder.
+ */
+export function capabilitiesFor(
 	desc: RuntimeDescriptor,
 	target: TargetDescriptor,
-	probe: ProbeResult | null,
+	probe: ProbeMerge,
 	kb: KnowledgeBase,
-): CapabilityFlags {
+): MergedCapabilities {
 	const kbHit = target.defaultModel ? kb.lookup(target.defaultModel) : null;
-	const base = capabilitiesFromCatalogModel(
-		desc.defaultCapabilities,
-		target.defaultModel ? getCatalogModelForRuntime(desc.id, target.defaultModel) : undefined,
-	);
-	const probeCaps =
-		!probe?.capabilityModelId || !target.defaultModel || probe.capabilityModelId === target.defaultModel
-			? (probe?.discoveredCapabilities ?? null)
-			: null;
-	return mergeCapabilities(base, kbHit?.entry.capabilities ?? null, probeCaps, target.capabilities ?? null);
+	const catalogModel = target.defaultModel ? getCatalogModelForRuntime(desc.id, target.defaultModel) : undefined;
+	const base = capabilitiesFromCatalogModel(desc.defaultCapabilities, catalogModel);
+	const probeCaps = probeCapabilitiesForModel({ target, ...probe }, target.defaultModel);
+	const userOverride = target.capabilities ?? null;
+	const capabilities = mergeCapabilities(base, kbHit?.entry.capabilities ?? null, probeCaps, userOverride);
+	return {
+		capabilities,
+		contextWindowProvenance: contextWindowProvenanceOf(kbHit, catalogModel, probeCaps, userOverride),
+	};
+}
+
+function contextWindowProvenanceOf(
+	kbHit: ReturnType<KnowledgeBase["lookup"]> | null,
+	catalogModel: ReturnType<typeof getCatalogModelForRuntime>,
+	probeCaps: Partial<CapabilityFlags> | null,
+	userOverride: Partial<CapabilityFlags> | null,
+): ContextWindowProvenance {
+	if (positiveWindow(userOverride?.contextWindow) !== undefined) return "configured";
+	if (positiveWindow(probeCaps?.contextWindow) !== undefined) return "discovered";
+	if (positiveWindow(kbHit?.entry.capabilities?.contextWindow) !== undefined) return "catalog";
+	if (positiveWindow(catalogModel?.contextWindow) !== undefined) return "catalog";
+	return "runtime-default";
 }
 
 function uniqueModels(ids: ReadonlyArray<string>): string[] {
@@ -250,8 +285,8 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			return out;
 		}
 		const availability = availabilityFor(desc, target, authStatusFor);
-		const capabilities = capabilitiesFor(desc, target, probe, kb);
 		const merge = mergeProbeResult(desc, target, probe, previous);
+		const { capabilities, contextWindowProvenance } = capabilitiesFor(desc, target, merge, kb);
 		const healthy = probe !== null ? probe.ok : null;
 		const health: TargetHealth =
 			probe === null
@@ -271,6 +306,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			reason,
 			health,
 			capabilities,
+			contextWindowProvenance,
 			probeCapabilities: merge.probeCapabilities,
 			probeModelCapabilities: merge.probeModelCapabilities,
 			probeModelId: merge.probeModelId,

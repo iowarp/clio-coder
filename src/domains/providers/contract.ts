@@ -11,6 +11,13 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
  * reaches into `extension.ts` or the runtime registry directly.
  */
 
+/**
+ * The layer that answered a target's context window, most authoritative first.
+ * `runtime-default` is the absence case: nothing declared a window and the
+ * runtime descriptor's placeholder stands in for one.
+ */
+export type ContextWindowProvenance = "configured" | "discovered" | "catalog" | "runtime-default";
+
 export interface TargetHealth {
 	status: "healthy" | "degraded" | "unknown" | "down";
 	lastCheckAt: string | null;
@@ -31,6 +38,14 @@ export interface TargetStatus {
 	health: TargetHealth;
 	/** Merged: defaults + knowledge base + probe + user override. */
 	capabilities: CapabilityFlags;
+	/**
+	 * Where `capabilities.contextWindow` came from. `runtime-default` means no
+	 * probe, catalog, knowledge base, or user setting answered, so the number is
+	 * the runtime descriptor's placeholder and must be presented as a guess
+	 * rather than a discovered capability. Absent only on statuses built before
+	 * a runtime resolved.
+	 */
+	contextWindowProvenance?: ContextWindowProvenance;
 	/** Probe-only capabilities preserved separately for per-model synthesis in the UI. */
 	probeCapabilities?: Partial<CapabilityFlags> | null;
 	/** Probe-only capabilities keyed by wire model id for selected-model resolution. */
