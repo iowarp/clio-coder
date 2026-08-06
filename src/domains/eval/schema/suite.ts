@@ -78,6 +78,19 @@ export const CANONICAL_METRICS = [
 	"boundary.violationsDetected",
 	"boundary.violationsRolledBack",
 	"boundary.rollbackIncomplete",
+	// Bounded loops. The declared bound is the promise: attempts never exceed it,
+	// every attempt after the first seals its own recovery receipt, and a bound
+	// spent without a pass reports loop_bound_exhausted rather than a false green.
+	// `loop.resolved` is the model's result, measured beside them and never a gate.
+	"loop.count",
+	"loop.attemptsSpent",
+	"loop.repairsSpent",
+	"loop.resolved",
+	"loop.reasonExhausted",
+	"loop.unneededNodes",
+	"loop.skippedNodes",
+	"loop.receiptsMatchRepairs",
+	"receipt.recoveryCount",
 	"stream.messageUpdateCount",
 	"stream.usageDoubleCounted",
 	"stream.segmentUsageMatchesMessages",

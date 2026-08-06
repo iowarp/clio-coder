@@ -1,0 +1,105 @@
+version: 2
+suite:
+  id: clio-soak-loop
+  title: Clio soak — bounded loops
+  visibility: local
+  description: >-
+    A `loop` step declares its bound, and the bound is the promise. This suite
+    gates that promise and nothing about the model.
+
+    Verifications never exceed `maxAttempts`. Every attempt after the first is
+    an execution role of `recovery` and seals its own receipt, so what the loop
+    reported it spent and what the journal shows it sealed have to agree. A loop
+    that resolves leaves its later nodes `unneeded`, which is neither skipped nor
+    failed. A loop that spends the whole bound without a pass reports
+    `loop_bound_exhausted`, which is the correct machinery result and not a
+    failure of this suite; a green it did not earn would be.
+
+    `loop.resolved` is collected and never asserted. Whether the local model
+    repaired the fixture inside three attempts is the model's result, reported
+    beside the invariants rather than folded into them. A weak model that spends
+    every attempt passes this suite.
+  provenance:
+    fixtures: benchmarks/soak/fixtures
+    offline: true
+
+matrix:
+  targets:
+    - id: mini
+      model: KAT-Coder-V2.5-Dev-IQ4_NL
+  repeats: 1
+
+tasks:
+  - id: bounded-loop.fleet
+    tags: [offline, invariant, loop, fleet]
+    workspace:
+      kind: temp-copy
+      path: fixtures/single-file-bug
+      setup:
+        - git init -q -b main .
+        - git -c user.email=soak@clio.local -c user.name=Soak add -A
+        - git -c user.email=soak@clio.local -c user.name=Soak commit -q -m 'fixture baseline'
+    runner:
+      kind: external-command
+      commands:
+        # The fleet exits nonzero when a loop never resolved. That is the model's
+        # result, not Clio's, so the runner reports it as data and the assertions
+        # below decide whether the machinery kept its promises.
+        - >-
+          node "$CLIO_ENTRY" fleet run bounded-repair --json; true
+      timeoutMs: 1500000
+    verify:
+      measure:
+        - node test/known-answers.test.mjs
+      assertions:
+        - metric: loop.count
+          op: eq
+          value: 1
+        # The declared bound. Exceeding it is the failure this whole fixture is
+        # for; one verification is the floor, because a loop that never ran
+        # measured nothing.
+        - metric: loop.attemptsSpent
+          op: lte
+          value: 3
+        - metric: loop.attemptsSpent
+          op: gte
+          value: 1
+        # A loop unrolls to one fewer repair than verifications.
+        - metric: loop.repairsSpent
+          op: lte
+          value: 2
+        # Resolved, or honestly out of attempts. Never a green it did not earn.
+        - metric: loop.reasonExhausted
+          op: eq
+          value: true
+        # Each repair is attempt n, is recovery, and seals its own receipt.
+        - metric: loop.receiptsMatchRepairs
+          op: eq
+          value: true
+        # A node a resolved loop made unnecessary is `unneeded`. Reporting it as
+        # skipped or failed would say something broke when the loop answered.
+        - metric: loop.skippedNodes
+          op: eq
+          value: 0
+        - metric: receipt.integrityValid
+          op: eq
+          value: true
+    metrics:
+      collect:
+        - loop.count
+        - loop.attemptsSpent
+        - loop.repairsSpent
+        - loop.resolved
+        - loop.reasonExhausted
+        - loop.unneededNodes
+        - loop.skippedNodes
+        - loop.receiptsMatchRepairs
+        - receipt.count
+        - receipt.recoveryCount
+        - receipt.sealed
+        - receipt.integrityValid
+        - task.solved
+        - patch.filesChanged
+        - patch.testFilesModified
+        - tokens.measured
+    timeoutMs: 1800000

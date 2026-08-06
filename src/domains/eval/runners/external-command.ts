@@ -8,6 +8,13 @@ import {
 	parseChaosMarker,
 } from "../metrics/chaos-stream.js";
 import {
+	addFleetLoopObservations,
+	createFleetLoopFold,
+	EMPTY_FLEET_LOOP_OBSERVATION,
+	type EvalFleetLoopObservation,
+	fleetLoopMetricEntries,
+} from "../metrics/fleet-loop-stream.js";
+import {
 	addStreamInvariants,
 	createStreamInvariantFold,
 	EMPTY_STREAM_INVARIANTS,
@@ -47,6 +54,7 @@ export interface ShellCommandResult {
 	streamInvariants: EvalStreamInvariants;
 	/** Strict SIGINT harness marker folded live from stdout. */
 	chaos: EvalChaosObservation;
+	fleetLoops: EvalFleetLoopObservation;
 	stderr: string;
 	wallTimeMs: number;
 	timedOut: boolean;
@@ -76,6 +84,7 @@ export async function runExternalCommandRunner(
 	let usage = UNMEASURED_TOKEN_USAGE;
 	let streamInvariants = EMPTY_STREAM_INVARIANTS;
 	let chaos = EMPTY_CHAOS_OBSERVATION;
+	let fleetLoops = EMPTY_FLEET_LOOP_OBSERVATION;
 	for (const command of commands) {
 		const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs, env);
 		stdout = appendLimited(stdout, result.stdout);
@@ -84,6 +93,7 @@ export async function runExternalCommandRunner(
 		usage = addTokenStreamUsage(usage, result.usage);
 		streamInvariants = addStreamInvariants(streamInvariants, result.streamInvariants);
 		chaos = addChaosObservations(chaos, result.chaos);
+		fleetLoops = addFleetLoopObservations(fleetLoops, result.fleetLoops);
 		if (result.exitCode !== 0) {
 			return {
 				assignmentId: null,
@@ -97,6 +107,7 @@ export async function runExternalCommandRunner(
 					...tokenMetricEntries(usage),
 					...streamInvariantMetrics(streamInvariants),
 					...chaosMetricEntries(chaos),
+					...fleetLoopMetricEntries(fleetLoops),
 					"verifier.exitCode": result.exitCode,
 				},
 				artifacts: chaosArtifacts(chaos),
@@ -115,6 +126,7 @@ export async function runExternalCommandRunner(
 			...tokenMetricEntries(usage),
 			...streamInvariantMetrics(streamInvariants),
 			...chaosMetricEntries(chaos),
+			...fleetLoopMetricEntries(fleetLoops),
 			"verifier.exitCode": 0,
 		},
 		artifacts: chaosArtifacts(chaos),
@@ -135,6 +147,7 @@ export function runShellCommand(
 		const usageFold = createTokenUsageFold();
 		const streamFold = createStreamInvariantFold();
 		const chaosFold = createChaosFold();
+		const fleetLoopFold = createFleetLoopFold();
 		let timedOut = false;
 		let settled = false;
 		const child = spawn(command, {
@@ -153,6 +166,7 @@ export function runShellCommand(
 			usageFold.push(chunk);
 			streamFold.push(chunk);
 			chaosFold.push(chunk);
+			fleetLoopFold.push(chunk);
 		});
 		child.stderr.on("data", (chunk: string) => {
 			stderr = appendLimited(stderr, chunk);
@@ -174,6 +188,7 @@ export function runShellCommand(
 				usage: usageFold.usage(),
 				streamInvariants: streamFold.invariants(),
 				chaos: chaosFold.observation(),
+				fleetLoops: fleetLoopFold.observation(),
 				stderr,
 				wallTimeMs: Math.max(0, Date.now() - started),
 				timedOut,

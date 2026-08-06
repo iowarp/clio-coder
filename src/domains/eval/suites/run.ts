@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { resolveMetricAssertion } from "../compare/thresholds.js";
 import { collectContextMetrics } from "../metrics/context.js";
+import { fleetLoopReceiptAgreement } from "../metrics/fleet-loop-stream.js";
 import {
 	processInvariantMetrics,
 	readRunJournal,
@@ -125,16 +126,20 @@ async function runMatrixItem(
 		});
 		const patch = collectPatchMetrics(workspace.dir);
 		const receiptExitCode = receiptProcessExitCode(runner);
+		// Read after the runner returned and before the journal is removed: what
+		// Clio sealed for this item, judged against its own ledger, and whether
+		// the workers it attested are still running.
+		const journalMetrics = invariantMetrics(stateDir, receiptExitCode);
 		const metrics: Record<string, number | string | boolean | null> = {
 			...zeroToolCallMetrics(),
 			...collectContextMetrics(workspace.dir),
 			// A runner may have exact measurements from command output. Those win
 			// over the generic post-run artifact collector.
 			...runner.metrics,
-			// Read after the runner returned and before the journal is removed:
-			// what Clio sealed for this item, judged against its own ledger, and
-			// whether the workers it attested are still running.
-			...invariantMetrics(stateDir, receiptExitCode),
+			...journalMetrics,
+			// The one reading that needs both sides: what the loop reported it
+			// spent, and what the journal shows it sealed.
+			...fleetLoopReceiptAgreement(runner.metrics as Record<string, number | boolean>, journalMetrics),
 			"patch.bytes": patch.bytes,
 			"patch.filesChanged": patch.filesChanged,
 			"patch.testFilesModified": patch.testFilesModified,
