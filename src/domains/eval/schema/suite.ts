@@ -6,6 +6,10 @@ export const CANONICAL_METRICS = [
 	"tokens.total",
 	"tokens.cacheRead",
 	"tokens.cacheWrite",
+	// False when the runner observed no provider usage at all. The counts above
+	// are absent in that case rather than zero, so a gate on cost can require
+	// measurement instead of reading silence as free.
+	"tokens.measured",
 	"latency.wallMs",
 	"latency.modelMs",
 	"tools.totalCalls",

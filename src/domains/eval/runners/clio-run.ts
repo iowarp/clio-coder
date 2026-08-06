@@ -5,6 +5,7 @@ import {
 	scoutDispatchCountFromJsonl,
 	wikiStaleAcknowledgedFromJsonl,
 } from "../metrics/evidence.js";
+import { tokenMetricEntries } from "../metrics/token-stream.js";
 import type { EvalRunnerV2, EvalSuiteTargetV2 } from "../schema/suite.js";
 import { type EvalRunnerOutput, runShellCommand, shellQuote } from "./external-command.js";
 
@@ -28,7 +29,9 @@ export async function runClioRunRunner(
 		shellQuote(prompt),
 	];
 	const result = await runShellCommand(`${process.execPath} ${args.join(" ")}`, cwd, runner.timeoutMs ?? timeoutMs);
-	const tokens = tokensFromJsonl(result.stdout);
+	// Usage is folded from the live stream, not from the bounded stdout
+	// artifact: a verbose run's `message_end` events do not survive truncation.
+	const tokens = result.usage;
 	const toolMetricStream = result.metricJsonl.length > 0 ? result.metricJsonl : result.stdout;
 	const tools = toolCallMetricsFromJsonl(toolMetricStream);
 	// Evidence metrics resolve only from the sealed receipt the --agent path
@@ -44,11 +47,7 @@ export async function runClioRunRunner(
 		wallTimeMs: result.wallTimeMs,
 		metrics: {
 			"latency.wallMs": result.wallTimeMs,
-			"tokens.input": tokens.input,
-			"tokens.output": tokens.output,
-			"tokens.total": tokens.total,
-			"tokens.cacheRead": tokens.cacheRead,
-			"tokens.cacheWrite": tokens.cacheWrite,
+			...tokenMetricEntries(tokens),
 			"tools.totalCalls": tools.totalCalls,
 			"tools.failed": tools.failed,
 			"tools.blocked": tools.blocked,
@@ -67,31 +66,6 @@ export async function runClioRunRunner(
 			...(receipt === null ? {} : { receipt: JSON.stringify(receipt) }),
 		},
 	};
-}
-
-function tokensFromJsonl(stdout: string): {
-	input: number;
-	output: number;
-	total: number;
-	cacheRead: number;
-	cacheWrite: number;
-} {
-	const totals = { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 };
-	for (const line of stdout.split(/\r?\n/)) {
-		if (line.trim().length === 0) continue;
-		try {
-			const parsed = JSON.parse(line) as Record<string, unknown>;
-			const message = isRecord(parsed.message) ? parsed.message : parsed;
-			const usage = isRecord(message.usage) ? message.usage : undefined;
-			if (usage === undefined) continue;
-			totals.input = Math.max(totals.input, numberField(usage, "inputTokens"));
-			totals.output = Math.max(totals.output, numberField(usage, "outputTokens"));
-			totals.total = Math.max(totals.total, numberField(usage, "totalTokens"));
-			totals.cacheRead = Math.max(totals.cacheRead, numberField(usage, "cacheReadTokens"));
-			totals.cacheWrite = Math.max(totals.cacheWrite, numberField(usage, "cacheWriteTokens"));
-		} catch {}
-	}
-	return totals;
 }
 
 type ToolCallMetrics = {
@@ -156,11 +130,6 @@ function recordToolOutcome(metrics: ToolCallMetrics, outcome: ToolOutcome): void
 function toolOutcome(record: Record<string, unknown>): ToolOutcome | undefined {
 	const outcome = record.outcome;
 	return outcome === "ok" || outcome === "error" || outcome === "blocked" ? outcome : undefined;
-}
-
-function numberField(record: Record<string, unknown>, field: string): number {
-	const value = record[field];
-	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function stringField(record: Record<string, unknown>, field: string): string | undefined {
