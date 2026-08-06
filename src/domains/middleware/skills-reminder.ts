@@ -1,6 +1,6 @@
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
-import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
+import { type MiddlewareEffect, metadataNumber } from "./types.js";
 
 /**
  * First-turn skills reminder. The skill-mastery batteries proved local
@@ -103,11 +103,6 @@ export function isSubstantiveUserTurn(text: string | undefined): boolean {
 	// any non-greeting token, is a real task.
 	if (tokens.length > 4) return true;
 	return tokens.some((token) => !GREETING_WORDS.has(token));
-}
-
-function metadataNumber(input: MiddlewareHookInput, key: string): number | null {
-	const value = input.metadata?.[key];
-	return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 export function createSkillsReminderRegistration(deps: SkillsReminderDeps): MiddlewareHookRegistration {

@@ -1,5 +1,5 @@
 import type { MiddlewareHookRegistration } from "./runtime.js";
-import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
+import { type MiddlewareEffect, metadataNumber } from "./types.js";
 
 /**
  * Task-board reminder for explicitly enumerated multi-step requests. The
@@ -51,11 +51,6 @@ export function countEnumeratedSteps(text: string | undefined): number {
 }
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
-
-function metadataNumber(input: MiddlewareHookInput, key: string): number | null {
-	const value = input.metadata?.[key];
-	return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
 
 export function createTaskBoardReminderRegistration(): MiddlewareHookRegistration {
 	// Same session-tracking shape as the skills reminder: the opening turn of a

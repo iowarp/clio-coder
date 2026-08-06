@@ -102,6 +102,18 @@ export interface MiddlewareHookResult {
 	ruleIds: ReadonlyArray<string>;
 }
 
+/**
+ * Read a finite number out of a hook input's metadata, or null.
+ *
+ * Metadata is an open bag a caller fills in, so a missing key, a string, a
+ * boolean, and a NaN are all the same answer: this hook was not told. Null is
+ * that answer; a zero would be a count the caller never reported.
+ */
+export function metadataNumber(input: MiddlewareHookInput, key: string): number | null {
+	const value = input.metadata?.[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 export function isMiddlewareHook(value: string): value is MiddlewareHook {
 	return (MIDDLEWARE_HOOKS as ReadonlyArray<string>).includes(value);
 }
