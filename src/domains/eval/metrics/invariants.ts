@@ -388,6 +388,97 @@ function isProcessAlive(pid: number): boolean {
 	}
 }
 
+/**
+ * Write-boundary invariants, read from the verdicts an item's Clio sealed under
+ * `write-boundaries/<rootId>/` in its own state directory.
+ *
+ * Enforcement is detect-and-rollback, so the promise is not "nothing was
+ * written outside the allowlist". It is that Clio saw what was written, named
+ * it with the typed reason, put back what git could put back, and left a signed
+ * record of the whole thing against the baseline it measured. A step that
+ * escaped its allowlist and passed anyway is the failure these catch.
+ *
+ * - `boundary.verdictCount`: verdict files this item's Clio wrote.
+ * - `boundary.verdictSealed`: every one of them parsed and carries both a
+ *   digest and the baseline commit it was computed against. False when any file
+ *   is unreadable: a verdict that cannot be read is a record that cannot be
+ *   audited, never an absence.
+ * - `boundary.violationsDetected`: verdicts whose typed reason is
+ *   `writes_boundary_violation`.
+ * - `boundary.violationsRolledBack`: verdicts that put the repository back.
+ * - `boundary.rollbackIncomplete`: verdicts that could not, because a path was
+ *   already dirty when the snapshot was taken. This is the honest failure, and
+ *   counting it is how the honest failure stays distinguishable from a clean
+ *   one.
+ *
+ * The whole group is absent when the item sealed no verdicts at all, because a
+ * run that enforced no boundary answered none of these questions.
+ */
+export function writeBoundaryInvariantMetrics(stateDir: string): Record<string, number | boolean> {
+	const files = findWriteBoundaryVerdicts(join(stateDir, "write-boundaries"));
+	if (files.length === 0) return {};
+
+	let sealed = true;
+	let violationsDetected = 0;
+	let violationsRolledBack = 0;
+	let rollbackIncomplete = 0;
+	for (const file of files) {
+		const verdict = parseJsonFile(file);
+		if (verdict === undefined) {
+			sealed = false;
+			continue;
+		}
+		if (!isNonEmptyString(verdict.digest) || !isNonEmptyString(verdict.baselineHead)) sealed = false;
+		if (verdict.reason === WRITES_BOUNDARY_VIOLATION) violationsDetected += 1;
+		if (verdict.status === "rolled-back") violationsRolledBack += 1;
+		if (verdict.status === "rollback-incomplete") rollbackIncomplete += 1;
+	}
+
+	return {
+		"boundary.verdictCount": files.length,
+		"boundary.verdictSealed": sealed,
+		"boundary.violationsDetected": violationsDetected,
+		"boundary.violationsRolledBack": violationsRolledBack,
+		"boundary.rollbackIncomplete": rollbackIncomplete,
+	};
+}
+
+/** Kept as a literal so the reducer reads the wire value, not an import cycle through dispatch. */
+const WRITES_BOUNDARY_VIOLATION = "writes_boundary_violation";
+
+function findWriteBoundaryVerdicts(root: string): string[] {
+	const files: string[] = [];
+	try {
+		for (const rootDir of readdirSync(root, { withFileTypes: true })) {
+			if (!rootDir.isDirectory()) continue;
+			const dir = join(root, rootDir.name);
+			try {
+				for (const entry of readdirSync(dir, { withFileTypes: true })) {
+					if (entry.isFile() && entry.name.endsWith(".json")) files.push(join(dir, entry.name));
+				}
+			} catch {
+				// A concurrently unreadable bucket contributes no discoverable verdict.
+			}
+		}
+	} catch {
+		return [];
+	}
+	return files;
+}
+
+function parseJsonFile(path: string): Record<string, unknown> | undefined {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+		return isRecord(parsed) ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function isNonEmptyString(value: unknown): boolean {
+	return typeof value === "string" && value.length > 0;
+}
+
 export interface EvalStreamInvariants {
 	/** `message_update` events seen on the wire. A diagnostic, not a promise: the two headless surfaces name increments differently. */
 	messageUpdateCount: number;
