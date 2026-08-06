@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type { RunOutcome, RunReceipt, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
-import { readRunJournal, receiptInvariantMetrics } from "../../src/domains/eval/metrics/invariants.js";
+import {
+	createStreamInvariantFold,
+	readRunJournal,
+	receiptInvariantMetrics,
+	streamInvariantMetrics,
+} from "../../src/domains/eval/metrics/invariants.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 interface SealOptions {
@@ -109,6 +114,27 @@ function receiptPath(root: string, runId: string): string {
 
 function metricsFor(root: string, processExitCode = 0): Record<string, number | boolean> {
 	return receiptInvariantMetrics(readRunJournal(stateDirOf(root)), processExitCode);
+}
+
+function assistantEnd(responseId: string, totalTokens: number): unknown {
+	return {
+		type: "message_end",
+		message: {
+			role: "assistant",
+			responseId,
+			usage: { input: totalTokens, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens },
+		},
+	};
+}
+
+function agentEnd(totalTokens: number): unknown {
+	return { type: "agent_end", messageCount: 1, usage: { totalTokens, measured: true } };
+}
+
+function streamMetrics(events: ReadonlyArray<unknown>): Record<string, number | boolean> {
+	const fold = createStreamInvariantFold();
+	fold.push(`${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+	return streamInvariantMetrics(fold.invariants());
 }
 
 describe("contracts/eval invariant metrics", { concurrency: false }, () => {
@@ -230,6 +256,105 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		} finally {
 			isolated.restore();
 		}
+	});
+
+	it("reads an append-oriented stream as intact", () => {
+		const metrics = streamMetrics([
+			assistantEnd("resp-1", 100),
+			{ type: "text_delta", contentIndex: 0, delta: "x" },
+			assistantEnd("resp-2", 50),
+			agentEnd(150),
+		]);
+
+		strictEqual(metrics["stream.messageUpdateCount"], 0);
+		strictEqual(metrics["stream.cumulativeSnapshots"], 0);
+		strictEqual(metrics["stream.usageDoubleCounted"], false);
+		strictEqual(metrics["stream.segmentUsageMatchesMessages"], true);
+	});
+
+	it("counts an increment that arrives under a worker's event name without calling it a snapshot", () => {
+		// The two headless surfaces name increments differently: the main agent
+		// publishes `text_delta`, a worker publishes a slimmed `message_update`
+		// whose only new field is the delta. Both keep the same promise.
+		const metrics = streamMetrics([
+			{ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "The" } },
+			{ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: " fix" } },
+			assistantEnd("resp-1", 100),
+		]);
+
+		strictEqual(metrics["stream.messageUpdateCount"], 2);
+		strictEqual(metrics["stream.cumulativeSnapshots"], 0);
+	});
+
+	it("fails stream.cumulativeSnapshots when an update republishes the growing message", () => {
+		const metrics = streamMetrics([
+			{ type: "message_update", message: { role: "assistant", content: [{ type: "text", text: "partial" }] } },
+			{
+				type: "message_update",
+				assistantMessageEvent: { type: "text_delta", delta: "e", partial: { role: "assistant", content: [] } },
+			},
+			assistantEnd("resp-1", 100),
+		]);
+
+		strictEqual(metrics["stream.cumulativeSnapshots"], 2);
+	});
+
+	it("fails stream.cumulativeSnapshots when a segment republishes its transcript", () => {
+		// Every message in that transcript already crossed as its own
+		// `message_end`; the summary is what a segment adds.
+		const metrics = streamMetrics([
+			assistantEnd("resp-1", 100),
+			{ type: "agent_end", messages: [{ role: "assistant", content: [] }] },
+		]);
+
+		strictEqual(metrics["stream.cumulativeSnapshots"], 1);
+	});
+
+	it("fails stream.usageDoubleCounted when one provider response is completed twice", () => {
+		const metrics = streamMetrics([assistantEnd("resp-1", 100), assistantEnd("resp-1", 100), agentEnd(100)]);
+
+		strictEqual(metrics["stream.usageDoubleCounted"], true);
+		// The two views disagree because one of them counted the response twice.
+		strictEqual(metrics["stream.segmentUsageMatchesMessages"], false);
+	});
+
+	it("fails stream.segmentUsageMatchesMessages when the two accounts of one run disagree", () => {
+		const metrics = streamMetrics([assistantEnd("resp-1", 100), assistantEnd("resp-2", 50), agentEnd(100)]);
+
+		strictEqual(metrics["stream.usageDoubleCounted"], false);
+		strictEqual(metrics["stream.segmentUsageMatchesMessages"], false);
+	});
+
+	it("sums several agent segments against the messages they span", () => {
+		// A headless turn spans several segments; nothing may key on the last one.
+		const metrics = streamMetrics([
+			assistantEnd("resp-1", 100),
+			agentEnd(100),
+			assistantEnd("resp-2", 40),
+			assistantEnd("resp-3", 60),
+			agentEnd(100),
+		]);
+
+		strictEqual(metrics["stream.segmentUsageMatchesMessages"], true);
+	});
+
+	it("leaves the stream invariants absent when the stream carried nothing to judge", () => {
+		const metrics = streamMetrics([{ type: "turn_start", startedAt: "2026-08-06T00:00:00.000Z" }]);
+
+		strictEqual(metrics["stream.messageUpdateCount"], 0);
+		strictEqual(metrics["stream.cumulativeSnapshots"], 0);
+		strictEqual("stream.usageDoubleCounted" in metrics, false);
+		strictEqual("stream.segmentUsageMatchesMessages" in metrics, false);
+	});
+
+	it("folds a stream split across arbitrary chunk boundaries", () => {
+		const stream = [assistantEnd("resp-1", 100), agentEnd(100)].map((event) => JSON.stringify(event)).join("\n");
+		const fold = createStreamInvariantFold();
+		for (let index = 0; index < stream.length; index += 7) fold.push(stream.slice(index, index + 7));
+
+		const metrics = streamInvariantMetrics(fold.invariants());
+		strictEqual(metrics["stream.segmentUsageMatchesMessages"], true);
+		strictEqual(metrics["stream.usageDoubleCounted"], false);
 	});
 
 	it("ignores files that are not receipts and keeps a stray directory out of the count", async () => {

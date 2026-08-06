@@ -148,6 +148,186 @@ function isRootReceipt(receipt: RunReceipt): boolean {
 	return receipt.lineage === undefined || receipt.lineage.rootRunId === receipt.runId;
 }
 
+export interface EvalStreamInvariants {
+	/** `message_update` events seen on the wire. A diagnostic, not a promise: the two headless surfaces name increments differently. */
+	messageUpdateCount: number;
+	/** Events that republished a cumulative snapshot instead of an increment. */
+	cumulativeSnapshots: number;
+	/** Assistant `message_end` events carrying provider usage. */
+	usageMessages: number;
+	/** Assistant `message_end` events whose provider response id was already reported. */
+	repeatedResponses: number;
+	/** Assistant `message_end` events carrying a response id at all. */
+	identifiedResponses: number;
+	/** Total tokens folded from `message_end`, the per-message view. */
+	messageTokenTotal: number;
+	/** Total tokens summed from `agent_end`, the per-segment view. */
+	segmentTokenTotal: number;
+	/** `agent_end` events that reported measured usage. */
+	measuredSegments: number;
+}
+
+export const EMPTY_STREAM_INVARIANTS: EvalStreamInvariants = {
+	messageUpdateCount: 0,
+	cumulativeSnapshots: 0,
+	usageMessages: 0,
+	repeatedResponses: 0,
+	identifiedResponses: 0,
+	messageTokenTotal: 0,
+	segmentTokenTotal: 0,
+	measuredSegments: 0,
+};
+
+/**
+ * Sum the readings of several child processes in one item. Response ids are
+ * per-run, so a repeat can only be a repeat within one stream; the counts
+ * therefore add without needing to compare ids across processes.
+ */
+export function addStreamInvariants(left: EvalStreamInvariants, right: EvalStreamInvariants): EvalStreamInvariants {
+	return {
+		messageUpdateCount: left.messageUpdateCount + right.messageUpdateCount,
+		cumulativeSnapshots: left.cumulativeSnapshots + right.cumulativeSnapshots,
+		usageMessages: left.usageMessages + right.usageMessages,
+		repeatedResponses: left.repeatedResponses + right.repeatedResponses,
+		identifiedResponses: left.identifiedResponses + right.identifiedResponses,
+		messageTokenTotal: left.messageTokenTotal + right.messageTokenTotal,
+		segmentTokenTotal: left.segmentTokenTotal + right.segmentTokenTotal,
+		measuredSegments: left.measuredSegments + right.measuredSegments,
+	};
+}
+
+export interface EvalStreamInvariantFold {
+	/** Feed a raw stdout chunk; partial trailing lines are held until completed. */
+	push(chunk: string): void;
+	invariants(): EvalStreamInvariants;
+}
+
+/**
+ * Fold the headless `--json` stream's own structural promises as it arrives.
+ *
+ * Folding live rather than reading the stored artifact is what makes these
+ * readings trustworthy: the operator-facing stdout keeps only a bounded head
+ * and tail, and the one regression these catch is a verbose run republishing
+ * content, which is exactly the run whose middle does not survive.
+ */
+export function createStreamInvariantFold(): EvalStreamInvariantFold {
+	const state: EvalStreamInvariants = {
+		messageUpdateCount: 0,
+		cumulativeSnapshots: 0,
+		usageMessages: 0,
+		repeatedResponses: 0,
+		identifiedResponses: 0,
+		messageTokenTotal: 0,
+		segmentTokenTotal: 0,
+		measuredSegments: 0,
+	};
+	const seenResponses = new Set<string>();
+	let pending = "";
+
+	const consume = (line: string): void => {
+		if (line.trim().length === 0) return;
+		let event: unknown;
+		try {
+			event = JSON.parse(line);
+		} catch {
+			return;
+		}
+		if (!isRecord(event)) return;
+		if (event.type === "message_update") {
+			state.messageUpdateCount += 1;
+			// The increment is the only part of an update that is new. A top-level
+			// message or a nested partial is the growing snapshot of a message
+			// whose completed form follows, and republishing it per delta is
+			// quadratic in the length of the answer.
+			const assistantEvent = isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : undefined;
+			if (event.message !== undefined || assistantEvent?.partial !== undefined) state.cumulativeSnapshots += 1;
+			return;
+		}
+		if (event.type === "agent_end") {
+			// A segment's transcript is every message that already crossed as its
+			// own `message_end`. The summary is what a segment adds.
+			if (Array.isArray(event.messages)) state.cumulativeSnapshots += 1;
+			const usage = isRecord(event.usage) ? event.usage : undefined;
+			if (usage === undefined || usage.measured !== true) return;
+			state.measuredSegments += 1;
+			state.segmentTokenTotal += numberField(usage, "totalTokens");
+			return;
+		}
+		if (event.type !== "message_end") return;
+		const message = isRecord(event.message) ? event.message : undefined;
+		if (message === undefined || message.role !== "assistant") return;
+		const usage = isRecord(message.usage) ? message.usage : undefined;
+		if (usage === undefined) return;
+		state.usageMessages += 1;
+		const input = numberField(usage, "input");
+		const output = numberField(usage, "output");
+		const cacheRead = numberField(usage, "cacheRead");
+		const cacheWrite = numberField(usage, "cacheWrite");
+		const totalTokens = numberField(usage, "totalTokens");
+		state.messageTokenTotal += totalTokens > 0 ? totalTokens : input + output + cacheRead + cacheWrite;
+		const responseId = message.responseId;
+		if (typeof responseId !== "string" || responseId.length === 0) return;
+		state.identifiedResponses += 1;
+		if (seenResponses.has(responseId)) state.repeatedResponses += 1;
+		seenResponses.add(responseId);
+	};
+
+	return {
+		push(chunk: string): void {
+			pending += chunk;
+			for (;;) {
+				const newline = pending.indexOf("\n");
+				if (newline === -1) break;
+				consume(pending.slice(0, newline).replace(/\r$/u, ""));
+				pending = pending.slice(newline + 1);
+			}
+		},
+		invariants(): EvalStreamInvariants {
+			if (pending.length > 0) {
+				consume(pending.replace(/\r$/u, ""));
+				pending = "";
+			}
+			return { ...state };
+		},
+	};
+}
+
+/**
+ * Metrics for the wire stream's structural promises.
+ *
+ * - `stream.cumulativeSnapshots`: content crosses the wire once, as an
+ *   increment while it streams and as one completed message when it lands. An
+ *   event that republishes a growing partial message, or a segment that
+ *   republishes the transcript every message of which already crossed, is that
+ *   promise broken. This is the one reading both headless surfaces answer: the
+ *   main agent publishes increments as `text_delta` and a worker publishes them
+ *   as `message_update` deltas, so `stream.messageUpdateCount` beside it is a
+ *   diagnostic count rather than a promise.
+ * - `stream.usageDoubleCounted`: true when one provider response was reported
+ *   as a completed assistant message more than once, which is the shape that
+ *   makes a run's cost read higher than it was. Absent when no message carried
+ *   a response id, because with nothing to key on there is nothing to judge.
+ * - `stream.segmentUsageMatchesMessages`: the per-message view and the
+ *   per-segment view of the same run agree on its token total. Two
+ *   independently computed accounts disagreeing means one of them is wrong
+ *   about what the run cost. Absent when no segment reported measured usage.
+ */
+export function streamInvariantMetrics(stream: EvalStreamInvariants): Record<string, number | boolean> {
+	return {
+		"stream.messageUpdateCount": stream.messageUpdateCount,
+		"stream.cumulativeSnapshots": stream.cumulativeSnapshots,
+		...(stream.identifiedResponses === 0 ? {} : { "stream.usageDoubleCounted": stream.repeatedResponses > 0 }),
+		...(stream.measuredSegments === 0
+			? {}
+			: { "stream.segmentUsageMatchesMessages": stream.segmentTokenTotal === stream.messageTokenTotal }),
+	};
+}
+
+function numberField(record: Record<string, unknown>, field: string): number {
+	const value = record[field];
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function isReceiptShaped(value: unknown): value is RunReceipt {
 	if (!isRecord(value)) return false;
 	return (
