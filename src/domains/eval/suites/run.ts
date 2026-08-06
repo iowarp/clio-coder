@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { resolveMetricAssertion } from "../compare/thresholds.js";
 import { collectContextMetrics } from "../metrics/context.js";
-import { processInvariantMetrics, readRunJournal, receiptInvariantMetrics } from "../metrics/invariants.js";
+import {
+	ledgerInvariantMetrics,
+	processInvariantMetrics,
+	readRunJournal,
+	receiptInvariantMetrics,
+} from "../metrics/invariants.js";
 import { wallTimeMetric } from "../metrics/latency.js";
 import { tokenAccountingFrom } from "../metrics/tokens.js";
 import { zeroToolCallMetrics } from "../metrics/tool-calls.js";
@@ -177,10 +182,14 @@ async function runMatrixItem(
 	}
 }
 
-/** Journal-derived invariants for one finished item, read from one pass over the state directory. */
+/** Journal-derived invariants for one finished item, read from its isolated state directory. */
 function invariantMetrics(stateDir: string, runnerExitCode: number): Record<string, number | boolean> {
 	const journal = readRunJournal(stateDir);
-	return { ...receiptInvariantMetrics(journal, runnerExitCode), ...processInvariantMetrics(journal) };
+	return {
+		...receiptInvariantMetrics(journal, runnerExitCode),
+		...ledgerInvariantMetrics(stateDir),
+		...processInvariantMetrics(journal),
+	};
 }
 
 async function prepareWorkspace(

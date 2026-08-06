@@ -13,9 +13,10 @@ suite:
     The readings stay in three layers. `verify.measure` records whether the
     model solved the task and gates nothing. `thresholds.fail` carries the
     invariants every surface answers. A task's own `verify.assertions` carry the
-    invariants only its surface can answer, because a worker attests processes
-    that the main agent, running in the orchestrator itself, never has. An
-    invariant a run could not measure fails closed in either layer.
+    invariants only its surface can answer: a worker attests processes that the
+    main agent never has, while the main agent persists a session ledger that a
+    dispatched worker currently does not. An invariant a run could not measure
+    fails closed in either layer.
   provenance:
     fixtures: benchmarks/soak/fixtures
     offline: true
@@ -48,11 +49,28 @@ tasks:
     verify:
       measure:
         - node test/known-answers.test.mjs
+      assertions:
+        # The main-agent surface persists a replayable session transcript. The
+        # dispatch worker currently streams its transcript but writes no session,
+        # so these promises belong here rather than in the suite-wide gate.
+        - metric: ledger.formatVersion
+          op: eq
+          value: 3
+        - metric: ledger.toolPairsUnmatched
+          op: eq
+          value: 0
+        - metric: ledger.assistantBetweenCallAndResult
+          op: eq
+          value: 0
     metrics:
       collect:
         - receipt.sealed
         - receipt.integrityValid
         - receipt.outcomeMatchesExit
+        - ledger.formatVersion
+        - ledger.toolPairsUnmatched
+        - ledger.assistantBetweenCallAndResult
+        - ledger.sessionCount
         - task.solved
         - patch.filesChanged
         - patch.testFilesModified

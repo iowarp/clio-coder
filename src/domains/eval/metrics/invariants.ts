@@ -148,6 +148,140 @@ function isRootReceipt(receipt: RunReceipt): boolean {
 	return receipt.lineage === undefined || receipt.lineage.rootRunId === receipt.runId;
 }
 
+interface LedgerTranscriptInvariants {
+	formatVersion: number;
+	toolPairsUnmatched: number;
+	assistantBetweenCallAndResult: number;
+}
+
+/**
+ * Session-ledger invariants for every transcript this eval item wrote beneath
+ * its isolated state directory.
+ *
+ * A present session whose `current.jsonl` cannot be read, or whose first line
+ * is not a readable session header, contributes format version zero. Tool
+ * calls and results are paired by id rather than adjacency because one
+ * assistant response may emit a batch of calls before any result lands.
+ *
+ * The whole group is absent when the item wrote no session at all. That is not
+ * a clean ledger: it is a surface with no transcript to judge.
+ */
+export function ledgerInvariantMetrics(stateDir: string): Record<string, number> {
+	const sessionDirs = findSessionDirs(join(stateDir, "sessions"));
+	if (sessionDirs.length === 0) return {};
+
+	let formatVersion = Number.POSITIVE_INFINITY;
+	let toolPairsUnmatched = 0;
+	let assistantBetweenCallAndResult = 0;
+	for (const sessionDir of sessionDirs) {
+		const transcript = readLedgerTranscript(join(sessionDir, "current.jsonl"));
+		formatVersion = Math.min(formatVersion, transcript.formatVersion);
+		toolPairsUnmatched += transcript.toolPairsUnmatched;
+		assistantBetweenCallAndResult += transcript.assistantBetweenCallAndResult;
+	}
+
+	return {
+		"ledger.formatVersion": formatVersion,
+		"ledger.toolPairsUnmatched": toolPairsUnmatched,
+		"ledger.assistantBetweenCallAndResult": assistantBetweenCallAndResult,
+		"ledger.sessionCount": sessionDirs.length,
+	};
+}
+
+function findSessionDirs(sessionsRoot: string): string[] {
+	try {
+		const dirs: string[] = [];
+		for (const cwdDir of readdirSync(sessionsRoot, { withFileTypes: true })) {
+			if (!cwdDir.isDirectory()) continue;
+			const cwdPath = join(sessionsRoot, cwdDir.name);
+			try {
+				for (const sessionDir of readdirSync(cwdPath, { withFileTypes: true })) {
+					if (sessionDir.isDirectory()) dirs.push(join(cwdPath, sessionDir.name));
+				}
+			} catch {
+				// A concurrently unreadable cwd bucket contributes no discoverable
+				// session. The reducer remains total and judges every session it found.
+			}
+		}
+		return dirs;
+	} catch {
+		return [];
+	}
+}
+
+function readLedgerTranscript(path: string): LedgerTranscriptInvariants {
+	let lines: string[];
+	try {
+		lines = readFileSync(path, "utf8").split(/\r?\n/u);
+	} catch {
+		return { formatVersion: 0, toolPairsUnmatched: 0, assistantBetweenCallAndResult: 0 };
+	}
+
+	const entries = lines.map(parseJsonRecord);
+	const header = entries[0];
+	const formatVersion =
+		header?.type === "session" && Number.isInteger(header.version) && (header.version as number) > 0
+			? (header.version as number)
+			: 0;
+	const pendingCalls = new Map<string, number[]>();
+	let invalidCalls = 0;
+	let orphanResults = 0;
+	let assistantGeneration = 0;
+	let assistantBetweenCallAndResult = 0;
+
+	for (const entry of entries) {
+		if (entry?.kind !== "message") continue;
+		if (entry.role === "assistant") {
+			assistantGeneration += 1;
+			continue;
+		}
+		if (entry.role !== "tool_call" && entry.role !== "tool_result") continue;
+		const payload = isRecord(entry.payload) ? entry.payload : undefined;
+		const toolCallId = payload?.toolCallId;
+		if (entry.role === "tool_call") {
+			if (typeof toolCallId !== "string" || toolCallId.length === 0) {
+				invalidCalls += 1;
+				continue;
+			}
+			const calls = pendingCalls.get(toolCallId) ?? [];
+			calls.push(assistantGeneration);
+			pendingCalls.set(toolCallId, calls);
+			continue;
+		}
+
+		if (typeof toolCallId !== "string" || toolCallId.length === 0) {
+			orphanResults += 1;
+			continue;
+		}
+		const calls = pendingCalls.get(toolCallId);
+		const callGeneration = calls?.shift();
+		if (callGeneration === undefined) {
+			orphanResults += 1;
+			continue;
+		}
+		if (calls?.length === 0) pendingCalls.delete(toolCallId);
+		if (assistantGeneration > callGeneration) assistantBetweenCallAndResult += 1;
+	}
+
+	let danglingCalls = invalidCalls;
+	for (const calls of pendingCalls.values()) danglingCalls += calls.length;
+	return {
+		formatVersion,
+		toolPairsUnmatched: danglingCalls + orphanResults,
+		assistantBetweenCallAndResult,
+	};
+}
+
+function parseJsonRecord(line: string): Record<string, unknown> | undefined {
+	if (line.trim().length === 0) return undefined;
+	try {
+		const parsed: unknown = JSON.parse(line);
+		return isRecord(parsed) ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Worker processes this item's receipts attested, checked for survival after
  * the item finished.

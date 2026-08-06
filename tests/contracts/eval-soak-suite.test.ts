@@ -26,6 +26,8 @@ function fakeClio(entryPath: string, body: string): void {
 			"const stateDir = process.env.CLIO_STATE_DIR;",
 			"if (stateDir === undefined) { process.stderr.write('no state dir\\n'); process.exit(90); }",
 			"mkdirSync(join(stateDir, 'receipts'), { recursive: true });",
+			"mkdirSync(join(stateDir, 'sessions', 'cwd-hash', 'session-1'), { recursive: true });",
+			"writeFileSync(join(stateDir, 'sessions', 'cwd-hash', 'session-1', 'current.jsonl'), JSON.stringify({ type: 'session', version: 3, id: 'session-1', timestamp: '2026-08-06T00:00:00.000Z', cwd: process.cwd() }) + '\\n');",
 			"const runId = 'soakrun00001';",
 			body,
 			"process.stdout.write(JSON.stringify({ type: 'message_end', message: { role: 'assistant', usage: { input: 3, output: 2, totalTokens: 5 } } }) + '\\n');",
@@ -83,6 +85,29 @@ describe("contracts/soak suite", { concurrency: false }, () => {
 			ok((task.workspace.setup ?? []).length > 0, `${task.id} must seed its fixture`);
 		}
 		ok((loaded.suite.thresholds?.fail ?? []).length > 0, "the soak gates on invariants");
+		const mainAgent = loaded.suite.tasks.find((task) => task.id === "single-file-bug.main-agent");
+		const dispatch = loaded.suite.tasks.find((task) => task.id === "single-file-bug.dispatch");
+		const ledgerAssertions = [
+			"ledger.formatVersion",
+			"ledger.toolPairsUnmatched",
+			"ledger.assistantBetweenCallAndResult",
+		];
+		for (const metric of ledgerAssertions) {
+			ok(
+				(mainAgent?.verify.assertions ?? []).some((assertion) => assertion.metric === metric),
+				`${metric} must gate main-agent`,
+			);
+			strictEqual(
+				(dispatch?.verify.assertions ?? []).some((assertion) => assertion.metric === metric),
+				false,
+				`${metric} is absent on dispatch`,
+			);
+			strictEqual(
+				loaded.suite.thresholds?.fail.some((assertion) => assertion.metric === metric),
+				false,
+				`${metric} is not surface-independent`,
+			);
+		}
 	});
 
 	it("fails its own gate when the receipt does not authenticate", async () => {
