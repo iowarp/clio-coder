@@ -12,10 +12,10 @@ import type {
 } from "../../src/domains/dispatch/types.js";
 import {
 	createStreamInvariantFold,
-	ledgerInvariantMetrics,
 	processInvariantMetrics,
 	readRunJournal,
 	receiptInvariantMetrics,
+	sessionInvariantMetrics,
 	streamInvariantMetrics,
 } from "../../src/domains/eval/metrics/invariants.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -175,6 +175,21 @@ function writeSession(root: string, id: string, entries: ReadonlyArray<unknown>,
 	);
 }
 
+function compactionSummary(): unknown {
+	return {
+		kind: "compactionSummary",
+		turnId: "summary-1",
+		parentTurnId: "kept-turn",
+		timestamp: "2026-08-06T12:01:00.000Z",
+		summary: "The earlier turn read planted-fact.txt.",
+		trigger: "force",
+		tokensBefore: 1200,
+		tokensAfter: 240,
+		messagesSummarized: 3,
+		firstKeptTurnId: "kept-turn",
+	};
+}
+
 function assistantEnd(responseId: string, totalTokens: number): unknown {
 	return {
 		type: "message_end",
@@ -247,7 +262,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 				sessionEntry("assistant", { content: [{ type: "text", text: "done" }] }),
 			]);
 
-			const metrics = ledgerInvariantMetrics(stateDirOf(isolated.dir));
+			const metrics = sessionInvariantMetrics(stateDirOf(isolated.dir));
 			strictEqual(metrics["ledger.formatVersion"], 3);
 			strictEqual(metrics["ledger.toolPairsUnmatched"], 0);
 			strictEqual(metrics["ledger.assistantBetweenCallAndResult"], 0);
@@ -269,7 +284,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 				cwd: "/tmp/soak-workspace",
 			});
 
-			const metrics = ledgerInvariantMetrics(stateDirOf(isolated.dir));
+			const metrics = sessionInvariantMetrics(stateDirOf(isolated.dir));
 			strictEqual(metrics["ledger.formatVersion"], 2);
 			// The diagnostic is capable of disagreeing with the one-session shape
 			// expected from each current soak task.
@@ -283,7 +298,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		const isolated = isolateClioEnv("clio-soak-ledger-dangling-");
 		try {
 			writeSession(isolated.dir, "session-1", [sessionEntry("tool_call", { toolCallId: "dangling" })]);
-			strictEqual(ledgerInvariantMetrics(stateDirOf(isolated.dir))["ledger.toolPairsUnmatched"], 1);
+			strictEqual(sessionInvariantMetrics(stateDirOf(isolated.dir))["ledger.toolPairsUnmatched"], 1);
 		} finally {
 			isolated.restore();
 		}
@@ -293,7 +308,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		const isolated = isolateClioEnv("clio-soak-ledger-orphan-result-");
 		try {
 			writeSession(isolated.dir, "session-1", [sessionEntry("tool_result", { toolCallId: "orphan" })]);
-			strictEqual(ledgerInvariantMetrics(stateDirOf(isolated.dir))["ledger.toolPairsUnmatched"], 1);
+			strictEqual(sessionInvariantMetrics(stateDirOf(isolated.dir))["ledger.toolPairsUnmatched"], 1);
 		} finally {
 			isolated.restore();
 		}
@@ -308,7 +323,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 				sessionEntry("tool_result", { toolCallId: "late-result" }),
 			]);
 
-			const metrics = ledgerInvariantMetrics(stateDirOf(isolated.dir));
+			const metrics = sessionInvariantMetrics(stateDirOf(isolated.dir));
 			strictEqual(metrics["ledger.toolPairsUnmatched"], 0);
 			strictEqual(metrics["ledger.assistantBetweenCallAndResult"], 1);
 		} finally {
@@ -327,7 +342,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 				"utf8",
 			);
 
-			strictEqual(ledgerInvariantMetrics(stateDirOf(isolated.dir))["ledger.formatVersion"], 0);
+			strictEqual(sessionInvariantMetrics(stateDirOf(isolated.dir))["ledger.formatVersion"], 0);
 		} finally {
 			isolated.restore();
 		}
@@ -337,7 +352,64 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		const isolated = isolateClioEnv("clio-soak-ledger-absent-");
 		try {
 			mkdirSync(stateDirOf(isolated.dir), { recursive: true });
-			strictEqual(Object.keys(ledgerInvariantMetrics(stateDirOf(isolated.dir))).length, 0);
+			strictEqual(Object.keys(sessionInvariantMetrics(stateDirOf(isolated.dir))).length, 0);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("proves compaction continuity from successful reads of the same path on both sides of the summary", () => {
+		const isolated = isolateClioEnv("clio-soak-continuity-intact-");
+		try {
+			writeSession(isolated.dir, "session-1", [
+				sessionEntry("tool_call", { toolCallId: "read-before", name: "read", args: { path: "planted-fact.txt" } }),
+				sessionEntry("tool_result", { toolCallId: "read-before", toolName: "read", isError: false, result: "fact" }),
+				compactionSummary(),
+				sessionEntry("tool_call", { toolCallId: "read-after", name: "read", args: { path: "planted-fact.txt" } }),
+				sessionEntry("tool_result", { toolCallId: "read-after", toolName: "read", isError: false, result: "fact" }),
+				sessionEntry("assistant", { content: [{ type: "text", text: "done" }] }),
+			]);
+
+			const metrics = sessionInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["continuity.compactionSummaryPresent"], true);
+			strictEqual(metrics["continuity.answeredFromPreCompaction"], true);
+			strictEqual(metrics["continuity.turnsAfterCompaction"], 3);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails continuity promises when the transcript has no compaction summary", () => {
+		const isolated = isolateClioEnv("clio-soak-continuity-no-summary-");
+		try {
+			writeSession(isolated.dir, "session-1", [
+				sessionEntry("tool_call", { toolCallId: "read-before", name: "read", args: { path: "planted-fact.txt" } }),
+				sessionEntry("tool_result", { toolCallId: "read-before", toolName: "read", isError: false, result: "fact" }),
+			]);
+
+			const metrics = sessionInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["continuity.compactionSummaryPresent"], false);
+			strictEqual(metrics["continuity.answeredFromPreCompaction"], false);
+			strictEqual(metrics["continuity.turnsAfterCompaction"], 0);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails continuity.answeredFromPreCompaction when the final turn never rereads the planted path", () => {
+		const isolated = isolateClioEnv("clio-soak-continuity-no-post-read-");
+		try {
+			writeSession(isolated.dir, "session-1", [
+				sessionEntry("tool_call", { toolCallId: "read-before", name: "read", args: { path: "planted-fact.txt" } }),
+				sessionEntry("tool_result", { toolCallId: "read-before", toolName: "read", isError: false, result: "fact" }),
+				compactionSummary(),
+				sessionEntry("assistant", { content: [{ type: "text", text: "did not read" }] }),
+			]);
+
+			const metrics = sessionInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["continuity.compactionSummaryPresent"], true);
+			strictEqual(metrics["continuity.answeredFromPreCompaction"], false);
+			strictEqual(metrics["continuity.turnsAfterCompaction"], 1);
 		} finally {
 			isolated.restore();
 		}

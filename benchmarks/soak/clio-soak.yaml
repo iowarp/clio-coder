@@ -62,6 +62,9 @@ tasks:
         - metric: ledger.assistantBetweenCallAndResult
           op: eq
           value: 0
+        - metric: receipt.rootCount
+          op: eq
+          value: 1
     metrics:
       collect:
         - receipt.sealed
@@ -106,6 +109,9 @@ tasks:
         - metric: process.orphanedChildren
           op: eq
           value: 0
+        - metric: receipt.rootCount
+          op: eq
+          value: 1
     metrics:
       collect:
         - receipt.sealed
@@ -121,6 +127,60 @@ tasks:
         - stream.cumulativeSnapshots
         - stream.segmentUsageMatchesMessages
     timeoutMs: 660000
+
+  - id: compaction-continuity.main-agent
+    tags: [offline, invariant, main-agent, continuity]
+    workspace:
+      kind: temp-copy
+      path: fixtures/compaction-continuity
+      setup:
+        - git init -q -b main .
+        - git -c user.email=soak@clio.local -c user.name=Soak add -A
+        - git -c user.email=soak@clio.local -c user.name=Soak commit -q -m 'fixture baseline'
+    runner:
+      kind: external-command
+      commands:
+        - >-
+          node "$CLIO_ENTRY" run --target mini --json "Use the read tool to read planted-fact.txt. Do not modify any file."
+        - >-
+          node "$CLIO_ENTRY" run --target mini --continue --json "Append one short continuity checkpoint. Do not modify any file."
+        - >-
+          CLIO_FORCE_COMPACT=1 node "$CLIO_ENTRY" run --target mini --continue --json "After compaction, use the read tool to read planted-fact.txt again. Do not modify any file."
+      timeoutMs: 600000
+    verify:
+      measure:
+        - node test/known-answers.test.mjs
+      assertions:
+        - metric: continuity.compactionSummaryPresent
+          op: eq
+          value: true
+        - metric: continuity.answeredFromPreCompaction
+          op: eq
+          value: true
+        - metric: receipt.rootCount
+          op: eq
+          value: 3
+    metrics:
+      collect:
+        - receipt.sealed
+        - receipt.integrityValid
+        - receipt.outcomeMatchesExit
+        - receipt.rootCount
+        - ledger.formatVersion
+        - ledger.toolPairsUnmatched
+        - ledger.assistantBetweenCallAndResult
+        - ledger.sessionCount
+        - continuity.compactionSummaryPresent
+        - continuity.answeredFromPreCompaction
+        - continuity.turnsAfterCompaction
+        - tokens.measured
+        - stream.messageUpdateCount
+        - stream.cumulativeSnapshots
+        - stream.segmentUsageMatchesMessages
+        - task.solved
+        - patch.filesChanged
+        - patch.testFilesModified
+    timeoutMs: 1860000
 
 # The gate. Every entry is a condition under which Clio broke a promise, and a
 # metric a run could not produce fails here too, so a check that never ran can
@@ -139,11 +199,6 @@ thresholds:
     - metric: receipt.outcomeMatchesExit
       op: eq
       value: false
-    # One operator-initiated run per item, so a leaked or duplicated root run
-    # shows up as a count rather than as silence.
-    - metric: receipt.rootCount
-      op: neq
-      value: 1
     # A run that reached a provider reports what it spent. Accounting that
     # observed nothing is unmeasured, and unmeasured is not free.
     - metric: tokens.measured

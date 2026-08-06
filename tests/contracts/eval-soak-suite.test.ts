@@ -108,6 +108,23 @@ describe("contracts/soak suite", { concurrency: false }, () => {
 				`${metric} is not surface-independent`,
 			);
 		}
+		const continuity = loaded.suite.tasks.find((task) => task.id === "compaction-continuity.main-agent");
+		strictEqual(continuity?.runner.kind, "external-command");
+		strictEqual(continuity?.runner.commands?.length, 3);
+		for (const command of continuity?.runner.commands ?? []) ok(command.includes('node "$CLIO_ENTRY" run'));
+		ok(continuity?.runner.commands?.[1]?.includes("--continue"));
+		ok(continuity?.runner.commands?.[2]?.includes("CLIO_FORCE_COMPACT=1"));
+		for (const metric of ["continuity.compactionSummaryPresent", "continuity.answeredFromPreCompaction"]) {
+			ok(
+				(continuity?.verify.assertions ?? []).some((assertion) => assertion.metric === metric),
+				`${metric} must gate only the continuity task`,
+			);
+			strictEqual(
+				loaded.suite.thresholds?.fail.some((assertion) => assertion.metric === metric),
+				false,
+				`${metric} must not become a suite-wide threshold`,
+			);
+		}
 	});
 
 	it("fails its own gate when the receipt does not authenticate", async () => {
