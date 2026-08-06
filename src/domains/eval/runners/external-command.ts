@@ -1,5 +1,12 @@
 import { spawn } from "node:child_process";
 import {
+	addStreamInvariants,
+	createStreamInvariantFold,
+	EMPTY_STREAM_INVARIANTS,
+	type EvalStreamInvariants,
+	streamInvariantMetrics,
+} from "../metrics/invariants.js";
+import {
 	addTokenStreamUsage,
 	createTokenUsageFold,
 	type EvalTokenStreamUsage,
@@ -28,6 +35,8 @@ export interface ShellCommandResult {
 	metricJsonl: string;
 	/** Provider usage folded from the live stream, independent of artifact truncation. */
 	usage: EvalTokenStreamUsage;
+	/** Wire-stream structural invariants folded live, for the same reason. */
+	streamInvariants: EvalStreamInvariants;
 	stderr: string;
 	wallTimeMs: number;
 	timedOut: boolean;
@@ -55,12 +64,14 @@ export async function runExternalCommandRunner(
 	// out of sight. Usage observed on the stream is reported; nothing observed
 	// is reported as unmeasured, never as zero cost.
 	let usage = UNMEASURED_TOKEN_USAGE;
+	let streamInvariants = EMPTY_STREAM_INVARIANTS;
 	for (const command of commands) {
 		const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs, env);
 		stdout = appendLimited(stdout, result.stdout);
 		stderr = appendLimited(stderr, result.stderr);
 		wallTimeMs += result.wallTimeMs;
 		usage = addTokenStreamUsage(usage, result.usage);
+		streamInvariants = addStreamInvariants(streamInvariants, result.streamInvariants);
 		if (result.exitCode !== 0) {
 			return {
 				assignmentId: null,
@@ -72,6 +83,7 @@ export async function runExternalCommandRunner(
 				metrics: {
 					"latency.wallMs": wallTimeMs,
 					...tokenMetricEntries(usage),
+					...streamInvariantMetrics(streamInvariants),
 					"verifier.exitCode": result.exitCode,
 				},
 				artifacts: {},
@@ -85,7 +97,12 @@ export async function runExternalCommandRunner(
 		stdout,
 		stderr,
 		wallTimeMs,
-		metrics: { "latency.wallMs": wallTimeMs, ...tokenMetricEntries(usage), "verifier.exitCode": 0 },
+		metrics: {
+			"latency.wallMs": wallTimeMs,
+			...tokenMetricEntries(usage),
+			...streamInvariantMetrics(streamInvariants),
+			"verifier.exitCode": 0,
+		},
 		artifacts: {},
 	};
 }
@@ -102,6 +119,7 @@ export function runShellCommand(
 		let stderr = "";
 		const metricCapture = createJsonlMetricCapture();
 		const usageFold = createTokenUsageFold();
+		const streamFold = createStreamInvariantFold();
 		let timedOut = false;
 		let settled = false;
 		const child = spawn(command, {
@@ -118,6 +136,7 @@ export function runShellCommand(
 			stdout = appendLimited(stdout, chunk);
 			metricCapture.push(chunk);
 			usageFold.push(chunk);
+			streamFold.push(chunk);
 		});
 		child.stderr.on("data", (chunk: string) => {
 			stderr = appendLimited(stderr, chunk);
@@ -137,6 +156,7 @@ export function runShellCommand(
 				stdout,
 				metricJsonl: metricCapture.finish(),
 				usage: usageFold.usage(),
+				streamInvariants: streamFold.invariants(),
 				stderr,
 				wallTimeMs: Math.max(0, Date.now() - started),
 				timedOut,

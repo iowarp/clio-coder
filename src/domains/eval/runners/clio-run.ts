@@ -5,6 +5,7 @@ import {
 	scoutDispatchCountFromJsonl,
 	wikiStaleAcknowledgedFromJsonl,
 } from "../metrics/evidence.js";
+import { streamInvariantMetrics } from "../metrics/invariants.js";
 import { tokenMetricEntries } from "../metrics/token-stream.js";
 import type { EvalRunnerV2, EvalSuiteTargetV2 } from "../schema/suite.js";
 import { type EvalRunnerOutput, runShellCommand, shellQuote } from "./external-command.js";
@@ -49,6 +50,9 @@ export async function runClioRunRunner(
 		metrics: {
 			"latency.wallMs": result.wallTimeMs,
 			...tokenMetricEntries(tokens),
+			// Folded live for the same reason the usage is: the structural
+			// promise these check is broken by a run whose middle is truncated.
+			...streamInvariantMetrics(result.streamInvariants),
 			"tools.totalCalls": tools.totalCalls,
 			"tools.failed": tools.failed,
 			"tools.blocked": tools.blocked,

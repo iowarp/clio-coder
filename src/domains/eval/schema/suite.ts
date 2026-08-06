@@ -56,6 +56,9 @@ export const CANONICAL_METRICS = [
 	"receipt.sealed",
 	"receipt.integrityValid",
 	"receipt.outcomeMatchesExit",
+	"stream.messageUpdateCount",
+	"stream.usageDoubleCounted",
+	"stream.segmentUsageMatchesMessages",
 	// The task outcome, measured and never gated: whether the model solved the
 	// workload. Reported beside the invariants above so a report can say "the
 	// model failed and Clio behaved" instead of one number for both.

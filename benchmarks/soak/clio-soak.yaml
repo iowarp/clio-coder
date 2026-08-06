@@ -54,6 +54,9 @@ tasks:
         - patch.filesChanged
         - patch.testFilesModified
         - tokens.measured
+        - stream.messageUpdateCount
+        - stream.cumulativeSnapshots
+        - stream.segmentUsageMatchesMessages
     timeoutMs: 660000
 
   - id: single-file-bug.dispatch
@@ -84,6 +87,9 @@ tasks:
         - patch.filesChanged
         - patch.testFilesModified
         - tokens.measured
+        - stream.messageUpdateCount
+        - stream.cumulativeSnapshots
+        - stream.segmentUsageMatchesMessages
     timeoutMs: 660000
 
 # The gate. Every entry is a condition under which Clio broke a promise, and a
@@ -111,5 +117,21 @@ thresholds:
     # A run that reached a provider reports what it spent. Accounting that
     # observed nothing is unmeasured, and unmeasured is not free.
     - metric: tokens.measured
+      op: eq
+      value: false
+    # Content crosses the wire once, as an increment while it streams and as one
+    # completed message when it lands. A republished partial message or a
+    # republished segment transcript is that promise broken, on either surface.
+    - metric: stream.cumulativeSnapshots
+      op: gt
+      value: 0
+    # One provider response is one completed assistant message. Reporting it
+    # twice makes a run read as costlier than it was.
+    - metric: stream.usageDoubleCounted
+      op: eq
+      value: true
+    # The per-message and per-segment accounts of the same run agree. Two
+    # independent views disagreeing means one is wrong about what it cost.
+    - metric: stream.segmentUsageMatchesMessages
       op: eq
       value: false
