@@ -8,7 +8,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { rollingMean } from "./src/window.mjs";
+import { rollingMean } from "../src/window.mjs";
 
 // Six samples, window three: four complete windows.
 assert.deepEqual(rollingMean([1, 2, 3, 4, 5, 6], 3), [2, 3, 4, 5]);

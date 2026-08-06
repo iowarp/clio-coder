@@ -8,6 +8,11 @@ coverage/
 .claude/
 .clio/
 .clio-benchmark/
+# Soak fixtures are seeded repositories, and a fixture's command registry is
+# fixture source: a repo with no commands.yaml fails a code step by contract,
+# so an ignored registry would make the fixture untestable.
+!benchmarks/soak/fixtures/*/.clio/
+!benchmarks/soak/fixtures/*/.clio/**
 .codex
 .codex/
 .antigravitycli
