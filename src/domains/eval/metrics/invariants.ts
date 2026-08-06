@@ -148,15 +148,18 @@ function isRootReceipt(receipt: RunReceipt): boolean {
 	return receipt.lineage === undefined || receipt.lineage.rootRunId === receipt.runId;
 }
 
-interface LedgerTranscriptInvariants {
+interface SessionTranscriptInvariants {
 	formatVersion: number;
 	toolPairsUnmatched: number;
 	assistantBetweenCallAndResult: number;
+	compactionSummaryPresent: boolean;
+	answeredFromPreCompaction: boolean;
+	turnsAfterCompaction: number;
 }
 
 /**
- * Session-ledger invariants for every transcript this eval item wrote beneath
- * its isolated state directory.
+ * Session-ledger and continuity invariants for every transcript this eval item
+ * wrote beneath its isolated state directory.
  *
  * A present session whose `current.jsonl` cannot be read, or whose first line
  * is not a readable session header, contributes format version zero. Tool
@@ -166,18 +169,24 @@ interface LedgerTranscriptInvariants {
  * The whole group is absent when the item wrote no session at all. That is not
  * a clean ledger: it is a surface with no transcript to judge.
  */
-export function ledgerInvariantMetrics(stateDir: string): Record<string, number> {
+export function sessionInvariantMetrics(stateDir: string): Record<string, number | boolean> {
 	const sessionDirs = findSessionDirs(join(stateDir, "sessions"));
 	if (sessionDirs.length === 0) return {};
 
 	let formatVersion = Number.POSITIVE_INFINITY;
 	let toolPairsUnmatched = 0;
 	let assistantBetweenCallAndResult = 0;
+	let compactionSummaryPresent = false;
+	let answeredFromPreCompaction = false;
+	let turnsAfterCompaction = 0;
 	for (const sessionDir of sessionDirs) {
-		const transcript = readLedgerTranscript(join(sessionDir, "current.jsonl"));
+		const transcript = readSessionTranscript(join(sessionDir, "current.jsonl"));
 		formatVersion = Math.min(formatVersion, transcript.formatVersion);
 		toolPairsUnmatched += transcript.toolPairsUnmatched;
 		assistantBetweenCallAndResult += transcript.assistantBetweenCallAndResult;
+		compactionSummaryPresent ||= transcript.compactionSummaryPresent;
+		answeredFromPreCompaction ||= transcript.answeredFromPreCompaction;
+		turnsAfterCompaction += transcript.turnsAfterCompaction;
 	}
 
 	return {
@@ -185,6 +194,9 @@ export function ledgerInvariantMetrics(stateDir: string): Record<string, number>
 		"ledger.toolPairsUnmatched": toolPairsUnmatched,
 		"ledger.assistantBetweenCallAndResult": assistantBetweenCallAndResult,
 		"ledger.sessionCount": sessionDirs.length,
+		"continuity.compactionSummaryPresent": compactionSummaryPresent,
+		"continuity.answeredFromPreCompaction": answeredFromPreCompaction,
+		"continuity.turnsAfterCompaction": turnsAfterCompaction,
 	};
 }
 
@@ -209,12 +221,19 @@ function findSessionDirs(sessionsRoot: string): string[] {
 	}
 }
 
-function readLedgerTranscript(path: string): LedgerTranscriptInvariants {
+function readSessionTranscript(path: string): SessionTranscriptInvariants {
 	let lines: string[];
 	try {
 		lines = readFileSync(path, "utf8").split(/\r?\n/u);
 	} catch {
-		return { formatVersion: 0, toolPairsUnmatched: 0, assistantBetweenCallAndResult: 0 };
+		return {
+			formatVersion: 0,
+			toolPairsUnmatched: 0,
+			assistantBetweenCallAndResult: 0,
+			compactionSummaryPresent: false,
+			answeredFromPreCompaction: false,
+			turnsAfterCompaction: 0,
+		};
 	}
 
 	const entries = lines.map(parseJsonRecord);
@@ -228,8 +247,12 @@ function readLedgerTranscript(path: string): LedgerTranscriptInvariants {
 	let orphanResults = 0;
 	let assistantGeneration = 0;
 	let assistantBetweenCallAndResult = 0;
+	const readCalls = new Map<string, string[]>();
+	const completedReads: Array<{ path: string; entryIndex: number }> = [];
+	let latestCompactionIndex = -1;
 
-	for (const entry of entries) {
+	for (const [entryIndex, entry] of entries.entries()) {
+		if (isCompactionSummary(entry)) latestCompactionIndex = entryIndex;
 		if (entry?.kind !== "message") continue;
 		if (entry.role === "assistant") {
 			assistantGeneration += 1;
@@ -246,6 +269,15 @@ function readLedgerTranscript(path: string): LedgerTranscriptInvariants {
 			const calls = pendingCalls.get(toolCallId) ?? [];
 			calls.push(assistantGeneration);
 			pendingCalls.set(toolCallId, calls);
+			if (payload?.name === "read") {
+				const args = isRecord(payload.args) ? payload.args : undefined;
+				const readPath = args?.path;
+				if (typeof readPath === "string" && readPath.trim().length > 0) {
+					const paths = readCalls.get(toolCallId) ?? [];
+					paths.push(readPath.trim());
+					readCalls.set(toolCallId, paths);
+				}
+			}
 			continue;
 		}
 
@@ -261,15 +293,41 @@ function readLedgerTranscript(path: string): LedgerTranscriptInvariants {
 		}
 		if (calls?.length === 0) pendingCalls.delete(toolCallId);
 		if (assistantGeneration > callGeneration) assistantBetweenCallAndResult += 1;
+		const readPaths = readCalls.get(toolCallId);
+		const readPath = readPaths?.shift();
+		if (readPaths?.length === 0) readCalls.delete(toolCallId);
+		if (readPath !== undefined && payload?.isError !== true) completedReads.push({ path: readPath, entryIndex });
 	}
 
 	let danglingCalls = invalidCalls;
 	for (const calls of pendingCalls.values()) danglingCalls += calls.length;
+	const pathsReadBeforeCompaction = new Set(
+		completedReads.filter((read) => read.entryIndex < latestCompactionIndex).map((read) => read.path),
+	);
+	const answeredFromPreCompaction = completedReads.some(
+		(read) => read.entryIndex > latestCompactionIndex && pathsReadBeforeCompaction.has(read.path),
+	);
 	return {
 		formatVersion,
 		toolPairsUnmatched: danglingCalls + orphanResults,
 		assistantBetweenCallAndResult,
+		compactionSummaryPresent: latestCompactionIndex >= 0,
+		answeredFromPreCompaction: latestCompactionIndex >= 0 && answeredFromPreCompaction,
+		turnsAfterCompaction:
+			latestCompactionIndex < 0
+				? 0
+				: entries.slice(latestCompactionIndex + 1).filter((entry) => entry?.kind === "message").length,
 	};
+}
+
+function isCompactionSummary(entry: Record<string, unknown> | undefined): boolean {
+	return (
+		entry?.kind === "compactionSummary" &&
+		typeof entry.summary === "string" &&
+		typeof entry.tokensBefore === "number" &&
+		Number.isFinite(entry.tokensBefore) &&
+		typeof entry.firstKeptTurnId === "string"
+	);
 }
 
 function parseJsonRecord(line: string): Record<string, unknown> | undefined {

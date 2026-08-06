@@ -221,4 +221,24 @@ describe("contracts/eval suite gating", { concurrency: false }, () => {
 			rmSync(workspace, { recursive: true, force: true });
 		}
 	});
+
+	it("passes the resolved absolute Clio entry to external-command runners", async () => {
+		const workspace = mkdtempSync(join(tmpdir(), "clio-eval-entry-env-"));
+		try {
+			const clioEntry = join(workspace, "resolved-clio-entry.js");
+			const task = quietTask("entry-env", []);
+			task.runner = {
+				kind: "external-command",
+				commands: [`${process.execPath} -e "if (process.env.CLIO_ENTRY !== '${clioEntry}') process.exit(12)"`],
+				args: [],
+			};
+
+			const artifact = await runEvalSuiteV2(loadedSuite(workspace, [task]), { clioEntry });
+
+			strictEqual(artifact.results[0]?.pass, true);
+			strictEqual(artifact.results[0]?.failureClass, null);
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
 });
