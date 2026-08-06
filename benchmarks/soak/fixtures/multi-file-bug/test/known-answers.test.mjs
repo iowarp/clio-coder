@@ -32,6 +32,9 @@ assert.equal(coerceField("1e3"), "1e3", "exponent form is not CSV numeric syntax
 assert.equal(coerceField("Infinity"), "Infinity");
 
 // Both defects together, through the composing module.
-assert.deepEqual(parseCsv('"a""b",42,\nx,0x10, 1 \n'), [['a"b', 42, null], ["x", "0x10", " 1 "]]);
+assert.deepEqual(parseCsv('"a""b",42,\nx,0x10, 1 \n'), [
+	['a"b', 42, null],
+	["x", "0x10", " 1 "],
+]);
 
 process.stdout.write("csv-parse: 11 known answers ok\n");

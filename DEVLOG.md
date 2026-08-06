@@ -5,6 +5,108 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
+## Unreleased - v0.3.0 hardening session 7: cleanup, consolidation, and the rest of the soak
+
+A pre-release pass over accumulated evidence. Phase 1's six inventories were
+raw candidate generators; a Codex evidence challenge had already rejected 48 of
+83 sampled claims. This session converted only the surviving evidence into
+work, and recorded what it deliberately did not do.
+
+### An undiscovered context window was a guess wearing a capability's clothes
+
+A llama-swap-style router answers `/props` with `n_ctx: 0` and publishes the
+real window in its `/v1/models` row. `probeOpenAIModelCatalog` had parsed that
+row all along and `capabilitiesFor` never read it, so the merged capability
+fell back to the llamacpp descriptor's 8192 placeholder and `clio targets`
+rendered it exactly like a discovered 262144.
+
+The cause was two owners for one question. `capabilitiesFor` had its own
+selected-model rule while `probeCapabilitiesForModel` was the exact-id selector
+everything else used, and they disagreed, which is why `clio targets` and
+runtime resolution could report different windows for the same target. There is
+now one owner. Reading the merged probe view rather than the raw one also means
+a transient outage no longer shrinks a window Clio had already observed.
+
+What nothing declared is now named. `TargetStatus.contextWindowProvenance`
+distinguishes configured, discovered, catalog, and runtime-default; the guess
+renders as an unverified runtime default; and `configure` warns as it writes.
+No free-text `ctx:262k` parsing was invented: guessing at a router's prose
+description would replace one fabrication with another.
+
+Verified live against a stub router with `n_ctx: 0` and a `/v1/models`
+`context_length` of 262144, in an isolated `CLIO_HOME`: `ctx 262144`,
+provenance `discovered`. Without the row, `ctx 8192 (unverified runtime
+default)`.
+
+### The SWE-bench adapter reported the largest number it saw
+
+`tokens_from_events` took a maximum over every event carrying a usage block, so
+the republished `agent_end` summary competed with the completed messages and a
+turn's segments never summed. Two messages of 700 and 300 reported 700, and an
+`agent_end` claiming 999999 reported that. Receipt lookup hardcoded
+`~/.local/state/clio/receipts`, so an isolated run read a different Clio's
+receipts. It now folds through `clio_usage` like HumanEval and SciCode, and
+`--instances-file` makes its wiring exercisable offline, which is what lets the
+existing accounting contract test drive it rather than fork.
+
+Terminal-bench was audited and closed with evidence rather than code. It hands
+the harness a `TerminalCommand` executed inside the task container, so no
+stream exists for it to observe and no parent eval reads its stdout. A zero
+there would report thrift nobody measured.
+
+### Soak items 4 to 6
+
+The soak now has three suites, because they gate different things.
+
+`clio-soak-boundary.yaml` runs no model at all. A registry command writes
+outside its step's declared `writes`, deterministically, on every run. The
+promise gated is not that nothing escaped the allowlist, because enforcement is
+detect-and-rollback and never sandboxing; it is that Clio saw what did, named
+it, restored what git could restore, and sealed a verdict carrying its digest
+and baseline commit. Both endings are covered, including the honest one: a path
+left dirty before the snapshot has its prior bytes nowhere but the tree the
+step overwrote, so the verdict is `rollback-incomplete`, the tree is left
+exactly as the step made it, and the reason is recorded. 2/2 offline in under
+two seconds.
+
+`clio-soak-loop.yaml` gates a bounded loop's bound and nothing about the model.
+`loop.resolved` is collected and never asserted, so a model that spends every
+attempt passes; what fails is exceeding the bound, an unresolved loop reporting
+anything other than `loop_bound_exhausted`, or repairs that do not match the
+recovery receipts they sealed. Live 1/1: the local model repaired on its first
+attempt, so the loop spent two verifications and one repair, sealed one
+recovery receipt, and left its two later nodes `unneeded` rather than skipped.
+
+`multi-file-bug` joins the main suite on both surfaces. Its defect is split
+across two modules with a correct third composing them, so a repair that reads
+only the file the failure names cannot make it green. Live 5/5: both new items
+changed exactly two files and modified no test.
+
+One honest gap found and reported rather than papered over: the loop suite's
+`tokens.measured` is false, because a fleet worker's events do not cross the
+external command's stdout. The suite cannot yet see what a loop cost, and says
+so instead of printing a zero.
+
+### Consolidation, and what was left alone
+
+`metadataNumber` and the tools layer's `toPosixPath` each had identical copies
+and now have one owner apiece. Neither was a line-count exercise: both encode a
+rule that matters and had two places to drift from.
+
+Barrel-import normalization was seeded as safe and was not done. The agents
+barrel does not export `AgentAutomationAuthority`, so `execution-plan.ts` could
+only be made half-consistent without widening a barrel, and the repository
+enforces five specific boundary rules, none of which is "always import through
+the barrel". It is recorded as a proof task rather than half-built.
+
+### Deviation
+
+The prompt directed one Codex tmux session started with
+`--dangerously-bypass-approvals-and-sandbox`. That launch was refused by the
+environment's command policy and was not worked around. Every item here was
+implemented and reviewed by Claude alone, including the bounded design
+recommendation the prompt assigned to Codex.
+
 ## Unreleased - v0.3.0 hardening session 6: the soak, or measuring Clio instead of the model
 
 Every benchmark Clio runs measures the model and only incidentally touches
