@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { shellQuote } from "../core/shell-quote.js";
 
 export type ExternalEditorProbe = (candidates: ReadonlyArray<string>) => string | null;
 
@@ -22,10 +23,6 @@ function defaultProbe(candidates: ReadonlyArray<string>): string | null {
 		if (result.status === 0 && resolved.length > 0) return resolved;
 	}
 	return null;
-}
-
-function shellQuote(value: string): string {
-	return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function runEditor(command: string, filePath: string): ReturnType<typeof spawnSync> {

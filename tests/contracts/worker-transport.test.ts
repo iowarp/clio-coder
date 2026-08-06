@@ -4,6 +4,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { shellQuote } from "../../src/core/shell-quote.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
@@ -17,7 +18,6 @@ import {
 	buildSshArgs,
 	createLocalWorkerTransport,
 	createSshWorkerTransport,
-	shellQuote,
 } from "../../src/domains/dispatch/transport.js";
 import type { RunNodeIdentity } from "../../src/domains/dispatch/types.js";
 import {

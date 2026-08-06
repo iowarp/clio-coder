@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { shellQuote } from "../../../core/shell-quote.js";
 import {
 	addChaosObservations,
 	chaosMetricEntries,
@@ -202,10 +203,6 @@ export function runShellCommand(
 			finish(typeof code === "number" ? code : timedOut ? 124 : 1);
 		});
 	});
-}
-
-export function shellQuote(value: string): string {
-	return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 /** Bounded head+tail capture: terminal JSON/receipts must survive verbose runs. */

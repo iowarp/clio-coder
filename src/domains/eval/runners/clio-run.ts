@@ -1,3 +1,4 @@
+import { shellQuote } from "../../../core/shell-quote.js";
 import {
 	dispatchCountFromJsonl,
 	evidenceMetricsFromReceipt,
@@ -8,7 +9,7 @@ import {
 import { streamInvariantMetrics } from "../metrics/invariants.js";
 import { tokenMetricEntries } from "../metrics/token-stream.js";
 import type { EvalRunnerV2, EvalSuiteTargetV2 } from "../schema/suite.js";
-import { type EvalRunnerOutput, runShellCommand, shellQuote } from "./external-command.js";
+import { type EvalRunnerOutput, runShellCommand } from "./external-command.js";
 
 export async function runClioRunRunner(
 	runner: EvalRunnerV2,
