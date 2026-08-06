@@ -60,6 +60,22 @@ Eval artifacts are version 4, and their summary accounting is a discriminated sh
 
 A benchmark adapter runs Clio as its own child and keeps the event stream in a file, so a parent `clio eval` observes nothing on its stdout. `benchmarks/community/clio_usage.py` is the one fold for that gap: it sums `message_end` usage exactly as the TypeScript fold does, republishes one aggregate `message_end` line on adapter stdout so the eval's accounting is measured, and publishes nothing at all when nothing was observed. Adapter summaries report their counts next to how many attempts or steps those counts cover.
 
+Every eval item runs against a Clio journal it owns. Each matrix item spawns its runner with its own `CLIO_STATE_DIR`, so a sibling process's receipts and yesterday's sessions cannot enter the reading and the item leaves nothing behind in the operator's state.
+
+An eval item separates three readings and never merges them. `workspace.setup` seeds the prepared workspace before the runner starts, and a setup that fails fails the item as `setup_failed`, because a fixture that never came up measured nothing. `verify.measure` records the task outcome as `task.exitCode` and `task.solved` and never fails the item, which is what keeps "the model did not solve it" from being reported as "Clio broke". `verify.commands` and `verify.assertions` are the gate for one item, and `thresholds.fail` is the gate for the suite.
+
+A suite's declared `thresholds.fail` gates the run that produced the artifact, not only a later `eval gate` invocation. Whole-artifact metrics are read once; every other metric is read from every run, so one run that trips the condition fails the gate and so does one run the metric could not be read from, and the failure names the run. An assertion whose metric was never measured fails closed in both layers: a check that silently passes because it never ran reports compliance it never observed.
+
+## The soak
+
+`benchmarks/soak/clio-soak.yaml` is the one suite whose subject is Clio rather than the model. A weak model that never repairs the fixture passes, because the machinery behaved; a strong model that repairs it fails the moment Clio breaks a promise about itself. It runs offline against a local target, because a gate on Clio's own invariants that needs a cloud key is not a gate.
+
+- `src/domains/eval/metrics/invariants.ts` is the one reducer for those promises. Every reader is total; a metric it could not compute is absent rather than false, because a threshold on an absent metric fails closed while a fabricated value is indistinguishable from a check that passed.
+- Receipt invariants are read from the item's own journal: whether Clio sealed at all, whether every seal authenticates against its own ledger envelope through `verifyReceiptIntegrity`, and whether any receipt claims an outcome its exit code or its process contradicts. A receipt with no envelope is unauthenticated, which is a failure and not an absence.
+- Stream invariants are folded live off the runner's stdout, for the same reason the token accounting is. `stream.cumulativeSnapshots` is the promise both headless surfaces make; `stream.messageUpdateCount` beside it is a diagnostic, because the two surfaces name streaming increments differently. `stream.segmentUsageMatchesMessages` checks the per-message and per-segment accounts of one run against each other.
+- `process.orphanedChildren` reads the pid and process-group id off a receipt's attestation rather than walking a process tree. It is absent on the main-agent surface, which attests no worker, so it rides the dispatch task's own assertions rather than the suite-wide gate: an invariant only one surface can answer belongs to that surface.
+- Fixtures under `benchmarks/soak/fixtures/` are seeded repositories with a known-answer defect, a test that runs offline in milliseconds, and a fleet command registry. A fixture's test lives under `test/` so a repair that edits the test instead of the defect shows up as `patch.testFilesModified`.
+
 ## Headless session continuity
 
 - `clio run --session <id>` appends its turn to an existing session and `--continue` appends to the most recent session for the working directory. The two forms are mutually exclusive, and neither applies to `--agent` dispatch, which runs in a worker with its own transcript.
@@ -142,8 +158,14 @@ A benchmark adapter runs Clio as its own child and keeps the event stream in a f
 
 ## Headless runs
 
-- `src/cli/modes/json-stream.ts` is the one projection from chat-loop events to
-  the `--json` wire stream, and the stream is append-oriented: every piece of
+- `src/cli/modes/json-stream.ts` owns both `--json` wire projections: the
+  main-agent stream from chat-loop events, and the dispatch stream from the
+  worker events `clio run --agent` forwards. They name streaming increments
+  differently, a worker publishing slimmed `message_update` deltas where the
+  chat loop publishes `text_delta`, and they make the same promise: content
+  crosses once, and neither `agent_end` republishes the segment transcript
+  whose every message already crossed as its own `message_end`.
+- The main-agent stream is append-oriented: every piece of
   content crosses once, as an increment while it streams and as one completed
   message when it lands. `message_update` is dropped because its increments are
   already published as `text_delta` / `thinking_delta` and its message is the
