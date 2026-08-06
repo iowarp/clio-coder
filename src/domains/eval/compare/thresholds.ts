@@ -12,12 +12,38 @@ export function loadThresholds(path: string): EvalSuiteThresholdsV2 {
 	throw new Error(`invalid thresholds file: ${path}`);
 }
 
+export interface EvalAssertionResolution {
+	actual: number | string | boolean | null;
+	/** True when neither the metric map nor the artifact carries a value for this metric. */
+	unresolved: boolean;
+	/** True when the comparison holds against the resolved value. */
+	holds: boolean;
+}
+
+/**
+ * Resolve one assertion against a metric map, keeping "the metric was missing"
+ * distinct from "the comparison did not hold". Both readings fail closed, but
+ * they fail for different reasons and a report that conflates them tells an
+ * operator nothing about whether the check ran.
+ */
+export function resolveMetricAssertion(
+	assertion: EvalMetricAssertion,
+	metrics: Readonly<Record<string, unknown>>,
+	artifact?: EvalArtifactV4,
+): EvalAssertionResolution {
+	const actual = metricValue(assertion.metric, metrics, artifact);
+	return { actual, unresolved: actual === null, holds: comparisonHolds(assertion, actual) };
+}
+
 export function evaluateMetricAssertion(
 	assertion: EvalMetricAssertion,
 	metrics: Readonly<Record<string, unknown>>,
 	artifact?: EvalArtifactV4,
 ): boolean {
-	const actual = metricValue(assertion.metric, metrics, artifact);
+	return comparisonHolds(assertion, metricValue(assertion.metric, metrics, artifact));
+}
+
+function comparisonHolds(assertion: EvalMetricAssertion, actual: number | string | boolean | null): boolean {
 	switch (assertion.op) {
 		case "lt":
 			return typeof actual === "number" && typeof assertion.value === "number" && actual < assertion.value;
