@@ -45,13 +45,22 @@ export function safeResourceBackupPath(targetPath: string, suffix = ".bak"): str
 	return `${targetPath}${suffix}`;
 }
 
-function fsyncDirectory(dir: string): void {
+/**
+ * Flush a directory entry so a completed rename survives a crash.
+ *
+ * Best effort by design: directory fsync is not supported on every filesystem
+ * or platform, and a rejection there is not a failed write. The temp-file
+ * fsync plus rename still preserves the property that matters, which is that
+ * no reader ever sees a torn file. Swallowing the error is what keeps an
+ * unsupported filesystem from failing a write that in fact landed.
+ */
+export function fsyncDirectory(dir: string): void {
 	let fd: number | null = null;
 	try {
 		fd = openSync(dir, "r");
 		fsyncSync(fd);
 	} catch {
-		// Directory fsync is not supported on every filesystem or platform.
+		// Unsupported here, and not evidence the write failed. See above.
 	} finally {
 		if (fd !== null) closeSync(fd);
 	}
