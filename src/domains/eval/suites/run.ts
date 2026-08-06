@@ -1,14 +1,17 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { evaluateMetricAssertion } from "../compare/thresholds.js";
 import { collectContextMetrics } from "../metrics/context.js";
 import { wallTimeMetric } from "../metrics/latency.js";
-import { addTokenMetrics, tokenMetricsFrom, zeroTokenMetrics } from "../metrics/tokens.js";
+import { tokenAccountingFrom } from "../metrics/tokens.js";
 import { zeroToolCallMetrics } from "../metrics/tool-calls.js";
 import { evalClioProvenance, evalEnvironmentProvenance } from "../provenance.js";
 import { runClioRunRunner } from "../runners/clio-run.js";
 import { runContextIndexRunner } from "../runners/context-index.js";
 import { runContextInitRunner } from "../runners/context-init.js";
 import { type EvalRunnerOutput, runExternalCommandRunner } from "../runners/external-command.js";
-import type { EvalArtifactResultV3, EvalArtifactV3 } from "../schema/artifact.js";
+import type { EvalArtifactResultV4, EvalArtifactV4 } from "../schema/artifact.js";
 import type { EvalMetricAssertion, EvalSuiteTargetV2, LoadedEvalSuiteV2 } from "../schema/suite.js";
 import { createEvalId } from "../store.js";
 import { runCommandVerifiers } from "../verifiers/command.js";
@@ -28,11 +31,11 @@ export interface RunEvalSuiteV2Options {
 export async function runEvalSuiteV2(
 	loaded: LoadedEvalSuiteV2,
 	options: RunEvalSuiteV2Options,
-): Promise<EvalArtifactV3> {
+): Promise<EvalArtifactV4> {
 	const now = options.now ?? (() => new Date());
 	const started = now();
 	const evalId = createEvalId(started, loaded.hash);
-	const results: EvalArtifactResultV3[] = [];
+	const results: EvalArtifactResultV4[] = [];
 	const maxCostUsd = loaded.suite.matrix.maxCostUsd;
 	let spentUsd = 0;
 	for (const item of expandEvalMatrix(loaded.suite)) {
@@ -51,7 +54,7 @@ export async function runEvalSuiteV2(
 }
 
 /** Known receipt cost of one finished matrix item; unpriced runs count zero. */
-export function resultCostUsd(result: Pick<EvalArtifactResultV3, "metrics">): number {
+export function resultCostUsd(result: Pick<EvalArtifactResultV4, "metrics">): number {
 	const value = result.metrics["cost.usd"];
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
@@ -62,7 +65,7 @@ function budgetExhaustedResult(
 	repeatIndex: number,
 	spentUsd: number,
 	maxCostUsd: number,
-): EvalArtifactResultV3 {
+): EvalArtifactResultV4 {
 	return {
 		assignmentId: null,
 		terminalReceiptDigest: null,
@@ -89,11 +92,16 @@ async function runMatrixItem(
 	target: EvalSuiteTargetV2,
 	repeatIndex: number,
 	clioEntry: string,
-): Promise<EvalArtifactResultV3> {
+): Promise<EvalArtifactResultV4> {
 	let workspace: PreparedEvalWorkspace | null = null;
+	// One matrix item, one Clio journal. An item measures Clio, and a shared
+	// state directory would mix sibling processes' runs and yesterday's sessions
+	// into the reading; pinning it here also means an item leaves nothing behind
+	// in the operator's own state.
+	const stateDir = await mkdtemp(resolve(tmpdir(), "clio-eval-state-"));
 	try {
 		workspace = await prepareWorkspace(loaded.baseDir, task);
-		const runner = await runTaskRunner(task, target, workspace.dir, clioEntry);
+		const runner = await runTaskRunner(task, target, workspace.dir, clioEntry, { CLIO_STATE_DIR: stateDir });
 		const patch = collectPatchMetrics(workspace.dir);
 		const metrics: Record<string, number | string | boolean | null> = {
 			...zeroToolCallMetrics(),
@@ -147,6 +155,7 @@ async function runMatrixItem(
 		};
 	} finally {
 		await workspace?.cleanup();
+		await rm(stateDir, { recursive: true, force: true });
 	}
 }
 
@@ -164,12 +173,13 @@ async function runTaskRunner(
 	target: EvalSuiteTargetV2,
 	cwd: string,
 	clioEntry: string,
+	env: NodeJS.ProcessEnv,
 ): Promise<EvalRunnerOutput> {
-	if (task.runner.kind === "external-command") return runExternalCommandRunner(task.runner, cwd, task.timeoutMs);
-	if (task.runner.kind === "context-index") return runContextIndexRunner(cwd, clioEntry, task.timeoutMs, target);
+	if (task.runner.kind === "external-command") return runExternalCommandRunner(task.runner, cwd, task.timeoutMs, env);
+	if (task.runner.kind === "context-index") return runContextIndexRunner(cwd, clioEntry, task.timeoutMs, target, env);
 	if (task.runner.kind === "context-init")
-		return runContextInitRunner(task.runner, cwd, clioEntry, task.timeoutMs, target);
-	return runClioRunRunner(task.runner, cwd, clioEntry, task.timeoutMs, target);
+		return runContextInitRunner(task.runner, cwd, clioEntry, task.timeoutMs, target, env);
+	return runClioRunRunner(task.runner, cwd, clioEntry, task.timeoutMs, target, env);
 }
 
 async function runVerifiers(
@@ -215,16 +225,12 @@ async function runVerifiers(
 function buildArtifact(
 	loaded: LoadedEvalSuiteV2,
 	evalId: string,
-	results: EvalArtifactResultV3[],
+	results: EvalArtifactResultV4[],
 	clioEntry: string,
-): EvalArtifactV3 {
+): EvalArtifactV4 {
 	const passed = results.filter((result) => result.pass).length;
-	const tokenTotals = results.reduce(
-		(total, result) => addTokenMetrics(total, tokenMetricsFrom(result.metrics)),
-		zeroTokenMetrics(),
-	);
 	return {
-		version: 3,
+		version: 4,
 		evalId,
 		suite: { id: loaded.suite.suite.id, hash: loaded.hash },
 		clio: evalClioProvenance({ entry: clioEntry }),
@@ -235,7 +241,7 @@ function buildArtifact(
 			passed,
 			failed: results.length - passed,
 			passRate: results.length === 0 ? 0 : passed / results.length,
-			tokens: tokenTotals,
+			tokens: tokenAccountingFrom(results),
 			wallTimeMs: results.reduce((sum, result) => sum + wallTimeMetric(result.metrics), 0),
 		},
 		results,

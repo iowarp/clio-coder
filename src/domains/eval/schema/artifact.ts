@@ -1,6 +1,6 @@
 import type { EvalClioProvenance, EvalEnvironmentProvenance } from "../types.js";
 
-export interface EvalTokenMetricsV3 {
+export interface EvalTokenMetricsV4 {
 	input: number;
 	output: number;
 	total: number;
@@ -8,12 +8,22 @@ export interface EvalTokenMetricsV3 {
 	cacheWrite: number;
 }
 
-export interface EvalArtifactSummaryV3 {
+/**
+ * Whole-artifact token accounting. The counts exist only when at least one run
+ * reported provider usage, because a run whose Clio work happened out of the
+ * harness's sight has no count and a numeric zero would claim it cost nothing.
+ * `measuredRuns` of `runs` is the coverage the counts are true for.
+ */
+export type EvalTokenAccountingV4 =
+	| { measured: false; runs: number; measuredRuns: 0 }
+	| ({ measured: true; runs: number; measuredRuns: number } & EvalTokenMetricsV4);
+
+export interface EvalArtifactSummaryV4 {
 	runs: number;
 	passed: number;
 	failed: number;
 	passRate: number;
-	tokens: EvalTokenMetricsV3;
+	tokens: EvalTokenAccountingV4;
 	wallTimeMs: number;
 }
 
@@ -23,7 +33,7 @@ export interface EvalArtifactAssignmentReference {
 	terminalReceiptDigest: string | null;
 }
 
-export interface EvalArtifactResultV3 extends EvalArtifactAssignmentReference {
+export interface EvalArtifactResultV4 extends EvalArtifactAssignmentReference {
 	taskId: string;
 	repeatIndex: number;
 	target: {
@@ -38,8 +48,8 @@ export interface EvalArtifactResultV3 extends EvalArtifactAssignmentReference {
 }
 
 /** The only current eval artifact format. Routing accepts this version only. */
-export interface EvalArtifactV3 {
-	version: 3;
+export interface EvalArtifactV4 {
+	version: 4;
 	evalId: string;
 	suite: {
 		id: string;
@@ -52,11 +62,11 @@ export interface EvalArtifactV3 {
 		model: string | null;
 		thinking: string | null;
 	};
-	summary: EvalArtifactSummaryV3;
-	results: EvalArtifactResultV3[];
+	summary: EvalArtifactSummaryV4;
+	results: EvalArtifactResultV4[];
 }
 
-export const ZERO_TOKEN_METRICS_V3: EvalTokenMetricsV3 = {
+export const ZERO_TOKEN_METRICS_V4: EvalTokenMetricsV4 = {
 	input: 0,
 	output: 0,
 	total: 0,

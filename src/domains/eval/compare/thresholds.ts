@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import type { EvalArtifactV3 } from "../schema/artifact.js";
+import type { EvalArtifactV4 } from "../schema/artifact.js";
 import type { EvalMetricAssertion, EvalSuiteThresholdsV2 } from "../schema/suite.js";
 
 export function loadThresholds(path: string): EvalSuiteThresholdsV2 {
@@ -15,7 +15,7 @@ export function loadThresholds(path: string): EvalSuiteThresholdsV2 {
 export function evaluateMetricAssertion(
 	assertion: EvalMetricAssertion,
 	metrics: Readonly<Record<string, unknown>>,
-	artifact?: EvalArtifactV3,
+	artifact?: EvalArtifactV4,
 ): boolean {
 	const actual = metricValue(assertion.metric, metrics, artifact);
 	switch (assertion.op) {
@@ -37,20 +37,22 @@ export function evaluateMetricAssertion(
 export function metricValue(
 	metric: string,
 	metrics: Readonly<Record<string, unknown>>,
-	artifact?: EvalArtifactV3,
+	artifact?: EvalArtifactV4,
 ): number | string | boolean | null {
 	if (metric in metrics) return metrics[metric] as number | string | boolean | null;
 	if (artifact !== undefined) {
 		if (metric === "result.pass") return artifact.summary.failed === 0;
 		if (metric === "latency.wallMs") return artifact.summary.wallTimeMs;
-		if (metric === "tokens.total") return artifact.summary.tokens.total;
+		// An unmeasured artifact answers null rather than 0, so a numeric
+		// threshold on token spend fails closed instead of passing on absence.
+		if (metric === "tokens.total") return artifact.summary.tokens.measured ? artifact.summary.tokens.total : null;
 		if (metric.startsWith("summary.")) return summaryValue(artifact, metric.slice("summary.".length));
 	}
 	return null;
 }
 
 /** Resolve a dotted path under artifact.summary to a scalar, else null. */
-function summaryValue(artifact: EvalArtifactV3, path: string): number | string | boolean | null {
+function summaryValue(artifact: EvalArtifactV4, path: string): number | string | boolean | null {
 	let current: unknown = artifact.summary;
 	for (const segment of path.split(".")) {
 		if (!isRecord(current) || !(segment in current)) return null;

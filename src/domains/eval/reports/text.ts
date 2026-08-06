@@ -1,8 +1,7 @@
-import { tokenMeasurementCoverage } from "../metrics/coverage.js";
-import type { EvalArtifactV3 } from "../schema/artifact.js";
+import type { EvalArtifactV4 } from "../schema/artifact.js";
 
-export function renderEvalTextReportV3(artifact: EvalArtifactV3): string {
-	const coverage = tokenMeasurementCoverage(artifact.results);
+export function renderEvalTextReportV4(artifact: EvalArtifactV4): string {
+	const tokens = artifact.summary.tokens;
 	return [
 		`eval: ${artifact.evalId}`,
 		`suite: ${artifact.suite.id}`,
@@ -15,11 +14,11 @@ export function renderEvalTextReportV3(artifact: EvalArtifactV3): string {
 		// A run whose child Clio work is out of the harness's sight has no token
 		// count. Saying "0" would claim it cost nothing, so the count is
 		// reported next to how many runs it actually covers.
-		coverage.measured === 0
-			? `tokens total: unmeasured (0 of ${coverage.total} runs reported usage)`
-			: coverage.measured === coverage.total
-				? `tokens total: ${artifact.summary.tokens.total}`
-				: `tokens total: ${artifact.summary.tokens.total} (measured in ${coverage.measured} of ${coverage.total} runs)`,
+		!tokens.measured
+			? `tokens total: unmeasured (0 of ${tokens.runs} runs reported usage)`
+			: tokens.measuredRuns === tokens.runs
+				? `tokens total: ${tokens.total}`
+				: `tokens total: ${tokens.total} (measured in ${tokens.measuredRuns} of ${tokens.runs} runs)`,
 		`wall time ms: ${artifact.summary.wallTimeMs}`,
 		"",
 	].join("\n");

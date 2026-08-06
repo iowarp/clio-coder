@@ -2,19 +2,19 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../../core/safe-id.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
-import type { EvalArtifactV3 } from "../schema/artifact.js";
+import type { EvalArtifactV4, EvalTokenAccountingV4 } from "../schema/artifact.js";
 import { evalRoot } from "../store.js";
 import { redactArtifactForStorage } from "./redact.js";
 
-export function evalArtifactPathV3(dataDir: string, evalId: string): string {
+export function evalArtifactPathV4(dataDir: string, evalId: string): string {
 	assertSafeId(evalId, "eval");
 	return join(evalRoot(dataDir), `${evalId}.json`);
 }
 
-export async function writeEvalArtifactV3(dataDir: string, artifact: EvalArtifactV3, out?: string): Promise<string> {
+export async function writeEvalArtifactV4(dataDir: string, artifact: EvalArtifactV4, out?: string): Promise<string> {
 	const path =
 		out === undefined
-			? evalArtifactPathV3(dataDir, artifact.evalId)
+			? evalArtifactPathV4(dataDir, artifact.evalId)
 			: out.endsWith(".json")
 				? out
 				: join(out, `${artifact.evalId}.json`);
@@ -23,20 +23,19 @@ export async function writeEvalArtifactV3(dataDir: string, artifact: EvalArtifac
 }
 
 /** Read only the current explicit-link artifact format; retired shapes are rejected. */
-export async function loadEvalArtifactV3(dataDir: string, evalId: string): Promise<EvalArtifactV3> {
-	const raw = await readFile(evalArtifactPathV3(dataDir, evalId), "utf8");
-	return parseEvalArtifactV3(JSON.parse(raw) as unknown, evalId);
+export async function loadEvalArtifactV4(dataDir: string, evalId: string): Promise<EvalArtifactV4> {
+	const raw = await readFile(evalArtifactPathV4(dataDir, evalId), "utf8");
+	return parseEvalArtifactV4(JSON.parse(raw) as unknown, evalId);
 }
 
-export function parseEvalArtifactV3(value: unknown, source: string): EvalArtifactV3 {
+export function parseEvalArtifactV4(value: unknown, source: string): EvalArtifactV4 {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
-	if (value.version !== 3) throw new Error(`${source}.version: expected current version 3`);
+	if (value.version !== 4) throw new Error(`${source}.version: expected current version 4`);
 	const summary = asRecord(value.summary, `${source}.summary`);
-	const tokens = asRecord(summary.tokens, `${source}.summary.tokens`);
 	const matrix = asRecord(value.matrix, `${source}.matrix`);
 	const suite = asRecord(value.suite, `${source}.suite`);
 	return {
-		version: 3,
+		version: 4,
 		evalId: readString(value, source, "evalId"),
 		suite: { id: readString(suite, `${source}.suite`, "id"), hash: readString(suite, `${source}.suite`, "hash") },
 		clio: {
@@ -58,20 +57,44 @@ export function parseEvalArtifactV3(value: unknown, source: string): EvalArtifac
 			passed: readNumber(summary, `${source}.summary`, "passed"),
 			failed: readNumber(summary, `${source}.summary`, "failed"),
 			passRate: readNumber(summary, `${source}.summary`, "passRate"),
-			tokens: {
-				input: readNumber(tokens, `${source}.summary.tokens`, "input"),
-				output: readNumber(tokens, `${source}.summary.tokens`, "output"),
-				total: readNumber(tokens, `${source}.summary.tokens`, "total"),
-				cacheRead: readNumber(tokens, `${source}.summary.tokens`, "cacheRead"),
-				cacheWrite: readNumber(tokens, `${source}.summary.tokens`, "cacheWrite"),
-			},
+			tokens: parseTokenAccounting(summary.tokens, `${source}.summary.tokens`),
 			wallTimeMs: readNumber(summary, `${source}.summary`, "wallTimeMs"),
 		},
 		results: readArray(value, source, "results").map((entry, index) => parseResult(entry, `${source}.results[${index}]`)),
 	};
 }
 
-function parseResult(value: unknown, source: string): EvalArtifactV3["results"][number] {
+/**
+ * An unmeasured artifact must carry no counts. Reading counts beside
+ * `measured: false` is a contradiction rather than a value to prefer, so it is
+ * refused instead of being resolved silently.
+ */
+function parseTokenAccounting(value: unknown, source: string): EvalTokenAccountingV4 {
+	const record = asRecord(value, source);
+	const measured = readBoolean(record, source, "measured");
+	const runs = readNumber(record, source, "runs");
+	const measuredRuns = readNumber(record, source, "measuredRuns");
+	const countFields = ["input", "output", "total", "cacheRead", "cacheWrite"] as const;
+	if (!measured) {
+		if (measuredRuns !== 0) throw new Error(`${source}.measuredRuns: expected 0 when unmeasured`);
+		const present = countFields.filter((field) => field in record);
+		if (present.length > 0) throw new Error(`${source}: unmeasured accounting carries no counts (${present.join(", ")})`);
+		return { measured: false, runs, measuredRuns: 0 };
+	}
+	if (measuredRuns <= 0) throw new Error(`${source}.measuredRuns: expected a positive count when measured`);
+	return {
+		measured: true,
+		runs,
+		measuredRuns,
+		input: readNumber(record, source, "input"),
+		output: readNumber(record, source, "output"),
+		total: readNumber(record, source, "total"),
+		cacheRead: readNumber(record, source, "cacheRead"),
+		cacheWrite: readNumber(record, source, "cacheWrite"),
+	};
+}
+
+function parseResult(value: unknown, source: string): EvalArtifactV4["results"][number] {
 	const record = asRecord(value, source);
 	const target = asRecord(record.target, `${source}.target`);
 	return {

@@ -6,11 +6,13 @@ export async function runContextIndexRunner(
 	clioEntry: string,
 	timeoutMs: number,
 	target: EvalSuiteTargetV2,
+	env?: NodeJS.ProcessEnv,
 ): Promise<EvalRunnerOutput> {
 	const result = await runShellCommand(
 		`${shellQuote(process.execPath)} ${shellQuote(clioEntry)} context index --json`,
 		cwd,
 		timeoutMs,
+		env,
 	);
 	const parsed = parseContextIndexOutput(result.stdout);
 	return {
