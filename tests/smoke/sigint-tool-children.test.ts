@@ -1,6 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -219,5 +219,21 @@ describe("smoke/SIGINT kills running tool children", { concurrency: false, skip:
 		// AbortSignal, and bash-exec signals the group.
 		const cleaned = await waitFor(() => pgrepMarker().length === 0, 5_000);
 		ok(cleaned, `tool child survived SIGINT: pids=${pgrepMarker().join(",")}; stderr=${stderr}`);
+
+		// The costly failure path is the one operators audit, so the interrupted
+		// run seals its receipt in the same drain phase. A soak that interrupted
+		// a million-token SciCode step left no receipt at all.
+		const receiptsDir = join(scratch.dir, "state", "receipts");
+		const receiptFiles = existsSync(receiptsDir) ? readdirSync(receiptsDir).filter((name) => name.endsWith(".json")) : [];
+		strictEqual(receiptFiles.length, 1, `interrupted run sealed no receipt; stderr=${stderr}`);
+		const receipt = JSON.parse(readFileSync(join(receiptsDir, receiptFiles[0] ?? ""), "utf8")) as {
+			outcome: string;
+			exitCode: number;
+			sessionId: string | null;
+			toolCalls: number;
+		};
+		strictEqual(receipt.outcome, "canceled");
+		strictEqual(receipt.exitCode, 130);
+		ok(receipt.sessionId !== null, "the receipt links the session it interrupted");
 	});
 });

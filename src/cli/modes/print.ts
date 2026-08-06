@@ -5,15 +5,17 @@ import {
 	type SkillActivation,
 	skillActivationFromToolDetails,
 } from "../../core/skill-activation.js";
+import { getTerminationCoordinator } from "../../core/termination.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { createRunReceiptQuality } from "../../domains/dispatch/receipt-findings.js";
 import { openLedger } from "../../domains/dispatch/state.js";
-import type { RunKind, RunOutcome, RunReceiptDraft, ToolCallStat } from "../../domains/dispatch/types.js";
+import type { RunKind, RunOutcome, RunReceiptDraft, RunStatus, ToolCallStat } from "../../domains/dispatch/types.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { type RunUsageSummary, sumRunUsage } from "../../interactive/chat-loop-messages.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { setupSteerChannel } from "../steer-channel.js";
+import { projectHeadlessJsonEvent } from "./json-stream.js";
 import { serializeJsonLine } from "./jsonl.js";
 
 export interface HeadlessSamplingOverrides {
@@ -26,6 +28,18 @@ export interface HeadlessSamplingOverrides {
 	repeatPenalty?: number;
 }
 
+/**
+ * The shutdown seam a headless turn needs: somewhere to register the drain
+ * hook that seals an interrupted run's receipt, and the exit code that
+ * shutdown will report. Defaults to the process termination coordinator.
+ */
+export interface HeadlessShutdownHooks {
+	onDrain(hook: () => void | Promise<void>): void;
+	getExitCode(): number;
+	/** True once a signal or quit started the coordinated shutdown. */
+	isShuttingDown(): boolean;
+}
+
 export interface HeadlessMainAgentOptions {
 	prompt: string;
 	images?: ReadonlyArray<ImageContent>;
@@ -36,6 +50,7 @@ export interface HeadlessMainAgentOptions {
 	jsonEvents?: "full" | "terminal";
 	steerChannel?: string;
 	getSessionHeader?: () => unknown | null;
+	shutdown?: HeadlessShutdownHooks;
 }
 
 interface HeadlessMainAgentResult {
@@ -179,13 +194,24 @@ function isMainAgentRunKind(value: string): value is RunKind {
 	return value === "http" || value === "sdk" || value === "subprocess";
 }
 
+/**
+ * Terminal accounting for one headless turn. `outcome`/`status` are resolved
+ * from how the turn ended, not from the exit code alone: a turn the operator
+ * interrupted is `canceled`/`interrupted`, never `failed`.
+ */
+interface HeadlessTerminalOutcome {
+	exitCode: number;
+	outcome: RunOutcome;
+	status: RunStatus;
+	failureMessage: string | null;
+}
+
 async function recordHeadlessMainAgentReceipt(input: {
 	chat: ChatLoop;
 	task: string;
 	startedAt: string;
 	endedAt: string;
-	exitCode: number;
-	failureMessage: string | null;
+	terminal: HeadlessTerminalOutcome;
 	stats: HeadlessMainAgentReceiptStats;
 }): Promise<void> {
 	const snapshot = input.chat.lastRunSnapshot?.();
@@ -199,9 +225,8 @@ async function recordHeadlessMainAgentReceipt(input: {
 	const cacheWriteTokenCount = usage?.cacheWrite ?? 0;
 	const reasoningTokenCount = usage?.reasoning ?? 0;
 	const costUsd = usage?.costUsd ?? 0;
-	const status = input.exitCode === 0 ? "completed" : "failed";
-	const outcome: RunOutcome = input.exitCode === 0 ? "succeeded" : "failed";
-	const outcomeDetail = input.exitCode === 0 ? null : input.failureMessage;
+	const { exitCode, outcome, status } = input.terminal;
+	const outcomeDetail = input.terminal.failureMessage;
 	const ledger = openLedger();
 	const envelope = ledger.create({
 		agentId: "main-agent",
@@ -228,7 +253,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 		outcome,
 		outcomeDetail,
 		lineage,
-		exitCode: input.exitCode,
+		exitCode,
 		tokenCount,
 		inputTokenCount,
 		outputTokenCount,
@@ -271,8 +296,8 @@ async function recordHeadlessMainAgentReceipt(input: {
 		costProvenance: "unknown",
 		startedAt: input.startedAt,
 		endedAt: input.endedAt,
-		exitCode: input.exitCode,
-		...(input.failureMessage !== null ? { failureMessage: input.failureMessage } : {}),
+		exitCode,
+		...(input.terminal.failureMessage !== null ? { failureMessage: input.terminal.failureMessage } : {}),
 		tokenCount,
 		inputTokenCount,
 		outputTokenCount,
@@ -299,6 +324,15 @@ async function recordHeadlessMainAgentReceipt(input: {
 	await ledger.persist();
 }
 
+function defaultShutdownHooks(): HeadlessShutdownHooks {
+	const coordinator = getTerminationCoordinator();
+	return {
+		onDrain: (hook) => coordinator.onDrain(hook),
+		getExitCode: () => coordinator.getExitCode(),
+		isShuttingDown: () => coordinator.getPhase() !== "idle",
+	};
+}
+
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
 	const mode = options.mode ?? "text";
 	const jsonEvents = options.jsonEvents ?? "full";
@@ -315,6 +349,47 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		skillActivations: [],
 		usage: null,
 	};
+	// The receipt is this run's accounting, so it has to exist on the costly
+	// failure paths too. Two callers can reach it: the turn's own completion
+	// path, and the coordinated shutdown a SIGINT/SIGTERM starts. The signal
+	// handler exits the process from inside shutdown, strictly before the
+	// awaited submit resumes, so an interrupted run seals here in the drain
+	// phase instead of losing the whole run's usage. Whichever caller arrives
+	// first seals; the other awaits that same seal.
+	let sealed: Promise<void> | null = null;
+	const sealReceipt = (terminal: HeadlessTerminalOutcome): Promise<void> => {
+		if (sealed !== null) return sealed;
+		const endedAt = new Date().toISOString();
+		sealed = recordHeadlessMainAgentReceipt({
+			chat,
+			task: options.prompt,
+			startedAt,
+			endedAt,
+			terminal,
+			stats: receiptStats,
+		}).catch((error: unknown) => {
+			process.stderr.write(`clio run: receipt write failed: ${error instanceof Error ? error.message : String(error)}\n`);
+		});
+		return sealed;
+	};
+	const termination = options.shutdown ?? defaultShutdownHooks();
+	// A shutdown that aborts the turn also resolves the awaited submit, so the
+	// completion path and this hook race. Interruption is a fact both read from
+	// the coordinator rather than a winner of that race: whichever seals first
+	// seals the same canceled outcome.
+	const interruptedTerminal = (): HeadlessTerminalOutcome => ({
+		exitCode: termination.getExitCode(),
+		outcome: "canceled",
+		status: "interrupted",
+		failureMessage: result.abortReason ?? "clio run: interrupted before the turn completed",
+	});
+	// Registered after the composition root's chat drain hook, which disposes
+	// the loop and awaits settlement, so the stats folded below are final by
+	// the time this runs.
+	termination.onDrain(async () => {
+		await sealReceipt(interruptedTerminal());
+	});
+
 	let jsonHeaderWritten = false;
 	const writeJsonHeader = (allowFallback: boolean): void => {
 		if (jsonHeaderWritten) return;
@@ -339,24 +414,27 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	};
 	const unsubscribe = chat.onEvent((event) => {
 		if (mode === "json") {
+			const projected = projectHeadlessJsonEvent(event);
 			if (jsonEvents === "terminal") {
 				writeTerminalTurnStart();
 				writeJsonHeader(true);
-				if (TERMINAL_JSON_EVENT_TYPES.has(event.type)) writeRawStdout(serializeJsonLine(event));
+				if (projected !== null && TERMINAL_JSON_EVENT_TYPES.has(event.type)) {
+					writeRawStdout(serializeJsonLine(projected));
+				}
 			} else {
 				writeJsonHeader(false);
-				writeRawStdout(serializeJsonLine(event));
+				if (projected !== null) writeRawStdout(serializeJsonLine(projected));
 			}
 		}
 		recordToolEnd(receiptStats, event);
-		if (event.type === "agent_end") {
-			// Notice-only agent_end events carry no usage; never let one clobber
-			// the real run's totals with zeros. A headless turn can also span
-			// several agent segments (middleware nudges and finish-contract
-			// reprompts start new agent runs), and each agent_end carries only
-			// its own segment's messages, so segments accumulate: keeping only
-			// the last one recorded 23808 of a measured ~204640-token run.
-			const usageSummary = sumRunUsage(event.messages);
+		if (event.type === "message_end") {
+			// Usage is accrued per completed assistant message, the one place a
+			// token count appears exactly once. Accruing at `agent_end` instead
+			// loses everything the process was told when a run is interrupted
+			// mid-segment, and a headless turn spans several agent segments
+			// (middleware nudges and finish-contract reprompts start new agent
+			// runs), so nothing here may key on the last segment alone.
+			const usageSummary = sumRunUsage([event.message]);
 			if (usageSummary.hadUsage) {
 				receiptStats.usage = receiptStats.usage === null ? usageSummary : addRunUsage(receiptStats.usage, usageSummary);
 			}
@@ -397,34 +475,40 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	}
 
 	const endedAt = new Date().toISOString();
-	let exitCode = 0;
-	let failureMessage: string | null = null;
+	let terminal: HeadlessTerminalOutcome = {
+		exitCode: 0,
+		outcome: "succeeded",
+		status: "completed",
+		failureMessage: null,
+	};
 	let stderrMessage: string | null = null;
 	let stdoutMessage: string | null = null;
-	if (result.abortReason !== null) {
+	if (termination.isShuttingDown()) {
+		// The turn did not fail; a signal ended it. Both this path and the drain
+		// hook read interruption from the coordinator, so whichever seals first
+		// seals the same canceled outcome with the status the process exits with.
+		terminal = interruptedTerminal();
+		stderrMessage = terminal.failureMessage;
+	} else if (result.abortReason !== null) {
 		// An interrupted turn never answered, no matter what partial text or
-		// internal error the abort left behind: nonzero exit, abort reason.
-		exitCode = 1;
-		failureMessage = result.abortReason;
+		// internal error the abort left behind: nonzero exit, abort reason. It
+		// was canceled, not failed, and its receipt says so.
+		terminal = { exitCode: 1, outcome: "canceled", status: "interrupted", failureMessage: result.abortReason };
 		stderrMessage = result.abortReason;
 	} else if (result.error) {
-		exitCode = 1;
-		failureMessage = result.error;
+		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage: result.error };
 		stderrMessage = result.error;
-	} else if (result.text.length === 0) {
-		if (result.sawTerminatingToolResult) {
-			exitCode = 0;
-		} else {
-			exitCode = 1;
-			failureMessage =
-				result.lastNotice !== null
-					? `clio run: no assistant response (${result.lastNotice})`
-					: "clio run: no assistant response";
-			stderrMessage = failureMessage;
-		}
-	} else if (mode === "text") {
+	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
+		const failureMessage =
+			result.lastNotice !== null
+				? `clio run: no assistant response (${result.lastNotice})`
+				: "clio run: no assistant response";
+		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
+		stderrMessage = failureMessage;
+	} else if (result.text.length > 0 && mode === "text") {
 		stdoutMessage = result.text;
 	}
+	const exitCode = terminal.exitCode;
 
 	if (mode === "json" && jsonEvents === "terminal") {
 		writeJsonHeader(true);
@@ -434,24 +518,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				startedAt,
 				endedAt,
 				exitCode,
-				...(failureMessage !== null ? { error: failureMessage } : {}),
+				...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
 			}),
 		);
 	}
 
-	try {
-		await recordHeadlessMainAgentReceipt({
-			chat,
-			task: options.prompt,
-			startedAt,
-			endedAt,
-			exitCode,
-			failureMessage,
-			stats: receiptStats,
-		});
-	} catch (error) {
-		process.stderr.write(`clio run: receipt write failed: ${error instanceof Error ? error.message : String(error)}\n`);
-	}
+	await sealReceipt(terminal);
 
 	if (stderrMessage !== null) {
 		process.stderr.write(`${stderrMessage}\n`);

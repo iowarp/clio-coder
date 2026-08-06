@@ -71,6 +71,15 @@ class TerminationCoordinator {
 		return this.phase;
 	}
 
+	/**
+	 * The process exit code this shutdown will use. Set before any hook runs,
+	 * so a hook sealing terminal accounting records the same status the process
+	 * reports (130 for SIGINT, 143 for SIGTERM).
+	 */
+	getExitCode(): number {
+		return this.exitCode;
+	}
+
 	onDrain(hook: Hook): void {
 		this.drainHooks.push(hook);
 	}
