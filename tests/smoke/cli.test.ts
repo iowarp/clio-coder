@@ -648,6 +648,38 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		}
 	});
 
+	it("the full --json stream carries increments, never repeated message snapshots", async () => {
+		// A tool-heavy SciCode sub-step wrote 802 MB of stdout, 99.3% of it
+		// `message_update` snapshots of a 44 KB message. The stream publishes
+		// each piece of content once: deltas while it streams, one completed
+		// message when it lands.
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const fixture = await startOpenAICompatFixture("full stream mock reply");
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const result = await runCli(["--no-context-files", "run", "--json", "hello"], {
+				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				timeoutMs: 20_000,
+			});
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			const events = jsonLines(result.stdout);
+			const types = events.map((event) => event.type);
+			ok(!types.includes("message_update"), `message_update leaked into the stream: ${result.stdout}`);
+			ok(types.includes("message_end"), `missing message_end: ${result.stdout}`);
+			for (const event of events) {
+				if (event.type !== "text_delta" && event.type !== "thinking_delta") continue;
+				strictEqual("partialText" in event, false, "a delta never carries the growing partial text");
+				strictEqual("partialThinking" in event, false, "a delta never carries the growing partial thinking");
+			}
+			const agentEnd = events.find((event) => event.type === "agent_end");
+			ok(agentEnd !== undefined, `missing agent_end: ${result.stdout}`);
+			strictEqual("messages" in (agentEnd ?? {}), false, "agent_end summarizes instead of republishing messages");
+			ok((agentEnd?.usage as { measured?: unknown } | undefined)?.measured !== undefined, "agent_end reports usage");
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
+
 	it("applies one-run autonomy without rewriting settings and seals it in the main receipt", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		const fixture = await startOpenAICompatFixture("autonomy mock reply");

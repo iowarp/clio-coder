@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import type { ChatLoop, ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 
 function buildFakeChatLoop(events: ChatLoopEvent[]): ChatLoop {
@@ -141,38 +142,29 @@ describe("contracts/headless-print", () => {
 
 	it("accumulates usage across agent segments in the run receipt", async () => {
 		// A headless turn can span several agent segments (middleware nudges and
-		// finish-contract reprompts start new agent runs); each agent_end
-		// carries only its own segment's messages. The receipt must sum the
-		// segments: keeping only the last one recorded 23808 of a measured
-		// ~204640-token live run.
+		// finish-contract reprompts start new agent runs). Usage is accrued once
+		// per completed assistant message; the agent_end that republishes the
+		// same segment must not count it a second time.
 		const savedStateDir = process.env.CLIO_STATE_DIR;
 		process.env.CLIO_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-headless-usage-"));
+		resetXdgCache();
 		try {
 			const usageMessage = (tokens: number) => ({
 				role: "assistant",
 				content: [{ type: "text", text: "segment answer" }],
 				usage: { input: tokens - 10, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: tokens },
 			});
+			const first = usageMessage(1000);
+			const second = usageMessage(200);
 			const chat = buildFakeChatLoop([
-				{ type: "agent_end", messages: [usageMessage(1000)] },
+				{ type: "message_end", message: first },
+				{ type: "agent_end", messages: [first] },
 				// Notice-only segment: no usage, must not clobber the total.
 				{ type: "agent_end", messages: [] },
-				{ type: "agent_end", messages: [usageMessage(200)] },
-				{ type: "message_end", message: usageMessage(0) },
+				{ type: "message_end", message: second },
+				{ type: "agent_end", messages: [second] },
 			] as unknown as ChatLoopEvent[]);
-			(chat as unknown as { lastRunSnapshot: () => unknown }).lastRunSnapshot = () => ({
-				runtimeKind: "http",
-				targetId: "test-target",
-				wireModelId: "test-model",
-				runtimeId: "llamacpp",
-				autonomy: "read-only",
-				sessionId: "fake-session",
-				cwd: process.cwd(),
-				promptSignature: "sig",
-				toolSignature: "sig",
-				compiledPromptHash: "hash",
-				staticCompositionHash: "hash",
-			});
+			(chat as unknown as { lastRunSnapshot: () => unknown }).lastRunSnapshot = () => runSnapshot();
 			const exitCode = await runHeadlessMainAgent(chat, { prompt: "multi-segment" });
 			strictEqual(exitCode, 0);
 			const receiptsDir = join(process.env.CLIO_STATE_DIR ?? "", "receipts");
@@ -183,12 +175,104 @@ describe("contracts/headless-print", () => {
 				outputTokenCount: number;
 				autonomyEnforcement?: unknown;
 			};
-			strictEqual(receipt.tokenCount, 1200, "segments sum instead of last-segment-wins");
+			strictEqual(receipt.tokenCount, 1200, "messages sum, and agent_end never double counts them");
 			ok(receipt.outputTokenCount === 20, "per-field totals sum too");
 			deepStrictEqual(receipt.autonomyEnforcement, { grade: "mediated", autonomy: "read-only" });
 		} finally {
 			if (savedStateDir === undefined) delete process.env.CLIO_STATE_DIR;
 			else process.env.CLIO_STATE_DIR = savedStateDir;
+			resetXdgCache();
+		}
+	});
+
+	it("seals a canceled receipt for a run the shutdown signal interrupts", async () => {
+		// A SIGINT exits the process from inside the shutdown coordinator,
+		// strictly before the awaited submit resumes. A soak of SciCode problem
+		// 11 interrupted mid-step consumed 1,008,198 reported tokens and left no
+		// receipt at all. The drain phase seals it instead.
+		const savedStateDir = process.env.CLIO_STATE_DIR;
+		process.env.CLIO_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-headless-interrupt-"));
+		resetXdgCache();
+		try {
+			const drainHooks: Array<() => void | Promise<void>> = [];
+			let interrupted = false;
+			let releaseSubmit = (): void => {};
+			const submitted = new Promise<void>((resolveSubmit) => {
+				releaseSubmit = resolveSubmit;
+			});
+			const chat = buildFakeChatLoop([]);
+			let emit: (event: ChatLoopEvent) => void = () => {};
+			const baseOnEvent = chat.onEvent.bind(chat);
+			(chat as unknown as { onEvent: ChatLoop["onEvent"] }).onEvent = (handler) => {
+				emit = handler;
+				return baseOnEvent(handler);
+			};
+			(chat as unknown as { submit: ChatLoop["submit"] }).submit = async () => {
+				emit({
+					type: "message_end",
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: "partial" }],
+						usage: { input: 900, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 1000 },
+					},
+				} as unknown as ChatLoopEvent);
+				await submitted;
+			};
+			(chat as unknown as { lastRunSnapshot: () => unknown }).lastRunSnapshot = () => runSnapshot();
+
+			const running = runHeadlessMainAgent(chat, {
+				prompt: "long interrupted task",
+				shutdown: {
+					onDrain: (hook) => drainHooks.push(hook),
+					getExitCode: () => 130,
+					isShuttingDown: () => drainHooks.length > 0 && interrupted,
+				},
+			});
+			// Let submit start and stream its first usage-bearing message.
+			await new Promise((r) => setTimeout(r, 0));
+			interrupted = true;
+			for (const hook of drainHooks) await hook();
+
+			const receiptsDir = join(process.env.CLIO_STATE_DIR ?? "", "receipts");
+			const files = readdirSync(receiptsDir).filter((name) => name.endsWith(".json"));
+			strictEqual(files.length, 1, "the interrupted run has a receipt");
+			const receipt = JSON.parse(readFileSync(join(receiptsDir, files[0] ?? ""), "utf8")) as {
+				outcome: string;
+				exitCode: number;
+				tokenCount: number;
+				failureMessage?: string;
+			};
+			strictEqual(receipt.outcome, "canceled");
+			strictEqual(receipt.exitCode, 130, "the receipt reports the signal's exit status");
+			strictEqual(receipt.tokenCount, 1000, "usage accrued before the interrupt is accounted");
+
+			releaseSubmit();
+			await running;
+			strictEqual(
+				readdirSync(receiptsDir).filter((name) => name.endsWith(".json")).length,
+				1,
+				"the completion path does not seal a second receipt",
+			);
+		} finally {
+			if (savedStateDir === undefined) delete process.env.CLIO_STATE_DIR;
+			else process.env.CLIO_STATE_DIR = savedStateDir;
+			resetXdgCache();
 		}
 	});
 });
+
+function runSnapshot(): unknown {
+	return {
+		runtimeKind: "http",
+		targetId: "test-target",
+		wireModelId: "test-model",
+		runtimeId: "llamacpp",
+		autonomy: "read-only",
+		sessionId: "fake-session",
+		cwd: process.cwd(),
+		promptSignature: "sig",
+		toolSignature: "sig",
+		compiledPromptHash: "hash",
+		staticCompositionHash: "hash",
+	};
+}
