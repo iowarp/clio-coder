@@ -1,4 +1,11 @@
 import { spawn } from "node:child_process";
+import {
+	addTokenStreamUsage,
+	createTokenUsageFold,
+	type EvalTokenStreamUsage,
+	tokenMetricEntries,
+	UNMEASURED_TOKEN_USAGE,
+} from "../metrics/token-stream.js";
 import type { EvalRunnerV2 } from "../schema/suite.js";
 
 export interface EvalRunnerOutput {
@@ -19,6 +26,8 @@ export interface ShellCommandResult {
 	stdout: string;
 	/** Compact, complete tool-event JSONL retained independently of artifact truncation. */
 	metricJsonl: string;
+	/** Provider usage folded from the live stream, independent of artifact truncation. */
+	usage: EvalTokenStreamUsage;
 	stderr: string;
 	wallTimeMs: number;
 	timedOut: boolean;
@@ -40,11 +49,17 @@ export async function runExternalCommandRunner(
 	let stdout = "";
 	let stderr = "";
 	let wallTimeMs = 0;
+	// An external command is an opaque subprocess: it may be a `clio run --json`
+	// whose usage events cross this stdout, or a harness script that runs Clio
+	// out of sight. Usage observed on the stream is reported; nothing observed
+	// is reported as unmeasured, never as zero cost.
+	let usage = UNMEASURED_TOKEN_USAGE;
 	for (const command of commands) {
 		const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs);
 		stdout = appendLimited(stdout, result.stdout);
 		stderr = appendLimited(stderr, result.stderr);
 		wallTimeMs += result.wallTimeMs;
+		usage = addTokenStreamUsage(usage, result.usage);
 		if (result.exitCode !== 0) {
 			return {
 				assignmentId: null,
@@ -53,7 +68,11 @@ export async function runExternalCommandRunner(
 				stdout,
 				stderr,
 				wallTimeMs,
-				metrics: { "latency.wallMs": wallTimeMs, "verifier.exitCode": result.exitCode },
+				metrics: {
+					"latency.wallMs": wallTimeMs,
+					...tokenMetricEntries(usage),
+					"verifier.exitCode": result.exitCode,
+				},
 				artifacts: {},
 			};
 		}
@@ -65,7 +84,7 @@ export async function runExternalCommandRunner(
 		stdout,
 		stderr,
 		wallTimeMs,
-		metrics: { "latency.wallMs": wallTimeMs, "verifier.exitCode": 0 },
+		metrics: { "latency.wallMs": wallTimeMs, ...tokenMetricEntries(usage), "verifier.exitCode": 0 },
 		artifacts: {},
 	};
 }
@@ -76,6 +95,7 @@ export function runShellCommand(command: string, cwd: string, timeoutMs: number)
 		let stdout = "";
 		let stderr = "";
 		const metricCapture = createJsonlMetricCapture();
+		const usageFold = createTokenUsageFold();
 		let timedOut = false;
 		let settled = false;
 		const child = spawn(command, { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"], env: process.env });
@@ -84,6 +104,7 @@ export function runShellCommand(command: string, cwd: string, timeoutMs: number)
 		child.stdout.on("data", (chunk: string) => {
 			stdout = appendLimited(stdout, chunk);
 			metricCapture.push(chunk);
+			usageFold.push(chunk);
 		});
 		child.stderr.on("data", (chunk: string) => {
 			stderr = appendLimited(stderr, chunk);
@@ -102,6 +123,7 @@ export function runShellCommand(command: string, cwd: string, timeoutMs: number)
 				exitCode,
 				stdout,
 				metricJsonl: metricCapture.finish(),
+				usage: usageFold.usage(),
 				stderr,
 				wallTimeMs: Math.max(0, Date.now() - started),
 				timedOut,
