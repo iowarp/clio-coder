@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
 import {
+	addChaosObservations,
+	chaosMetricEntries,
+	createChaosFold,
+	EMPTY_CHAOS_OBSERVATION,
+	type EvalChaosObservation,
+	parseChaosMarker,
+} from "../metrics/chaos-stream.js";
+import {
 	addStreamInvariants,
 	createStreamInvariantFold,
 	EMPTY_STREAM_INVARIANTS,
@@ -37,6 +45,8 @@ export interface ShellCommandResult {
 	usage: EvalTokenStreamUsage;
 	/** Wire-stream structural invariants folded live, for the same reason. */
 	streamInvariants: EvalStreamInvariants;
+	/** Strict SIGINT harness marker folded live from stdout. */
+	chaos: EvalChaosObservation;
 	stderr: string;
 	wallTimeMs: number;
 	timedOut: boolean;
@@ -65,6 +75,7 @@ export async function runExternalCommandRunner(
 	// is reported as unmeasured, never as zero cost.
 	let usage = UNMEASURED_TOKEN_USAGE;
 	let streamInvariants = EMPTY_STREAM_INVARIANTS;
+	let chaos = EMPTY_CHAOS_OBSERVATION;
 	for (const command of commands) {
 		const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs, env);
 		stdout = appendLimited(stdout, result.stdout);
@@ -72,6 +83,7 @@ export async function runExternalCommandRunner(
 		wallTimeMs += result.wallTimeMs;
 		usage = addTokenStreamUsage(usage, result.usage);
 		streamInvariants = addStreamInvariants(streamInvariants, result.streamInvariants);
+		chaos = addChaosObservations(chaos, result.chaos);
 		if (result.exitCode !== 0) {
 			return {
 				assignmentId: null,
@@ -84,9 +96,10 @@ export async function runExternalCommandRunner(
 					"latency.wallMs": wallTimeMs,
 					...tokenMetricEntries(usage),
 					...streamInvariantMetrics(streamInvariants),
+					...chaosMetricEntries(chaos),
 					"verifier.exitCode": result.exitCode,
 				},
-				artifacts: {},
+				artifacts: chaosArtifacts(chaos),
 			};
 		}
 	}
@@ -101,9 +114,10 @@ export async function runExternalCommandRunner(
 			"latency.wallMs": wallTimeMs,
 			...tokenMetricEntries(usage),
 			...streamInvariantMetrics(streamInvariants),
+			...chaosMetricEntries(chaos),
 			"verifier.exitCode": 0,
 		},
-		artifacts: {},
+		artifacts: chaosArtifacts(chaos),
 	};
 }
 
@@ -120,6 +134,7 @@ export function runShellCommand(
 		const metricCapture = createJsonlMetricCapture();
 		const usageFold = createTokenUsageFold();
 		const streamFold = createStreamInvariantFold();
+		const chaosFold = createChaosFold();
 		let timedOut = false;
 		let settled = false;
 		const child = spawn(command, {
@@ -137,6 +152,7 @@ export function runShellCommand(
 			metricCapture.push(chunk);
 			usageFold.push(chunk);
 			streamFold.push(chunk);
+			chaosFold.push(chunk);
 		});
 		child.stderr.on("data", (chunk: string) => {
 			stderr = appendLimited(stderr, chunk);
@@ -157,6 +173,7 @@ export function runShellCommand(
 				metricJsonl: metricCapture.finish(),
 				usage: usageFold.usage(),
 				streamInvariants: streamFold.invariants(),
+				chaos: chaosFold.observation(),
 				stderr,
 				wallTimeMs: Math.max(0, Date.now() - started),
 				timedOut,
@@ -258,6 +275,10 @@ export function createJsonlMetricCapture(): JsonlMetricCapture {
 
 function compactMetricEvent(event: Record<string, unknown>): Record<string, unknown> | null {
 	const type = event.type;
+	if (type === "clio_soak_chaos") {
+		const marker = parseChaosMarker(event);
+		return marker === null ? null : { type, ...marker };
+	}
 	if (type === "tool_execution_start") {
 		const toolName = stringField(event, "toolName");
 		if (toolName !== "dispatch" && toolName !== "code_nav" && toolName !== "read" && toolName !== "grep") {
@@ -296,6 +317,12 @@ function compactMetricEvent(event: Record<string, unknown>): Record<string, unkn
 			...(stringField(event.payload, "outcome") !== undefined ? { outcome: stringField(event.payload, "outcome") } : {}),
 		},
 	};
+}
+
+function chaosArtifacts(observation: EvalChaosObservation): Record<string, string> {
+	return observation.markerCount === 1 && observation.marker !== null
+		? { chaosSeed: String(observation.marker.seed) }
+		: {};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

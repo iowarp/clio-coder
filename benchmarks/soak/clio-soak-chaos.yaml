@@ -1,0 +1,80 @@
+version: 2
+suite:
+  id: clio-soak-chaos
+  title: Clio soak chaos — SIGINT mid tool execution
+  visibility: local
+  description: >-
+    Fault injection soak suite for Phase 0 Item 3 Fault 1: SIGINT mid tool execution.
+    Executes a standalone chaos script that prompts Clio for a long-running bash tool,
+    injects SIGINT once the child process exists, verifies exit status 130, checks that
+    no orphaned children remain, and asserts receipt sealing with token usage.
+  provenance:
+    fixtures: benchmarks/soak/fixtures
+    offline: true
+
+matrix:
+  targets:
+    - id: mini
+  repeats: 1
+
+tasks:
+  - id: chaos.sigint-mid-tool
+    tags: [offline, invariant, chaos, sigint]
+    workspace:
+      kind: temp-copy
+      path: fixtures/chaos-sigint-tool
+      setup:
+        - git init -q -b main .
+        - git -c user.email=soak@clio.local -c user.name=Soak add -A
+        - git -c user.email=soak@clio.local -c user.name=Soak commit -q -m 'fixture baseline'
+    runner:
+      kind: external-command
+      commands:
+        - >-
+          CLIO_CHAOS_SEED=42 node chaos-sigint-tool.mjs
+      timeoutMs: 120000
+    verify:
+      assertions:
+        - metric: chaos.seed
+          op: eq
+          value: 42
+        - metric: chaos.faultInjected
+          op: eq
+          value: true
+        - metric: chaos.exitCode
+          op: eq
+          value: 130
+        - metric: process.orphanedChildren
+          op: eq
+          value: 0
+        - metric: receipt.sealed
+          op: eq
+          value: true
+        - metric: receipt.integrityValid
+          op: eq
+          value: true
+        - metric: receipt.outcomeMatchesExit
+          op: eq
+          value: true
+        - metric: receipt.rootCount
+          op: eq
+          value: 1
+        - metric: tokens.measured
+          op: eq
+          value: true
+        - metric: tokens.total
+          op: gt
+          value: 0
+    metrics:
+      collect:
+        - chaos.seed
+        - chaos.faultInjected
+        - chaos.exitCode
+        - process.orphanedChildren
+        - receipt.sealed
+        - receipt.integrityValid
+        - receipt.outcomeMatchesExit
+        - receipt.rootCount
+        - tokens.measured
+        - tokens.total
+    timeoutMs: 180000

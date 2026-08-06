@@ -46,6 +46,10 @@ export const CANONICAL_METRICS = [
 	// Behavioral checkpoints for the bounded reconnaissance live suite.
 	"dispatch.count",
 	"wiki.staleAcknowledged",
+	// SIGINT chaos-harness facts folded live from its one strict stdout marker.
+	"chaos.seed",
+	"chaos.faultInjected",
+	"chaos.exitCode",
 	// Invariant checks: what Clio promised about its own machinery, read from
 	// the journal the item's run left behind. These are true or false about
 	// Clio and say nothing about whether the model solved the task. A check

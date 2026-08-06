@@ -123,6 +123,7 @@ async function runMatrixItem(
 			CLIO_ENTRY: clioEntry,
 		});
 		const patch = collectPatchMetrics(workspace.dir);
+		const receiptExitCode = receiptProcessExitCode(runner);
 		const metrics: Record<string, number | string | boolean | null> = {
 			...zeroToolCallMetrics(),
 			...collectContextMetrics(workspace.dir),
@@ -132,7 +133,7 @@ async function runMatrixItem(
 			// Read after the runner returned and before the journal is removed:
 			// what Clio sealed for this item, judged against its own ledger, and
 			// whether the workers it attested are still running.
-			...invariantMetrics(stateDir, runner.exitCode),
+			...invariantMetrics(stateDir, receiptExitCode),
 			"patch.bytes": patch.bytes,
 			"patch.filesChanged": patch.filesChanged,
 			"patch.testFilesModified": patch.testFilesModified,
@@ -183,6 +184,12 @@ async function runMatrixItem(
 		await workspace?.cleanup();
 		await rm(stateDir, { recursive: true, force: true });
 	}
+}
+
+/** A SIGINT harness exits cleanly after checking the nested Clio process; reconcile its receipt to that nested exit. */
+export function receiptProcessExitCode(runner: Pick<EvalRunnerOutput, "exitCode" | "metrics">): number {
+	const chaosExitCode = runner.metrics["chaos.exitCode"];
+	return typeof chaosExitCode === "number" && Number.isInteger(chaosExitCode) ? chaosExitCode : runner.exitCode;
 }
 
 /** Journal-derived invariants for one finished item, read from its isolated state directory. */

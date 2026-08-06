@@ -36,4 +36,19 @@ describe("contracts/eval output buffer", () => {
 		strictEqual(dispatchCountFromJsonl(metricJsonl), 1);
 		ok(metricJsonl.length < 2_000, "large tool results are not retained in metric evidence");
 	});
+
+	it("preserves the bounded SIGINT chaos marker exactly", () => {
+		const marker = {
+			type: "clio_soak_chaos",
+			seed: 90210,
+			faultInjected: true,
+			exitCode: 130,
+			orphanedChildren: 0,
+		};
+		const encoded = JSON.stringify(marker);
+		const capture = createJsonlMetricCapture();
+		capture.push(encoded.slice(0, 23));
+		capture.push(encoded.slice(23));
+		strictEqual(capture.finish(), encoded);
+	});
 });
