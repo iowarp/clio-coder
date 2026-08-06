@@ -1,5 +1,8 @@
 # Trace store contract
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive trace database viewer, schema inspector, and SQL query validator simulator is located at [docs/html/trace_blueprint.html](html/trace_blueprint.html) (Version: 0.3.0).
+
 Clio's trace database is a rebuildable, queryable mirror. Receipts, session
 ledgers, gate artifacts, and evidence remain the source of truth. Removing
 `<state-dir>/trace.sqlite` loses no authoritative run data.
@@ -76,3 +79,26 @@ worker event pump and never participates in receipt correctness.
 Write/open/schema failures emit one bounded `[clio:trace]` warning and degrade
 the mirror without failing the run. Domain shutdown prioritizes flushing trace
 writes before slower evidence builds.
+
+## CLI Commands
+
+The `clio trace` command surfaces 6 subcommands for inspecting and querying the SQLite trace mirror:
+
+```bash
+clio trace runs [--db PATH] [--limit N]
+clio trace phases <runId> [--db PATH]
+clio trace tail <runId> [--follow] [--db PATH]
+clio trace procs <runId> [--db PATH]
+clio trace sql <SELECT query> [--db PATH]
+clio trace ui [--db PATH] [--port N]
+```
+
+### Subcommand Specifications
+
+1. **`runs`**: Lists recent dispatch runs from the trace store. `--limit` sets maximum rows (1 to 500, default 50). Formats status, start time, total tokens, total USD cost, and run ID.
+2. **`phases`**: Lists sequence phases for a designated `runId`. Displays status, attempt, owner, total tokens, USD cost, and phase name.
+3. **`tail`**: Displays append-ordered event rows for a designated `runId`. When `--follow` is specified, polls for new events every 500 ms until two consecutive idle polls observe a finished run status.
+4. **`procs`**: Lists orchestrator and worker process executions associated with a `runId`. Displays state (`live` or `ended`), PID, process kind, name, and command string.
+5. **`sql`**: Executes a single read-only `SELECT` or `WITH` SQL statement against the SQLite trace database. The subcommand enforces read-only access: queries containing semicolons or data mutation keywords (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, etc.) are rejected with exit code 2. BigInt numbers in result objects format as JSON strings.
+6. **`ui`**: Launches the web-based interactive trace viewer server on the specified `--port` (default 0). This subcommand requires a source checkout containing `apps/trace-viewer/server.mjs`.
+

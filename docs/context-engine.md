@@ -1,11 +1,11 @@
 # Context Engine
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/context_blueprint.html](html/context_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/context_blueprint.html](html/context_blueprint.html) (Version: 0.3.0).
 
 Clio Coder tracks context pressure, records per-turn snapshots, and protects the provider context with bounded tool results plus single-threshold compaction.
 
-Source of truth lives in `src/domains/session/context-accounting.ts`, `src/domains/session/context-ledger.ts`, `src/domains/session/compaction/`, and the chat-loop integration in `src/interactive/chat-loop.ts`.
+Source of truth lives in `src/domains/session/context-accounting.ts`, `src/domains/session/context-ledger.ts`, `src/domains/session/compaction/`, `src/domains/session/migrations/index.ts`, and the chat-loop integration in `src/interactive/chat-loop.ts`.
 
 ## Context window resolution
 
@@ -18,6 +18,8 @@ Local-native runtimes use a recommended minimum desired window of 128,000 tokens
 The estimator in `context-accounting.ts` uses a four-characters-per-token family for hot-path accounting. It estimates system prompt, tools, messages, pending input, and runtime categories without calling a model tokenizer on every TUI refresh.
 
 At submit time, Clio captures a context snapshot and persists a slim JSONL record under the session directory as `context-snapshots.jsonl`. The slim record keeps token counts, segment metadata, signatures, and hashes, not the heavy prompt or transcript text. When provider usage arrives, `reconcileSnapshot` folds actual input and output counts back into the ledger.
+
+Session metadata enforces session format version 3 (`CURRENT_SESSION_FORMAT_VERSION = 3`). Before resuming any session, Clio checks `sessionFormatVersion`; earlier formats are rejected outright with an error rather than silently migrated.
 
 The `/context` overlay and footer meter read the same ledger categories: `system`, `tools`, `agents`, `skills`, `memory`, `project`, `messages`, `pending`, `reserve`, `free`, and `streaming`.
 
@@ -79,6 +81,8 @@ and restamp `.clio/state.json` without reading or writing `CLIO.md`. The CLI
 flag `--wiki` is the only refresh path that may update the Markdown wiki, and
 it only runs when an existing wiki metadata file is present. Regenerating or
 updating handbook prose stays with `/context init`.
+
+`clio context init` is model-driven by default. The `--heuristic` flag is the sole deterministic flag for offline handbook generation. The `--propose` flag writes ignored drafts to `.clio/proposals/`, `--apply` updates from the existing handbook, and `--rewrite` generates a fresh handbook.
 
 ---
 

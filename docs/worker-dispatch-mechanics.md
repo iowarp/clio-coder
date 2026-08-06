@@ -1,7 +1,7 @@
 # Worker Dispatch Mechanics
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive NDJSON protocol timeline stream and heartbeat watchdog simulator is located at [docs/html/worker_dispatch_blueprint.html](html/worker_dispatch_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive NDJSON protocol timeline stream and heartbeat watchdog simulator is located at [docs/html/worker_dispatch_blueprint.html](html/worker_dispatch_blueprint.html) (Version: 0.3.0).
 
 This document describes the design and lifecycle of Clio Coder dispatched workers, focusing on the spawning sequence, execution isolation, the standard input/output NDJSON communication loop, and permission escalation routing.
 
@@ -24,7 +24,7 @@ When the orchestrator dispatches a task to a fleet agent (such as via the `dispa
 2. **Environment Scrubbing:**
    To ensure clean execution, the child process runs with a sanitized environment. The orchestrator scrubs user-interactive flags (e.g., `CLIO_INTERACTIVE` is removed from `process.env`) to prevent child workers from attempting to mount TUI elements or intercept standard input signals.
 3. **Spec Injection & Attestation Handshake:**
-   The orchestrator serializes a `WorkerSpec` JSON document and writes it as the very first line of `stdin` to the child worker. Before reaching a model, every worker announces its attestation on the structured stderr control lane: protocol version, pid, process-group id, host, settings fingerprint, a digest it recomputed from the specification bytes it received, runtime, target, endpoint identity hash, wire model, effective tool signature, and bounded resource facts. The orchestrator compares each field against the approved plan and terminates a drifting peer instead of running it. Bulk NDJSON on `stdout` is accepted only once that attestation verifies.
+   The orchestrator serializes a `WorkerSpec` JSON document and writes it as the very first line of `stdin` to the child worker. Before reaching a model, every worker announces its attestation on the structured stderr control lane (`@clio-control/1 ` prefix): protocol version (`WORKER_PROTOCOL_VERSION = 1`), spec version, process ID, process group ID (or null), host, settings fingerprint, worker-computed spec digest (`specDigest`), runtime ID, target ID, endpoint identity hash (`endpointIdentityHash`), wire model ID, effective tool signature, and bounded node resource facts (labels, CPU count, total memory, free memory, GPU count, VRAM, and resident models). The orchestrator compares each field against the approved plan and terminates a drifting peer instead of running it. Bulk NDJSON on `stdout` is accepted only once that attestation verifies.
 
 ```mermaid
 sequenceDiagram

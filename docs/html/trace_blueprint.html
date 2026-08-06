@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder Trace Store Blueprint (v0.3.0)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .subcommand-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+      transition: border-color 0.2s ease;
+    }
+    .subcommand-card:hover {
+      border-color: var(--border-card-hover);
+    }
+    .subcommand-title {
+      font-family: var(--font-mono);
+      color: var(--color-cyan);
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    .badge-tag {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      background: rgba(0, 212, 219, 0.1);
+      color: var(--color-cyan);
+      border: 1px solid rgba(0, 212, 219, 0.3);
+      margin-right: 0.5rem;
+    }
+    .table-schema-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .schema-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .schema-card h4 {
+      font-family: var(--font-mono);
+      color: var(--color-orange);
+      margin-bottom: 0.5rem;
+    }
+    .sql-demo-box {
+      background: rgba(13, 20, 38, 0.8);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-top: 1.5rem;
+    }
+    .sql-input {
+      width: 100%;
+      background: #060911;
+      border: 1px solid var(--border-card);
+      color: var(--text-main);
+      font-family: var(--font-mono);
+      padding: 0.75rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      margin-bottom: 0.75rem;
+    }
+    .sql-input:focus {
+      outline: none;
+      border-color: var(--color-cyan);
+    }
+    .sql-result {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      background: #04060c;
+      padding: 1rem;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      max-height: 250px;
+      overflow-y: auto;
+    }
+    .sql-result.error {
+      color: var(--color-rose);
+      border-left: 3px solid var(--color-rose);
+    }
+    .sql-result.success {
+      color: var(--color-emerald);
+      border-left: 3px solid var(--color-emerald);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Trace Store Blueprint</h1>
+        <p style="color: var(--text-muted);">Interactive reference and query validator simulator for the SQLite trace mirror (v0.3.0)</p>
+      </div>
+      <div>
+        <span class="badge-tag">v0.3.0</span>
+        <span class="badge-tag" style="color: var(--color-orange); border-color: rgba(255, 126, 41, 0.3); background: rgba(255, 126, 41, 0.1);">Trace Mirror</span>
+      </div>
+    </header>
+
+    <div style="margin-bottom: 2rem;">
+      <p>Clio's trace database is a rebuildable, queryable SQLite mirror located at <code>&lt;stateDir&gt;/trace.sqlite</code>. Authoritative state remains in receipts, ledgers, and gate artifacts. Removing <code>trace.sqlite</code> causes no data loss. Writers enforce WAL journal mode and busy_timeout=5000; readers open in read-only mode.</p>
+    </div>
+
+    <main>
+      <section style="margin-bottom: 3rem;">
+        <h2>clio trace Subcommands</h2>
+        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">The CLI exposes six dedicated subcommands for operational tracing and diagnostics:</p>
+
+        <div class="subcommand-card">
+          <div class="subcommand-title">clio trace runs [--db PATH] [--limit N]</div>
+          <p>Queries and formats recent execution runs up to limit N (1 to 500, default 50). Displays run status, start timestamp, total tokens, USD cost, and run ID.</p>
+        </div>
+
+        <div class="subcommand-card">
+          <div class="subcommand-title">clio trace phases &lt;runId&gt; [--db PATH]</div>
+          <p>Lists execution phases for a specified run. Displays phase status, attempt index, owner, token count, USD cost, and phase name.</p>
+        </div>
+
+        <div class="subcommand-card">
+          <div class="subcommand-title">clio trace tail &lt;runId&gt; [--follow] [--db PATH]</div>
+          <p>Streams append-ordered trace events by SQLite <code>rowid</code>. When <code>--follow</code> is enabled, polls every 500 ms until two consecutive idle polls observe a completed run status.</p>
+        </div>
+
+        <div class="subcommand-card">
+          <div class="subcommand-title">clio trace procs &lt;runId&gt; [--db PATH]</div>
+          <p>Displays process records (orchestrator and worker) registered for a run. Shows process state (<code>live</code> or <code>ended</code>), PID, kind, name, and command line.</p>
+        </div>
+
+        <div class="subcommand-card">
+          <div class="subcommand-title">clio trace sql &lt;SELECT query&gt; [--db PATH]</div>
+          <p>Executes a single read-only <code>SELECT</code> or <code>WITH</code> query against the trace store. Rejects semicolons and data modification statements (<code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, etc.).</p>
+        </div>
+
+        <div class="subcommand-card">
+          <div class="subcommand-title">clio trace ui [--db PATH] [--port N]</div>
+          <p>Launches the web-based trace viewer server on the specified port. Requires source checkout with <code>apps/trace-viewer/server.mjs</code>.</p>
+        </div>
+      </section>
+
+      <section style="margin-bottom: 3rem;">
+        <h2>Database Schema</h2>
+        <div class="table-schema-grid">
+          <div class="schema-card">
+            <h4>runs</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Terminal run records, statuses, models, targets, node, timing, total tokens, total USD cost.</p>
+          </div>
+          <div class="schema-card">
+            <h4>phases</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Sequence phases, attempt index, retries, worker owner, itemized token and dollar spend, context occupancy.</p>
+          </div>
+          <div class="schema-card">
+            <h4>events</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Append-ordered events by rowid. Tool calls are spans with ended_at; point events have null ended_at.</p>
+          </div>
+          <div class="schema-card">
+            <h4>envelopes</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Agent output envelopes, valid flags, attempt indices, and output types.</p>
+          </div>
+          <div class="schema-card">
+            <h4>gate_results</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Typed reviewer/judge verdicts, passed status, and itemized checks JSON array.</p>
+          </div>
+          <div class="schema-card">
+            <h4>agent_sessions</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Mirrored worker/model/session context occupancy records.</p>
+          </div>
+          <div class="schema-card">
+            <h4>processes</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Registered worker processes, PIDs, redacted command string, and SHA-256 command digest.</p>
+          </div>
+          <div class="schema-card">
+            <h4>meta</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Schema version metadata table (enforces schema_version = 1).</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Interactive Read-Only SQL Query Simulator</h2>
+        <p style="color: var(--text-muted);">Test SQL queries against the strict <code>clio trace sql</code> read-only validator rule set:</p>
+        
+        <div class="sql-demo-box">
+          <input type="text" id="sqlQueryInput" class="sql-input" value="SELECT run_id, status, total_tokens, total_cost_usd FROM runs LIMIT 10">
+          <button type="button" id="sqlTestBtn" style="background: var(--gradient-main); color: #000; border: none; padding: 0.5rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; margin-bottom: 1rem;">Validate Query</button>
+          <div id="sqlOutput" class="sql-result success">Validation passed: Read-only SELECT query is valid.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const input = document.getElementById("sqlQueryInput");
+      const btn = document.getElementById("sqlTestBtn");
+      const output = document.getElementById("sqlOutput");
+
+      function validateSql(sql) {
+        const trimmed = sql.trim();
+        if (!/^(SELECT|WITH)\b/i.test(trimmed)) {
+          return { ok: false, msg: "Error: trace sql accepts SELECT or read-only WITH queries only." };
+        }
+        if (trimmed.includes(";")) {
+          return { ok: false, msg: "Error: trace sql accepts exactly one statement (no semicolons allowed)." };
+        }
+        if (/\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP|ATTACH|DETACH|VACUUM|PRAGMA)\b/i.test(trimmed)) {
+          return { ok: false, msg: "Error: trace sql query is not read-only (mutation keyword detected)." };
+        }
+        return { ok: true, msg: "Validation passed: Query is strictly read-only SELECT/WITH." };
+      }
+
+      btn.addEventListener("click", () => {
+        const result = validateSql(input.value);
+        if (result.ok) {
+          output.className = "sql-result success";
+          output.textContent = result.msg;
+        } else {
+          output.className = "sql-result error";
+          output.textContent = result.msg;
+        }
+      });
+    });
+  </script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Middleware &amp; Components Blueprint (v0.2.9)</title>
+  <title>Clio Coder Middleware &amp; Components Blueprint (v0.3.0)</title>
   
   <style>
     :root {
@@ -429,7 +429,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.2.9</span>
+        <span class="version-badge">Clio Coder v0.3.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -550,12 +550,13 @@
         <ul style="margin-left: 2rem; margin-bottom: 1.5rem; color:var(--text-muted)">
           <li style="margin-bottom:0.4rem;"><strong>Hook IDs</strong>: <code>before_tool</code>, <code>after_tool</code>, <code>turn_start</code>, <code>turn_end</code>, <code>on_compaction</code>.</li>
           <li style="margin-bottom:0.4rem;"><strong>Effect Kinds</strong>: <code>inject_reminder</code>, <code>annotate_tool_result</code>, <code>block_tool</code>, <code>protect_path</code>, <code>request_continuation</code>.</li>
+          <li style="margin-bottom:0.4rem;"><strong>Phase-Aware Budgets</strong> (<code>DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS</code>): <code>before_tool</code>: 25ms, <code>after_tool</code>: 25ms, <code>turn_start</code>: 50ms, <code>turn_end</code>: 75ms, <code>on_compaction</code>: 150ms.</li>
         </ul>
       </div>
     </main>
 
     <footer>
-      <p>Clio Coder Middleware spec &bull; Version 0.2.9</p>
+      <p>Clio Coder Middleware spec &bull; Version 0.3.0</p>
     </footer>
   </div>
 

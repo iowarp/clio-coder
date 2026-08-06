@@ -1,7 +1,7 @@
 # Commands and Modes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.3.0).
 
 
 Clio Coder is a terminal-first alpha harness. This page keeps the command
@@ -22,6 +22,8 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio --version` | Print the installed version. |
 | `clio --api-key <key>` | Override the active target API key for one invocation. |
 | `clio --no-context-files` / `clio -nc` | Skip `CLIO.md` project-context injection for one invocation. |
+| `clio --no-skills` | Disable skill discovery for one invocation while still honoring explicit `--skill` paths. |
+| `clio --skill <path>` | Load one explicit skill file or directory for one invocation (repeatable). |
 | `clio configure` | Run the configuration wizard. |
 | `clio configure --list` | List user-facing runtime ids. |
 | `clio configure --list --all` | List every registered runtime, including aliases. |
@@ -76,13 +78,16 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | --- | --- |
 | `--target <id>` | One-run main-agent or dispatch target override. |
 | `--model <wireId>` | One-run model override. |
-| `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `--autonomy <level>` | One-run autonomy override: `read-only`, `suggest`, `auto-edit`, or `full-auto`; it does not change saved settings. |
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. |
 | `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |
 | `--kv-cache-mode <mode>` | One-run KV-cache override for supported local runtimes: `f16`, `f32`, `none`, `false`, `q8_0`, `q4_0`, `q4_1`, `iq4_nl`, `q5_0`, or `q5_1`. |
 | `--json` | Stream JSONL events for main-agent runs; dispatch streams events and receipt JSON. |
+| `--json-events <mode>` | Main-agent JSON stream mode: `full` or `terminal`; implies `--json`. |
+| `--session <id>` | Append this turn to an existing session identified by `<id>`. |
+| `--continue` | Append this turn to the most recent session for the current working directory. |
 | `--agent <recipe-id>` | Dispatch a fleet agent instead of the main agent. Unknown ids fail fast. |
 | `--skill <path>` | Load one explicit skill file or skill directory for this run. Repeatable. |
 | `--no-skills` | Disable skill discovery for this run while still honoring explicit `--skill` paths. |
@@ -92,6 +97,24 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `--require <capability>` | Require a target capability for dispatch. Repeatable. |
 | `--steer-channel <path>` | Read live steering lines from a FIFO or an appended regular file to steer the active run. |
 
+### Headless Session Continuity
+
+A headless turn (`clio run`) starts a fresh session unless `--session <id>` or `--continue` specifies a session to append to.
+- `--session <id>` appends the turn to the session with id `<id>`.
+- `--continue` appends the turn to the most recent session recorded for the current working directory.
+- `--session` and `--continue` are mutually exclusive. Specifying both causes the invocation to fail with exit code 2 before execution.
+- Session continuity options apply strictly to main-agent execution. They are non-applicable to `--agent` fleet dispatches because dispatched agents execute in isolated worker processes with independent transcripts; specifying session flags alongside `--agent` exits with code 2.
+- A named session that cannot be resumed (such as an unknown session ID or unreadable history) fails the run with exit code 2 before any model call is initiated.
+- The session ID is discoverable via the `session` event when running under `--json` mode and on stderr via the `clio run: session <id>` line in text mode. Standard output remains reserved for the assistant answer alone.
+
+### JSON Event Streaming and Wire Projection Promise
+
+When `--json` or `--json-events <mode>` (`full` | `terminal`) is passed, `clio run` streams structured JSONL events.
+- **Wire Projection Promise:** Each piece of turn content crosses the wire exactly once.
+- Intermediate `message_update` events are dropped to prevent quadratic snapshot duplication over stdout.
+- `text_delta` and `thinking_delta` events stream incremental text deltas rather than accumulating message snapshots.
+- `agent_end` events carry segment summary metrics (`messageCount` and a `usage` object containing `input`, `output`, `cacheRead`, `cacheWrite`, `reasoning`, `totalTokens`, `costUsd`, `apiCalls`, and `measured`) instead of duplicating the full message transcript.
+- `turn_end` preserves the final assistant message while dropping `toolResults` array objects, each of which already crossed the wire in an preceding `tool_execution_end` event.
 
 Example:
 

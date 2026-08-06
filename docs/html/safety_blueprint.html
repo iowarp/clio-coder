@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Safety Model Blueprint (v0.2.9)</title>
+  <title>Clio Coder Safety Model Blueprint (v0.3.0)</title>
   
   <style>
     :root {
@@ -581,7 +581,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.2.9</span>
+        <span class="version-badge">Clio Coder v0.3.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -859,7 +859,7 @@ commands:
         <p>Source of truth: <code>src/domains/safety/**</code>, <code>src/tools/registry.ts</code>, <code>src/tools/bootstrap.ts</code>, and <code>damage-control-rules.yaml</code>.</p>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Two axes: autonomy and the safety net</h3>
-        <p>The <code>autonomy</code> setting (<code>read-only</code> | <code>suggest</code> | <code>auto-edit</code> | <code>full-auto</code>) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level.</p>
+        <p>The <code>autonomy</code> setting (<code>read-only</code> | <code>suggest</code> | <code>auto-edit</code> | <code>full-auto</code>) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. Effective autonomy is resolved through <code>resolveEffectiveAutonomy</code> and <code>resolveBaselineAutonomy</code> in <code>src/entry/orchestrator.ts</code> across all admission surfaces. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level.</p>
         
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Enforcement path</h3>
         <p>Every tool call, orchestrator or worker, evaluates in this order:</p>
@@ -910,13 +910,16 @@ commands:
           <li style="margin-bottom: 0.5rem;"><strong>Claude Code over ACP (Advisory Gating):</strong> Drives the agent over ACP delegation. Gating is <strong>advisory</strong> because Claude self-governs its tools; <code>claude-sdk</code> is preferred for fully enforced safety.</li>
         </ul>
 
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Write boundaries: detect-and-rollback</h3>
+        <p>Post-run enforcement of declared write boundaries is strictly detect-and-rollback, never sandboxing (<code>src/domains/dispatch/write-boundary.ts</code>). Nothing prevents a write during step execution: no container, no seccomp filter, and no filesystem interception. After execution, the orchestrator compares the checkout against pre-step snapshots, rolls back unpermitted modifications, and fails the step with a <code>WriteBoundaryViolation</code>.</p>
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Receipts and evidence</h3>
         <p>Safety decisions feed receipts, audit rows, and evidence. The interactive <code>/view</code> surface can inspect receipt artifacts without mutating them, detailing rules matched, command hashes, and active decisions counts.</p>
       </div>
     </main>
 
     <footer>
-      <p>Clio Coder Safety Model Specification Dashboard &bull; Version 0.2.9</p>
+      <p>Clio Coder Safety Model Specification Dashboard &bull; Version 0.3.0</p>
     </footer>
   </div>
 

@@ -1,7 +1,7 @@
 # Configuration, Targets, Runtimes, and Auth
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.3.0).
 
 Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP/native/pi-ai-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.
 
@@ -547,6 +547,16 @@ The command `clio targets profile` supports several subcommands to manage fleet 
 
 Inside the TUI, `/targets` is the target management surface. The hub lists health, auth, runtime, model, capabilities, ready or unavailable reason, URL, and discovered models. Press `u` on a row to switch the active orchestrator target; the model is rebased to that target's default, matching `/settings` and `clio targets use`. Press `f` to set the selected target as the fleet default. Press `c` on a row for the same API-key, OAuth, or no-auth connection flow used by the auth system.
 
+### Context-Window Provenance
+
+Target status resolution tracks provenance explicitly in `TargetStatus.contextWindowProvenance`. The provenance names which layer answered the context window query:
+- `configured`: Explicitly set by the operator via `--context-window` or `capabilities.contextWindow`.
+- `discovered`: Live target probe discovered the context limit directly from the endpoint.
+- `catalog`: Resolved from the model catalog knowledge base.
+- `runtime-default`: Unanswered placeholder fall-back provided by the runtime descriptor.
+
+When a probed target reports no context window, Clio uses the runtime descriptor default as an unverified guess. In `clio targets` text output, this renders as `ctx <N> (unverified runtime default)`. In JSON output, `contextWindowProvenance` is set to `"runtime-default"`. During target creation via `clio configure`, Clio emits a warning: `warning: the target reported no context window; Clio will use the runtime default as a guess. Set one with --context-window.`. This design ensures that a number the operator never chose and the server never claimed will not read like a verified capability.
+
 ---
 
 ## Local Model Quirks
@@ -631,6 +641,8 @@ Some hidden aliases exist for backward compatibility or special surfaces; use `c
 ---
 
 ## Auth
+
+Auth state is exposed via `providers.auth` and persisted through `openAuthStorage()`.
 
 ```bash
 clio auth list

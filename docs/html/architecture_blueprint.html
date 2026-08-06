@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Architecture Blueprint (v0.2.9)</title>
+  <title>Clio Coder Architecture Blueprint (v0.3.0)</title>
   
   <style>
     :root {
@@ -440,7 +440,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.2.9</span>
+        <span class="version-badge">Clio Coder v0.3.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -498,7 +498,7 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
               Boundary Rule Validator
             </h2>
-            <p>Simulate imports to test project boundaries (Rule 1, Rule 2, and Rule 3 constraints).</p>
+            <p>Simulate imports to test project boundaries (Rules 1, 2, 3, 4, and 5 constraints).</p>
             
             <div class="form-group">
               <label for="importSource">Source File Path</label>
@@ -507,6 +507,7 @@
                 <option value="src/worker/rehydrate.ts">src/worker/rehydrate.ts</option>
                 <option value="src/domains/safety/policy.ts">src/domains/safety/policy.ts</option>
                 <option value="src/domains/agents/registry.ts">src/domains/agents/registry.ts</option>
+                <option value="src/tools/bash.ts">src/tools/bash.ts</option>
               </select>
             </div>
 
@@ -517,6 +518,8 @@
                 <option value="src/domains/providers/plugins.ts (value import)">src/domains/providers/plugins.ts (value import)</option>
                 <option value="src/domains/safety/extension.ts (value import)">src/domains/safety/extension.ts (value import)</option>
                 <option value="src/domains/safety/policy-engine.ts (value import)">src/domains/safety/policy-engine.ts (value import)</option>
+                <option value="src/interactive/chat-panel.ts (value import)">src/interactive/chat-panel.ts (value import)</option>
+                <option value="src/entry/orchestrator.ts (value import)">src/entry/orchestrator.ts (value import)</option>
               </select>
             </div>
 
@@ -654,11 +657,13 @@
         </table>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Boundary Invariants</h3>
-        <p>Boundary rules are test-enforced by <code>npm run check:boundaries</code>. Three rules are strictly enforced:</p>
+        <p>Boundary rules are test-enforced by <code>npm run check:boundaries</code>. Five rules constrain dependency <strong>direction</strong>, never import <strong>form</strong>:</p>
         <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
-          <li style="margin-bottom: 0.5rem;"><strong>Rule 1: pi-ai value imports stay in <code>src/engine/**</code></strong><br>Only files under <code>src/engine/**</code> may value-import `@earendil-works/pi-*` packages. Outside `src/engine`, only type-only imports are allowed.</li>
-          <li style="margin-bottom: 0.5rem;"><strong>Rule 2: workers do not value-import domains except runtime rehydration</strong><br><code>src/worker/**</code> may not value-import `src/domains/**` except the worker-safe provider runtime rehydration modules (plugins.ts, registry.ts, runtimes/builtins.ts).</li>
+          <li style="margin-bottom: 0.5rem;"><strong>Rule 1: @earendil-works/* imports stay in <code>src/engine/**</code></strong><br>Only files under <code>src/engine/**</code> may import `@earendil-works/*` packages (value or type-only). Domains take erased shapes from `src/engine/types.ts`.</li>
+          <li style="margin-bottom: 0.5rem;"><strong>Rule 2: workers do not value-import domains except runtime rehydration</strong><br><code>src/worker/**</code> may not value-import `src/domains/**` except worker-safe provider runtime rehydration modules (plugins.ts, registry.ts, runtimes/builtins.ts).</li>
           <li style="margin-bottom: 0.5rem;"><strong>Rule 3: domains do not import each other's `extension.ts`</strong><br>A file under <code>src/domains/&lt;x&gt;/**</code> must not import `src/domains/&lt;y&gt;/extension.ts` for `y != x`.</li>
+          <li style="margin-bottom: 0.5rem;"><strong>Rule 4: tool substrate is surface-agnostic</strong><br>Files under <code>src/tools/**</code> may never import <code>src/interactive/**</code> (value or type-only).</li>
+          <li style="margin-bottom: 0.5rem;"><strong>Rule 5: one-way entry point composition</strong><br>Turn modules in <code>src/interactive/turn-*.ts</code> and <code>chat-loop.ts</code> may never import <code>src/entry/**</code>.</li>
         </ul>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Command Verification</h3>
@@ -670,7 +675,7 @@ npm run build                # compile build package</code></pre>
     </main>
 
     <footer>
-      <p>Clio Coder Architecture Spec Dashboard &bull; Version 0.2.9</p>
+      <p>Clio Coder Architecture Spec Dashboard &bull; Version 0.3.0</p>
     </footer>
   </div>
 
@@ -758,12 +763,10 @@ npm run build                # compile build package</code></pre>
       let passed = true;
       let reason = "Import conforms to Clio Coder boundaries.";
 
-      // Rule 1 check: value import of pi-ai outside src/engine
-      if (target.includes('@earendil-works/pi-ai') && type === 'value') {
-        if (!src.startsWith('src/engine/')) {
-          passed = false;
-          reason = "Rule 1 Violation: Only files under src/engine/** may value-import @earendil-works/pi-* packages.";
-        }
+      // Rule 1 check: import of pi-ai outside src/engine
+      if (target.includes('@earendil-works/') && !src.startsWith('src/engine/')) {
+        passed = false;
+        reason = "Rule 1 Violation: Only files under src/engine/** may import @earendil-works/* packages.";
       }
 
       // Rule 2 check: workers value import of domains outside allowable rehydration modules
@@ -775,13 +778,25 @@ npm run build                # compile build package</code></pre>
       }
 
       // Rule 3 check: domains importing other extension.ts
-      if (src.startsWith('src/domains/') && target.includes('extension.ts') && type === 'value') {
+      if (src.startsWith('src/domains/') && target.includes('extension.ts')) {
         const srcSub = src.split('/')[2];
         const tgtSub = target.split('/')[2];
         if (srcSub !== tgtSub) {
           passed = false;
           reason = `Rule 3 Violation: src/domains/${srcSub}/** cannot import src/domains/${tgtSub}/extension.ts.`;
         }
+      }
+
+      // Rule 4 check: tools importing interactive
+      if (src.startsWith('src/tools/') && target.includes('src/interactive/')) {
+        passed = false;
+        reason = "Rule 4 Violation: src/tools/** may not import src/interactive/** (the tool substrate is surface-agnostic).";
+      }
+
+      // Rule 5 check: chat loop turn modules importing entry
+      if ((src.includes('chat-loop.ts') || src.includes('turn-')) && target.includes('src/entry/')) {
+        passed = false;
+        reason = "Rule 5 Violation: Chat loop turn modules may not import src/entry/** (composition flows one way).";
       }
 
       if (passed) {

@@ -1,7 +1,7 @@
 # Clio TUI Design System
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive color/glyph token laboratory and terminal transcript preview renderer is located at [docs/html/tui_design_blueprint.html](html/tui_design_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive color/glyph token laboratory and terminal transcript preview renderer is located at [docs/html/tui_design_blueprint.html](html/tui_design_blueprint.html) (Version: 0.3.0).
 
 This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under [src/interactive/](../src/interactive/).
 
@@ -69,6 +69,7 @@ All symbols are defined as constants in [src/interactive/theme/glyphs.ts](../src
 | `↑ ↓` | `up/down` | Input and output tokens; scroll | Everywhere. |
 | `⚡` | `speed` | Throughput | Everywhere. |
 | `▰ ▱` | `contextFull/contextFree` | Context meter cells | Meters. |
+| `▒` | `contextReserve` | Autocompact reserve cells | Context meters. |
 | `█ ░` | `barFull/barEmpty` | Wide-glyph fallback | Meters. |
 | `│` | `rail` | Body rail and section bar | Tool bodies, thinking rail, column separators. |
 | `─` | (rules) | Horizontal rule and borders | Frames and rules. |

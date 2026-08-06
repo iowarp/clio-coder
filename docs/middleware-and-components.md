@@ -1,7 +1,7 @@
 # Middleware and Component Registry
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard with an interactive component scanner and a dynamic hook-and-effect pipeline is located at [docs/html/middleware_blueprint.html](html/middleware_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive dashboard with an interactive component scanner and a dynamic hook-and-effect pipeline is located at [docs/html/middleware_blueprint.html](html/middleware_blueprint.html) (Version: 0.3.0).
 
 Clio Coder has two related but separate surfaces:
 
@@ -79,7 +79,7 @@ Snapshots are useful in reviews because they show behavior-affecting changes eve
 
 ## Middleware contract
 
-Source: `src/domains/middleware/types.ts`, `validate.ts`, and `runtime.ts`.
+Source: `src/domains/middleware/types.ts`, `validate.ts`, `budget.ts`, and `runtime.ts`.
 
 Supported hooks:
 
@@ -101,7 +101,16 @@ Supported effect kinds:
 | `protect_path` | Register a protected artifact path in session state. |
 | `request_continuation` | Ask the chat loop for one bounded automatic continuation. |
 
-Declarative rules run before coded registrations. Scoped registrations match by hook and, for tool hooks, by tool name. Hook failures emit diagnostics and later hooks still run. Soft-budget overruns are reported but do not abort the turn. The orchestrator and workers share the middleware contract, but worker guard state is process-local.
+Declarative rules run before coded registrations. Scoped registrations match by hook and, for tool hooks, by tool name. Hook failures emit diagnostics and later hooks still run.
+
+Middleware hook budgets are phase-aware through `DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS`:
+- `before_tool`: 25 ms
+- `after_tool`: 25 ms
+- `turn_start`: 50 ms
+- `turn_end`: 75 ms
+- `on_compaction`: 150 ms
+
+Per-phase budgets can be overridden via `CLIO_HOOK_BUDGET_<PHASE>_MS` or global `CLIO_HOOK_BUDGET_MS`. Warmup grace exempts initial calls (`DEFAULT_HOOK_BUDGET_WARMUP_CALLS = 1`), and steady-state warnings trigger when at least 3 of the last 5 post-warmup calls exceed budget (`DEFAULT_HOOK_BUDGET_WINDOW = 5`, `DEFAULT_HOOK_BUDGET_THRESHOLD = 3`). Overruns are reported but do not abort the turn. The orchestrator and workers share the middleware contract, but worker guard state is process-local.
 
 Middleware reminders are visible request text, not hidden prompt state. `turn_start` reminders flush into the same accepted request; `turn_end` reminders flush once on the next request. The built-in stalled-turn rule can request one automatic continuation for a user prompt, then stops rather than looping forever.
 

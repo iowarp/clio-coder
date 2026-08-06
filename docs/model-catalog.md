@@ -1,7 +1,7 @@
 # Model Catalog, Runtime Refresh, and Field Notes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.3.0).
 
 Clio Coder treats a selectable model as the intersection of three sources:
 
@@ -13,7 +13,7 @@ Clio Coder treats a selectable model as the intersection of three sources:
 
 - `/targets`: `r` probes the selected target; `R` probes all targets.
 - `/model` or `/models`: `r` refreshes the selected row's target; `R` refreshes all targets.
-- `clio models`: probes live targets before printing the CLI model list. Use `--offline` to skip live probing. The former `--probe` and `--no-probe` flags are rejected.
+- `clio models`: probes live targets by default before printing the CLI model list. Use `--offline` to skip live probing. Former `--probe` and `--no-probe` flags are gone.
 
 Configured `wireModels` and a target `defaultModel` remain selectable before a
 live catalog is known; Clio labels those rows as `configured` or `default`.
@@ -27,6 +27,8 @@ edits require a restart or rebuild before they affect capability and quirk
 matching.
 
 Live provider probes are the preferred source for loaded context and per-model metadata. Clio keeps a 128k local-coding context recommendation, but it no longer treats that recommendation as provider truth for unknown local models: effective context comes from live probe data, an explicit target override, a model catalog/KB entry, or the runtime descriptor default. If the live target is below the recommendation, Clio reports a warning rather than silently inflating the displayed window.
+
+`probeCapabilitiesForModel` is the one exact-id selector. When a router serves several models, capability resolution queries `probeCapabilitiesForModel` to ensure probe data is extracted only from the `/v1/models` row keyed to its own exact wire model ID.
 
 Transient probe failures preserve the last-good catalog, load states,
 capabilities, and notes for the same target identity, but the target health is

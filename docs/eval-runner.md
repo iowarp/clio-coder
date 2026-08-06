@@ -1,7 +1,7 @@
 # Clio Coder Local Evaluation Runner
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive task suite validator, subprocess execution simulator, and compare calculator is located at [docs/html/eval_blueprint.html](html/eval_blueprint.html) (Version: 0.2.9).
+> **Interactive Spec Available:** An interactive task suite validator, subprocess execution simulator, and compare calculator is located at [docs/html/eval_blueprint.html](html/eval_blueprint.html) (Version: 0.3.0).
 
 The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows.
 
@@ -165,3 +165,41 @@ Under the hood, these are parsed and wrapped into a Suite v2 adapter with:
 * Runner kind: `external-command` (executing task `setup` commands)
 * Verify commands: Task `verifier` commands
 * Timeout and tags mapped directly
+
+---
+
+## Token Accounting & Provenance
+
+Clio maintains two distinct token accounting streams with different provenances. These accounts are never merged, reconciled, or treated as interchangeable:
+
+1. **`tokens.*` (Wire Streaming)**: Folded live off stdout from assistant `message_end` events watched by `token-stream.ts` / `createStreamInvariantFold`. This represents usage reported by the provider for assistant messages watched over the wire. On surfaces without stdout streaming (such as `clio fleet run --json`), `tokens.measured` is `false`.
+2. **`receiptUsage.*` (Journal Receipts)**: Summed from an evaluation item's run journal. Every attempt writes a receipt carrying token counts and USD cost authenticated against its own ledger envelope.
+
+### Fail-Closed Reporting
+Both accounting streams report unmeasured state with no counts at all rather than a numeric zero. Reporting zero for an unmeasured run would falsely claim the run cost nothing. On an unmeasured run, `tokens.total` resolves to `null` and fails closed on metric threshold comparisons.
+
+---
+
+## Eval Artifact Format (v4)
+
+Evaluation artifacts use format version 4 (`EvalArtifactV4`). Summary token metrics report `measuredRuns` out of total `runs`:
+
+```typescript
+export interface EvalArtifactV4 {
+  version: 4;
+  evalId: string;
+  suite: { id: string; hash: string };
+  clio: EvalClioProvenance;
+  environment: EvalEnvironmentProvenance;
+  matrix: { target: string; model: string | null; thinking: string | null };
+  summary: EvalArtifactSummaryV4;
+  results: EvalArtifactResultV4[];
+}
+```
+
+---
+
+## Task Outcome Measurement (`verify.measure`)
+
+Task outcome commands declared under `verify.measure` evaluate whether the model solved the workload and record metrics (`task.solved`, `task.exitCode`). A non-zero exit from `verify.measure` is recorded as data and **never fails the evaluation item**. Task solution outcome is a measurement, while only machinery invariant behavior operates as a gate.
+
