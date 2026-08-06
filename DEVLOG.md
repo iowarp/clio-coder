@@ -5,6 +5,101 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
+## Unreleased - v0.3.0 hardening session 6: the soak, or measuring Clio instead of the model
+
+Every benchmark Clio runs measures the model and only incidentally touches
+Clio. None of them fail when Clio breaks its own promises: a run whose receipt
+never sealed, whose seal does not authenticate, or whose stream republishes its
+own transcript scores exactly as well as a clean one, provided the model got
+the answer right. This session built the inverse and ran it.
+
+### The suite
+
+`benchmarks/soak/clio-soak.yaml` runs one seeded defect through the two
+surfaces that execute work, the headless main agent and a dispatched worker,
+and gates on the machinery. A weak model that never repairs the fixture passes;
+a strong model that repairs it fails the moment an invariant breaks. It is a
+suite v2 file on the existing `clio eval run --suite` machinery, with no new
+command and no new domain.
+
+Three readings stay in three layers and never merge:
+
+| layer | carries | fails the item? |
+| --- | --- | --- |
+| `verify.measure` | the task outcome (`task.solved`) | never |
+| `verify.assertions` | invariants only this surface can answer | yes |
+| `thresholds.fail` | invariants every surface answers | gates the suite |
+
+### The metrics
+
+`src/domains/eval/metrics/invariants.ts` reads the promises. Receipt
+invariants come from the item's own journal, stream invariants are folded live
+off the runner's stdout, and `process.orphanedChildren` reads the pid and
+process group off a receipt's attestation rather than walking a process tree.
+Absence is never zero and never success: a metric the pass could not compute is
+absent, and a threshold on an absent metric fails closed. Every one of them has
+a test proving it fails on a corrupted artifact, because a check that cannot
+fail is decoration.
+
+Making the readings possible needed three changes to the eval machinery:
+
+- Every eval item now spawns its runner with its own `CLIO_STATE_DIR`. An item
+  measures Clio, and a shared state directory mixes sibling processes' runs and
+  yesterday's sessions into the reading.
+- `workspace.setup` seeds the prepared workspace before the runner, so a
+  fixture can pin the baseline commit that the patch metrics and write-boundary
+  enforcement measure against.
+- `verify.measure` records a task outcome without gating on it. `verify.commands`
+  could not express this: a failing verifier fails the item, which is exactly
+  how "the model did not solve it" gets reported as "Clio broke".
+
+### Two defects the first runs found
+
+A suite's `thresholds.fail` was parsed, validated, and then decided nothing.
+Only a later `eval gate` invocation read it, so the run that broke a declared
+threshold still exited zero. `eval run --suite` now evaluates the suite's own
+thresholds against the artifact it just wrote, and a gate reaches per-run
+metrics so the failure names the run rather than an aggregate.
+
+Separately, a task assertion resolved against a missing metric was passing.
+`neq` was the clearest case: an absent metric is not equal to anything, so a
+run that measured nothing reported compliance with a check that never ran.
+
+### One Clio defect the soak found
+
+`clio run --agent … --json` forwarded worker events verbatim, so `agent_end`
+carried every message of the segment a second time. Each had already crossed
+the wire as its own `message_end`. Measured on a two-minute run against the
+local KAT-Coder target: 24 KB of `agent_end` republishing the 19 KB of
+`message_end` that preceded it, and the ratio grows with the answer. The
+main-agent projection had replaced exactly this with a segment summary in
+session 4; the dispatch surface never got it. Both wire projections now live in
+`json-stream.ts`.
+
+The first version of the stream invariant over-reached: it counted every
+`message_update` as a violation, which is true of the main-agent stream and
+false of the dispatch stream, where a worker publishes its increments under
+that name already slimmed of cumulative snapshots at the worker stdout seam.
+The check was corrected to the promise both surfaces actually make, that no
+event republishes a growing partial message or a segment's transcript, which is
+strictly stronger on the main-agent surface than what it replaced.
+
+### Measured
+
+Verified live and offline against the local `mini` target (KAT-Coder,
+llama.cpp). Both surfaces repaired the fixture, and both sealed one root
+receipt that authenticated against its own envelope, agreed with its exit
+status, reported measured usage, republished nothing, left no attested worker
+alive, and touched one file that was not the test. Fixing the dispatch
+`agent_end` also made `stream.segmentUsageMatchesMessages` computable on that
+surface, where the per-segment and per-message accounts now agree.
+
+Not built: the multi-file, bounded-loop, write-boundary, and compaction
+fixtures, and the chaos runner. Each needs its own end-to-end green loop before
+it means anything, and the write-boundary case in particular needs a
+deterministic way to make a model attempt a write it is not allowed, which the
+fixture design does not yet have.
+
 ## Unreleased - v0.3.0 hardening session 5: truthful eval accounting, headless continuity, benchmark grading
 
 - Eval artifacts moved to version 4. `summary.tokens` is now a discriminated
