@@ -66,12 +66,12 @@ export interface AuthResolution extends AuthStatus {
 	apiKey?: string;
 }
 
-interface StorageShapeV1 {
+interface AuthStorageShapeV1 {
 	version?: 1;
 	entries?: Record<string, { key?: string; updatedAt?: string }>;
 }
 
-interface StorageShapeV2 {
+interface AuthStorageShapeV2 {
 	version?: 2;
 	entries?: Record<string, AuthCredential>;
 }
@@ -138,7 +138,7 @@ function parseStorageData(content: string | undefined): AuthStorageData {
 		version === 1 ||
 		(version === undefined && Object.values(entries).every((value) => isRecord(value) && "key" in value))
 	) {
-		for (const [providerId, value] of Object.entries((entries as StorageShapeV1["entries"]) ?? {})) {
+		for (const [providerId, value] of Object.entries((entries as AuthStorageShapeV1["entries"]) ?? {})) {
 			if (!value || typeof value.key !== "string" || value.key.trim().length === 0) continue;
 			data[providerId] = {
 				type: "api_key",
@@ -149,7 +149,7 @@ function parseStorageData(content: string | undefined): AuthStorageData {
 		return data;
 	}
 
-	for (const [providerId, value] of Object.entries((entries as StorageShapeV2["entries"]) ?? {})) {
+	for (const [providerId, value] of Object.entries((entries as AuthStorageShapeV2["entries"]) ?? {})) {
 		const apiKey = toApiKeyCredential(value);
 		if (apiKey) {
 			data[providerId] = apiKey;
