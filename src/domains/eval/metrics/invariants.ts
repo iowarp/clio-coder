@@ -148,6 +148,54 @@ function isRootReceipt(receipt: RunReceipt): boolean {
 	return receipt.lineage === undefined || receipt.lineage.rootRunId === receipt.runId;
 }
 
+/**
+ * Worker processes this item's receipts attested, checked for survival after
+ * the item finished.
+ *
+ * A local or remote worker leads its own process group and abort escalates
+ * against the whole group, so a group that outlives the run is a child nobody
+ * is going to kill. The attested pid and group id are read from the receipt
+ * rather than by walking a process tree: the receipt names exactly the
+ * processes this run was responsible for.
+ *
+ * - `process.attestedWorkers`: workers whose receipt recorded a pid.
+ * - `process.orphanedChildren`: how many of them, or their process groups, are
+ *   still alive. Absent when no receipt carried an attestation, which is the
+ *   main-agent path: it runs in this process and attests no worker.
+ *
+ * A pid can in principle be reused between the run ending and this check, which
+ * would read as an orphan. That direction is the safe one: this reports a
+ * process that may not be Clio's, never a Clio process it failed to see.
+ */
+export function processInvariantMetrics(journal: EvalRunJournal | null): Record<string, number> {
+	if (journal === null) return {};
+	const attested = journal.receipts.flatMap((receipt) =>
+		receipt.attestation === undefined ? [] : [receipt.attestation],
+	);
+	if (attested.length === 0) return {};
+	const orphaned = attested.filter((attestation) => {
+		if (isProcessAlive(attestation.pid)) return true;
+		// Only a worker that leads its own group can be checked as a group; a pid
+		// that is not its own group leader shares a group with its parent, and
+		// asking about that group asks about the orchestrator.
+		const group = attestation.processGroupId;
+		return group !== null && group === attestation.pid && isProcessAlive(-group);
+	});
+	return { "process.attestedWorkers": attested.length, "process.orphanedChildren": orphaned.length };
+}
+
+function isProcessAlive(pid: number): boolean {
+	if (!Number.isInteger(pid) || pid === 0) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		// ESRCH is the one answer that means gone. EPERM means it exists and
+		// belongs to someone else, which is still alive.
+		return (error as NodeJS.ErrnoException).code !== "ESRCH";
+	}
+}
+
 export interface EvalStreamInvariants {
 	/** `message_update` events seen on the wire. A diagnostic, not a promise: the two headless surfaces name increments differently. */
 	messageUpdateCount: number;

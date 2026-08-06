@@ -1,11 +1,18 @@
 import { strictEqual } from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import type { RunOutcome, RunReceipt, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
+import type {
+	RunOutcome,
+	RunReceipt,
+	RunReceiptAttestation,
+	RunReceiptDraft,
+} from "../../src/domains/dispatch/types.js";
 import {
 	createStreamInvariantFold,
+	processInvariantMetrics,
 	readRunJournal,
 	receiptInvariantMetrics,
 	streamInvariantMetrics,
@@ -15,6 +22,25 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 interface SealOptions {
 	outcome?: RunOutcome;
 	exitCode?: number;
+	/** Seal a worker attestation naming this pid; omitted leaves the receipt unattested. */
+	attestedPid?: number;
+}
+
+function attestation(pid: number): RunReceiptAttestation {
+	return {
+		protocolVersion: 3,
+		host: "soak-host",
+		pid,
+		processGroupId: pid,
+		settingsFingerprint: "fingerprint",
+		specDigest: "digest",
+		targetId: "mini",
+		endpointIdentityHash: "e".repeat(64),
+		wireModelId: "model",
+		runtimeId: "llamacpp",
+		toolSignature: "tools",
+		resources: { labels: [], cpuCount: null, totalMemoryBytes: null, gpuCount: null, vramBytes: null },
+	};
 }
 
 /** Seal one genuine, integrity-valid receipt into the isolated state directory. */
@@ -97,6 +123,7 @@ async function sealRun(options: SealOptions = {}): Promise<string> {
 		nodeVersion: process.version,
 		toolCalls: 0,
 		toolStats: [],
+		...(options.attestedPid === undefined ? {} : { attestation: attestation(options.attestedPid) }),
 		sessionId: null,
 	};
 	ledger.recordReceipt(envelope.id, draft);
@@ -253,6 +280,50 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 			const metrics = metricsFor(isolated.dir, 1);
 			strictEqual(metrics["receipt.integrityValid"], true);
 			strictEqual(metrics["receipt.outcomeMatchesExit"], false);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("reports no orphan when the workers a receipt attested are gone", async () => {
+		const isolated = isolateClioEnv("clio-soak-no-orphan-");
+		try {
+			// A pid that has certainly exited: this process's own child, awaited.
+			const dead = spawnSync(process.execPath, ["-e", ""]).pid ?? 1;
+			await sealRun({ attestedPid: dead });
+
+			const metrics = processInvariantMetrics(readRunJournal(stateDirOf(isolated.dir)));
+			strictEqual(metrics["process.attestedWorkers"], 1);
+			strictEqual(metrics["process.orphanedChildren"], 0);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails process.orphanedChildren when an attested worker outlives its run", async () => {
+		const isolated = isolateClioEnv("clio-soak-orphan-");
+		const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+		try {
+			await sealRun({ attestedPid: child.pid ?? process.pid });
+
+			const metrics = processInvariantMetrics(readRunJournal(stateDirOf(isolated.dir)));
+			strictEqual(metrics["process.attestedWorkers"], 1);
+			strictEqual(metrics["process.orphanedChildren"], 1);
+		} finally {
+			child.kill("SIGKILL");
+			isolated.restore();
+		}
+	});
+
+	it("leaves the process invariants absent when no receipt attested a worker", async () => {
+		const isolated = isolateClioEnv("clio-soak-no-attestation-");
+		try {
+			// The main-agent path runs in the orchestrator's own process and
+			// attests no worker, so there is nothing here to judge.
+			await sealRun();
+
+			const metrics = processInvariantMetrics(readRunJournal(stateDirOf(isolated.dir)));
+			strictEqual(Object.keys(metrics).length, 0);
 		} finally {
 			isolated.restore();
 		}

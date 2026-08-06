@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { resolveMetricAssertion } from "../compare/thresholds.js";
 import { collectContextMetrics } from "../metrics/context.js";
-import { readRunJournal, receiptInvariantMetrics } from "../metrics/invariants.js";
+import { processInvariantMetrics, readRunJournal, receiptInvariantMetrics } from "../metrics/invariants.js";
 import { wallTimeMetric } from "../metrics/latency.js";
 import { tokenAccountingFrom } from "../metrics/tokens.js";
 import { zeroToolCallMetrics } from "../metrics/tool-calls.js";
@@ -122,8 +122,9 @@ async function runMatrixItem(
 			// over the generic post-run artifact collector.
 			...runner.metrics,
 			// Read after the runner returned and before the journal is removed:
-			// what Clio sealed for this item, judged against its own ledger.
-			...receiptInvariantMetrics(readRunJournal(stateDir), runner.exitCode),
+			// what Clio sealed for this item, judged against its own ledger, and
+			// whether the workers it attested are still running.
+			...invariantMetrics(stateDir, runner.exitCode),
 			"patch.bytes": patch.bytes,
 			"patch.filesChanged": patch.filesChanged,
 			"patch.testFilesModified": patch.testFilesModified,
@@ -174,6 +175,12 @@ async function runMatrixItem(
 		await workspace?.cleanup();
 		await rm(stateDir, { recursive: true, force: true });
 	}
+}
+
+/** Journal-derived invariants for one finished item, read from one pass over the state directory. */
+function invariantMetrics(stateDir: string, runnerExitCode: number): Record<string, number | boolean> {
+	const journal = readRunJournal(stateDir);
+	return { ...receiptInvariantMetrics(journal, runnerExitCode), ...processInvariantMetrics(journal) };
 }
 
 async function prepareWorkspace(
