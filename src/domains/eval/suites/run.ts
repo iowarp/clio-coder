@@ -24,6 +24,13 @@ import { prepareTempCopyWorkspace } from "../workspaces/temp-copy.js";
 import { expandEvalMatrix } from "./matrix.js";
 import { artifactMatrixIdentity } from "./resolve.js";
 
+class EvalWorkspaceSetupError extends Error {
+	constructor(exitCode: number, stderr: string) {
+		super(`workspace setup failed (exit ${exitCode}): ${stderr.trim()}`);
+		this.name = "EvalWorkspaceSetupError";
+	}
+}
+
 export interface RunEvalSuiteV2Options {
 	clioEntry: string;
 	now?: () => Date;
@@ -102,6 +109,10 @@ async function runMatrixItem(
 	const stateDir = await mkdtemp(resolve(tmpdir(), "clio-eval-state-"));
 	try {
 		workspace = await prepareWorkspace(loaded.baseDir, task);
+		const setup = await runCommandVerifiers(task.workspace.setup ?? [], workspace.dir, task.timeoutMs);
+		// A fixture that never came up measured nothing, so the item fails as a
+		// harness failure rather than reporting an invariant it never observed.
+		if (!setup.pass) throw new EvalWorkspaceSetupError(setup.exitCode, setup.stderr);
 		const runner = await runTaskRunner(task, target, workspace.dir, clioEntry, { CLIO_STATE_DIR: stateDir });
 		const patch = collectPatchMetrics(workspace.dir);
 		const metrics: Record<string, number | string | boolean | null> = {
@@ -118,6 +129,7 @@ async function runMatrixItem(
 			"patch.testFilesModified": patch.testFilesModified,
 			"result.pass": runner.exitCode === 0,
 			"result.failureClass": runner.exitCode === 0 ? null : "runner_failed",
+			...(await measureTaskOutcome(task, workspace.dir)),
 		};
 		const verifier = await runVerifiers(task, workspace.dir, metrics);
 		const pass = runner.exitCode === 0 && verifier.pass;
@@ -141,6 +153,7 @@ async function runMatrixItem(
 			},
 		};
 	} catch (error) {
+		const failureClass = error instanceof EvalWorkspaceSetupError ? "setup_failed" : "command_error";
 		return {
 			assignmentId: null,
 			terminalReceiptDigest: null,
@@ -148,10 +161,10 @@ async function runMatrixItem(
 			repeatIndex,
 			target: { id: target.id, model: target.model ?? null, thinking: target.thinking ?? null },
 			pass: false,
-			failureClass: "command_error",
+			failureClass,
 			metrics: {
 				"result.pass": false,
-				"result.failureClass": "command_error",
+				"result.failureClass": failureClass,
 				"verifier.exitCode": 1,
 				"latency.wallMs": 0,
 			},
@@ -184,6 +197,22 @@ async function runTaskRunner(
 	if (task.runner.kind === "context-init")
 		return runContextInitRunner(task.runner, cwd, clioEntry, task.timeoutMs, target, env);
 	return runClioRunRunner(task.runner, cwd, clioEntry, task.timeoutMs, target, env);
+}
+
+/**
+ * Run the task-outcome commands and report what they found. A nonzero exit is
+ * recorded, never raised: whether the model solved the workload is a
+ * measurement, and only the machinery's behavior is a gate. A task that
+ * declares no measure commands reports nothing rather than a passing zero.
+ */
+async function measureTaskOutcome(
+	task: LoadedEvalSuiteV2["suite"]["tasks"][number],
+	cwd: string,
+): Promise<Record<string, number | boolean>> {
+	const commands = task.verify.measure ?? [];
+	if (commands.length === 0) return {};
+	const result = await runCommandVerifiers(commands, cwd, task.timeoutMs);
+	return { "task.exitCode": result.exitCode, "task.solved": result.exitCode === 0 };
 }
 
 async function runVerifiers(
