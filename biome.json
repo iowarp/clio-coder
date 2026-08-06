@@ -43,7 +43,7 @@
 			"!**/node_modules",
 			"!**/*.log",
 			"!**/.superpowers",
-			"!benchmarks/community/human-eval/runs",
+			"!benchmarks/community/*/runs",
 			"!**/*.html"
 		]
 	}

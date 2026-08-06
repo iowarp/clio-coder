@@ -54,6 +54,8 @@ Session metadata must declare format version 3. Earlier session formats are reje
 
 Stored eval artifacts require complete `clio`, `environment`, and `paths` provenance blocks. Evidence views render only provenance fields carried by sealed receipts and omit absent fields.
 
+Eval token accounting is observed, never assumed. `src/domains/eval/metrics/token-stream.ts` folds provider usage out of a runner's live stdout as it arrives, so truncation of the operator-facing artifact cannot erase it. A runner that observed no usage emits `tokens.measured: false` and no counts at all, and reports say how many runs the total covers rather than printing a zero for work they could not see.
+
 ## Process-safe dispatch admission
 
 - `src/domains/dispatch/capacity-lease.ts` is the durable, expiring global and per-node capacity authority. Lease acquisition, retry rebinding, heartbeat, drain state, and reservation transfer are serialized by one cross-process state lock. The lease bound fails admission closed rather than dropping a lease, and lease reclamation needs owner-liveness evidence wherever a process birth token cannot prove death.
@@ -127,6 +129,27 @@ Stored eval artifacts require complete `clio`, `environment`, and `paths` proven
 - Headless result derivation keys on event types and stop reasons, never on
   text prefixes. An interrupted turn (notice keyed `turn.interrupted`) exits
   nonzero with its abort reason even when partial assistant text landed.
+
+## Headless runs
+
+- `src/cli/modes/json-stream.ts` is the one projection from chat-loop events to
+  the `--json` wire stream, and the stream is append-oriented: every piece of
+  content crosses once, as an increment while it streams and as one completed
+  message when it lands. `message_update` is dropped because its increments are
+  already published as `text_delta` / `thinking_delta` and its message is the
+  partial form of the `message_end` that follows. Deltas carry the increment
+  and never the growing partial text, `agent_end` carries its segment's usage
+  and message count instead of the transcript, and `turn_end` keeps its
+  assistant message and drops the tool results already streamed.
+- Usage is accrued once per completed assistant message at `message_end`, which
+  is the one event that reports a message's tokens exactly once. A headless turn
+  spans several agent segments, so segments sum and no consumer may key on the
+  last one.
+- Every headless main-agent run seals a receipt, the interrupted ones included.
+  A signal exits the process from inside the shutdown coordinator, so the drain
+  phase seals the receipt and the turn's own completion path seals the same
+  outcome. Interruption is read from the coordinator rather than won by a race:
+  the outcome is `canceled` with the exit status the process reports.
 
 ## Tool substrate
 
