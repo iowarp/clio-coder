@@ -1,4 +1,4 @@
-import type { EvalTokenMetricsV3 } from "../schema/artifact.js";
+import type { EvalTokenMetricsV4 } from "../schema/artifact.js";
 
 export interface EvalTokenStreamUsage {
 	/**
@@ -7,7 +7,7 @@ export interface EvalTokenStreamUsage {
 	 * accounting at all, which is not the same as a run that cost nothing.
 	 */
 	measured: boolean;
-	tokens: EvalTokenMetricsV3;
+	tokens: EvalTokenMetricsV4;
 	costUsd: number;
 }
 
@@ -38,7 +38,7 @@ export const UNMEASURED_TOKEN_USAGE: EvalTokenStreamUsage = {
  * verbose run's usage events do not survive in it.
  */
 export function createTokenUsageFold(): EvalTokenUsageFold {
-	const tokens: EvalTokenMetricsV3 = { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 };
+	const tokens: EvalTokenMetricsV4 = { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 };
 	let costUsd = 0;
 	let measured = false;
 	let pending = "";

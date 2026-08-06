@@ -43,6 +43,7 @@ export async function runExternalCommandRunner(
 	runner: EvalRunnerV2,
 	cwd: string,
 	timeoutMs: number,
+	env?: NodeJS.ProcessEnv,
 ): Promise<EvalRunnerOutput> {
 	const runnerCommands = runner.commands ?? [];
 	const commands = runnerCommands.length > 0 ? runnerCommands : runner.command === undefined ? [] : [runner.command];
@@ -55,7 +56,7 @@ export async function runExternalCommandRunner(
 	// is reported as unmeasured, never as zero cost.
 	let usage = UNMEASURED_TOKEN_USAGE;
 	for (const command of commands) {
-		const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs);
+		const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs, env);
 		stdout = appendLimited(stdout, result.stdout);
 		stderr = appendLimited(stderr, result.stderr);
 		wallTimeMs += result.wallTimeMs;
@@ -89,7 +90,12 @@ export async function runExternalCommandRunner(
 	};
 }
 
-export function runShellCommand(command: string, cwd: string, timeoutMs: number): Promise<ShellCommandResult> {
+export function runShellCommand(
+	command: string,
+	cwd: string,
+	timeoutMs: number,
+	env?: NodeJS.ProcessEnv,
+): Promise<ShellCommandResult> {
 	const started = Date.now();
 	return new Promise((resolve) => {
 		let stdout = "";
@@ -98,7 +104,14 @@ export function runShellCommand(command: string, cwd: string, timeoutMs: number)
 		const usageFold = createTokenUsageFold();
 		let timedOut = false;
 		let settled = false;
-		const child = spawn(command, { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"], env: process.env });
+		const child = spawn(command, {
+			cwd,
+			shell: true,
+			stdio: ["ignore", "pipe", "pipe"],
+			// The overlay is additive: an eval item pins where Clio writes its
+			// journal, and inherits everything else the operator's shell provides.
+			env: env === undefined ? process.env : { ...process.env, ...env },
+		});
 		child.stdout.setEncoding("utf8");
 		child.stderr.setEncoding("utf8");
 		child.stdout.on("data", (chunk: string) => {

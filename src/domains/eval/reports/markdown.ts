@@ -1,6 +1,6 @@
-import type { EvalArtifactV3 } from "../schema/artifact.js";
+import type { EvalArtifactV4 } from "../schema/artifact.js";
 
-export function renderEvalMarkdownReportV3(artifact: EvalArtifactV3): string {
+export function renderEvalMarkdownReportV4(artifact: EvalArtifactV4): string {
 	const lines = [
 		`# Eval ${artifact.evalId}`,
 		"",

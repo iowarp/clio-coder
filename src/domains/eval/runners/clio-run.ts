@@ -15,6 +15,7 @@ export async function runClioRunRunner(
 	clioEntry: string,
 	timeoutMs: number,
 	target: EvalSuiteTargetV2,
+	env?: NodeJS.ProcessEnv,
 ): Promise<EvalRunnerOutput> {
 	const prompt = runner.prompt ?? "";
 	const args = [
@@ -28,7 +29,7 @@ export async function runClioRunRunner(
 		...(target.thinking === undefined ? [] : ["--thinking", shellQuote(target.thinking)]),
 		shellQuote(prompt),
 	];
-	const result = await runShellCommand(`${process.execPath} ${args.join(" ")}`, cwd, runner.timeoutMs ?? timeoutMs);
+	const result = await runShellCommand(`${process.execPath} ${args.join(" ")}`, cwd, runner.timeoutMs ?? timeoutMs, env);
 	// Usage is folded from the live stream, not from the bounded stdout
 	// artifact: a verbose run's `message_end` events do not survive truncation.
 	const tokens = result.usage;

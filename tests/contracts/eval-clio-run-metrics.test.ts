@@ -1,4 +1,4 @@
-import { deepStrictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,6 +86,32 @@ describe("contracts/eval clio-run tool metrics", () => {
 				},
 				{ totalCalls: 2, failed: 1, blocked: 0 },
 			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("pins the child's Clio state directory to the environment the item was given", async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-eval-state-env-"));
+		try {
+			const entry = join(root, "fake-clio.mjs");
+			// The child reports the journal location it resolved. An item that
+			// cannot pin it reads a state directory it does not own.
+			writeFileSync(entry, "process.stdout.write(String(process.env.CLIO_STATE_DIR ?? 'unset'));\n", "utf8");
+			const stateDir = join(root, "state");
+
+			const output = await runClioRunRunner(
+				{ kind: "clio-run", prompt: "test" },
+				root,
+				entry,
+				5000,
+				{ id: "local" },
+				{
+					CLIO_STATE_DIR: stateDir,
+				},
+			);
+
+			strictEqual(output.stdout, stateDir);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

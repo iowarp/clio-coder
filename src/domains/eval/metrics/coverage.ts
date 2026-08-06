@@ -1,4 +1,4 @@
-import type { EvalArtifactResultV3 } from "../schema/artifact.js";
+import type { EvalArtifactResultV4 } from "../schema/artifact.js";
 
 export interface EvalTokenCoverage {
 	total: number;
@@ -11,7 +11,7 @@ export interface EvalTokenCoverage {
  * summary total is only meaningful next to this coverage.
  */
 export function tokenMeasurementCoverage(
-	results: ReadonlyArray<Pick<EvalArtifactResultV3, "metrics">>,
+	results: ReadonlyArray<Pick<EvalArtifactResultV4, "metrics">>,
 ): EvalTokenCoverage {
 	let measured = 0;
 	for (const result of results) {

@@ -9,6 +9,7 @@ export async function runContextInitRunner(
 	clioEntry: string,
 	timeoutMs: number,
 	target: EvalSuiteTargetV2,
+	env?: NodeJS.ProcessEnv,
 ): Promise<EvalRunnerOutput> {
 	const extraArgs = runner.args ?? [];
 	const command = [
@@ -26,7 +27,7 @@ export async function runContextInitRunner(
 	]
 		.map(shellQuote)
 		.join(" ");
-	const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs);
+	const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs, env);
 	const payload = parseInitPayload(result.stdout);
 	const candidateGeneration = recordField(payload, "generation");
 	const generation = isValidGenerationPayload(payload, candidateGeneration) ? candidateGeneration : null;
