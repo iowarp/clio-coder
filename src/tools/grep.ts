@@ -14,7 +14,7 @@ import {
 	releaseObservation,
 	reserveObservation,
 } from "./observation.js";
-import { resolveReadPath } from "./path-utils.js";
+import { resolveReadPath, toPosixPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream, validateSearchPatternSize } from "./spawn-hygiene.js";
 import { stringEnum } from "./string-enum.js";
@@ -37,10 +37,6 @@ function parseContext(value: unknown): number | null {
 	if (value === undefined) return 0;
 	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
 	return Math.floor(value);
-}
-
-function toPosixPath(value: string): string {
-	return value.split(path.sep).join("/");
 }
 
 function formatPath(filePath: string, searchPath: string, isDirectory: boolean): string {

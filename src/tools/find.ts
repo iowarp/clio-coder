@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import path, { join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { resolveFdBinary } from "./executables.js";
@@ -14,7 +14,7 @@ import {
 	releaseObservation,
 	reserveObservation,
 } from "./observation.js";
-import { resolveReadPath } from "./path-utils.js";
+import { resolveReadPath, toPosixPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream, validateSearchPatternSize } from "./spawn-hygiene.js";
 import { stringEnum } from "./string-enum.js";
@@ -27,10 +27,6 @@ const DEFAULT_LIMIT = 500;
 const MTIME_CANDIDATE_FLOOR = 2000;
 
 type FindOrder = "path" | "mtime";
-
-function toPosixPath(value: string): string {
-	return value.split(path.sep).join("/");
-}
 
 // Build fd's argv. Ignore semantics (hidden files, .gitignore honoring,
 // generated-dir excludes, include_ignored) come entirely from the shared

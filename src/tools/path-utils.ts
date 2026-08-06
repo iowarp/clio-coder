@@ -1,7 +1,18 @@
 import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import { isAbsolute, resolve as resolvePath, sep } from "node:path";
 import { canonicalizeExistingPath } from "../core/path-canonical.js";
+
+/**
+ * Render a path with forward slashes for a tool's observation.
+ *
+ * Tool output is read by the model and matched against patterns the model
+ * writes, so it must not change shape with the host's separator. This is
+ * presentation only: it never touches a path used to reach the filesystem.
+ */
+export function toPosixPath(value: string): string {
+	return value.split(sep).join("/");
+}
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const NARROW_NO_BREAK_SPACE = "\u202F";
