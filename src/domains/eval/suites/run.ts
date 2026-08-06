@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { evaluateMetricAssertion } from "../compare/thresholds.js";
+import { resolveMetricAssertion } from "../compare/thresholds.js";
 import { collectContextMetrics } from "../metrics/context.js";
 import { readRunJournal, receiptInvariantMetrics } from "../metrics/invariants.js";
 import { wallTimeMetric } from "../metrics/latency.js";
@@ -211,16 +211,20 @@ async function runVerifiers(
 			stderr: `forbidden paths exist: ${forbidden.join(", ")}`,
 		};
 	}
-	const failedAssertion = (task.verify.assertions ?? []).find(
-		(assertion) => !evaluateMetricAssertion(assertion, metrics),
-	);
-	if (failedAssertion !== undefined) {
+	// An assertion whose metric this run could not produce fails closed. A check
+	// that silently passes because it never ran is worse than no check: it
+	// reports compliance it never observed.
+	for (const assertion of task.verify.assertions ?? []) {
+		const resolution = resolveMetricAssertion(assertion, metrics);
+		if (!resolution.unresolved && resolution.holds) continue;
 		return {
 			pass: false,
 			exitCode: 1,
-			failureClass: "assertion_failed",
+			failureClass: resolution.unresolved ? "assertion_unresolved" : "assertion_failed",
 			stdout: "",
-			stderr: assertionMessage(failedAssertion),
+			stderr: resolution.unresolved
+				? `assertion unresolved (fail closed): ${assertion.metric} was not measured by this run`
+				: assertionMessage(assertion, resolution.actual),
 		};
 	}
 	return { pass: true, exitCode: 0, failureClass: null, stdout: commandResult.stdout, stderr: commandResult.stderr };
@@ -252,6 +256,6 @@ function buildArtifact(
 	};
 }
 
-function assertionMessage(assertion: EvalMetricAssertion): string {
-	return `assertion failed: ${assertion.metric} ${assertion.op} ${String(assertion.value)}`;
+function assertionMessage(assertion: EvalMetricAssertion, actual: number | string | boolean | null): string {
+	return `assertion failed: ${assertion.metric} ${assertion.op} ${String(assertion.value)} (actual ${JSON.stringify(actual)})`;
 }
