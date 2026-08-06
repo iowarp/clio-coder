@@ -68,8 +68,17 @@ tasks:
         - metric: loop.repairsSpent
           op: lte
           value: 2
-        # Resolved, or honestly out of attempts. Never a green it did not earn.
-        - metric: loop.reasonExhausted
+        # Never a green it did not earn. The loop's terminal reason is one Clio
+        # declares and agrees with what it reported as resolved.
+        #
+        # This is asserted rather than `loop.reasonExhausted`, which is true
+        # only for the two endings of a loop that reached its bound. A repair
+        # whose own run fails ends the loop at `loop_step_failed` without
+        # spending the bound, and that is an honest report about the model's
+        # worker, not a promise Clio broke. Gating the narrower metric made this
+        # suite fail for the one reason it exists to never fail for. The bound
+        # itself is still gated, by `loop.attemptsSpent` above.
+        - metric: loop.reasonDeclared
           op: eq
           value: true
         # Each repair is attempt n, is recovery, and seals its own receipt.
@@ -101,6 +110,7 @@ tasks:
         - loop.repairsSpent
         - loop.resolved
         - loop.reasonExhausted
+        - loop.reasonDeclared
         - loop.unneededNodes
         - loop.skippedNodes
         - loop.receiptsMatchRepairs

@@ -87,6 +87,10 @@ export const CANONICAL_METRICS = [
 	"loop.repairsSpent",
 	"loop.resolved",
 	"loop.reasonExhausted",
+	// The terminal reason is one Clio declares and agrees with `resolved`. This
+	// is the promise that holds across every ending, including the ones that
+	// never spend the bound, so it is the one a suite can gate unconditionally.
+	"loop.reasonDeclared",
 	"loop.unneededNodes",
 	"loop.skippedNodes",
 	"loop.receiptsMatchRepairs",

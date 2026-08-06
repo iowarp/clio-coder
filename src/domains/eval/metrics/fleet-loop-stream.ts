@@ -42,6 +42,20 @@ export interface EvalFleetLoopFold {
 
 export const EMPTY_FLEET_LOOP_OBSERVATION: EvalFleetLoopObservation = { summaryCount: 0, loops: [] };
 
+/**
+ * The terminal reasons the scheduler declares (`ExecutionLoopReason` in
+ * `src/domains/dispatch/execution-scheduler.ts`). Held as data here rather
+ * than imported because this fold reads a wire summary: the point of the check
+ * is that what crossed stdout still names a reason the scheduler types, so
+ * sharing the union would assume exactly what is being verified.
+ */
+const DECLARED_LOOP_REASONS: ReadonlySet<string> = new Set([
+	"resolved",
+	"loop_bound_exhausted",
+	"loop_step_failed",
+	"loop_not_reached",
+]);
+
 export function createFleetLoopFold(): EvalFleetLoopFold {
 	let summaryCount = 0;
 	let loops: EvalFleetLoopSummary[] = [];
@@ -103,9 +117,17 @@ export function addFleetLoopObservations(
  * - `loop.resolved`: whether the loop converged. This is the model's result and
  *   is measured, never gated: a bound spent without a pass is correct
  *   machinery.
- * - `loop.reasonExhausted`: the terminal report was `loop_bound_exhausted`
- *   rather than a false green. A loop that ran out of attempts and reported
- *   success would be the worst failure here.
+ * - `loop.reasonExhausted`: the loop resolved, or spent its declared bound and
+ *   said so. This distinguishes the two endings a converging loop can have. It
+ *   is not the "no false green" check, because a loop can also end without
+ *   spending its bound: a repair whose own run failed ends the loop at
+ *   `loop_step_failed`, which is an honest report and not a broken promise. A
+ *   suite that asserts this one is asserting that the bound was spent.
+ * - `loop.reasonDeclared`: the terminal reason is one Clio declares, and it
+ *   agrees with `resolved`. This is the "never a green it did not earn" check,
+ *   and it holds across every ending. A loop reporting `resolved: true` beside
+ *   a reason that is not `resolved`, or a reason outside the declared set, is
+ *   the wire summary drifting from the typed outcome the scheduler sealed.
  * - `loop.unneededNodes` / `loop.skippedNodes`: after a loop resolves its later
  *   nodes are `unneeded`, never `skipped` and never failed. Counting them
  *   apart is how "the loop answered it" stays distinguishable from "something
@@ -123,6 +145,9 @@ export function fleetLoopMetricEntries(observation: EvalFleetLoopObservation): R
 		"loop.repairsSpent": sum(loops.map((loop) => loop.repairs)),
 		"loop.resolved": loops.every((loop) => loop.resolved),
 		"loop.reasonExhausted": loops.every((loop) => loop.resolved || loop.reason === "loop_bound_exhausted"),
+		"loop.reasonDeclared": loops.every(
+			(loop) => DECLARED_LOOP_REASONS.has(loop.reason) && loop.resolved === (loop.reason === "resolved"),
+		),
 		"loop.unneededNodes": loops[0]?.unneeded ?? 0,
 		"loop.skippedNodes": loops[0]?.skipped ?? 0,
 	};

@@ -75,6 +75,51 @@ describe("contracts/eval fleet loop metrics", () => {
 		);
 
 		strictEqual(metrics["loop.reasonExhausted"], false);
+		// The same ending is still an honest one. A repair whose own run failed
+		// ended the loop before the bound was reached, and it said so.
+		strictEqual(metrics["loop.reasonDeclared"], true);
+	});
+
+	it("reads every declared ending as an honest one", () => {
+		// All four are reasons Clio types. None of them is a green it did not
+		// earn, so gating this metric never fails a suite for the model's result.
+		for (const [reason, resolved] of [
+			["resolved", true],
+			["loop_bound_exhausted", false],
+			["loop_step_failed", false],
+			["loop_not_reached", false],
+		] as const) {
+			const metrics = metricsFor(fleetSummary([{ loopId: "repair", resolved, attempts: 1, repairs: 0, reason }]));
+			strictEqual(metrics["loop.reasonDeclared"], true, `${reason} is a declared ending`);
+		}
+	});
+
+	it("fails loop.reasonDeclared when a loop claims it resolved under another reason", () => {
+		// The worst failure this suite can catch: the summary reports success
+		// beside a reason that says it never converged.
+		const metrics = metricsFor(
+			fleetSummary([{ loopId: "repair", resolved: true, attempts: 3, repairs: 2, reason: "loop_bound_exhausted" }]),
+		);
+
+		strictEqual(metrics["loop.reasonDeclared"], false);
+	});
+
+	it("fails loop.reasonDeclared when a loop reports resolved without claiming it", () => {
+		const metrics = metricsFor(
+			fleetSummary([{ loopId: "repair", resolved: false, attempts: 2, repairs: 1, reason: "resolved" }]),
+		);
+
+		strictEqual(metrics["loop.reasonDeclared"], false);
+	});
+
+	it("fails loop.reasonDeclared when the wire summary names a reason Clio does not declare", () => {
+		// The summary drifting from the scheduler's typed outcome. A reason
+		// nobody declares cannot be judged, so it is refused rather than trusted.
+		const metrics = metricsFor(
+			fleetSummary([{ loopId: "repair", resolved: false, attempts: 1, repairs: 0, reason: "gave_up" }]),
+		);
+
+		strictEqual(metrics["loop.reasonDeclared"], false);
 	});
 
 	it("counts nodes the scheduler refused apart from nodes a loop made unnecessary", () => {
