@@ -22,6 +22,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { shellQuote } from "../../core/shell-quote.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { RunNodeIdentity } from "./types.js";
 import { type SpawnedWorker, type SpawnOptions, spawnNativeWorker, spawnWorkerProcess } from "./worker-spawn.js";
@@ -91,11 +92,6 @@ export function createLocalWorkerTransport(opts?: Omit<SpawnOptions, "cwd">): Wo
 
 const DEFAULT_SSH_CONNECT_TIMEOUT_SEC = 10;
 const DEFAULT_REMOTE_CLIO_ENTRY = "clio worker";
-
-/** POSIX single-quote escaping for one shell word. */
-export function shellQuote(value: string): string {
-	return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 /**
  * The env whitelist exported to the remote worker. Nothing from the

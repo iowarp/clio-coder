@@ -15,6 +15,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readClioVersion } from "../../core/package-root.js";
+import { shellQuote } from "../../core/shell-quote.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import {
@@ -26,7 +27,7 @@ import {
 	type RouteFactRequirement,
 	type RouteFactVerdict,
 } from "./route-facts.js";
-import { buildSshArgs, LOCAL_NODE_ID, type SshNodeEndpoint, shellQuote } from "./transport.js";
+import { buildSshArgs, LOCAL_NODE_ID, type SshNodeEndpoint } from "./transport.js";
 import { endpointIdentityHash } from "./worker-protocol.js";
 
 export interface FleetPreflightChecks {
