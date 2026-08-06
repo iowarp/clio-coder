@@ -158,6 +158,7 @@ function readWorkspace(
 		...(commit === undefined ? {} : { commit }),
 		...(checkout === undefined ? {} : { checkout }),
 		excludes: readOptionalStringArray(value, "excludes", `${path}.excludes`, issues),
+		setup: readOptionalStringArray(value, "setup", `${path}.setup`, issues),
 	};
 }
 
@@ -204,6 +205,7 @@ function readVerify(
 	}
 	return {
 		commands: readOptionalStringArray(value, "commands", `${path}.commands`, issues),
+		measure: readOptionalStringArray(value, "measure", `${path}.measure`, issues),
 		assertions: readAssertions(value.assertions, `${path}.assertions`, issues),
 		forbidPaths: readOptionalStringArray(value, "forbidPaths", `${path}.forbidPaths`, issues),
 	};

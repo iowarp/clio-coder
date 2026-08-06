@@ -149,4 +149,76 @@ describe("contracts/eval suite gating", { concurrency: false }, () => {
 			rmSync(workspace, { recursive: true, force: true });
 		}
 	});
+
+	it("records a failed task outcome without failing the item", async () => {
+		const workspace = mkdtempSync(join(tmpdir(), "clio-eval-measure-"));
+		try {
+			const task = quietTask("unsolved", []);
+			task.verify.measure = [`${process.execPath} -e "process.exit(7)"`];
+
+			const artifact = await runEvalSuiteV2(loadedSuite(workspace, [task]), {
+				clioEntry: join(workspace, "unused-entry.js"),
+			});
+
+			// The model did not solve it. The machinery behaved, so the item passes
+			// and the report carries both readings side by side.
+			strictEqual(artifact.results[0]?.metrics["task.solved"], false);
+			strictEqual(artifact.results[0]?.metrics["task.exitCode"], 7);
+			strictEqual(artifact.results[0]?.pass, true);
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
+	it("leaves the task outcome absent when a task declares no measure commands", async () => {
+		const workspace = mkdtempSync(join(tmpdir(), "clio-eval-unmeasured-outcome-"));
+		try {
+			const artifact = await runEvalSuiteV2(loadedSuite(workspace, [quietTask("silent", [])]), {
+				clioEntry: join(workspace, "unused-entry.js"),
+			});
+
+			strictEqual("task.solved" in (artifact.results[0]?.metrics ?? {}), false);
+			strictEqual("task.exitCode" in (artifact.results[0]?.metrics ?? {}), false);
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
+	it("fails an item whose fixture setup never came up", async () => {
+		const workspace = mkdtempSync(join(tmpdir(), "clio-eval-setup-"));
+		try {
+			const task = quietTask("unseeded", []);
+			task.workspace.setup = [`${process.execPath} -e "process.exit(1)"`];
+
+			const artifact = await runEvalSuiteV2(loadedSuite(workspace, [task]), {
+				clioEntry: join(workspace, "unused-entry.js"),
+			});
+
+			strictEqual(artifact.results[0]?.pass, false);
+			strictEqual(artifact.results[0]?.failureClass, "setup_failed");
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
+	it("runs setup in the prepared workspace before the runner sees it", async () => {
+		const workspace = mkdtempSync(join(tmpdir(), "clio-eval-setup-order-"));
+		try {
+			const task = quietTask("seeded", []);
+			task.workspace.setup = [`${process.execPath} -e "require('fs').writeFileSync('seeded.txt','1')"`];
+			task.runner = {
+				kind: "external-command",
+				commands: [`${process.execPath} -e "if(!require('fs').existsSync('seeded.txt'))process.exit(9)"`],
+				args: [],
+			};
+
+			const artifact = await runEvalSuiteV2(loadedSuite(workspace, [task]), {
+				clioEntry: join(workspace, "unused-entry.js"),
+			});
+
+			strictEqual(artifact.results[0]?.pass, true);
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
 });

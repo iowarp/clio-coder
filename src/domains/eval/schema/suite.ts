@@ -56,6 +56,11 @@ export const CANONICAL_METRICS = [
 	"receipt.sealed",
 	"receipt.integrityValid",
 	"receipt.outcomeMatchesExit",
+	// The task outcome, measured and never gated: whether the model solved the
+	// workload. Reported beside the invariants above so a report can say "the
+	// model failed and Clio behaved" instead of one number for both.
+	"task.exitCode",
+	"task.solved",
 ] as const;
 
 export type EvalMetricName = (typeof CANONICAL_METRICS)[number];
@@ -103,6 +108,13 @@ export interface EvalWorkspaceV2 {
 	commit?: string;
 	checkout?: string;
 	excludes?: string[];
+	/**
+	 * Commands that seed the prepared workspace before the runner starts, so a
+	 * fixture can pin a baseline commit the patch metrics and write-boundary
+	 * enforcement measure against. A failing setup fails the item: an item whose
+	 * fixture never came up measured nothing.
+	 */
+	setup?: string[];
 }
 
 export interface EvalRunnerV2 {
@@ -123,6 +135,14 @@ export interface EvalRunnerV2 {
 
 export interface EvalVerifyV2 {
 	commands?: string[];
+	/**
+	 * Commands that measure the task outcome without gating on it. They run in
+	 * the workspace before the gating verifiers and record `task.exitCode` and
+	 * `task.solved`; a nonzero exit is data, never a failure. This is what keeps
+	 * "the model did not solve it" from being reported as "Clio broke", which
+	 * `commands` above cannot express because a failing verifier fails the item.
+	 */
+	measure?: string[];
 	assertions?: EvalMetricAssertion[];
 	forbidPaths?: string[];
 }
