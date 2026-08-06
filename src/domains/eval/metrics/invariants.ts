@@ -107,7 +107,15 @@ export function receiptInvariantMetrics(
 	if (journal === null) return {};
 	const sealed = journal.receiptFiles > 0;
 	const roots = journal.receipts.filter(isRootReceipt);
-	const base = { "receipt.count": journal.receiptFiles, "receipt.sealed": sealed, "receipt.rootCount": roots.length };
+	const base = {
+		"receipt.count": journal.receiptFiles,
+		"receipt.sealed": sealed,
+		"receipt.rootCount": roots.length,
+		// Every attempt after the first is `recovery`. A bounded loop's repairs
+		// are exactly those attempts, so this is what a loop's attempt accounting
+		// is checked against.
+		"receipt.recoveryCount": journal.receipts.filter((receipt) => receipt.executionRole === "recovery").length,
+	};
 	if (!sealed) return base;
 	return {
 		...base,
