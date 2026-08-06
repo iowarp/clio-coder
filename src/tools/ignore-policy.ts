@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import path, { dirname, join } from "node:path";
+import { dirname, join } from "node:path";
+import { toPosixPath } from "./path-utils.js";
 
 /**
  * One ignore policy for every path-walking OBSERVE tool. grep (rg), find (fd),
@@ -36,10 +37,6 @@ export const GENERATED_DIRS: ReadonlyArray<string> = [
 	"node_modules",
 	"target",
 ];
-
-function toPosixPath(value: string): string {
-	return value.split(path.sep).join("/");
-}
 
 /**
  * Walk up from the search path looking for a `.git` marker (a directory in a
