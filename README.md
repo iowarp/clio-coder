@@ -398,7 +398,7 @@ list|propose|approve|reject|prune`. Design notes:
 ## Status
 
 Clio Coder is alpha software distributed from source. The current release is
-**v0.2.9**. Interfaces may still move between minor versions, and
+**v0.3.0**. Interfaces may still move between minor versions, and
 model-specific behavior varies by target.
 
 Release notes live in the [CHANGELOG](CHANGELOG.md), the detailed developer
