@@ -22,6 +22,7 @@
  *   - Every other event passes through unchanged.
  */
 
+import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { sumRunUsage } from "../../interactive/chat-loop-messages.js";
 
@@ -33,26 +34,52 @@ export function projectHeadlessJsonEvent(event: ChatLoopEvent): unknown | null {
 	if (event.type === "thinking_delta") {
 		return { type: event.type, contentIndex: event.contentIndex, delta: event.delta };
 	}
-	if (event.type === "agent_end") {
-		const usage = sumRunUsage(event.messages);
-		return {
-			type: event.type,
-			messageCount: event.messages.length,
-			usage: {
-				input: usage.input,
-				output: usage.output,
-				cacheRead: usage.cacheRead,
-				cacheWrite: usage.cacheWrite,
-				reasoning: usage.reasoning,
-				totalTokens: usage.tokens,
-				costUsd: usage.costUsd,
-				apiCalls: usage.apiCalls,
-				measured: usage.hadUsage,
-			},
-		};
-	}
+	if (event.type === "agent_end") return segmentSummary(event.type, event.messages);
 	if (event.type === "turn_end") {
 		return { type: event.type, message: event.message };
 	}
 	return event;
+}
+
+/**
+ * Projection for the dispatch `--json` stream, whose events come off a worker
+ * rather than out of the chat loop.
+ *
+ * The two streams name streaming increments differently by design: a worker
+ * publishes them as `message_update` deltas already slimmed of their
+ * cumulative snapshots at the worker stdout seam, and the chat loop publishes
+ * them as `text_delta`. They make the same promise about content crossing
+ * once, and `agent_end` was breaking it here: it carried the segment's entire
+ * transcript, every message of which had already crossed as its own
+ * `message_end`. It now carries the same segment summary the main-agent stream
+ * carries, which is also what lets a reader check the per-segment and
+ * per-message accounts of one run against each other.
+ */
+export function projectDispatchJsonEvent(event: unknown): unknown {
+	if (!isRecord(event) || event.type !== "agent_end" || !Array.isArray(event.messages)) return event;
+	const { messages: _messages, ...rest } = event;
+	return { ...rest, ...segmentSummary("agent_end", event.messages as AgentMessage[]) };
+}
+
+function segmentSummary(type: string, messages: ReadonlyArray<AgentMessage>): Record<string, unknown> {
+	const usage = sumRunUsage(messages);
+	return {
+		type,
+		messageCount: messages.length,
+		usage: {
+			input: usage.input,
+			output: usage.output,
+			cacheRead: usage.cacheRead,
+			cacheWrite: usage.cacheWrite,
+			reasoning: usage.reasoning,
+			totalTokens: usage.tokens,
+			costUsd: usage.costUsd,
+			apiCalls: usage.apiCalls,
+			measured: usage.hadUsage,
+		},
+	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
