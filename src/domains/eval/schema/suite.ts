@@ -91,6 +91,18 @@ export const CANONICAL_METRICS = [
 	"loop.skippedNodes",
 	"loop.receiptsMatchRepairs",
 	"receipt.recoveryCount",
+	// Receipt-derived accounting. A different observation from `tokens.*` above,
+	// with a different provenance: what Clio sealed and authenticated, rather
+	// than what a provider was watched reporting on the runner's own stdout. A
+	// surface that publishes no usage stream (`clio fleet run --json` drains its
+	// workers' events) still seals the cost, so this is how a bounded loop's cost
+	// is read. The two are never merged, and this family never enters
+	// `summary.tokens`. Counts appear only beside `measured: true`; an
+	// incomplete or unauthenticated receipt set reports false and no counts.
+	"receiptUsage.measured",
+	"receiptUsage.receiptCount",
+	"receiptUsage.totalTokens",
+	"receiptUsage.costUsd",
 	"stream.messageUpdateCount",
 	"stream.usageDoubleCounted",
 	"stream.segmentUsageMatchesMessages",

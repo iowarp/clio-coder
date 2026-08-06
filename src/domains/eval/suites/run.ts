@@ -8,6 +8,7 @@ import {
 	processInvariantMetrics,
 	readRunJournal,
 	receiptInvariantMetrics,
+	receiptUsageMetrics,
 	sessionInvariantMetrics,
 	writeBoundaryInvariantMetrics,
 } from "../metrics/invariants.js";
@@ -203,6 +204,7 @@ function invariantMetrics(stateDir: string, runnerExitCode: number): Record<stri
 	const journal = readRunJournal(stateDir);
 	return {
 		...receiptInvariantMetrics(journal, runnerExitCode),
+		...receiptUsageMetrics(journal),
 		...sessionInvariantMetrics(stateDir),
 		...processInvariantMetrics(journal),
 		...writeBoundaryInvariantMetrics(stateDir),

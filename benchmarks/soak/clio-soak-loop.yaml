@@ -84,6 +84,16 @@ tasks:
         - metric: receipt.integrityValid
           op: eq
           value: true
+        # What the loop cost, read from the receipts it sealed rather than from
+        # a stream this runner never sees. `clio fleet run --json` drains its
+        # workers' events, so `tokens.measured` is correctly false here and
+        # stays collected below as the independent stream reading. This is the
+        # other observation: authenticated, journal-derived, and never merged
+        # with the first. It is false whenever the receipt set is incomplete or
+        # unauthenticated, so a cost nobody can vouch for fails closed.
+        - metric: receiptUsage.measured
+          op: eq
+          value: true
     metrics:
       collect:
         - loop.count
@@ -102,4 +112,8 @@ tasks:
         - patch.filesChanged
         - patch.testFilesModified
         - tokens.measured
+        - receiptUsage.measured
+        - receiptUsage.receiptCount
+        - receiptUsage.totalTokens
+        - receiptUsage.costUsd
     timeoutMs: 1800000
