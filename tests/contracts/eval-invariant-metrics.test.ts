@@ -12,6 +12,7 @@ import type {
 } from "../../src/domains/dispatch/types.js";
 import {
 	createStreamInvariantFold,
+	ledgerInvariantMetrics,
 	processInvariantMetrics,
 	readRunJournal,
 	receiptInvariantMetrics,
@@ -143,6 +144,37 @@ function metricsFor(root: string, processExitCode = 0): Record<string, number | 
 	return receiptInvariantMetrics(readRunJournal(stateDirOf(root)), processExitCode);
 }
 
+function sessionEntry(role: "assistant" | "tool_call" | "tool_result", payload: Record<string, unknown> = {}): unknown {
+	return {
+		kind: "message",
+		turnId: `turn-${role}-${JSON.stringify(payload)}`,
+		parentTurnId: null,
+		timestamp: "2026-08-06T12:00:00.000Z",
+		role,
+		payload,
+	};
+}
+
+function writeSession(root: string, id: string, entries: ReadonlyArray<unknown>, header: unknown = undefined): void {
+	const sessionDir = join(stateDirOf(root), "sessions", "cwd-hash", id);
+	mkdirSync(sessionDir, { recursive: true });
+	const sessionHeader =
+		header === undefined
+			? {
+					type: "session",
+					version: 3,
+					id,
+					timestamp: "2026-08-06T12:00:00.000Z",
+					cwd: "/tmp/soak-workspace",
+				}
+			: header;
+	writeFileSync(
+		join(sessionDir, "current.jsonl"),
+		`${[sessionHeader, ...entries].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+		"utf8",
+	);
+}
+
 function assistantEnd(responseId: string, totalTokens: number): unknown {
 	return {
 		type: "message_end",
@@ -201,6 +233,114 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	it("leaves every invariant absent when there is no journal to read", () => {
 		strictEqual(readRunJournal(join("/nonexistent-soak-state", "state")), null);
 		strictEqual(Object.keys(receiptInvariantMetrics(null, 0)).length, 0);
+	});
+
+	it("reads batched tool calls and results as matched by toolCallId", () => {
+		const isolated = isolateClioEnv("clio-soak-ledger-intact-");
+		try {
+			writeSession(isolated.dir, "session-1", [
+				sessionEntry("assistant", { content: [{ type: "toolCall" }, { type: "toolCall" }] }),
+				sessionEntry("tool_call", { toolCallId: "call-a", name: "read", args: {} }),
+				sessionEntry("tool_call", { toolCallId: "call-b", name: "context", args: {} }),
+				sessionEntry("tool_result", { toolCallId: "call-a", toolName: "read", result: "a" }),
+				sessionEntry("tool_result", { toolCallId: "call-b", toolName: "context", result: "b" }),
+				sessionEntry("assistant", { content: [{ type: "text", text: "done" }] }),
+			]);
+
+			const metrics = ledgerInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["ledger.formatVersion"], 3);
+			strictEqual(metrics["ledger.toolPairsUnmatched"], 0);
+			strictEqual(metrics["ledger.assistantBetweenCallAndResult"], 0);
+			strictEqual(metrics["ledger.sessionCount"], 1);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails ledger.formatVersion on a version 2 transcript and takes the lowest version", () => {
+		const isolated = isolateClioEnv("clio-soak-ledger-v2-");
+		try {
+			writeSession(isolated.dir, "session-v3", []);
+			writeSession(isolated.dir, "session-v2", [], {
+				type: "session",
+				version: 2,
+				id: "session-v2",
+				timestamp: "2026-08-06T12:00:00.000Z",
+				cwd: "/tmp/soak-workspace",
+			});
+
+			const metrics = ledgerInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["ledger.formatVersion"], 2);
+			// The diagnostic is capable of disagreeing with the one-session shape
+			// expected from each current soak task.
+			strictEqual(metrics["ledger.sessionCount"], 2);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails ledger.toolPairsUnmatched on a dangling tool call", () => {
+		const isolated = isolateClioEnv("clio-soak-ledger-dangling-");
+		try {
+			writeSession(isolated.dir, "session-1", [sessionEntry("tool_call", { toolCallId: "dangling" })]);
+			strictEqual(ledgerInvariantMetrics(stateDirOf(isolated.dir))["ledger.toolPairsUnmatched"], 1);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails ledger.toolPairsUnmatched on an orphan tool result", () => {
+		const isolated = isolateClioEnv("clio-soak-ledger-orphan-result-");
+		try {
+			writeSession(isolated.dir, "session-1", [sessionEntry("tool_result", { toolCallId: "orphan" })]);
+			strictEqual(ledgerInvariantMetrics(stateDirOf(isolated.dir))["ledger.toolPairsUnmatched"], 1);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails ledger.assistantBetweenCallAndResult when the model completed another message first", () => {
+		const isolated = isolateClioEnv("clio-soak-ledger-assistant-between-");
+		try {
+			writeSession(isolated.dir, "session-1", [
+				sessionEntry("tool_call", { toolCallId: "late-result" }),
+				sessionEntry("assistant", { content: [{ type: "text", text: "premature" }] }),
+				sessionEntry("tool_result", { toolCallId: "late-result" }),
+			]);
+
+			const metrics = ledgerInvariantMetrics(stateDirOf(isolated.dir));
+			strictEqual(metrics["ledger.toolPairsUnmatched"], 0);
+			strictEqual(metrics["ledger.assistantBetweenCallAndResult"], 1);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("fails ledger.formatVersion closed when the transcript has no header", () => {
+		const isolated = isolateClioEnv("clio-soak-ledger-no-header-");
+		try {
+			const sessionDir = join(stateDirOf(isolated.dir), "sessions", "cwd-hash", "session-1");
+			mkdirSync(sessionDir, { recursive: true });
+			writeFileSync(
+				join(sessionDir, "current.jsonl"),
+				`${JSON.stringify(sessionEntry("assistant", { content: [] }))}\n`,
+				"utf8",
+			);
+
+			strictEqual(ledgerInvariantMetrics(stateDirOf(isolated.dir))["ledger.formatVersion"], 0);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("leaves ledger metrics absent when the item wrote no session", () => {
+		const isolated = isolateClioEnv("clio-soak-ledger-absent-");
+		try {
+			mkdirSync(stateDirOf(isolated.dir), { recursive: true });
+			strictEqual(Object.keys(ledgerInvariantMetrics(stateDirOf(isolated.dir))).length, 0);
+		} finally {
+			isolated.restore();
+		}
 	});
 
 	it("fails receipt.integrityValid when a sealed receipt is edited after sealing", async () => {
