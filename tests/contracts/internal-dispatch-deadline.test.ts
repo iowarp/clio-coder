@@ -140,6 +140,36 @@ describe("internal generator dispatch deadline", () => {
 		}
 	});
 
+	it("does not offer the wiki documenter a git tool it cannot learn anything from", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		try {
+			let submitted: JobSpec | null = null;
+			const dispatch = {
+				dispatch: async (spec: JobSpec) => {
+					submitted = spec;
+					return {
+						runId: "run-denytools-1",
+						events: (async function* () {
+							yield* [];
+						})(),
+						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
+					};
+				},
+				abort: () => {},
+			} as unknown as DispatchContract;
+
+			await generateWikiWithDocumenter(dispatch, WIKI_INPUT);
+
+			ok(submitted);
+			// `buildWikiPrompt` embeds `git status` and `git log` verbatim, and the
+			// staging dir sits under the gitignored `.clio/`, so every op this tool
+			// supports is either already answered or blind to the run's own output.
+			deepStrictEqual([...((submitted as JobSpec).denyTools ?? [])], ["git"]);
+		} finally {
+			configureGuardrails(undefined);
+		}
+	});
+
 	it("surfaces concise documenter tool progress while draining events", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
 		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-progress-"));

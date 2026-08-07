@@ -233,7 +233,17 @@ describe("lmstudio-native thinking replay", () => {
 			false,
 		);
 		strictEqual(message.content.find((block) => block.type === "text")?.text, "Visible answer.");
-		strictEqual((message.usage as { reasoningTokens?: number }).reasoningTokens, undefined);
+		// The reasoning-never class governs what is shown, never what the server
+		// spent. This model reasoned anyway, for 1 + 3 + 1 tokens across the start
+		// tag, the body, and the end tag, and usage reports all five.
+		//
+		// This assertion previously required `undefined`. That contract was wrong:
+		// the SDK carries no chat-template-kwargs channel, so `enable_thinking`
+		// never reaches this transport and a catalog `reasoning: false` cannot
+		// stop a model from reasoning, only stop Clio from displaying it. Reporting
+		// zero for a model burning most of its output on reasoning removed the one
+		// reading that would show the catalog was wrong about the model.
+		strictEqual((message.usage as { reasoningTokens?: number }).reasoningTokens, 5);
 	});
 });
 

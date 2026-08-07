@@ -1,4 +1,5 @@
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
+import { ToolNames } from "../core/tool-names.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -205,6 +206,13 @@ async function runDocumenterAttempt(
 		requestOrigin: "internal",
 		noSkills: true,
 		...routeFields(route),
+		// `git` cannot answer anything for this dispatch. `buildWikiPrompt`
+		// already embeds `git status` and `git log` verbatim, so `op=status`
+		// and `op=log` re-fetch text the model was handed, and the staging dir
+		// is under the gitignored `.clio/`, so `op=diff` cannot see the pages
+		// this run is writing. Offering it spent about 40% of the documenter's
+		// orientation on calls that could not move the work forward.
+		denyTools: [ToolNames.Git],
 		// Containment: the worker safety seam blocks any write-class tool call
 		// whose target escapes the staging dir.
 		writeRoots: [input.outputDir],

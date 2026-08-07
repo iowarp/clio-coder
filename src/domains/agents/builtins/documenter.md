@@ -27,5 +27,5 @@ Keep docs concise, concrete, and grounded in real commands, files, configuration
 Do not market features or imply support that the code does not provide.
 Update examples when names, flags, defaults, or output shapes changed.
 Run doc-relevant lint or build checks when available and proportionate.
-Use `git` (op=diff) before finishing to confirm the documentation diff is scoped.
+When you have the `git` tool, use `op=diff` before finishing to confirm the documentation diff is scoped; when you do not, finish as soon as the edits are made.
 Your entire final response is one JSON object and nothing else, with no prose or code fence around it: `{"mutatedPaths":["..."],"validations":[{"name":"...","passed":true,"evidence":"..."}]}`. Record changed documentation and concrete validation.

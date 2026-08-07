@@ -92,6 +92,15 @@ export interface JobSpec {
 	reroutes?: RunNodeReroute[];
 	requiredCapabilities?: ReadonlyArray<string>;
 	toolProfile?: ToolProfileName;
+	/**
+	 * Tools this run is not offered, by name. Purely subtractive: it removes
+	 * from the surface admission already resolved and can never widen it, so
+	 * any origin may set it. A caller that knows a tool is non-productive for
+	 * the job it is dispatching uses this so the model does not spend budget
+	 * discovering that. Removing a tool the recipe *requires* fails admission
+	 * rather than running the agent without it.
+	 */
+	denyTools?: ReadonlyArray<string>;
 	cwd?: string;
 	memorySection?: string;
 	noSkills?: boolean;
@@ -158,6 +167,7 @@ const KNOWN_KEYS = new Set([
 	"reroutes",
 	"requiredCapabilities",
 	"toolProfile",
+	"denyTools",
 	"cwd",
 	"memorySection",
 	"noSkills",
@@ -356,6 +366,12 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("denyTools" in spec && spec.denyTools !== undefined) {
+		if (!Array.isArray(spec.denyTools) || spec.denyTools.some((tool) => typeof tool !== "string" || tool.length === 0)) {
+			errors.push("denyTools must be an array of non-empty strings");
+		}
+	}
+
 	if ("cwd" in spec && spec.cwd !== undefined) {
 		if (typeof spec.cwd !== "string" || spec.cwd.length === 0) {
 			errors.push("cwd must be a non-empty string");
@@ -488,6 +504,7 @@ export function validateJobSpec(spec: unknown): Validated {
 		out.requiredCapabilities = spec.requiredCapabilities.map((c) => String(c));
 	}
 	if (typeof spec.toolProfile === "string" && isToolProfileName(spec.toolProfile)) out.toolProfile = spec.toolProfile;
+	if (Array.isArray(spec.denyTools)) out.denyTools = spec.denyTools.map((tool) => String(tool));
 	if (typeof spec.cwd === "string") out.cwd = spec.cwd;
 	if (typeof spec.memorySection === "string") out.memorySection = spec.memorySection;
 	if (typeof spec.noSkills === "boolean") out.noSkills = spec.noSkills;

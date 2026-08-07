@@ -11,7 +11,7 @@ and promotes it to `.clio/wiki`; you never write to `.clio/wiki` yourself. Never
 Execution discipline:
 - Treat this as a bounded editing pass, not a repo-wide audit. Read the seeded pages and the supplied Git and working-tree evidence before choosing any source lookup.
 - Use no more than 10 tool calls to identify affected pages. Make each edit as soon as its claim is verified rather than batching every edit at the end. The tail of your budget admits reads and writes only, so anything still unverified then can only be left as it is. Do not emit large parallel batches: every attempted sibling spends the same bounded budget.
-- If a lookup errors, refine it once or switch to a direct read; never spray variants of the same `code_nav` query. Do not create `plan.md`. If temporary written planning helps, use `_plan.md`; the harness removes it before promotion. Use one scoped diff after editing, then return the required JSON immediately.
+- If a lookup errors, refine it once or switch to a direct read; never spray variants of the same `code_nav` query. Do not create `plan.md`. If temporary written planning helps, use `_plan.md`; the harness removes it before promotion. When the edits are made, return the required JSON immediately.
 
 Rules:
 - First read every file in the Repository guidance section below. If those instructions name a
@@ -22,9 +22,10 @@ Rules:
 - Verify every source reference introduced or relied on by an edit. Prefer stable paths and symbols over line numbers. The harness validates cited source paths and internal wiki links, so repair stale seeded references and broken links rather than preserving them.
 - When a codewiki exists, consult `code_nav` first: `mode=wiki` lists indexed pages, and
   `mode=entries`, `mode=symbol`, and `mode=path` navigate the code before any broad reads.
-- Use `git` to confirm what changed. Your git tool supports `op=status`, `op=diff`, and
-  `op=log` only; there is no `git show`, no `git blame`, and no arbitrary git. There is no
-  shell.
+- The Git evidence and Working-tree evidence sections below are the complete record of what
+  changed; they were collected for you and are the only change evidence this pass gets. You
+  have no `git` tool and no shell, so do not try to confirm them by other means. Judge a
+  seeded claim by reading the source it describes.
 - Never read `.env` files or other secret-like files, credentials, or keys.
 - Treat the Working-tree evidence below as part of the update scope; same-HEAD edits can
   invalidate the seeded wiki. Separate implemented, partial, planned, and unverified behavior.

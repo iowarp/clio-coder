@@ -2328,6 +2328,24 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("carries a denied tool list as names and refuses a malformed one", () => {
+		const denied = validateJobSpec({ agentId: "documenter", task: "t", denyTools: ["git", "bash"] });
+		strictEqual(denied.ok, true);
+		if (denied.ok) deepStrictEqual([...(denied.spec.denyTools ?? [])], ["git", "bash"]);
+
+		// The list only ever subtracts, so a name matching no Clio tool is inert
+		// rather than an error; only a shape that cannot name a tool is refused.
+		const inert = validateJobSpec({ agentId: "documenter", task: "t", denyTools: ["not-a-tool"] });
+		strictEqual(inert.ok, true);
+
+		const malformed = validateJobSpec({ agentId: "documenter", task: "t", denyTools: ["git", ""] });
+		strictEqual(malformed.ok, false);
+		if (!malformed.ok) ok(malformed.errors.includes("denyTools must be an array of non-empty strings"));
+
+		const notAnArray = validateJobSpec({ agentId: "documenter", task: "t", denyTools: "git" });
+		strictEqual(notAnArray.ok, false);
+	});
+
 	it("normalizes empty briefings and rejects briefing input above the UTF-8 byte limit", () => {
 		const omitted = validateJobSpec({ agentId: "coder", task: "t", briefing: " \n\t " });
 		strictEqual(omitted.ok, true);

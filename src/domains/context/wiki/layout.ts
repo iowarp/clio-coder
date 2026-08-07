@@ -27,9 +27,18 @@ function wikiPageFileNamesInDir(dir: string): string[] {
 
 export const WIKI_TEMPORARY_PAGE_NAMES: ReadonlySet<string> = new Set(["_plan.md", "plan.md"]);
 
-function titleFromPage(name: string, text: string): string {
+/**
+ * The page's own H1, or null when it has none. Validation and the title reader
+ * share this one definition, so a page that promotes is exactly a page whose
+ * title the reader could find.
+ */
+function wikiPageHeading(text: string): string | null {
 	const heading = /^#\s+(.+?)\s*$/m.exec(text)?.[1]?.trim();
-	return heading && heading.length > 0 ? heading : name;
+	return heading && heading.length > 0 ? heading : null;
+}
+
+function titleFromPage(name: string, text: string): string {
+	return wikiPageHeading(text) ?? name;
 }
 
 export function wikiDir(cwd: string): string {
@@ -150,6 +159,11 @@ export function validateWikiLayoutInDir(dir: string, bounds: WikiPageBounds = {}
 			texts.set(page, text);
 			if (stat.size === 0 || text.trim().length === 0) {
 				problems.push(`${page} is empty`);
+			} else if (wikiPageHeading(text) === null) {
+				// Without an H1 the page has no title, and `meta.json` records the
+				// literal filename as one. That is checkable, so it is checked here
+				// rather than asked for in a prompt sentence the writer may miss.
+				problems.push(`${page} has no H1 title heading`);
 			}
 		} catch {
 			problems.push(`${page} is unreadable`);

@@ -1127,6 +1127,18 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 			"Claude CLI subprocess executes Claude Code tools; Clio constrains permission mode and forbids dangerous bypass unless explicitly gated",
 		];
 	}
+	if (runtimeId === "lmstudio-native") {
+		// The LM Studio SDK's prediction config carries no chat-template-kwargs
+		// channel, so `enable_thinking` and `reasoning_effort` cannot reach the
+		// template on this transport and the resolved thinking level never
+		// becomes a wire control. A catalog `reasoning: false` is then a belief
+		// about the model rather than something imposed on it. Naming it here
+		// keeps a no-op dial from reading like an applied one; the same server's
+		// HTTP port under `openai-compat` does carry the kwargs.
+		return [
+			"LM Studio native SDK exposes no chat-template-kwargs channel; the thinking level is not sent to the model and only governs how Clio renders what comes back",
+		];
+	}
 	// HTTP/native runtimes run through pi-agent-core, which Clio observes and
 	// controls directly, so there are no runtime-imposed dispatch limitations.
 	return [];
@@ -1185,16 +1197,35 @@ function effectiveToolNames(
 	 * that and reads the refusal as something to retry.
 	 */
 	writeConfined = false,
+	/**
+	 * Names the request asked not to be offered. Purely subtractive, so it can
+	 * only ever shrink what admission already resolved. A caller that knows a
+	 * tool cannot produce anything for the job it is dispatching removes it
+	 * here rather than leaving the model to spend budget finding that out.
+	 */
+	denied: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<ToolName> {
 	if (!targetToolCapability(target)) return [];
 	const names = allowedTools.filter(
 		(tool): tool is ToolName =>
 			isBuiltinToolName(tool) &&
 			tool !== ToolNames.AskUser &&
+			!denied.has(tool) &&
 			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&
 			(target.runtime.id !== "claude-sdk" || isClaudeCanonicalTool(tool)),
 	);
 	return [...new Set(names)].sort();
+}
+
+/**
+ * The request's denied tool names, case-normalized the way a declared skill
+ * surface is. A name that matches no Clio tool subtracts nothing, which is
+ * correct: this list only ever removes, so an unmatched entry is inert rather
+ * than an error.
+ */
+function deniedToolNames(req: DispatchRequest): ReadonlySet<string> {
+	if (!req.denyTools || req.denyTools.length === 0) return new Set();
+	return new Set(req.denyTools.map((tool) => tool.trim().toLowerCase()));
 }
 
 function assertPostRuntimeToolCompatibility(
@@ -2774,7 +2805,12 @@ export function createDispatchBundle(
 		const cwd = req.cwd ?? process.cwd();
 		const sessionAutonomy = settings?.autonomy ?? "auto-edit";
 		const effectiveAutonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
-		const effectiveTools = effectiveToolNames(admission.allowedTools, target, writeConfinedRequest(req));
+		const effectiveTools = effectiveToolNames(
+			admission.allowedTools,
+			target,
+			writeConfinedRequest(req),
+			deniedToolNames(req),
+		);
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target);
 		const effectiveAdmission: DispatchAdmissionStage = {
 			...admission,
@@ -4727,7 +4763,12 @@ export function createDispatchBundle(
 			providers,
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
-		const effectiveTools = effectiveToolNames(admission.allowedTools, target, writeConfinedRequest(req));
+		const effectiveTools = effectiveToolNames(
+			admission.allowedTools,
+			target,
+			writeConfinedRequest(req),
+			deniedToolNames(req),
+		);
 		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema);
