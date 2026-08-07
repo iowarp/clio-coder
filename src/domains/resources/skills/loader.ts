@@ -14,6 +14,24 @@ import { getMarketplaceSkills } from "./marketplace.js";
 const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
 
+/**
+ * Hard ceiling on a SKILL.md. Above this the file is a payload rather than a
+ * document: `loadSkills` runs on every `context(scope="skills")` call and reads
+ * and hashes each file whole, so an oversized one is a cost paid per tool call
+ * for content no model will ever be shown.
+ */
+const MAX_SKILL_BYTES = 1024 * 1024;
+
+/**
+ * Bytes of skill body the activation path can actually deliver. Mirrors
+ * `OBSERVE_SELF_CAPS.contextSkills`, which lives in the tool substrate and must
+ * not be imported from a domain; `contracts/skills` asserts the two agree so
+ * the mirror cannot drift. A skill over this still loads, because truncation is
+ * the activation path's job, but validation says so: an author whose workflow
+ * is silently cut in half at runtime has no other way to find out.
+ */
+export const SKILL_ACTIVATION_BODY_CAP_BYTES = 50 * 1024;
+
 /** Frontmatter keys with first-class meaning; everything else lands in metadata. */
 const CORE_FRONTMATTER_KEYS = new Set([
 	"name",
@@ -569,15 +587,52 @@ function loadSkillFile(
 	root: SkillRoot,
 ): { candidate: SkillCandidate | null; diagnostics: ResourceDiagnostic[] } {
 	const diagnostics: ResourceDiagnostic[] = [];
-	let raw: string;
+	let bytes: Buffer;
 	try {
-		raw = readFileSync(filePath, "utf8");
+		bytes = readFileSync(filePath);
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
 		return {
 			candidate: null,
 			diagnostics: [{ type: "warning", message: `skill file could not be read: ${reason}`, path: filePath }],
 		};
+	}
+	if (bytes.byteLength > MAX_SKILL_BYTES) {
+		return {
+			candidate: null,
+			diagnostics: [
+				{
+					type: "warning",
+					message: `skill file is ${bytes.byteLength} bytes, over the ${MAX_SKILL_BYTES}-byte limit for a SKILL.md`,
+					path: filePath,
+				},
+			],
+		};
+	}
+	// A SKILL.md becomes model-visible instructions, so it has to be text. utf8
+	// decoding never throws: it substitutes U+FFFD, which would turn a binary
+	// file into a document of replacement characters that loads and says
+	// nothing. Round-tripping is the check that catches it, and a NUL byte is
+	// called out separately because that is what a binary file looks like.
+	const raw = bytes.toString("utf8");
+	if (bytes.includes(0) || !Buffer.from(raw, "utf8").equals(bytes)) {
+		return {
+			candidate: null,
+			diagnostics: [
+				{
+					type: "warning",
+					message: "skill file is not valid UTF-8 text; a SKILL.md is a document, not a binary payload",
+					path: filePath,
+				},
+			],
+		};
+	}
+	if (bytes.byteLength > SKILL_ACTIVATION_BODY_CAP_BYTES) {
+		diagnostics.push({
+			type: "warning",
+			message: `skill file is ${bytes.byteLength} bytes; activation delivers at most ${SKILL_ACTIVATION_BODY_CAP_BYTES}, so the model will not be shown the rest`,
+			path: filePath,
+		});
 	}
 
 	let parsed: { frontmatter: Record<string, unknown>; body: string };
