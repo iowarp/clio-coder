@@ -997,6 +997,16 @@ describe("synthesis reserve at the cap tail", () => {
 		};
 	}
 
+	function mockDiscoverySpec(): ToolSpec {
+		return {
+			name: ToolNames.Grep,
+			description: "test discovery tool",
+			parameters: Type.Object({}),
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: "matched" }),
+		};
+	}
+
 	function reserveRegistry(cap: number, reserve: number) {
 		const safety = unknownClassSafety();
 		const guard = createLoopGuardRegistration({
@@ -1100,6 +1110,147 @@ describe("synthesis reserve at the cap tail", () => {
 		strictEqual((await registry.invoke({ tool: ToolNames.Write, args: { path: "b.md" } })).kind, "ok");
 		const third = await registry.invoke({ tool: ToolNames.Read, args: { path: "c.md" } });
 		ok(third.kind === "ok" && third.result.kind === "ok" && !third.result.output.includes("budget reserve"));
+	});
+
+	it("admits an agent's delivery tools inside the cap-tail reserve", async () => {
+		const safety = unknownClassSafety();
+		const guard = createLoopGuardRegistration({
+			safety,
+			toolCallCap: 6,
+			toolCallReserve: 3,
+			deliveryTools: [ToolNames.Write],
+			turnSynthesisLockout: true,
+		});
+		const bundle = createMiddlewareBundle({ registrations: [guard] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		registry.register(mockWriteSpec());
+		registry.register(mockDiscoverySpec());
+		for (let i = 0; i < 3; i += 1) {
+			strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: `pre-${i}.md` } })).kind, "ok");
+		}
+		// The window is open: the agent's product still lands, its exploration does not.
+		strictEqual(
+			(await registry.invoke({ tool: ToolNames.Write, args: { path: "page.md" } })).kind,
+			"ok",
+			"a writer must be able to write in its own reserve",
+		);
+		const discovery = await registry.invoke({ tool: ToolNames.Grep, args: { pattern: "still exploring" } });
+		ok(discovery.kind === "blocked" && isWorkerSynthesisReserveBlockReason(discovery.reason), "discovery still bounces");
+	});
+
+	it("never spends the lifetime cap on a call the reserve refused", async () => {
+		const safety = unknownClassSafety();
+		const guard = createLoopGuardRegistration({
+			safety,
+			toolCallCap: 5,
+			toolCallReserve: 3,
+			deliveryTools: [ToolNames.Write],
+			turnSynthesisLockout: true,
+		});
+		const bundle = createMiddlewareBundle({ registrations: [guard] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		registry.register(mockWriteSpec());
+		registry.register(mockDiscoverySpec());
+		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: "pre.md" } })).kind, "ok");
+		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: "pre-2.md" } })).kind, "ok");
+		const before = guard.callCount();
+		const refused = await registry.invoke(
+			{ tool: ToolNames.Grep, args: { pattern: "one" } },
+			{ correlationId: "round-1" },
+		);
+		strictEqual(refused.kind, "blocked");
+		strictEqual(guard.callCount(), before, "a refused call ran nothing and spends nothing");
+		// The remaining budget is therefore still the agent's to deliver with.
+		for (let i = 0; i < 3; i += 1) {
+			strictEqual(
+				(await registry.invoke({ tool: ToolNames.Write, args: { path: `page-${i}.md` } })).kind,
+				"ok",
+				`delivery call ${i + 1} still fits inside the cap`,
+			);
+		}
+	});
+
+	it("bounds reserve refusals per model round instead of letting them run forever", async () => {
+		const safety = unknownClassSafety();
+		const guard = createLoopGuardRegistration({
+			safety,
+			toolCallCap: 8,
+			toolCallReserve: 6,
+			deliveryTools: [ToolNames.Write],
+			turnSynthesisLockout: true,
+		});
+		const bundle = createMiddlewareBundle({ registrations: [guard] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		registry.register(mockWriteSpec());
+		registry.register(mockDiscoverySpec());
+		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: "pre.md" } })).kind, "ok");
+		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: "pre-2.md" } })).kind, "ok");
+		for (let round = 1; round <= LOOP_SYNTHESIS_BACKSTOP_DENIALS; round += 1) {
+			const denied = await registry.invoke(
+				{ tool: ToolNames.Grep, args: { pattern: `round-${round}` } },
+				{ correlationId: `round-${round}` },
+			);
+			ok(denied.kind === "blocked" && isWorkerSynthesisReserveBlockReason(denied.reason), `round ${round} steers`);
+		}
+		const locked = await registry.invoke(
+			{ tool: ToolNames.Grep, args: { pattern: "still-exploring" } },
+			{ correlationId: "round-final" },
+		);
+		ok(
+			locked.kind === "blocked" && isWorkerToolCallCapSynthesisReason(locked.reason),
+			"a model that will not stop exploring reaches the synthesis lockout",
+		);
+	});
+
+	it("lets a writer finish inside the soft-budget live-read reserve", async () => {
+		// The production shape: a recipe's own budget with a read reserve at its
+		// tail. Before delivery tools were admitted here, a documenter that
+		// verified and then wrote had every write bounced, retried, and charged
+		// until the lifetime cap aborted the run with nothing promoted.
+		const safety = unknownClassSafety();
+		let reserveOpened = 0;
+		const guard = createLoopGuardRegistration({
+			safety,
+			toolCallCap: 12,
+			toolCallSoftLimit: 6,
+			toolCallSoftReadReserve: 3,
+			deliveryTools: [ToolNames.Write],
+			turnSynthesisLockout: true,
+			onSoftReadReserve: () => {
+				reserveOpened += 1;
+			},
+		});
+		const bundle = createMiddlewareBundle({ registrations: [guard] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		registry.register(mockWriteSpec());
+		registry.register(mockDiscoverySpec());
+		for (let i = 0; i < 3; i += 1) {
+			strictEqual((await registry.invoke({ tool: ToolNames.Grep, args: { pattern: `orient-${i}` } })).kind, "ok");
+		}
+		strictEqual(reserveOpened, 1, "the reserve opens once the pre-reserve allowance is spent");
+		const refused = await registry.invoke(
+			{ tool: ToolNames.Grep, args: { pattern: "more exploration" } },
+			{ correlationId: "round-1" },
+		);
+		ok(refused.kind === "blocked", "discovery is refused once the reserve opens");
+		ok(
+			refused.kind === "blocked" && refused.reason.startsWith("worker live-read reserve"),
+			"the reason names the reserve",
+		);
+		ok(refused.kind === "blocked" && refused.reason.includes("write"), "the directive names what is still admitted");
+		strictEqual(guard.callCount(), 3, "the refusal spends nothing");
+		for (let i = 0; i < 3; i += 1) {
+			strictEqual(
+				(await registry.invoke({ tool: ToolNames.Write, args: { path: `page-${i}.md` } })).kind,
+				"ok",
+				`the reserve is spent on delivery, not lost to refusals (${i + 1})`,
+			);
+		}
+		const spent = await registry.invoke({ tool: ToolNames.Write, args: { path: "one-too-many.md" } });
+		ok(
+			spent.kind === "blocked" && spent.reason.startsWith("worker exploration budget reached (6)"),
+			"the soft budget still ends the work phase",
+		);
 	});
 
 	it("keeps the reserve predicate mutually exclusive with the cap vocabulary", () => {

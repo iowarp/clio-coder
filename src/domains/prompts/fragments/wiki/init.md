@@ -22,7 +22,7 @@ Structure requirements:
 
 Execution discipline:
 - Treat the codewiki digest as the repository map. Spend at most 10 tool calls choosing the outline, then write a useful minimal wiki early and improve it in place as targeted checks land.
-- Finish all writes before the read-only reserve begins. Do not emit large parallel batches: every attempted sibling spends the same bounded budget. If a lookup errors, refine it once or switch to a direct read; never spray variants of the same `code_nav` query.
+- Write each page as soon as you can ground it rather than researching every area first. The tail of your budget admits reads and writes only, so an unwritten page at that point cannot be researched further, only written. Do not emit large parallel batches: every attempted sibling spends the same bounded budget. If a lookup errors, refine it once or switch to a direct read; never spray variants of the same `code_nav` query.
 - Establish the full required page skeleton early, then deepen every page with grounded implementation details. Do not create `plan.md`. If temporary written planning helps, use `_plan.md`; the harness removes it before promotion. Before finishing, reconcile the final page map against manifests, indexed entry points, public surfaces, focus areas, and representative tests; repair uncovered components, orphan pages, unsupported claims, and missing cross-links. Use one scoped diff after writing, then return the required JSON immediately.
 
 Research discipline:

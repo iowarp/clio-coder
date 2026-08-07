@@ -579,7 +579,9 @@ retry:
 # Guardrails: numeric backstops that bound runaway agent behavior.
 #   turnToolCallBudget          orchestrator per-turn soft tool-call budget;
 #                               the hard interrupt ceiling sits 15 above it.
-#   workerToolCallCap           lifetime tool-call cap per dispatched worker run.
+#   workerToolCallCap           ceiling on tool calls a dispatched worker may
+#                               execute; the agent recipe's own budget is what
+#                               normally binds, and refused calls never spend it.
 #   maxDispatchRuns             dispatch run-ledger retention cap.
 #   readMaxBytes                per-call byte cap for the read tool.
 #   observationTurnBudgetBytes  shared per-turn byte pool for observation tools.
@@ -591,7 +593,7 @@ retry:
 # for CI and one-off experiments.
 guardrails:
   turnToolCallBudget: 60
-  workerToolCallCap: 50
+  workerToolCallCap: 150
   maxDispatchRuns: 1000
   readMaxBytes: 51200
   observationTurnBudgetBytes: 196608

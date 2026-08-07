@@ -186,10 +186,15 @@ function workerExplorationSynthesisDirective(limit: number): string {
 	);
 }
 
-function workerLiveReadReserveDirective(remaining: number): string {
+function workerLiveReadReserveDirective(remaining: number, deliveryTools: ReadonlyArray<string>): string {
+	const admitted = deliveryTools.length > 0 ? `read and ${deliveryTools.join("/")}` : "the read tool";
+	const finish =
+		deliveryTools.length > 0
+			? `Finish the work: re-read what you will cite and write it with ${deliveryTools.join(" or ")}.`
+			: "Read a specific live file needed for the handoff.";
 	return (
-		`Scout live-read reserve: broad orientation is complete and ${remaining} source ${remaining === 1 ? "read remains" : "reads remain"}. ` +
-		"Only the read tool is admitted now. Read a specific live file needed for the handoff and do not substitute code_nav, ls, grep, find, context, git, or shell commands."
+		`worker live-read reserve: broad orientation is complete and ${remaining} ${remaining === 1 ? "call remains" : "calls remain"}. ` +
+		`Only ${admitted} ${deliveryTools.length > 0 ? "are" : "is"} admitted now. ${finish} Do not substitute code_nav, ls, grep, find, context, git, or shell commands.`
 	);
 }
 
@@ -332,11 +337,21 @@ export interface CreateLoopGuardRegistrationOptions {
 	toolCallSoftLimit?: number;
 	/**
 	 * Worker only: tail of {@link toolCallSoftLimit} reserved for live source
-	 * reads. Once the pre-reserve allowance is consumed, non-read attempts are
+	 * reads. Once the pre-reserve allowance is consumed, discovery attempts are
 	 * blocked without spending the read allowance and the next provider round
 	 * can be forced to `read` through {@link onSoftReadReserve}.
 	 */
 	toolCallSoftReadReserve?: number;
+	/**
+	 * Worker only: tools that carry this agent's deliverable rather than its
+	 * exploration, admitted inside a reserve window alongside `read`. The
+	 * reserve exists to end broad discovery, not to stop an agent from
+	 * finishing: for an agent whose product is a report the tail is reads and
+	 * prose, but for one whose product is files the tail is reads and writes,
+	 * and blocking those made the last calls of every editing run bounce. Empty
+	 * for read-only agents, which keeps the reserve read-only exactly as before.
+	 */
+	deliveryTools?: ReadonlyArray<string>;
 	/**
 	 * Worker only: calls held back from the tail of {@link toolCallCap} for
 	 * verification reads and synthesis. Entering the window annotates one tool
@@ -407,8 +422,18 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const softReadReserve = options.toolCallSoftReadReserve ?? 0;
 	const softReadReserveThreshold =
 		softLimit !== undefined && softReadReserve > 0 && softLimit > softReadReserve ? softLimit - softReadReserve : null;
+	const deliveryTools = [...new Set(options.deliveryTools ?? [])];
+	const reserveAdmits = (tool: string | undefined): boolean =>
+		tool === ToolNames.Read || (tool !== undefined && deliveryTools.includes(tool));
 	let softAdmittedCount = 0;
 	let softReadReserveEntered = false;
+	/**
+	 * Per-round non-compliance inside a reserve window. A reserve block is
+	 * steering rather than a runaway signal, so it never spends the lifetime
+	 * cap; this is what still bounds it. Reset by every admitted call, so the
+	 * total is bounded by the reserve's own remaining calls.
+	 */
+	let reserveDenials: { denials: number; correlationId?: string } = { denials: 0 };
 	// Reserve window bounds. Active only when a cap exists and is strictly
 	// larger than the reserve; a call is inside the window when its attempt
 	// ordinal exceeds this threshold but has not passed the cap itself.
@@ -753,7 +778,12 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				recordSuccessfulResult(input);
 				recordResultForStagnation(input);
 				const effects = [...crossArgumentResultEffects(input)];
-				if (softReadReserveEntered && softLockout === null && input.toolName === ToolNames.Read) {
+				if (
+					softReadReserveEntered &&
+					softLockout === null &&
+					deliveryTools.length === 0 &&
+					input.toolName === ToolNames.Read
+				) {
 					effects.push({ kind: "require_tool", toolName: ToolNames.Read });
 				}
 				// One-shot reserve directive: the first executed call inside the
@@ -790,10 +820,6 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
 			}
 			if (softLockout !== null && softLimit !== undefined) {
-				count += 1;
-				if (cap !== undefined && count > cap) {
-					return [{ kind: "block_tool", reason: workerToolCallCapExceededReason(cap), severity: "hard-block" }];
-				}
 				if (reachesLockoutBackstop(softLockout, input)) {
 					return [
 						{ kind: "block_tool", reason: synthesisBackstopReason(input.toolName ?? "unknown"), severity: "hard-block" },
@@ -807,10 +833,6 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// lifetime-cap failure before the model gets its synthesis round.
 			const lockout = synthesisLockout ? lockoutByTurn.get(turnKey) : undefined;
 			if (lockout !== undefined) {
-				count += 1;
-				if (cap !== undefined && count > cap) {
-					return [{ kind: "block_tool", reason: workerToolCallCapExceededReason(cap), severity: "hard-block" }];
-				}
 				if (reachesLockoutBackstop(lockout, input)) {
 					emitLoopBlocked(
 						input,
@@ -827,7 +849,88 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
 			}
 
+			// Soft agent budget and its reserve window, resolved before the call is
+			// counted: every refusal below is steering the harness authored, and a
+			// call the harness refused never ran. Counting those spent the lifetime
+			// cap on the guard's own denials, which is how a worker that obeyed the
+			// reserve by writing instead of grepping got killed by it. The bound on
+			// refusals is reserveDenials and the synthesis backstop, both per model
+			// round; the cap bounds executed work.
+			if (softLimit !== undefined) {
+				if (softAdmittedCount >= softLimit) {
+					softLockout = {
+						denials: 0,
+						...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+					};
+					options.onSynthesisLockout?.();
+					return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
+				}
+				if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) {
+					enterSoftReadReserve();
+					if (!reserveAdmits(input.toolName)) {
+						// A model that keeps calling discovery tools inside the reserve
+						// is not going to finish; after a bounded number of model rounds
+						// it gets the same graceful synthesis lockout the soft budget
+						// ends in, rather than an unbounded bounce.
+						if (reachesLockoutBackstop(reserveDenials, input)) {
+							softLockout = {
+								denials: 0,
+								...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+							};
+							options.onSynthesisLockout?.();
+							return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
+						}
+						return [
+							{
+								kind: "block_tool",
+								reason: workerLiveReadReserveDirective(softLimit - softAdmittedCount, deliveryTools),
+								severity: "hard-block",
+							},
+						];
+					}
+				}
+			}
+
+			// Synthesis reserve (workers): the tail of the lifetime cap is held for
+			// verification reads and delivery. Discovery calls bounce with a
+			// steering reason that never carries the cap's machine prefix, so cap
+			// telemetry, worker aborts, and A2's cap-exhaustion notice stay
+			// untouched; reads and this agent's delivery tools keep flowing through
+			// the repetition and stagnation detectors below.
+			if (reserveThreshold !== null && cap !== undefined && count >= reserveThreshold && !reserveAdmits(input.toolName)) {
+				if (reachesLockoutBackstop(reserveDenials, input)) {
+					if (synthesisLockout) {
+						capLockout = {
+							denials: 0,
+							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+						};
+						options.onSynthesisLockout?.();
+					}
+					return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
+				}
+				return [
+					{
+						kind: "block_tool",
+						reason: workerSynthesisReserveBlockReason(input.toolName ?? "unknown", Math.max(1, cap - count), cap),
+						severity: "hard-block",
+					},
+				];
+			}
+
 			count += 1;
+			reserveDenials = { denials: 0 };
+			if (softLimit !== undefined) {
+				softAdmittedCount += 1;
+				if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) enterSoftReadReserve();
+				if (softAdmittedCount >= softLimit) {
+					softLockout = {
+						denials: 0,
+						...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+					};
+					options.onSynthesisLockout?.();
+					options.onSoftLimitFinalCallAdmitted?.(input.toolCallId);
+				}
+			}
 			if (cap !== undefined && count > cap) {
 				// No tool body executes past the cap. With the synthesis lockout
 				// wired the run is not aborted on the spot: the first crossing flips
@@ -845,74 +948,6 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				};
 				options.onSynthesisLockout?.();
 				return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
-			}
-			if (softLimit !== undefined) {
-				if (softReadReserveThreshold === null) {
-					if (count > softLimit) {
-						softLockout = {
-							denials: 0,
-							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
-						};
-						options.onSynthesisLockout?.();
-						return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
-					}
-					if (count === softLimit) {
-						softLockout = {
-							denials: 0,
-							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
-						};
-						options.onSynthesisLockout?.();
-						options.onSoftLimitFinalCallAdmitted?.(input.toolCallId);
-					}
-				} else {
-					if (softAdmittedCount >= softReadReserveThreshold) enterSoftReadReserve();
-					if (softAdmittedCount >= softLimit) {
-						softLockout = {
-							denials: 0,
-							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
-						};
-						options.onSynthesisLockout?.();
-						return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
-					}
-					if (softAdmittedCount >= softReadReserveThreshold && input.toolName !== ToolNames.Read) {
-						return [
-							{
-								kind: "block_tool",
-								reason: workerLiveReadReserveDirective(softLimit - softAdmittedCount),
-								severity: "hard-block",
-							},
-						];
-					}
-					softAdmittedCount += 1;
-					if (softAdmittedCount >= softReadReserveThreshold) enterSoftReadReserve();
-					if (softAdmittedCount >= softLimit) {
-						softLockout = {
-							denials: 0,
-							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
-						};
-						options.onSynthesisLockout?.();
-						options.onSoftLimitFinalCallAdmitted?.(input.toolCallId);
-					}
-				}
-			}
-
-			// Synthesis reserve (workers): the tail of the lifetime cap is held for
-			// verification reads and synthesis. Non-read calls bounce with a
-			// steering reason that never carries the cap's machine prefix, so cap
-			// telemetry, worker aborts, and A2's cap-exhaustion notice stay
-			// untouched; reads keep flowing through the repetition and stagnation
-			// detectors below. A model that keeps trying blocked calls burns
-			// attempts toward the unchanged hard cap, which remains the bound.
-			if (reserveThreshold !== null && cap !== undefined && count > reserveThreshold) {
-				if (input.toolName !== ToolNames.Read) {
-					return [
-						{
-							kind: "block_tool",
-							reason: workerSynthesisReserveBlockReason(input.toolName ?? "unknown", Math.max(1, cap - count + 1), cap),
-							severity: "hard-block",
-						},
-					];
-				}
 			}
 
 			// Identical-repeat detection runs BEFORE the volume budget so verbatim

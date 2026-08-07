@@ -791,7 +791,7 @@ describe("contracts/worker-steer", () => {
 			});
 		});
 
-		it("lets the operator hard cap win when a model calls again after a coincident boundary", async () => {
+		it("ends a model that keeps calling after its boundary on the backstop, not on the cap", async () => {
 			await withWorkerCap(3, async () => {
 				const events: unknown[] = [];
 				const { input, unregister } = fauxRuntimeInput(
@@ -814,11 +814,21 @@ describe("contracts/worker-steer", () => {
 					strictEqual(
 						reasons.filter((reason) => reason.startsWith("permission denied by policy")).length,
 						3,
-						"exactly cap attempts reached the permission seam",
+						"exactly budget attempts reached the permission seam",
 					);
-					const capBlocks = reasons.filter((reason) => reason.startsWith("workerToolCallCap reached (3); abort run"));
-					strictEqual(capBlocks.length, 1, "the first post-boundary attempt crosses the independent hard cap");
-					strictEqual(finishes.length, 4, "three admitted attempts plus one hard-cap noncompliance block");
+					// The budget bounds what executes. Attempts after it are the
+					// harness's own refusals, so they neither run nor spend the cap;
+					// the per-round backstop is what ends the run.
+					strictEqual(
+						reasons.filter((reason) => reason.startsWith("workerToolCallCap reached (3)")).length,
+						0,
+						"a refused call never crosses the lifetime cap",
+					);
+					ok(
+						reasons.some((reason) => reason.startsWith("loop guard: tool calls stayed disabled")),
+						"the run ends on the bounded synthesis backstop",
+					);
+					ok(finishes.length <= 7, `post-boundary denials stay bounded (saw ${finishes.length} finishes)`);
 					strictEqual(
 						events.some(
 							(event) =>
@@ -830,7 +840,7 @@ describe("contracts/worker-steer", () => {
 								typeof event.payload === "object" &&
 								event.payload !== null &&
 								"outcomeCode" in event.payload &&
-								event.payload.outcomeCode === "worker_tool_call_cap_exhausted",
+								event.payload.outcomeCode === "loop_guard_tools_disabled_exhausted",
 						),
 						true,
 					);

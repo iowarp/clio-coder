@@ -9,7 +9,11 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { workerToolCallCapExceededReason, workerToolCallCapSynthesisReason } from "../../src/core/guardrails.js";
+import {
+	GUARDRAIL_DEFAULTS,
+	workerToolCallCapExceededReason,
+	workerToolCallCapSynthesisReason,
+} from "../../src/core/guardrails.js";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES } from "../../src/core/response-schema.js";
 import type { ToolName } from "../../src/core/tool-names.js";
@@ -1253,7 +1257,12 @@ describe("contracts/dispatch", () => {
 			strictEqual(spec.trustProjectCompatRoots, true);
 			deepStrictEqual(
 				spec.budget,
-				{ toolCalls: 50, readReserve: 0, synthesis: true, hardCap: 50 },
+				{
+					toolCalls: GUARDRAIL_DEFAULTS.workerToolCallCap,
+					readReserve: 0,
+					synthesis: true,
+					hardCap: GUARDRAIL_DEFAULTS.workerToolCallCap,
+				},
 				"an admitted surface without canonical read must zero the effective reserve",
 			);
 			strictEqual(spec.systemPrompt.includes("require_tool(read)"), false);
@@ -1334,7 +1343,12 @@ describe("contracts/dispatch", () => {
 				strictEqual(routineSpec.allowedTools.includes(omitted), false, `${omitted} must be absent from schemas`);
 				strictEqual(routineSpec.systemPrompt.includes(`\`${omitted}\``), false, `${omitted} must be absent from guidance`);
 			}
-			deepStrictEqual(routineSpec.budget, { toolCalls: 50, readReserve: 5, synthesis: true, hardCap: 50 });
+			deepStrictEqual(routineSpec.budget, {
+				toolCalls: 50,
+				readReserve: 5,
+				synthesis: true,
+				hardCap: GUARDRAIL_DEFAULTS.workerToolCallCap,
+			});
 
 			const navigation = await bundle.contract.dispatch({
 				agentId: "coder",

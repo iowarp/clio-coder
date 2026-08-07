@@ -10,7 +10,7 @@ and promotes it to `.clio/wiki`; you never write to `.clio/wiki` yourself. Never
 
 Execution discipline:
 - Treat this as a bounded editing pass, not a repo-wide audit. Read the seeded pages and the supplied Git and working-tree evidence before choosing any source lookup.
-- Use no more than 10 tool calls to identify affected pages. Make edits as soon as a claim is verified, and finish all writes before the read-only reserve begins. Do not emit large parallel batches: every attempted sibling spends the same bounded budget.
+- Use no more than 10 tool calls to identify affected pages. Make each edit as soon as its claim is verified rather than batching every edit at the end. The tail of your budget admits reads and writes only, so anything still unverified then can only be left as it is. Do not emit large parallel batches: every attempted sibling spends the same bounded budget.
 - If a lookup errors, refine it once or switch to a direct read; never spray variants of the same `code_nav` query. Do not create `plan.md`. If temporary written planning helps, use `_plan.md`; the harness removes it before promotion. Use one scoped diff after editing, then return the required JSON immediately.
 
 Rules:
