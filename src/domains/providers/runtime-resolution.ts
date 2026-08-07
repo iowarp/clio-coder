@@ -532,6 +532,16 @@ export function firstRuntimeResolutionError(diagnostics: ReadonlyArray<RuntimeRe
 	return diagnostics.find((entry) => entry.severity === "error")?.message ?? null;
 }
 
+/**
+ * The warnings a successful resolution still carries. A resolution that
+ * succeeded is not a resolution that was clean: an unadvertised model id or a
+ * thinking level the runtime ignores resolves fine and still changes what the
+ * run does, so the caller has something to report rather than discard.
+ */
+export function runtimeResolutionWarnings(diagnostics: ReadonlyArray<RuntimeResolutionDiagnostic>): string[] {
+	return diagnostics.filter((entry) => entry.severity === "warning").map((entry) => entry.message);
+}
+
 /** Recommended minimum context for coding against a local-native runtime. Advisory, not provider truth. */
 const LOCAL_NATIVE_DESIRED_CONTEXT_WINDOW = 128000;
 /** Last-resort window when nothing declares one. */
