@@ -167,12 +167,14 @@ async function runWikiStatusCommand(): Promise<number> {
 		`gitHead: ${meta.gitHead ?? "none"}`,
 	];
 	if (meta.generation) {
-		const { depth, requestedDepth, sourceFiles } = meta.generation;
-		const bounds = context.WIKI_DEPTH_STRATEGY[depth];
+		const { depth, requestedDepth, sourceFiles, pagesPlanned, pagesWritten } = meta.generation;
 		lines.push(
-			`depth: ${depth} (requested ${requestedDepth}; one documenter pass; ` +
-				`${sourceFiles} source files; ${bounds.minPages}-${bounds.maxPages} pages guided)`,
+			`depth: ${depth} (requested ${requestedDepth}; ${sourceFiles} source files; ` +
+				`${pagesWritten}/${pagesPlanned} planned pages written)`,
 		);
+		if (pagesWritten < pagesPlanned) {
+			lines.push(`pending: ${pagesPlanned - pagesWritten} page(s); run \`clio context wiki --update\` to finish`);
+		}
 	}
 	if (currentHead !== meta.gitHead) {
 		lines.push(`staleness: gitHead differs from current HEAD (${currentHead ?? "none"})`);

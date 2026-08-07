@@ -1,23 +1,26 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
-import { type WikiPage, wikiDir } from "./layout.js";
-import type { ResolvedWikiDepth, WikiDepth } from "./plan.js";
+import { type WikiPage, wikiDir, wikiMarkdownFilesInDir } from "./layout.js";
+import type { ResolvedWikiDepth, WikiDepth, WikiPlan } from "./plan.js";
+import { sanitizeWikiPlan } from "./plan-store.js";
 
 /**
- * What the generator observed and chose for this artifact. Only measurements
- * and the resolved choice are recorded; the page and size bounds are policy
- * derivable from `depth` through `WIKI_DEPTH_STRATEGY`, so storing them would
- * duplicate a constant that the reader can already look up.
+ * What the generator observed and chose for this artifact. Page and section
+ * counts are outcomes, not targets: they record what the repository produced
+ * at the resolved depth so an operator can see whether a run finished.
  */
 export interface WikiMetaGeneration {
 	requestedDepth: WikiDepth;
 	depth: ResolvedWikiDepth;
 	sourceFiles: number;
 	sourceLines: number;
-	researchAgents: number;
+	/** Pages the plan calls for. */
+	pagesPlanned: number;
+	/** Pages the plan records as written. Below `pagesPlanned` means work remains. */
+	pagesWritten: number;
 }
 
 export interface WikiMeta {
@@ -29,6 +32,12 @@ export interface WikiMeta {
 	contentHash: string;
 	pages: WikiPage[];
 	generation?: WikiMetaGeneration;
+	/**
+	 * The page plan this wiki was built from. Carrying it here is what lets a
+	 * later run resume: it knows the intended structure and which pages are
+	 * still owed without re-deriving either.
+	 */
+	plan?: WikiPlan;
 }
 
 export type WikiMetaValidation = { ok: true; value: WikiMeta } | { ok: false; problems: string[] };
@@ -52,35 +61,39 @@ function nonNegativeSafeInteger(value: unknown): value is number {
 const REQUESTED_DEPTHS: ReadonlyArray<WikiDepth> = ["auto", "simple", "medium", "detailed"];
 const RESOLVED_DEPTHS: ReadonlyArray<ResolvedWikiDepth> = ["simple", "medium", "detailed"];
 
-function parseGeneration(value: unknown, problems: string[]): WikiMetaGeneration | undefined {
-	if (value === undefined) return undefined;
-	if (!isRecord(value)) {
-		problems.push("generation must be an object when present");
+/**
+ * Parse the generation block, or drop it. It is a diagnostic record, so a
+ * shape this version of Clio does not recognize costs an operator a status
+ * line; treating it as corruption would instead discard a usable wiki and
+ * silently regenerate it from scratch.
+ */
+function parseGeneration(value: unknown): WikiMetaGeneration | undefined {
+	if (!isRecord(value)) return undefined;
+	const { requestedDepth, depth, sourceFiles, sourceLines, pagesPlanned, pagesWritten } = value;
+	if (
+		!REQUESTED_DEPTHS.includes(requestedDepth as WikiDepth) ||
+		!RESOLVED_DEPTHS.includes(depth as ResolvedWikiDepth) ||
+		!nonNegativeSafeInteger(sourceFiles) ||
+		!nonNegativeSafeInteger(sourceLines) ||
+		!nonNegativeSafeInteger(pagesPlanned) ||
+		!nonNegativeSafeInteger(pagesWritten)
+	) {
 		return undefined;
 	}
-	const { requestedDepth, depth, sourceFiles, sourceLines, researchAgents } = value;
-	const requestedOk = REQUESTED_DEPTHS.includes(requestedDepth as WikiDepth);
-	const depthOk = RESOLVED_DEPTHS.includes(depth as ResolvedWikiDepth);
-	const filesOk = nonNegativeSafeInteger(sourceFiles);
-	const linesOk = nonNegativeSafeInteger(sourceLines);
-	const agentsOk = nonNegativeSafeInteger(researchAgents);
-	if (!requestedOk) problems.push("generation.requestedDepth is invalid");
-	if (!depthOk) problems.push("generation.depth is invalid");
-	if (!filesOk) problems.push("generation.sourceFiles must be a non-negative safe integer");
-	if (!linesOk) problems.push("generation.sourceLines must be a non-negative safe integer");
-	if (!agentsOk) problems.push("generation.researchAgents must be a non-negative safe integer");
-	if (!requestedOk || !depthOk || !filesOk || !linesOk || !agentsOk) return undefined;
 	return {
 		requestedDepth: requestedDepth as WikiDepth,
 		depth: depth as ResolvedWikiDepth,
 		sourceFiles,
 		sourceLines,
-		researchAgents,
+		pagesPlanned,
+		pagesWritten,
 	};
 }
 
 function normalizePages(pages: ReadonlyArray<WikiPage>): WikiPage[] {
-	return pages.map((page) => ({ path: page.path, title: page.title })).sort((a, b) => a.path.localeCompare(b.path));
+	return pages
+		.map((page) => ({ path: page.path, title: page.title, ...(page.summary ? { summary: page.summary } : {}) }))
+		.sort((a, b) => a.path.localeCompare(b.path));
 }
 
 export function wikiMetaPath(cwd: string): string {
@@ -119,7 +132,6 @@ export function validateWikiMeta(value: unknown): WikiMetaValidation {
 	if (!contentHash || !/^[a-f0-9]{64}$/.test(contentHash)) {
 		problems.push("contentHash must be a sha256 hex string");
 	}
-	const generation = parseGeneration(value.generation, problems);
 	if (!Array.isArray(value.pages)) {
 		problems.push("pages must be an array");
 	} else {
@@ -133,6 +145,8 @@ export function validateWikiMeta(value: unknown): WikiMetaValidation {
 		}
 	}
 	if (problems.length > 0) return { ok: false, problems };
+	const generation = parseGeneration(value.generation);
+	const plan = sanitizeWikiPlan(value.plan, undefined, { trustStatus: true });
 	return {
 		ok: true,
 		value: {
@@ -144,6 +158,7 @@ export function validateWikiMeta(value: unknown): WikiMetaValidation {
 			contentHash: contentHash as string,
 			pages: normalizePages(value.pages as WikiPage[]),
 			...(generation !== undefined ? { generation } : {}),
+			...(plan !== null ? { plan } : {}),
 		},
 	};
 }
@@ -175,29 +190,26 @@ export function writeWikiMeta(cwd: string, meta: WikiMeta): void {
 		contentHash: meta.contentHash,
 		pages: normalizePages(meta.pages),
 		...(meta.generation !== undefined ? { generation: { ...meta.generation } } : {}),
+		...(meta.plan !== undefined ? { plan: meta.plan } : {}),
 	};
 	safeResourceWrite(wikiMetaPath(cwd), `${JSON.stringify(normalized)}\n`, { encoding: "utf8" });
 }
 
+/**
+ * Content hash over the whole page tree. Nested sections mean the walk has to
+ * recurse; the relative path is folded in so moving a page between sections
+ * changes the hash even when its bytes do not.
+ */
 export function computeWikiContentHashOfDir(dir: string): string {
-	let names: string[];
-	try {
-		names = readdirSync(dir, { withFileTypes: true })
-			.filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-			.map((entry) => entry.name)
-			.sort(compareStrings);
-	} catch {
-		names = [];
-	}
 	const hash = createHash("sha256");
-	for (const name of names) {
+	for (const relPath of wikiMarkdownFilesInDir(dir).sort(compareStrings)) {
 		let text = "";
 		try {
-			text = readFileSync(join(dir, name), "utf8");
+			text = readFileSync(join(dir, relPath), "utf8");
 		} catch {
 			text = "";
 		}
-		hash.update(`${name}\0${text.length}\0`);
+		hash.update(`${relPath}\0${text.length}\0`);
 		hash.update(text);
 		hash.update("\0");
 	}

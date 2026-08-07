@@ -376,18 +376,28 @@ Java, Ruby, and C#, with per-file regex fallback where a regex extractor exists.
 ### Markdown wiki commands
 
 `clio context wiki` generates the optional agent-authored wiki under
-`.clio/wiki/` by dispatching the `documenter` agent through the configured model
-target. `quickstart.md` is required as the hub, the layout is capped at eight
-Markdown pages, and `.clio/wiki/meta.json` records the page list, model label,
-content hash, git head, and indexed source-tree hash after validation succeeds.
+`.clio/wiki/` by dispatching the `wiki-writer` agent through the configured
+model target. It makes one planning dispatch, which revises the page plan the
+codewiki index derived, then one dispatch per page. `quickstart.md` and every
+directory `index.md` are generated deterministically from the pages' front
+matter after the run, so no dispatch writes them. `.clio/wiki/meta.json` records
+the page list, model label, content hash, git head, indexed source-tree hash,
+and the plan.
 
-`clio context wiki --update` requests update mode explicitly. Update prompts
-include repository-instruction discovery, bounded working-tree evidence, the
-codewiki digest, and git evidence since the recorded wiki `gitHead`.
+Each page dispatch is bounded on its own wall clock, and the run is bounded
+between pages. Neither bound loses work: a page that fails or times out is
+recorded as still owed and the run continues to the next one, and every finished
+page is assembled and promoted. When `generation.pagesWritten` is below
+`generation.pagesPlanned`, run `clio context wiki --update` to finish the rest;
+it resumes from the plan rather than starting over.
+
+`clio context wiki --update` requests update mode explicitly. It rewrites the
+pages whose front-matter `sources` git reports as changed since the recorded
+wiki `gitHead`, and leaves the rest alone.
 `clio context wiki --status` is read-only: it prints whether wiki metadata is
-present, page count, `updatedAt`, recorded `gitHead`, and whether that head
-differs from current `HEAD`. It does not dispatch the documenter and does not
-spend model tokens.
+present, page count, `updatedAt`, recorded `gitHead`, whether that head differs
+from current `HEAD`, and how many planned pages remain unwritten. It dispatches
+nothing and spends no model tokens.
 
 `clio context refresh` rebuilds only the structural codewiki and state. It does
 not run a model and does not touch `CLIO.md` or `.clio/wiki/`. If a wiki exists

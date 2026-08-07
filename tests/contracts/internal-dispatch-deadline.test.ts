@@ -1,13 +1,15 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { armInternalDispatchDeadline } from "../../src/cli/internal-dispatch.js";
 import { generateWikiWithDocumenter } from "../../src/cli/wiki-generate.js";
 import { configureGuardrails } from "../../src/core/guardrails.js";
-import type { WikiGenerationPlan } from "../../src/domains/context/index.js";
-import type { AbortReason, DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import { CODEWIKI_VERSION, type Codewiki } from "../../src/domains/context/codewiki/indexer.js";
+import type { WikiGenerateInput, WikiGenerationPlan, WikiPlan } from "../../src/domains/context/index.js";
+import { readWikiPlanFile, writeWikiPlanFile } from "../../src/domains/context/index.js";
+import type { AbortReason, DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { JobSpec } from "../../src/domains/dispatch/validation.js";
 
@@ -16,600 +18,378 @@ interface AbortCall {
 	reason?: AbortReason;
 }
 
-/**
- * Minimal dispatch fake for the internal generator seam: one run whose event
- * stream stays open until abort, mirroring a worker that keeps streaming
- * without finishing. Abort ends the stream and settles the receipt.
- */
-function fakeDispatch(options: { exitCode: number; endImmediately?: boolean }): {
-	dispatch: DispatchContract;
-	abortCalls: AbortCall[];
-} {
-	const abortCalls: AbortCall[] = [];
-	let releaseEvents!: () => void;
-	const eventsGate = new Promise<void>((resolve) => {
-		releaseEvents = resolve;
-	});
-	let resolveFinal!: (receipt: RunReceipt) => void;
-	const finalPromise = new Promise<RunReceipt>((resolve) => {
-		resolveFinal = resolve;
-	});
-	const settle = (): void => {
-		releaseEvents();
-		resolveFinal({ exitCode: options.exitCode, failureMessage: "settled" } as RunReceipt);
+const EMPTY_CODEWIKI: Codewiki = {
+	version: CODEWIKI_VERSION,
+	language: "typescript",
+	files: [],
+	symbols: [],
+	edges: [],
+};
+
+function plan(...paths: string[]): WikiPlan {
+	return {
+		version: 1,
+		overview: "",
+		pages: paths.map((path) => ({
+			path,
+			title: path.replace(/\.md$/, ""),
+			intent: `Document ${path}.`,
+			sources: [],
+			status: "pending" as const,
+			attempts: 0,
+		})),
 	};
-	if (options.endImmediately) settle();
-	async function* events(): AsyncIterableIterator<unknown> {
-		// The stream carries no events; it exists to stay open until settle().
-		await eventsGate;
-		yield* [];
-	}
-	const dispatch = {
-		dispatch: async () => ({ runId: "run-deadline-1", events: events(), finalPromise }),
-		abort: (runId: string, reason?: AbortReason) => {
-			abortCalls.push({ runId, ...(reason !== undefined ? { reason } : {}) });
-			settle();
-		},
-	} as unknown as DispatchContract;
-	return { dispatch, abortCalls };
 }
 
-const SIMPLE_PLAN: WikiGenerationPlan = {
-	requestedDepth: "simple",
-	depth: "simple",
-	sourceFiles: 1,
-	sourceLines: 1,
-	researchAgents: 0,
-	minPages: 0,
-	maxPages: 5,
-	minPageBytes: 0,
-	focusAreas: [],
-};
-const WIKI_INPUT = {
-	cwd: "/tmp",
-	mode: "update" as const,
-	prompt: "update the wiki",
-	outputDir: "/tmp/staging",
-	plan: SIMPLE_PLAN,
-};
+function generation(pagePlan: WikiPlan): WikiGenerationPlan {
+	return { requestedDepth: "simple", depth: "simple", sourceFiles: 1, sourceLines: 1, plan: pagePlan };
+}
 
-describe("internal generator dispatch deadline", () => {
-	it("aborts a run that streams past the deadline and names the timeout in the failure", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 25 });
-		try {
-			const { dispatch, abortCalls } = fakeDispatch({ exitCode: 1 });
-			await rejects(generateWikiWithDocumenter(dispatch, WIKI_INPUT), (err: Error) => {
-				match(err.message, /wiki documenter timed out after \d+s and was aborted/);
-				match(err.message, /CLIO_INTERNAL_DISPATCH_TIMEOUT_MS/);
-				return true;
-			});
-			strictEqual(abortCalls.length, 1, "the deadline aborts exactly once");
-			strictEqual(abortCalls[0]?.reason?.cause, "timeout", "the receipt-facing abort carries the timeout cause");
-		} finally {
-			configureGuardrails(undefined);
-		}
-	});
+function wikiInput(outputDir: string, pagePlan: WikiPlan, cwd = "/tmp"): WikiGenerateInput {
+	return {
+		cwd,
+		mode: "update",
+		outputDir,
+		codewiki: EMPTY_CODEWIKI,
+		generation: generation(pagePlan),
+		plan: pagePlan,
+		resumed: false,
+		unclaimedAreas: [],
+	};
+}
 
-	it("keeps the plain failure path when the run fails before the deadline", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		try {
-			const { dispatch, abortCalls } = fakeDispatch({ exitCode: 1, endImmediately: true });
-			await rejects(generateWikiWithDocumenter(dispatch, WIKI_INPUT), /wiki documenter failed with exit 1/);
-			strictEqual(abortCalls.length, 1, "a non-timeout failure keeps the existing abort");
-			strictEqual(abortCalls[0]?.reason, undefined, "a non-timeout abort carries no timeout cause");
-		} finally {
-			configureGuardrails(undefined);
-		}
-	});
+interface FakeDispatch {
+	dispatch: DispatchContract;
+	submitted: JobSpec[];
+	abortCalls: AbortCall[];
+}
 
-	it("does not abort a run that completes before the deadline", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		try {
-			const { dispatch, abortCalls } = fakeDispatch({ exitCode: 0, endImmediately: true });
-			await generateWikiWithDocumenter(dispatch, WIKI_INPUT);
-			strictEqual(abortCalls.length, 0, "a completed run is never aborted");
-		} finally {
-			configureGuardrails(undefined);
-		}
-	});
-
-	it("lets the configured documenter profile choose the thinking level", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		try {
-			let submitted: JobSpec | null = null;
-			const dispatch = {
-				dispatch: async (spec: JobSpec) => {
-					submitted = spec;
-					return {
-						runId: "run-profile-1",
-						events: (async function* () {
-							yield* [];
-						})(),
-						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, WIKI_INPUT);
-
-			ok(submitted);
-			strictEqual("thinkingLevel" in submitted, false);
-		} finally {
-			configureGuardrails(undefined);
-		}
-	});
-
-	it("does not offer the wiki documenter a git tool it cannot learn anything from", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		try {
-			let submitted: JobSpec | null = null;
-			const dispatch = {
-				dispatch: async (spec: JobSpec) => {
-					submitted = spec;
-					return {
-						runId: "run-denytools-1",
-						events: (async function* () {
-							yield* [];
-						})(),
-						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, WIKI_INPUT);
-
-			ok(submitted);
-			// `buildWikiPrompt` embeds `git status` and `git log` verbatim, and the
-			// staging dir sits under the gitignored `.clio/`, so every op this tool
-			// supports is either already answered or blind to the run's own output.
-			deepStrictEqual([...((submitted as JobSpec).denyTools ?? [])], ["git"]);
-		} finally {
-			configureGuardrails(undefined);
-		}
-	});
-
-	it("surfaces concise documenter tool progress while draining events", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-progress-"));
-		try {
-			const progress: string[] = [];
-			const dispatch = {
-				dispatch: async () => {
-					mkdirSync(outputDir, { recursive: true });
-					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nValid.\n", "utf8");
-					return {
-						runId: "run-progress-1",
-						events: (async function* () {
-							yield { type: "agent_start" };
-							yield { type: "clio_tool_start", payload: { tool: "read" } };
-							yield { type: "clio_tool_finish", payload: { tool: "read", outcome: "ok" } };
-						})(),
-						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, {
-				...WIKI_INPUT,
-				outputDir,
-				progress: (event) => progress.push(`${event.message}|${event.detail ?? ""}`),
-			});
-
-			deepStrictEqual(
-				progress.map((entry) => entry.replace(/elapsed \d+(ms|s)/, "elapsed <n>")),
-				[
-					"dispatching wiki documenter|single-owner direct research",
-					"documenter started wiki update|elapsed <n>",
-					"documenter made 1 tool attempt|elapsed <n>; read=1",
-				],
-			);
-		} finally {
-			rmSync(outputDir, { recursive: true, force: true });
-			configureGuardrails(undefined);
-		}
-	});
-
-	it("runs one focused completion pass after a deterministic tool-loop failure", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-recovery-"));
-		try {
-			const submitted: JobSpec[] = [];
-			const dispatch = {
-				dispatch: async (spec: JobSpec) => {
-					submitted.push(spec);
-					const attempt = submitted.length;
-					if (attempt === 2) {
-						mkdirSync(outputDir, { recursive: true });
-						writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nRecovered.\n", "utf8");
-					}
-					return {
-						runId: `run-recovery-${attempt}`,
-						events: (async function* () {
-							yield { type: "agent_start" };
-						})(),
-						finalPromise: Promise.resolve({
-							exitCode: attempt === 1 ? 1 : 0,
-							outcomeCode: attempt === 1 ? "loop_guard_tools_disabled_exhausted" : null,
-						} as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, { ...WIKI_INPUT, outputDir });
-
-			strictEqual(submitted.length, 2);
-			strictEqual(submitted[0]?.task, WIKI_INPUT.prompt);
-			match(submitted[1]?.task ?? "", /Focused recovery pass/);
-			match(submitted[1]?.task ?? "", /preserve|staged pages/i);
-			deepStrictEqual(submitted[1]?.writeRoots, [outputDir]);
-		} finally {
-			rmSync(outputDir, { recursive: true, force: true });
-			configureGuardrails(undefined);
-		}
-	});
-
-	it("names why the first call was blocked instead of only counting blocks", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-block-reason-"));
-		const progress: string[] = [];
-		try {
-			const dispatch = {
-				dispatch: async () => {
-					mkdirSync(outputDir, { recursive: true });
-					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nValid.\n", "utf8");
-					return {
-						runId: "run-block-reason",
-						events: (async function* () {
-							yield {
-								type: "clio_tool_finish",
-								payload: {
-									tool: "read",
-									outcome: "blocked",
-									reason:
-										"loop detected: read was called 3 times with identical arguments among this turn's recent tool calls. Repeating the exact call is blocked.",
-								},
-							};
-						})(),
-						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, {
-				...WIKI_INPUT,
-				outputDir,
-				progress: (event) => progress.push(event.detail ?? ""),
-			});
-
-			const blockedLine = progress.find((detail) => detail.includes("blocked=1"));
-			ok(blockedLine, "the blocked call is reported");
-			// A count says a run is in trouble; the reason says which kind of trouble.
-			ok(blockedLine?.includes("loop detected"), `the reason rides the progress line: ${blockedLine}`);
-			ok((blockedLine?.length ?? 0) < 200, "the line stays one line");
-		} finally {
-			rmSync(outputDir, { recursive: true, force: true });
-			configureGuardrails(undefined);
-		}
-	});
-
-	it("promotes a valid staged wiki when the last attempt ended on its budget", async () => {
-		// The writer stopped the way its budget told it to. What it staged is a
-		// candidate like any other, so validation decides; deleting it here threw
-		// away a correct wiki because of how its author stopped.
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-budget-keep-"));
-		const progress: string[] = [];
-		try {
-			const dispatch = {
-				dispatch: async () => {
-					mkdirSync(outputDir, { recursive: true });
-					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nStaged before the budget ran out.\n", "utf8");
-					return {
-						runId: "run-budget-keep",
-						events: (async function* () {
-							yield* [];
-						})(),
-						finalPromise: Promise.resolve({
-							exitCode: 1,
-							outcomeCode: "worker_tool_call_cap_exhausted",
-						} as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, {
-				...WIKI_INPUT,
-				outputDir,
-				progress: (event) => progress.push(event.message),
-			});
-
-			ok(
-				progress.includes("documenter ended on its budget; staged wiki passed validation"),
-				"the operator is told the promotion rests on validation, not on the writer's exit",
-			);
-		} finally {
-			rmSync(outputDir, { recursive: true, force: true });
-			configureGuardrails(undefined);
-		}
-	});
-
-	it("fails a budget-exhausted run whose staged wiki does not validate", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-budget-invalid-"));
-		try {
-			const dispatch = {
-				dispatch: async () => ({
-					runId: "run-budget-invalid",
+/**
+ * Dispatch fake driven by a per-call behavior function. Returning "hang" leaves
+ * the event stream open until abort, which is what the wall-clock deadline is
+ * there to end.
+ */
+function fakeDispatch(behavior: (spec: JobSpec, call: number) => "hang" | Partial<RunReceipt>): FakeDispatch {
+	const submitted: JobSpec[] = [];
+	const abortCalls: AbortCall[] = [];
+	const dispatch = {
+		dispatch: async (spec: JobSpec) => {
+			submitted.push(spec);
+			const outcome = behavior(spec, submitted.length);
+			const runId = `run-${submitted.length}`;
+			if (outcome !== "hang") {
+				return {
+					runId,
 					events: (async function* () {
 						yield* [];
 					})(),
-					finalPromise: Promise.resolve({
-						exitCode: 1,
-						outcomeCode: "worker_tool_call_cap_exhausted",
-					} as RunReceipt),
-				}),
-				abort: () => {},
-			} as unknown as DispatchContract;
+					finalPromise: Promise.resolve({ exitCode: 0, ...outcome } as RunReceipt),
+				};
+			}
+			let release!: () => void;
+			const gate = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			let settle!: (receipt: RunReceipt) => void;
+			const finalPromise = new Promise<RunReceipt>((resolve) => {
+				settle = resolve;
+			});
+			hangs.set(runId, () => {
+				release();
+				settle({ exitCode: 1, failureMessage: "aborted" } as RunReceipt);
+			});
+			return {
+				runId,
+				events: (async function* () {
+					await gate;
+					yield* [];
+				})(),
+				finalPromise,
+			};
+		},
+		abort: (runId: string, reason?: AbortReason) => {
+			abortCalls.push({ runId, ...(reason !== undefined ? { reason } : {}) });
+			hangs.get(runId)?.();
+		},
+	} as unknown as DispatchContract;
+	const hangs = new Map<string, () => void>();
+	return { dispatch, submitted, abortCalls };
+}
 
-			await rejects(
-				generateWikiWithDocumenter(dispatch, { ...WIKI_INPUT, outputDir }),
-				/staged wiki also failed validation: quickstart\.md is missing/,
-			);
-		} finally {
-			rmSync(outputDir, { recursive: true, force: true });
-			configureGuardrails(undefined);
-		}
-	});
+function writePage(outputDir: string, relPath: string, text: string): void {
+	const target = join(outputDir, relPath);
+	mkdirSync(dirname(target), { recursive: true });
+	writeFileSync(target, text, "utf8");
+}
 
-	it("does not retry when a successful writer produces fewer pages than the depth guidance", async () => {
+function withStaging(run: (dir: string) => Promise<void>): Promise<void> {
+	const dir = mkdtempSync(join(tmpdir(), "clio-wiki-dispatch-"));
+	return run(dir).finally(() => rmSync(dir, { recursive: true, force: true }));
+}
+
+describe("wiki generation dispatch", () => {
+	it("writes one page per dispatch on the wiki-writer recipe", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-breadth-"));
-		try {
-			const submitted: JobSpec[] = [];
-			const dispatch = {
-				dispatch: async (spec: JobSpec) => {
-					submitted.push(spec);
-					mkdirSync(outputDir, { recursive: true });
-					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nOne page.\n", "utf8");
-					return {
-						runId: `run-breadth-${submitted.length}`,
-						events: (async function* () {
-							yield* [];
-						})(),
-						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, {
-				...WIKI_INPUT,
-				outputDir,
-				plan: { ...SIMPLE_PLAN, depth: "detailed", requestedDepth: "detailed", minPages: 10, maxPages: 16 },
+		await withStaging(async (dir) => {
+			const pagePlan = plan("architecture.md", "domains/dispatch.md");
+			const fake = fakeDispatch((_spec, call) => {
+				if (call === 1) writeWikiPlanFile(dir, pagePlan);
+				else writePage(dir, call === 2 ? "architecture.md" : "domains/dispatch.md", "# Page\n\nBody.\n");
+				return {};
 			});
 
-			strictEqual(submitted.length, 1);
-		} finally {
-			rmSync(outputDir, { recursive: true, force: true });
-			configureGuardrails(undefined);
-		}
+			await generateWikiWithDocumenter(fake.dispatch, wikiInput(dir, pagePlan));
+
+			// One planning dispatch, then one per page. The whole wiki is never a
+			// single worker's job, so no single wall clock has to cover it.
+			strictEqual(fake.submitted.length, 3);
+			deepStrictEqual([...new Set(fake.submitted.map((spec) => spec.agentId))], ["wiki-writer"]);
+			for (const spec of fake.submitted) {
+				deepStrictEqual([...(spec.denyTools ?? [])], ["git"]);
+				deepStrictEqual([...(spec.writeRoots ?? [])], [dir]);
+			}
+			match(fake.submitted[1]?.task ?? "", /architecture\.md/);
+			match(fake.submitted[2]?.task ?? "", /domains\/dispatch\.md/);
+		});
+		configureGuardrails(undefined);
 	});
 
-	it("allows one budget recovery and then fails if the recovery also exhausts", async () => {
+	it("keeps writing the remaining pages after one page dispatch times out", async () => {
+		// The failure this whole design exists to remove: one page that never
+		// finishes used to abort the run and delete every page around it.
+		configureGuardrails({ internalDispatchTimeoutMs: 40 });
+		await withStaging(async (dir) => {
+			const pagePlan = plan("a.md", "b.md", "c.md");
+			const fake = fakeDispatch((_spec, call) => {
+				if (call === 1) return {};
+				if (call === 2) return "hang";
+				writePage(dir, call === 3 ? "b.md" : "c.md", "# Page\n\nBody.\n");
+				return {};
+			});
+
+			await generateWikiWithDocumenter(fake.dispatch, wikiInput(dir, pagePlan));
+
+			strictEqual(fake.submitted.length, 4, "the timed-out page does not end the run");
+			ok(!existsSync(join(dir, "a.md")), "the page that timed out was not written");
+			ok(existsSync(join(dir, "b.md")) && existsSync(join(dir, "c.md")), "the pages after it were");
+			strictEqual(fake.abortCalls[0]?.reason?.cause, "timeout", "the abort names the timeout on the receipt");
+			const checkpoint = readWikiPlanFile(dir);
+			strictEqual(checkpoint?.pages.find((page) => page.path === "a.md")?.status, "pending");
+			strictEqual(checkpoint?.pages.find((page) => page.path === "b.md")?.status, "written");
+		});
+		configureGuardrails(undefined);
+	});
+
+	it("records a page as written when the file exists, whatever the receipt says", async () => {
+		// The artifact is the postcondition. A writer that wrote its page and then
+		// ended on its tool budget produced the page.
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		try {
-			let attempts = 0;
+		await withStaging(async (dir) => {
+			const pagePlan = plan("a.md");
+			const fake = fakeDispatch((_spec, call) => {
+				if (call === 1) return {};
+				writePage(dir, "a.md", "# A\n\nWritten before the budget ran out.\n");
+				return { exitCode: 1, outcomeCode: "worker_tool_call_cap_exhausted" };
+			});
+
+			await generateWikiWithDocumenter(fake.dispatch, wikiInput(dir, pagePlan));
+
+			strictEqual(readWikiPlanFile(dir)?.pages[0]?.status, "written");
+		});
+		configureGuardrails(undefined);
+	});
+
+	it("checkpoints the plan after every page so an interrupted run resumes", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		await withStaging(async (dir) => {
+			const pagePlan = plan("a.md", "b.md");
+			const observed: Array<string | undefined> = [];
+			const fake = fakeDispatch((_spec, call) => {
+				if (call === 1) return {};
+				observed.push(readWikiPlanFile(dir)?.pages.find((page) => page.path === "a.md")?.status);
+				writePage(dir, call === 2 ? "a.md" : "b.md", "# Page\n\nBody.\n");
+				return {};
+			});
+
+			await generateWikiWithDocumenter(fake.dispatch, wikiInput(dir, pagePlan));
+
+			// By the time the second page is dispatched, the first is already
+			// recorded on disk: the checkpoint is not deferred to the end.
+			deepStrictEqual(observed, ["pending", "written"]);
+		});
+		configureGuardrails(undefined);
+	});
+
+	it("stops between pages when the run budget is spent and leaves the rest owed", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		await withStaging(async (dir) => {
+			const pagePlan = plan("a.md", "b.md", "c.md");
 			const progress: string[] = [];
-			const dispatch = {
-				dispatch: async () => {
-					attempts += 1;
-					return {
-						runId: `run-staged-${attempts}`,
-						events: (async function* () {
-							yield* [];
-						})(),
-						finalPromise: Promise.resolve({
-							exitCode: 1,
-							outcomeCode: attempts === 1 ? "loop_guard_tools_disabled_exhausted" : "worker_tool_call_cap_exhausted",
-							toolActivity: {
-								calls: 1,
-								succeeded: attempts === 1 ? 1 : 0,
-								failed: 0,
-								blocked: attempts === 1 ? 0 : 1,
-								mutatingSucceeded: attempts === 1,
-							},
-						} as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
+			const fake = fakeDispatch((_spec, call) => {
+				if (call === 1) return {};
+				writePage(dir, "a.md", "# A\n\nBody.\n");
+				return {};
+			});
 
-			await rejects(
-				generateWikiWithDocumenter(dispatch, {
-					...WIKI_INPUT,
-					progress: (event) => progress.push(event.message),
-				}),
-				/wiki documenter failed/,
+			await generateWikiWithDocumenter(
+				fake.dispatch,
+				{ ...wikiInput(dir, pagePlan), progress: (event) => progress.push(event.message) },
+				{},
+				// A budget this small is spent by the time the first page returns.
+				1,
 			);
 
-			strictEqual(attempts, 2);
-			ok(progress.includes("documenter budget exhausted; starting focused recovery"));
-		} finally {
-			configureGuardrails(undefined);
-		}
+			ok(fake.submitted.length < 4, "the budget stops the run short of every page");
+			ok(
+				progress.some((message) => /run budget reached with \d+ pages? unwritten/.test(message)),
+				`the operator is told what remains: ${progress.join(" | ")}`,
+			);
+		});
+		configureGuardrails(undefined);
 	});
 
-	it("uses the shipped documenter agent for a detailed update", async () => {
+	it("skips planning on a resumed run and writes only the pages still owed", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-update-"));
-		try {
-			const submitted: JobSpec[] = [];
-			const dispatch = {
-				dispatch: async (spec: JobSpec) => {
-					submitted.push(spec);
-					mkdirSync(outputDir, { recursive: true });
-					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nValid.\n", "utf8");
-					return {
-						runId: `run-update-${submitted.length}`,
-						events: (async function* () {
-							yield* [];
-						})(),
-						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, {
-				...WIKI_INPUT,
-				outputDir,
-				plan: {
-					...SIMPLE_PLAN,
-					requestedDepth: "detailed",
-					depth: "detailed",
-					focusAreas: ["src/domains/dispatch", "tests/contracts"],
-				},
+		await withStaging(async (dir) => {
+			const resumed: WikiPlan = {
+				...plan("a.md", "b.md"),
+				pages: plan("a.md", "b.md").pages.map((page) =>
+					page.path === "a.md" ? { ...page, status: "written" as const, attempts: 1 } : page,
+				),
+			};
+			writePage(dir, "a.md", "# A\n\nAlready written.\n");
+			const fake = fakeDispatch(() => {
+				writePage(dir, "b.md", "# B\n\nBody.\n");
+				return {};
 			});
 
-			strictEqual(submitted.length, 1);
-			strictEqual(submitted[0]?.agentId, "documenter");
-			ok(!("assignmentDeadlineAt" in (submitted[0] as DispatchRequest)));
-		} finally {
-			rmSync(outputDir, { recursive: true, force: true });
-			configureGuardrails(undefined);
-		}
+			await generateWikiWithDocumenter(fake.dispatch, { ...wikiInput(dir, resumed), plan: resumed, resumed: true });
+
+			// Re-planning a resumed wiki would churn the paths the finished pages
+			// already link to, so the plan is settled once per wiki, not per run.
+			strictEqual(fake.submitted.length, 1);
+			match(fake.submitted[0]?.task ?? "", /b\.md/);
+		});
+		configureGuardrails(undefined);
 	});
 
-	it("does not run sequential coverage passes for detailed init", async () => {
+	it("falls back to the indexed candidate plan when the planner does not finish", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-init-"));
-		try {
-			const submitted: JobSpec[] = [];
-			const dispatch = {
-				dispatch: async (spec: JobSpec) => {
-					submitted.push(spec);
-					mkdirSync(outputDir, { recursive: true });
-					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nValid.\n", "utf8");
-					return {
-						runId: `run-specialist-${submitted.length}`,
-						events: (async function* () {
-							yield* [];
-						})(),
-						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, {
-				...WIKI_INPUT,
-				mode: "init",
-				outputDir,
-				plan: {
-					...SIMPLE_PLAN,
-					requestedDepth: "detailed",
-					depth: "detailed",
-					focusAreas: ["src/domains/area-0", "src/domains/area-1"],
-				},
+		await withStaging(async (dir) => {
+			const pagePlan = plan("a.md");
+			const progress: string[] = [];
+			const fake = fakeDispatch((_spec, call) => {
+				if (call === 1) return { exitCode: 1 };
+				writePage(dir, "a.md", "# A\n\nBody.\n");
+				return {};
 			});
 
-			strictEqual(submitted.length, 1);
-			strictEqual(submitted[0]?.agentId, "documenter");
-		} finally {
-			rmSync(outputDir, { recursive: true, force: true });
-			configureGuardrails(undefined);
-		}
-	});
-
-	it("feeds deterministic validation failures back to the documenter for repair", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const root = mkdtempSync(join(tmpdir(), "clio-wiki-reference-"));
-		const staging = join(root, "staging");
-		try {
-			writeFileSync(join(root, "source.ts"), "export const live = true;\n", "utf8");
-			mkdirSync(staging);
-			writeFileSync(join(staging, "quickstart.md"), "# Quickstart\n\nOwner: `src/missing.ts:20`.\n", "utf8");
-			writeFileSync(join(staging, "architecture.md"), "# Architecture\n\nSubstantive.\n", "utf8");
-			const tasks: string[] = [];
-			const dispatch = {
-				dispatch: async (spec: JobSpec) => {
-					tasks.push(spec.task);
-					if (tasks.length === 2) {
-						writeFileSync(join(staging, "quickstart.md"), "# Quickstart\n\nSee [Architecture](architecture.md).\n", "utf8");
-					}
-					return {
-						runId: `run-reference-${tasks.length}`,
-						events: (async function* () {
-							yield* [];
-						})(),
-						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, {
-				...WIKI_INPUT,
-				cwd: root,
-				outputDir: staging,
-				plan: { ...SIMPLE_PLAN, minPages: 2 },
+			await generateWikiWithDocumenter(fake.dispatch, {
+				...wikiInput(dir, pagePlan),
+				progress: (event) => progress.push(event.message),
 			});
 
-			strictEqual(tasks.length, 2);
-			match(tasks[1] ?? "", /Validation repair pass/);
-			match(tasks[1] ?? "", /cites missing source path src\/missing\.ts/);
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-			configureGuardrails(undefined);
-		}
+			ok(progress.includes("planner did not finish; using the indexed candidate plan"));
+			strictEqual(fake.submitted.length, 2, "page writing proceeds on the candidate plan");
+		});
+		configureGuardrails(undefined);
 	});
 
-	it("does not deepen thin pages because byte floor is guidance, not validation", async () => {
+	it("ignores a status a planning pass tries to author for itself", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const staging = mkdtempSync(join(tmpdir(), "clio-wiki-thin-"));
-		try {
-			mkdirSync(staging, { recursive: true });
-			writeFileSync(join(staging, "quickstart.md"), "# Quickstart\n\nSee [Architecture](architecture.md).\n", "utf8");
-			writeFileSync(join(staging, "architecture.md"), "# thin\n", "utf8");
-			const submitted: JobSpec[] = [];
-			const dispatch = {
-				dispatch: async (spec: JobSpec) => {
-					submitted.push(spec);
-					return {
-						runId: `run-thin-${submitted.length}`,
-						events: (async function* () {
-							yield* [];
-						})(),
-						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(dispatch, {
-				...WIKI_INPUT,
-				outputDir: staging,
-				plan: { ...SIMPLE_PLAN, depth: "detailed", requestedDepth: "detailed", minPages: 2, minPageBytes: 1_200 },
+		await withStaging(async (dir) => {
+			const pagePlan = plan("a.md");
+			const fake = fakeDispatch((_spec, call) => {
+				if (call === 1) {
+					// A planner claiming its pages are already finished would skip
+					// every one of them forever.
+					writeFileSync(
+						join(dir, "_plan.json"),
+						JSON.stringify({ pages: [{ path: "a.md", title: "A", intent: "x", status: "written" }] }),
+						"utf8",
+					);
+					return {};
+				}
+				writePage(dir, "a.md", "# A\n\nBody.\n");
+				return {};
 			});
 
-			strictEqual(submitted.length, 1);
-		} finally {
-			rmSync(staging, { recursive: true, force: true });
-			configureGuardrails(undefined);
-		}
+			await generateWikiWithDocumenter(fake.dispatch, wikiInput(dir, pagePlan));
+
+			strictEqual(fake.submitted.length, 2, "the page is still written");
+		});
+		configureGuardrails(undefined);
 	});
 
+	it("gives up on a page after its attempt limit instead of retrying forever", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		await withStaging(async (dir) => {
+			const exhausted: WikiPlan = {
+				...plan("a.md"),
+				pages: plan("a.md").pages.map((page) => ({ ...page, attempts: 3 })),
+			};
+			// A written page is needed so the run counts as resumed and skips planning.
+			writePage(dir, "b.md", "# B\n\nBody.\n");
+			const withWritten: WikiPlan = {
+				...exhausted,
+				pages: [...exhausted.pages, { path: "b.md", title: "B", intent: "", sources: [], status: "written", attempts: 1 }],
+			};
+			const fake = fakeDispatch(() => ({}));
+
+			await generateWikiWithDocumenter(fake.dispatch, {
+				...wikiInput(dir, withWritten),
+				plan: withWritten,
+				resumed: true,
+			});
+
+			strictEqual(fake.submitted.length, 0, "a page that has failed its limit is left alone");
+		});
+		configureGuardrails(undefined);
+	});
+
+	it("names a page's anchor sources and its sibling pages in the page prompt", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		await withStaging(async (dir) => {
+			const pagePlan: WikiPlan = {
+				version: 1,
+				overview: "",
+				pages: [
+					{
+						path: "domains/dispatch.md",
+						title: "Dispatch",
+						intent: "Document admission.",
+						sources: ["src/domains/dispatch/validation.ts"],
+						status: "pending",
+						attempts: 0,
+					},
+					{ path: "cli.md", title: "CLI", intent: "Document the CLI.", sources: [], status: "pending", attempts: 0 },
+				],
+			};
+			const fake = fakeDispatch((_spec, call) => {
+				if (call >= 2) writePage(dir, call === 2 ? "domains/dispatch.md" : "cli.md", "# P\n\nBody.\n");
+				return {};
+			});
+
+			await generateWikiWithDocumenter(fake.dispatch, wikiInput(dir, pagePlan));
+
+			const pageTask = fake.submitted[1]?.task ?? "";
+			match(pageTask, /src\/domains\/dispatch\/validation\.ts/, "the anchor sources are named");
+			match(pageTask, /cli\.md — CLI/, "the sibling pages a link may point at are named");
+			ok(!pageTask.includes("codewiki v"), "the repository-wide digest stays out of a page dispatch");
+		});
+		configureGuardrails(undefined);
+	});
+});
+
+describe("internal generator dispatch deadline", () => {
 	it("clear() disarms the timer so no late abort fires", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 10 });
 		try {
-			const { dispatch, abortCalls } = fakeDispatch({ exitCode: 0 });
-			const deadline = armInternalDispatchDeadline(dispatch, "run-deadline-1", "wiki documenter");
+			const abortCalls: AbortCall[] = [];
+			const dispatch = {
+				abort: (runId: string, reason?: AbortReason) => abortCalls.push({ runId, ...(reason ? { reason } : {}) }),
+			} as unknown as DispatchContract;
+			const deadline = armInternalDispatchDeadline(dispatch, "run-deadline-1", "wiki page a.md");
 			deadline.clear();
 			await new Promise((resolve) => setTimeout(resolve, 30));
 			strictEqual(deadline.timedOut(), false);
@@ -623,7 +403,10 @@ describe("internal generator dispatch deadline", () => {
 	it("lets latency-sensitive callers cap a larger configured deadline", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
 		try {
-			const { dispatch, abortCalls } = fakeDispatch({ exitCode: 1 });
+			const abortCalls: AbortCall[] = [];
+			const dispatch = {
+				abort: (runId: string, reason?: AbortReason) => abortCalls.push({ runId, ...(reason ? { reason } : {}) }),
+			} as unknown as DispatchContract;
 			const deadline = armInternalDispatchDeadline(dispatch, "run-deadline-1", "bootstrap scout", process.env, 10);
 			await new Promise((resolve) => setTimeout(resolve, 30));
 			strictEqual(deadline.timedOut(), true);
@@ -634,5 +417,23 @@ describe("internal generator dispatch deadline", () => {
 		} finally {
 			configureGuardrails(undefined);
 		}
+	});
+});
+
+describe("wiki page prompt", () => {
+	it("tells a revising writer that the current page is already staged", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		await withStaging(async (dir) => {
+			const pagePlan = plan("a.md");
+			writePage(dir, "a.md", "# A\n\nSeeded.\n");
+			const fake = fakeDispatch(() => ({}));
+
+			await generateWikiWithDocumenter(fake.dispatch, wikiInput(dir, pagePlan));
+
+			match(fake.submitted[1]?.task ?? "", /Revision/);
+			match(fake.submitted[1]?.task ?? "", /revise it in place/);
+			strictEqual(readFileSync(join(dir, "a.md"), "utf8"), "# A\n\nSeeded.\n", "the seed is untouched by dispatch");
+		});
+		configureGuardrails(undefined);
 	});
 });

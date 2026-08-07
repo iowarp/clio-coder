@@ -81,6 +81,13 @@ export {
 	readClioState,
 	writeClioState,
 } from "./state.js";
+export { assembleWikiTree, type WikiAssemblyReport, type WikiPageIssue } from "./wiki/assemble.js";
+export {
+	readWikiPage,
+	renderWikiPage,
+	type WikiPageDocument,
+	type WikiPageMetadata,
+} from "./wiki/frontmatter.js";
 export {
 	type RunWikiGenerateInput,
 	type RunWikiGenerateResult,
@@ -90,14 +97,15 @@ export {
 	type WikiGenerateMode,
 } from "./wiki/generate.js";
 export {
+	isGeneratedWikiFile,
 	listWikiPages,
 	listWikiPagesInDir,
-	validateWikiLayout,
-	validateWikiLayoutInDir,
-	type WikiLayoutValidation,
+	WIKI_INDEX,
+	WIKI_PLAN_FILE,
+	WIKI_QUICKSTART,
 	type WikiPage,
-	type WikiPageBounds,
 	wikiDir,
+	wikiMarkdownFilesInDir,
 } from "./wiki/layout.js";
 export {
 	computeWikiContentHash,
@@ -113,12 +121,31 @@ export {
 	writeWikiMeta,
 } from "./wiki/meta.js";
 export {
+	buildCandidatePlan,
 	type DepthStrategy,
+	pagePathForArea,
 	planWikiGeneration,
 	type ResolvedWikiDepth,
 	WIKI_DEPTH_STRATEGY,
 	type WikiDepth,
 	type WikiGenerationPlan,
+	type WikiPlan,
+	type WikiPlanPage,
 } from "./wiki/plan.js";
-export { type BuildWikiPromptInput, buildWikiPrompt } from "./wiki/prompts.js";
-export { type WikiStaleness, wikiStaleness } from "./wiki/staleness.js";
+export {
+	MAX_PAGE_ATTEMPTS,
+	pendingPages,
+	readWikiPlanFile,
+	sanitizePagePath,
+	sanitizeWikiPlan,
+	scopePlanForUpdate,
+	wikiPlanPath,
+	writeWikiPlanFile,
+} from "./wiki/plan-store.js";
+export {
+	type BuildWikiPagePromptInput,
+	type BuildWikiPlanPromptInput,
+	buildWikiPagePrompt,
+	buildWikiPlanPrompt,
+} from "./wiki/prompts.js";
+export { changedPathsSince, type WikiStaleness, wikiStaleness } from "./wiki/staleness.js";

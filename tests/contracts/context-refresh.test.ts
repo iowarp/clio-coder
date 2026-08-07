@@ -200,9 +200,17 @@ describe("contracts/context-refresh", () => {
 
 		strictEqual(called, 1);
 		strictEqual(sawRebuiltCodewiki, true);
-		strictEqual(result.wiki?.status, "noop");
+		// The fixture is a hand-authored page with no front matter. The assembly
+		// pass normalizes it and generates the navigation, so the first run over
+		// such a wiki is a real change even though the generator wrote nothing.
+		strictEqual(result.wiki?.status, "generated");
 		strictEqual(result.wiki?.pages, 1);
 		strictEqual(result.hint, undefined);
+
+		// Assembly is idempotent: once normalized, a generator that writes nothing
+		// produces a byte-identical tree and the run is a no-op.
+		const second = await runContextRefresh({ cwd, wiki: true, wikiGenerate: () => undefined });
+		strictEqual(second.wiki?.status, "noop");
 	});
 
 	it("returns a stale wiki hint on ordinary refresh without calling the wiki generator", async () => {

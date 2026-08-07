@@ -95,7 +95,7 @@ when the operator explicitly asks for it.
 | Layer | Artifact | Producer | Model use | Prompt surfacing |
 | --- | --- | --- | --- | --- |
 | Structural codewiki | `.clio/codewiki.json` plus `.clio/state.json` | `context init`, `context refresh`, `context index`, session freshness checks, and incremental mutation observers | None | `<codewiki>available...; use code_nav</codewiki>` |
-| Markdown wiki | `.clio/wiki/*.md` plus `.clio/wiki/meta.json` | `clio context wiki` or `clio context refresh --wiki` | Yes, through the configured documenter dispatch path | `<wiki>N pages at .clio/wiki (start: quickstart.md)...</wiki>` |
+| Markdown wiki | `.clio/wiki/**/*.md` plus `.clio/wiki/meta.json` | `clio context wiki` or `clio context refresh --wiki` | Yes, one planning dispatch plus one dispatch per page | `<wiki>N pages at .clio/wiki (start: quickstart.md)...</wiki>` |
 
 ### Structural Index
 
@@ -135,20 +135,46 @@ paths are no-ops.
 
 ### Markdown Wiki & `code_nav` Resolution
 
-The wiki lives under `.clio/wiki/` and is written by the `documenter` agent.
-Model agents can resolve Markdown wiki pages dynamically through `code_nav` with
-`mode: "wiki"`; an optional query resolves a page id or title and returns its summary
-and path, giving models deterministic on-demand navigation without loading entire wiki pages
-into prompt context.
-`quickstart.md` is mandatory and acts as the hub. The layout validator allows
-at most eight Markdown pages, rejects empty pages, and requires
-`quickstart.md`. Before drafting, the documenter receives a deterministic list
-of safe repository instruction files, bounded working-tree status, and the
-codewiki digest; repository-declared source-of-truth documents must be read even
-when they are ignored or absent from the structural index. `meta.json` records
-`updatedAt`, `gitHead`, the indexed source-tree hash, the model label, a content
-hash over the Markdown pages, and the page list. Metadata is written
-only after the generated layout validates and the page content changed.
+The wiki lives under `.clio/wiki/` as a nested tree and is written by the
+`wiki-writer` agent. Model agents resolve pages dynamically through `code_nav`
+with `mode: "wiki"`; an optional query resolves a page id or title, where the id
+is the page's path without its extension (`domains/dispatch`), and returns its
+summary and path. That gives deterministic on-demand navigation without loading
+whole pages into prompt context.
+
+The unit of work is one page, not one wiki. A run makes a single planning
+dispatch, then one dispatch per page, each with a fresh context holding only that
+page's plan entry, its anchor sources, and the sibling paths it may link to. The
+repository-wide payload, including the codewiki digest, appears only in the
+planning prompt. Because a static prompt is re-sent on every round of a run, this
+is what keeps prefill cost from growing quadratically with the size of the wiki.
+
+`_plan.json` is the skeleton and the checkpoint. It is derived deterministically
+from the codewiki index, so a usable plan exists before any model runs; the
+planning dispatch may merge, split, rename, drop, or re-anchor entries by
+rewriting it, and a malformed rewrite falls back to the candidate. The harness
+owns each entry's status and rewrites the file after every page, so a run that
+ends early records exactly which pages are still owed. Staging survives such a
+run and the next one resumes from it.
+
+Every page opens with front matter carrying `title`, `summary`, `sources`,
+`symbols`, `tests`, `invariants`, and `validate`. That is the retrieval layer:
+`quickstart.md`, every directory `index.md`, and the task-routing table are
+generated from it after each run, so navigation cannot drift or miss a page and
+no writer has to remember to update it.
+
+Assembly repairs rather than rejects. A missing H1, absent or malformed front
+matter, a dangling `sources` entry, a link to a page that was never written, and
+a citation to a path that does not exist are all mechanically fixable, so each is
+fixed or recorded in a `<!-- clio:wiki ... -->` marker and reported; none fails a
+run. An empty page is dropped and its plan entry stays owed. An update run's
+scope is computed, not guessed: a page is rewritten when git reports a change to
+one of the sources its own front matter claims.
+
+`meta.json` records `updatedAt`, `gitHead`, the indexed source-tree hash, the
+model label, a content hash over the page tree, the page list, and the plan.
+`generation.pagesPlanned` and `generation.pagesWritten` say whether a run
+finished; when they differ, `clio context wiki --update` completes the rest.
 
 `clio context wiki` creates a wiki when no metadata exists and updates one when metadata is present. During wiki generation, Clio automatically refreshes a stale codewiki index before grounding the model run. The decision to write new pages and update metadata is a no-op if the newly generated content's hash matches the existing content hash. `clio context wiki --update` requests update mode explicitly. `clio context wiki --status` only reads metadata and does not run a model. `clio context refresh --wiki` first rebuilds the structural codewiki and then updates an existing wiki when `.clio/wiki/meta.json` exists; when no wiki metadata exists, it performs no wiki generation.
 
@@ -161,9 +187,9 @@ only after the generated layout validates and the page content changed.
 | Session stop | Drains the incremental queue, then rebuilds only when state is stale, the index is missing, or v5 backfill is needed. State records `lastSessionAt`, `lastIndexedAt` when applicable, and `codewikiVersion`. | No automatic update. |
 | `/context init` or `clio context init` | Performs a full codewiki rebuild before generating, preserving, proposing, or previewing `CLIO.md`; writes state with the fingerprint and codewiki version when it writes state. | No wiki generation. |
 | `/context refresh` or `clio context refresh` | Performs a full codewiki rebuild and writes state. Does not touch `CLIO.md`. | If an existing wiki is stale and `--wiki` was not passed on the CLI, prints a hint to run `clio context refresh --wiki` or `clio context wiki --update`. |
-| `clio context refresh --wiki` | Performs the same full codewiki rebuild and state write. | Updates an existing wiki through the model-backed documenter path. No wiki metadata means no wiki model call. |
-| `clio context wiki` | Automatically refreshes the codewiki index if stale before composing the wiki prompt. | Generates or updates `.clio/wiki/` through the configured documenter path (no-op if content hashes match) and validates the layout before writing metadata. |
-| `clio context wiki --status` | No index rebuild. | Reads metadata and reports page count, update time, recorded git head, and git-head drift. |
+| `clio context refresh --wiki` | Performs the same full codewiki rebuild and state write. | Updates an existing wiki through the model-backed page dispatches. No wiki metadata means no wiki model call. |
+| `clio context wiki` | Automatically refreshes the codewiki index if stale before composing the wiki prompt. | Plans, then writes each owed page in its own dispatch, assembles and promotes whatever landed (no-op if content hashes match), and records any pages still owed. |
+| `clio context wiki --status` | No index rebuild. | Reads metadata and reports page count, update time, recorded git head, git-head drift, and how many planned pages remain unwritten. |
 
 ### Staleness
 

@@ -2,13 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readClioVersion, resolvePackageRoot } from "../core/package-root.js";
-import {
-	listWikiPages,
-	readCodewiki,
-	renderCodewikiDigest,
-	validateWikiLayout,
-	wikiStaleness,
-} from "../domains/context/index.js";
+import { listWikiPages, readCodewiki, renderCodewikiDigest, wikiStaleness } from "../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
@@ -197,9 +191,8 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		hasCodewiki = true;
 		codewikiCount = codewiki.files.filter((file) => file.lang !== "config").length;
 		wikiDigestExcerpt = entryPointExcerpt(renderCodewikiDigest(codewiki));
-		const layout = validateWikiLayout(cwd);
 		const staleness = wikiStaleness(cwd);
-		if (layout.ok && staleness.state !== "absent") {
+		if (staleness.state !== "absent") {
 			wikiPageCount = listWikiPages(cwd).length;
 			wikiStatus =
 				staleness.state === "stale"
