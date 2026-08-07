@@ -3,6 +3,7 @@ import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync } from
 import { homedir } from "node:os";
 import path from "node:path";
 import type { PendingSkillRequest } from "../../../core/skill-activation.js";
+import { type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { enabledExtensionResourceRoots } from "../../extensions/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
@@ -336,15 +337,92 @@ function booleanField(frontmatter: Record<string, unknown>, key: string): boolea
 	return frontmatter[key] === true;
 }
 
-/** Parse a frontmatter tool list: a YAML string array; non-strings are dropped. */
-function toolListField(frontmatter: Record<string, unknown>, key: string): string[] | undefined {
+/**
+ * Parse a frontmatter tool list. Two spellings are the same declaration and
+ * both appear in the roots Clio discovers: a YAML sequence, which every skill
+ * Clio ships uses, and one comma-separated scalar, which is what the
+ * compatibility roots under `.claude` and `.agents` carry. Reading only the
+ * sequence dropped the scalar form silently, so a skill that asked to be
+ * confined to four tools ran with the whole surface and no word about it.
+ */
+function rawToolListField(frontmatter: Record<string, unknown>, key: string): string[] | undefined {
 	const raw = frontmatter[key];
-	if (!Array.isArray(raw)) return undefined;
-	const tools = raw
-		.filter((entry): entry is string => typeof entry === "string")
-		.map((entry) => entry.trim())
-		.filter((entry) => entry.length > 0);
+	const entries =
+		typeof raw === "string"
+			? raw.split(",")
+			: Array.isArray(raw)
+				? raw.filter((entry): entry is string => typeof entry === "string")
+				: null;
+	if (entries === null) return undefined;
+	const tools = entries.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
 	return tools.length > 0 ? [...new Set(tools)] : undefined;
+}
+
+const TOOL_NAMES_BY_LOWERCASE = new Map(Object.values(ToolNames).map((name) => [name.toLowerCase(), name]));
+
+interface ResolvedToolList {
+	/** Declared names Clio recognizes, which are the ones narrowing can enforce. */
+	tools: ToolName[];
+	/** Declared names that are no tool Clio has. */
+	unrecognized: string[];
+}
+
+/**
+ * Resolve declared tool names against the tools Clio actually has. Case is
+ * normalized because `Bash` and `bash` are the same tool named by two
+ * harnesses; nothing else is mapped, because an alias table would let a
+ * declaration mean a tool its author never wrote.
+ */
+function resolveDeclaredTools(declared: ReadonlyArray<string>): ResolvedToolList {
+	const tools: ToolName[] = [];
+	const unrecognized: string[] = [];
+	for (const entry of declared) {
+		const resolved = TOOL_NAMES_BY_LOWERCASE.get(entry.toLowerCase());
+		if (resolved === undefined) unrecognized.push(entry);
+		else if (!tools.includes(resolved)) tools.push(resolved);
+	}
+	return { tools, unrecognized };
+}
+
+/**
+ * The tool surface one frontmatter key declares, reduced to what Clio can
+ * enforce and reported where it cannot.
+ *
+ * `allowed-tools` is workflow scoping, not a security boundary: the host
+ * admission in `tools/registry.ts` has already decided what this run may call,
+ * and narrowing only ever subtracts from it. So an allow-list naming no tool
+ * Clio has is not a declaration to enforce as "nothing is permitted"; it is a
+ * declaration written for another harness, and honoring it literally would
+ * block every call for a reason the operator never chose. It narrows nothing
+ * and says so. A denial is kept whenever it resolves, because a denial that
+ * fails open is the one direction that matters.
+ */
+function declaredToolSurface(
+	frontmatter: Record<string, unknown>,
+	key: string,
+	filePath: string,
+	diagnostics: ResourceDiagnostic[],
+): ToolName[] | undefined {
+	const declared = rawToolListField(frontmatter, key);
+	if (declared === undefined) return undefined;
+	const { tools, unrecognized } = resolveDeclaredTools(declared);
+	if (unrecognized.length > 0) {
+		diagnostics.push({
+			type: "warning",
+			message: `${key} names ${unrecognized.length === 1 ? "a tool" : "tools"} Clio does not have: ${unrecognized.join(", ")}`,
+			path: filePath,
+		});
+	}
+	if (tools.length === 0 && key === "allowed-tools") {
+		diagnostics.push({
+			type: "warning",
+			message:
+				"allowed-tools names no tool Clio has, so it narrows nothing; declare Clio tool names to confine this skill",
+			path: filePath,
+		});
+		return undefined;
+	}
+	return tools.length > 0 ? tools : undefined;
 }
 
 function validationSubject(filePath: string): string {
@@ -469,8 +547,8 @@ function loadSkillFile(
 		...(root.origin ? { source: root.origin } : {}),
 	};
 	const provenance = extractProvenance(parsed.frontmatter);
-	const allowedTools = toolListField(parsed.frontmatter, "allowed-tools");
-	const disallowedTools = toolListField(parsed.frontmatter, "disallowed-tools");
+	const allowedTools = declaredToolSurface(parsed.frontmatter, "allowed-tools", filePath, diagnostics);
+	const disallowedTools = declaredToolSurface(parsed.frontmatter, "disallowed-tools", filePath, diagnostics);
 	const skill: Skill = {
 		name,
 		description,
