@@ -759,10 +759,15 @@ export function runStream(
 			}
 			stream.push({ type: "start", partial: output });
 			// Resolve once per request and make the resolved reasoning class
-			// authoritative for the whole adapter. LM Studio may classify
+			// authoritative for what the operator is shown. LM Studio may classify
 			// <think> tags even when the catalog says the selected family is
 			// reasoning-never; in that case Clio suppresses those fragments rather
-			// than surfacing thinking blocks or reasoning-token usage.
+			// than surfacing thinking blocks. It never suppresses the token count:
+			// the SDK carries no chat-template-kwargs channel, so `enable_thinking`
+			// cannot reach this transport and a catalog `reasoning: false` is a
+			// belief about the model, not a control over it. The reasoning a server
+			// spends anyway has to stay visible in usage, or the belief cannot be
+			// discovered to be wrong.
 			const requestedThinkingLevel = thinkingLevelFromHintOrModel(hints, model);
 			const resolved = resolveModelRuntimeCapabilitiesForModel(model, requestedThinkingLevel);
 			const applied = resolved.thinking;
@@ -983,15 +988,18 @@ export function runStream(
 					// agent message is non-empty and pi-agent-core's loop can chain
 					// correctly when the model only emits reasoning + tool calls.
 					if (fragment.reasoningType === "reasoningStartTag" || fragment.reasoningType === "reasoningEndTag") {
-						if (!suppressThinking) reasoningTokensAccum += fragment.tokensCount ?? 0;
+						reasoningTokensAccum += fragment.tokensCount ?? 0;
 						return;
 					}
 					if (fragment.reasoningType === "reasoning") {
 						flushNonReasoningPending();
-						if (!suppressThinking) {
-							reasoningTokensAccum += fragment.tokensCount ?? 0;
-							emitThinking(fragment.content, 0);
-						}
+						// Count first, show second. Suppression is a statement about what
+						// the operator is shown, never about what the server spent. Gating
+						// the accrual on it made a reasoning-never model that reasons
+						// anyway report zero reasoning tokens, which is the one reading
+						// that would have revealed the catalog was wrong about it.
+						reasoningTokensAccum += fragment.tokensCount ?? 0;
+						emitThinking(fragment.content, 0);
 						return;
 					}
 					routeNonReasoningChunk(fragment.content);

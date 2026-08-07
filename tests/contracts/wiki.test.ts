@@ -186,6 +186,23 @@ describe("contracts/wiki", () => {
 		if (!validation.ok) ok(validation.problems.some((problem) => problem.includes("empty.md is empty")));
 	});
 
+	it("rejects a page with no H1, because its recorded title would be its filename", () => {
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nSee [Providers](providers.md).\n");
+		// Prose and a subheading, but no H1: `titleFromPage` falls back to the
+		// filename, so `meta.json` would record the literal "providers.md" as the
+		// page title. That is deterministic, so validation catches it instead of
+		// a prompt sentence the writer may skip.
+		writeWikiPage(scratch, "providers.md", "## Runtimes\n\nThe provider layer resolves targets.\n");
+		let validation = validateWikiLayout(scratch);
+		strictEqual(validation.ok, false);
+		if (!validation.ok) ok(validation.problems.some((problem) => problem === "providers.md has no H1 title heading"));
+
+		writeWikiPage(scratch, "providers.md", "# Providers\n\n## Runtimes\n\nThe provider layer resolves targets.\n");
+		validation = validateWikiLayout(scratch);
+		strictEqual(validation.ok, true);
+		strictEqual(listWikiPages(scratch).find((page) => page.path === "providers.md")?.title, "Providers");
+	});
+
 	it("rejects a staged wiki with broken internal links or missing source citations", () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "live.ts"), "export const live = true;\n", "utf8");

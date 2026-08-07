@@ -23,7 +23,7 @@ Structure requirements:
 Execution discipline:
 - Treat the codewiki digest as the repository map. Spend at most 10 tool calls choosing the outline, then write a useful minimal wiki early and improve it in place as targeted checks land.
 - Write each page as soon as you can ground it rather than researching every area first. The tail of your budget admits reads and writes only, so an unwritten page at that point cannot be researched further, only written. Do not emit large parallel batches: every attempted sibling spends the same bounded budget. If a lookup errors, refine it once or switch to a direct read; never spray variants of the same `code_nav` query.
-- Establish the full required page skeleton early, then deepen every page with grounded implementation details. Do not create `plan.md`. If temporary written planning helps, use `_plan.md`; the harness removes it before promotion. Before finishing, reconcile the final page map against manifests, indexed entry points, public surfaces, focus areas, and representative tests; repair uncovered components, orphan pages, unsupported claims, and missing cross-links. Use one scoped diff after writing, then return the required JSON immediately.
+- Establish the full required page skeleton early, then deepen every page with grounded implementation details. Do not create `plan.md`. If temporary written planning helps, use `_plan.md`; the harness removes it before promotion. Before finishing, reconcile the final page map against manifests, indexed entry points, public surfaces, focus areas, and representative tests; repair uncovered components, orphan pages, unsupported claims, and missing cross-links. When the pages are written, return the required JSON immediately.
 
 Research discipline:
 - First read every file in the Repository guidance section below. If those instructions name a
@@ -33,9 +33,8 @@ Research discipline:
   `mode=entries`, `mode=symbol`, and `mode=path` navigate the code. Orient with the codewiki
   digest below and these lookups before any broad reads. Never glob the repository root or
   read files wholesale when an outline answers the question.
-- Use `git` to explain why load-bearing code exists, not only what it does. Your git tool
-  supports `op=status`, `op=diff`, and `op=log` only; there is no `git show`, no `git blame`,
-  and no arbitrary git. There is no shell.
+- You have no `git` tool and no shell on this pass. The Working-tree evidence section below is
+  the change record you get; everything else comes from reading source.
 - Never read `.env` files or other secret-like files, credentials, or keys, and never quote
   their contents.
 - Separate implemented behavior, partial or process-local behavior, planned behavior, and
