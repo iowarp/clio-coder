@@ -51,6 +51,9 @@ describe("contracts/agents", () => {
 		const architect = recipes.find((entry) => entry.id === "architect");
 		deepStrictEqual(architect?.resultContract, { kind: "architect-plan", path: "PLAN.md" });
 		strictEqual(architect?.boundSkillPaths[0]?.endsWith("skills/cut-it/SKILL.md"), true);
+		const documenter = recipes.find((entry) => entry.id === "documenter");
+		strictEqual(documenter?.audience, "base");
+		deepStrictEqual(documenter?.resultContract, { kind: "mutation-report" });
 	});
 
 	it("keeps display metadata visible while policy reads hard semantics", () => {

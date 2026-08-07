@@ -167,11 +167,11 @@ async function runWikiStatusCommand(): Promise<number> {
 		`gitHead: ${meta.gitHead ?? "none"}`,
 	];
 	if (meta.generation) {
-		const { depth, requestedDepth, researchAgents, sourceFiles } = meta.generation;
+		const { depth, requestedDepth, sourceFiles } = meta.generation;
 		const bounds = context.WIKI_DEPTH_STRATEGY[depth];
 		lines.push(
-			`depth: ${depth} (requested ${requestedDepth}; ${researchAgents} area researchers; ` +
-				`${sourceFiles} source files; ${bounds.minPages}-${bounds.maxPages} pages)`,
+			`depth: ${depth} (requested ${requestedDepth}; one documenter pass; ` +
+				`${sourceFiles} source files; ${bounds.minPages}-${bounds.maxPages} pages guided)`,
 		);
 	}
 	if (currentHead !== meta.gitHead) {

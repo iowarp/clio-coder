@@ -171,48 +171,31 @@ describe("contracts/wiki", () => {
 		strictEqual(readWikiMeta(scratch), null);
 	});
 
-	it("validates missing quickstart, page overflow, and empty pages", () => {
+	it("validates missing quickstart and empty pages", () => {
 		let validation = validateWikiLayout(scratch);
 		strictEqual(validation.ok, false);
 		if (!validation.ok) ok(validation.problems.some((problem) => problem.includes("quickstart.md")));
 
 		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
-		for (let i = 1; i <= 16; i += 1) writeWikiPage(scratch, `page-${i}.md`, `# Page ${i}\n`);
 		validation = validateWikiLayout(scratch);
-		strictEqual(validation.ok, false);
-		if (!validation.ok) ok(validation.problems.some((problem) => problem.includes("maximum for this depth is 16")));
+		strictEqual(validation.ok, true);
 
-		rmSync(wikiDir(scratch), { recursive: true, force: true });
-		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
 		writeWikiPage(scratch, "empty.md", " \n");
 		validation = validateWikiLayout(scratch);
 		strictEqual(validation.ok, false);
 		if (!validation.ok) ok(validation.problems.some((problem) => problem.includes("empty.md is empty")));
 	});
 
-	it("rejects a staged wiki that misses the depth's breadth or substance floor", () => {
-		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
-		writeWikiPage(scratch, "architecture.md", `# Architecture\n${"detail. ".repeat(200)}`);
-		const detailed = { minPages: 10, maxPages: 16, minPageBytes: 1_200 };
+	it("rejects a staged wiki with broken internal links or missing source citations", () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "live.ts"), "export const live = true;\n", "utf8");
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nSee [Missing](missing.md). Owner: `src/missing.ts:20`.\n");
 
-		const tooNarrow = validateWikiLayout(scratch, detailed);
-		strictEqual(tooNarrow.ok, false);
-		if (!tooNarrow.ok) {
-			ok(tooNarrow.problems.some((problem) => problem.includes("minimum for this depth is 10")));
-			// The one substantive page is not reported as thin; only breadth is missing.
-			ok(!tooNarrow.problems.some((problem) => problem.includes("architecture.md is")));
-		}
-
-		// Breadth alone must not buy a pass: a padded page count of thin files is
-		// exactly the filler the byte floor exists to refuse.
-		for (let i = 1; i <= 9; i += 1) writeWikiPage(scratch, `thin-${i}.md`, `# Thin ${i}\n`);
-		const thin = validateWikiLayout(scratch, detailed);
-		strictEqual(thin.ok, false);
-		if (!thin.ok) {
-			ok(
-				thin.problems.some((problem) => problem.includes("thin-1.md is") && problem.includes("minimum substantive size")),
-			);
-			ok(!thin.problems.some((problem) => problem.includes("minimum for this depth is 10")));
+		const validation = validateWikiLayout(scratch, { sourceRoot: scratch });
+		strictEqual(validation.ok, false);
+		if (!validation.ok) {
+			ok(validation.problems.some((problem) => problem.includes("links missing wiki page missing.md")));
+			ok(validation.problems.some((problem) => problem.includes("cites missing source path src/missing.ts")));
 		}
 	});
 
@@ -465,7 +448,11 @@ describe("contracts/wiki", () => {
 
 	it("seeds staging for update runs: an edit promotes, an untouched run no-ops", async () => {
 		writeProjectFile(scratch);
-		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nOriginal quickstart line.\n");
+		writeWikiPage(
+			scratch,
+			"quickstart.md",
+			"# Quickstart\n\nOriginal quickstart line. See [Architecture](architecture.md).\n",
+		);
 		writeWikiPage(scratch, "architecture.md", "# Architecture\n\nOriginal architecture body.\n");
 		writeExistingWikiMeta(scratch);
 
@@ -476,7 +463,11 @@ describe("contracts/wiki", () => {
 			generate: (input) => {
 				seededPages = readdirSync(input.outputDir).sort();
 				ok(readFileSync(join(input.outputDir, "quickstart.md"), "utf8").includes("Original quickstart line."));
-				writeStagingPage(input.outputDir, "quickstart.md", "# Quickstart\n\nEdited quickstart line.\n");
+				writeStagingPage(
+					input.outputDir,
+					"quickstart.md",
+					"# Quickstart\n\nEdited quickstart line. See [Architecture](architecture.md).\n",
+				);
 			},
 		});
 
@@ -565,6 +556,62 @@ describe("contracts/wiki", () => {
 		strictEqual(existsSync(wikiMetaPath(scratch)), false);
 	});
 
+	it("rejects generated source citations that do not exist", async () => {
+		writeProjectFile(scratch);
+
+		const result = await runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: (input) => {
+				writeStagingPage(
+					input.outputDir,
+					"quickstart.md",
+					"# Quickstart\n\nSee [Missing](missing.md). The owner is `src/missing.ts:20`.\n",
+				);
+			},
+		});
+
+		strictEqual(result.status, "failed");
+		ok(result.problems?.some((problem) => problem.includes("cites missing source path src/missing.ts")));
+	});
+
+	it("rejects invented wiki links and removes temporary plan files", async () => {
+		writeProjectFile(scratch);
+
+		const result = await runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: (input) => {
+				writeStagingPage(input.outputDir, "quickstart.md", "# Quickstart\n\nSee [Invented](invented.md).\n");
+				writeStagingPage(input.outputDir, "architecture.md", "# Architecture\n\nGrounded architecture.\n");
+				writeStagingPage(input.outputDir, "plan.md", "# Temporary plan\n");
+			},
+		});
+
+		strictEqual(result.status, "failed");
+		ok(result.problems?.some((problem) => problem.includes("links missing wiki page invented.md")));
+		strictEqual(existsSync(join(wikiDir(scratch), "plan.md")), false);
+		strictEqual(existsSync(join(wikiDir(scratch), "quickstart.md")), false);
+	});
+
+	it("accepts TypeScript-authored .js module citations and schematic source families", async () => {
+		writeProjectFile(scratch);
+
+		const result = await runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: (input) => {
+				writeStagingPage(
+					input.outputDir,
+					"quickstart.md",
+					"# Quickstart\n\nEntry: `src/index.js:1`. Sources: `src/**/*.ts`.\n",
+				);
+			},
+		});
+
+		strictEqual(result.status, "generated");
+	});
+
 	it("returns a structured failure when no model runtime is injected", async () => {
 		writeProjectFile(scratch);
 
@@ -575,7 +622,7 @@ describe("contracts/wiki", () => {
 		strictEqual(existsSync(wikiMetaPath(scratch)), false);
 	});
 
-	it("auto-classifies wiki depth and distributes detailed research across the heaviest areas", () => {
+	it("auto-classifies wiki depth and assigns coverage anchors", () => {
 		const small = planWikiGeneration(promptCodewiki());
 		strictEqual(small.depth, "simple");
 		strictEqual(small.researchAgents, 0);
@@ -609,7 +656,7 @@ describe("contracts/wiki", () => {
 		};
 		const detailed = planWikiGeneration(large);
 		strictEqual(detailed.depth, "detailed");
-		strictEqual(detailed.researchAgents, 8);
+		strictEqual(detailed.researchAgents, 0);
 		strictEqual(detailed.minPages, 10);
 		strictEqual(detailed.maxPages, 16);
 		strictEqual(detailed.minPageBytes, 1_200);
@@ -625,6 +672,7 @@ describe("contracts/wiki", () => {
 		ok(initPrompt.includes("## Codewiki digest"));
 		ok(initPrompt.includes("## Generation strategy"));
 		ok(initPrompt.includes("Depth: simple"));
+		ok(initPrompt.includes("one documenter pass"));
 		ok(initPrompt.includes("## Repository guidance"));
 		ok(initPrompt.includes("AGENTS.md"));
 		ok(initPrompt.includes("## Working-tree evidence"));
