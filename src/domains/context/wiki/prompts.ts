@@ -126,19 +126,17 @@ function gitEvidence(cwd: string, gitHead: string | null | undefined): string {
 }
 
 function generationStrategy(plan: WikiGenerationPlan, currentPages: number | undefined): string {
-	const areas = plan.focusAreas.length > 0 ? plan.focusAreas.join(", ") : "none; the primary writer researches directly";
+	const areas = plan.focusAreas.length > 0 ? plan.focusAreas.join(", ") : "none; direct research";
 	const lines = [
 		`Depth: ${plan.depth} (requested: ${plan.requestedDepth}).`,
 		`Scale: ${plan.sourceFiles} source files, ${plan.sourceLines} source lines.`,
-		`Composition: ${plan.researchAgents} area researchers feeding one coherent writer; required breadth ${plan.minPages}-${plan.maxPages} substantive pages, each at least ${plan.minPageBytes} bytes.`,
-		`Focus areas: ${areas}.`,
-		"Area reports supplied to the writer are advisory navigation evidence. Verify mutable claims against live source before publishing them.",
+		`Composition: one documenter pass. Target breadth ${plan.minPages}-${plan.maxPages} substantive pages, each at least ${plan.minPageBytes} bytes.`,
+		`Coverage anchors: ${areas}.`,
+		"The codewiki is a navigation index, not factual authority. Verify mutable claims against live source and focused tests before publishing them.",
 	];
 	if (currentPages !== undefined) {
 		lines.push(
-			currentPages < plan.minPages
-				? `Current wiki breadth: ${currentPages} pages. Expand it to at least ${plan.minPages} pages; a no-op is not acceptable for this run.`
-				: `Current wiki breadth: ${currentPages} pages. Keep or improve this breadth without creating thin pages.`,
+			`Current wiki breadth: ${currentPages} pages. Make surgical edits only where current evidence invalidates seeded content.`,
 		);
 	}
 	return lines.join("\n");

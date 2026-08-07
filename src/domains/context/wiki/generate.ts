@@ -24,7 +24,7 @@ import {
 } from "../codewiki/indexer.js";
 import { computeFingerprint, isStale } from "../fingerprint.js";
 import { readClioState, writeClioState } from "../state.js";
-import { listWikiPagesInDir, validateWikiLayoutInDir, wikiDir } from "./layout.js";
+import { listWikiPagesInDir, validateWikiLayoutInDir, WIKI_TEMPORARY_PAGE_NAMES, wikiDir } from "./layout.js";
 import {
 	computeWikiContentHash,
 	computeWikiContentHashOfDir,
@@ -48,7 +48,7 @@ export interface WikiGenerateInput {
 	 * (and the worker it drives) must write only here, never into .clio/wiki.
 	 */
 	outputDir: string;
-	/** Auto-classified or operator-selected horizontal generation strategy. */
+	/** Auto-classified or operator-selected bounded generation strategy. */
 	plan: WikiGenerationPlan;
 	progress?: BootstrapProgressSink;
 }
@@ -305,7 +305,7 @@ export async function runWikiGenerate(
 			phase: "codewiki",
 			status: "running",
 			message: `selected ${wikiPlan.depth} wiki strategy`,
-			detail: `${wikiPlan.sourceFiles} source files; ${wikiPlan.sourceLines} lines; ${wikiPlan.researchAgents} area researchers; ${wikiPlan.minPages}-${wikiPlan.maxPages} pages; at least ${wikiPlan.minPageBytes} bytes/page`,
+			detail: `${wikiPlan.sourceFiles} source files; ${wikiPlan.sourceLines} lines; one documenter pass; ${wikiPlan.minPages}-${wikiPlan.maxPages} pages guided; at least ${wikiPlan.minPageBytes} bytes/page guided`,
 		});
 		progress(input, {
 			phase: "codewiki",
@@ -361,12 +361,9 @@ export async function runWikiGenerate(
 			return failed([problem], listWikiPagesInDir(wikiDir(cwd)).length);
 		}
 		progress(input, { phase: "generate", status: "completed", message: "wiki generator completed" });
+		for (const temporary of WIKI_TEMPORARY_PAGE_NAMES) rmSync(join(stagingDir, temporary), { force: true });
 
-		const validation = validateWikiLayoutInDir(stagingDir, {
-			minPages: wikiPlan.minPages,
-			maxPages: wikiPlan.maxPages,
-			minPageBytes: wikiPlan.minPageBytes,
-		});
+		const validation = validateWikiLayoutInDir(stagingDir, { sourceRoot: cwd });
 		if (!validation.ok) {
 			removeDir(stagingDir);
 			progress(input, {

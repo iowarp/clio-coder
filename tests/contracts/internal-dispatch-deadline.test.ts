@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -7,7 +7,7 @@ import { armInternalDispatchDeadline } from "../../src/cli/internal-dispatch.js"
 import { generateWikiWithDocumenter } from "../../src/cli/wiki-generate.js";
 import { configureGuardrails } from "../../src/core/guardrails.js";
 import type { WikiGenerationPlan } from "../../src/domains/context/index.js";
-import type { AbortReason, DispatchContract } from "../../src/domains/dispatch/contract.js";
+import type { AbortReason, DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { JobSpec } from "../../src/domains/dispatch/validation.js";
 
@@ -142,47 +142,59 @@ describe("internal generator dispatch deadline", () => {
 
 	it("surfaces concise documenter tool progress while draining events", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-progress-"));
 		try {
 			const progress: string[] = [];
 			const dispatch = {
-				dispatch: async () => ({
-					runId: "run-progress-1",
-					events: (async function* () {
-						yield { type: "agent_start" };
-						yield { type: "clio_tool_start", payload: { tool: "read" } };
-						yield { type: "clio_tool_finish", payload: { tool: "read", outcome: "ok" } };
-					})(),
-					finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
-				}),
+				dispatch: async () => {
+					mkdirSync(outputDir, { recursive: true });
+					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nValid.\n", "utf8");
+					return {
+						runId: "run-progress-1",
+						events: (async function* () {
+							yield { type: "agent_start" };
+							yield { type: "clio_tool_start", payload: { tool: "read" } };
+							yield { type: "clio_tool_finish", payload: { tool: "read", outcome: "ok" } };
+						})(),
+						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
+					};
+				},
 				abort: () => {},
 			} as unknown as DispatchContract;
 
 			await generateWikiWithDocumenter(dispatch, {
 				...WIKI_INPUT,
+				outputDir,
 				progress: (event) => progress.push(`${event.message}|${event.detail ?? ""}`),
 			});
 
 			deepStrictEqual(
 				progress.map((entry) => entry.replace(/elapsed \d+(ms|s)/, "elapsed <n>")),
 				[
-					"dispatching primary wiki documenter|direct research",
+					"dispatching wiki documenter|single-owner direct research",
 					"documenter started wiki update|elapsed <n>",
 					"documenter made 1 tool attempt|elapsed <n>; read=1",
 				],
 			);
 		} finally {
+			rmSync(outputDir, { recursive: true, force: true });
 			configureGuardrails(undefined);
 		}
 	});
 
 	it("runs one focused completion pass after a deterministic tool-loop failure", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-recovery-"));
 		try {
 			const submitted: JobSpec[] = [];
 			const dispatch = {
 				dispatch: async (spec: JobSpec) => {
 					submitted.push(spec);
 					const attempt = submitted.length;
+					if (attempt === 2) {
+						mkdirSync(outputDir, { recursive: true });
+						writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nRecovered.\n", "utf8");
+					}
 					return {
 						runId: `run-recovery-${attempt}`,
 						events: (async function* () {
@@ -197,27 +209,31 @@ describe("internal generator dispatch deadline", () => {
 				abort: () => {},
 			} as unknown as DispatchContract;
 
-			await generateWikiWithDocumenter(dispatch, WIKI_INPUT);
+			await generateWikiWithDocumenter(dispatch, { ...WIKI_INPUT, outputDir });
 
 			strictEqual(submitted.length, 2);
 			strictEqual(submitted[0]?.task, WIKI_INPUT.prompt);
 			match(submitted[1]?.task ?? "", /Focused recovery pass/);
 			match(submitted[1]?.task ?? "", /preserve|staged pages/i);
-			deepStrictEqual(submitted[1]?.writeRoots, [WIKI_INPUT.outputDir]);
+			deepStrictEqual(submitted[1]?.writeRoots, [outputDir]);
 		} finally {
+			rmSync(outputDir, { recursive: true, force: true });
 			configureGuardrails(undefined);
 		}
 	});
 
-	it("launches a mandatory expansion pass when a successful writer leaves detailed breadth incomplete", async () => {
+	it("does not retry when a successful writer produces fewer pages than the depth guidance", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-breadth-"));
 		try {
-			const tasks: string[] = [];
+			const submitted: JobSpec[] = [];
 			const dispatch = {
 				dispatch: async (spec: JobSpec) => {
-					tasks.push(spec.task);
+					submitted.push(spec);
+					mkdirSync(outputDir, { recursive: true });
+					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nOne page.\n", "utf8");
 					return {
-						runId: `run-breadth-${tasks.length}`,
+						runId: `run-breadth-${submitted.length}`,
 						events: (async function* () {
 							yield* [];
 						})(),
@@ -229,25 +245,18 @@ describe("internal generator dispatch deadline", () => {
 
 			await generateWikiWithDocumenter(dispatch, {
 				...WIKI_INPUT,
-				outputDir: "/tmp/clio-wiki-contract-nonexistent",
+				outputDir,
 				plan: { ...SIMPLE_PLAN, depth: "detailed", requestedDepth: "detailed", minPages: 10, maxPages: 16 },
 			});
 
-			// Breadth is re-read after every pass, and the attempt bound is what stops
-			// the loop. Artifact validation, not this loop, refuses the final shortfall.
-			strictEqual(tasks.length, 3);
-			strictEqual(tasks[0], WIKI_INPUT.prompt);
-			for (const task of tasks.slice(1)) {
-				match(task, /Mandatory breadth completion pass/);
-				match(task, /not allowed to return a no-op/);
-				match(task, /10-16 pages/);
-			}
+			strictEqual(submitted.length, 1);
 		} finally {
+			rmSync(outputDir, { recursive: true, force: true });
 			configureGuardrails(undefined);
 		}
 	});
 
-	it("hands a staged candidate to artifact validation when recovery ends after successful writes", async () => {
+	it("allows one budget recovery and then fails if the recovery also exhausts", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
 		try {
 			let attempts = 0;
@@ -276,111 +285,37 @@ describe("internal generator dispatch deadline", () => {
 				abort: () => {},
 			} as unknown as DispatchContract;
 
-			await generateWikiWithDocumenter(dispatch, {
-				...WIKI_INPUT,
-				progress: (event) => progress.push(event.message),
-			});
+			await rejects(
+				generateWikiWithDocumenter(dispatch, {
+					...WIKI_INPUT,
+					progress: (event) => progress.push(event.message),
+				}),
+				/wiki documenter failed/,
+			);
 
 			strictEqual(attempts, 2);
-			ok(progress.includes("documenter stopped after producing a staged candidate; validating artifact"));
+			ok(progress.includes("documenter budget exhausted; starting focused recovery"));
 		} finally {
 			configureGuardrails(undefined);
 		}
 	});
 
-	it("scales detailed generation through area researchers and briefs one coherent writer", async () => {
+	it("uses the shipped documenter agent for a detailed update", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-update-"));
 		try {
 			const submitted: JobSpec[] = [];
 			const dispatch = {
 				dispatch: async (spec: JobSpec) => {
 					submitted.push(spec);
-					const scout = spec.agentId === "scout";
-					const failedScoutContract = scout && submitted.length === 1;
+					mkdirSync(outputDir, { recursive: true });
+					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nValid.\n", "utf8");
 					return {
-						runId: `run-${submitted.length}`,
+						runId: `run-update-${submitted.length}`,
 						events: (async function* () {
 							yield* [];
 						})(),
-						finalPromise: Promise.resolve({
-							exitCode: failedScoutContract ? 1 : 0,
-							...(failedScoutContract ? { outcomeCode: "result_contract_exhausted" } : {}),
-							...(scout ? { output: { state: "final", text: '{"findings":[]}', bytes: 15, truncated: false } } : {}),
-						} as RunReceipt),
-					};
-				},
-				abort: () => {},
-			} as unknown as DispatchContract;
-
-			await generateWikiWithDocumenter(
-				dispatch,
-				{
-					...WIKI_INPUT,
-					plan: {
-						requestedDepth: "detailed",
-						depth: "detailed",
-						sourceFiles: 1_000,
-						sourceLines: 200_000,
-						researchAgents: 2,
-						minPages: 0,
-						maxPages: 16,
-						minPageBytes: 0,
-						focusAreas: ["src/domains/dispatch", "tests/contracts"],
-					},
-				},
-				{ target: "dynamo", model: "nemotron", thinkingLevel: "high" },
-			);
-
-			deepStrictEqual(
-				submitted.map((spec) => spec.agentId),
-				["scout", "scout", "documenter"],
-			);
-			strictEqual(submitted[0]?.autonomy, "read-only");
-			for (const spec of submitted) {
-				strictEqual(spec.target, "dynamo");
-				strictEqual(spec.model, "nemotron");
-				strictEqual(spec.thinkingLevel, "high");
-			}
-			match(submitted[2]?.briefing ?? "", /src\/domains\/dispatch/);
-			match(submitted[2]?.briefing ?? "", /tests\/contracts/);
-		} finally {
-			configureGuardrails(undefined);
-		}
-	});
-
-	it("bounds detailed research to waves of four concurrent scouts", async () => {
-		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		try {
-			const areas = Array.from({ length: 8 }, (_, index) => `src/domains/area-${index}`);
-			const progress: string[] = [];
-			let scoutsInFlight = 0;
-			let peakScoutsInFlight = 0;
-			let scoutsDispatched = 0;
-			const dispatch = {
-				dispatch: async (spec: JobSpec) => {
-					const scout = spec.agentId === "scout";
-					if (scout) {
-						scoutsDispatched += 1;
-						scoutsInFlight += 1;
-						peakScoutsInFlight = Math.max(peakScoutsInFlight, scoutsInFlight);
-					}
-					return {
-						runId: `run-wave-${scoutsDispatched}`,
-						events: (async function* () {
-							yield* [];
-						})(),
-						// Settle on a later macrotask so every researcher in a wave is
-						// genuinely concurrent. A coordinator that ignored the wave width
-						// would show all eight in flight at once.
-						finalPromise: new Promise<RunReceipt>((resolve) => {
-							setTimeout(() => {
-								if (scout) scoutsInFlight -= 1;
-								resolve({
-									exitCode: 0,
-									...(scout ? { output: { state: "final", text: '{"findings":[]}', bytes: 15, truncated: false } } : {}),
-								} as RunReceipt);
-							}, 5);
-						}),
+						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
 					};
 				},
 				abort: () => {},
@@ -388,31 +323,121 @@ describe("internal generator dispatch deadline", () => {
 
 			await generateWikiWithDocumenter(dispatch, {
 				...WIKI_INPUT,
-				progress: (event) => progress.push(event.message),
-				plan: { ...SIMPLE_PLAN, depth: "detailed", requestedDepth: "detailed", researchAgents: 8, focusAreas: areas },
+				outputDir,
+				plan: {
+					...SIMPLE_PLAN,
+					requestedDepth: "detailed",
+					depth: "detailed",
+					focusAreas: ["src/domains/dispatch", "tests/contracts"],
+				},
 			});
 
-			strictEqual(scoutsDispatched, 8);
-			strictEqual(peakScoutsInFlight, 4);
-			ok(progress.includes("starting wiki research wave 1/2"));
-			ok(progress.includes("starting wiki research wave 2/2"));
+			strictEqual(submitted.length, 1);
+			strictEqual(submitted[0]?.agentId, "documenter");
+			ok(!("assignmentDeadlineAt" in (submitted[0] as DispatchRequest)));
 		} finally {
+			rmSync(outputDir, { recursive: true, force: true });
 			configureGuardrails(undefined);
 		}
 	});
 
-	it("runs a deepening pass when the staged wiki meets breadth but leaves thin pages", async () => {
+	it("does not run sequential coverage passes for detailed init", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
-		const staging = mkdtempSync(join(tmpdir(), "clio-wiki-thin-"));
+		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-init-"));
 		try {
-			writeFileSync(join(staging, "quickstart.md"), "x".repeat(2_000), "utf8");
-			writeFileSync(join(staging, "architecture.md"), "# thin\n", "utf8");
+			const submitted: JobSpec[] = [];
+			const dispatch = {
+				dispatch: async (spec: JobSpec) => {
+					submitted.push(spec);
+					mkdirSync(outputDir, { recursive: true });
+					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nValid.\n", "utf8");
+					return {
+						runId: `run-specialist-${submitted.length}`,
+						events: (async function* () {
+							yield* [];
+						})(),
+						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
+					};
+				},
+				abort: () => {},
+			} as unknown as DispatchContract;
+
+			await generateWikiWithDocumenter(dispatch, {
+				...WIKI_INPUT,
+				mode: "init",
+				outputDir,
+				plan: {
+					...SIMPLE_PLAN,
+					requestedDepth: "detailed",
+					depth: "detailed",
+					focusAreas: ["src/domains/area-0", "src/domains/area-1"],
+				},
+			});
+
+			strictEqual(submitted.length, 1);
+			strictEqual(submitted[0]?.agentId, "documenter");
+		} finally {
+			rmSync(outputDir, { recursive: true, force: true });
+			configureGuardrails(undefined);
+		}
+	});
+
+	it("feeds deterministic validation failures back to the documenter for repair", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		const root = mkdtempSync(join(tmpdir(), "clio-wiki-reference-"));
+		const staging = join(root, "staging");
+		try {
+			writeFileSync(join(root, "source.ts"), "export const live = true;\n", "utf8");
+			mkdirSync(staging);
+			writeFileSync(join(staging, "quickstart.md"), "# Quickstart\n\nOwner: `src/missing.ts:20`.\n", "utf8");
+			writeFileSync(join(staging, "architecture.md"), "# Architecture\n\nSubstantive.\n", "utf8");
 			const tasks: string[] = [];
 			const dispatch = {
 				dispatch: async (spec: JobSpec) => {
 					tasks.push(spec.task);
+					if (tasks.length === 2) {
+						writeFileSync(join(staging, "quickstart.md"), "# Quickstart\n\nSee [Architecture](architecture.md).\n", "utf8");
+					}
 					return {
-						runId: `run-thin-${tasks.length}`,
+						runId: `run-reference-${tasks.length}`,
+						events: (async function* () {
+							yield* [];
+						})(),
+						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
+					};
+				},
+				abort: () => {},
+			} as unknown as DispatchContract;
+
+			await generateWikiWithDocumenter(dispatch, {
+				...WIKI_INPUT,
+				cwd: root,
+				outputDir: staging,
+				plan: { ...SIMPLE_PLAN, minPages: 2 },
+			});
+
+			strictEqual(tasks.length, 2);
+			match(tasks[1] ?? "", /Validation repair pass/);
+			match(tasks[1] ?? "", /cites missing source path src\/missing\.ts/);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+			configureGuardrails(undefined);
+		}
+	});
+
+	it("does not deepen thin pages because byte floor is guidance, not validation", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		const staging = mkdtempSync(join(tmpdir(), "clio-wiki-thin-"));
+		try {
+			mkdirSync(staging, { recursive: true });
+			writeFileSync(join(staging, "quickstart.md"), "# Quickstart\n\nSee [Architecture](architecture.md).\n", "utf8");
+			writeFileSync(join(staging, "architecture.md"), "# thin\n", "utf8");
+			const submitted: JobSpec[] = [];
+			const dispatch = {
+				dispatch: async (spec: JobSpec) => {
+					submitted.push(spec);
+					return {
+						runId: `run-thin-${submitted.length}`,
 						events: (async function* () {
 							yield* [];
 						})(),
@@ -428,11 +453,7 @@ describe("internal generator dispatch deadline", () => {
 				plan: { ...SIMPLE_PLAN, depth: "detailed", requestedDepth: "detailed", minPages: 2, minPageBytes: 1_200 },
 			});
 
-			// The pass names only the thin page, so a deepening request can never be
-			// satisfied by padding a page that was already substantive.
-			match(tasks[1] ?? "", /Mandatory quality completion pass/);
-			match(tasks[1] ?? "", /architecture\.md/);
-			ok(!/quickstart\.md is/.test(tasks[1] ?? ""));
+			strictEqual(submitted.length, 1);
 		} finally {
 			rmSync(staging, { recursive: true, force: true });
 			configureGuardrails(undefined);

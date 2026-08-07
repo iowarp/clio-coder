@@ -8,11 +8,14 @@ export interface WikiGenerationPlan {
 	depth: ResolvedWikiDepth;
 	sourceFiles: number;
 	sourceLines: number;
+	/** Retained in metadata for compatibility. Wiki generation uses one documenter pass. */
 	researchAgents: number;
+	/** Guidance for the documenter prompt; not enforced as a hard validation rule. */
+	focusAreas: ReadonlyArray<string>;
+	/** Target breadth and substance for the documenter prompt; not hard limits. */
 	minPages: number;
 	maxPages: number;
 	minPageBytes: number;
-	focusAreas: ReadonlyArray<string>;
 }
 
 interface AreaWeight {
@@ -20,15 +23,15 @@ interface AreaWeight {
 	lines: number;
 }
 
-/** Per-depth breadth and substance policy. The one place these numbers are chosen. */
+/** Per-depth guidance for the documenter prompt. These are not hard limits. */
 export const WIKI_DEPTH_STRATEGY: Record<ResolvedWikiDepth, DepthStrategy> = {
-	simple: { researchAgents: 0, minPages: 1, maxPages: 5, minPageBytes: 0 },
-	medium: { researchAgents: 4, minPages: 4, maxPages: 10, minPageBytes: 800 },
-	detailed: { researchAgents: 8, minPages: 10, maxPages: 16, minPageBytes: 1_200 },
+	simple: { focusAreas: 0, minPages: 1, maxPages: 5, minPageBytes: 0 },
+	medium: { focusAreas: 4, minPages: 4, maxPages: 10, minPageBytes: 800 },
+	detailed: { focusAreas: 8, minPages: 10, maxPages: 16, minPageBytes: 1_200 },
 };
 
 export interface DepthStrategy {
-	researchAgents: number;
+	focusAreas: number;
 	minPages: number;
 	maxPages: number;
 	minPageBytes: number;
@@ -48,16 +51,16 @@ function classifyDepth(sourceFiles: number, sourceLines: number): ResolvedWikiDe
 }
 
 /**
- * Turn index size into a bounded multi-agent wiki strategy. Scale increases
- * horizontally through independent area researchers; it never grants one
- * model an unbounded tool loop or lets concurrent writers race on pages.
+ * Turn index size into a single-owner wiki strategy. The documenter does one
+ * pass; bounded recovery only runs when deterministic validation finds a real
+ * defect in the staged artifact.
  */
 export function planWikiGeneration(codewiki: Codewiki, requestedDepth: WikiDepth = "auto"): WikiGenerationPlan {
 	const source = codewiki.files.filter((file) => file.lang !== "config");
 	const sourceFiles = source.length;
 	const sourceLines = source.reduce((total, file) => total + Math.max(0, file.loc), 0);
 	const depth = requestedDepth === "auto" ? classifyDepth(sourceFiles, sourceLines) : requestedDepth;
-	const { researchAgents, minPages, maxPages, minPageBytes } = WIKI_DEPTH_STRATEGY[depth];
+	const { focusAreas: focusAreaLimit, minPages, maxPages, minPageBytes } = WIKI_DEPTH_STRATEGY[depth];
 	const weights = new Map<string, AreaWeight>();
 	for (const file of source) {
 		const area = areaForPath(file.path);
@@ -73,14 +76,14 @@ export function planWikiGeneration(codewiki: Codewiki, requestedDepth: WikiDepth
 			const byFiles = right.files - left.files;
 			return byFiles !== 0 ? byFiles : leftName.localeCompare(rightName);
 		})
-		.slice(0, researchAgents)
+		.slice(0, focusAreaLimit)
 		.map(([area]) => area);
 	return {
 		requestedDepth,
 		depth,
 		sourceFiles,
 		sourceLines,
-		researchAgents: focusAreas.length,
+		researchAgents: 0,
 		minPages,
 		maxPages,
 		minPageBytes,
