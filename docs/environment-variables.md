@@ -12,7 +12,7 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | Variable | Settings key | Default | Controls |
 | --- | --- | --- | --- |
 | `CLIO_TURN_TOOL_CALL_BUDGET` | `guardrails.turnToolCallBudget` | 60 | Orchestrator per-turn soft tool-call budget; the hard interrupt ceiling sits 15 above it (`src/engine/loop-guard.ts`). |
-| `CLIO_WORKER_TOOL_CALL_CAP` | `guardrails.workerToolCallCap` | 50 | Independent lifetime attempt ceiling per dispatched worker, including blocked and guard-denied attempts. Agent recipe budgets may narrow but never widen it (`src/engine/loop-guard.ts`). |
+| `CLIO_WORKER_TOOL_CALL_CAP` | `guardrails.workerToolCallCap` | 150 | Lifetime ceiling on tool calls one dispatched worker may execute. Calls the harness refused (reserve steering, synthesis-lockout denials) never spend it. Agent recipe budgets may narrow but never widen it (`src/engine/loop-guard.ts`). |
 | `CLIO_MAX_RUNS` | `guardrails.maxDispatchRuns` | 1000 | Dispatch run-ledger retention cap (`src/domains/dispatch/state.ts`). |
 | `CLIO_READ_MAX_BYTES` | `guardrails.readMaxBytes` | 51200 | Per-call byte cap for the read tool, floored at 1024 (`src/tools/read.ts`). |
 | `CLIO_OBSERVATION_TURN_BUDGET_BYTES` | `guardrails.observationTurnBudgetBytes` | 196608 | Shared per-turn byte pool across observation tools (`src/tools/observation.ts`). |

@@ -26,7 +26,19 @@ export interface GuardrailValues {
 	 * of productive calls in one turn.
 	 */
 	turnToolCallBudget: number;
-	/** Lifetime tool-call cap for a dispatched worker run. */
+	/**
+	 * Lifetime cap on tool calls a dispatched worker may execute. It bounds
+	 * admitted calls, not attempts: a call the harness refuses (a reserve-window
+	 * steering block, a synthesis-lockout denial) never ran and never spends the
+	 * cap, because a worker must not be killed by the harness's own refusals.
+	 * Attempts stay bounded by the loop-block budget and the synthesis backstop.
+	 *
+	 * Sized so a recipe's declared budget is what actually binds. A writer that
+	 * produces a dozen files spends a call per file before a single grounding
+	 * read, so a ceiling tuned for a reporting agent silently made whole classes
+	 * of work impossible: `min(declared, cap)` in dispatch means the smaller of
+	 * the two always wins, and only the recipe knows the shape of its job.
+	 */
 	workerToolCallCap: number;
 	/** Dispatch run-ledger retention cap. */
 	maxDispatchRuns: number;
@@ -47,7 +59,7 @@ export interface GuardrailValues {
 
 export const GUARDRAIL_DEFAULTS: GuardrailValues = {
 	turnToolCallBudget: 60,
-	workerToolCallCap: 50,
+	workerToolCallCap: 150,
 	maxDispatchRuns: 1000,
 	readMaxBytes: 50 * 1024,
 	observationTurnBudgetBytes: 192 * 1024,

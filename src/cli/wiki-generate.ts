@@ -240,7 +240,22 @@ export async function generateWikiWithDocumenter(
 				task = remediationPrompt(input.prompt, BUDGET_SHORTFALL);
 				continue;
 			}
-			throw new Error(receiptFailure(receipt));
+			// The writer ran out of budget, not out of correctness. Whatever it
+			// staged is a candidate like any other, so validation decides, and a
+			// wiki that passes every deterministic check is promoted rather than
+			// deleted for the way its author stopped. A staged tree that fails
+			// validation fails the run carrying the writer's own diagnosis.
+			const remaining = validationShortfall(input);
+			if (remaining !== null) {
+				throw new Error(`${receiptFailure(receipt)}; staged wiki also failed validation: ${remaining.progressDetail}`);
+			}
+			input.progress?.({
+				phase: "generate",
+				status: "running",
+				message: "documenter ended on its budget; staged wiki passed validation",
+				detail: `outcome=${outcome}`,
+			});
+			return;
 		}
 		const shortfall = validationShortfall(input);
 		if (!shortfall) return;

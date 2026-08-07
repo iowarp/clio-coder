@@ -405,6 +405,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let stopAfterToolResultCallId: string | null = null;
 	const workerBudget = resolveWorkerRuntimeBudget(input);
 	const readReserve = input.allowedTools.includes(ToolNames.Read) ? workerBudget.readReserve : 0;
+	// The reserve ends discovery, not the run's own product. An agent that was
+	// granted mutation tools delivers by writing, so those stay admitted in the
+	// reserve window; a read-only agent has none and the window stays read-only.
+	const deliveryTools = [ToolNames.Write, ToolNames.Edit].filter((tool) => input.allowedTools.includes(tool));
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
 	// Tool calls emitted by one provider response share this correlation. The
 	// loop guard counts synthesis-lock noncompliance by model round, preventing
@@ -433,6 +437,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				toolCallCap: workerBudget.hardCap,
 				toolCallSoftLimit: workerBudget.toolCalls,
 				toolCallSoftReadReserve: readReserve,
+				...(deliveryTools.length > 0 ? { deliveryTools } : {}),
 				turnSynthesisLockout: workerBudget.synthesis,
 				// Once locked, the next model round is forced text-only at the
 				// request level (tool_choice none in onPayload below): the lockout
@@ -456,7 +461,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							},
 						}
 					: {}),
-				...(readReserve > 0
+				// Forcing the next round to `read` is only correct when reading is
+				// the whole reserve. An agent with delivery tools must be able to
+				// write in its own reserve window, so it gets the steering directive
+				// without the request-level lock.
+				...(readReserve > 0 && deliveryTools.length === 0
 					? {
 							onSoftReadReserve: () => {
 								middlewareToolChoice.apply([{ kind: "require_tool", toolName: ToolNames.Read }]);

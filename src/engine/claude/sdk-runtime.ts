@@ -314,6 +314,13 @@ export function createClaudeWorkerBudgetGate(
 	budget: WorkerBudget,
 	onBoundary: () => void,
 	onHardCap: () => void,
+	/**
+	 * Tools carrying this agent's deliverable, admitted in the reserve window
+	 * beside `read`. Same rule the native guard applies: the reserve ends broad
+	 * discovery, and an agent whose product is files has to be able to write
+	 * them in its own last calls. Empty keeps the window read-only.
+	 */
+	deliveryTools: ReadonlyArray<string> = [],
 ): ClaudeWorkerBudgetGate {
 	let attempts = 0;
 	let admitted = 0;
@@ -328,10 +335,12 @@ export function createClaudeWorkerBudgetGate(
 			};
 		}
 		const reserveStart = budget.toolCalls - budget.readReserve;
-		if (budget.readReserve > 0 && admitted >= reserveStart && canonicalToolName !== ToolNames.Read) {
+		const reserveAdmits = canonicalToolName === ToolNames.Read || deliveryTools.includes(canonicalToolName);
+		if (budget.readReserve > 0 && admitted >= reserveStart && !reserveAdmits) {
+			const admittedNames = deliveryTools.length > 0 ? `read and ${deliveryTools.join("/")} are` : "only read is";
 			return {
 				kind: "deny",
-				reason: `worker read reserve: ${budget.toolCalls - admitted} admitted calls remain and only read is allowed`,
+				reason: `worker read reserve: ${budget.toolCalls - admitted} admitted calls remain and ${admittedNames} allowed`,
 			};
 		}
 		return { kind: "allow" };
@@ -504,6 +513,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 					emit({ type: "clio_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
 					abort();
 				},
+				[ToolNames.Write, ToolNames.Edit].filter((tool) => allowedToolSet.has(tool)),
 			)
 		: undefined;
 	const permissionGate: PermissionGateInput = {

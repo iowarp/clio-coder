@@ -222,6 +222,76 @@ describe("internal generator dispatch deadline", () => {
 		}
 	});
 
+	it("promotes a valid staged wiki when the last attempt ended on its budget", async () => {
+		// The writer stopped the way its budget told it to. What it staged is a
+		// candidate like any other, so validation decides; deleting it here threw
+		// away a correct wiki because of how its author stopped.
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-budget-keep-"));
+		const progress: string[] = [];
+		try {
+			const dispatch = {
+				dispatch: async () => {
+					mkdirSync(outputDir, { recursive: true });
+					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nStaged before the budget ran out.\n", "utf8");
+					return {
+						runId: "run-budget-keep",
+						events: (async function* () {
+							yield* [];
+						})(),
+						finalPromise: Promise.resolve({
+							exitCode: 1,
+							outcomeCode: "worker_tool_call_cap_exhausted",
+						} as RunReceipt),
+					};
+				},
+				abort: () => {},
+			} as unknown as DispatchContract;
+
+			await generateWikiWithDocumenter(dispatch, {
+				...WIKI_INPUT,
+				outputDir,
+				progress: (event) => progress.push(event.message),
+			});
+
+			ok(
+				progress.includes("documenter ended on its budget; staged wiki passed validation"),
+				"the operator is told the promotion rests on validation, not on the writer's exit",
+			);
+		} finally {
+			rmSync(outputDir, { recursive: true, force: true });
+			configureGuardrails(undefined);
+		}
+	});
+
+	it("fails a budget-exhausted run whose staged wiki does not validate", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-budget-invalid-"));
+		try {
+			const dispatch = {
+				dispatch: async () => ({
+					runId: "run-budget-invalid",
+					events: (async function* () {
+						yield* [];
+					})(),
+					finalPromise: Promise.resolve({
+						exitCode: 1,
+						outcomeCode: "worker_tool_call_cap_exhausted",
+					} as RunReceipt),
+				}),
+				abort: () => {},
+			} as unknown as DispatchContract;
+
+			await rejects(
+				generateWikiWithDocumenter(dispatch, { ...WIKI_INPUT, outputDir }),
+				/staged wiki also failed validation: quickstart\.md is missing/,
+			);
+		} finally {
+			rmSync(outputDir, { recursive: true, force: true });
+			configureGuardrails(undefined);
+		}
+	});
+
 	it("does not retry when a successful writer produces fewer pages than the depth guidance", async () => {
 		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
 		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-breadth-"));
