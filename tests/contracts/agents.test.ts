@@ -41,7 +41,7 @@ describe("contracts/agents", () => {
 	it("loads shipped recipes as explicit strict specs", () => {
 		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
 		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
-		strictEqual(recipes.length, 9);
+		strictEqual(recipes.length, 10);
 		for (const entry of recipes) {
 			strictEqual(entry.version, 1);
 			ok(entry.body.trim().length > 0);
@@ -54,6 +54,11 @@ describe("contracts/agents", () => {
 		const documenter = recipes.find((entry) => entry.id === "documenter");
 		strictEqual(documenter?.audience, "base");
 		deepStrictEqual(documenter?.resultContract, { kind: "mutation-report" });
+		// A wiki page's postcondition is the file it left on disk, which only the
+		// caller that named the output location can check. Asking this writer for
+		// a typed report is what made a small model fabricate one.
+		const wikiWriter = recipes.find((entry) => entry.id === "wiki-writer");
+		deepStrictEqual(wikiWriter?.resultContract, { kind: "artifact-report" });
 	});
 
 	it("keeps display metadata visible while policy reads hard semantics", () => {
