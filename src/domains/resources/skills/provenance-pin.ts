@@ -62,20 +62,54 @@ export function loadSkillPinManifest(manifestPath: string): Map<string, SkillPin
 	return entries;
 }
 
+/** Which recorded hash the activated content was measured against. */
+export type SkillDriftAuthority = "pinned-manifest" | "install-record";
+
+export interface SkillDriftReport {
+	verdict: SkillDriftVerdict;
+	authority: SkillDriftAuthority;
+	/** The hash the content was compared against, for the operator's record. */
+	expected: string;
+}
+
 /**
- * Compare an activated skill against the pinned manifest. Returns null when
- * no manifest exists locally or the manifest has no entry for the skill
- * (silent pass: pinning is opt-in evidence, not a gate).
+ * Compare an activated skill against whatever recorded hash can speak for it.
+ *
+ * Two independent authorities, tried in that order because they answer
+ * different questions. The pinned manifest says what the audited catalog
+ * entry's content is, so it wins wherever it has an entry. The skill's own
+ * `installed-hash` frontmatter says what this machine wrote at install time,
+ * which is the only evidence available for a skill installed straight from a
+ * URL, and it catches the case the manifest cannot see at all: content edited
+ * on disk after installation.
+ *
+ * Both compare on the provenance-stripped hash, so install-lifecycle stamps
+ * never read as drift while any content or registry-identity edit does. Null
+ * means nothing recorded a hash for this skill; drift evidence is opt-in and
+ * never a gate, and skills still pass the normal tool safety gates either way.
  */
 export function checkSkillDrift(
-	skill: { name: string; normalizedHash: string },
+	skill: { name: string; normalizedHash: string; provenance?: { installedHash?: string } },
 	cwd: string,
-): SkillDriftVerdict | null {
+): SkillDriftReport | null {
+	const actual = skill.normalizedHash.toLowerCase();
 	const manifestPath = resolveSkillPinManifestPath(cwd);
-	if (manifestPath === null) return null;
-	const manifest = loadSkillPinManifest(manifestPath);
-	if (manifest === null) return null;
-	const entry = manifest.get(skill.name);
-	if (entry === undefined) return null;
-	return entry.sha256 === skill.normalizedHash.toLowerCase() ? "match" : "mismatch";
+	const manifest = manifestPath === null ? null : loadSkillPinManifest(manifestPath);
+	const pinned = manifest?.get(skill.name);
+	if (pinned !== undefined) {
+		return {
+			verdict: pinned.sha256 === actual ? "match" : "mismatch",
+			authority: "pinned-manifest",
+			expected: pinned.sha256,
+		};
+	}
+	const recorded = skill.provenance?.installedHash?.trim().toLowerCase();
+	if (recorded !== undefined && /^[0-9a-f]{64}$/.test(recorded)) {
+		return {
+			verdict: recorded === actual ? "match" : "mismatch",
+			authority: "install-record",
+			expected: recorded,
+		};
+	}
+	return null;
 }

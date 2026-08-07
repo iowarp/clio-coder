@@ -12,7 +12,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
-import { installSkillFromSource, parseSkillSourceSpec } from "../../src/domains/resources/skills/install.js";
+import { stripProvenanceFrontmatter } from "../../src/domains/resources/skills/content-hash.js";
+import {
+	installSkillFromSource,
+	normalizedSkillHash,
+	parseSkillSourceSpec,
+	updateSkills,
+} from "../../src/domains/resources/skills/install.js";
+import { loadSkills } from "../../src/domains/resources/skills/loader.js";
+import { checkSkillDrift } from "../../src/domains/resources/skills/provenance-pin.js";
 
 const scratchDirs: string[] = [];
 
@@ -118,5 +126,103 @@ describe("contracts/skills install containment", () => {
 			(entry) => entry.includes(".clio-staging-") || entry.includes(".clio-backup-"),
 		);
 		deepStrictEqual(leftovers, []);
+	});
+});
+
+describe("contracts/skills update lifecycle", () => {
+	after(() => {
+		for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true });
+	});
+
+	function installed(project: string, name: string) {
+		const skill = loadSkills({ cwd: project }).items.find((entry) => entry.name === name);
+		ok(skill, `expected ${name} to be installed`);
+		return skill;
+	}
+
+	it("keeps an updated copy hash-equal to the source it was updated from", () => {
+		const workspace = scratchDir();
+		const source = writeSkillSource(workspace, "review", "The first version.");
+		const project = join(workspace, "project");
+		mkdirSync(project, { recursive: true });
+		installSkillFromSource({ source, scope: "project", cwd: project });
+
+		writeFileSync(
+			join(source, "SKILL.md"),
+			["---", "name: review", "description: The second version.", "---", "", "The second version.", ""].join("\n"),
+			"utf8",
+		);
+		deepStrictEqual(updateSkills({ name: "review", cwd: project }), [{ name: "review", status: "updated" }]);
+
+		// An update writes updated-at, which a fresh install does not. The
+		// normalized hash has to ignore that too, or every updated skill reads as
+		// drifted from the source it was just updated from.
+		strictEqual(
+			installed(project, "review").normalizedHash,
+			normalizedSkillHash(readFileSync(join(source, "SKILL.md"), "utf8")),
+		);
+	});
+
+	it("refuses to replace a working skill with an upstream that no longer loads", () => {
+		const workspace = scratchDir();
+		const source = writeSkillSource(workspace, "review", "The original.");
+		const project = join(workspace, "project");
+		mkdirSync(project, { recursive: true });
+		installSkillFromSource({ source, scope: "project", cwd: project });
+		const before = readFileSync(join(project, ".clio", "skills", "review", "SKILL.md"), "utf8");
+
+		// Upstream drops the description, so the skill would install and then
+		// silently stop existing while the operator is told it updated.
+		writeFileSync(join(source, "SKILL.md"), ["---", "name: review", "---", "", "No description.", ""].join("\n"), "utf8");
+		const [report] = updateSkills({ name: "review", cwd: project });
+		strictEqual(report?.status, "error");
+
+		strictEqual(
+			readFileSync(join(project, ".clio", "skills", "review", "SKILL.md"), "utf8"),
+			before,
+			"a refused update leaves the installed skill byte-identical",
+		);
+	});
+
+	it("reports drift against the install record for a skill no catalog pins", () => {
+		const workspace = scratchDir();
+		const source = writeSkillSource(workspace, "review", "The audited content.");
+		const project = join(workspace, "project");
+		mkdirSync(project, { recursive: true });
+		installSkillFromSource({ source, scope: "project", cwd: project });
+
+		strictEqual(checkSkillDrift(installed(project, "review"), project)?.verdict, "match");
+
+		const file = join(project, ".clio", "skills", "review", "SKILL.md");
+		writeFileSync(file, `${readFileSync(file, "utf8")}\nSomething nobody audited.\n`, "utf8");
+
+		// No registry-id and no pinned manifest, so the manifest cannot speak for
+		// this skill at all. Its own install record still can, and this is the
+		// case the manifest could never see: content edited on disk afterwards.
+		const report = checkSkillDrift(installed(project, "review"), project);
+		strictEqual(report?.verdict, "mismatch");
+		strictEqual(report?.authority, "install-record");
+	});
+
+	it("strips the lines a multi-line provenance value owns", () => {
+		const raw = [
+			"---",
+			"name: review",
+			"description: Reviews things.",
+			"audit: >",
+			"  a value",
+			"  spanning lines",
+			"license: MIT",
+			"---",
+			"",
+			"Body.",
+			"",
+		].join("\n");
+		const stripped = stripProvenanceFrontmatter(raw);
+		// Filtering only the key line left the continuation behind, where YAML
+		// then read it as part of whatever key preceded it.
+		ok(!stripped.includes("spanning lines"), `orphan continuation survived:\n${stripped}`);
+		ok(stripped.includes("license: MIT"), "an unrelated key after the block must survive");
+		ok(stripped.includes("description: Reviews things."));
 	});
 });
