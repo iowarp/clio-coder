@@ -541,8 +541,14 @@ function normalizeAuthored(value: string): string {
 function validateAuthorship(value: Record<string, unknown>): string | null {
 	for (const field of AUTHORSHIP_FIELDS) {
 		const raw = value[field];
-		if (raw === undefined) continue;
-		if (!string(raw)) return `${field} must be a non-empty string when present`;
+		// Absent, null, and blank are three spellings of the same thing: nothing
+		// was authored. `ResultAuthorship` types the field `string | null` and
+		// `resultContractAuthorship` already normalizes a blank to null, so
+		// failing here on a spelling this contract's own reader accepts ends a
+		// finished run over an optional field the agent correctly left empty.
+		if (raw === undefined || raw === null) continue;
+		if (typeof raw !== "string") return `${field} must be a string when present`;
+		if (raw.trim().length === 0) continue;
 		if (Buffer.byteLength(raw, "utf8") > RESULT_COMMIT_MESSAGE_MAX_BYTES) {
 			return `${field} must be at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} bytes`;
 		}
