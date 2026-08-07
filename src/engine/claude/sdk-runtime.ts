@@ -326,7 +326,21 @@ export function createClaudeWorkerBudgetGate(
 	let admitted = 0;
 	let locked = false;
 	const phaseDecision = (canonicalToolName: string): { kind: "allow" } | { kind: "deny"; reason: string } => {
+		const reserveAdmits = canonicalToolName === ToolNames.Read || deliveryTools.includes(canonicalToolName);
 		if (locked || admitted >= budget.toolCalls) {
+			// Same rule the native guard applies: the soft budget ends discovery,
+			// not the run's own product. An agent holding delivery tools keeps
+			// delivering past its declared budget and is bounded by hardCap in
+			// attempt() above; an agent with none is done, as before.
+			if (deliveryTools.length > 0 && !locked) {
+				if (reserveAdmits) return { kind: "allow" };
+				return {
+					kind: "deny",
+					reason:
+						`worker discovery budget reached (${budget.toolCalls}); only read and ${deliveryTools.join("/")} ` +
+						`are admitted for the rest of this run`,
+				};
+			}
 			return {
 				kind: "deny",
 				reason: budget.synthesis
@@ -335,7 +349,6 @@ export function createClaudeWorkerBudgetGate(
 			};
 		}
 		const reserveStart = budget.toolCalls - budget.readReserve;
-		const reserveAdmits = canonicalToolName === ToolNames.Read || deliveryTools.includes(canonicalToolName);
 		if (budget.readReserve > 0 && admitted >= reserveStart && !reserveAdmits) {
 			const admittedNames = deliveryTools.length > 0 ? `read and ${deliveryTools.join("/")} are` : "only read is";
 			return {
@@ -361,7 +374,10 @@ export function createClaudeWorkerBudgetGate(
 			const phase = phaseDecision(canonicalToolName);
 			if (phase.kind === "deny") return phase;
 			admitted += 1;
-			if (admitted >= budget.toolCalls) {
+			// Locking here is what ends the work phase. A delivery-capable agent is
+			// not locked at its soft budget: it still owes the files it was
+			// dispatched to write, and hardCap in attempt() is its bound.
+			if (admitted >= budget.toolCalls && deliveryTools.length === 0) {
 				locked = true;
 				onBoundary();
 			}

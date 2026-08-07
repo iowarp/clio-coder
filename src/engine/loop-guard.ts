@@ -229,6 +229,22 @@ function workerLiveReadReserveDirective(remaining: number, deliveryTools: Readon
 }
 
 /**
+ * Directive for a delivery-capable agent that has spent its declared soft
+ * budget. Discovery is over for the rest of the run; delivery continues under
+ * the lifetime cap, which is the bound that exists for it. Deliberately distinct
+ * from the reserve directive, which counts down remaining calls inside a window
+ * that has an end: past the soft limit there is no countdown to report, only the
+ * cap.
+ */
+export function workerDeliveryOnlyDirective(limit: number, deliveryTools: ReadonlyArray<string>): string {
+	return (
+		`worker discovery budget reached (${limit}); exploration tools are disabled for the rest of this run. ` +
+		`Only read and ${deliveryTools.join("/")} are admitted now. Write what you have with ` +
+		`${deliveryTools.join(" or ")} and finish. Do not substitute code_nav, ls, grep, find, context, git, or shell commands.`
+	);
+}
+
+/**
  * Dead tool-call markup a model can emit as plain text once tool_choice is
  * forced to none: the chat template's call syntax arrives as prose because the
  * runtime no longer parses it into a structured call. Measured on the mini
@@ -912,7 +928,18 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// refusals is reserveDenials and the synthesis backstop, both per model
 				// round; the cap bounds executed work.
 				if (softLimit !== undefined) {
-					if (softAdmittedCount >= softLimit) {
+					const spentSoftLimit = softAdmittedCount >= softLimit;
+					// The soft budget ends discovery, not the run's own product. An agent
+					// with no delivery tools has nothing left to do with a tool call, so
+					// the budget locks it to synthesis exactly as before. An agent that
+					// was granted mutation tools is still holding the files it was
+					// dispatched to write, and its bound is the lifetime cap, which sits
+					// above this limit for that reason. Refusing delivery here named the
+					// refusal after exploration and told a writer its writes were
+					// disabled: measured on the wiki documenter, ten of one pass's twelve
+					// write attempts were refused with "exploration tools are now
+					// disabled" and the pass landed no successful write at all.
+					if (spentSoftLimit && deliveryTools.length === 0) {
 						softLockout = {
 							denials: 0,
 							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
@@ -920,7 +947,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						options.onSynthesisLockout?.();
 						return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
 					}
-					if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) {
+					const inReserve = softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold;
+					if (spentSoftLimit || inReserve) {
 						enterSoftReadReserve();
 						if (!reserveAdmits(input.toolName)) {
 							// A model that keeps calling discovery tools inside the reserve
@@ -938,7 +966,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 							return [
 								{
 									kind: "block_tool",
-									reason: workerLiveReadReserveDirective(softLimit - softAdmittedCount, deliveryTools),
+									reason: spentSoftLimit
+										? workerDeliveryOnlyDirective(softLimit, deliveryTools)
+										: workerLiveReadReserveDirective(softLimit - softAdmittedCount, deliveryTools),
 									severity: "hard-block",
 								},
 							];
@@ -978,11 +1008,20 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					softAdmittedCount += 1;
 					if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) enterSoftReadReserve();
 					if (softAdmittedCount >= softLimit) {
-						softLockout = {
-							denials: 0,
-							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
-						};
-						options.onSynthesisLockout?.();
+						// Arming the lockout here is what actually ends the work phase: the
+						// softLockout branch above refuses every later call. A delivery-
+						// capable agent must not be armed, or it would be locked out on the
+						// call after the one that reached its budget and never deliver.
+						// Its ending is the lifetime cap. `onSoftLimitFinalCallAdmitted` is
+						// the separate synthesis:false runtime stop and still fires: an
+						// agent that declared no synthesis phase ends where it said it did.
+						if (deliveryTools.length === 0) {
+							softLockout = {
+								denials: 0,
+								...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+							};
+							options.onSynthesisLockout?.();
+						}
 						options.onSoftLimitFinalCallAdmitted?.(input.toolCallId);
 					}
 				}

@@ -1317,10 +1317,84 @@ describe("synthesis reserve at the cap tail", () => {
 				`the reserve is spent on delivery, not lost to refusals (${i + 1})`,
 			);
 		}
-		const spent = await registry.invoke({ tool: ToolNames.Write, args: { path: "one-too-many.md" } });
+		// The soft budget ends discovery, not delivery. The old contract here
+		// asserted that a write past the soft limit was refused with "worker
+		// exploration budget reached", which is the same defect the reserve fix
+		// corrected, one call later: it names a writer's delivery "exploration" and
+		// refuses it. Measured on the wiki documenter, ten of one pass's twelve
+		// write attempts were refused this way and the pass landed no write at all.
+		// Delivery now continues under the lifetime cap, which is its bound.
+		strictEqual(
+			(await registry.invoke({ tool: ToolNames.Write, args: { path: "past-the-limit.md" } })).kind,
+			"ok",
+			"delivery continues past the soft budget under the lifetime cap",
+		);
+		const explored = await registry.invoke(
+			{ tool: ToolNames.Grep, args: { pattern: "still exploring" } },
+			{ correlationId: "past-limit-round" },
+		);
 		ok(
-			spent.kind === "blocked" && spent.reason.startsWith("worker exploration budget reached (6)"),
-			"the soft budget still ends the work phase",
+			explored.kind === "blocked" && explored.reason.startsWith("worker discovery budget reached (6)"),
+			"discovery past the soft budget is over, and the reason says discovery rather than exploration budget",
+		);
+	});
+
+	it("ends a delivery-capable run on the lifetime cap, not the soft budget", async () => {
+		// Delivery past the soft budget still has to end. The cap is the bound that
+		// exists for exactly that, so an agent that keeps writing walks the
+		// headroom between its declared budget and the cap and then locks out.
+		const safety = unknownClassSafety();
+		const guard = createLoopGuardRegistration({
+			safety,
+			toolCallCap: 6,
+			toolCallSoftLimit: 3,
+			deliveryTools: [ToolNames.Write],
+			turnSynthesisLockout: true,
+		});
+		const bundle = createMiddlewareBundle({ registrations: [guard] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		registry.register(mockWriteSpec());
+		registry.register(mockDiscoverySpec());
+		for (let i = 0; i < 6; i += 1) {
+			strictEqual(
+				(await registry.invoke({ tool: ToolNames.Write, args: { path: `page-${i}.md` } })).kind,
+				"ok",
+				`delivery call ${i + 1} fits under the cap`,
+			);
+		}
+		strictEqual(guard.callCount(), 6, "every delivery call was counted against the cap");
+		const capped = await registry.invoke({ tool: ToolNames.Write, args: { path: "over.md" } });
+		ok(
+			capped.kind === "blocked" && isWorkerToolCallCapSynthesisReason(capped.reason),
+			"the lifetime cap ends the run, and the reason names the cap",
+		);
+	});
+
+	it("still locks a read-only agent to synthesis at its soft budget", async () => {
+		// The other half of the rule: an agent with no delivery tools has nothing
+		// left to do with a tool call, so its budget still ends its work phase.
+		const safety = unknownClassSafety();
+		let lockedOut = 0;
+		const guard = createLoopGuardRegistration({
+			safety,
+			toolCallCap: 12,
+			toolCallSoftLimit: 3,
+			turnSynthesisLockout: true,
+			onSynthesisLockout: () => {
+				lockedOut += 1;
+			},
+		});
+		const bundle = createMiddlewareBundle({ registrations: [guard] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		registry.register(mockDiscoverySpec());
+		for (let i = 0; i < 3; i += 1) {
+			strictEqual((await registry.invoke({ tool: ToolNames.Grep, args: { pattern: `scan-${i}` } })).kind, "ok");
+		}
+		strictEqual(lockedOut, 1, "the soft budget arms the lockout for an agent with no delivery tools");
+		const spent = await registry.invoke({ tool: ToolNames.Grep, args: { pattern: "one too many" } });
+		ok(
+			spent.kind === "blocked" && spent.reason.startsWith("worker exploration budget reached (3)"),
+			"a read-only agent's soft budget still ends its work phase",
 		);
 	});
 
