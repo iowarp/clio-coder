@@ -103,6 +103,23 @@ export interface SkillRoot {
 	precedence?: number;
 	/** Whether discovered skills are model-visible by default. */
 	trusted?: boolean;
+	/**
+	 * Directory every discovered skill must resolve inside. A skill root says
+	 * what a repository or an operator's machine offers, so a symlink out of it
+	 * would let a cloned repository offer content it does not contain, under
+	 * paths that still read as repository-local. `.clio/skills` is trusted
+	 * unconditionally, so the escape needs no opt-in to reach the model.
+	 *
+	 * The anchor is the workspace for a project root and the home directory for
+	 * a user root, matching `assertWriteBoundaryInsideRoot`: a monorepo may
+	 * share one skills tree across checkouts, but nothing may reach outside the
+	 * tree the operator is working in.
+	 *
+	 * Undefined disables the check. An extension root is laid out by a package
+	 * manager that symlinks by design, and an explicit skill path names its own
+	 * target, so neither has a containing scope to be measured against.
+	 */
+	containment?: string;
 }
 
 export interface SkillList {
@@ -211,6 +228,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "agents-user",
 		precedence: SKILL_PRECEDENCE.userCompat,
 		trusted: true,
+		containment: home,
 	});
 	roots.push({
 		path: path.join(home, ".claude", "skills"),
@@ -219,6 +237,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "claude-user",
 		precedence: SKILL_PRECEDENCE.userCompat,
 		trusted: true,
+		containment: home,
 	});
 	roots.push({
 		path: path.join(home, ".codex", "skills"),
@@ -227,6 +246,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "codex-user",
 		precedence: SKILL_PRECEDENCE.userCompat,
 		trusted: true,
+		containment: home,
 	});
 	roots.push({
 		path: path.join(home, ".config", "opencode", "skills"),
@@ -235,6 +255,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "opencode-user",
 		precedence: SKILL_PRECEDENCE.userCompat,
 		trusted: true,
+		containment: home,
 	});
 	roots.push({
 		path: path.join(home, ".copilot", "skills"),
@@ -243,6 +264,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "copilot-user",
 		precedence: SKILL_PRECEDENCE.userCompat,
 		trusted: true,
+		containment: home,
 	});
 
 	if (configDir) {
@@ -253,6 +275,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 			origin: "config",
 			precedence: SKILL_PRECEDENCE.user,
 			trusted: true,
+			containment: home,
 		});
 	}
 
@@ -263,6 +286,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "agents-project",
 		precedence: SKILL_PRECEDENCE.projectCompat,
 		trusted: trustProject,
+		containment: cwd,
 	});
 	roots.push({
 		path: path.join(cwd, ".claude", "skills"),
@@ -271,6 +295,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "claude-project",
 		precedence: SKILL_PRECEDENCE.projectCompat,
 		trusted: trustProject,
+		containment: cwd,
 	});
 	roots.push({
 		path: path.join(cwd, ".codex", "skills"),
@@ -279,6 +304,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "codex-project",
 		precedence: SKILL_PRECEDENCE.projectCompat,
 		trusted: trustProject,
+		containment: cwd,
 	});
 	roots.push({
 		path: path.join(cwd, ".opencode", "skills"),
@@ -287,6 +313,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "opencode-project",
 		precedence: SKILL_PRECEDENCE.projectCompat,
 		trusted: trustProject,
+		containment: cwd,
 	});
 	roots.push({
 		path: path.join(cwd, ".github", "skills"),
@@ -295,6 +322,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "copilot-project",
 		precedence: SKILL_PRECEDENCE.projectCompat,
 		trusted: trustProject,
+		containment: cwd,
 	});
 
 	roots.push({
@@ -304,6 +332,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		origin: "project",
 		precedence: SKILL_PRECEDENCE.project,
 		trusted: true,
+		containment: cwd,
 	});
 
 	return roots;
@@ -496,6 +525,45 @@ function canonicalizePath(filePath: string): string {
 	}
 }
 
+function pathIsInside(candidate: string, anchor: string): boolean {
+	return candidate === anchor || candidate.startsWith(anchor + path.sep);
+}
+
+/**
+ * The directory this root's skills must resolve inside, canonicalized once so
+ * every later comparison is against real paths on both sides.
+ *
+ * A root the operator placed outside its own declared scope anchors to itself:
+ * an XDG config dir on another volume is where the operator put their skills,
+ * not an escape, and anchoring it at home would reject every skill under it.
+ */
+function containmentAnchor(root: SkillRoot): string | null {
+	if (root.containment === undefined) return null;
+	const anchor = canonicalizePath(root.containment);
+	const rootReal = canonicalizePath(root.path);
+	return pathIsInside(rootReal, anchor) ? anchor : rootReal;
+}
+
+/**
+ * Refuse a discovered entry whose real path leaves the root's containing
+ * scope. Rejection rather than a warning, because the escape is invisible in
+ * every path the operator is later shown: `filePath` and `baseDir` both keep
+ * the symlink's own location, so a loaded escaped skill reads as ordinary
+ * repository content while its body and its resource tree come from somewhere
+ * the repository never contained.
+ */
+function escapesContainment(fullPath: string, anchor: string | null, diagnostics: ResourceDiagnostic[]): boolean {
+	if (anchor === null) return false;
+	const resolved = canonicalizePath(fullPath);
+	if (pathIsInside(resolved, anchor)) return false;
+	diagnostics.push({
+		type: "warning",
+		message: `skill path resolves to ${resolved}, outside ${anchor}; a skill root may not leave its scope through a symlink`,
+		path: fullPath,
+	});
+	return true;
+}
+
 function loadSkillFile(
 	filePath: string,
 	root: SkillRoot,
@@ -582,8 +650,10 @@ function collectSkills(
 	dir: string,
 	diagnostics: ResourceDiagnostic[],
 	includeRootFiles: boolean,
+	anchor: string | null = containmentAnchor(root),
 ): SkillCandidate[] {
 	if (!existsSync(dir)) return [];
+	if (escapesContainment(dir, anchor, diagnostics)) return [];
 	let entries: Dirent<string>[];
 	try {
 		entries = readdirSync(dir, { withFileTypes: true });
@@ -595,7 +665,9 @@ function collectSkills(
 
 	const skillEntry = entries.find((entry) => entry.name === "SKILL.md" && entry.isFile());
 	if (skillEntry) {
-		const loaded = loadSkillFile(path.join(dir, skillEntry.name), root);
+		const skillPath = path.join(dir, skillEntry.name);
+		if (escapesContainment(skillPath, anchor, diagnostics)) return [];
+		const loaded = loadSkillFile(skillPath, root);
 		diagnostics.push(...loaded.diagnostics);
 		return loaded.candidate ? [loaded.candidate] : [];
 	}
@@ -605,10 +677,11 @@ function collectSkills(
 		if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
 		const fullPath = path.join(dir, entry.name);
 		if (entry.isDirectory() || (entry.isSymbolicLink() && existsSync(path.join(fullPath, "SKILL.md")))) {
-			candidates.push(...collectSkills(root, fullPath, diagnostics, false));
+			candidates.push(...collectSkills(root, fullPath, diagnostics, false, anchor));
 			continue;
 		}
 		if (!includeRootFiles || (!entry.isFile() && !entry.isSymbolicLink()) || !isSkillMarkdownFile(entry.name)) continue;
+		if (escapesContainment(fullPath, anchor, diagnostics)) continue;
 		const loaded = loadSkillFile(fullPath, root);
 		diagnostics.push(...loaded.diagnostics);
 		if (loaded.candidate) candidates.push(loaded.candidate);
