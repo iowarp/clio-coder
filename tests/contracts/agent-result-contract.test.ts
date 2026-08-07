@@ -2,6 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
 	parseScoutResult,
+	resultContractAuthorship,
 	validateRecipeResult,
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
@@ -301,5 +302,34 @@ describe("contracts/agent result contract", () => {
 				.conformance,
 			"pass",
 		);
+	});
+
+	it("an optional authored field left empty is absent rather than malformed", () => {
+		const mutation = (authorship: string) =>
+			contract({
+				contract: { kind: "mutation-report" },
+				output: `{"mutatedPaths":["src/a.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}]${authorship}}`,
+				cwd: "/repo",
+				networkAllowed: false,
+				filesystem,
+			});
+		// A blank string and an explicit null are how a model spells "I authored
+		// no commit message". `resultContractAuthorship` reads both as absent, so
+		// validation that failed the run on them ended a finished run over an
+		// optional field the agent correctly left empty.
+		strictEqual(mutation(',"commitMessage":"","summary":""').conformance, "pass");
+		strictEqual(mutation(',"commitMessage":null,"summary":null').conformance, "pass");
+		strictEqual(mutation(',"commitMessage":"   "').conformance, "pass");
+		strictEqual(mutation("").conformance, "pass");
+		// A non-string is still a shape error: only the emptiness spellings are absent.
+		const wrongShape = mutation(',"commitMessage":42');
+		strictEqual(wrongShape.conformance, "fail");
+		ok(wrongShape.reason?.includes("commitMessage must be a string when present"));
+	});
+
+	it("an empty authored field reads as no authored message", () => {
+		const output = '{"mutatedPaths":[],"validations":[],"commitMessage":"","summary":""}';
+		strictEqual(resultContractAuthorship({ kind: "mutation-report" }, output).commitMessage, null);
+		strictEqual(resultContractAuthorship({ kind: "mutation-report" }, output).summary, null);
 	});
 });
