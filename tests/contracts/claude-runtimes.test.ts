@@ -427,6 +427,39 @@ describe("contracts/external CLI worker tool-profile enforcement", () => {
 		strictEqual(hardCaps, 1);
 	});
 
+	it("keeps a delivery-capable agent writing past its soft budget, bounded by the cap", () => {
+		// The SDK gate mirrors the native guard: the soft budget ends discovery,
+		// not the run's own product, and hardCap is the delivery phase's bound.
+		// Refusing delivery at the budget is what left the wiki documenter with
+		// zero successful writes in a whole pass.
+		let boundaries = 0;
+		let hardCaps = 0;
+		const gate = createClaudeWorkerBudgetGate(
+			{ toolCalls: 2, readReserve: 0, synthesis: true, hardCap: 4 },
+			() => {
+				boundaries += 1;
+			},
+			() => {
+				hardCaps += 1;
+			},
+			["write"],
+		);
+		strictEqual(gate.attempt("grep").kind, "allow");
+		strictEqual(gate.admit("grep").kind, "allow");
+		strictEqual(gate.attempt("write").kind, "allow");
+		strictEqual(gate.admit("write").kind, "allow");
+		strictEqual(boundaries, 0, "a delivery-capable agent is not locked at its soft budget");
+		strictEqual(gate.phaseReached(), false);
+		// Discovery is over; delivery continues. The denial still consumes a hard
+		// attempt, which is this gate's existing rule.
+		matchBudgetDeny(gate.attempt("grep"), /worker discovery budget reached \(2\)/);
+		strictEqual(gate.attempt("write").kind, "allow");
+		strictEqual(gate.admit("write").kind, "allow");
+		// hardCap is the ending: four attempts landed, the fifth aborts the run.
+		matchBudgetDeny(gate.attempt("write"), /workerToolCallCap reached \(4\)/);
+		strictEqual(hardCaps, 1);
+	});
+
 	it("counts duplicate PreToolUse and canUseTool mediation as one logical attempt", () => {
 		const gate = createClaudeWorkerBudgetGate(
 			{ toolCalls: 1, readReserve: 0, synthesis: true, hardCap: 1 },
