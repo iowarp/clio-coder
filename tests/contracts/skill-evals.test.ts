@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { runSkillsCommand } from "../../src/cli/skills.js";
-import { extractBulletsObject, materializeSkillEvalWorkspaces, parseJudgeVerdicts } from "../../src/cli/skills-eval.js";
+import {
+	extractBulletsObject,
+	materializeSkillEvalWorkspaces,
+	parseJudgeVerdicts,
+	resolveSkillBaseDir,
+} from "../../src/cli/skills-eval.js";
 import { parseSkillEvals } from "../../src/domains/resources/skills/evals.js";
 import {
 	closeServer,
@@ -422,5 +427,51 @@ describe("contracts/skill-evals CLI argument contract", () => {
 			await closeServer(fixture.server);
 			scratch.cleanup();
 		}
+	});
+});
+
+describe("contracts/skill evals select the copy an activation would select", () => {
+	function writeSkill(dir: string, name: string, marker: string): void {
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "SKILL.md"),
+			["---", `name: ${name}`, `description: ${marker}`, "---", "", marker, ""].join("\n"),
+			"utf8",
+		);
+		writeFileSync(
+			join(dir, "evals.md"),
+			["## S1 - a scenario", "", `Setup: ${marker}`, "", "Expected:", "- it works", ""].join("\n"),
+			"utf8",
+		);
+	}
+
+	it("prefers an installed skill over a same-named catalog entry", () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-eval-select-"));
+		scratchRoots.push(scratch);
+		const workspace = join(scratch, "repo");
+		// Same name in two places. The catalog is what a bare name used to
+		// resolve to, so the eval measured an artifact the agent would never
+		// load and said nothing about which copy it ran.
+		writeSkill(join(workspace, "skills", "review"), "review", "THE CATALOG COPY");
+		writeSkill(join(workspace, ".clio", "skills", "review"), "review", "THE INSTALLED COPY");
+
+		const resolved = resolveSkillBaseDir("review", workspace);
+		strictEqual(resolved.baseDir, join(workspace, ".clio", "skills", "review"));
+		strictEqual(resolved.origin, "clio/project");
+		ok(readFileSync(join(String(resolved.baseDir), "SKILL.md"), "utf8").includes("THE INSTALLED COPY"));
+	});
+
+	it("still resolves a catalog skill no root installed", () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-eval-select-"));
+		scratchRoots.push(scratch);
+		const workspace = join(scratch, "repo");
+		// The skill author's case in this repository: skills/ is a catalog, not
+		// a discovery root, so nothing installs these names.
+		writeSkill(join(workspace, "skills", "authoring"), "authoring", "THE CATALOG COPY");
+		writeFileSync(join(workspace, "skills", "registry.yaml"), "skills: []\n", "utf8");
+
+		const resolved = resolveSkillBaseDir("authoring", workspace);
+		strictEqual(resolved.origin, "catalog");
+		ok(readFileSync(join(String(resolved.baseDir), "SKILL.md"), "utf8").includes("THE CATALOG COPY"));
 	});
 });

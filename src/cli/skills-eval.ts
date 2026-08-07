@@ -106,7 +106,7 @@ interface ScenarioOutcome {
 }
 
 export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptions): Promise<number> {
-	const resolved = resolveSkillBaseDir(nameOrPath);
+	const resolved = resolveSkillBaseDir(nameOrPath, process.cwd());
 	if (resolved.baseDir === null) {
 		printError(resolved.error ?? `unknown skill: ${nameOrPath}`);
 		return 2;
@@ -117,6 +117,12 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 		printError(`skill did not load from ${resolved.baseDir}: ${list.diagnostics.map((d) => d.message).join("; ")}`);
 		return 2;
 	}
+	// Which copy is under test, before any scenario runs. A result nobody can
+	// attribute to a source is not evidence about a skill, and several roots may
+	// carry this name.
+	process.stderr.write(
+		`clio skills eval: ${skill.name} from ${resolved.origin ?? "unknown"} at ${resolved.baseDir} (sha256 ${skill.normalizedHash.slice(0, 12)}…)\n`,
+	);
 	const evalsPath = join(resolved.baseDir, "evals.md");
 	let evalsRaw: string;
 	try {
@@ -228,15 +234,33 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	return evidenceErrors.length > 0 ? 3 : 0;
 }
 
-function resolveSkillBaseDir(nameOrPath: string): { baseDir: string | null; error?: string } {
+/**
+ * The copy of a named skill this eval will actually execute.
+ *
+ * Resolution follows activation, not the catalog. A bare name previously
+ * resolved straight to the catalog entry, so an operator with the same skill
+ * installed in a project or user root evaluated a different artifact from the
+ * one their agent would load, and nothing in the run said which. Discovery runs
+ * first and its precedence winner is exactly what an activation would select;
+ * the catalog answers only for a name no root installed, which is the skill
+ * author's case in this repository.
+ */
+export function resolveSkillBaseDir(
+	nameOrPath: string,
+	cwd: string,
+): { baseDir: string | null; origin?: string; error?: string } {
 	const asPath = resolve(nameOrPath);
-	if (existsSync(join(asPath, "SKILL.md"))) return { baseDir: asPath };
-	const marketplace = discoverMarketplaceSkills({ cwd: process.cwd() });
+	if (existsSync(join(asPath, "SKILL.md"))) return { baseDir: asPath, origin: "path" };
+	const discovered = loadSkills({ cwd }).items.find((skill) => skill.name === nameOrPath);
+	if (discovered !== undefined) {
+		return { baseDir: discovered.baseDir, origin: `${discovered.source}/${discovered.scope}` };
+	}
+	const marketplace = discoverMarketplaceSkills({ cwd });
 	const entry = marketplace.skills.find((skill) => skill.name === nameOrPath && skill.origin === "catalog");
-	if (entry !== undefined) return { baseDir: entry.sourceUrl };
+	if (entry !== undefined) return { baseDir: entry.sourceUrl, origin: "catalog" };
 	return {
 		baseDir: null,
-		error: `skill not found: ${nameOrPath} (expected a catalog skill name or a directory containing SKILL.md)`,
+		error: `skill not found: ${nameOrPath} (expected an installed skill, a catalog skill name, or a directory containing SKILL.md)`,
 	};
 }
 
