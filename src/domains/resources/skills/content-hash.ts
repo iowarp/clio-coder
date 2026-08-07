@@ -49,12 +49,36 @@ export function isProvenanceLine(line: string): boolean {
 	return match?.[1] !== undefined && PROVENANCE_KEYS.has(match[1]);
 }
 
+/**
+ * Frontmatter lines with the install-lifecycle keys removed, along with the
+ * lines that belong to them.
+ *
+ * A key's value may span lines (`audit: >` followed by an indented block), and
+ * filtering the key line alone left those orphans behind: they stayed in the
+ * installed copy where YAML then read them as part of whatever key preceded
+ * them. Only an indented line can continue a key, so the next unindented line
+ * ends the removal.
+ */
+export function stripProvenanceLines(lines: ReadonlyArray<string>): string[] {
+	const kept: string[] = [];
+	let dropping = false;
+	for (const line of lines) {
+		if (isProvenanceLine(line)) {
+			dropping = true;
+			continue;
+		}
+		if (dropping && /^[ \t]/.test(line) && line.trim().length > 0) continue;
+		dropping = false;
+		kept.push(line);
+	}
+	return kept;
+}
+
 /** Remove install-lifecycle frontmatter lines so content compares across copies. */
 export function stripProvenanceFrontmatter(rawText: string): string {
 	const region = frontmatterRegion(rawText);
 	if (!region) return rawText;
-	const kept = region.lines.filter((line) => !isProvenanceLine(line));
-	return `${region.head}${kept.join("\n")}${region.tail}`;
+	return `${region.head}${stripProvenanceLines(region.lines).join("\n")}${region.tail}`;
 }
 
 /** Content hash of a SKILL.md, ignoring install-lifecycle provenance frontmatter. */

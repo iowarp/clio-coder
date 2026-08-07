@@ -14,7 +14,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fsyncDirectory } from "../../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../../core/xdg.js";
-import { frontmatterRegion, isProvenanceLine, normalizedSkillHash } from "./content-hash.js";
+import { frontmatterRegion, normalizedSkillHash, stripProvenanceLines } from "./content-hash.js";
 import { loadSkills, type Skill } from "./loader.js";
 
 export { normalizedSkillHash, stripProvenanceFrontmatter } from "./content-hash.js";
@@ -137,7 +137,9 @@ interface ProvenanceFields {
 export function injectProvenanceFrontmatter(rawText: string, fields: ProvenanceFields): string {
 	const region = frontmatterRegion(rawText);
 	if (!region) throw new Error("skill file is missing YAML frontmatter");
-	const kept = region.lines.filter((line) => !isProvenanceLine(line));
+	// Same removal the hash uses, so what is written and what is compared can
+	// never disagree about which lines the install lifecycle owns.
+	const kept = stripProvenanceLines(region.lines);
 	const added = [
 		`source-url: ${yamlQuote(fields.sourceUrl)}`,
 		`installed-at: ${yamlQuote(fields.installedAt)}`,
@@ -323,6 +325,11 @@ function updateOne(skill: Skill, force: boolean): SkillUpdateReport {
 
 	const fetched = fetchSource(spec);
 	try {
+		// The same gate a fresh install passes. Upstream may have moved on to a
+		// SKILL.md that no longer loads, and without this an update replaces a
+		// working skill with one that fails discovery: the operator is told the
+		// skill updated, and it silently stops existing.
+		validateSourceSkill(fetched.skillDir);
 		const remoteFile = path.join(fetched.skillDir, "SKILL.md");
 		const remoteRaw = readFileSync(remoteFile, "utf8");
 		const remoteHash = normalizedSkillHash(remoteRaw);

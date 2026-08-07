@@ -329,14 +329,20 @@ function runSkillsScope(
 	const tree = includeTree ? buildResourceTree(skill.baseDir, DEFAULT_TREE_ENTRIES) : null;
 	const pendingRequest = pendingSkillRequestFor(name, options);
 	const pendingTask = pendingRequest?.args.trim() ?? "";
-	// Provenance pinning: marketplace-installed skills (registry-id frontmatter)
-	// are compared against the local pinned manifest. A mismatch annotates the
-	// result and is recorded with the activation; it never blocks, the normal
-	// tool safety gates still govern whatever the skill asks for.
-	const drift = skill.provenance?.registryId ? checkSkillDrift(skill, cwdFromDeps(deps)) : null;
+	// Provenance: the activated content is compared against whatever recorded
+	// hash can speak for it, the audited catalog's pinned manifest or the
+	// skill's own install record. A mismatch annotates the result and is
+	// recorded with the activation; it never blocks, the normal tool safety
+	// gates still govern whatever the skill asks for.
+	const driftReport = checkSkillDrift(skill, cwdFromDeps(deps));
+	const drift = driftReport?.verdict ?? null;
 	const driftWarning =
-		drift === "mismatch"
-			? `WARNING skill_drift: '${skill.name}' content (sha256 ${skill.hash.slice(0, 12)}…) no longer matches its pinned marketplace hash; the installed skill drifted from its audited content.`
+		driftReport?.verdict === "mismatch"
+			? `WARNING skill_drift: '${skill.name}' content (sha256 ${skill.hash.slice(0, 12)}…) no longer matches the hash recorded for it ${
+					driftReport.authority === "pinned-manifest"
+						? "in the audited skill catalog"
+						: "when it was installed on this machine"
+				} (expected ${driftReport.expected.slice(0, 12)}…); the installed skill drifted from the content it claims to be.`
 			: null;
 	const body = [
 		...(driftWarning !== null ? [driftWarning] : []),
