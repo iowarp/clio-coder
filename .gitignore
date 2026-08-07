@@ -25,16 +25,14 @@ scripts/orch/
 # Local session handoff notes (not shipped; regenerated per session).
 
 
-# Battletest session tracking (local working notes, not shipped product docs).
-BATTLETEST.md
-FINDINGS.md
-MODEL-CATALOG.md
-TOOL-SUITE.md
-captures/
+
 
 # Dev-time scratch area: planning files, debugging notes, sprint plans, reports. Never shipped.
 .superpowers/
 benchmarks/battletest
+CLIO.md
+CLAUDE.md
+AGENTS.md
 
 
 
