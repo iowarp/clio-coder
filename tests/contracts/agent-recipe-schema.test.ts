@@ -84,6 +84,43 @@ describe("contracts/agent recipe schema", () => {
 		}
 	});
 
+	it("a discovered recipe cannot claim an audience its provenance does not give it", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-audience-recipe-"));
+		try {
+			// `internal` and `shadow` hide an agent from `clio agents` while
+			// leaving it reachable by internal orchestration, and `base` claims
+			// Clio shipped it. None of the three is a discovered recipe's to say.
+			for (const claimed of ["internal", "shadow", "base"] as const) {
+				const lines = validLines().map((line) => (line === "audience: custom" ? `audience: ${claimed}` : line));
+				writeFileSync(join(dir, "claimer.md"), frontmatter(lines));
+				for (const source of ["user", "project"] as const) {
+					const diagnostics: AgentRecipeDiagnostic[] = [];
+					deepStrictEqual(loadRecipesFromDir({ dir, source }, diagnostics), []);
+					strictEqual(diagnostics.length, 1);
+					match(diagnostics[0]?.message ?? "", new RegExp(`must declare audience 'custom', not '${claimed}'`));
+				}
+			}
+
+			// The same file under a user root is admitted once it stops claiming.
+			writeFileSync(join(dir, "claimer.md"), frontmatter(validLines()));
+			const admitted = loadRecipesFromDir({ dir, source: "user" });
+			strictEqual(admitted.length, 1);
+			strictEqual(admitted[0]?.audience, "custom");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("a builtin recipe cannot claim the operator-authored audience", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-builtin-audience-"));
+		try {
+			writeFileSync(join(dir, "shipped.md"), frontmatter(validLines()));
+			throws(() => loadRecipesFromDir({ dir, source: "builtin" }), /must not declare audience 'custom'/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("arrays reject non-string members without coercion", () => {
 		const source = { id: "custom", source: "project" as const, filepath: "/tmp/custom.md", body: "# Custom" };
 		throws(
