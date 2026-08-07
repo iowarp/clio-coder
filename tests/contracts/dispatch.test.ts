@@ -5275,6 +5275,61 @@ rl.once("line", (line) => {
 		}
 	});
 
+	it("stops offering a write-confined run the tools confinement always refuses", async () => {
+		// verify, bash, and dispatch are refused by name under write roots. An
+		// offered tool whose every call is refused is budget the model spends
+		// learning it cannot use it, and the refusal reads as a retryable error.
+		const context = stubContext({
+			recipes: [
+				agentRecipeFixture({
+					id: "documenter",
+					name: "documenter",
+					capabilityClass: "workspace-edit",
+					tools: ["read", "edit", "grep", "verify", "bash"],
+					toolRequirements: { required: ["read", "edit"], optional: ["grep", "verify", "bash"] },
+				}),
+			],
+		});
+		let capturedSpec: WorkerSpec | null = null;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 4243,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: emptyEvents(),
+					heartbeatAt: { current: Date.now() },
+					abort: () => {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const unconfined = await bundle.contract.dispatch({
+				agentId: "documenter",
+				executionRole: "builder",
+				task: "update docs",
+			});
+			await unconfined.finalPromise;
+			const openTools = (capturedSpec as WorkerSpec | null)?.allowedTools ?? [];
+			ok(openTools.includes("verify"), "an unconfined documenter still gets verify");
+
+			const confined = await bundle.contract.dispatch({
+				agentId: "documenter",
+				executionRole: "builder",
+				task: "stage wiki",
+				writeRoots: ["/tmp/clio-wiki-staging-xyz"],
+			});
+			await confined.finalPromise;
+			const confinedTools = (capturedSpec as WorkerSpec | null)?.allowedTools ?? [];
+			strictEqual(confinedTools.includes("verify"), false, "verify is never offered under confinement");
+			strictEqual(confinedTools.includes("bash"), false);
+			ok(confinedTools.includes("read") && confinedTools.includes("edit"), "the writer keeps its own tools");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("threads responseSchema onto a native llama.cpp worker spec", async () => {
 		const target: TargetDescriptor = { id: "mini", runtime: "llamacpp", defaultModel: "scout-model" };
 		const runtime: RuntimeDescriptor = {

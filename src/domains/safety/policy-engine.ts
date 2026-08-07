@@ -116,6 +116,21 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 
 const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
 
+/**
+ * Tools write-root confinement refuses by name, whatever their arguments: they
+ * run a project script, a shell, or an unconfined child, so no lexical check
+ * can bound where they write. Exported because a run that declares write roots
+ * must not be *offered* them: a tool that is guaranteed to be refused is a
+ * budget the model spends learning it cannot use it, and the refusal reads to
+ * the model as a mistake it should retry. The class-based check below still
+ * catches anything that classifies as execute or dispatch at call time.
+ */
+export const WRITE_ROOT_REFUSED_TOOLS: ReadonlySet<string> = new Set<string>([
+	ToolNames.Bash,
+	ToolNames.Verify,
+	ToolNames.Dispatch,
+]);
+
 // Write-class tools (action class "write"). bash is execute class and runs its
 // own loop, so it is not covered by the lexical write-root containment below.
 const WRITE_ROOT_TOOLS = new Set<string>([ToolNames.Write, ToolNames.Edit, ToolNames.Artifact]);
@@ -137,7 +152,7 @@ function writeRootTargetPath(call: ClassifierCall): string | null {
  * project scripts or a shell; dispatch spawns a worker not bound to these roots.
  */
 function isWriteConfinementEscape(call: ClassifierCall, actionClass: string): boolean {
-	if (EXECUTION_TOOLS.has(call.tool)) return true;
+	if (WRITE_ROOT_REFUSED_TOOLS.has(call.tool)) return true;
 	return actionClass === "execute" || actionClass === "dispatch";
 }
 
