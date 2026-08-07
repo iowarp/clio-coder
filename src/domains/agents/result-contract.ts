@@ -12,6 +12,18 @@ export type ResultContract =
 	| { kind: "provenance-report" }
 	| { kind: "external-delegation" }
 	/**
+	 * The run's postcondition is the artifact it left on disk, so its terminal
+	 * text carries no claim to validate. Only the caller that named the output
+	 * location can check the artifact, and it does so by reading the location
+	 * rather than by believing a report. A writer asked for a typed report
+	 * instead has to invent one: a small model handed `mutation-report` for a
+	 * documentation pass routinely seals a fabricated passing `npm test` entry,
+	 * which is a false correctness signal produced purely to satisfy a shape.
+	 * Recipes may declare this kind; Scout subtasks may not request it, because
+	 * a subtask's result is consumed as data by its dependents.
+	 */
+	| { kind: "artifact-report" }
+	/**
 	 * A deterministic command's structured result. No agent recipe may declare
 	 * it (`parseResultContract` rejects the kind) and no Scout subtask may
 	 * request it: it is authored by the code-step runner, never by a model. It
@@ -731,6 +743,12 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			return validateProvenance(input.contract, input.output);
 		case "external-delegation":
 			return success(input.contract, "unmeasured", { external: true });
+		case "artifact-report":
+			// Nothing here can be measured: the artifact lives at a location only
+			// the caller knows, so the caller checks it. Any terminal text
+			// conforms, which is what stops a bounded repair round from being
+			// spent teaching a writer a JSON shape that proves nothing.
+			return success(input.contract, "unmeasured", { artifact: true });
 		case "code-report":
 			return validateCodeReport(input.contract, input.output);
 	}
@@ -803,6 +821,8 @@ export function resultContractShape(contract: ResultContract): string {
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
 		case "external-delegation":
 			return "any final text";
+		case "artifact-report":
+			return "any final text; the artifact you wrote at the location the task named is the result";
 		case "code-report":
 			return '{"passed":false,"exitCode":1,"checks":[{"name":"test","passed":false,"evidence":"exit 1"}],"artifactPaths":["/path/command.log"],"outputExcerpt":"..."}';
 	}
@@ -870,6 +890,7 @@ export function parseResultContract(value: unknown, sourcePath: string): ResultC
 		"mutation-report",
 		"provenance-report",
 		"external-delegation",
+		"artifact-report",
 	] as const;
 	if (!(kinds as ReadonlyArray<string>).includes(record.kind) || !only("kind")) {
 		throw new Error(`agent recipe: ${sourcePath}: resultContract.kind is unsupported or has unknown keys`);
