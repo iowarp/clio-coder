@@ -17,7 +17,7 @@ import {
 	resolveModelReference,
 } from "../../src/domains/providers/index.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
-import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
+import { resolveRuntimeTarget, runtimeResolutionWarnings } from "../../src/domains/providers/runtime-resolution.js";
 import { BUILTIN_RUNTIMES } from "../../src/domains/providers/runtimes/builtins.js";
 import { synthesizeOpenAICompatModel } from "../../src/domains/providers/runtimes/protocol/openai-compat.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
@@ -282,6 +282,42 @@ describe("contracts/providers", () => {
 			known.diagnostics.some((d) => d.code === "model-not-in-catalog"),
 			false,
 		);
+	});
+
+	it("reads the warnings a successful resolution still carries, in diagnostic order", () => {
+		const status = fakeLiveStatus(["served-model"]);
+		const mockProviders: ProvidersContract = {
+			list: () => [status],
+			getTarget: (id: string) => (id === status.target.id ? status.target : null),
+			getRuntime: (id: string) => (id === status.runtime?.id ? status.runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
+
+		const resolution = resolveRuntimeTarget(mockProviders, {
+			targetId: status.target.id,
+			wireModelId: "typo-model",
+			requestedThinkingLevel: "off",
+		});
+
+		ok(resolution.ok);
+		const warnings = runtimeResolutionWarnings(resolution.diagnostics);
+		ok(
+			warnings.some((message) => message.includes("typo-model")),
+			"a dispatch that resolves with an unadvertised model has something to report",
+		);
+		deepStrictEqual(
+			warnings,
+			resolution.diagnostics.filter((entry) => entry.severity === "warning").map((entry) => entry.message),
+		);
+
+		const clean = resolveRuntimeTarget(mockProviders, {
+			targetId: status.target.id,
+			wireModelId: "served-model",
+			requestedThinkingLevel: "off",
+		});
+		ok(clean.ok);
+		deepStrictEqual(runtimeResolutionWarnings(clean.diagnostics), []);
 	});
 
 	it("stays silent about unknown models when there is no catalog basis to judge", () => {

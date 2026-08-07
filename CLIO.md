@@ -36,6 +36,8 @@ Provider authentication is exposed through `providers.auth` and persisted throug
 
 A target's context window is only ever the window something declared, and `TargetStatus.contextWindowProvenance` says which layer that was. `probeCapabilitiesForModel` is the one exact-id selector for the probe layer, so a router that serves several models can answer for this target only from the `/v1/models` row keyed to its own wire model; a sibling model's window is another model's fact. When nothing answered, the runtime descriptor's placeholder stands in and is reported as `runtime-default`: `clio targets` renders it as an unverified runtime default in text and in `--json`, and `configure` warns at the moment it writes a target whose server reported no window. A number the operator never chose and the server never claimed must not read like a capability.
 
+A configured target id is a closed set that settings itself defines, so an unknown one is dropped at validation. A wire model id is not: the server owns that set, `wireModels` is a declaration that may be stale or absent, and live discovery is the only authority. So a model id the target never advertised still dispatches, because a local server may serve ids it never listed, and `unknownModelDiagnostic` warns whenever there is any basis to judge. `runtimeResolutionWarnings` is the reader for what a *successful* resolution still warned about, and dispatch reports those as `route_warning` preludes. They never merge into the run's outcome detail: they say something about the route, not about why the run ended.
+
 ## Model discovery CLI
 
 `clio models` probes live targets by default. The `--offline` flag disables live probing. The former `--probe` and `--no-probe` flags are not supported.
@@ -218,7 +220,7 @@ A suite's declared `thresholds.fail` gates the run that produced the artifact, n
 
 ## Shared core utilities
 
-- `src/core/shell-quote.ts` is the one POSIX single-quote escaper, used by the eval external-command runner, the SSH transport, and the external editor launch. The rule is fixed by the shell grammar rather than chosen per caller, so it cannot drift per consumer. The result is always a quoted word, including for the empty string: `fleet-preflight.ts` strips the outer pair to embed an escaped value inside a `case` pattern, so an implementation returning a bare word for safe input would break that caller silently. This is quoting for a shell, never sanitization for a security boundary.
+- `src/core/shell-quote.ts` is the one POSIX single-quote escaper, used by the eval runners that build a command string, the SSH transport, fleet preflight, and the external editor launch. The rule is fixed by the shell grammar rather than chosen per caller, so it cannot drift per consumer. The result is always a quoted word, including for the empty string: `fleet-preflight.ts` strips the outer pair to embed an escaped value inside a `case` pattern, so an implementation returning a bare word for safe input would break that caller silently. This is quoting for a shell, never sanitization for a security boundary.
 - `fsyncDirectory` in `src/core/safe-resource-write.ts` is the one directory flush, used there and by session persistence. It is best effort by design: directory fsync is unsupported on some filesystems, and a rejection is not evidence the write failed, because the temp-file fsync plus rename already guarantees no reader sees a torn file.
 
 ## Boundaries

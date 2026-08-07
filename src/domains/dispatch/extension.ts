@@ -70,6 +70,7 @@ import {
 	type RuntimeDescriptor,
 	resolveModelCapabilities,
 	resolveRuntimeTarget,
+	runtimeResolutionWarnings,
 	runtimeTargetSnapshot,
 	type TargetDescriptor,
 	type TargetStatus,
@@ -944,7 +945,15 @@ interface ResolvedTarget {
 	modelCapabilities: CapabilityFlags | null;
 	runtimeResolution: ResolvedRuntimeTarget;
 	effectivePricing: EffectivePricing;
+	/** Why the route this run got is not the route it asked for. Belongs in the outcome. */
 	routeWarning?: string;
+	/**
+	 * What a successful resolution still warned about, such as a model id the
+	 * target never advertised. It is reported to the operator but never merged
+	 * into the outcome detail: it says something about the route, not about why
+	 * the run ended.
+	 */
+	resolutionWarnings?: string[];
 }
 
 interface WorkerTargetConfig {
@@ -1753,6 +1762,8 @@ function resolveSelectedDispatchTarget(
 		effectivePricing: resolveEffectivePricing(target, runtime.id, wireModelId),
 	};
 	if (routeWarning) resolvedTarget.routeWarning = routeWarning;
+	const resolutionWarnings = runtimeResolutionWarnings(resolved.diagnostics);
+	if (resolutionWarnings.length > 0) resolvedTarget.resolutionWarnings = resolutionWarnings;
 	return { ok: true, target: resolvedTarget };
 }
 
@@ -4117,9 +4128,13 @@ export function createDispatchBundle(
 		// contract state, permission audit events, and output capture fold in
 		// the pump; consumers get a bounded replay tee. Events the worker
 		// emitted before this point are still queued in the spawn channel.
+		const routeWarnings = [
+			...(lifecycle.target.routeWarning !== undefined ? [lifecycle.target.routeWarning] : []),
+			...(lifecycle.target.resolutionWarnings ?? []),
+		];
 		const eventPump = startDispatchEventPump(workerEvents, foldWorkerEvent, {
-			...(lifecycle.target.routeWarning !== undefined
-				? { prelude: [{ type: "route_warning", level: "warning", message: lifecycle.target.routeWarning }] }
+			...(routeWarnings.length > 0
+				? { prelude: routeWarnings.map((message) => ({ type: "route_warning", level: "warning", message })) }
 				: {}),
 			onEvent: (event) => {
 				context.bus.emit(BusChannels.DispatchProgress, {

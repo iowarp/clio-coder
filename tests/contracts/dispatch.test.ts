@@ -698,13 +698,19 @@ describe("contracts/dispatch", () => {
 			const result = await tool.run({ tasks: ["central progress"] }, {});
 			strictEqual(result.kind, "ok");
 			deepStrictEqual(enqueuedTasks, ["central progress"]);
-			strictEqual(progress.length, sourceEvents.length, "the tool consumer must not duplicate domain events");
+			// This fixture target declares no output budget, so the resolution
+			// warns before any worker event crosses. The warning is a prelude,
+			// not a duplicate of anything the worker published.
+			const preludes = progress.filter((entry) => (entry.event as { type?: string }).type === "route_warning");
+			const workerProgress = progress.filter((entry) => (entry.event as { type?: string }).type !== "route_warning");
+			strictEqual(preludes.length, 1);
+			strictEqual(workerProgress.length, sourceEvents.length, "the tool consumer must not duplicate domain events");
 			strictEqual(
 				progress.every((entry) => entry.task === "central progress"),
 				true,
 			);
 			deepStrictEqual(
-				progress.map((entry) => (entry.event as { type?: string }).type),
+				workerProgress.map((entry) => (entry.event as { type?: string }).type),
 				sourceEvents.map((event) => event.type),
 			);
 		} finally {
@@ -1392,6 +1398,64 @@ describe("contracts/dispatch", () => {
 			strictEqual((capturedSpec as WorkerSpec | null)?.wireModelId, canonical);
 			strictEqual((capturedSpec as WorkerSpec | null)?.runtimeResolution?.wireModelId, canonical);
 			strictEqual(receipt.wireModelId, canonical);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("reports a worker model the target never advertised instead of dispatching silently", async () => {
+		const target: TargetDescriptor = {
+			id: "mini",
+			runtime: "llamacpp",
+			defaultModel: "typo-model",
+			wireModels: ["served-model"],
+		};
+		const runtime: RuntimeDescriptor = {
+			id: "llamacpp",
+			displayName: "llama.cpp",
+			kind: "http",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			synthesizeModel: (_target, wireModelId) => ({ id: wireModelId, provider: "llamacpp" }) as never,
+		};
+		const context = stubContext({
+			target,
+			runtime,
+			status: { discoveredModels: ["served-model"], discoveredModelsSource: "probe" },
+		});
+		const warnings: string[] = [];
+		context.bus.on(BusChannels.DispatchProgress, (payload) => {
+			const event = payload.event as { type?: string; message?: string };
+			if (event.type === "route_warning" && event.message !== undefined) warnings.push(event.message);
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec) => ({
+				pid: 9997,
+				promise: exit.promise,
+				events: finalEvents(`completed ${spec.task}`),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "unadvertised model dispatch",
+			});
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			// The id still dispatches: a local server may serve ids it never
+			// listed. What it may not do is dispatch without saying so.
+			strictEqual(receipt.wireModelId, "typo-model");
+			ok(
+				warnings.some((message) => message.includes("typo-model") && message.includes("mini")),
+				`expected an unadvertised-model warning, got ${JSON.stringify(warnings)}`,
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}

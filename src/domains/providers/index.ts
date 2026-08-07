@@ -90,6 +90,7 @@ export {
 	type RuntimeTargetSnapshot,
 	refineRuntimeTargetWithModelHints,
 	resolveRuntimeTarget,
+	runtimeResolutionWarnings,
 	runtimeTargetSnapshot,
 } from "./runtime-resolution.js";
 export {

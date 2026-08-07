@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { shellQuote } from "../../../core/shell-quote.js";
 import {
 	addChaosObservations,
 	chaosMetricEntries,
