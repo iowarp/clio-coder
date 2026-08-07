@@ -108,8 +108,64 @@ describe("contracts/skills loader normalization", () => {
 		match(skill.hash, /^[0-9a-f]{64}$/);
 		strictEqual(skill.metadata.license, "MIT");
 		strictEqual(skill.metadata.version, "1.2.0");
-		deepStrictEqual(skill.allowedTools, ["Read", "Grep"]);
+		// Resolved to the tools Clio has: `Read` and `read` are one tool named by
+		// two harnesses, and narrowing enforces the name Clio dispatches on.
+		deepStrictEqual(skill.allowedTools, ["read", "grep"]);
 		strictEqual("allowed-tools" in skill.metadata, false);
+	});
+
+	it("reads a comma-separated tool declaration as the same declaration as a sequence", () => {
+		const root = scratchDir();
+		// The spelling every skill under a .claude or .agents compatibility root
+		// uses. Reading only the YAML sequence dropped it silently, so a skill
+		// that asked to be confined to three tools ran with the whole surface.
+		writeSkillDir(root, "compat", [
+			'name: "compat"',
+			'description: "A skill authored for another harness."',
+			"allowed-tools: Bash, Read, Grep",
+			"disallowed-tools: Write, Edit",
+		]);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const skill = list.items[0];
+		ok(skill);
+		deepStrictEqual(skill.allowedTools, ["bash", "read", "grep"]);
+		deepStrictEqual(skill.disallowedTools, ["write", "edit"]);
+	});
+
+	it("says so when a declared tool surface names tools Clio does not have", () => {
+		const root = scratchDir();
+		writeSkillDir(root, "foreign", [
+			'name: "foreign"',
+			'description: "Names another harness tools."',
+			"allowed-tools: Read, Glob, WebSearch",
+		]);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const skill = list.items[0];
+		ok(skill);
+		// The recognized part still narrows; the rest is reported rather than
+		// silently treated as a tool that exists.
+		deepStrictEqual(skill.allowedTools, ["read"]);
+		ok(
+			list.diagnostics.some((d) => d.message.includes("Glob") && d.message.includes("WebSearch")),
+			`expected an unrecognized-tool diagnostic, got ${JSON.stringify(list.diagnostics.map((d) => d.message))}`,
+		);
+	});
+
+	it("narrows nothing when an allow-list names no tool Clio has", () => {
+		const root = scratchDir();
+		writeSkillDir(root, "unenforceable", [
+			'name: "unenforceable"',
+			'description: "Declares only foreign tools."',
+			"allowed-tools: Glob, WebSearch, Agent",
+		]);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		const skill = list.items[0];
+		ok(skill);
+		// allowed-tools is workflow scoping, not the security boundary. Honoring
+		// an unenforceable list literally would block every call for a reason the
+		// operator never chose, so it narrows nothing and says why.
+		strictEqual(skill.allowedTools, undefined);
+		ok(list.diagnostics.some((d) => d.message.includes("narrows nothing")));
 	});
 
 	it("rejects a skill that is missing a description", () => {
