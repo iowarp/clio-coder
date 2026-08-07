@@ -37,7 +37,11 @@ import {
 	zeroSuccessfulToolNote,
 } from "../../src/domains/dispatch/tool-stats.js";
 import type { RunLineage, RunReceiptAutonomyEnforcement, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
-import { DISPATCH_BRIEFING_MAX_BYTES, validateJobSpec } from "../../src/domains/dispatch/validation.js";
+import {
+	DISPATCH_BRIEFING_MAX_BYTES,
+	INTERNAL_DISPATCH_BRIEFING_MAX_BYTES,
+	validateJobSpec,
+} from "../../src/domains/dispatch/validation.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import { compileWorker, safetyOneLiner } from "../../src/domains/prompts/compiler.js";
@@ -2258,6 +2262,15 @@ describe("contracts/dispatch", () => {
 		const oversized = validateJobSpec({ agentId: "coder", task: "t", briefing: `${"é".repeat(6000)}x` });
 		strictEqual(oversized.ok, false);
 		if (!oversized.ok) ok(oversized.errors.some((error) => error.includes("12000 UTF-8 bytes")));
+
+		const internalBriefing = "x".repeat(INTERNAL_DISPATCH_BRIEFING_MAX_BYTES);
+		const internal = validateJobSpec({
+			agentId: "documenter",
+			task: "synthesize wiki",
+			briefing: internalBriefing,
+			requestOrigin: "internal",
+		});
+		strictEqual(internal.ok, true);
 	});
 
 	it("accepts and normalizes writeRoots onto the validated job spec", () => {

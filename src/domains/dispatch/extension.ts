@@ -2214,7 +2214,6 @@ export function createDispatchBundle(
 	function maybeScheduleRetry(
 		run: ActiveRun,
 		outcome: RunOutcome,
-		outcomeCode: RunOutcomeCode | null | undefined,
 		detail: string | null,
 		receipt: RunReceipt,
 		failureClass: FailureClass,
@@ -2232,12 +2231,9 @@ export function createDispatchBundle(
 		const decision = recovery.retryDecisionWithinFailover(baseDecision, failoverModeFor(run.req));
 		if (!decision.retry) {
 			retryBackoff.delete(rootRunId);
-			if (failureClass === "deterministic-task") {
-				reportDispatchDiagnostic(
-					`run ${run.runId}`,
-					new Error(`retry suppressed: deterministic outcome code (${outcomeCode})`),
-				);
-			}
+			// Deterministic outcomes are intentionally not retried. This is a normal
+			// policy decision carried by the receipt, not an operational diagnostic
+			// that should leak into an embedding command's stderr.
 			return false;
 		}
 		const backoff = retryBackoff.get(rootRunId) ?? createBackoff();
@@ -2288,7 +2284,6 @@ export function createDispatchBundle(
 		run: ActiveRun,
 		receipt: RunReceipt,
 		outcome: RunOutcome,
-		outcomeCode: RunOutcomeCode | null | undefined,
 		detail: string | null,
 		failureClass: FailureClass,
 	): void {
@@ -2306,7 +2301,7 @@ export function createDispatchBundle(
 			retryReason,
 		});
 		persistAssignment(recordAssignmentAttempt(assignment.id, run.runId), `${assignment.id}:attempt:${run.runId}`);
-		if (maybeScheduleRetry(run, outcome, outcomeCode, detail, receipt, failureClass)) return;
+		if (maybeScheduleRetry(run, outcome, detail, receipt, failureClass)) return;
 		const currentStatus = assignments.get(assignment.id)?.status;
 		const terminalStatus =
 			currentStatus === "canceled" || outcome === "canceled"
@@ -3523,14 +3518,7 @@ export function createDispatchBundle(
 				recordTargetOutcome(targetId, runtimeId, wireModelId, status, receipt.exitCode, failureClass);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
-				completeAssignmentAttempt(
-					activeRun,
-					receipt,
-					finalOutcome,
-					receipt.outcomeCode,
-					receipt.outcomeDetail ?? finalDetail,
-					failureClass,
-				);
+				completeAssignmentAttempt(activeRun, receipt, finalOutcome, receipt.outcomeDetail ?? finalDetail, failureClass);
 				return receipt;
 			} catch (error) {
 				// Finalization itself failed (ACP promise rejection, ledger or
@@ -4534,14 +4522,7 @@ export function createDispatchBundle(
 				recordNodeChannelOutcome(activeRun, finalOutcome, failureClass, finalDetail);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
-				completeAssignmentAttempt(
-					activeRun,
-					receipt,
-					finalOutcome,
-					receipt.outcomeCode,
-					receipt.outcomeDetail ?? finalDetail,
-					failureClass,
-				);
+				completeAssignmentAttempt(activeRun, receipt, finalOutcome, receipt.outcomeDetail ?? finalDetail, failureClass);
 				return receipt;
 			} catch (error) {
 				// Finalization itself failed (worker promise rejection, ledger or

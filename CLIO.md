@@ -44,6 +44,16 @@ A target's context window is only ever the window something declared, and `Targe
 
 `clio context init` uses model-driven exploration by default. `--heuristic` is the sole flag for deterministic generation.
 
+## Wiki generation
+
+- `clio context wiki --depth auto|simple|medium|detailed` selects the strategy, and `--target`, `--model`, and `--thinking` pin an exact route. `src/domains/context/wiki/plan.ts` is the one planner: `auto` classifies from indexed source files and lines, and `WIKI_DEPTH_STRATEGY` is the single table where researcher count, page range, and the substantive-size floor are chosen.
+- Scale is horizontal. Detailed mode fans out to eight area researchers over the heaviest repository areas, admitted in bounded waves of four so a local fleet's inference slots are filled rather than oversubscribed. Researchers are read-only and advisory: any one that returns no usable notes degrades to the primary writer covering that area, because a wiki that loses one lead is better than a wiki that fails.
+- Researchers may run concurrently; writers may not. Every documenter pass is sequential against one staging tree, so concurrent writers can never race on the same page.
+- Completion is one bounded loop of at most `MAX_DOCUMENTER_ATTEMPTS` passes. After each pass the staging tree is read once and compared against the plan, and the first shortfall names the next pass: breadth before substance, so a deepening pass never has to invent the pages it was asked to thicken. Budget exhaustion earns exactly one focused recovery, because spending the whole bound on writers that keep running out of budget buys nothing.
+- Artifact validation before promotion is the authority, not the loop. When the passes are spent the staged tree is handed to `validateWikiLayoutInDir`, which rejects a wiki that misses the depth's page range or leaves any page under its byte floor. The floor exists to refuse filler, so a padded count of thin pages fails exactly like too few pages.
+- A recoverable writer failure that already staged successful writes hands its candidate to validation rather than discarding it; any other nonzero outcome fails the run before promotion. Transactional promotion, locking, metadata, no-op behavior, and staging write containment are unchanged.
+- `WikiMetaGeneration` records only what was observed and chosen: requested depth, resolved depth, source files, source lines, and researcher count. Page and size bounds are policy derivable from `depth`, so storing them would duplicate a constant the reader can look up. The block is optional, and metadata written before it stays valid.
+
 ## Remote marketplace cache
 
 Remote marketplace cache files require explicit finite `listingTimestamp` and `detailTimestamp` fields. Invalid cache files are refreshed from the remote marketplace.

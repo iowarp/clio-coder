@@ -52,20 +52,34 @@ export function listWikiPages(cwd: string): WikiPage[] {
 	return listWikiPagesInDir(wikiDir(cwd));
 }
 
-export function validateWikiLayoutInDir(dir: string): WikiLayoutValidation {
+export interface WikiPageBounds {
+	minPages?: number;
+	maxPages?: number;
+	minPageBytes?: number;
+}
+
+export function validateWikiLayoutInDir(dir: string, bounds: WikiPageBounds = {}): WikiLayoutValidation {
 	const pages = wikiPageFileNamesInDir(dir);
+	const minPages = bounds.minPages ?? 1;
+	const maxPages = bounds.maxPages ?? 16;
+	const minPageBytes = bounds.minPageBytes ?? 0;
 	const problems: string[] = [];
 	if (!existsSync(join(dir, "quickstart.md"))) {
 		problems.push("quickstart.md is missing");
 	}
-	if (pages.length > 8) {
-		problems.push(`wiki has ${pages.length} pages; maximum is 8`);
+	if (pages.length < minPages) {
+		problems.push(`wiki has ${pages.length} pages; minimum for this depth is ${minPages}`);
+	}
+	if (pages.length > maxPages) {
+		problems.push(`wiki has ${pages.length} pages; maximum for this depth is ${maxPages}`);
 	}
 	for (const page of pages) {
 		try {
 			const stat = statSync(join(dir, page));
 			if (stat.size === 0 || readFileSync(join(dir, page), "utf8").trim().length === 0) {
 				problems.push(`${page} is empty`);
+			} else if (stat.size < minPageBytes) {
+				problems.push(`${page} is ${stat.size} bytes; minimum substantive size for this depth is ${minPageBytes}`);
 			}
 		} catch {
 			problems.push(`${page} is unreadable`);
@@ -74,6 +88,6 @@ export function validateWikiLayoutInDir(dir: string): WikiLayoutValidation {
 	return problems.length === 0 ? { ok: true } : { ok: false, problems };
 }
 
-export function validateWikiLayout(cwd: string): WikiLayoutValidation {
-	return validateWikiLayoutInDir(wikiDir(cwd));
+export function validateWikiLayout(cwd: string, bounds: WikiPageBounds = {}): WikiLayoutValidation {
+	return validateWikiLayoutInDir(wikiDir(cwd), bounds);
 }

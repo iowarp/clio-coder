@@ -11,6 +11,7 @@ import {
 	computeFingerprint,
 	computeWikiContentHash,
 	listWikiPages,
+	planWikiGeneration,
 	readWikiMeta,
 	runWikiGenerate,
 	validateWikiLayout,
@@ -153,6 +154,19 @@ describe("contracts/wiki", () => {
 		const malformed = validateWikiMeta({ ...meta, contentHash: "not-a-hash" });
 		strictEqual(malformed.ok, false);
 		strictEqual(validateWikiMeta({ ...meta, sourceTreeHash: "not-a-hash" }).ok, false);
+		strictEqual(
+			validateWikiMeta({
+				...meta,
+				generation: {
+					requestedDepth: "auto",
+					depth: "huge",
+					sourceFiles: 1,
+					sourceLines: 1,
+					researchAgents: 0,
+				},
+			}).ok,
+			false,
+		);
 		writeFileSync(wikiMetaPath(scratch), JSON.stringify({ version: 2 }), "utf8");
 		strictEqual(readWikiMeta(scratch), null);
 	});
@@ -163,10 +177,10 @@ describe("contracts/wiki", () => {
 		if (!validation.ok) ok(validation.problems.some((problem) => problem.includes("quickstart.md")));
 
 		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
-		for (let i = 1; i <= 8; i += 1) writeWikiPage(scratch, `page-${i}.md`, `# Page ${i}\n`);
+		for (let i = 1; i <= 16; i += 1) writeWikiPage(scratch, `page-${i}.md`, `# Page ${i}\n`);
 		validation = validateWikiLayout(scratch);
 		strictEqual(validation.ok, false);
-		if (!validation.ok) ok(validation.problems.some((problem) => problem.includes("maximum is 8")));
+		if (!validation.ok) ok(validation.problems.some((problem) => problem.includes("maximum for this depth is 16")));
 
 		rmSync(wikiDir(scratch), { recursive: true, force: true });
 		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
@@ -174,6 +188,32 @@ describe("contracts/wiki", () => {
 		validation = validateWikiLayout(scratch);
 		strictEqual(validation.ok, false);
 		if (!validation.ok) ok(validation.problems.some((problem) => problem.includes("empty.md is empty")));
+	});
+
+	it("rejects a staged wiki that misses the depth's breadth or substance floor", () => {
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
+		writeWikiPage(scratch, "architecture.md", `# Architecture\n${"detail. ".repeat(200)}`);
+		const detailed = { minPages: 10, maxPages: 16, minPageBytes: 1_200 };
+
+		const tooNarrow = validateWikiLayout(scratch, detailed);
+		strictEqual(tooNarrow.ok, false);
+		if (!tooNarrow.ok) {
+			ok(tooNarrow.problems.some((problem) => problem.includes("minimum for this depth is 10")));
+			// The one substantive page is not reported as thin; only breadth is missing.
+			ok(!tooNarrow.problems.some((problem) => problem.includes("architecture.md is")));
+		}
+
+		// Breadth alone must not buy a pass: a padded page count of thin files is
+		// exactly the filler the byte floor exists to refuse.
+		for (let i = 1; i <= 9; i += 1) writeWikiPage(scratch, `thin-${i}.md`, `# Thin ${i}\n`);
+		const thin = validateWikiLayout(scratch, detailed);
+		strictEqual(thin.ok, false);
+		if (!thin.ok) {
+			ok(
+				thin.problems.some((problem) => problem.includes("thin-1.md is") && problem.includes("minimum substantive size")),
+			);
+			ok(!thin.problems.some((problem) => problem.includes("minimum for this depth is 10")));
+		}
 	});
 
 	it("reports absent, fresh, and stale wiki staleness from git metadata", () => {
@@ -286,6 +326,8 @@ describe("contracts/wiki", () => {
 		const meta = readWikiMeta(scratch);
 		ok(meta);
 		strictEqual(meta.model, "test-model");
+		strictEqual(meta.generation?.depth, "simple");
+		strictEqual(meta.generation?.sourceFiles, 1);
 		match(meta.sourceTreeHash ?? "", /^[a-f0-9]{64}$/);
 		strictEqual(meta.contentHash, computeWikiContentHash(scratch));
 		deepStrictEqual(
@@ -533,15 +575,61 @@ describe("contracts/wiki", () => {
 		strictEqual(existsSync(wikiMetaPath(scratch)), false);
 	});
 
+	it("auto-classifies wiki depth and distributes detailed research across the heaviest areas", () => {
+		const small = planWikiGeneration(promptCodewiki());
+		strictEqual(small.depth, "simple");
+		strictEqual(small.researchAgents, 0);
+		strictEqual(small.minPages, 1);
+		strictEqual(small.maxPages, 5);
+		strictEqual(small.minPageBytes, 0);
+
+		const seed = promptCodewiki();
+		const baseFile = seed.files[0];
+		ok(baseFile);
+		const areas = [
+			"src/domains/dispatch",
+			"src/domains/context",
+			"tests/contracts",
+			"src/interactive",
+			"src/engine",
+			"src/tools",
+			"src/cli",
+			"benchmarks/community",
+		];
+		const large: Codewiki = {
+			...seed,
+			files: Array.from({ length: 808 }, (_, index) => ({
+				...baseFile,
+				id: `f_${index}`,
+				path: `${areas[index % areas.length]}/file-${index}.ts`,
+				loc: areas.length - (index % areas.length),
+			})),
+			symbols: [],
+			edges: [],
+		};
+		const detailed = planWikiGeneration(large);
+		strictEqual(detailed.depth, "detailed");
+		strictEqual(detailed.researchAgents, 8);
+		strictEqual(detailed.minPages, 10);
+		strictEqual(detailed.maxPages, 16);
+		strictEqual(detailed.minPageBytes, 1_200);
+		deepStrictEqual(detailed.focusAreas, areas);
+	});
+
 	it("composes init and update prompts from fragments, digest, and git evidence", () => {
 		writeFileSync(join(scratch, "AGENTS.md"), "# Instructions\n\nUse docs/TRUTH.md as the authority.\n", "utf8");
 		const outputDir = join(scratch, ".clio", "wiki-staging-xyz");
-		const initPrompt = buildWikiPrompt({ cwd: scratch, mode: "init", codewiki: promptCodewiki(), outputDir });
+		const codewiki = promptCodewiki();
+		const plan = planWikiGeneration(codewiki, "simple");
+		const initPrompt = buildWikiPrompt({ cwd: scratch, mode: "init", codewiki, plan, outputDir });
 		ok(initPrompt.includes("## Codewiki digest"));
+		ok(initPrompt.includes("## Generation strategy"));
+		ok(initPrompt.includes("Depth: simple"));
 		ok(initPrompt.includes("## Repository guidance"));
 		ok(initPrompt.includes("AGENTS.md"));
 		ok(initPrompt.includes("## Working-tree evidence"));
 		ok(initPrompt.includes("Structure requirements:"));
+		ok(initPrompt.includes("Spend at most 10 tool calls choosing the outline"));
 		ok(initPrompt.includes("source of truth or planning authority"));
 		ok(initPrompt.includes("Component existence is not end-to-end evidence"));
 		ok(initPrompt.includes("src/index.ts"));
@@ -552,11 +640,13 @@ describe("contracts/wiki", () => {
 		const updatePrompt = buildWikiPrompt({
 			cwd: scratch,
 			mode: "update",
-			codewiki: promptCodewiki(),
+			codewiki,
+			plan,
 			gitHead: "0000000000000000000000000000000000000000",
 			outputDir,
 		});
 		ok(updatePrompt.includes("## Git evidence"));
+		ok(updatePrompt.includes("Use no more than 10 tool calls to identify affected pages"));
 		ok(updatePrompt.includes(outputDir));
 		ok(updatePrompt.includes("Git evidence unavailable") || updatePrompt.includes("Git evidence is empty"));
 	});
@@ -569,10 +659,12 @@ describe("contracts/wiki", () => {
 		writeFileSync(join(scratch, "src", "index.ts"), "export const main = false;\n", "utf8");
 		writeFileSync(join(scratch, "src", "untracked.ts"), "export const newFact = true;\n", "utf8");
 
+		const codewiki = promptCodewiki();
 		const prompt = buildWikiPrompt({
 			cwd: scratch,
 			mode: "init",
-			codewiki: promptCodewiki(),
+			codewiki,
+			plan: planWikiGeneration(codewiki, "simple"),
 			outputDir: join(scratch, ".clio", "wiki-staging-xyz"),
 		});
 
@@ -581,8 +673,12 @@ describe("contracts/wiki", () => {
 		match(prompt, /\?\? src\/untracked\.ts/);
 	});
 
-	it("prints CLI wiki status with and without metadata", async () => {
-		let captured = runContextHandler(scratch, ["wiki", "--status"]);
+	it("validates wiki depth and prints status with and without metadata", async () => {
+		let captured = runContextHandler(scratch, ["wiki", "--depth", "enormous"]);
+		strictEqual(captured.status, 2);
+		match(captured.stderr, /--depth must be auto, simple, medium, or detailed/);
+
+		captured = runContextHandler(scratch, ["wiki", "--status"]);
 		strictEqual(captured.status, 0);
 		strictEqual(captured.stderr, "");
 		match(captured.stdout, /^wiki: absent \(0 pages\)$/m);

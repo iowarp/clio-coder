@@ -1,11 +1,18 @@
 import type { DomainModule } from "../../core/domain-loader.js";
-import { createObservabilityBundle } from "./extension.js";
+import { createObservabilityBundle, type ObservabilityBundleOptions } from "./extension.js";
 import { ObservabilityManifest } from "./manifest.js";
 
 export const ObservabilityDomainModule: DomainModule = {
 	manifest: ObservabilityManifest,
 	createExtension: createObservabilityBundle,
 };
+
+export function createObservabilityDomainModule(options: ObservabilityBundleOptions = {}): DomainModule {
+	return {
+		manifest: ObservabilityManifest,
+		createExtension: (context) => createObservabilityBundle(context, options),
+	};
+}
 
 export type { AccountabilitySummary } from "./accountability.js";
 export { readAccountabilitySummary, summarizeEvidenceIndex } from "./accountability.js";

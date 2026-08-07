@@ -11,14 +11,18 @@ modify source code, CLIO.md, or configuration.
 Structure requirements:
 - `quickstart.md` is mandatory and is the hub: what the project is, how to build, run, and
   test it, and a linked list of every other wiki page with a one-line description.
-- At most 8 pages including quickstart. Prefer fewer, deeper pages over many thin ones. A page
-  with no substantive content must not exist.
+- Obey the page range in the Generation strategy section. Every page must own a distinct repository concern; breadth never means splitting one thin topic across several pages.
 - Choose section pages by what the codebase actually contains: architecture and domain
   boundaries, key runtime flows, testing strategy, extension points, operational concerns.
 - Give the repository's defining domain model and any declared current-capability or evidence
   boundary enough space to be useful. Do not let generic build and test pages crowd them out.
 - Every page cites concrete files as `path:line` or `path` references. Include a short
   "Things to watch when editing" section per page where the code has real constraints.
+
+Execution discipline:
+- Treat the codewiki digest as the repository map. Spend at most 10 tool calls choosing the outline, then write a useful minimal wiki early and improve it in place as targeted checks land.
+- Finish all writes before the read-only reserve begins. Do not emit large parallel batches: every attempted sibling spends the same bounded budget. If a lookup errors, refine it once or switch to a direct read; never spray variants of the same `code_nav` query.
+- Establish the full required page skeleton early, then deepen every page with grounded implementation details. Use one scoped diff after writing, then return the required JSON immediately.
 
 Research discipline:
 - First read every file in the Repository guidance section below. If those instructions name a

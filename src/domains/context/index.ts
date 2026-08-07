@@ -96,6 +96,7 @@ export {
 	validateWikiLayoutInDir,
 	type WikiLayoutValidation,
 	type WikiPage,
+	type WikiPageBounds,
 	wikiDir,
 } from "./wiki/layout.js";
 export {
@@ -106,9 +107,18 @@ export {
 	readWikiMeta,
 	validateWikiMeta,
 	type WikiMeta,
+	type WikiMetaGeneration,
 	type WikiMetaValidation,
 	wikiMetaPath,
 	writeWikiMeta,
 } from "./wiki/meta.js";
+export {
+	type DepthStrategy,
+	planWikiGeneration,
+	type ResolvedWikiDepth,
+	WIKI_DEPTH_STRATEGY,
+	type WikiDepth,
+	type WikiGenerationPlan,
+} from "./wiki/plan.js";
 export { type BuildWikiPromptInput, buildWikiPrompt } from "./wiki/prompts.js";
 export { type WikiStaleness, wikiStaleness } from "./wiki/staleness.js";

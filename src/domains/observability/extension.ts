@@ -15,7 +15,7 @@ import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-i
 import { aggregateMetrics } from "./metrics.js";
 import { createObservabilityProjection } from "./projection.js";
 import { createTelemetry } from "./telemetry.js";
-import { createDispatchTraceMirror, traceDatabasePath } from "./trace-store.js";
+import { createDispatchTraceMirror, type DispatchTraceMirror, traceDatabasePath } from "./trace-store.js";
 
 /**
  * Callbacks the auto-build path uses to report evidence readiness back to the
@@ -128,10 +128,21 @@ function evidenceIndexRow(
 	};
 }
 
-export function createObservabilityBundle(context: DomainContext): DomainBundle<ObservabilityContract> {
+export interface ObservabilityBundleOptions {
+	/** Disable the SQLite dispatch mirror for short-lived internal generators. */
+	dispatchTrace?: boolean;
+}
+
+export function createObservabilityBundle(
+	context: DomainContext,
+	options: ObservabilityBundleOptions = {},
+): DomainBundle<ObservabilityContract> {
 	const telemetry = createTelemetry();
 	const cost = createCostTracker();
-	const trace = createDispatchTraceMirror(traceDatabasePath(clioStateDir()));
+	const trace: DispatchTraceMirror =
+		options.dispatchTrace === false
+			? { enqueue: () => {}, flush: async () => {}, close: async () => {} }
+			: createDispatchTraceMirror(traceDatabasePath(clioStateDir()));
 	const unsubscribes: Array<() => void> = [];
 	let latestThroughput: TokenThroughputSnapshot | null = null;
 

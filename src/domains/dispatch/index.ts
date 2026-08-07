@@ -117,6 +117,7 @@ export {
 	DISPATCH_BRIEFING_MAX_BYTES,
 	type DispatchFailoverCandidate,
 	type DispatchFailoverMode,
+	INTERNAL_DISPATCH_BRIEFING_MAX_BYTES,
 	type JobSpec,
 } from "./validation.js";
 export type {
