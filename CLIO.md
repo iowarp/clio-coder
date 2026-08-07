@@ -168,6 +168,11 @@ A suite's declared `thresholds.fail` gates the run that produced the artifact, n
   per-provider `ProviderAuth.oauth` flows; pi's global registry is gone
   upstream. `EngineOAuthProvider.getApiKey` is async.
 
+## Local reasoning control
+
+- The LM Studio SDK's prediction config carries no chat-template-kwargs channel. `enable_thinking` and `reasoning_effort` cannot reach the template on `lmstudio-native`, so a resolved thinking level never becomes a wire control there and `--thinking off` only governs rendering. `runtimeLimitations` names this, because a dial that changes nothing must not read like an applied one. The same server's HTTP port under `openai-compat` does carry the kwargs through `src/engine/apis/openai-completions.ts`, which is the transport to pick when the level has to reach the model.
+- A catalog `reasoning: false` is therefore a belief about a model, never something imposed on it. `reasoningClassForMechanism(...) === "never"` suppresses thinking blocks and the replayed transcript, which is a statement about what the operator is shown. It never suppresses the token count: reasoning fragments are accrued into `reasoningTokens` whether or not their content is displayed. Gating the accrual made a model that reasons anyway report zero reasoning tokens, which removed the one reading that shows the catalog is wrong about it.
+
 ## The chat loop
 
 - `src/interactive/chat-loop.ts` is the turn's state machine and the ChatLoop
