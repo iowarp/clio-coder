@@ -55,6 +55,34 @@ function enumValue<T extends string>(value: unknown, path: string, predicate: (v
 	return value;
 }
 
+/**
+ * Audience is provenance, not a claim a file makes about itself. It decides
+ * whether an operator can see an agent and whether a user-origin dispatch may
+ * reach it, so a discovered recipe declaring `shadow` or `internal` would hide
+ * itself from `clio agents` while staying reachable by internal orchestration,
+ * and one declaring `base` would present itself as shipped. Only recipes Clio
+ * ships may name any audience; everything discovered under a user or project
+ * root is `custom`. The declaration is rejected rather than coerced, because a
+ * recipe whose audience was quietly rewritten is a recipe whose author still
+ * believes it is hidden.
+ */
+function parseAudience(value: unknown, source: AgentRecipe["source"], filepath: string): AgentAudience {
+	const audience = enumValue<AgentAudience>(value, `${filepath}: audience`, isAgentAudience);
+	if (source === "builtin") {
+		if (audience === "custom") {
+			throw new Error(`agent recipe: ${filepath}: a builtin recipe must not declare audience 'custom'`);
+		}
+		return audience;
+	}
+	if (audience !== "custom") {
+		throw new Error(
+			`agent recipe: ${filepath}: a ${source} recipe must declare audience 'custom', not '${audience}'; ` +
+				"audience follows where the recipe was discovered and cannot be claimed in frontmatter",
+		);
+	}
+	return audience;
+}
+
 function parseTools(
 	value: unknown,
 	filepath: string,
@@ -125,7 +153,7 @@ export function parseAgentRecipeSchema(input: ParseRecipeSchemaInput): AgentReci
 		toolRequirements: parsedTools.toolRequirements,
 		skills: requiredStringArray(frontmatter.skills, `${filepath}: skills`),
 		boundSkillPaths: [],
-		audience: enumValue<AgentAudience>(frontmatter.audience, `${filepath}: audience`, isAgentAudience),
+		audience: parseAudience(frontmatter.audience, input.source, filepath),
 		category: enumValue<AgentCategory>(frontmatter.category, `${filepath}: category`, isAgentCategory),
 		capabilityClass: enumValue<AgentCapabilityClass>(
 			frontmatter.capabilityClass,
