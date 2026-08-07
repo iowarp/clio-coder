@@ -17,11 +17,13 @@ import {
 	type ResourcesContract,
 	type SkillRoot,
 } from "../../src/domains/resources/index.js";
+import { SKILL_ACTIVATION_BODY_CAP_BYTES } from "../../src/domains/resources/skills/loader.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { expandInteractiveSubmitAsync } from "../../src/interactive/index.js";
 import { createArtifactTool } from "../../src/tools/artifact.js";
 import { createContextTool } from "../../src/tools/context/index.js";
+import { OBSERVE_SELF_CAPS } from "../../src/tools/observation.js";
 import { createSkillActivationObserver } from "../../src/tools/observers.js";
 import { createRegistry } from "../../src/tools/registry.js";
 
@@ -218,6 +220,72 @@ describe("contracts/skills loader normalization", () => {
 			list.diagnostics.find((d) => d.message.includes("may not leave its scope through a symlink")),
 			undefined,
 		);
+	});
+
+	it("refuses a SKILL.md that is not valid UTF-8 text", () => {
+		const root = scratchDir();
+		const dir = join(root, "binary");
+		mkdirSync(dir, { recursive: true });
+		// utf8 decoding never throws: it substitutes U+FFFD, so without the
+		// round-trip check this loads as a document of replacement characters
+		// and becomes model-visible instructions.
+		writeFileSync(
+			join(dir, "SKILL.md"),
+			Buffer.concat([
+				Buffer.from(["---", 'name: "binary"', 'description: "Looks like a skill."', "---", "", ""].join("\n"), "utf8"),
+				Buffer.from([0x00, 0xff, 0xfe, 0x00]),
+			]),
+		);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		strictEqual(list.items.length, 0);
+		ok(list.diagnostics.some((d) => d.message.includes("not valid UTF-8 text")));
+	});
+
+	it("refuses a SKILL.md over the byte limit", () => {
+		const root = scratchDir();
+		const dir = join(root, "huge");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "SKILL.md"),
+			["---", 'name: "huge"', 'description: "Too large to be a document."', "---", "", "x".repeat(1024 * 1024), ""].join(
+				"\n",
+			),
+			"utf8",
+		);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		strictEqual(list.items.length, 0);
+		ok(list.diagnostics.some((d) => d.message.includes("over the")));
+	});
+
+	it("says so when a skill is larger than activation can deliver", () => {
+		const root = scratchDir();
+		const dir = join(root, "truncated");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "SKILL.md"),
+			[
+				"---",
+				'name: "truncated"',
+				'description: "Larger than the activation cap."',
+				"---",
+				"",
+				"x".repeat(SKILL_ACTIVATION_BODY_CAP_BYTES + 1),
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		const list = loadSkills({ roots: [projectRoot(root)] });
+		// It still loads; truncation is the activation path's job. But an author
+		// whose workflow is silently cut in half at runtime has no other way to
+		// find out that the model never saw the rest.
+		strictEqual(list.items.length, 1);
+		ok(list.diagnostics.some((d) => d.message.includes("the model will not be shown the rest")));
+	});
+
+	it("keeps the activation cap mirror in step with the tool substrate", () => {
+		// The cap lives in the tool substrate, which a domain must not import.
+		// The mirror is only safe while this holds.
+		strictEqual(SKILL_ACTIVATION_BODY_CAP_BYTES, OBSERVE_SELF_CAPS.contextSkills);
 	});
 
 	it("rejects a skill that is missing a description", () => {
