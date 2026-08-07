@@ -56,6 +56,13 @@ A configured target id is a closed set that settings itself defines, so an unkno
 - A recoverable writer failure that already staged successful writes hands its candidate to validation rather than discarding it; any other nonzero outcome fails the run before promotion. Transactional promotion, locking, metadata, no-op behavior, and staging write containment are unchanged.
 - `WikiMetaGeneration` records only what was observed and chosen: requested depth, resolved depth, source files, source lines, and researcher count. Page and size bounds are policy derivable from `depth`, so storing them would duplicate a constant the reader can look up. The block is optional, and metadata written before it stays valid.
 
+## Skill tool surfaces and installation
+
+- A skill's declared tool surface is read in both spellings, because a YAML sequence and one comma-separated scalar are the same declaration and the compatibility roots under `.claude`, `.agents`, and `.codex` carry the scalar. Declared names resolve against the tools Clio has, case-normalized only: `Bash` and `bash` are one tool named by two harnesses, and no alias table maps anything further, because an alias would let a declaration mean a tool its author never wrote. What stays unmatched is named in a diagnostic.
+- `allowed-tools` is workflow scoping, not a security boundary. Host admission in `src/tools/registry.ts` decides what a run may call and skill narrowing only ever subtracts from it, so an allow-list that resolves to no Clio tool narrows nothing and says why: honoring it literally would block every call for a reason the operator never chose. A denial is kept whenever it resolves, because a denial that fails open is the one direction that matters.
+- Replacing an installed skill is a staged swap, never a remove followed by a copy. Staging directory and backup are siblings of the destination so both renames are atomic on one filesystem, and a failure after the destination moves aside puts it back. What a failed install must never do is destroy the only local copy.
+- A GitHub source's path must be a path inside the repository the operator named. The URL patterns capture a free-form tail, so a tail that climbs out would install from the operator's own disk instead.
+
 ## Remote marketplace cache
 
 Remote marketplace cache files require explicit finite `listingTimestamp` and `detailTimestamp` fields. Invalid cache files are refreshed from the remote marketplace.
