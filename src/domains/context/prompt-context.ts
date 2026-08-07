@@ -9,7 +9,7 @@ import { readCodewiki } from "./codewiki/indexer.js";
 import type { ProjectPromptContext } from "./contract.js";
 import { computeFingerprintCached, isStale } from "./fingerprint.js";
 import { readClioState } from "./state.js";
-import { listWikiPages, validateWikiLayout } from "./wiki/layout.js";
+import { listWikiPages } from "./wiki/layout.js";
 import { wikiStaleness } from "./wiki/staleness.js";
 
 /**
@@ -38,14 +38,14 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 		const suffix = stale ? " (stale; run /context refresh)" : "";
 		pieces.push(`<codewiki>available${suffix}; use code_nav</codewiki>`);
 	}
-	const wikiLayout = validateWikiLayout(cwd);
-	if (wikiLayout.ok) {
-		const staleness = wikiStaleness(cwd);
-		if (staleness.state !== "absent") {
-			const pages = listWikiPages(cwd);
-			const suffix = staleness.state === "stale" ? " (stale; run clio context wiki --update)" : "";
-			pieces.push(`<wiki>${pages.length} pages at .clio/wiki (start: quickstart.md)${suffix}</wiki>`);
-		}
+	// A wiki is advertised whenever one exists. There is no invalid-layout state
+	// to gate on: every structural defect is repaired by the assembly pass before
+	// a tree is promoted, so a promoted wiki is by construction navigable.
+	const staleness = wikiStaleness(cwd);
+	if (staleness.state !== "absent") {
+		const pages = listWikiPages(cwd);
+		const suffix = staleness.state === "stale" ? " (stale; run clio context wiki --update)" : "";
+		pieces.push(`<wiki>${pages.length} pages at .clio/wiki (start: quickstart.md)${suffix}</wiki>`);
 	}
 	return { text: pieces.join("\n\n"), clioMd, warnings };
 }

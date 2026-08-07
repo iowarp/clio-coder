@@ -1,10 +1,19 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
 import { ToolNames } from "../core/tool-names.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule, type WikiGenerate, type WikiGenerateInput } from "../domains/context/index.js";
-import { validateWikiLayoutInDir } from "../domains/context/wiki/layout.js";
+import type { WikiPlan, WikiPlanPage } from "../domains/context/wiki/plan.js";
+import {
+	MAX_PAGE_ATTEMPTS,
+	pendingPages,
+	readAuthoredWikiPlan,
+	writeWikiPlanFile,
+} from "../domains/context/wiki/plan-store.js";
+import { buildWikiPagePrompt, buildWikiPlanPrompt } from "../domains/context/wiki/prompts.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
@@ -22,10 +31,33 @@ import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 /**
  * Model id recorded on wiki metadata when the documenter target cannot be
  * resolved. It is only reached when no target is configured, in which case the
- * documenter dispatch also fails and no metadata is written, so it never lands
- * on a real artifact; it exists so the resolver never throws.
+ * dispatch also fails and no metadata is written, so it never lands on a real
+ * artifact; it exists so the resolver never throws.
  */
 const UNRESOLVED_DOCUMENTER_MODEL = "unresolved-documenter-target";
+
+/** The agent recipe that plans and writes pages. */
+const WIKI_AGENT_ID = "wiki-writer";
+
+/**
+ * Wall-clock ceiling for one page dispatch, clamped against the configured
+ * internal-dispatch guardrail. A page is a small job: read a handful of named
+ * sources and write one file. Bounding it here is what keeps one degenerate
+ * page from consuming the time every other page needed, and losing it costs
+ * exactly that page because the plan records it as still owed.
+ */
+const PAGE_DEADLINE_MS = 6 * 60 * 1000;
+
+/** Wall-clock ceiling for the single planning dispatch. */
+const PLAN_DEADLINE_MS = 8 * 60 * 1000;
+
+/**
+ * Wall-clock budget for a whole generation, checked between page dispatches and
+ * never during one. Exceeding it ends the run cleanly with every finished page
+ * promoted and the rest recorded as owed, so a repository too large for one
+ * sitting is finished by the next run instead of failing forever.
+ */
+const RUN_BUDGET_MS = 60 * 60 * 1000;
 
 export interface WikiModelRoute {
 	target?: string;
@@ -36,6 +68,8 @@ export interface WikiModelRoute {
 export interface ModelWikiGenerateOptions {
 	dispatch?: DispatchContract;
 	route?: WikiModelRoute;
+	/** Overrides the whole-run wall-clock budget. Tests use it to force an early stop. */
+	runBudgetMs?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -43,8 +77,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * The one place an operator's exact wiki route reaches a dispatch. Researchers
- * and the writer are pinned identically, so a wiki never silently mixes models.
+ * The one place an operator's exact wiki route reaches a dispatch. The planner
+ * and every page writer are pinned identically, so a wiki never silently mixes
+ * models across its own pages.
  */
 function routeFields(route: WikiModelRoute): Pick<JobSpec, "target" | "model" | "thinkingLevel"> {
 	return {
@@ -66,15 +101,6 @@ function formatElapsed(ms: number): string {
 	return `elapsed ${Math.round(ms / 1000)}s`;
 }
 
-const TOOL_PROGRESS_INTERVAL = 5;
-/** One normal pass plus one bounded recovery for budget exhaustion or validation failure. */
-const MAX_DOCUMENTER_ATTEMPTS = 2;
-const RECOVERABLE_WIKI_OUTCOMES = new Set([
-	"loop_guard_tools_disabled_exhausted",
-	"worker_tool_call_cap_exhausted",
-	"result_contract_exhausted",
-]);
-
 const BLOCK_REASON_MAX_CHARS = 80;
 
 /** First sentence of a block reason, bounded so one line stays one line. */
@@ -86,48 +112,29 @@ function summarizeBlockReason(reason: string): string {
 		: `${collapsed.slice(0, BLOCK_REASON_MAX_CHARS - 1).trimEnd()}…`;
 }
 
-async function drainDispatchEvents(
-	events: AsyncIterable<unknown>,
-	input: WikiGenerateInput,
-	attempt: number,
-): Promise<void> {
-	const startedAt = Date.now();
+interface DispatchSummary {
+	tools: number;
+	errors: number;
+	blocked: number;
+	firstBlockReason: string | null;
+	mix: string;
+}
+
+/**
+ * Drain a dispatch's event stream, summarizing rather than narrating. One
+ * dispatch is now one page, so per-call progress lines would scroll the
+ * operator's terminal without telling them anything; the per-page line printed
+ * on completion carries the same facts.
+ */
+async function drainDispatchEvents(events: AsyncIterable<unknown>): Promise<DispatchSummary> {
+	const tools = new Map<string, number>();
 	let completed = 0;
 	let errors = 0;
 	let blocked = 0;
-	// A count of blocked calls says a run is in trouble without saying what kind.
-	// A containment refusal, a loop block, and a budget block are three different
-	// diagnoses, and reading them back out of receipts afterwards is the only
-	// thing that separated them. The first reason is carried in the progress line.
 	let firstBlockReason: string | null = null;
-	const tools = new Map<string, number>();
-	const report = (message: string): void => {
-		const mix = [...tools.entries()]
-			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([tool, count]) => `${tool}=${count}`)
-			.join(", ");
-		const blockedDetail =
-			blocked > 0 ? `; blocked=${blocked}${firstBlockReason ? ` (${summarizeBlockReason(firstBlockReason)})` : ""}` : "";
-		input.progress?.({
-			phase: "generate",
-			status: "running",
-			message,
-			detail: `${formatElapsed(Date.now() - startedAt)}; ${mix || "no tools completed"}${errors > 0 ? `; errors=${errors}` : ""}${blockedDetail}`,
-		});
-	};
 	// Every event is consumed so finalization cannot block on an unread iterator.
 	for await (const event of events) {
-		if (!isRecord(event)) continue;
-		if (event.type === "agent_start") {
-			input.progress?.({
-				phase: "generate",
-				status: "running",
-				message: attempt === 1 ? "documenter started wiki update" : "documenter started focused recovery",
-				detail: formatElapsed(Date.now() - startedAt),
-			});
-			continue;
-		}
-		if (event.type !== "clio_tool_finish") continue;
+		if (!isRecord(event) || event.type !== "clio_tool_finish") continue;
 		const tool = eventPayloadString(event, "tool");
 		if (!tool) continue;
 		const outcome = eventPayloadString(event, "outcome") ?? "done";
@@ -138,164 +145,228 @@ async function drainDispatchEvents(
 			blocked += 1;
 			firstBlockReason ??= eventPayloadString(event, "reason");
 		}
-		// Report the first block immediately, then fold a blocked-call spiral into
-		// the normal cadence instead of flooding the operator's terminal.
-		if (completed % TOOL_PROGRESS_INTERVAL === 0 || outcome === "error" || (outcome === "blocked" && blocked === 1)) {
-			report(`documenter made ${completed} tool attempt${completed === 1 ? "" : "s"}`);
-		}
 	}
-	if (completed > 0 && completed % TOOL_PROGRESS_INTERVAL !== 0) {
-		report(`documenter made ${completed} tool attempt${completed === 1 ? "" : "s"}`);
+	const mix = [...tools.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([tool, count]) => `${tool}=${count}`)
+		.join(", ");
+	return { tools: completed, errors, blocked, firstBlockReason, mix };
+}
+
+function summaryDetail(summary: DispatchSummary, startedAt: number): string {
+	const blockedDetail =
+		summary.blocked > 0
+			? `; blocked=${summary.blocked}${summary.firstBlockReason ? ` (${summarizeBlockReason(summary.firstBlockReason)})` : ""}`
+			: "";
+	return (
+		`${formatElapsed(Date.now() - startedAt)}; ${summary.mix || "no tools completed"}` +
+		`${summary.errors > 0 ? `; errors=${summary.errors}` : ""}${blockedDetail}`
+	);
+}
+
+interface WikiDispatchOutcome {
+	ok: boolean;
+	detail: string;
+}
+
+/**
+ * Run one wiki dispatch to completion and report how it ended. It never
+ * throws: a failed page must not take down the pages around it, and whatever
+ * the run wrote before it stopped is already on disk.
+ */
+async function runWikiDispatch(input: {
+	dispatch: DispatchContract;
+	cwd: string;
+	outputDir: string;
+	task: string;
+	route: WikiModelRoute;
+	deadlineMs: number;
+	label: string;
+}): Promise<WikiDispatchOutcome> {
+	const startedAt = Date.now();
+	let handle: Awaited<ReturnType<DispatchContract["dispatch"]>>;
+	try {
+		handle = await input.dispatch.dispatch({
+			agentId: WIKI_AGENT_ID,
+			executionRole: "builder",
+			task: input.task,
+			cwd: input.cwd,
+			requestOrigin: "internal",
+			noSkills: true,
+			...routeFields(input.route),
+			// `git` cannot answer anything for this dispatch. The prompt already
+			// embeds `git status` and `git log` verbatim, and the staging dir is
+			// under the gitignored `.clio/`, so `op=diff` cannot see the pages this
+			// run is writing.
+			denyTools: [ToolNames.Git],
+			// Containment: the worker safety seam blocks any write-class tool call
+			// whose target escapes the staging dir.
+			writeRoots: [input.outputDir],
+		});
+	} catch (err) {
+		return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+	}
+	const deadline = armInternalDispatchDeadline(input.dispatch, handle.runId, input.label, process.env, input.deadlineMs);
+	try {
+		const summary = await drainDispatchEvents(handle.events);
+		const receipt = await handle.finalPromise;
+		if (deadline.timedOut()) return { ok: false, detail: `timed out; ${summaryDetail(summary, startedAt)}` };
+		if (receipt.exitCode !== 0) {
+			input.dispatch.abort(handle.runId);
+			return { ok: false, detail: `${receiptFailure(receipt)}; ${summaryDetail(summary, startedAt)}` };
+		}
+		return { ok: true, detail: summaryDetail(summary, startedAt) };
+	} catch (err) {
+		if (!deadline.timedOut()) input.dispatch.abort(handle.runId);
+		await handle.finalPromise.catch(() => undefined);
+		const reason = deadline.timedOut() ? "timed out" : err instanceof Error ? err.message : String(err);
+		return { ok: false, detail: `${reason}; ${formatElapsed(Date.now() - startedAt)}` };
+	} finally {
+		deadline.clear();
 	}
 }
 
 function receiptFailure(receipt: RunReceipt): string {
 	const code = receipt.outcomeCode ? ` (${receipt.outcomeCode})` : "";
-	const detail = receipt.failureMessage ? `: ${receipt.failureMessage}` : "";
-	return `wiki documenter failed with exit ${receipt.exitCode}${code}${detail}`;
+	return `exit ${receipt.exitCode}${code}`;
 }
 
-interface WikiShortfall {
-	heading: string;
-	progressMessage: string;
-	progressDetail: string;
-	instruction: string;
-}
-
-const BUDGET_SHORTFALL: WikiShortfall = {
-	heading: "Focused recovery pass",
-	progressMessage: "documenter budget exhausted; starting focused recovery",
-	progressDetail: "preserved staged work",
-	instruction:
-		"A prior writer spent its exploration budget before completing the wiki. The staged pages contain any work it finished. " +
-		"Do not repeat a repository-wide survey. Inspect the staged pages first, use the supplied digest and change evidence to " +
-		"select only the missing or stale claims, make the required edits early, and reserve the final calls for targeted source " +
-		"checks and one scoped diff. An accurate update may remain unchanged.",
-};
-
-function validationShortfall(input: WikiGenerateInput): WikiShortfall | null {
-	const validation = validateWikiLayoutInDir(input.outputDir, { sourceRoot: input.cwd });
-	if (validation.ok) return null;
-	return {
-		heading: "Validation repair pass",
-		progressMessage: "wiki failed deterministic validation; starting repair pass",
-		progressDetail: validation.problems.slice(0, 5).join("; "),
-		instruction:
-			`The staged wiki failed deterministic validation:\n- ${validation.problems.join("\n- ")}\n` +
-			"Inspect each problem, correct unsupported source citations, repair or remove broken internal wiki links, ensure quickstart.md links every page, and add any missing pages. " +
-			"Do not silence a check with vague prose or by creating a page whose only purpose is satisfying a link.",
-	};
-}
-
-function remediationPrompt(basePrompt: string, shortfall: WikiShortfall): string {
-	return `${basePrompt}\n## ${shortfall.heading}\n${shortfall.instruction} Finish with the required mutation-report JSON.\n`;
-}
-
-async function runDocumenterAttempt(
+/**
+ * The planning pass. It rewrites a plan file that already holds a usable
+ * candidate, so nothing here can fail the generation: a planner that errors,
+ * times out, or writes unparseable JSON simply leaves the candidate in place.
+ */
+async function runPlanPhase(
 	dispatch: DispatchContract,
 	input: WikiGenerateInput,
-	attempt: number,
-	task: string,
 	route: WikiModelRoute,
-): Promise<RunReceipt> {
-	const handle = await dispatch.dispatch({
-		agentId: "documenter",
-		executionRole: "builder",
-		task,
+): Promise<WikiPlan> {
+	input.progress?.({ phase: "generate", status: "running", message: "planning wiki pages" });
+	const outcome = await runWikiDispatch({
+		dispatch,
 		cwd: input.cwd,
-		requestOrigin: "internal",
-		noSkills: true,
-		...routeFields(route),
-		// `git` cannot answer anything for this dispatch. `buildWikiPrompt`
-		// already embeds `git status` and `git log` verbatim, so `op=status`
-		// and `op=log` re-fetch text the model was handed, and the staging dir
-		// is under the gitignored `.clio/`, so `op=diff` cannot see the pages
-		// this run is writing. Offering it spent about 40% of the documenter's
-		// orientation on calls that could not move the work forward.
-		denyTools: [ToolNames.Git],
-		// Containment: the worker safety seam blocks any write-class tool call
-		// whose target escapes the staging dir.
-		writeRoots: [input.outputDir],
+		outputDir: input.outputDir,
+		task: buildWikiPlanPrompt({
+			cwd: input.cwd,
+			mode: input.mode,
+			codewiki: input.codewiki,
+			generation: input.generation,
+			plan: input.plan,
+			unclaimedAreas: input.unclaimedAreas,
+			outputDir: input.outputDir,
+			gitHead: input.gitHead ?? null,
+		}),
+		route,
+		deadlineMs: PLAN_DEADLINE_MS,
+		label: "wiki planner",
 	});
-	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "wiki documenter");
-	try {
-		await drainDispatchEvents(handle.events, input, attempt);
-		const receipt = await handle.finalPromise;
-		if (deadline.timedOut()) throw new Error(deadline.message());
-		// Preserve the dispatch cleanup signal used by failed internal runs. The
-		// receipt is already terminal, so this cannot interrupt staged writes.
-		if (receipt.exitCode !== 0) dispatch.abort(handle.runId);
-		return receipt;
-	} catch (err) {
-		if (!deadline.timedOut()) dispatch.abort(handle.runId);
-		await handle.finalPromise.catch(() => undefined);
-		throw deadline.timedOut() ? new Error(deadline.message()) : err;
-	} finally {
-		deadline.clear();
-	}
+	const revised = readAuthoredWikiPlan(input.outputDir, input.plan);
+	const plan = revised ?? input.plan;
+	input.progress?.({
+		phase: "generate",
+		status: "running",
+		message: outcome.ok
+			? `plan has ${plan.pages.length} page${plan.pages.length === 1 ? "" : "s"}`
+			: "planner did not finish; using the indexed candidate plan",
+		detail: outcome.detail,
+	});
+	return plan;
+}
+
+/** Write one page, then checkpoint the plan so the work survives whatever follows. */
+async function runPagePhase(
+	dispatch: DispatchContract,
+	input: WikiGenerateInput,
+	plan: WikiPlan,
+	page: WikiPlanPage,
+	route: WikiModelRoute,
+	position: { index: number; total: number },
+): Promise<WikiPlan> {
+	const seeded = existsSync(join(input.outputDir, page.path));
+	const outcome = await runWikiDispatch({
+		dispatch,
+		cwd: input.cwd,
+		outputDir: input.outputDir,
+		task: buildWikiPagePrompt({
+			cwd: input.cwd,
+			mode: input.mode,
+			codewiki: input.codewiki,
+			page,
+			siblings: plan.pages,
+			outputDir: input.outputDir,
+			seeded,
+		}),
+		route,
+		deadlineMs: PAGE_DEADLINE_MS,
+		label: `wiki page ${page.path}`,
+	});
+	// The file on disk is the postcondition, not what the writer reported. A run
+	// that ended on its budget after writing the page still wrote the page.
+	const written = existsSync(join(input.outputDir, page.path));
+	const next: WikiPlan = {
+		...plan,
+		pages: plan.pages.map((entry) =>
+			entry.path === page.path
+				? { ...entry, status: written ? ("written" as const) : ("pending" as const), attempts: entry.attempts + 1 }
+				: entry,
+		),
+	};
+	writeWikiPlanFile(input.outputDir, next);
+	input.progress?.({
+		phase: "generate",
+		status: "running",
+		message: `${written ? "wrote" : "could not write"} ${page.path} (${position.index}/${position.total})`,
+		detail: outcome.detail,
+	});
+	return next;
 }
 
 export async function generateWikiWithDocumenter(
 	dispatch: DispatchContract,
 	input: WikiGenerateInput,
 	route: WikiModelRoute = {},
+	runBudgetMs: number = RUN_BUDGET_MS,
 ): Promise<void> {
+	const startedAt = Date.now();
 	const routeDetail = [route.target, route.model, route.thinkingLevel ? `thinking=${route.thinkingLevel}` : undefined]
 		.filter((value): value is string => value !== undefined)
 		.join("/");
 	input.progress?.({
 		phase: "generate",
 		status: "running",
-		message: "dispatching wiki documenter",
-		detail: `single-owner direct research${routeDetail ? `; ${routeDetail}` : ""}`,
+		message: "dispatching wiki writers",
+		detail: `one page per dispatch${routeDetail ? `; ${routeDetail}` : ""}`,
 	});
-	// One documenter pass. A second attempt is allowed only for budget exhaustion
-	// or deterministic validation failure.
-	let task = input.prompt;
-	let budgetRecoverySpent = false;
-	for (let attempt = 1; attempt <= MAX_DOCUMENTER_ATTEMPTS; attempt += 1) {
-		const receipt = await runDocumenterAttempt(dispatch, input, attempt, task, route);
-		if (receipt.exitCode !== 0) {
-			const outcome = receipt.outcomeCode;
-			if (!outcome || !RECOVERABLE_WIKI_OUTCOMES.has(outcome)) throw new Error(receiptFailure(receipt));
-			if (!budgetRecoverySpent && attempt < MAX_DOCUMENTER_ATTEMPTS) {
-				budgetRecoverySpent = true;
-				input.progress?.({
-					phase: "generate",
-					status: "running",
-					message: BUDGET_SHORTFALL.progressMessage,
-					detail: `outcome=${outcome}; ${BUDGET_SHORTFALL.progressDetail}`,
-				});
-				task = remediationPrompt(input.prompt, BUDGET_SHORTFALL);
-				continue;
-			}
-			// The writer ran out of budget, not out of correctness. Whatever it
-			// staged is a candidate like any other, so validation decides, and a
-			// wiki that passes every deterministic check is promoted rather than
-			// deleted for the way its author stopped. A staged tree that fails
-			// validation fails the run carrying the writer's own diagnosis.
-			const remaining = validationShortfall(input);
-			if (remaining !== null) {
-				throw new Error(`${receiptFailure(receipt)}; staged wiki also failed validation: ${remaining.progressDetail}`);
-			}
+
+	// A resumed run keeps the plan its finished pages were written against;
+	// re-planning would churn the paths those pages already link to. Every other
+	// run plans, including an update, which is the only thing allowed to change
+	// a wiki's shape as the repository grows.
+	let plan = input.resumed ? input.plan : await runPlanPhase(dispatch, input, route);
+	if (!input.resumed) writeWikiPlanFile(input.outputDir, plan);
+
+	const queue = pendingPages(plan);
+	if (queue.length === 0) {
+		input.progress?.({ phase: "generate", status: "running", message: "every planned page is already current" });
+		return;
+	}
+	for (const [index, page] of queue.entries()) {
+		if (Date.now() - startedAt >= runBudgetMs) {
+			const left = queue.length - index;
 			input.progress?.({
 				phase: "generate",
 				status: "running",
-				message: "documenter ended on its budget; staged wiki passed validation",
-				detail: `outcome=${outcome}`,
+				message: `run budget reached with ${left} page${left === 1 ? "" : "s"} unwritten`,
+				detail: `${formatElapsed(Date.now() - startedAt)}; staged pages are kept and promoted`,
 			});
 			return;
 		}
-		const shortfall = validationShortfall(input);
-		if (!shortfall) return;
-		if (attempt === MAX_DOCUMENTER_ATTEMPTS) return;
-		input.progress?.({
-			phase: "generate",
-			status: "running",
-			message: shortfall.progressMessage,
-			detail: shortfall.progressDetail,
+		const current = plan.pages.find((entry) => entry.path === page.path) ?? page;
+		if (current.status === "written" || current.attempts >= MAX_PAGE_ATTEMPTS) continue;
+		plan = await runPagePhase(dispatch, input, plan, current, route, {
+			index: index + 1,
+			total: queue.length,
 		});
-		task = remediationPrompt(input.prompt, shortfall);
 	}
 }
 
@@ -317,14 +388,14 @@ async function loadWikiDispatch(): Promise<{ dispatch: DispatchContract; loaded:
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	if (!dispatch) {
 		await loaded.stop();
-		throw new Error("wiki documenter dispatch unavailable");
+		throw new Error("wiki writer dispatch unavailable");
 	}
 	return { dispatch, loaded };
 }
 
 /**
- * Resolve the wire model id the documenter dispatch will run on, so wiki
- * metadata records the real model instead of a placeholder. Mirrors dispatch's
+ * Resolve the wire model id the wiki dispatches will run on, so wiki metadata
+ * records the real model instead of a placeholder. Mirrors dispatch's
  * default-target precedence for a request with no explicit target: agent
  * binding profile, then the worker default, then the first configured target;
  * the model follows the same profile/default/target.defaultModel order and is
@@ -340,7 +411,10 @@ export async function resolveDocumenterModelId(route: WikiModelRoute = {}): Prom
 		if (!config || !providers) return UNRESOLVED_DOCUMENTER_MODEL;
 		const settings = config.get();
 		const workers = settings.workers;
-		const bindingProfileName = workers?.agentBindings?.documenter;
+		// Keyed on the dispatched agent id and nothing else, because that is what
+		// `placement.ts` reads. Falling back to another agent's binding here would
+		// record a model in wiki metadata that no dispatch ever ran.
+		const bindingProfileName = workers?.agentBindings?.[WIKI_AGENT_ID];
 		const profile = bindingProfileName ? workers?.profiles?.[bindingProfileName] : undefined;
 		const targetId = route.target ?? profile?.target ?? workers?.default?.target ?? settings.targets?.[0]?.id ?? null;
 		if (!targetId) return UNRESOLVED_DOCUMENTER_MODEL;
@@ -361,12 +435,12 @@ export function modelWikiGenerate(options: ModelWikiGenerateOptions = {}): WikiG
 		let loaded: LoadResult | null = null;
 		try {
 			if (options.dispatch) {
-				await generateWikiWithDocumenter(options.dispatch, input, options.route);
+				await generateWikiWithDocumenter(options.dispatch, input, options.route, options.runBudgetMs);
 				return;
 			}
 			const lazy = await loadWikiDispatch();
 			loaded = lazy.loaded;
-			await generateWikiWithDocumenter(lazy.dispatch, input, options.route);
+			await generateWikiWithDocumenter(lazy.dispatch, input, options.route, options.runBudgetMs);
 		} finally {
 			if (loaded) await loaded.stop();
 		}

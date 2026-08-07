@@ -26,28 +26,49 @@ function currentGitHead(cwd: string): string | null {
 	}
 }
 
+function collectChangedPaths(cwd: string, gitHead: string): Set<string> {
+	const committed = execFileSync("git", ["diff", "--name-only", "-z", `${gitHead}..HEAD`], {
+		cwd,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+	const trackedWorking = execFileSync("git", ["diff", "--name-only", "-z", "HEAD"], {
+		cwd,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+	const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+		cwd,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+	return new Set([
+		...splitNullTerminatedPaths(committed),
+		...splitNullTerminatedPaths(trackedWorking),
+		...splitNullTerminatedPaths(untracked),
+	]);
+}
+
+/**
+ * Repository-relative paths that changed since the wiki was written, committed
+ * and working-tree alike. This is what scopes an update run: a page is rewritten
+ * when one of the sources its front matter claims appears here, which replaces
+ * asking a model to guess which pages a diff invalidates. Uncapped, because a
+ * capped list would silently mark changed pages current. Empty on any git
+ * failure, which leaves the plan's own statuses in charge.
+ */
+export function changedPathsSince(cwd: string, gitHead: string | null): string[] {
+	if (!gitHead) return [];
+	try {
+		return [...collectChangedPaths(cwd, gitHead)];
+	} catch {
+		return [];
+	}
+}
+
 function changedFileCount(cwd: string, gitHead: string): { count: number; warning?: string } | { warning: string } {
 	try {
-		const committed = execFileSync("git", ["diff", "--name-only", "-z", `${gitHead}..HEAD`], {
-			cwd,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-		});
-		const trackedWorking = execFileSync("git", ["diff", "--name-only", "-z", "HEAD"], {
-			cwd,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-		});
-		const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
-			cwd,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-		});
-		const paths = new Set([
-			...splitNullTerminatedPaths(committed),
-			...splitNullTerminatedPaths(trackedWorking),
-			...splitNullTerminatedPaths(untracked),
-		]);
+		const paths = collectChangedPaths(cwd, gitHead);
 		const capped = [...paths].slice(0, GIT_DIFF_LINE_CAP);
 		return {
 			count: capped.length,
