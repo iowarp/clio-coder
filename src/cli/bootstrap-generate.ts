@@ -56,20 +56,38 @@ export interface BootstrapScoutRoute {
 	thinkingLevel?: ThinkingLevel;
 }
 
+/**
+ * Scout's route, resolved with the same precedence every other internal
+ * dispatch uses: an explicit `workers.agentBindings.scout` profile first, then
+ * `workers.default`. Scout used to be the one internal agent that demanded an
+ * explicit binding, so a fresh install with a perfectly good `workers.default`
+ * silently never produced a model-driven CLIO.md. A dangling binding still
+ * throws, because naming a profile that does not resolve is an operator error
+ * rather than an absent opinion.
+ */
 export function resolveBootstrapScoutRoute(settings: Readonly<ClioSettings>): BootstrapScoutRoute {
 	const profileName = settings.workers.agentBindings.scout;
-	if (!profileName) {
+	if (profileName) {
+		const profile = settings.workers.profiles[profileName];
+		if (!profile) throw new Error(`bootstrap Scout profile '${profileName}' is not configured`);
+		if (!profile.target) throw new Error(`bootstrap Scout profile '${profileName}' has no target`);
+		return {
+			target: profile.target,
+			...(profile.model ? { model: profile.model } : {}),
+			...(profile.thinkingLevel ? { thinkingLevel: profile.thinkingLevel } : {}),
+		};
+	}
+	const fallback = settings.workers.default;
+	if (!fallback?.target) {
 		throw new Error(
-			"bootstrap Scout has no worker profile binding; bind one with 'clio targets profile bind scout <profile>'",
+			"bootstrap Scout has no route: workers.agentBindings.scout is unbound and workers.default has no target; " +
+				"bind a profile with 'clio targets profile bind scout <profile>' or set workers.default.target",
 		);
 	}
-	const profile = settings.workers.profiles[profileName];
-	if (!profile) throw new Error(`bootstrap Scout profile '${profileName}' is not configured`);
-	if (!profile.target) throw new Error(`bootstrap Scout profile '${profileName}' has no target`);
 	return {
-		target: profile.target,
-		...(profile.model ? { model: profile.model } : {}),
-		...(profile.thinkingLevel ? { thinkingLevel: profile.thinkingLevel } : {}),
+		target: fallback.target,
+		...(fallback.model ? { model: fallback.model } : {}),
+		...(fallback.thinkingLevel ? { thinkingLevel: fallback.thinkingLevel } : {}),
 	};
 }
 

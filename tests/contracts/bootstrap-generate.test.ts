@@ -199,7 +199,7 @@ describe("contracts/bootstrap Scout generation", () => {
 		deepStrictEqual(dispatch.requests[0]?.responseSchema, BOOTSTRAP_OUTPUT_JSON_SCHEMA);
 	});
 
-	it("resolves the configured Scout binding and refuses missing or dangling profiles", () => {
+	it("resolves the configured Scout binding and refuses dangling profiles", () => {
 		const configured = structuredClone(DEFAULT_SETTINGS);
 		configured.workers.profiles.scout = {
 			target: "mini",
@@ -213,10 +213,35 @@ describe("contracts/bootstrap Scout generation", () => {
 			thinkingLevel: "off",
 		});
 
+		const dangling = structuredClone(DEFAULT_SETTINGS);
+		dangling.workers.agentBindings.scout = "missing";
+		throws(() => resolveBootstrapScoutRoute(dangling), /profile 'missing' is not configured/);
+
+		const targetless = structuredClone(DEFAULT_SETTINGS);
+		targetless.workers.profiles.empty = { target: null, model: null, thinkingLevel: "off" };
+		targetless.workers.agentBindings.scout = "empty";
+		throws(() => resolveBootstrapScoutRoute(targetless), /profile 'empty' has no target/);
+	});
+
+	// Scout used to throw when no binding existed, which made it the only
+	// internal dispatch that could not run off workers.default. A fresh install
+	// with a working default therefore never produced a model-driven CLIO.md.
+	it("falls back to workers.default when no Scout binding is configured", () => {
 		const unbound = structuredClone(DEFAULT_SETTINGS);
-		throws(() => resolveBootstrapScoutRoute(unbound), /has no worker profile binding/);
-		unbound.workers.agentBindings.scout = "missing";
-		throws(() => resolveBootstrapScoutRoute(unbound), /profile 'missing' is not configured/);
+		unbound.workers.default = { target: "dynamo", model: "qwopus-coder", thinkingLevel: "off" };
+		deepStrictEqual(resolveBootstrapScoutRoute(unbound), {
+			target: "dynamo",
+			model: "qwopus-coder",
+			thinkingLevel: "off",
+		});
+
+		const bound = structuredClone(unbound);
+		bound.workers.profiles.fast = { target: "mini", model: "MiniCPM-test", thinkingLevel: "off" };
+		bound.workers.agentBindings.scout = "fast";
+		strictEqual(resolveBootstrapScoutRoute(bound).target, "mini", "an explicit binding still wins over the default");
+
+		const routeless = structuredClone(DEFAULT_SETTINGS);
+		throws(() => resolveBootstrapScoutRoute(routeless), /workers.default has no target/);
 	});
 
 	it("retries a valid non-schema Scout route through the bounded prompt parser", async () => {
