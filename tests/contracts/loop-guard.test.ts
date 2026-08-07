@@ -35,6 +35,7 @@ import {
 	readOrchTurnToolCallBudget,
 	readWorkerToolCallCap,
 	sanitizeLockedSynthesisMessage,
+	WIDE_BATCH_DENIAL_FLOOR,
 	workerLoopBlockBudget,
 } from "../../src/engine/loop-guard.js";
 import type { AgentMessage } from "../../src/engine/types.js";
@@ -972,6 +973,34 @@ describe("worker synthesis lockout", () => {
 			stopped.kind === "blocked" && isLoopGuardSynthesisBackstopReason(stopped.reason),
 			"the backstop reason is recognizable by the worker abort seam",
 		);
+	});
+
+	it("ends a run refused more calls than it was ever allowed to execute", async () => {
+		// One degenerate provider response can carry hundreds of parsed tool
+		// calls, and every sibling shares a correlation id, so the per-round
+		// backstop sees one denial while the batch drains. Refusals being free
+		// removed the accidental bound the lifetime cap used to provide.
+		const safety = testSafety();
+		const cap = WIDE_BATCH_DENIAL_FLOOR + 8;
+		const bundle = createMiddlewareBundle({
+			registrations: [createLoopGuardRegistration({ safety, toolCallCap: cap, turnSynthesisLockout: true })],
+		});
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		for (let i = 0; i < cap; i += 1) {
+			strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: `pre-${i}.md` } })).kind, "ok");
+		}
+		let backstopAt: number | null = null;
+		for (let i = 0; i < cap * 4 && backstopAt === null; i += 1) {
+			// One correlation id for the whole batch: the per-round bounds never advance.
+			const denied = await registry.invoke(
+				{ tool: ToolNames.Read, args: { path: `sibling-${i}.md` } },
+				{ correlationId: "one-degenerate-response" },
+			);
+			strictEqual(denied.kind, "blocked");
+			if (denied.kind === "blocked" && isLoopGuardSynthesisBackstopReason(denied.reason)) backstopAt = i + 1;
+		}
+		ok(backstopAt !== null, "a run-level bound ends the batch");
+		ok(backstopAt !== null && backstopAt <= cap + 1, `the bound is the run's own size, not unbounded (${backstopAt})`);
 	});
 
 	it("keeps the immediate cap abort when no synthesis lockout is wired", async () => {

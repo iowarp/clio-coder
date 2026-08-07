@@ -81,6 +81,7 @@ import type { ActionClass } from "../safety/action-classifier.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
 import { assessFinishContract, type FinishContractAssessment } from "../safety/finish-contract.js";
+import { WRITE_ROOT_REFUSED_TOOLS } from "../safety/policy-engine.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
 import type { ScopeSpec } from "../safety/scope.js";
@@ -1170,12 +1171,27 @@ function targetToolCapability(target: ResolvedTarget): boolean {
 	return target.modelCapabilities?.tools ?? target.runtime.defaultCapabilities.tools === true;
 }
 
-function effectiveToolNames(allowedTools: ReadonlyArray<ToolName>, target: ResolvedTarget): ReadonlyArray<ToolName> {
+function writeConfinedRequest(req: DispatchRequest): boolean {
+	return req.writeRoots !== undefined && req.writeRoots.length > 0;
+}
+
+function effectiveToolNames(
+	allowedTools: ReadonlyArray<ToolName>,
+	target: ResolvedTarget,
+	/**
+	 * True when this run declares write roots. The confinement rail refuses
+	 * shell, verify, and dispatch by name, so offering them would hand the
+	 * model a tool whose every call is refused; it spends budget discovering
+	 * that and reads the refusal as something to retry.
+	 */
+	writeConfined = false,
+): ReadonlyArray<ToolName> {
 	if (!targetToolCapability(target)) return [];
 	const names = allowedTools.filter(
 		(tool): tool is ToolName =>
 			isBuiltinToolName(tool) &&
 			tool !== ToolNames.AskUser &&
+			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&
 			(target.runtime.id !== "claude-sdk" || isClaudeCanonicalTool(tool)),
 	);
 	return [...new Set(names)].sort();
@@ -2758,7 +2774,7 @@ export function createDispatchBundle(
 		const cwd = req.cwd ?? process.cwd();
 		const sessionAutonomy = settings?.autonomy ?? "auto-edit";
 		const effectiveAutonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
-		const effectiveTools = effectiveToolNames(admission.allowedTools, target);
+		const effectiveTools = effectiveToolNames(admission.allowedTools, target, writeConfinedRequest(req));
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target);
 		const effectiveAdmission: DispatchAdmissionStage = {
 			...admission,
@@ -4711,7 +4727,7 @@ export function createDispatchBundle(
 			providers,
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
-		const effectiveTools = effectiveToolNames(admission.allowedTools, target);
+		const effectiveTools = effectiveToolNames(admission.allowedTools, target, writeConfinedRequest(req));
 		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema);

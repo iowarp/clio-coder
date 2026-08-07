@@ -77,6 +77,15 @@ export function workerLoopBlockBudget(toolCalls: number): number {
 export const LOOP_SYNTHESIS_BACKSTOP_DENIALS = 2;
 
 /**
+ * Floor for the run-level denial budget, sized to cover one wide parallel
+ * batch. The budget is otherwise the run's own tool-call cap, and a run whose
+ * cap is tiny must still be able to steer a full batch of siblings rather than
+ * die on it: the per-round bounds exist precisely so a wide batch gets one
+ * synthesis round instead of a kill.
+ */
+export const WIDE_BATCH_DENIAL_FLOOR = 32;
+
+/**
  * Default lifetime tool-call cap for a worker run. Value and env override live
  * in core/guardrails.ts (`CLIO_WORKER_TOOL_CALL_CAP`); re-exported here for
  * tests and callers that reason about the guard's tuning in one place.
@@ -455,6 +464,31 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 * total is bounded by the reserve's own remaining calls.
 	 */
 	let reserveDenials: { denials: number; correlationId?: string } = { denials: 0 };
+	/**
+	 * Run-level bound on refused attempts, counted per call and blind to
+	 * correlation. Every other bound here is per model round, which is correct
+	 * for steering a model that keeps answering with tool calls but assumes a
+	 * round is a handful of them. A degenerate local model emits one response
+	 * whose parsed tool calls number in the hundreds, and every one of those
+	 * siblings shares a correlation id, so the per-round bounds see a single
+	 * denial while the batch drains. Charging refusals to the lifetime cap used
+	 * to stop that by accident, at the cost of killing runs for obeying the
+	 * guard. This is the same bound stated directly: a run may be refused as
+	 * many calls as it was allowed to execute, and past that it is degenerate
+	 * and ends on the backstop the worker already aborts on. The orchestrator
+	 * has no cap and no bound here; it has an operator instead.
+	 */
+	let deniedAttempts = 0;
+	const denialBudget = cap === undefined ? undefined : Math.max(cap, WIDE_BATCH_DENIAL_FLOOR);
+	const boundRunDenials = (
+		effects: ReadonlyArray<MiddlewareEffect>,
+		input: MiddlewareHookInput,
+	): ReadonlyArray<MiddlewareEffect> => {
+		if (denialBudget === undefined || !effects.some((effect) => effect.kind === "block_tool")) return effects;
+		deniedAttempts += 1;
+		if (deniedAttempts <= denialBudget) return effects;
+		return [{ kind: "block_tool", reason: synthesisBackstopReason(input.toolName ?? "unknown"), severity: "hard-block" }];
+	};
 	// Reserve window bounds. Active only when a cap exists and is strictly
 	// larger than the reserve; a call is inside the window when its attempt
 	// ordinal exceeds this threshold but has not passed the cap itself.
@@ -828,196 +862,205 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			}
 			const now = options.now?.() ?? Date.now();
 			const turnKey = input.turnId ?? NO_TURN_BUCKET;
-
-			// Once a synthesis phase begins, sibling calls from the already-emitted
-			// parallel batch are denied without consuming the lifetime cap or the
-			// per-round non-compliance backstop.
-			if (capLockout !== null && cap !== undefined) {
-				if (reachesLockoutBackstop(capLockout, input)) {
-					return [
-						{ kind: "block_tool", reason: synthesisBackstopReason(input.toolName ?? "unknown"), severity: "hard-block" },
-					];
-				}
-				return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
-			}
-			if (softLockout !== null && softLimit !== undefined) {
-				if (reachesLockoutBackstop(softLockout, input)) {
-					return [
-						{ kind: "block_tool", reason: synthesisBackstopReason(input.toolName ?? "unknown"), severity: "hard-block" },
-					];
-				}
-				return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
-			}
-
-			// Synthesis lockout after repeated calls. Check before counting the
-			// attempt so a wide parallel batch cannot turn a graceful lock into a
-			// lifetime-cap failure before the model gets its synthesis round.
-			const lockout = synthesisLockout ? lockoutByTurn.get(turnKey) : undefined;
-			if (lockout !== undefined) {
-				if (reachesLockoutBackstop(lockout, input)) {
-					emitLoopBlocked(
-						input,
-						{
-							tool: lockout.tool,
-							repeatCount: lockout.repeatCount,
-							blocksThisTurn: lockout.blocksThisTurn,
-							disposition: "stop",
-						},
-						now,
-					);
-					return [{ kind: "block_tool", reason: synthesisBackstopReason(lockout.tool), severity: "hard-block" }];
-				}
-				return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
-			}
-
-			// Soft agent budget and its reserve window, resolved before the call is
-			// counted: every refusal below is steering the harness authored, and a
-			// call the harness refused never ran. Counting those spent the lifetime
-			// cap on the guard's own denials, which is how a worker that obeyed the
-			// reserve by writing instead of grepping got killed by it. The bound on
-			// refusals is reserveDenials and the synthesis backstop, both per model
-			// round; the cap bounds executed work.
-			if (softLimit !== undefined) {
-				if (softAdmittedCount >= softLimit) {
-					softLockout = {
-						denials: 0,
-						...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
-					};
-					options.onSynthesisLockout?.();
-					return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
-				}
-				if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) {
-					enterSoftReadReserve();
-					if (!reserveAdmits(input.toolName)) {
-						// A model that keeps calling discovery tools inside the reserve
-						// is not going to finish; after a bounded number of model rounds
-						// it gets the same graceful synthesis lockout the soft budget
-						// ends in, rather than an unbounded bounce.
-						if (reachesLockoutBackstop(reserveDenials, input)) {
-							softLockout = {
-								denials: 0,
-								...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
-							};
-							options.onSynthesisLockout?.();
-							return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
-						}
+			const decide = (): ReadonlyArray<MiddlewareEffect> => {
+				// Once a synthesis phase begins, sibling calls from the already-emitted
+				// parallel batch are denied without consuming the lifetime cap or the
+				// per-round non-compliance backstop.
+				if (capLockout !== null && cap !== undefined) {
+					if (reachesLockoutBackstop(capLockout, input)) {
 						return [
-							{
-								kind: "block_tool",
-								reason: workerLiveReadReserveDirective(softLimit - softAdmittedCount, deliveryTools),
-								severity: "hard-block",
-							},
+							{ kind: "block_tool", reason: synthesisBackstopReason(input.toolName ?? "unknown"), severity: "hard-block" },
 						];
 					}
+					return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
 				}
-			}
+				if (softLockout !== null && softLimit !== undefined) {
+					if (reachesLockoutBackstop(softLockout, input)) {
+						return [
+							{ kind: "block_tool", reason: synthesisBackstopReason(input.toolName ?? "unknown"), severity: "hard-block" },
+						];
+					}
+					return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
+				}
 
-			// Synthesis reserve (workers): the tail of the lifetime cap is held for
-			// verification reads and delivery. Discovery calls bounce with a
-			// steering reason that never carries the cap's machine prefix, so cap
-			// telemetry, worker aborts, and A2's cap-exhaustion notice stay
-			// untouched; reads and this agent's delivery tools keep flowing through
-			// the repetition and stagnation detectors below.
-			if (reserveThreshold !== null && cap !== undefined && count >= reserveThreshold && !reserveAdmits(input.toolName)) {
-				if (reachesLockoutBackstop(reserveDenials, input)) {
-					if (synthesisLockout) {
-						capLockout = {
+				// Synthesis lockout after repeated calls. Check before counting the
+				// attempt so a wide parallel batch cannot turn a graceful lock into a
+				// lifetime-cap failure before the model gets its synthesis round.
+				const lockout = synthesisLockout ? lockoutByTurn.get(turnKey) : undefined;
+				if (lockout !== undefined) {
+					if (reachesLockoutBackstop(lockout, input)) {
+						emitLoopBlocked(
+							input,
+							{
+								tool: lockout.tool,
+								repeatCount: lockout.repeatCount,
+								blocksThisTurn: lockout.blocksThisTurn,
+								disposition: "stop",
+							},
+							now,
+						);
+						return [{ kind: "block_tool", reason: synthesisBackstopReason(lockout.tool), severity: "hard-block" }];
+					}
+					return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
+				}
+
+				// Soft agent budget and its reserve window, resolved before the call is
+				// counted: every refusal below is steering the harness authored, and a
+				// call the harness refused never ran. Counting those spent the lifetime
+				// cap on the guard's own denials, which is how a worker that obeyed the
+				// reserve by writing instead of grepping got killed by it. The bound on
+				// refusals is reserveDenials and the synthesis backstop, both per model
+				// round; the cap bounds executed work.
+				if (softLimit !== undefined) {
+					if (softAdmittedCount >= softLimit) {
+						softLockout = {
 							denials: 0,
 							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
 						};
 						options.onSynthesisLockout?.();
+						return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
 					}
-					return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
+					if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) {
+						enterSoftReadReserve();
+						if (!reserveAdmits(input.toolName)) {
+							// A model that keeps calling discovery tools inside the reserve
+							// is not going to finish; after a bounded number of model rounds
+							// it gets the same graceful synthesis lockout the soft budget
+							// ends in, rather than an unbounded bounce.
+							if (reachesLockoutBackstop(reserveDenials, input)) {
+								softLockout = {
+									denials: 0,
+									...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+								};
+								options.onSynthesisLockout?.();
+								return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
+							}
+							return [
+								{
+									kind: "block_tool",
+									reason: workerLiveReadReserveDirective(softLimit - softAdmittedCount, deliveryTools),
+									severity: "hard-block",
+								},
+							];
+						}
+					}
 				}
-				return [
-					{
-						kind: "block_tool",
-						reason: workerSynthesisReserveBlockReason(input.toolName ?? "unknown", Math.max(1, cap - count), cap),
-						severity: "hard-block",
-					},
-				];
-			}
 
-			count += 1;
-			reserveDenials = { denials: 0 };
-			if (softLimit !== undefined) {
-				softAdmittedCount += 1;
-				if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) enterSoftReadReserve();
-				if (softAdmittedCount >= softLimit) {
-					softLockout = {
+				// Synthesis reserve (workers): the tail of the lifetime cap is held for
+				// verification reads and delivery. Discovery calls bounce with a
+				// steering reason that never carries the cap's machine prefix, so cap
+				// telemetry, worker aborts, and A2's cap-exhaustion notice stay
+				// untouched; reads and this agent's delivery tools keep flowing through
+				// the repetition and stagnation detectors below.
+				if (reserveThreshold !== null && cap !== undefined && count >= reserveThreshold && !reserveAdmits(input.toolName)) {
+					if (reachesLockoutBackstop(reserveDenials, input)) {
+						if (synthesisLockout) {
+							capLockout = {
+								denials: 0,
+								...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+							};
+							options.onSynthesisLockout?.();
+						}
+						return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
+					}
+					return [
+						{
+							kind: "block_tool",
+							reason: workerSynthesisReserveBlockReason(input.toolName ?? "unknown", Math.max(1, cap - count), cap),
+							severity: "hard-block",
+						},
+					];
+				}
+
+				count += 1;
+				reserveDenials = { denials: 0 };
+				if (softLimit !== undefined) {
+					softAdmittedCount += 1;
+					if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) enterSoftReadReserve();
+					if (softAdmittedCount >= softLimit) {
+						softLockout = {
+							denials: 0,
+							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+						};
+						options.onSynthesisLockout?.();
+						options.onSoftLimitFinalCallAdmitted?.(input.toolCallId);
+					}
+				}
+				if (cap !== undefined && count > cap) {
+					// No tool body executes past the cap. With the synthesis lockout
+					// wired the run is not aborted on the spot: the first crossing flips
+					// the request-level tool lock (onSynthesisLockout) and directs the
+					// model to answer from what it gathered; a model that keeps emitting
+					// tool calls anyway reaches the bounded backstop, whose reason the
+					// worker runtime recognizes and aborts on. Parallel calls crossing
+					// the cap in one batch enter the lockout exactly once.
+					if (!synthesisLockout) {
+						return [{ kind: "block_tool", reason: workerToolCallCapExceededReason(cap), severity: "hard-block" }];
+					}
+					capLockout = {
 						denials: 0,
 						...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
 					};
 					options.onSynthesisLockout?.();
-					options.onSoftLimitFinalCallAdmitted?.(input.toolCallId);
+					return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
 				}
-			}
-			if (cap !== undefined && count > cap) {
-				// No tool body executes past the cap. With the synthesis lockout
-				// wired the run is not aborted on the spot: the first crossing flips
-				// the request-level tool lock (onSynthesisLockout) and directs the
-				// model to answer from what it gathered; a model that keeps emitting
-				// tool calls anyway reaches the bounded backstop, whose reason the
-				// worker runtime recognizes and aborts on. Parallel calls crossing
-				// the cap in one batch enter the lockout exactly once.
-				if (!synthesisLockout) {
-					return [{ kind: "block_tool", reason: workerToolCallCapExceededReason(cap), severity: "hard-block" }];
-				}
-				capLockout = {
-					denials: 0,
-					...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
-				};
-				options.onSynthesisLockout?.();
-				return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
-			}
 
-			// Identical-repeat detection runs BEFORE the volume budget so verbatim
-			// retries of budget-blocked calls still reach the detector. Its tighter
-			// interrupt (a couple of blocks per turn) is what ends the retry spiral
-			// a weak model falls into once the budget starts rejecting calls;
-			// checking the budget first starved the detector and let that spiral
-			// churn all the way to the hard ceiling.
-			const fingerprint = input.metadata?.callFingerprint;
-			if (typeof fingerprint !== "string" || fingerprint.length === 0) {
+				// Identical-repeat detection runs BEFORE the volume budget so verbatim
+				// retries of budget-blocked calls still reach the detector. Its tighter
+				// interrupt (a couple of blocks per turn) is what ends the retry spiral
+				// a weak model falls into once the budget starts rejecting calls;
+				// checking the budget first starved the detector and let that spiral
+				// churn all the way to the hard ceiling.
+				const fingerprint = input.metadata?.callFingerprint;
+				if (typeof fingerprint !== "string" || fingerprint.length === 0) {
+					return evaluateTurnBudget(input, now) ?? [];
+				}
+				// The detector key is turn-scoped: its state lives for the whole
+				// session, and the detector now retains the most recent attempts
+				// regardless of age, so an unscoped key would let one identical call
+				// per user turn (rerunning a build across turns) accumulate into a
+				// false loop.
+				const verdict = options.safety.observeLoop(`${turnKey}|${fingerprint}`, now);
+				if (verdict.looping) {
+					const tool = input.toolName ?? "unknown";
+					const priorSuccesses = succeededFingerprints.get(fingerprint) ?? 0;
+					return blockAsLoop(
+						input,
+						turnKey,
+						tool,
+						verdict.count,
+						loopBlockBaseReason(tool, verdict.count, priorSuccesses),
+						now,
+					);
+				}
+
+				// Stagnation detection: the incoming call has the same shape (size
+				// args ignored) as a streak of calls whose results hashed identical.
+				// The escalation cycle (limit: 10k -> 20k -> 50k -> 10k ...) varies
+				// arguments enough to evade the verbatim detector while never
+				// producing new information; block the attempt the streak proves
+				// futile.
+				const toolName = input.toolName;
+				if (typeof toolName === "string" && toolName.length > 0) {
+					const entry = stagnationByTurn.get(turnKey);
+					if (
+						entry !== undefined &&
+						entry.streak >= RESULT_STAGNATION_THRESHOLD - 1 &&
+						entry.reducedFingerprint === stagnationFingerprint(toolName, input.toolArgs)
+					) {
+						return blockAsLoop(
+							input,
+							turnKey,
+							toolName,
+							entry.streak + 1,
+							stagnationBlockReason(toolName, entry.streak),
+							now,
+						);
+					}
+				}
 				return evaluateTurnBudget(input, now) ?? [];
-			}
-			// The detector key is turn-scoped: its state lives for the whole
-			// session, and the detector now retains the most recent attempts
-			// regardless of age, so an unscoped key would let one identical call
-			// per user turn (rerunning a build across turns) accumulate into a
-			// false loop.
-			const verdict = options.safety.observeLoop(`${turnKey}|${fingerprint}`, now);
-			if (verdict.looping) {
-				const tool = input.toolName ?? "unknown";
-				const priorSuccesses = succeededFingerprints.get(fingerprint) ?? 0;
-				return blockAsLoop(
-					input,
-					turnKey,
-					tool,
-					verdict.count,
-					loopBlockBaseReason(tool, verdict.count, priorSuccesses),
-					now,
-				);
-			}
-
-			// Stagnation detection: the incoming call has the same shape (size
-			// args ignored) as a streak of calls whose results hashed identical.
-			// The escalation cycle (limit: 10k -> 20k -> 50k -> 10k ...) varies
-			// arguments enough to evade the verbatim detector while never
-			// producing new information; block the attempt the streak proves
-			// futile.
-			const toolName = input.toolName;
-			if (typeof toolName === "string" && toolName.length > 0) {
-				const entry = stagnationByTurn.get(turnKey);
-				if (
-					entry !== undefined &&
-					entry.streak >= RESULT_STAGNATION_THRESHOLD - 1 &&
-					entry.reducedFingerprint === stagnationFingerprint(toolName, input.toolArgs)
-				) {
-					return blockAsLoop(input, turnKey, toolName, entry.streak + 1, stagnationBlockReason(toolName, entry.streak), now);
-				}
-			}
-			return evaluateTurnBudget(input, now) ?? [];
+			};
+			return boundRunDenials(decide(), input);
 		},
 	};
 }
