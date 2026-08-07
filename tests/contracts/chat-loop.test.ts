@@ -903,6 +903,94 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 		}
 	});
 
+	it("releases skill narrowing when the turn that requested it ends", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-chat-skill-life-"));
+		try {
+			const skillDir = join(scratch, ".clio", "skills", "narrow");
+			mkdirSync(skillDir, { recursive: true });
+			writeFileSync(
+				join(skillDir, "SKILL.md"),
+				[
+					"---",
+					"name: narrow",
+					"description: Narrow surface skill.",
+					"allowed-tools:",
+					"  - read",
+					"---",
+					"",
+					"BODY",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+
+			const registry = createRegistry({ safety: allowAllSafety() });
+			registry.register(createContextTool({ getCwd: () => scratch }));
+			for (const name of [ToolNames.Read, ToolNames.Edit]) registry.register(dummyTool(name));
+
+			const entries: SessionEntry[] = [];
+			const editOutcomes: string[] = [];
+			let turn = 0;
+			const loop = createChatLoop({
+				getSettings: () => settings(),
+				providers: providers(),
+				knownTargets: () => new Set(["test-target"]),
+				session: createSession(entries),
+				readSessionEntries: () => entries,
+				toolRegistry: registry,
+				createAgent: createFakeAgentFactory(async (agent, input) => {
+					agent.state.messages.push(...inputMessages(input));
+					const tools = agent.state.tools as NamedAgentTool[];
+					turn += 1;
+					if (turn === 1) {
+						const contextTool = tools.find((tool) => tool.name === "context");
+						ok(contextTool);
+						await contextTool.execute("call-load", { scope: "skills", name: "narrow" });
+					}
+					const editTool = tools.find((tool) => tool.name === "edit");
+					ok(editTool);
+					try {
+						const result = (await editTool.execute(`call-edit-${turn}`, {})) as {
+							content?: Array<{ type: string; text?: string }>;
+						};
+						editOutcomes.push(result.content?.find((part) => part.type === "text")?.text ?? "");
+					} catch (err) {
+						editOutcomes.push(err instanceof Error ? err.message : String(err));
+					}
+					const message = {
+						role: "assistant",
+						content: [{ type: "text", text: "done" }],
+						stopReason: "stop",
+						timestamp: Date.now(),
+					} as unknown as AgentMessage;
+					agent.state.messages.push(message);
+					await agent.emit({ type: "message_end", message } as never);
+					await agent.emit({ type: "agent_end", messages: [message] } as never);
+				}),
+			} as never);
+
+			await loop.submit("use the skill", {
+				pendingSkillRequests: [
+					{ name: "narrow", args: "", source: "slash-command", installed: true, filePath: join(skillDir, "SKILL.md") },
+				],
+			});
+			await loop.submit("a plain turn with no skill request");
+
+			// Narrowing is scoped to the turn that requested the skill. Outliving
+			// it is a silent capability loss; ending early is a silent grant.
+			ok(
+				editOutcomes[0]?.includes("narrow"),
+				`expected edit blocked by the active skill in turn 1, got ${JSON.stringify(editOutcomes[0])}`,
+			);
+			ok(
+				editOutcomes[1] !== undefined && !editOutcomes[1].includes("narrow"),
+				`expected edit admitted once the requesting turn ended, got ${JSON.stringify(editOutcomes[1])}`,
+			);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
 	it("supplies structured task memory only to an explicit context-handoff request", async () => {
 		const entries: SessionEntry[] = [];
 		let sourceReads = 0;

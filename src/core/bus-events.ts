@@ -527,6 +527,13 @@ export interface DispatchFailedPayload extends DispatchRunIdentity, Partial<Disp
 	outcomeCode?: RunOutcomeCode | null;
 	outcomeDetail: string | null;
 	reason: RunOutcome | "retry_denied";
+	/**
+	 * Worker skill activations collected into the run receipt, on the same
+	 * terms as {@link DispatchCompletedPayload}. A run that loaded a skill and
+	 * then failed is exactly when the operator needs to know which skill and
+	 * which copy of it, so the failing path records them too.
+	 */
+	skillActivations?: ReadonlyArray<SkillActivation>;
 }
 
 // ---------------------------------------------------------------------------

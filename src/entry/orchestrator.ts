@@ -432,6 +432,32 @@ function appendProtectedArtifactRegistryEvent(
 	clearPendingProtectedArtifact(pending);
 }
 
+/**
+ * Fold a terminal dispatch payload's worker skill activations into the session
+ * ledger, tagged with the runId, so worker skill provenance sits next to
+ * main-agent activations.
+ *
+ * Both terminal channels carry them and the run finalizer emits exactly one of
+ * the two, so this cannot double-record. The orchestrator never observes worker
+ * tool calls directly, because a worker runs its own registry in its own
+ * subprocess, which makes this the only recording path there is. Returns how
+ * many were folded.
+ */
+export function foldDispatchSkillActivations(
+	session: SessionContract | undefined,
+	payload: { runId?: unknown; skillActivations?: ReadonlyArray<unknown> } | undefined,
+): number {
+	const runId = payload?.runId;
+	if (typeof runId !== "string") return 0;
+	let folded = 0;
+	for (const activation of payload?.skillActivations ?? []) {
+		if (!isSkillActivation(activation)) continue;
+		appendSkillActivationRegistryEvent(session, { ...activation, runId });
+		folded += 1;
+	}
+	return folded;
+}
+
 function appendSkillActivationRegistryEvent(
 	session: SessionContract | undefined,
 	activation: Parameters<SessionContract["recordSkillActivation"]>[0],
@@ -1003,18 +1029,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.on(BusChannels.DispatchCompleted, (payload) => {
 		if (typeof payload?.runId !== "string") return;
 		taskBoard.detachRun(payload.runId);
-		// Fold worker skill activations from the completed run's receipt into
-		// the session ledger, tagged with the runId, so worker skill provenance
-		// sits next to main-agent activations. The orchestrator never observes
-		// worker tool calls directly (separate subprocess registry), so this is
-		// the only recording path and cannot double-record.
-		for (const activation of payload.skillActivations ?? []) {
-			if (!isSkillActivation(activation)) continue;
-			appendSkillActivationRegistryEvent(session, { ...activation, runId: payload.runId });
-		}
+		foldDispatchSkillActivations(session, payload);
 	});
 	bus.on(BusChannels.DispatchFailed, (payload) => {
-		if (typeof payload?.runId === "string") taskBoard.detachRun(payload.runId);
+		if (typeof payload?.runId !== "string") return;
+		taskBoard.detachRun(payload.runId);
+		// A run that failed after loading a skill is the case the operator most
+		// needs the provenance for, and the receipt already carried it here.
+		foldDispatchSkillActivations(session, payload);
 	});
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
