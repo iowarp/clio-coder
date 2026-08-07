@@ -1,7 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { fsyncDirectory } from "../../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { frontmatterRegion, isProvenanceLine, normalizedSkillHash } from "./content-hash.js";
 import { loadSkills, type Skill } from "./loader.js";
@@ -59,26 +70,45 @@ export interface UpdateSkillsInput {
 	force?: boolean;
 }
 
+/**
+ * A path inside a cloned repository, and nothing else. The URL pattern's tail
+ * is free-form, so `.../blob/main/../../../etc` would join out of the clone
+ * directory and install from somewhere on the operator's own disk instead of
+ * from the repository they named.
+ */
+function repoRelativePath(filePath: string): string | null {
+	if (path.isAbsolute(filePath) || filePath.includes("\0")) return null;
+	const segments = filePath.split("/");
+	if (segments.some((segment) => segment === "..")) return null;
+	const normalized = path.posix.normalize(filePath);
+	if (normalized.startsWith("..") || path.posix.isAbsolute(normalized)) return null;
+	return normalized;
+}
+
 export function parseSkillSourceSpec(source: string): SkillSourceSpec | null {
 	const trimmed = source.trim();
 	if (trimmed.length === 0) return null;
 	const browser = trimmed.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:blob|tree)\/([^/]+)\/(.+?)\/?$/);
 	if (browser?.[1] && browser[2] && browser[3] && browser[4]) {
+		const filePath = repoRelativePath(browser[4]);
+		if (!filePath) return null;
 		return {
 			kind: "github",
 			cloneUrl: `https://github.com/${browser[1]}/${browser[2]}.git`,
 			branch: browser[3],
-			filePath: browser[4],
+			filePath,
 			original: trimmed,
 		};
 	}
 	const raw = trimmed.match(/^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+?)\/?$/);
 	if (raw?.[1] && raw[2] && raw[3] && raw[4]) {
+		const filePath = repoRelativePath(raw[4]);
+		if (!filePath) return null;
 		return {
 			kind: "github",
 			cloneUrl: `https://github.com/${raw[1]}/${raw[2]}.git`,
 			branch: raw[3],
-			filePath: raw[4],
+			filePath,
 			original: trimmed,
 		};
 	}
@@ -166,6 +196,42 @@ function copySkillDir(from: string, to: string): void {
 	});
 }
 
+let skillSwapSequence = 0;
+
+/**
+ * Replace one skill directory by staged swap rather than destroying it first.
+ *
+ * `rmSync(dest)` followed by a copy is not recoverable: a copy that fails
+ * partway, or a process that dies between the two, leaves the operator with a
+ * skill that is half its old self or gone entirely, and the thing destroyed is
+ * the only local copy. The staging directory and the backup are siblings of
+ * the destination so both renames stay on one filesystem and are therefore
+ * atomic, and a failure after the destination moves aside puts it back.
+ */
+function swapSkillDir(stage: (stagingDir: string) => void, dest: string): void {
+	const suffix = `${process.pid}-${++skillSwapSequence}`;
+	const staging = `${dest}.clio-staging-${suffix}`;
+	const backup = `${dest}.clio-backup-${suffix}`;
+	rmSync(staging, { recursive: true, force: true });
+	try {
+		stage(staging);
+	} catch (err) {
+		rmSync(staging, { recursive: true, force: true });
+		throw err;
+	}
+	const hadPrevious = existsSync(dest);
+	if (hadPrevious) renameSync(dest, backup);
+	try {
+		renameSync(staging, dest);
+	} catch (err) {
+		if (hadPrevious) renameSync(backup, dest);
+		rmSync(staging, { recursive: true, force: true });
+		throw err;
+	}
+	if (hadPrevious) rmSync(backup, { recursive: true, force: true });
+	fsyncDirectory(path.dirname(dest));
+}
+
 function destinationRoot(scope: "user" | "project", cwd: string, configDir?: string): string {
 	return scope === "user" ? path.join(configDir ?? clioConfigDir(), "skills") : path.join(cwd, ".clio", "skills");
 }
@@ -204,24 +270,25 @@ export function installSkillFromSource(input: InstallSkillInput): InstallSkillRe
 		}
 
 		const dest = path.join(destinationRoot(scope, cwd, input.configDir), name);
-		if (existsSync(dest)) {
-			if (input.force !== true) throw new Error(`skill already installed at ${dest} (use --force to overwrite)`);
-			rmSync(dest, { recursive: true, force: true });
+		if (existsSync(dest) && input.force !== true) {
+			throw new Error(`skill already installed at ${dest} (use --force to overwrite)`);
 		}
-		copySkillDir(fetched.skillDir, dest);
 
 		const sourceRaw = readFileSync(skill.filePath, "utf8");
 		const installedHash = normalizedSkillHash(sourceRaw);
 		const destFile = path.join(dest, "SKILL.md");
-		writeFileSync(
-			destFile,
-			injectProvenanceFrontmatter(sourceRaw, {
-				sourceUrl: spec.original,
-				installedAt: new Date().toISOString(),
-				installedHash,
-			}),
-			"utf8",
-		);
+		swapSkillDir((staging) => {
+			copySkillDir(fetched.skillDir, staging);
+			writeFileSync(
+				path.join(staging, "SKILL.md"),
+				injectProvenanceFrontmatter(sourceRaw, {
+					sourceUrl: spec.original,
+					installedAt: new Date().toISOString(),
+					installedHash,
+				}),
+				"utf8",
+			);
+		}, dest);
 
 		// Surface unmet typed requires (and any other warnings) for the installed copy.
 		const after = loadSkills({ cwd, ...(scope === "user" && input.configDir ? { configDir: input.configDir } : {}) });
@@ -271,19 +338,19 @@ function updateOne(skill: Skill, force: boolean): SkillUpdateReport {
 			return { name: skill.name, status: "local-changes", detail: "skipped, use --force to overwrite" };
 		}
 
-		const dest = skill.baseDir;
-		rmSync(dest, { recursive: true, force: true });
-		copySkillDir(fetched.skillDir, dest);
-		writeFileSync(
-			path.join(dest, "SKILL.md"),
-			injectProvenanceFrontmatter(remoteRaw, {
-				sourceUrl,
-				installedAt: skill.provenance?.installedAt ?? new Date().toISOString(),
-				updatedAt: new Date().toISOString(),
-				installedHash: remoteHash,
-			}),
-			"utf8",
-		);
+		swapSkillDir((staging) => {
+			copySkillDir(fetched.skillDir, staging);
+			writeFileSync(
+				path.join(staging, "SKILL.md"),
+				injectProvenanceFrontmatter(remoteRaw, {
+					sourceUrl,
+					installedAt: skill.provenance?.installedAt ?? new Date().toISOString(),
+					updatedAt: new Date().toISOString(),
+					installedHash: remoteHash,
+				}),
+				"utf8",
+			);
+		}, skill.baseDir);
 		return { name: skill.name, status: "updated" };
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
