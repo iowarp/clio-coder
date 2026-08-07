@@ -29,6 +29,8 @@ export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "
 
 /** Maximum UTF-8 size of caller-supplied parent-to-worker briefing data. */
 export const DISPATCH_BRIEFING_MAX_BYTES = 12_000;
+/** Larger bounded handoff for trusted internal fan-in workflows such as detailed wiki synthesis. */
+export const INTERNAL_DISPATCH_BRIEFING_MAX_BYTES = 64 * 1024;
 
 /**
  * Data threaded from one pipeline step to the next. `fromRunId` is the source
@@ -217,8 +219,10 @@ export function validateJobSpec(spec: unknown): Validated {
 			const normalized = spec.briefing.trim();
 			if (normalized.length > 0) {
 				const bytes = Buffer.byteLength(normalized, "utf8");
-				if (bytes > DISPATCH_BRIEFING_MAX_BYTES) {
-					errors.push(`briefing must be ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes or fewer`);
+				const maxBytes =
+					spec.requestOrigin === "internal" ? INTERNAL_DISPATCH_BRIEFING_MAX_BYTES : DISPATCH_BRIEFING_MAX_BYTES;
+				if (bytes > maxBytes) {
+					errors.push(`briefing must be ${maxBytes} UTF-8 bytes or fewer`);
 				} else {
 					briefing = normalized;
 				}

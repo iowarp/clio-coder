@@ -8,6 +8,11 @@ Output location: write only into `{{outputDir}}`. The harness validates what you
 and promotes it to `.clio/wiki`; you never write to `.clio/wiki` yourself. Never write
 `meta.json`; it is harness-owned. An accurate wiki may be left exactly as seeded.
 
+Execution discipline:
+- Treat this as a bounded editing pass, not a repo-wide audit. Read the seeded pages and the supplied Git and working-tree evidence before choosing any source lookup.
+- Use no more than 10 tool calls to identify affected pages. Make edits as soon as a claim is verified, and finish all writes before the read-only reserve begins. Do not emit large parallel batches: every attempted sibling spends the same bounded budget.
+- If a lookup errors, refine it once or switch to a direct read; never spray variants of the same `code_nav` query. Use one scoped diff after editing, then return the required JSON immediately.
+
 Rules:
 - First read every file in the Repository guidance section below. If those instructions name a
   source of truth or planning authority, read it before deciding that seeded content is still
@@ -15,9 +20,7 @@ Rules:
 - Update only pages whose content the changes actually invalidate. Fewer than 5 changed files
   should touch at most 2 pages. It is acceptable, and common, to change nothing: if the wiki
   is still accurate, stop without editing and say so.
-- Never rewrite a page wholesale when a section edit suffices. Never make formatting-only
-  edits. Keep the 8-page cap; if a new page is genuinely warranted, add it and link it from
-  quickstart.md.
+- Never rewrite a page wholesale when a section edit suffices. Never make formatting-only edits. Obey the page range in the Generation strategy section; add missing concern pages and link every page from quickstart.md.
 - Keep every existing `path:line` reference you do not have evidence against; verify the ones
   your edits rely on.
 - When a codewiki exists, consult `code_nav` first: `mode=wiki` lists indexed pages, and

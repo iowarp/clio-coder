@@ -33,9 +33,10 @@ import {
 	wikiMetaPath,
 	writeWikiMeta,
 } from "./meta.js";
+import { planWikiGeneration, type WikiDepth, type WikiGenerationPlan } from "./plan.js";
 import { buildWikiPrompt, type WikiGenerateMode } from "./prompts.js";
 
-export type { WikiGenerateMode };
+export type { WikiDepth, WikiGenerateMode };
 
 export interface WikiGenerateInput {
 	cwd: string;
@@ -47,6 +48,8 @@ export interface WikiGenerateInput {
 	 * (and the worker it drives) must write only here, never into .clio/wiki.
 	 */
 	outputDir: string;
+	/** Auto-classified or operator-selected horizontal generation strategy. */
+	plan: WikiGenerationPlan;
 	progress?: BootstrapProgressSink;
 }
 
@@ -55,6 +58,8 @@ export type WikiGenerate = (input: WikiGenerateInput) => void | Promise<void>;
 export interface RunWikiGenerateInput {
 	cwd?: string;
 	mode?: WikiGenerateMode;
+	/** Repository-detail policy. Auto scales from indexed files and lines. */
+	depth?: WikiDepth;
 	model: string;
 	generate?: WikiGenerate;
 	onProgress?: BootstrapProgressSink;
@@ -295,6 +300,13 @@ export async function runWikiGenerate(
 		progress(input, { phase: "codewiki", status: "started", message: "loading codewiki for wiki generation" });
 		const codewiki = await loadOrBuildCodewiki(cwd);
 		const sourceTreeHash = computeFingerprint(cwd, codewiki).treeHash;
+		const wikiPlan = planWikiGeneration(codewiki, input.depth ?? "auto");
+		progress(input, {
+			phase: "codewiki",
+			status: "running",
+			message: `selected ${wikiPlan.depth} wiki strategy`,
+			detail: `${wikiPlan.sourceFiles} source files; ${wikiPlan.sourceLines} lines; ${wikiPlan.researchAgents} area researchers; ${wikiPlan.minPages}-${wikiPlan.maxPages} pages; at least ${wikiPlan.minPageBytes} bytes/page`,
+		});
 		progress(input, {
 			phase: "codewiki",
 			status: "completed",
@@ -313,6 +325,8 @@ export async function runWikiGenerate(
 			cwd,
 			mode,
 			codewiki,
+			plan: wikiPlan,
+			currentPages: listWikiPagesInDir(wikiDir(cwd)).length,
 			gitHead: existingMeta?.gitHead ?? null,
 			outputDir: stagingDir,
 		});
@@ -336,6 +350,7 @@ export async function runWikiGenerate(
 				mode,
 				prompt,
 				outputDir: stagingDir,
+				plan: wikiPlan,
 				...(input.onProgress ? { progress: input.onProgress } : {}),
 			});
 		} catch (err) {
@@ -347,7 +362,11 @@ export async function runWikiGenerate(
 		}
 		progress(input, { phase: "generate", status: "completed", message: "wiki generator completed" });
 
-		const validation = validateWikiLayoutInDir(stagingDir);
+		const validation = validateWikiLayoutInDir(stagingDir, {
+			minPages: wikiPlan.minPages,
+			maxPages: wikiPlan.maxPages,
+			minPageBytes: wikiPlan.minPageBytes,
+		});
 		if (!validation.ok) {
 			removeDir(stagingDir);
 			progress(input, {
@@ -371,6 +390,13 @@ export async function runWikiGenerate(
 				model: input.model,
 				contentHash: afterHash,
 				pages: stagedPages,
+				generation: {
+					requestedDepth: wikiPlan.requestedDepth,
+					depth: wikiPlan.depth,
+					sourceFiles: wikiPlan.sourceFiles,
+					sourceLines: wikiPlan.sourceLines,
+					researchAgents: wikiPlan.researchAgents,
+				},
 			});
 		};
 

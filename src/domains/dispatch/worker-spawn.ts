@@ -530,7 +530,11 @@ export function spawnWorkerProcess(
 
 export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): SpawnedWorker {
 	const workerEntry = opts?.workerEntryPath ?? join(resolvePackageRoot(), "dist/worker/entry.js");
-	return spawnWorkerProcess(process.execPath, [workerEntry], spec, {
+	// Workers intentionally use node:sqlite for the trace journal. Its generic
+	// ExperimentalWarning offers operators no action and otherwise leaks into
+	// every internal-agent command's stderr. Suppress only that warning class;
+	// ordinary process warnings remain visible.
+	return spawnWorkerProcess(process.execPath, ["--disable-warning=ExperimentalWarning", workerEntry], spec, {
 		...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
 		env: opts?.env ?? process.env,
 		...(opts?.shutdownGraceMs !== undefined ? { shutdownGraceMs: opts.shutdownGraceMs } : {}),

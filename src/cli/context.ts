@@ -5,7 +5,8 @@ const HELP = `Usage:
   clio context
   clio context init [--yes] [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
   clio context refresh [--wiki]
-  clio context wiki [--update] [--status]
+  clio context wiki [--update] [--status] [--depth auto|simple|medium|detailed]
+                    [--target <id>] [--model <id>] [--thinking off|low|medium|high]
   clio context reset [--all]
   clio context index [--json]
 
@@ -165,6 +166,14 @@ async function runWikiStatusCommand(): Promise<number> {
 		`updatedAt: ${meta.updatedAt}`,
 		`gitHead: ${meta.gitHead ?? "none"}`,
 	];
+	if (meta.generation) {
+		const { depth, requestedDepth, researchAgents, sourceFiles } = meta.generation;
+		const bounds = context.WIKI_DEPTH_STRATEGY[depth];
+		lines.push(
+			`depth: ${depth} (requested ${requestedDepth}; ${researchAgents} area researchers; ` +
+				`${sourceFiles} source files; ${bounds.minPages}-${bounds.maxPages} pages)`,
+		);
+	}
 	if (currentHead !== meta.gitHead) {
 		lines.push(`staleness: gitHead differs from current HEAD (${currentHead ?? "none"})`);
 	}
@@ -172,10 +181,28 @@ async function runWikiStatusCommand(): Promise<number> {
 	return 0;
 }
 
+type WikiCliDepth = "auto" | "simple" | "medium" | "detailed";
+type WikiCliThinking = "off" | "low" | "medium" | "high";
+
+const VALUE_FLAGS = new Set(["--target", "--model", "--thinking", "--depth"]);
+
+function isWikiDepth(value: unknown): value is WikiCliDepth {
+	return value === "auto" || value === "simple" || value === "medium" || value === "detailed";
+}
+
+function isThinkingLevel(value: unknown): value is WikiCliThinking {
+	return value === "off" || value === "low" || value === "medium" || value === "high";
+}
+
 async function runWikiCommand(args: string[]): Promise<number> {
 	let forceUpdate = false;
 	let status = false;
-	for (const arg of args) {
+	let depth: WikiCliDepth = "auto";
+	let target: string | undefined;
+	let model: string | undefined;
+	let thinkingLevel: WikiCliThinking | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index];
 		if (arg === "--help" || arg === "-h") {
 			process.stdout.write(HELP);
 			return 0;
@@ -188,6 +215,33 @@ async function runWikiCommand(args: string[]): Promise<number> {
 			status = true;
 			continue;
 		}
+		if (VALUE_FLAGS.has(arg ?? "")) {
+			const value = args[index + 1];
+			index += 1;
+			if (arg === "--target" || arg === "--model") {
+				if (!value || value.startsWith("--")) {
+					process.stderr.write(`clio context wiki: ${arg} requires a value\n`);
+					return 2;
+				}
+				if (arg === "--target") target = value;
+				else model = value;
+				continue;
+			}
+			if (arg === "--thinking") {
+				if (!isThinkingLevel(value)) {
+					process.stderr.write("clio context wiki: --thinking must be off, low, medium, or high\n");
+					return 2;
+				}
+				thinkingLevel = value;
+				continue;
+			}
+			if (!isWikiDepth(value)) {
+				process.stderr.write("clio context wiki: --depth must be auto, simple, medium, or detailed\n");
+				return 2;
+			}
+			depth = value;
+			continue;
+		}
 		process.stderr.write(`clio context wiki: unknown flag ${arg}\n`);
 		process.stdout.write(HELP);
 		return 2;
@@ -196,11 +250,17 @@ async function runWikiCommand(args: string[]): Promise<number> {
 	try {
 		const context = await import("../domains/context/index.js");
 		const { modelWikiGenerate, resolveDocumenterModelId } = await import("./wiki-generate.js");
+		const route = {
+			...(target !== undefined ? { target } : {}),
+			...(model !== undefined ? { model } : {}),
+			...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
+		};
 		const result = await context.runWikiGenerate({
 			cwd: process.cwd(),
 			...(forceUpdate ? { mode: "update" as const } : {}),
-			model: await resolveDocumenterModelId(),
-			generate: modelWikiGenerate(),
+			depth,
+			model: await resolveDocumenterModelId(route),
+			generate: modelWikiGenerate({ route }),
 			onProgress: printWikiProgress,
 		});
 		if (result.status === "failed") {

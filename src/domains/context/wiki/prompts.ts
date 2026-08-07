@@ -4,6 +4,7 @@ import { isAbsolute, join, relative } from "node:path";
 import { resolvePackageRoot } from "../../../core/package-root.js";
 import { renderCodewikiDigest } from "../codewiki/digest.js";
 import type { Codewiki } from "../codewiki/indexer.js";
+import type { WikiGenerationPlan } from "./plan.js";
 
 export type WikiGenerateMode = "init" | "update";
 
@@ -11,6 +12,8 @@ export interface BuildWikiPromptInput {
 	cwd: string;
 	mode: WikiGenerateMode;
 	codewiki: Codewiki;
+	plan: WikiGenerationPlan;
+	currentPages?: number;
 	gitHead?: string | null;
 	/**
 	 * Absolute staging directory the writer must target. Substituted for the
@@ -122,9 +125,30 @@ function gitEvidence(cwd: string, gitHead: string | null | undefined): string {
 	}
 }
 
+function generationStrategy(plan: WikiGenerationPlan, currentPages: number | undefined): string {
+	const areas = plan.focusAreas.length > 0 ? plan.focusAreas.join(", ") : "none; the primary writer researches directly";
+	const lines = [
+		`Depth: ${plan.depth} (requested: ${plan.requestedDepth}).`,
+		`Scale: ${plan.sourceFiles} source files, ${plan.sourceLines} source lines.`,
+		`Composition: ${plan.researchAgents} area researchers feeding one coherent writer; required breadth ${plan.minPages}-${plan.maxPages} substantive pages, each at least ${plan.minPageBytes} bytes.`,
+		`Focus areas: ${areas}.`,
+		"Area reports supplied to the writer are advisory navigation evidence. Verify mutable claims against live source before publishing them.",
+	];
+	if (currentPages !== undefined) {
+		lines.push(
+			currentPages < plan.minPages
+				? `Current wiki breadth: ${currentPages} pages. Expand it to at least ${plan.minPages} pages; a no-op is not acceptable for this run.`
+				: `Current wiki breadth: ${currentPages} pages. Keep or improve this breadth without creating thin pages.`,
+		);
+	}
+	return lines.join("\n");
+}
+
 export function buildWikiPrompt(input: BuildWikiPromptInput): string {
 	const sections = [
 		readWikiFragment(input.mode, input.outputDir),
+		"## Generation strategy",
+		generationStrategy(input.plan, input.currentPages),
 		"## Repository guidance",
 		repositoryGuidance(input.cwd),
 		"## Working-tree evidence",

@@ -4,6 +4,21 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { type WikiPage, wikiDir } from "./layout.js";
+import type { ResolvedWikiDepth, WikiDepth } from "./plan.js";
+
+/**
+ * What the generator observed and chose for this artifact. Only measurements
+ * and the resolved choice are recorded; the page and size bounds are policy
+ * derivable from `depth` through `WIKI_DEPTH_STRATEGY`, so storing them would
+ * duplicate a constant that the reader can already look up.
+ */
+export interface WikiMetaGeneration {
+	requestedDepth: WikiDepth;
+	depth: ResolvedWikiDepth;
+	sourceFiles: number;
+	sourceLines: number;
+	researchAgents: number;
+}
 
 export interface WikiMeta {
 	version: 1;
@@ -13,6 +28,7 @@ export interface WikiMeta {
 	model: string;
 	contentHash: string;
 	pages: WikiPage[];
+	generation?: WikiMetaGeneration;
 }
 
 export type WikiMetaValidation = { ok: true; value: WikiMeta } | { ok: false; problems: string[] };
@@ -27,6 +43,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function nonNegativeSafeInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+const REQUESTED_DEPTHS: ReadonlyArray<WikiDepth> = ["auto", "simple", "medium", "detailed"];
+const RESOLVED_DEPTHS: ReadonlyArray<ResolvedWikiDepth> = ["simple", "medium", "detailed"];
+
+function parseGeneration(value: unknown, problems: string[]): WikiMetaGeneration | undefined {
+	if (value === undefined) return undefined;
+	if (!isRecord(value)) {
+		problems.push("generation must be an object when present");
+		return undefined;
+	}
+	const { requestedDepth, depth, sourceFiles, sourceLines, researchAgents } = value;
+	const requestedOk = REQUESTED_DEPTHS.includes(requestedDepth as WikiDepth);
+	const depthOk = RESOLVED_DEPTHS.includes(depth as ResolvedWikiDepth);
+	const filesOk = nonNegativeSafeInteger(sourceFiles);
+	const linesOk = nonNegativeSafeInteger(sourceLines);
+	const agentsOk = nonNegativeSafeInteger(researchAgents);
+	if (!requestedOk) problems.push("generation.requestedDepth is invalid");
+	if (!depthOk) problems.push("generation.depth is invalid");
+	if (!filesOk) problems.push("generation.sourceFiles must be a non-negative safe integer");
+	if (!linesOk) problems.push("generation.sourceLines must be a non-negative safe integer");
+	if (!agentsOk) problems.push("generation.researchAgents must be a non-negative safe integer");
+	if (!requestedOk || !depthOk || !filesOk || !linesOk || !agentsOk) return undefined;
+	return {
+		requestedDepth: requestedDepth as WikiDepth,
+		depth: depth as ResolvedWikiDepth,
+		sourceFiles,
+		sourceLines,
+		researchAgents,
+	};
 }
 
 function normalizePages(pages: ReadonlyArray<WikiPage>): WikiPage[] {
@@ -69,6 +119,7 @@ export function validateWikiMeta(value: unknown): WikiMetaValidation {
 	if (!contentHash || !/^[a-f0-9]{64}$/.test(contentHash)) {
 		problems.push("contentHash must be a sha256 hex string");
 	}
+	const generation = parseGeneration(value.generation, problems);
 	if (!Array.isArray(value.pages)) {
 		problems.push("pages must be an array");
 	} else {
@@ -92,6 +143,7 @@ export function validateWikiMeta(value: unknown): WikiMetaValidation {
 			model: model as string,
 			contentHash: contentHash as string,
 			pages: normalizePages(value.pages as WikiPage[]),
+			...(generation !== undefined ? { generation } : {}),
 		},
 	};
 }
@@ -122,6 +174,7 @@ export function writeWikiMeta(cwd: string, meta: WikiMeta): void {
 		model: meta.model,
 		contentHash: meta.contentHash,
 		pages: normalizePages(meta.pages),
+		...(meta.generation !== undefined ? { generation: { ...meta.generation } } : {}),
 	};
 	safeResourceWrite(wikiMetaPath(cwd), `${JSON.stringify(normalized)}\n`, { encoding: "utf8" });
 }
