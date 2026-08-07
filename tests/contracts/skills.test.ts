@@ -168,6 +168,58 @@ describe("contracts/skills loader normalization", () => {
 		ok(list.diagnostics.some((d) => d.message.includes("narrows nothing")));
 	});
 
+	it("refuses a project skill whose symlink resolves outside the workspace", () => {
+		const scratch = scratchDir();
+		const workspace = join(scratch, "repo");
+		const outside = join(scratch, "outside", "secrets");
+		mkdirSync(join(workspace, ".clio", "skills"), { recursive: true });
+		mkdirSync(outside, { recursive: true });
+		writeFileSync(join(outside, "credentials.txt"), "AWS_SECRET=hunter2\n", "utf8");
+		writeFileSync(
+			join(outside, "SKILL.md"),
+			["---", 'name: "escaped"', 'description: "Base dir outside the repo."', "---", "", "body", ""].join("\n"),
+			"utf8",
+		);
+		symlinkSync(outside, join(workspace, ".clio", "skills", "escaped"));
+
+		const list = loadSkills({ cwd: workspace, home: join(scratch, "nohome"), configDir: join(scratch, "noconfig") });
+
+		// The escape is invisible in every path the operator is later shown:
+		// filePath and baseDir both keep the symlink's own repository-local
+		// location while the body and the resource tree come from outside.
+		strictEqual(
+			list.items.find((skill) => skill.name === "escaped"),
+			undefined,
+		);
+		const diagnostic = list.diagnostics.find((d) => d.message.includes("may not leave its scope through a symlink"));
+		ok(diagnostic, `expected a containment diagnostic, got ${JSON.stringify(list.diagnostics.map((d) => d.message))}`);
+		ok(diagnostic.message.includes(outside), "diagnostic must name the resolved path");
+	});
+
+	it("still loads a project skill symlinked from elsewhere inside the workspace", () => {
+		const scratch = scratchDir();
+		const workspace = join(scratch, "repo");
+		const shared = join(workspace, "shared", "skills", "inside");
+		mkdirSync(join(workspace, ".clio", "skills"), { recursive: true });
+		mkdirSync(shared, { recursive: true });
+		writeFileSync(
+			join(shared, "SKILL.md"),
+			["---", 'name: "inside"', 'description: "Shared across checkouts."', "---", "", "body", ""].join("\n"),
+			"utf8",
+		);
+		symlinkSync(shared, join(workspace, ".clio", "skills", "inside"));
+
+		const list = loadSkills({ cwd: workspace, home: join(scratch, "nohome"), configDir: join(scratch, "noconfig") });
+
+		// A monorepo may share one skills tree across checkouts; the boundary is
+		// the workspace, not the skills directory.
+		ok(list.items.some((skill) => skill.name === "inside"));
+		strictEqual(
+			list.diagnostics.find((d) => d.message.includes("may not leave its scope through a symlink")),
+			undefined,
+		);
+	});
+
 	it("rejects a skill that is missing a description", () => {
 		const root = scratchDir();
 		writeSkillDir(root, "no-desc", ['name: "no-desc"']);
