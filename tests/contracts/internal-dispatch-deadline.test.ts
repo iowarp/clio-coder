@@ -222,6 +222,51 @@ describe("internal generator dispatch deadline", () => {
 		}
 	});
 
+	it("names why the first call was blocked instead of only counting blocks", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		const outputDir = mkdtempSync(join(tmpdir(), "clio-wiki-block-reason-"));
+		const progress: string[] = [];
+		try {
+			const dispatch = {
+				dispatch: async () => {
+					mkdirSync(outputDir, { recursive: true });
+					writeFileSync(join(outputDir, "quickstart.md"), "# Quickstart\n\nValid.\n", "utf8");
+					return {
+						runId: "run-block-reason",
+						events: (async function* () {
+							yield {
+								type: "clio_tool_finish",
+								payload: {
+									tool: "read",
+									outcome: "blocked",
+									reason:
+										"loop detected: read was called 3 times with identical arguments among this turn's recent tool calls. Repeating the exact call is blocked.",
+								},
+							};
+						})(),
+						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
+					};
+				},
+				abort: () => {},
+			} as unknown as DispatchContract;
+
+			await generateWikiWithDocumenter(dispatch, {
+				...WIKI_INPUT,
+				outputDir,
+				progress: (event) => progress.push(event.detail ?? ""),
+			});
+
+			const blockedLine = progress.find((detail) => detail.includes("blocked=1"));
+			ok(blockedLine, "the blocked call is reported");
+			// A count says a run is in trouble; the reason says which kind of trouble.
+			ok(blockedLine?.includes("loop detected"), `the reason rides the progress line: ${blockedLine}`);
+			ok((blockedLine?.length ?? 0) < 200, "the line stays one line");
+		} finally {
+			rmSync(outputDir, { recursive: true, force: true });
+			configureGuardrails(undefined);
+		}
+	});
+
 	it("promotes a valid staged wiki when the last attempt ended on its budget", async () => {
 		// The writer stopped the way its budget told it to. What it staged is a
 		// candidate like any other, so validation decides; deleting it here threw

@@ -74,6 +74,17 @@ const RECOVERABLE_WIKI_OUTCOMES = new Set([
 	"result_contract_exhausted",
 ]);
 
+const BLOCK_REASON_MAX_CHARS = 80;
+
+/** First sentence of a block reason, bounded so one line stays one line. */
+function summarizeBlockReason(reason: string): string {
+	const firstSentence = reason.split(/(?<=[.;])\s/, 1)[0]?.trim() ?? reason.trim();
+	const collapsed = firstSentence.replace(/\s+/g, " ");
+	return collapsed.length <= BLOCK_REASON_MAX_CHARS
+		? collapsed
+		: `${collapsed.slice(0, BLOCK_REASON_MAX_CHARS - 1).trimEnd()}…`;
+}
+
 async function drainDispatchEvents(
 	events: AsyncIterable<unknown>,
 	input: WikiGenerateInput,
@@ -83,17 +94,24 @@ async function drainDispatchEvents(
 	let completed = 0;
 	let errors = 0;
 	let blocked = 0;
+	// A count of blocked calls says a run is in trouble without saying what kind.
+	// A containment refusal, a loop block, and a budget block are three different
+	// diagnoses, and reading them back out of receipts afterwards is the only
+	// thing that separated them. The first reason is carried in the progress line.
+	let firstBlockReason: string | null = null;
 	const tools = new Map<string, number>();
 	const report = (message: string): void => {
 		const mix = [...tools.entries()]
 			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([tool, count]) => `${tool}=${count}`)
 			.join(", ");
+		const blockedDetail =
+			blocked > 0 ? `; blocked=${blocked}${firstBlockReason ? ` (${summarizeBlockReason(firstBlockReason)})` : ""}` : "";
 		input.progress?.({
 			phase: "generate",
 			status: "running",
 			message,
-			detail: `${formatElapsed(Date.now() - startedAt)}; ${mix || "no tools completed"}${errors > 0 ? `; errors=${errors}` : ""}${blocked > 0 ? `; blocked=${blocked}` : ""}`,
+			detail: `${formatElapsed(Date.now() - startedAt)}; ${mix || "no tools completed"}${errors > 0 ? `; errors=${errors}` : ""}${blockedDetail}`,
 		});
 	};
 	// Every event is consumed so finalization cannot block on an unread iterator.
@@ -115,7 +133,10 @@ async function drainDispatchEvents(
 		completed += 1;
 		tools.set(tool, (tools.get(tool) ?? 0) + 1);
 		if (outcome === "error") errors += 1;
-		if (outcome === "blocked") blocked += 1;
+		if (outcome === "blocked") {
+			blocked += 1;
+			firstBlockReason ??= eventPayloadString(event, "reason");
+		}
 		// Report the first block immediately, then fold a blocked-call spiral into
 		// the normal cadence instead of flooding the operator's terminal.
 		if (completed % TOOL_PROGRESS_INTERVAL === 0 || outcome === "error" || (outcome === "blocked" && blocked === 1)) {

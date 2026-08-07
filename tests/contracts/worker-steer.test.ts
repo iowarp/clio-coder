@@ -1428,7 +1428,13 @@ describe("worker locked-turn markup sanitation", () => {
 			fauxAssistantMessage([fauxToolCall("read", { path: "README.md" }, { id })], { stopReason: "toolUse" });
 		const { input, unregister } = fauxRuntimeInput(
 			[readCall("call-1"), readCall("call-2"), readCall("call-3"), readCall("call-4"), fauxAssistantMessage(markup)],
-			{ allowedTools: [ToolNames.Read], task: "summarize README.md" },
+			{
+				allowedTools: [ToolNames.Read],
+				task: "summarize README.md",
+				// A short run's loop-block budget is still the interactive two, so
+				// this is the same lockout the battletest evidence produced.
+				budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
+			},
 		);
 		try {
 			const result = await startWorkerRun(input, (event) => events.push(event)).promise;
