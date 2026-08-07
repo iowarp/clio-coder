@@ -35,6 +35,7 @@ import {
 	readOrchTurnToolCallBudget,
 	readWorkerToolCallCap,
 	sanitizeLockedSynthesisMessage,
+	workerLoopBlockBudget,
 } from "../../src/engine/loop-guard.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { invokeRegisteredTool, type ToolFinishEvent } from "../../src/tools/agent-tools.js";
@@ -150,6 +151,47 @@ describe("unified loop guard registration", () => {
 		// runaway-turn hardening that motivated them.
 		strictEqual(LOOP_THRESHOLD, 3, "identical-call detector trips on the third repeat");
 		strictEqual(INTERACTIVE_LOOP_BLOCK_BUDGET, 2, "two loop blocks per turn before interrupt");
+	});
+
+	it("scales a worker's loop-block budget with the run it is allowed to be", async () => {
+		// A worker sets no turnId, so its blocks accumulate in one bucket for the
+		// whole run. Measured against the interactive per-turn budget, the second
+		// spiral anywhere in a long editing pass ended the run.
+		strictEqual(workerLoopBlockBudget(18), INTERACTIVE_LOOP_BLOCK_BUDGET, "a short run keeps today's bound");
+		strictEqual(workerLoopBlockBudget(50), 5);
+		strictEqual(workerLoopBlockBudget(120), 12);
+		strictEqual(workerLoopBlockBudget(0), INTERACTIVE_LOOP_BLOCK_BUDGET, "a nonsense budget falls back, never to zero");
+		strictEqual(workerLoopBlockBudget(Number.NaN), INTERACTIVE_LOOP_BLOCK_BUDGET);
+	});
+
+	it("does not lock a long worker run out on its second isolated spiral", async () => {
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({
+			registrations: [
+				createLoopGuardRegistration({
+					safety,
+					toolCallCap: 150,
+					toolCallSoftLimit: 120,
+					turnBlockBudget: workerLoopBlockBudget(120),
+					turnSynthesisLockout: true,
+				}),
+			],
+		});
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		// Two separate spirals, the shape a weak model produces across a long pass.
+		for (const path of ["first-spiral.md", "second-spiral.md"]) {
+			for (let i = 0; i < LOOP_THRESHOLD; i += 1) {
+				await registry.invoke({ tool: ToolNames.Read, args: { path } });
+			}
+			const blocked = await registry.invoke({ tool: ToolNames.Read, args: { path } });
+			ok(blocked.kind === "blocked" && blocked.reason.includes("loop detected"), `${path} is blocked on the spot`);
+			ok(
+				blocked.kind === "blocked" && !blocked.reason.includes("tool calls are now disabled"),
+				`${path} does not end the run`,
+			);
+		}
+		// Work continues after both.
+		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: "back-to-work.md" } })).kind, "ok");
 	});
 
 	it("blocks the identical call at the detector threshold and recovers with house-style feedback", async () => {

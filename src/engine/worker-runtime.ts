@@ -69,6 +69,7 @@ import {
 	createLoopGuardRegistration,
 	isLoopGuardSynthesisBackstopReason,
 	sanitizeLockedSynthesisMessage,
+	workerLoopBlockBudget,
 } from "./loop-guard.js";
 import { patchWorkerRequestPayload } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
@@ -436,6 +437,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				safety,
 				toolCallCap: workerBudget.hardCap,
 				toolCallSoftLimit: workerBudget.toolCalls,
+				// A worker's blocks all land in one run-long bucket, so the bound on
+				// them is a statement about this run's length, not about a turn.
+				turnBlockBudget: workerLoopBlockBudget(workerBudget.toolCalls),
 				toolCallSoftReadReserve: readReserve,
 				...(deliveryTools.length > 0 ? { deliveryTools } : {}),
 				turnSynthesisLockout: workerBudget.synthesis,

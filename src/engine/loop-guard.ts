@@ -46,6 +46,27 @@ export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
  */
 export const INTERACTIVE_LOOP_BLOCK_BUDGET = 2;
 
+/** One loop block tolerated per this many admitted calls in a worker run. */
+const WORKER_LOOP_BLOCK_CALLS_PER_BLOCK = 10;
+
+/**
+ * Loop blocks a worker run tolerates before it is locked to synthesis.
+ *
+ * A worker has no turns: it never sets a turnId, so every block it collects
+ * lands in one bucket that lives for the whole run. Measuring that run-long
+ * count against the interactive per-turn budget made the second verbatim
+ * spiral anywhere in a ninety-call editing pass end the run, which is a
+ * verdict about run length rather than about degeneracy. The detector still
+ * blocks each spiral on the spot; this is the separate judgment that the run
+ * as a whole is not converging, so it scales with how long the run is allowed
+ * to be. The interactive budget stays the floor, so a short worker keeps
+ * exactly the bound it has today.
+ */
+export function workerLoopBlockBudget(toolCalls: number): number {
+	if (!Number.isSafeInteger(toolCalls) || toolCalls <= 0) return INTERACTIVE_LOOP_BLOCK_BUDGET;
+	return Math.max(INTERACTIVE_LOOP_BLOCK_BUDGET, Math.ceil(toolCalls / WORKER_LOOP_BLOCK_CALLS_PER_BLOCK));
+}
+
 /**
  * Post-lockout tool calls tolerated before the synthesis lockout falls back to
  * a hard turn stop. Once a turn reaches its loop-block budget the guard locks
