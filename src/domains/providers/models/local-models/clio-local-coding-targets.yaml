@@ -617,11 +617,22 @@
     chat: true
     tools: true
     toolCallFormat: qwen
-    # Reasoning class: never. The creator's card frames the Coder-MTP line as
-    # thinking-off execution; reasoning=false keeps every per-request path
-    # (pi-ai qwen-chat-template kwargs included) from re-enabling thinking
-    # over the server's enable_thinking=false launch default.
-    reasoning: false
+    # Reasoning class: effort-levels, measured on dynamo 2026-08-08. The card
+    # frames the Coder-MTP line as thinking-off execution, but the wire
+    # disagrees: on "what is 17+25" this model spends 98 of 103 completion
+    # tokens on reasoning, and a wiki planning dispatch spent 89,501. It is an
+    # always-reasoning model unless told otherwise.
+    #
+    # chat_template_kwargs enable_thinking is inert here (verified with unique
+    # prompts to rule out cache hits). reasoning_effort "none" is the control
+    # that works, taking the same prompt from 98 reasoning tokens to 0, which
+    # is why `off` is mapped explicitly below rather than left unsent.
+    #
+    # reasoning=false previously resolved to mechanism "none", and mechanism
+    # "none" makes openai-completions strip reasoning_effort from the payload.
+    # The flag set to suppress thinking was the reason it could not be
+    # suppressed.
+    reasoning: true
     thinkingFormat: qwen-chat-template
     structuredOutputs: json-schema
     vision: true
@@ -663,12 +674,21 @@
       chatTemplateKwargs:
         enable_thinking: false
     thinking:
-      mechanism: none
+      mechanism: effort-levels
+      effortByLevel:
+        # "none" is the only value that silences this family. It is carried on
+        # the wire because the model reasons by default, so sending nothing is
+        # in effect a request to keep reasoning.
+        off: none
+        low: low
+        medium: medium
+        high: high
       guidance: |
-        Qwopus3.6 35B-A3B Coder is a thinking-off coder/agent in the Qwopus
-        line (Opus-distilled traces over Qwen3.6 35B-A3B). The creator's card
-        specifies thinking-off execution for the Coder-MTP variants; the dial
-        clamps to off at every level and no request may re-enable thinking.
+        Qwopus3.6 35B-A3B Coder reasons unless reasoning_effort is set to
+        "none", despite the creator's card describing the Coder-MTP variants as
+        thinking-off. That dial only reaches the wire on openai-compat; the LM
+        Studio native transport has no field for it, so a native-routed run
+        reasons at full rate whatever the configured thinking level says.
     serving: "Jackrong Qwopus3.6 35B-A3B Coder MTP, Q4_K_M. Thinking-off coder/agent tuned for tool-use loops. Served as a local router default with MTP speculative decoding (spec-type draft-mtp, n_max 2) and F32 mmproj vision both active at 262k."
 
 - family: qwopus3.6-27b-coder

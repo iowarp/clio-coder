@@ -178,6 +178,7 @@ function extractBudgetByLevel(raw: unknown): ThinkingQuirks["budgetByLevel"] | u
 function extractEffortByLevel(raw: unknown): ThinkingQuirks["effortByLevel"] | undefined {
 	if (!isRecord(raw)) return undefined;
 	const out: NonNullable<ThinkingQuirks["effortByLevel"]> = {};
+	if (typeof raw.off === "string" && raw.off.length > 0) out.off = raw.off;
 	if (typeof raw.minimal === "string" && raw.minimal.length > 0) out.minimal = raw.minimal;
 	if (typeof raw.low === "string" && raw.low.length > 0) out.low = raw.low;
 	if (typeof raw.medium === "string" && raw.medium.length > 0) out.medium = raw.medium;
