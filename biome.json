@@ -44,7 +44,8 @@
 			"!**/*.log",
 			"!**/.superpowers",
 			"!benchmarks/community/*/runs",
-			"!**/*.html"
+			"!**/*.html",
+			"!tmp"
 		]
 	}
 }
