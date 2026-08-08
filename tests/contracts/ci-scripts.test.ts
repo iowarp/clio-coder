@@ -51,9 +51,9 @@ function matrixValues(path: string, jobId: string, key: string): unknown[] {
 
 describe("contracts/ci scripts", () => {
 	it("audits both runtime identity fragments as exact package resources", () => {
-		const releaseGate = readFileSync("scripts/check-release.mjs", "utf8");
-		ok(releaseGate.includes('"src/domains/prompts/fragments/identity/clio.md"'));
-		ok(releaseGate.includes('"src/domains/prompts/fragments/identity/clio-worker.md"'));
+		const required: string[] = JSON.parse(readFileSync("scripts/release-manifest.json", "utf8")).requiredFiles;
+		ok(required.includes("src/domains/prompts/fragments/identity/clio.md"));
+		ok(required.includes("src/domains/prompts/fragments/identity/clio-worker.md"));
 	});
 
 	it("keeps the deterministic local ci script aligned with the release-relevant checks", () => {
