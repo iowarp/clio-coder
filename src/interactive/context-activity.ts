@@ -26,13 +26,26 @@ interface ContextActivityEntry extends ContextActivitySnapshot {}
 
 export const CONTEXT_ISLAND_WIDTH = 52;
 const PHASES: ReadonlyArray<ContextActivityPhase> = ["scan", "codewiki", "generate", "clio-md", "state", "done"];
+/**
+ * A wiki run only ever emits codewiki, generate, state, and done. Trailing the
+ * bootstrap phases it never reaches would leave `scan` and `CLIO.md` dimmed for
+ * the whole run and would stretch the progress bar across steps that cannot
+ * happen.
+ */
+const WIKI_PHASES: ReadonlyArray<ContextActivityPhase> = ["codewiki", "generate", "state", "done"];
 const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 	scan: "scan",
-	codewiki: "wiki",
+	// "index" rather than "wiki": this phase is the codewiki index build, and
+	// `context-wiki` runs made the old label ambiguous with the Markdown wiki.
+	codewiki: "index",
 	generate: "draft",
 	"clio-md": "CLIO.md",
 	state: "state",
 	done: "done",
+};
+const WIKI_PHASE_LABELS: Partial<Record<ContextActivityPhase, string>> = {
+	generate: "pages",
+	state: "promote",
 };
 const TERMINAL_RETENTION_MS = 4_000;
 
@@ -40,9 +53,19 @@ const KINDS: ReadonlySet<string> = new Set<ContextActivityKind>([
 	"context-init",
 	"context-clear",
 	"context-refresh",
+	"context-wiki",
 	"compaction",
 ]);
 const PHASE_SET: ReadonlySet<string> = new Set<ContextActivityPhase>(PHASES);
+
+function phasesFor(kind: ContextActivityKind): ReadonlyArray<ContextActivityPhase> {
+	return kind === "context-wiki" ? WIKI_PHASES : PHASES;
+}
+
+function phaseLabel(kind: ContextActivityKind, phase: ContextActivityPhase): string {
+	if (kind === "context-wiki") return WIKI_PHASE_LABELS[phase] ?? PHASE_LABELS[phase];
+	return PHASE_LABELS[phase];
+}
 const STATUSES: ReadonlySet<string> = new Set<ContextActivityStatus>(["started", "running", "completed", "failed"]);
 
 function isContextActivityPayload(value: unknown): value is ContextActivityPayload {
@@ -65,18 +88,20 @@ function padAnsi(text: string, width: number): string {
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
-function phaseIndex(phase: ContextActivityPhase): number {
-	const index = PHASES.indexOf(phase);
+function phaseIndex(kind: ContextActivityKind, phase: ContextActivityPhase): number {
+	const index = phasesFor(kind).indexOf(phase);
 	return index >= 0 ? index : 0;
 }
 
 function activityProgress(activity: ContextActivitySnapshot): number {
 	if (activity.status === "completed" && activity.phase === "done") return 1;
+	const phases = phasesFor(activity.kind);
+	const index = phaseIndex(activity.kind, activity.phase);
 	if (activity.total !== null && activity.total > 0 && activity.current !== null) {
 		const withinPhase = Math.max(0, Math.min(1, activity.current / activity.total));
-		return Math.min(1, (phaseIndex(activity.phase) + withinPhase) / PHASES.length);
+		return Math.min(1, (index + withinPhase) / phases.length);
 	}
-	return Math.min(1, phaseIndex(activity.phase) / Math.max(1, PHASES.length - 1));
+	return Math.min(1, index / Math.max(1, phases.length - 1));
 }
 
 function progressBar(theme: ClioTheme, activity: ContextActivitySnapshot, width: number): string {
@@ -87,20 +112,22 @@ function progressBar(theme: ClioTheme, activity: ContextActivitySnapshot, width:
 }
 
 function phaseTrail(theme: ClioTheme, activity: ContextActivitySnapshot, width: number): string {
-	const currentIndex = phaseIndex(activity.phase);
-	const parts = PHASES.slice(0, -1).map((phase, index) => {
-		const label = PHASE_LABELS[phase];
-		if (index < currentIndex) return theme.fg("success", label);
-		if (index === currentIndex && activity.status !== "completed") return theme.fg("accent", label);
-		return theme.fg("dim", label);
-	});
+	const currentIndex = phaseIndex(activity.kind, activity.phase);
+	const parts = phasesFor(activity.kind)
+		.slice(0, -1)
+		.map((phase, index) => {
+			const label = phaseLabel(activity.kind, phase);
+			if (index < currentIndex) return theme.fg("success", label);
+			if (index === currentIndex && activity.status !== "completed") return theme.fg("accent", label);
+			return theme.fg("dim", label);
+		});
 	return padAnsi(parts.join(theme.fg("frame", " › ")), width);
 }
 
 function statusLabel(theme: ClioTheme, activity: ContextActivitySnapshot, tick: number): string {
 	if (activity.status === "failed") return theme.fg("error", `${GLYPH.error} failed`);
 	if (activity.status === "completed") return theme.fg("success", `${GLYPH.ok} done`);
-	return theme.fg("accent", `${spinnerFrame(tick)} ${PHASE_LABELS[activity.phase]}`);
+	return theme.fg("accent", `${spinnerFrame(tick)} ${phaseLabel(activity.kind, activity.phase)}`);
 }
 
 function frame(theme: ClioTheme, title: string, body: string[], width: number): string[] {
@@ -128,9 +155,11 @@ export function formatContextActivityIslandLines(
 			? "Context Init"
 			: activity.kind === "context-refresh"
 				? "Context Refresh"
-				: activity.kind === "compaction"
-					? "Context Compact"
-					: "Context";
+				: activity.kind === "context-wiki"
+					? "Context Wiki"
+					: activity.kind === "compaction"
+						? "Context Compact"
+						: "Context";
 	const elapsedMs = Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs);
 	const topLine = `${theme.style("accent", title, { bold: true })} ${theme.fg("dim", "·")} ${statusLabel(theme, activity, tick)} ${theme.fg("dim", "·")} ${theme.fg("info", formatCompactMs(elapsedMs))}`;
 	const barWidth = Math.max(8, Math.min(24, bodyWidth - 10));
