@@ -5,7 +5,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/context/codewiki/indexer.js";
 import { listWikiPages } from "../../domains/context/wiki/layout.js";
 import { readWikiMeta } from "../../domains/context/wiki/meta.js";
-import { wikiStaleness } from "../../domains/context/wiki/staleness.js";
+import { wikiCompletenessFromMeta, wikiStaleness } from "../../domains/context/wiki/staleness.js";
 import { compileGlobRegex } from "../ignore-policy.js";
 import {
 	finalizeObservation,
@@ -442,7 +442,7 @@ function runWiki(cwd: string, query: string): NavPayload | ToolResult {
 	if (staleness.state !== "fresh") {
 		messages.push(`Wiki pages may be outdated; wiki regeneration is operator-only: run \`${WIKI_UPDATE_COMMAND}\`.`);
 	}
-	const owed = meta.generation ? meta.generation.pagesPlanned - meta.generation.pagesWritten : 0;
+	const owed = wikiCompletenessFromMeta(meta)?.owed ?? 0;
 	if (owed > 0) {
 		messages.push(
 			`${owed} planned page${owed === 1 ? " is" : "s are"} not written yet; run \`${WIKI_UPDATE_COMMAND}\` to finish them.`,

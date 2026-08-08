@@ -2,7 +2,13 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readClioVersion, resolvePackageRoot } from "../core/package-root.js";
-import { listWikiPages, readCodewiki, renderCodewikiDigest, wikiStaleness } from "../domains/context/index.js";
+import {
+	listWikiPages,
+	readCodewiki,
+	renderCodewikiDigest,
+	wikiCompleteness,
+	wikiStaleness,
+} from "../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
@@ -194,10 +200,17 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		const staleness = wikiStaleness(cwd);
 		if (staleness.state !== "absent") {
 			wikiPageCount = listWikiPages(cwd).length;
-			wikiStatus =
+			const completeness = wikiCompleteness(cwd);
+			const freshness =
 				staleness.state === "stale"
 					? `stale, ${staleness.changedFiles} changed file${staleness.changedFiles === 1 ? "" : "s"}`
 					: "fresh";
+			// An incomplete wiki reports what it owes even when it is current,
+			// otherwise a half-finished run reads as a finished one.
+			wikiStatus =
+				completeness && completeness.owed > 0
+					? `${freshness}, ${completeness.pagesWritten}/${completeness.pagesPlanned} pages`
+					: freshness;
 		}
 	}
 

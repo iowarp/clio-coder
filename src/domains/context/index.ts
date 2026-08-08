@@ -148,4 +148,11 @@ export {
 	buildWikiPagePrompt,
 	buildWikiPlanPrompt,
 } from "./wiki/prompts.js";
-export { changedPathsSince, type WikiStaleness, wikiStaleness } from "./wiki/staleness.js";
+export {
+	changedPathsSince,
+	type WikiCompleteness,
+	type WikiStaleness,
+	wikiCompleteness,
+	wikiCompletenessFromMeta,
+	wikiStaleness,
+} from "./wiki/staleness.js";

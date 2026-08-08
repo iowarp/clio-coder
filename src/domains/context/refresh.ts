@@ -5,7 +5,7 @@ import { computeFingerprint, type Fingerprint } from "./fingerprint.js";
 import { readClioState, writeClioState } from "./state.js";
 import { type RunWikiGenerateResult, runWikiGenerate, type WikiGenerate } from "./wiki/generate.js";
 import { readWikiMeta } from "./wiki/meta.js";
-import { wikiStaleness } from "./wiki/staleness.js";
+import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
 
 /**
  * `/context refresh` and `clio context refresh`: rebuild the codewiki index
@@ -41,6 +41,13 @@ function indexedSourceFileCount(codewiki: Codewiki): number {
 }
 
 const STALE_WIKI_REFRESH_HINT = "wiki is stale; run clio context refresh --wiki or clio context wiki --update";
+const NO_WIKI_HINT = "no wiki exists, so --wiki had nothing to update; run clio context wiki to build one";
+
+function incompleteWikiHint(cwd: string): string | undefined {
+	const completeness = wikiCompleteness(cwd);
+	if (!completeness || completeness.owed === 0) return undefined;
+	return `wiki is incomplete: ${completeness.pagesWritten} of ${completeness.pagesPlanned} planned pages written, ${completeness.owed} owed; run clio context wiki --update to resume`;
+}
 
 export async function runContextRefresh(input: RunContextRefreshInput = {}): Promise<RunContextRefreshResult> {
 	const cwd = input.cwd ?? process.cwd();
@@ -80,8 +87,15 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 			...(input.wikiGenerate ? { generate: input.wikiGenerate } : {}),
 			...(input.onProgress ? { onProgress: input.onProgress } : {}),
 		});
-	} else if (input.wiki !== true && hasWiki && wikiStaleness(cwd).state === "stale") {
-		hint = STALE_WIKI_REFRESH_HINT;
+	} else if (input.wiki === true) {
+		// --wiki with no wiki on disk used to return silently, so an operator who
+		// asked for an update got a bare "codewiki rebuilt" and no way to tell the
+		// request had been dropped.
+		hint = NO_WIKI_HINT;
+	} else if (hasWiki) {
+		// Incompleteness is checked before staleness: a partial wiki is often
+		// perfectly fresh, and that combination used to produce no hint at all.
+		hint = incompleteWikiHint(cwd) ?? (wikiStaleness(cwd).state === "stale" ? STALE_WIKI_REFRESH_HINT : undefined);
 	}
 
 	input.io?.stdout(`clio context refresh: codewiki rebuilt (${entries} source file${entries === 1 ? "" : "s"})\n`);
