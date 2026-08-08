@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { runtimeSpeaksResponseSchemaDialect } from "../../src/core/response-schema.js";
 import {
 	createMemoryAuthStorage,
 	resolveAuthTarget,
@@ -822,6 +823,54 @@ describe("contracts/providers/runtime-cleanup", () => {
 					},
 					runtimeId: "claude-code",
 				}),
+			/responseSchema is supported only by the native llamacpp runtime/,
+		);
+	});
+
+	/**
+	 * The rule had five copies: the dispatch admission check, the receipt's
+	 * runtimeEnforceable flag, the worker spec validator, the worker runtime
+	 * assertion, and the payload patcher, which checked only the id and omitted
+	 * the transport clause the other four carried. One predicate now owns it.
+	 *
+	 * It stays a name check on purpose. lmstudio-native declares
+	 * `structuredOutputs: "json-schema"` truthfully and is still refused, because
+	 * the constraint ships as llama-server's `response_format: {type:
+	 * "json_object", schema}` spelling rather than the openai-completions
+	 * standard. A gateway that does not know that key accepts the request,
+	 * ignores it, and returns 200 with unconstrained JSON, so widening the gate to
+	 * the api family would turn a refusal into a silent non-enforcement.
+	 */
+	it("gates response schemas on the llama.cpp wire dialect, not on a declared capability", () => {
+		ok(runtimeSpeaksResponseSchemaDialect({ id: "llamacpp", kind: "http", apiFamily: "openai-completions" }));
+		strictEqual(
+			runtimeSpeaksResponseSchemaDialect({ id: "lmstudio-native", kind: "http", apiFamily: "lmstudio-native" }),
+			false,
+		);
+		strictEqual(runtimeSpeaksResponseSchemaDialect({ id: "vllm", kind: "http", apiFamily: "openai-completions" }), false);
+		strictEqual(
+			runtimeSpeaksResponseSchemaDialect({ id: "llamacpp", kind: "sdk", apiFamily: "openai-completions" }),
+			false,
+		);
+
+		// The spec validator refuses lmstudio-native even with the capability set.
+		throws(
+			() =>
+				parseWorkerSpec(
+					minimalWorkerSpec({
+						target: { id: "studio", runtime: "lmstudio-native" },
+						runtime: {
+							version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
+							id: "lmstudio-native",
+							kind: "http",
+							apiFamily: "lmstudio-native",
+							auth: "none",
+						},
+						runtimeId: "lmstudio-native",
+						modelCapabilities: { structuredOutputs: "json-schema" },
+						responseSchema: { type: "object", properties: { summary: { type: "string" } } },
+					}),
+				),
 			/responseSchema is supported only by the native llamacpp runtime/,
 		);
 	});

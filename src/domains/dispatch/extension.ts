@@ -19,7 +19,7 @@ import { GUARDRAIL_DEFAULTS } from "../../core/guardrails.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { protectedResidencyModelIds } from "../../core/residency-protection.js";
-import { UnsupportedResponseSchemaError } from "../../core/response-schema.js";
+import { runtimeSpeaksResponseSchemaDialect, UnsupportedResponseSchemaError } from "../../core/response-schema.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import {
@@ -1352,7 +1352,7 @@ function assertResponseSchemaEnforceable(
 	responseSchema: Record<string, unknown> | undefined,
 ): void {
 	if (responseSchema === undefined) return;
-	if (runtime.id === "llamacpp" && runtime.kind === "http" && runtime.apiFamily === "openai-completions") {
+	if (runtimeSpeaksResponseSchemaDialect(runtime)) {
 		if (capabilities?.structuredOutputs === "json-schema") return;
 		throw new UnsupportedResponseSchemaError(
 			"dispatch: responseSchema requires resolved structuredOutputs='json-schema'; the selected llama.cpp target/model reports no enforceable schema support",
@@ -4350,7 +4350,7 @@ export function createDispatchBundle(
 				quality: createRunReceiptQuality({
 					...(req.responseSchema === undefined ? {} : { responseSchema: req.responseSchema }),
 					runtimeEnforceable:
-						lifecycle.target.runtime.id === "llamacpp" &&
+						runtimeSpeaksResponseSchemaDialect(lifecycle.target.runtime) &&
 						lifecycle.target.modelCapabilities?.structuredOutputs === "json-schema",
 					enforcementPassed:
 						req.responseSchema === undefined ? null : outcome === "succeeded" && capturedOutput?.state === "final",
