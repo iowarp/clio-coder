@@ -1,0 +1,24 @@
+{
+	"comment": "Runtime resources the installed package must contain. Read by scripts/check-release.mjs against `npm pack --dry-run`, and by tests/contracts/packaging.test.ts against the package.json `files` allowlist, so the gate and the allowlist cannot drift apart. Every entry here must be shipped by `files`; a generated or gitignored path does not belong in this list.",
+	"requiredFiles": [
+		"dist/cli/index.js",
+		"dist/worker/entry.js",
+		"src/domains/prompts/fragments/identity/clio.md",
+		"src/domains/prompts/fragments/identity/clio-worker.md",
+		"assets/clio-coder-logo-128.webp",
+		"docs/html/index.html",
+		"damage-control-rules.yaml",
+		"README.md",
+		"LICENSE",
+		"NOTICE",
+		"CHANGELOG.md"
+	],
+	"requiredPrefixes": [
+		"src/domains/prompts/fragments/",
+		"src/domains/agents/builtins/",
+		"dist/domains/agents/builtins/",
+		"skills/cut-it/",
+		"src/domains/providers/models/",
+		"docs/html/"
+	]
+}
