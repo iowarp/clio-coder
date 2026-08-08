@@ -984,6 +984,7 @@ describe("contracts/turn-hooks finish-contract registration", () => {
 				metadata: {
 					stopReason: "stop",
 					runtimeId: "lmstudio-native",
+					runtimeTier: "local-native",
 					activeToolNames: "read",
 				},
 			}),
@@ -1094,6 +1095,7 @@ describe("contracts/turn-hooks tool-prose registration", () => {
 		text: proseText,
 		metadata: {
 			runtimeId: "llamacpp",
+			runtimeTier: "local-native",
 			activeToolNames: "read,write,bash",
 			hasStructuredToolCall: false,
 			stopReason: "stop",
@@ -1109,16 +1111,45 @@ describe("contracts/turn-hooks tool-prose registration", () => {
 		ok(effects[0]?.kind === "inject_reminder" && effects[0].message.includes("aborted local model turn"));
 	});
 
+	/**
+	 * The gate used to be a two-name set, llamacpp and lmstudio-native. Prose
+	 * narration is a property of open-weight models served locally, not of the
+	 * two servers that were tested first, so the same model narrating through
+	 * Ollama, vLLM, or SGLang ran with no cutoff at all.
+	 */
+	it("cuts off a local-native runtime that is not one of the originally listed servers", () => {
+		const registration = createToolProseRegistration();
+		const effects = registration.evaluate(
+			proseInput({
+				metadata: {
+					runtimeId: "ollama-native",
+					runtimeTier: "local-native",
+					activeToolNames: "read,write,bash",
+					hasStructuredToolCall: false,
+				},
+			}),
+		);
+		strictEqual(effects.length, 1);
+		ok(effects[0]?.kind === "inject_reminder" && effects[0].severity === "hard-block");
+	});
+
 	it("stays silent off local runtimes and when a structured tool call exists", () => {
 		const registration = createToolProseRegistration();
 		strictEqual(
-			registration.evaluate(proseInput({ metadata: { runtimeId: "anthropic", activeToolNames: "read" } })).length,
+			registration.evaluate(
+				proseInput({ metadata: { runtimeId: "anthropic", runtimeTier: "cloud", activeToolNames: "read" } }),
+			).length,
 			0,
 		);
 		strictEqual(
 			registration.evaluate(
 				proseInput({
-					metadata: { runtimeId: "llamacpp", activeToolNames: "read", hasStructuredToolCall: true },
+					metadata: {
+						runtimeId: "llamacpp",
+						runtimeTier: "local-native",
+						activeToolNames: "read",
+						hasStructuredToolCall: true,
+					},
 				}),
 			).length,
 			0,

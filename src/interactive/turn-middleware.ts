@@ -191,6 +191,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				assistantTextChars: text.length,
 				hasStructuredToolCall: terminalToolResult !== undefined || (message !== null && hasStructuredToolCall(message)),
 				runtimeId: agentRuntime.runtimeId,
+				runtimeTier: agentRuntime.runtimeResolution.runtimeTier ?? "",
 				activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
 				turnToolCalls: state.turnToolCalls,
 			};

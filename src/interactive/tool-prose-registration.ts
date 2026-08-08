@@ -11,15 +11,9 @@
  */
 
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../domains/middleware/index.js";
-import { assessToolProseLoop } from "./tool-prose-loop.js";
+import { assessToolProseLoop, runtimeNarratesToolCalls } from "./tool-prose-loop.js";
 
 export const TOOL_PROSE_REGISTRATION_ID = "assessor.tool-prose-loop";
-
-/**
- * Runtimes whose models are prone to prose-narrated tool calls. Same gate the
- * chat-loop's streaming cutoff applies; hosted runtimes never see this check.
- */
-const LOCAL_TOOL_RUNTIMES: ReadonlySet<string> = new Set(["llamacpp", "lmstudio-native"]);
 
 export function createToolProseRegistration(): MiddlewareHookRegistration {
 	return {
@@ -28,8 +22,8 @@ export function createToolProseRegistration(): MiddlewareHookRegistration {
 		hooks: ["turn_end"],
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook !== "turn_end") return [];
-			const runtimeId = typeof input.metadata?.runtimeId === "string" ? input.metadata.runtimeId : "";
-			if (!LOCAL_TOOL_RUNTIMES.has(runtimeId)) return [];
+			const runtimeTier = typeof input.metadata?.runtimeTier === "string" ? input.metadata.runtimeTier : undefined;
+			if (!runtimeNarratesToolCalls(runtimeTier)) return [];
 			const text = input.text ?? "";
 			if (text.length === 0) return [];
 			const activeToolNames =

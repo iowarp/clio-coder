@@ -1,3 +1,17 @@
+/**
+ * Whether a runtime's models are prone to narrating tool calls as prose instead
+ * of emitting them.
+ *
+ * Keyed on the local-native tier rather than a list of server names. The
+ * behavior belongs to open-weight models served locally, not to the two servers
+ * that happened to be tested first: the same model narrating through llama.cpp
+ * narrates through Ollama, vLLM, and SGLang, and a name list left those runs
+ * with no cutoff at all. Hosted runtimes are unaffected either way.
+ */
+export function runtimeNarratesToolCalls(runtimeTier: string | undefined): boolean {
+	return runtimeTier === "local-native";
+}
+
 export interface ToolProseLoopInput {
 	text: string;
 	activeToolNames: ReadonlyArray<string>;
