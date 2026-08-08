@@ -1,3 +1,4 @@
+import { RESPONSE_SCHEMA_RUNTIME_ID } from "../core/response-schema.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import {
 	defaultAnthropicBudgetForLevel,
@@ -216,7 +217,7 @@ export function patchLlamaCppResponseSchemaPayload(
 	responseSchema: Record<string, unknown> | undefined,
 ): unknown | undefined {
 	if (responseSchema === undefined) return undefined;
-	if (runtimeId !== "llamacpp") {
+	if (runtimeId !== RESPONSE_SCHEMA_RUNTIME_ID) {
 		throw new Error(`responseSchema requires the native llamacpp runtime; received '${runtimeId}'`);
 	}
 	if (!isRecord(payload)) throw new Error("cannot apply responseSchema to a non-object provider payload");

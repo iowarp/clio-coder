@@ -17,6 +17,7 @@ import {
 	isWorkerToolCallCapExceededReason,
 	isWorkerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
+import { runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import {
@@ -310,9 +311,7 @@ export function workerProviderSupportsTools(input: WorkerRunInput): boolean {
 function assertResponseSchemaRuntime(input: WorkerRunInput): void {
 	if (input.responseSchema === undefined) return;
 	if (
-		input.runtime.id === "llamacpp" &&
-		input.runtime.kind === "http" &&
-		input.runtime.apiFamily === "openai-completions" &&
+		runtimeSpeaksResponseSchemaDialect(input.runtime) &&
 		input.modelCapabilities?.structuredOutputs === "json-schema"
 	) {
 		return;

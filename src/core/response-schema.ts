@@ -1,6 +1,29 @@
 export const RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES = 64 * 1024;
 
 /**
+ * The one runtime whose wire dialect carries a JSON-schema response constraint.
+ *
+ * This is a name check rather than a capability check, deliberately. The
+ * constraint travels as `response_format: { type: "json_object", schema }`,
+ * which is llama-server's own spelling and not the openai-completions standard
+ * (`type: "json_schema"` with a nested `json_schema` object). A generic
+ * OpenAI-compatible gateway accepts that request, ignores the unrecognized
+ * `schema` key, and returns HTTP 200 with unconstrained JSON, so widening this
+ * to the api family would convert a clean refusal into a silent
+ * non-enforcement. lmstudio-native declares `structuredOutputs: "json-schema"`
+ * truthfully and is still excluded here, because Clio has no dialect for its
+ * transport. Widen this only together with a dialect for the runtime added.
+ */
+export const RESPONSE_SCHEMA_RUNTIME_ID = "llamacpp";
+
+/** Whether this runtime speaks the dialect above. Transport shape, not capability. */
+export function runtimeSpeaksResponseSchemaDialect(runtime: { id: string; kind: string; apiFamily: string }): boolean {
+	return (
+		runtime.id === RESPONSE_SCHEMA_RUNTIME_ID && runtime.kind === "http" && runtime.apiFamily === "openai-completions"
+	);
+}
+
+/**
  * Admission-time signal that the resolved worker runtime cannot enforce a
  * response schema. A caller that treats native enforcement as an optimization
  * may retry without the schema only after receiving this exact error type.

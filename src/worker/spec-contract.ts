@@ -1,4 +1,4 @@
-import { assertValidResponseSchema } from "../core/response-schema.js";
+import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
@@ -516,8 +516,8 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	if (runtimeId !== runtimeRefId) {
 		throw new Error(`WorkerSpec runtime id mismatch: runtimeId=${runtimeId} runtime.id=${runtimeRefId}`);
 	}
-	readEnum(runtime.kind, "WorkerSpec.runtime.kind", RUNTIME_KINDS);
-	readEnum(runtime.apiFamily, "WorkerSpec.runtime.apiFamily", RUNTIME_API_FAMILIES);
+	const runtimeKind = readEnum(runtime.kind, "WorkerSpec.runtime.kind", RUNTIME_KINDS);
+	const runtimeApiFamily = readEnum(runtime.apiFamily, "WorkerSpec.runtime.apiFamily", RUNTIME_API_FAMILIES);
 	readEnum(runtime.auth, "WorkerSpec.runtime.auth", RUNTIME_AUTHS);
 	readString(spec.systemPrompt, "WorkerSpec.systemPrompt", { allowEmpty: true });
 	readWorkerPromptMessages(spec.dynamicPromptMessages, "WorkerSpec.dynamicPromptMessages");
@@ -535,7 +535,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		validateCapabilityPatch(spec.modelCapabilities, "WorkerSpec.modelCapabilities");
 	if (spec.responseSchema !== undefined) {
 		assertValidResponseSchema(spec.responseSchema, "WorkerSpec.responseSchema");
-		if (runtimeId !== "llamacpp" || runtime.kind !== "http" || runtime.apiFamily !== "openai-completions") {
+		if (!runtimeSpeaksResponseSchemaDialect({ id: runtimeId, kind: runtimeKind, apiFamily: runtimeApiFamily })) {
 			throw new Error("WorkerSpec.responseSchema is supported only by the native llamacpp runtime");
 		}
 		const structuredOutputs =
