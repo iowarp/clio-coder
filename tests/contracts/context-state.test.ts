@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { runContextRefresh } from "../../src/domains/context/refresh.js";
 import {
 	type BootstrapGenerationState,
@@ -59,6 +60,26 @@ describe("contracts/context-state", () => {
 		writeClioState(cwd, { version: 1, fingerprint, lastBootstrap: completeBootstrapState });
 
 		await runContextRefresh({ cwd });
+
+		deepStrictEqual(readClioState(cwd)?.lastBootstrap, completeBootstrapState);
+	});
+
+	// lastBootstrap describes how the CLIO.md on disk was produced. A run that
+	// generates nothing leaves the handbook untouched, so it must not downgrade a
+	// recorded scout provenance to "existing" and erase the run id, target, and
+	// token counts that let an operator audit where the handbook came from.
+	it("a run that generates nothing keeps the provenance of the run that did", async () => {
+		const cwd = scratchProject();
+		writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "provenance-fixture", type: "module" }), "utf8");
+		writeFileSync(
+			join(cwd, "CLIO.md"),
+			"# Provenance Fixture\n\nProvenance Fixture is a TypeScript project used as a bootstrap fixture.\n",
+			"utf8",
+		);
+		writeClioState(cwd, { version: 1, fingerprint, lastBootstrap: completeBootstrapState });
+
+		// No `generate`: the --heuristic/--preview shape, which skips generation.
+		await runBootstrap({ cwd, confirmGitignore: () => true, now: () => new Date("2026-05-01T00:00:00.000Z") });
 
 		deepStrictEqual(readClioState(cwd)?.lastBootstrap, completeBootstrapState);
 	});
