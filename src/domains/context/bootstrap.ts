@@ -628,10 +628,17 @@ function stabilizeGeneratedOutput(
 	};
 }
 
-function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] {
+/**
+ * The handbook sections whose every fact is read straight off the codewiki index:
+ * how many files it holds, which modules anchor it, where the mass sits. They are
+ * the only sections nothing but the index can author, and equally the only ones
+ * that are wrong the moment the tree moves, so `context refresh` re-derives them
+ * in place and leaves every other section to its human or model author.
+ */
+export function codewikiSections(codewiki: Codewiki): ClioMdSection[] {
 	const sections: ClioMdSection[] = [];
-	const entryPoints = codewikiEntryPoints(input.codewiki, 8);
-	const indexedCount = indexedSourceFileCount(input.codewiki);
+	const entryPoints = codewikiEntryPoints(codewiki, 8);
+	const indexedCount = indexedSourceFileCount(codewiki);
 	if (entryPoints.length > 0) {
 		sections.push({
 			title: "Context retrieval",
@@ -642,7 +649,7 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
 			].join(" "),
 		});
 	}
-	const topDirs = topCodewikiDirectories(input.codewiki);
+	const topDirs = topCodewikiDirectories(codewiki);
 	if (topDirs.length > 0) {
 		sections.push({
 			title: "Repository shape",
@@ -652,6 +659,11 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
 			].join(" "),
 		});
 	}
+	return sections;
+}
+
+function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] {
+	const sections: ClioMdSection[] = [...codewikiSections(input.codewiki)];
 	const invariants = inferInvariants(input.siblingFiles);
 	if (invariants.length > 0) {
 		sections.push({
