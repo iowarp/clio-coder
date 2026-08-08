@@ -197,8 +197,75 @@ describe("contracts/context-refresh", () => {
 		const cwd = scratchProject();
 		const result = await runContextRefresh({ cwd });
 		strictEqual("clioMdRestamped" in result, false);
+		strictEqual(result.clioMd, "absent");
 		ok(existsSync(join(cwd, ".clio", "codewiki.json")));
 		strictEqual(existsSync(join(cwd, "CLIO.md")), false);
+	});
+
+	/**
+	 * The index-owned sections state file counts, entry points and where the mass
+	 * of the tree sits. Those are the only handbook facts nothing but the index can
+	 * author, and the only ones that are wrong the moment a file moves. Refresh
+	 * rebuilds the index anyway, so leaving them stale was leaving the handbook
+	 * confidently wrong about the repository it had just re-read.
+	 */
+	it("re-derives the index-owned handbook sections against the rebuilt codewiki", async () => {
+		const cwd = scratchProject();
+		writeFileSync(
+			join(cwd, "CLIO.md"),
+			serializeClioMd({
+				projectName: "Refresh Fixture",
+				identity: "Refresh Fixture is a TypeScript project used to test context refresh.",
+				conventions: ["Keep prose byte-stable across refresh."],
+				invariants: ["Refresh never edits prose."],
+				sections: [
+					{ title: "Context retrieval", body: "The codewiki currently indexes 4096 source files." },
+					{ title: "Architecture", body: "`src/index.ts` is the only module a change travels through." },
+				],
+			}),
+			"utf8",
+		);
+
+		const result = await runContextRefresh({ cwd });
+
+		strictEqual(result.clioMd, "updated");
+		const after = readFileSync(join(cwd, "CLIO.md"), "utf8");
+		strictEqual(after.includes("4096 source files"), false, after);
+		ok(after.includes(`indexes ${result.codewikiEntries} source file`), after);
+		// Sections the index does not author survive untouched, prose and all.
+		ok(after.includes("`src/index.ts` is the only module a change travels through."), after);
+		ok(after.includes("Keep prose byte-stable across refresh."), after);
+	});
+
+	/**
+	 * Curation replaces; it never grows. A handbook that never asked for an
+	 * index-owned section does not get handed one on a routine refresh.
+	 */
+	it("leaves a handbook without index-owned sections byte-identical", async () => {
+		const cwd = scratchProject();
+		const before = writeFixtureClioMd(cwd);
+
+		const result = await runContextRefresh({ cwd });
+
+		strictEqual(result.clioMd, "unchanged");
+		strictEqual(readFileSync(join(cwd, "CLIO.md"), "utf8"), before);
+	});
+
+	/**
+	 * A malformed handbook is the same as no handbook: nothing in this repository
+	 * may require CLIO.md to exist or to parse, least of all the command whose job
+	 * is to keep the index healthy.
+	 */
+	it("refreshes past a malformed CLIO.md without failing", async () => {
+		const cwd = scratchProject();
+		writeFileSync(join(cwd, "CLIO.md"), "no heading here, just prose\n", "utf8");
+
+		const result = await runContextRefresh({ cwd });
+
+		strictEqual(result.action, "refreshed");
+		strictEqual(result.clioMd, "absent");
+		strictEqual(readFileSync(join(cwd, "CLIO.md"), "utf8"), "no heading here, just prose\n");
+		ok(existsSync(join(cwd, ".clio", "codewiki.json")));
 	});
 
 	it("updates the wiki after the L1 rebuild only when wiki is explicitly true", async () => {

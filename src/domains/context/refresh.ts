@@ -1,5 +1,8 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { detectProjectType } from "../session/workspace/project-type.js";
-import type { BootstrapIo, BootstrapProgressSink } from "./bootstrap.js";
+import { type BootstrapIo, type BootstrapProgressSink, codewikiSections } from "./bootstrap.js";
+import { serializeClioMd, tryReadClioMd } from "./clio-md.js";
 import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint, type Fingerprint } from "./fingerprint.js";
 import { readClioState, writeClioState } from "./state.js";
@@ -8,9 +11,9 @@ import { readWikiMeta } from "./wiki/meta.js";
 import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
 
 /**
- * `/context refresh` and `clio context refresh`: rebuild the codewiki index
- * and `.clio` state. It never reads or writes CLIO.md; regenerating handbook
- * prose stays with `/context init`.
+ * `/context refresh` and `clio context refresh`: rebuild the codewiki index and
+ * `.clio` state, then re-derive the handbook sections the index owns. Authoring
+ * handbook prose stays with `/context init`.
  */
 
 export interface RunContextRefreshInput {
@@ -28,12 +31,63 @@ export interface RunContextRefreshInput {
 	wikiModel?: string;
 }
 
+/**
+ * What refresh did to CLIO.md. "absent" covers no handbook and an unparseable
+ * one alike: a missing or broken handbook is never an error here, because a
+ * repository must stay fully usable without one.
+ */
+export type ClioMdCuration = "updated" | "unchanged" | "absent";
+
 export interface RunContextRefreshResult {
 	action: "refreshed";
 	codewikiEntries: number;
 	fingerprint: Fingerprint;
+	clioMd: ClioMdCuration;
 	wiki?: RunWikiGenerateResult;
 	hint?: string;
+}
+
+/**
+ * Re-derive the index-owned sections of an existing handbook against the codewiki
+ * this run just built. Only sections whose title the index authors are replaced,
+ * and only when they are already present, so a human's handbook is never grown a
+ * section it did not ask for and never loses one it wrote. Best-effort by
+ * construction: nothing here may turn a routine refresh into a failure.
+ */
+function curateClioMd(cwd: string, codewiki: Codewiki): ClioMdCuration {
+	try {
+		const parsed = tryReadClioMd(cwd);
+		if (!parsed?.ok) return "absent";
+		const handbook = parsed.value;
+		const fresh = new Map(codewikiSections(codewiki).map((section) => [section.title, section.body] as const));
+		let changed = false;
+		const sections = handbook.sections.map((section) => {
+			const body = fresh.get(section.title);
+			if (body === undefined || body === section.body) return section;
+			changed = true;
+			return { title: section.title, body };
+		});
+		// Rewrite only when an index-owned body actually moved. Serializing on every
+		// refresh would silently reformat a hand-written handbook into the generator's
+		// canonical rendering, which is a diff the author never asked for.
+		if (!changed) return "unchanged";
+		writeFileSync(
+			join(cwd, "CLIO.md"),
+			serializeClioMd({
+				projectName: handbook.projectName,
+				identity: handbook.identity,
+				conventions: handbook.conventions,
+				invariants: handbook.invariants,
+				sections,
+				...(handbook.importedAgentContext ? { importedAgentContext: handbook.importedAgentContext } : {}),
+				fingerprint: handbook.fingerprint,
+			}),
+			"utf8",
+		);
+		return "updated";
+	} catch {
+		return "absent";
+	}
 }
 
 function indexedSourceFileCount(codewiki: Codewiki): number {
@@ -61,6 +115,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	const codewiki = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
 	writeCodewiki(cwd, codewiki);
 	const fingerprint = computeFingerprint(cwd, codewiki);
+	const clioMd = curateClioMd(cwd, codewiki);
 
 	input.onProgress?.({ phase: "state", status: "running", message: "writing state" });
 	writeClioState(cwd, {
@@ -98,12 +153,16 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 		hint = incompleteWikiHint(cwd) ?? (wikiStaleness(cwd).state === "stale" ? STALE_WIKI_REFRESH_HINT : undefined);
 	}
 
-	input.io?.stdout(`clio context refresh: codewiki rebuilt (${entries} source file${entries === 1 ? "" : "s"})\n`);
+	const handbookNote = clioMd === "updated" ? "; CLIO.md index sections updated" : "";
+	input.io?.stdout(
+		`clio context refresh: codewiki rebuilt (${entries} source file${entries === 1 ? "" : "s"})${handbookNote}\n`,
+	);
 	input.onProgress?.({ phase: "done", status: "completed", message: "context refreshed" });
 	return {
 		action: "refreshed",
 		codewikiEntries: entries,
 		fingerprint,
+		clioMd,
 		...(wikiResult ? { wiki: wikiResult } : {}),
 		...(hint ? { hint } : {}),
 	};
