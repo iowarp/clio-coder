@@ -2,7 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/str
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it, mock } from "node:test";
 import {
 	BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES,
 	modelBootstrapGenerate,
@@ -148,6 +148,59 @@ describe("contracts/bootstrap Scout generation", () => {
 		strictEqual(serialized.includes("minLength"), false);
 		strictEqual(serialized.includes("maxLength"), false);
 		strictEqual(serialized.includes("maxItems"), false);
+	});
+
+	/**
+	 * The bootstrap Scout used to be clamped to a 30s product ceiling layered over
+	 * the operator's `internalDispatchTimeoutMs` guardrail. Scout is instructed to
+	 * explore the repository with code_nav first, so that ceiling aborted real runs
+	 * mid-exploration and every model-driven bootstrap silently degraded to the
+	 * heuristic. The guardrail is the operator's knob for slow targets; the call
+	 * site has no better information than it does.
+	 */
+	it("lets the operator guardrail govern the Scout deadline instead of a product ceiling", async () => {
+		const input = await bootstrapInput();
+		const response = JSON.stringify({
+			projectName: "Deadline Fixture",
+			identity: "A project whose bootstrap outlives the deleted 30s ceiling.",
+			conventions: [],
+			invariants: [],
+			sections: [],
+		});
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const aborted: string[] = [];
+		const base = fakeDispatch(response);
+		const contract: DispatchContract = {
+			...base.contract,
+			dispatch: async () => ({
+				runId: "scout-run-1",
+				events: (async function* () {
+					await gate;
+					yield { type: "message_end", message: { role: "assistant", content: response } };
+				})(),
+				finalPromise: Promise.resolve(receipt()),
+			}),
+			abort: (runId: string) => {
+				aborted.push(runId);
+			},
+		};
+
+		mock.timers.enable({ apis: ["setTimeout"] });
+		try {
+			const generated = modelBootstrapGenerate({ dispatch: contract })(input);
+			await Promise.resolve();
+			// Well past the deleted ceiling, comfortably inside the 15 minute default.
+			mock.timers.tick(120_000);
+			strictEqual(aborted.length, 0, "the deleted 30s ceiling must not abort a run the guardrail still allows");
+			release();
+			const output = await generated;
+			strictEqual(output.projectName, "Deadline Fixture");
+		} finally {
+			mock.timers.reset();
+		}
 	});
 
 	it("reports receipt-backed Scout telemetry with UTF-8 byte counts", async () => {

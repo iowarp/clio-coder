@@ -33,7 +33,6 @@ import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 
-export const BOOTSTRAP_SCOUT_TIMEOUT_MS = 30_000;
 export const BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES = 256 * 1024;
 
 /**
@@ -313,13 +312,13 @@ export async function generateBootstrapWithScout(
 			throw new BootstrapScoutAttemptError(error, "not-run", scoutTelemetry(prompt, "", startedAt, structuredOutputMode));
 		}
 	}
-	const deadline = armInternalDispatchDeadline(
-		dispatch,
-		handle.runId,
-		"bootstrap scout",
-		process.env,
-		BOOTSTRAP_SCOUT_TIMEOUT_MS,
-	);
+	// No product cap. Scout is told to explore the repository with code_nav, and a
+	// 30s ceiling clamped over the operator's guardrail aborted every real run
+	// mid-exploration: an observed bootstrap burned 19k tokens across 5 tool calls
+	// and returned zero bytes at 29s. The wiki documenter in this same directory
+	// budgets minutes for the same shape of work. `internalDispatchTimeoutMs` is
+	// the operator's knob for slow targets; nothing here knows better than it does.
+	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "bootstrap scout", process.env);
 	let text = "";
 	let receipt: RunReceipt | undefined;
 	let parserAttempted = false;
