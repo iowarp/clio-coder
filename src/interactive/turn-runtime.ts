@@ -40,7 +40,7 @@ import {
 	toolNamesFromAgentState,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
-import { assessToolProseLoop } from "./tool-prose-loop.js";
+import { assessToolProseLoop, runtimeNarratesToolCalls } from "./tool-prose-loop.js";
 import type { TurnContext } from "./turn-context.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { TurnPersistence } from "./turn-persistence.js";
@@ -497,7 +497,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						partialText,
 					});
 					const activeToolNames = toolNamesFromAgentState(localRuntime.agent.state.tools);
-					const localToolRuntime = localRuntime.runtimeId === "llamacpp" || localRuntime.runtimeId === "lmstudio-native";
+					const localToolRuntime = runtimeNarratesToolCalls(localRuntime.runtimeResolution.runtimeTier);
 					if (localToolRuntime && state.toolProseAbortReason === null) {
 						const assessment = assessToolProseLoop({
 							text: partialText,
