@@ -473,7 +473,12 @@ describe("contracts/bootstrap", () => {
 		strictEqual(result.telemetry.generation.mode, "heuristic");
 	});
 
-	it("preserves existing CLIO.md by default without a model rewrite", async () => {
+	// The old contract skipped generation whenever CLIO.md existed, even when the
+	// caller supplied a generator. That made a model-capable init indistinguishable
+	// from one with no route: nothing was dispatched, nothing was said, and
+	// lastBootstrap recorded mode "existing" for a run that never tried. The
+	// handbook is still handed to the generator as source, so this refreshes it.
+	it("hands an existing CLIO.md to the generator instead of skipping generation", async () => {
 		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
 		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");
 		writeFileSync(
@@ -518,12 +523,42 @@ describe("contracts/bootstrap", () => {
 			strictEqual(parsed.value.sections[0]?.title, "Architecture traps");
 			strictEqual(parsed.value.sections[0]?.body, "Preserve this section when scout or model generation is unavailable.");
 		}
-		strictEqual(generated, false);
-		strictEqual(result.telemetry.generation.mode, "existing");
-		strictEqual(readClioState(scratch)?.lastBootstrap?.mode, "existing");
+		strictEqual(generated, true, "a supplied generator is the request to generate");
 		ok(phases.includes("codewiki:completed"));
 		ok(phases.includes("clio-md:completed"));
 		ok(phases.includes("done:completed"));
+	});
+
+	it("skips generation only when no generator is supplied", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");
+		writeFileSync(
+			join(scratch, "CLIO.md"),
+			serializeClioMd({
+				projectName: "Rich Context",
+				identity: "Rich Context is a TypeScript project with curated agent guidance.",
+				conventions: ["Keep the curated convention intact."],
+				invariants: ["Never erase custom CLIO.md sections during a bootstrap fallback."],
+				sections: [{ title: "Architecture traps", body: "Preserve this section when no generator runs." }],
+				fingerprint,
+			}),
+			"utf8",
+		);
+
+		// --heuristic and --preview are the paths that withhold `generate`.
+		const result = await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			now: () => new Date("2026-05-01T00:00:00.000Z"),
+		});
+
+		const parsed = parseClioMd(readFileSync(join(scratch, "CLIO.md"), "utf8"));
+		ok(parsed.ok);
+		if (parsed.ok) {
+			strictEqual(parsed.value.projectName, "Rich Context");
+			strictEqual(parsed.value.sections[0]?.title, "Architecture traps");
+		}
+		strictEqual(result.telemetry.generation.mode, "existing");
 	});
 
 	it("invalidates cached context state after contract bootstrap", async () => {

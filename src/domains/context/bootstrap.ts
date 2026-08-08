@@ -1156,7 +1156,14 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			`cannot refresh Imported agent context because CLIO.md is malformed${detail}; use --apply or --rewrite after reviewing the handbook`,
 		);
 	}
-	const shouldGenerate = !hadClioMd || replaceClioMd || input.proposeClioMd === true;
+	// A supplied generator *is* the request to generate: both entry points
+	// withhold `generate` for --heuristic and --preview and supply it otherwise.
+	// An existing CLIO.md used to suppress generation entirely, so a plain
+	// `clio context init` on an initialized repository dispatched nothing, wrote
+	// `lastBootstrap.mode: "existing"`, and looked identical to a run that had no
+	// route at all. The handbook still reaches the generator as source (see
+	// `useExistingClioMdAsSource`), so this refreshes rather than replaces.
+	const shouldGenerate = !hadClioMd || replaceClioMd || input.proposeClioMd === true || input.generate !== undefined;
 	let output: BootstrapStructuredOutput;
 	let generation: BootstrapGenerationTelemetry = {
 		mode: shouldGenerate ? "heuristic" : existingParsed ? "existing" : "heuristic",
