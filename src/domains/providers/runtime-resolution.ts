@@ -44,7 +44,10 @@ export interface ContextWindowDetails {
 		| "model-hint"
 		| "descriptor-default"
 		| "unknown";
+	/** The window is below what this kind of work wants. An actionable degradation. */
 	warning: string | null;
+	/** The window is a placeholder rather than something the target reported. */
+	provenanceNotice: string | null;
 }
 
 export type RuntimeResolutionUse = "orchestrator" | "print" | "dispatch";
@@ -383,6 +386,9 @@ export function resolveRuntimeTarget(
 	if (contextWindowDetails.warning) {
 		diagnostics.push(diagnostic("warning", "context-window-low", contextWindowDetails.warning));
 	}
+	if (contextWindowDetails.provenanceNotice) {
+		diagnostics.push(diagnostic("info", "context-window-unverified", contextWindowDetails.provenanceNotice));
+	}
 
 	const modelRuntime = resolveTargetRuntimeCapabilities(
 		target,
@@ -594,8 +600,8 @@ export function resolveContextWindowDetails(
 		modelDeclaredSource = "catalog";
 	}
 
-	const declaredContextWindow =
-		modelDeclared ?? positiveWindow(runtime.defaultCapabilities?.contextWindow) ?? FALLBACK_CONTEXT_WINDOW;
+	const runtimeDefault = positiveWindow(runtime.defaultCapabilities?.contextWindow);
+	const declaredContextWindow = modelDeclared ?? runtimeDefault ?? FALLBACK_CONTEXT_WINDOW;
 
 	const desired =
 		runtime.tier === "local-native"
@@ -617,7 +623,11 @@ export function resolveContextWindowDetails(
 		source = modelDeclaredSource;
 	} else {
 		effective = declaredContextWindow;
-		source = "descriptor-default";
+		// `descriptor-default` is a claim that the runtime descriptor supplied
+		// this number. When it did not, the number is FALLBACK_CONTEXT_WINDOW and
+		// the honest label is `unknown`; attributing a hardcoded guess to the
+		// descriptor makes a value nobody declared read like a declared one.
+		source = runtimeDefault !== undefined ? "descriptor-default" : "unknown";
 	}
 
 	// One-run CLI override (clio run --max-context-tokens), delivered over the
@@ -633,6 +643,19 @@ export function resolveContextWindowDetails(
 		warning = `Connected target offers ${effective} tokens, which is below the recommended 128k for local coding.`;
 	}
 
+	// Deliberately not folded into `warning`. That field means the window is
+	// smaller than this kind of work wants, which is a degradation an operator
+	// can act on. Provenance is the separate question of whether the number is
+	// real, and it is `info` because it holds for every target Clio has no
+	// model-specific knowledge of; raising it to `warning` would put one on
+	// every hosted dispatch and dilute the field that means something is wrong.
+	let provenanceNotice: string | null = null;
+	if (source === "descriptor-default") {
+		provenanceNotice = `Context window ${effective} is the ${runtime.id} runtime default, not a figure this target reported.`;
+	} else if (source === "unknown") {
+		provenanceNotice = `No context window was declared for this target; assuming ${effective} tokens.`;
+	}
+
 	return {
 		declaredContextWindow,
 		probedContextWindow,
@@ -641,5 +664,6 @@ export function resolveContextWindowDetails(
 		effectiveContextWindow: effective,
 		contextWindowSource: source,
 		warning,
+		provenanceNotice,
 	};
 }

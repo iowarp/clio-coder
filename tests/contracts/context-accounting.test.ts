@@ -196,6 +196,65 @@ describe("contracts/context-accounting", () => {
 		strictEqual(reconciled.sources.total, "reconciled");
 	});
 
+	/**
+	 * A window nothing declared is a guess. `clio targets` already annotates the
+	 * runtime-default case as unverified; the session path resolved the same
+	 * placeholder and reported it as settled fact, so a hosted target whose model
+	 * Clio has never heard of planned against a blanket number with no notice.
+	 */
+	it("warns that a runtime-default window is the descriptor's blanket figure, not a reported one", () => {
+		const runtime: RuntimeDescriptor = {
+			id: "openrouter",
+			displayName: "openrouter",
+			kind: "http",
+			tier: "cloud",
+			apiFamily: "openai-completions",
+			auth: "api-key",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, contextWindow: 128000 },
+			synthesizeModel() {
+				throw new Error("not used in this test");
+			},
+		};
+		const target: TargetDescriptor = { id: "hosted", runtime: "openrouter", capabilities: {} };
+
+		const details = resolveContextWindowDetails(target, runtime, "model-clio-never-heard-of", null, null);
+
+		strictEqual(details.effectiveContextWindow, 128000);
+		strictEqual(details.contextWindowSource, "descriptor-default");
+		strictEqual(details.warning, null, "a 128k window is not a degradation to warn about");
+		ok(details.provenanceNotice !== null, "a blanket runtime default must be reported as one");
+		ok(details.provenanceNotice.includes("runtime default"));
+	});
+
+	/**
+	 * `descriptor-default` asserts the runtime descriptor supplied the number.
+	 * When it supplied nothing the number is the module's own 8192 fallback, and
+	 * labelling that as the descriptor's makes a hardcoded guess indistinguishable
+	 * from a declared capability in the persisted ledger.
+	 */
+	it("reports a window nothing declared as unknown rather than a descriptor default", () => {
+		const runtime: RuntimeDescriptor = {
+			id: "custom-runtime",
+			displayName: "custom-runtime",
+			kind: "http",
+			tier: "cloud",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES },
+			synthesizeModel() {
+				throw new Error("not used in this test");
+			},
+		};
+		const target: TargetDescriptor = { id: "custom", runtime: "custom-runtime", capabilities: {} };
+
+		const details = resolveContextWindowDetails(target, runtime, "model", null, null);
+
+		strictEqual(details.effectiveContextWindow, 8192);
+		strictEqual(details.contextWindowSource, "unknown");
+		ok(details.provenanceNotice !== null, "an undeclared window must be reported as an assumption");
+		ok(details.provenanceNotice.includes("No context window was declared"));
+	});
+
 	it("keeps local-native 128k as advisory and does not inflate unknown effective context", () => {
 		const target: TargetDescriptor = {
 			id: "local-target",
