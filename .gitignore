@@ -34,5 +34,8 @@ CLIO.md
 CLAUDE.md
 AGENTS.md
 
+# Throwaway scratch: probe scripts, benchmark fixtures, copied repositories.
+tmp/
+
 
 
