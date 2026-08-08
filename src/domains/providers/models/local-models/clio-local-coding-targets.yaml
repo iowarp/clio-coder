@@ -617,7 +617,8 @@
     chat: true
     tools: true
     toolCallFormat: qwen
-    # Reasoning class: effort-levels, measured on dynamo 2026-08-08. The card
+    # Reasoning class: effort-levels, measured against an LM Studio host on
+    # 2026-08-08 over its OpenAI-compatible surface. The card
     # frames the Coder-MTP line as thinking-off execution, but the wire
     # disagrees: on "what is 17+25" this model spends 98 of 103 completion
     # tokens on reasoning, and a wiki planning dispatch spent 89,501. It is an
