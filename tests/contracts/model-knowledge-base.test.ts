@@ -180,12 +180,25 @@ describe("contracts/model knowledge base", () => {
 		const bundled = join(dirname(fileURLToPath(import.meta.url)), "../../src/domains/providers/models");
 		const kb = new FileKnowledgeBase([{ dir: bundled, label: "bundled" }]);
 
-		// Coder-MTP variants are reasoning class "never": reasoning=false so no
-		// per-request path (pi-ai qwen-chat-template kwargs included) can flip
-		// enable_thinking back on over the server's launch default, and the
-		// thinking mechanism is none so the dial clamps to off.
+		// The 35B-A3B Coder-MTP was pinned reasoning class "never" on the strength
+		// of the creator's card. Measured on dynamo 2026-08-08 the wire disagrees:
+		// it spends 98 of 103 completion tokens reasoning on "what is 17+25" with
+		// no thinking field set, and a wiki planning dispatch spent 89,501.
+		// reasoning_effort "none" takes the same prompt to 0, so the family is
+		// effort-levels with an explicit off-effort, not "never".
+		{
+			const wireId = "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K";
+			const hit = kb.lookup(wireId);
+			strictEqual(hit?.entry.family, "qwopus3.6-35b-a3b-coder", `${wireId} family`);
+			strictEqual(hit?.entry.capabilities.reasoning, true, `${wireId} reasoning`);
+			const quirks = hit?.entry.quirks as LocalModelQuirks | undefined;
+			strictEqual(quirks?.thinking?.mechanism, "effort-levels", `${wireId} mechanism`);
+			strictEqual(quirks?.thinking?.effortByLevel?.off, "none", `${wireId} off-effort`);
+		}
+
+		// The 27B and 9B Coder variants keep the "never" pin: nothing has measured
+		// them, and an unmeasured family is left as its card describes it.
 		for (const [wireId, family] of [
-			["Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K", "qwopus3.6-35b-a3b-coder"],
 			["Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K", "qwopus3.6-27b-coder"],
 			["Qwopus3.5-9B-Coder-Q8_0-262K", "qwopus3.5-9b-coder"],
 		] as const) {
@@ -220,7 +233,11 @@ describe("contracts/model knowledge base", () => {
 	it("keeps catalog reasoning class authoritative over noisy live reasoning detection", () => {
 		const bundled = join(dirname(fileURLToPath(import.meta.url)), "../../src/domains/providers/models");
 		const kb = new FileKnowledgeBase([{ dir: bundled, label: "bundled" }]);
-		const qwopus = "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K";
+		// The 35B-A3B used to be the example here, on the premise that live
+		// detection reporting reasoning was noise. It was not noise; the catalog
+		// was wrong and detection was right. The contract still holds, so it is
+		// pinned against a family whose "never" class is still accurate.
+		const qwopus = "Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K";
 		const ornith = "Ornith-1.0-35B-Q4_K_M-262K";
 
 		const noThinkingCaps = resolveModelCapabilities(localStatus(qwopus, { reasoning: true }), qwopus, kb, {

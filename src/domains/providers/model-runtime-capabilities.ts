@@ -240,7 +240,10 @@ export function applyThinkingMechanism(
 				noticeKind: "applied",
 				notice: "",
 			};
-			if (requestedActive && effort) result.effort = effort;
+			// An off-effort is carried too. Suppressing a model that reasons by
+			// default is an instruction that has to reach the wire; omitting the
+			// field only works for models whose default is already silence.
+			if (effort) result.effort = effort;
 			return result;
 		}
 		case "budget-tokens": {

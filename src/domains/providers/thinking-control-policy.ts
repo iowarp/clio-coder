@@ -30,7 +30,10 @@ export function thinkingEffortFromMap(
 	level: ThinkingLevel,
 ): string | undefined {
 	if (!efforts) return undefined;
-	if (level === "off") return undefined;
+	// `off` is only wireable when a family maps it explicitly. Models that
+	// reason unconditionally unless told otherwise need an off-effort to send;
+	// sending nothing leaves them reasoning at full rate. Families that reason
+	// only on request still omit the key and keep the send-nothing behaviour.
 	const exact = efforts[level];
 	if (exact === null) return undefined;
 	if (typeof exact === "string") return exact;

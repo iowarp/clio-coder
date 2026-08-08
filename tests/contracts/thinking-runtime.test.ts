@@ -319,4 +319,38 @@ describe("contracts/thinking-runtime local reasoning classes", () => {
 		strictEqual(applied.noticeKind, "always-on");
 		strictEqual(applied.notice, "model emits chain-of-thought unconditionally; off was ignored");
 	});
+
+	/**
+	 * effort-levels used to drop the effort whenever the level was `off`, on the
+	 * assumption that sending no field leaves a model silent. That holds only for
+	 * models that reason on request. Measured on dynamo 2026-08-08,
+	 * qwopus3.6-35b-a3b-coder-mtp spends 98 of 103 completion tokens reasoning on
+	 * "what is 17+25" with no thinking field set, and reasoning_effort "none"
+	 * takes it to 0. For such a family, omitting the field is a request to keep
+	 * reasoning, so an explicitly mapped off-effort has to reach the wire.
+	 */
+	it("carries an explicitly mapped off-effort so a default-reasoning model can be silenced", () => {
+		const quirks: LocalModelQuirks = {
+			thinking: { mechanism: "effort-levels", effortByLevel: { off: "none", low: "low", high: "high" } },
+		};
+
+		const off = applyThinkingMechanism(quirks, "off", qwenCaps);
+		strictEqual(off.mechanism, "effort-levels");
+		strictEqual(off.effort, "none", "off must be expressible on the wire when a family maps it");
+		strictEqual(off.thinkingActive, false);
+
+		const high = applyThinkingMechanism(quirks, "high", qwenCaps);
+		strictEqual(high.effort, "high");
+		strictEqual(high.thinkingActive, true);
+	});
+
+	it("still sends nothing for off when a family maps no off-effort", () => {
+		const quirks: LocalModelQuirks = {
+			thinking: { mechanism: "effort-levels", effortByLevel: { low: "low", high: "high" } },
+		};
+
+		const off = applyThinkingMechanism(quirks, "off", qwenCaps);
+		strictEqual(off.effort, undefined, "a family that reasons only on request keeps the send-nothing behaviour");
+		strictEqual(off.thinkingActive, false);
+	});
 });
