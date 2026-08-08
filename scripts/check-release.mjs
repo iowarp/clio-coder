@@ -37,31 +37,13 @@ const FORBIDDEN = [
 	{ test: (f) => f.includes("node_modules/"), reason: "vendored node_modules" },
 ];
 
-// Exact files the CLI resolves from the installed package root at runtime.
-const REQUIRED_FILES = [
-	...ENTRIES,
-	"src/domains/prompts/fragments/identity/clio.md",
-	"src/domains/prompts/fragments/identity/clio-worker.md",
-	"assets/clio-coder-logo-128.webp",
-	"docs/html/index.html",
-	"damage-control-rules.yaml",
-	"CLIO.md",
-	"README.md",
-	"LICENSE",
-	"NOTICE",
-	"CHANGELOG.md",
-];
-
-// Resource trees loaded by directory scan; require at least one entry each so
-// a `files` allowlist edit cannot silently drop a whole tree.
-const REQUIRED_PREFIXES = [
-	"src/domains/prompts/fragments/",
-	"src/domains/agents/builtins/",
-	"dist/domains/agents/builtins/",
-	"skills/cut-it/",
-	"src/domains/providers/models/",
-	"docs/html/",
-];
+// Exact files the CLI resolves from the installed package root at runtime, and
+// the resource trees it loads by directory scan. Shared with the packaging
+// contract test, which holds this list against the package.json `files`
+// allowlist so the gate cannot outlive what the allowlist actually ships.
+const manifest = JSON.parse(readFileSync(join(root, "scripts", "release-manifest.json"), "utf8"));
+const REQUIRED_FILES = manifest.requiredFiles;
+const REQUIRED_PREFIXES = manifest.requiredPrefixes;
 
 const errors = [];
 
