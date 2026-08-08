@@ -475,7 +475,10 @@ describe("contracts/bootstrap", () => {
 		// The handbook describes the user's repository. Clio's own `.clio/` bookkeeping
 		// is enforced by the .gitignore this run just wrote, not by prose repeated
 		// verbatim into every handbook Clio ever generates.
-		strictEqual(result.output.sections?.some((section) => section.title === "Context artifacts"), false);
+		strictEqual(
+			result.output.sections?.some((section) => section.title === "Context artifacts"),
+			false,
+		);
 		strictEqual(readFileSync(join(scratch, "CLIO.md"), "utf8").includes("## Context artifacts"), false);
 		ok(readFileSync(join(scratch, ".gitignore"), "utf8").split(/\r?\n/).includes(".clio/"));
 
