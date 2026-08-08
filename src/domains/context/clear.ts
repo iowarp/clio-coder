@@ -23,7 +23,15 @@ const ACCUMULATED_CONTEXT_PATHS = [
 	".clio/handoffs",
 	".clio/proposals",
 ] as const;
-const PRESERVED_CONTEXT_PATHS = ["CLIO.md", ".clio/agents", ".clio/skills"] as const;
+/**
+ * Kept, and said to be kept. `.clio/wiki` is Clio-written rather than
+ * operator-authored, so it does not belong with the handbook and the overlay
+ * directories on merit; it is listed because the reset reports exactly two
+ * categories and a reader takes anything absent from both to be gone. It is the
+ * most expensive artifact in `.clio` (one model dispatch per page), and leaving
+ * it unnamed made a reset look like it had discarded a wiki it had not touched.
+ */
+const PRESERVED_CONTEXT_PATHS = ["CLIO.md", ".clio/agents", ".clio/skills", ".clio/wiki"] as const;
 
 function out(io: BootstrapIo | undefined, message: string): void {
 	io?.stdout(message);

@@ -28,6 +28,46 @@ You can redirect Clio Coder's folders using environment variables:
 *   `CLIO_STATE_DIR`: Overrides the state directory only (takes precedence over `CLIO_HOME`).
 *   `CLIO_CACHE_DIR`: Overrides the cache directory only (takes precedence over `CLIO_HOME`).
 
+### The Project `.clio/` Directory
+
+The tables above cover the per-user roots. A repository Clio works in also grows a
+`.clio/` directory, and everything in it falls into one of three kinds:
+
+*   **Operator input.** You wrote it. Clio only reads it. Deleting it removes a
+    behavior you configured and nothing else.
+*   **Runtime state.** Clio wrote it. It is derived from your repository and can be
+    regenerated, though not always cheaply.
+*   **Overlay.** You wrote it, and it composes with a directory Clio ships. The
+    overlay column below says how.
+
+| Path | Kind | What it is | Safe to delete? | `context reset` |
+| :--- | :--- | :--- | :--- | :--- |
+| `.clio/settings.yaml`, `.clio/settings.local.yaml` | Operator input | Project settings layered over the user's `settings.yaml`. Precedence is built-in < user < project < project-local. | Yes; the user-level settings apply again. | Kept |
+| `.clio/safety.yaml` | Operator input | Per-repository command allowlist consulted before execute actions. | Yes; approvals return to per-action prompting. | Kept |
+| `.clio/hooks.yaml`, `.clio/hooks.local.yaml` | Operator input | Project-declared hooks. | Yes. | Kept |
+| `.clio/rules/**/*.md` | Operator input | Path-scoped project rules injected into the prompt. | Yes. | Kept |
+| `.clio/profile.yaml` | Operator input | Operator profile; closed enums and bounded path lists. | Yes. | Kept |
+| `.clio/fleets/*.md`, `.clio/fleets/commands.yaml` | Overlay | Fleet contracts and their command registry. Adds to the fleets shipped under `src/domains/agents/fleets/`. | Yes; shipped fleets remain. | Kept |
+| `.clio/agents/*.md` | Overlay | Project agent recipes. Composes with shipped builtins and the user's `~/.config/clio/agents`; a project recipe reusing a builtin id is **ignored**, not applied, with a note on stderr. | Yes; shipped agents remain. | Kept, and named |
+| `.clio/skills/**` | Overlay | Project skills, trusted as repository-local. Composes with skills Clio ships. | Yes; shipped skills remain. | Kept, and named |
+| `CLIO.md` (repository root) | Runtime state | The generated project handbook. Human-reviewable, but written by `context init`. | Yes; regenerate with `clio context init`. | Kept unless `--all` |
+| `.clio/codewiki.json` | Runtime state | Structural index, schema v5. | Yes; rebuilt by `clio context index`. | **Removed** |
+| `.clio/state.json` | Runtime state | Index fingerprint and freshness stamps. | Yes; forces a rebuild. | **Removed** |
+| `.clio/proposals/` | Runtime state | Ignored handbook drafts from `context init --propose`. | Yes. | **Removed** |
+| `.clio/handoffs/` | Runtime state | Session handoff notes. | Yes. | **Removed** |
+| `.clio/wiki/` | Runtime state | The generated Markdown wiki plus `meta.json`. The most expensive artifact here: one model dispatch per page. | Yes, but regenerating costs a full `clio context wiki` run. | Kept, and named |
+| `.clio/wiki-prev/` | Runtime state | Previous wiki, retained for rollback during generation. | Yes. | Kept, not named |
+| `.clio/worktrees/` | Runtime state | Git worktrees for `compete` candidate groups. | Prefer `git worktree remove`; a plain delete leaves git metadata behind. | Kept, not named |
+
+`~/.clio/runtimes/` is a separate, user-level directory for third-party runtime
+plugins. It is not part of any repository.
+
+None of `.clio/` is published by Clio's own package. The directories Clio ships
+(`src/domains/agents/builtins/`, `src/domains/agents/fleets/`, `skills/cut-it/`,
+`src/domains/prompts/fragments/`, `src/domains/providers/models/`) are read from
+the installed package root; the `.clio/` entries above compose with them and never
+replace them on disk.
+
 ---
 
 ## 2. File & Permissions Matrix
@@ -198,6 +238,9 @@ If you are removing Clio Coder completely from your system, verify that all cate
     *   `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`
 3.  **Global Bin Links**:
     *   `clio` executable in your global npm path (for source checkouts, avoid this path unless intentionally debugging npm link behavior).
+4.  **Per-Repository State**:
+    *   `.clio/` in every repository Clio has worked in, and the generated `CLIO.md` beside it. See [The Project `.clio/` Directory](#the-project-clio-directory) for what each entry is before deleting.
+    *   Remove `.clio/worktrees/` with `git worktree remove` rather than `rm -rf`, so git does not keep stale worktree metadata.
 
 ---
 

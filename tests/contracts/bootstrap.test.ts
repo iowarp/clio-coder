@@ -800,6 +800,27 @@ describe("contracts/bootstrap", () => {
 		strictEqual(existsSync(join(scratch, ".clio", "skills", "skill.md")), true);
 	});
 
+	/**
+	 * The reset reports two categories, removed and preserved, and a reader takes
+	 * anything in neither to be gone. The generated wiki was in neither: untouched
+	 * on disk but absent from the report, so a reset read as having discarded the
+	 * most expensive artifact in `.clio` (one model dispatch per page).
+	 */
+	it("context-clear names the generated wiki it keeps instead of leaving it unreported", async () => {
+		mkdirSync(join(scratch, ".clio", "wiki"), { recursive: true });
+		writeFileSync(join(scratch, ".clio", "wiki", "meta.json"), "{}\n", "utf8");
+		writeFileSync(join(scratch, ".clio", "wiki", "architecture.md"), "# Architecture\n", "utf8");
+
+		const result = await runContextClear({ cwd: scratch, confirmContext: () => true });
+
+		strictEqual(existsSync(join(scratch, ".clio", "wiki", "architecture.md")), true);
+		ok(
+			result.preserved.includes(".clio/wiki"),
+			"a wiki the reset keeps must be reported as kept, not omitted from both lists",
+		);
+		ok(!result.removed.includes(".clio/wiki"));
+	});
+
 	it("context-clear --all removes CLIO.md only after the extra confirmation", async () => {
 		writeFileSync(join(scratch, "CLIO.md"), "# Project\n", "utf8");
 		let result = await runContextClear({
