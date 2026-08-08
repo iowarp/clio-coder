@@ -47,6 +47,40 @@ describe("context activity island", () => {
 		ok(rendered.includes("Context Refresh"), rendered);
 	});
 
+	// context-wiki is declared in ContextActivityKind and emitted by the context
+	// domain, but the island's KINDS set omitted it, so isContextActivityPayload
+	// rejected every wiki event and the island stayed blank for a whole wiki run.
+	it("renders wiki activity instead of discarding it", () => {
+		const bus = createSafeEventBus();
+		const store = createContextActivityStore(bus);
+		bus.emit(BusChannels.ContextActivity, {
+			kind: "context-wiki",
+			phase: "generate",
+			status: "running",
+			message: "writing page 4 of 32",
+			at: 1000,
+			current: 4,
+			total: 32,
+		});
+		const current = store.current(1001);
+		ok(current, "a wiki activity payload must reach the island store");
+		strictEqual(current.kind, "context-wiki");
+		store.unsubscribe();
+
+		const rendered = stripAnsi(formatContextActivityIslandLines(current, CONTEXT_ISLAND_WIDTH, 2000, 1).join("\n"));
+		ok(rendered.includes("Context Wiki"), rendered);
+		// A wiki run never reaches the CLIO.md phase, so the trail must not offer it.
+		strictEqual(rendered.includes("CLIO.md"), false, rendered);
+		ok(rendered.includes("pages"), rendered);
+	});
+
+	it("labels the codewiki index phase distinctly from the Markdown wiki", () => {
+		const rendered = stripAnsi(
+			formatContextActivityIslandLines(makeActivity({ phase: "codewiki" }), CONTEXT_ISLAND_WIDTH, 2000, 1).join("\n"),
+		);
+		ok(rendered.includes("index"), rendered);
+	});
+
 	it("labels the generation phase neutrally for Scout and heuristic drafts", () => {
 		const rendered = stripAnsi(
 			formatContextActivityIslandLines(
