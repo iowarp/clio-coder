@@ -24,6 +24,7 @@ import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { defaultProjectContextTier, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import {
+	admissionMaxOutputTokens,
 	buildDynamicPromptMessages,
 	createDispatchBundle,
 	renderWorkerProjectContext,
@@ -6149,5 +6150,26 @@ describe("contracts/dispatch canonical agent field", () => {
 		const { captured, result } = await captureRoutedAgents({ tasks: [{ task: "t" }], agent_id: "scout" });
 		strictEqual(result.kind, "error");
 		deepStrictEqual(captured, []);
+	});
+});
+
+describe("contracts/dispatch route admission defaults", () => {
+	/**
+	 * The output-token figure a route is priced against had three identical
+	 * copies of the literal 32768 in this file, none of them connected to
+	 * DEFAULT_SETTINGS.defaults.maxTokens, which is the value an unconfigured
+	 * install actually runs with. Changing the shipped default would have moved
+	 * what every run requests while leaving all three admission estimates
+	 * pricing the old number, so budget admission would silently disagree with
+	 * the budget being spent.
+	 */
+	it("prices an unconfigured route against the shipped output-token default", () => {
+		strictEqual(admissionMaxOutputTokens(undefined), DEFAULT_SETTINGS.defaults.maxTokens);
+	});
+
+	it("prefers a configured output-token budget over the shipped default", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.defaults.maxTokens = 4096;
+		strictEqual(admissionMaxOutputTokens(settings), 4096);
 	});
 });

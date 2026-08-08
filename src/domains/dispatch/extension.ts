@@ -13,7 +13,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
-import type { DelegationToolGovernance } from "../../core/defaults.js";
+import { DEFAULT_SETTINGS, type DelegationToolGovernance } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { GUARDRAIL_DEFAULTS } from "../../core/guardrails.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
@@ -351,6 +351,16 @@ function calculateUsageCostUsd(meter: RunTokenMeter, pricing: EffectivePricing["
 			meter.cacheWriteTokens * pricing.cacheWrite) /
 		1_000_000
 	);
+}
+
+/**
+ * Output-token figure the admission estimate prices a route against. Settings
+ * always carry `defaults.maxTokens`; the fallback covers the callers that
+ * admit a route before settings are resolved, and it defers to the one place
+ * that owns the default rather than restating the number here.
+ */
+export function admissionMaxOutputTokens(settings: EffectiveSettings): number {
+	return settings?.defaults.maxTokens ?? DEFAULT_SETTINGS.defaults.maxTokens;
 }
 
 export function conservativeRouteAdmissionEstimateUsd(pricing: EffectivePricing, maxOutputTokens: number): number {
@@ -2103,7 +2113,7 @@ export function createDispatchBundle(
 		if (preflight.verdict === "over" || preflight.verdict === "at") {
 			denyDispatchForBudget(preflight, req.agentId);
 		}
-		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, settings?.defaults.maxTokens ?? 32768);
+		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, admissionMaxOutputTokens(settings));
 		const intentCeiling = req.routingIntent?.maxCostUsd;
 		if (intentCeiling !== null && intentCeiling !== undefined && estimateUsd > intentCeiling)
 			denyDispatchForBudget({ currentUsd: estimateUsd, ceilingUsd: intentCeiling }, req.agentId, estimateUsd);
@@ -3758,7 +3768,7 @@ export function createDispatchBundle(
 		rebindReservationSlot(
 			req,
 			effectiveRoute.node,
-			conservativeRouteAdmissionEstimateUsd(lifecycle.target.effectivePricing, settings?.defaults.maxTokens ?? 32768),
+			conservativeRouteAdmissionEstimateUsd(lifecycle.target.effectivePricing, admissionMaxOutputTokens(settings)),
 			settings,
 		);
 		if (placement?.reroutes !== undefined && placement.reroutes.length > 0) {
@@ -4791,7 +4801,7 @@ export function createDispatchBundle(
 			settingsFingerprint: computeSettingsFingerprint(settings ?? null),
 			costUpperBoundUsd: conservativeRouteAdmissionEstimateUsd(
 				target.effectivePricing,
-				settings?.defaults.maxTokens ?? 32768,
+				admissionMaxOutputTokens(settings),
 			),
 			costUpperBoundKnown: target.effectivePricing.provenance !== "unknown",
 			routeApproval: null,
