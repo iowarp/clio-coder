@@ -11,6 +11,7 @@ import { createContextBundle } from "../../src/domains/context/extension.js";
 import {
 	computeFingerprint,
 	listWikiPages,
+	readWikiMeta,
 	renderPromptContext,
 	runContextRefresh,
 	serializeClioMd,
@@ -80,6 +81,24 @@ function writeWikiFixture(cwd: string, gitHead: string | null): void {
 		model: "test-model",
 		contentHash: "0".repeat(64),
 		pages: listWikiPages(cwd),
+	});
+}
+
+/** A promoted wiki that finished 12 of its 32 planned pages and is not stale. */
+function writePartialWikiFixture(cwd: string): void {
+	writeWikiFixture(cwd, null);
+	const meta = readWikiMeta(cwd);
+	ok(meta);
+	writeWikiMeta(cwd, {
+		...meta,
+		generation: {
+			requestedDepth: "detailed",
+			depth: "detailed",
+			sourceFiles: 1,
+			sourceLines: 1,
+			pagesPlanned: 32,
+			pagesWritten: 12,
+		},
 	});
 }
 
@@ -235,7 +254,9 @@ describe("contracts/context-refresh", () => {
 		strictEqual(result.hint, "wiki is stale; run clio context refresh --wiki or clio context wiki --update");
 	});
 
-	it("does not run or hint wiki refresh when no wiki exists", async () => {
+	// --wiki with no wiki on disk used to return silently, so the operator saw a
+	// bare "codewiki rebuilt" line and no sign that the request had been dropped.
+	it("says so instead of silently dropping --wiki when no wiki exists", async () => {
 		const cwd = scratchProject();
 		let called = 0;
 
@@ -249,6 +270,41 @@ describe("contracts/context-refresh", () => {
 
 		strictEqual(called, 0);
 		strictEqual(result.wiki, undefined);
+		strictEqual(result.hint, "no wiki exists, so --wiki had nothing to update; run clio context wiki to build one");
+	});
+
+	// A page is the unit of work, so a run that loses pages to a deadline still
+	// promotes what it finished. That wiki is current with the tree and therefore
+	// never "stale", which used to mean an ordinary refresh said nothing at all
+	// about the 20 pages it still owed.
+	it("hints that a partial wiki owes pages even when it is not stale", async () => {
+		const cwd = scratchProject();
+		writePartialWikiFixture(cwd);
+
+		const result = await runContextRefresh({ cwd, wiki: false });
+
+		strictEqual(result.wiki, undefined);
+		strictEqual(
+			result.hint,
+			"wiki is incomplete: 12 of 32 planned pages written, 20 owed; run clio context wiki --update to resume",
+		);
+	});
+
+	it("advertises a partial wiki to the model as partial", () => {
+		const cwd = scratchProject();
+		writePartialWikiFixture(cwd);
+
+		const rendered = renderPromptContext(cwd);
+		ok(rendered.text.includes("incomplete: 12 of 32 planned pages written, 20 owed"), rendered.text);
+	});
+
+	it("leaves a complete wiki unqualified", async () => {
+		const cwd = scratchProject();
+		writeWikiFixture(cwd, null);
+
+		const result = await runContextRefresh({ cwd, wiki: false });
+
 		strictEqual(result.hint, undefined);
+		strictEqual(renderPromptContext(cwd).text.includes("incomplete"), false);
 	});
 });

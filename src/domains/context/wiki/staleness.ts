@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { computeFingerprint } from "../fingerprint.js";
-import { readWikiMeta } from "./meta.js";
+import { readWikiMeta, type WikiMeta } from "./meta.js";
 
 export type WikiStaleness =
 	| { state: "absent"; warning?: string }
@@ -77,6 +77,37 @@ function changedFileCount(cwd: string, gitHead: string): { count: number; warnin
 	} catch {
 		return { warning: "wiki staleness unavailable: git diff failed for the recorded wiki gitHead" };
 	}
+}
+
+export interface WikiCompleteness {
+	pagesPlanned: number;
+	pagesWritten: number;
+	/** Planned pages the promoted wiki has not written yet. */
+	owed: number;
+}
+
+/**
+ * How much of the plan the promoted wiki actually covers. A page is the unit of
+ * work now, so a run that loses pages to a deadline still promotes what it
+ * finished and records the rest as owed. That makes "incomplete" a normal
+ * resting state, distinct from "stale": an incomplete wiki can be perfectly
+ * current with the tree and still be missing most of its pages.
+ *
+ * Null when no wiki exists or when its metadata predates generation counts,
+ * which is indistinguishable from complete and must not be reported as owing.
+ */
+export function wikiCompletenessFromMeta(meta: WikiMeta | null): WikiCompleteness | null {
+	const generation = meta?.generation;
+	if (!generation) return null;
+	return {
+		pagesPlanned: generation.pagesPlanned,
+		pagesWritten: generation.pagesWritten,
+		owed: Math.max(0, generation.pagesPlanned - generation.pagesWritten),
+	};
+}
+
+export function wikiCompleteness(cwd: string): WikiCompleteness | null {
+	return wikiCompletenessFromMeta(readWikiMeta(cwd));
 }
 
 export function wikiStaleness(cwd: string): WikiStaleness {
