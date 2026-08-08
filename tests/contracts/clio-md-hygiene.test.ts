@@ -79,4 +79,37 @@ describe("contracts/clio-md hygiene", () => {
 			strictEqual(prompt.includes(obsoleteTool), false, `Scout prompt must not mention ${obsoleteTool}`);
 		}
 	});
+
+	/**
+	 * The prompt and the grounding filter are two halves of one contract, and when
+	 * they disagree the disagreement is silent: Scout answers in good faith, every
+	 * line is deleted after the fact, and the run reports a heuristic handbook with
+	 * no indication that the instructions were the problem. The prompt asked for
+	 * verbatim extraction from sibling files while the filter now asks for cited
+	 * description, so the prompt has to state the rule it will be judged by.
+	 */
+	it("the Scout bootstrap prompt states the citation rule the grounding filter enforces", async () => {
+		const prompt = buildBootstrapPrompt(await generatorInput());
+
+		ok(prompt.includes("backticked token"), "the prompt must name the token requirement the filter applies");
+		ok(/cites nothing is deleted/i.test(prompt), "the prompt must say an uncited line is dropped");
+		strictEqual(
+			/verbatim|copied from siblingFiles|extractive/i.test(prompt),
+			false,
+			"the prompt must not still ask for verbatim extraction",
+		);
+	});
+
+	/**
+	 * The section titles the prompt requests are the ones the handbook is worth
+	 * having for: control flow, invariants that break silently, and the file sets a
+	 * change has to touch together. A handbook without them is a file listing.
+	 */
+	it("the Scout bootstrap prompt asks for behavior-changing sections", async () => {
+		const prompt = buildBootstrapPrompt(await generatorInput());
+
+		for (const section of ["Architecture", "Gotchas", "Extending"]) {
+			ok(prompt.includes(`"${section}"`), `Scout prompt must request a ${section} section`);
+		}
+	});
 });

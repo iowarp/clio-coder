@@ -5,29 +5,33 @@ import { renderCodewikiDigest } from "./codewiki/digest.js";
 import type { Codewiki } from "./codewiki/indexer.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 
-export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your job is to produce a single CLIO.md file for the project at <cwd>. CLIO.md is a lean, project-specific context file that the clio-coder coding agent loads on every session.
+export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your job is to write the custom sections of CLIO.md for the project at <cwd>. CLIO.md is a lean, project-specific handbook that the clio-coder coding agent loads on every session, so write for an experienced engineer who has never seen this repository and is about to change it.
 
-You are being dispatched through Clio's internal Scout shadow agent. Use Scout's read-only tools only when the structured <bootstrap-input> is insufficient. Do not write files, run tests, or use external sources. For this bootstrap task, the JSON-only response contract below overrides Scout's normal evidence-report format.
+You are being dispatched through Clio's internal Scout shadow agent. Read the repository before you answer: start with code_nav (modes symbol, path, entries, outline, deps, dependents, wiki) against the index Clio just built, then read the specific files that decide behavior. Do not write files, run tests, or use external sources. For this bootstrap task, the JSON-only response contract below overrides Scout's normal evidence-report format.
 
 You will be given:
 - The repository-derived project name. Return it exactly as projectName; do not substitute a path or invent a brand.
 - The detected project type.
 - The existing CLIO.md when one is present. Treat it as evidence; Clio preserves its human-owned fields outside your response.
-- A structural digest from the codewiki index: module count, entry points, and top directories. Ground architecture sections in this real structure; do not invent files.
+- A structural digest from the codewiki index: module count, entry points, and top directories.
 - A sanitized adoption scan of project-local agent configs, including Claude Code context files and skills (CLAUDE.md, .claude/CLAUDE.md, project settings/commands/agents/skills), Codex (AGENTS.md, CODEX.md, .codex/AGENTS.md, .codex/skills), Gemini (GEMINI.md, .gemini/GEMINI.md, .gemini config/rules), Cursor (.cursor/rules/*.mdc and *.md), OpenCode (.opencode/skills), and GitHub Copilot (.github/copilot-instructions.md, .github/skills).
 - Global user preferences only when the user explicitly opted in.
 
-Clio's deterministic evidence layer owns the final project name, identity, conventions, hard invariants, navigation section, repository shape, agent-context provenance, verification policy, and artifact policy. Set projectName to the supplied expectedProjectName, keep identity to one short sentence, and return empty conventions and invariants arrays. Your only enrichment is one or two extractive custom H2 sections. When adoption.sourceCount is greater than zero, always return an "Architecture evidence" section whose body contains two to five exact, high-value source lines copied from siblingFiles, without their Markdown headings. An optional "Workflow evidence" section may contain exact lines about traps or failure modes. When no suitable source lines exist, sections may be empty. Do not synthesize connecting prose: every retained line must occur verbatim in the supplied evidence.
+THE CITATION RULE, which Clio enforces after you answer: a line survives only when it contains at least one backticked token, and every backticked token names something real in this repository, meaning an indexed file path, a symbol, a runnable package script, or a string that occurs in the supplied evidence. A line that cites nothing is deleted. A line that cites something that does not exist is deleted. Write every line so that it names the file, symbol, or command it is about.
 
-Copy commands, file paths, symbols, and version constraints exactly from supplied evidence. Never repair, combine, or paraphrase a shell command. Never invent API endpoints or examples. Do not use fenced code blocks. Keep the complete custom-section payload between 300 and 1200 bytes.
+Clio's deterministic layer owns the project name, identity, conventions, hard invariants, the navigation and repository-shape sections, agent-context provenance, and the verification-command section. Set projectName to the supplied expectedProjectName, keep identity to one short sentence, and return empty conventions and invariants arrays.
 
-When the input is insufficient, query the existing index with code_nav modes symbol, path, entries, outline, deps, dependents, or wiki before using broader read-only tools.
+Your contribution is two to four custom H2 sections, chosen from these, in this order of value:
+- "Architecture": the control flow a change has to travel through, named file by file. Say which module owns which decision, and which files are coupled and must change together. This is the section that requires reading, so it is the one worth the most.
+- "Gotchas": invariants that are easy to break. Each item names the file that enforces it and the consequence of breaking it, especially where a violation degrades silently instead of failing loudly.
+- "Extending": for the two or three most likely kinds of change, the exact set of files that must be touched together.
+- "Commands": only development commands that Clio's verification section will not already state, such as running a single test, a dry-run mode, or a debug environment variable.
 
-CLIO.md is a versioned, human-owned handbook. Do not call it disposable or generated state. Do not emit an artifact-policy section; Clio appends the canonical one.
+Prefer specific over complete. Six lines that name real files beat twenty lines of summary. State a size warning when a file is large enough that reading it top to bottom is the wrong move. A fenced block is acceptable for commands; Clio inlines it.
 
-Do not invent ownership teams, review requirements, release processes, module export conventions, migration requirements, or file counts unless they are present in the input or verified by Scout tools.
+Copy commands, file paths, symbols, and version constraints exactly. Never repair, combine, or paraphrase a shell command. Never invent an API endpoint, an example, an ownership team, a review requirement, a release process, or a file count. If you did not read it or it was not supplied, do not write it.
 
-Do not include a project map, file tree, dependency inventory, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, generated state, fingerprint metadata, or imported-context provenance. Clio adds those deterministic surfaces after parsing.
+Do not include a project map, a file tree, a dependency inventory, a language-idiom list, preferences, communication-style content, secrets, credentials, auth tokens, caches, histories, generated state, fingerprint metadata, or imported-context provenance. Clio adds its deterministic surfaces after parsing. Keep the complete custom-section payload under 2500 bytes.
 
 Return one assistant message containing only compact JSON with this exact shape. Do not include markdown fences, prose, explanation, or commentary:
 {
