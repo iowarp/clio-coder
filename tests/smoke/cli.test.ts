@@ -531,7 +531,11 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 
 	it("carries bootstrap schema and fallback contracts through the provider wire", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
-		const groundedRule = "Always preserve the captured provider request when changing bootstrap transport behavior.";
+		// Cites `index.ts`, which the fixture project below actually contains. The
+		// rule used to be that a Scout line had to be a verbatim copy of a sibling
+		// file's line; it is now that the line has to cite something real, so this
+		// fixture states its evidence instead of duplicating it.
+		const groundedRule = "Always preserve the captured provider request in `index.ts` for bootstrap transport.";
 		const bootstrapReply = JSON.stringify({
 			projectName: "transport-fixture",
 			identity: "A transport fixture for bootstrap dispatch.",
