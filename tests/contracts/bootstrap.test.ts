@@ -472,8 +472,12 @@ describe("contracts/bootstrap", () => {
 		strictEqual(result.summary.action, "wrote");
 		strictEqual(result.telemetry.generation.mode, "heuristic");
 		strictEqual(result.telemetry.generation.parserOutcome, "not-run");
-		strictEqual(result.output.sections?.filter((section) => section.title === "Context artifacts").length, 1);
-		strictEqual(readFileSync(join(scratch, "CLIO.md"), "utf8").match(/^## Context artifacts$/gm)?.length, 1);
+		// The handbook describes the user's repository. Clio's own `.clio/` bookkeeping
+		// is enforced by the .gitignore this run just wrote, not by prose repeated
+		// verbatim into every handbook Clio ever generates.
+		strictEqual(result.output.sections?.some((section) => section.title === "Context artifacts"), false);
+		strictEqual(readFileSync(join(scratch, "CLIO.md"), "utf8").includes("## Context artifacts"), false);
+		ok(readFileSync(join(scratch, ".gitignore"), "utf8").split(/\r?\n/).includes(".clio/"));
 
 		const state = readClioState(scratch);
 		strictEqual(state?.projectType, "typescript");
