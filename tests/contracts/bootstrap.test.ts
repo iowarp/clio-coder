@@ -524,6 +524,7 @@ describe("contracts/bootstrap", () => {
 			strictEqual(parsed.value.sections[0]?.body, "Preserve this section when scout or model generation is unavailable.");
 		}
 		strictEqual(generated, true, "a supplied generator is the request to generate");
+		strictEqual(result.telemetry.generation.mode, "heuristic", "a run that generated never records mode 'existing'");
 		ok(phases.includes("codewiki:completed"));
 		ok(phases.includes("clio-md:completed"));
 		ok(phases.includes("done:completed"));

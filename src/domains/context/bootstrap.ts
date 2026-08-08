@@ -998,10 +998,18 @@ function writeProjectState(
 	recordAdoption: boolean,
 	codewikiVersion: number,
 	generation: BootstrapGenerationTelemetry,
+	generated: boolean,
 ): string {
 	const finalFingerprint = computeFingerprint(cwd);
 	const statePath = resolveStatePath(cwd);
 	const prev = readClioState(cwd);
+	// lastBootstrap describes how the CLIO.md on disk was produced, not what the
+	// most recent run happened to do. A run that generated nothing leaves the
+	// handbook untouched, so overwriting a recorded `scout` provenance with
+	// `existing` would claim the handbook has no model authorship behind it.
+	const lastBootstrap = generated
+		? durableGenerationTelemetry(generation)
+		: (prev?.lastBootstrap ?? durableGenerationTelemetry(generation));
 	const contextSources = recordAdoption ? adoption.sourceSnapshots : prev?.contextSources;
 	const contextSourceHash = contextSources ? adoptionSnapshotsHash(contextSources) : undefined;
 	writeClioState(cwd, {
@@ -1012,7 +1020,7 @@ function writeProjectState(
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
 		lastIndexedAt: indexedAt,
-		lastBootstrap: durableGenerationTelemetry(generation),
+		lastBootstrap,
 		...(contextSources ? { contextSources } : {}),
 		...(contextSourceHash ? { contextSourceHash } : {}),
 	});
@@ -1317,6 +1325,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		adoptionApplied,
 		codewiki.version,
 		generation,
+		shouldGenerate,
 	);
 	progress(input, {
 		phase: "state",
