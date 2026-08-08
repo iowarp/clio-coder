@@ -474,19 +474,6 @@ function verificationSection(cwd: string): ClioMdSection | null {
 	return { title: "Verification expectations", body: lines.join(" ") };
 }
 
-function contextArtifactsSection(): ClioMdSection {
-	return {
-		title: "Context artifacts",
-		body: [
-			"`CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed.",
-			"`.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts.",
-			"Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact.",
-			"`clio context init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.",
-		].join(" "),
-	};
-}
-
-const ARTIFACT_SECTION_RE = /\b(artifacts?|generated|local state|local files?|context artifacts?)\b/i;
 const VERIFICATION_SECTION_RE = /\bverification\b/i;
 
 interface ModelGroundingCorpus {
@@ -613,7 +600,7 @@ function stabilizeGeneratedOutput(
 	const modelSections = new Set<ClioMdSection>();
 	const seenSectionTitles = new Set<string>();
 	const addSection = (section: ClioMdSection): boolean => {
-		if (ARTIFACT_SECTION_RE.test(section.title) || VERIFICATION_SECTION_RE.test(section.title)) return false;
+		if (VERIFICATION_SECTION_RE.test(section.title)) return false;
 		const titleKey = section.title.replace(/\s+/g, " ").trim().toLowerCase();
 		if (seenSectionTitles.has(titleKey)) return false;
 		seenSectionTitles.add(titleKey);
@@ -637,7 +624,7 @@ function stabilizeGeneratedOutput(
 		identity: existing?.identity ?? defaultIdentity(input.cwd, input.projectType, input.siblingFiles),
 		conventions: conventions.slice(0, 6),
 		invariants: invariants.slice(0, 3),
-		sections: [...retainedOrdinarySections, ...(verification ? [verification] : []), contextArtifactsSection()],
+		sections: [...retainedOrdinarySections, ...(verification ? [verification] : [])],
 	};
 }
 
