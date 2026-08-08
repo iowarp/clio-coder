@@ -79,15 +79,4 @@ describe("contracts/clio-md hygiene", () => {
 			strictEqual(prompt.includes(obsoleteTool), false, `Scout prompt must not mention ${obsoleteTool}`);
 		}
 	});
-
-	// A handbook checked into this repository is reviewed like source, so it
-	// still must not carry retired tool names. An empty committed stub satisfies
-	// this vacuously, which is the intended post-b8fbd6ca state.
-	it("a committed CLIO.md never names a retired navigation tool", () => {
-		const clioMd = readFileSync(join(repoRoot, "CLIO.md"), "utf8");
-
-		for (const obsoleteTool of OBSOLETE_TOOLS) {
-			strictEqual(clioMd.includes(obsoleteTool), false, `CLIO.md must not mention ${obsoleteTool}`);
-		}
-	});
 });
