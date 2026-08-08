@@ -43,6 +43,45 @@ describe("contracts/bootstrap", () => {
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
+	/**
+	 * The verification section used to hardcode `npm run` and to name whichever
+	 * `lint`/`format` script existed. In a pnpm repository whose `lint` script is
+	 * `eslint . --fix`, that produced a handbook telling the agent to run a command
+	 * the repo cannot run, and to close out a task by rewriting the working tree
+	 * with an autofixer instead of judging it. Both are worse than saying nothing.
+	 */
+	it("names verification commands the repository can actually run", async () => {
+		writeFileSync(
+			join(scratch, "package.json"),
+			JSON.stringify({
+				name: "pnpm-fixture",
+				type: "module",
+				scripts: {
+					typecheck: "tsc --noEmit",
+					lint: "eslint . --fix",
+					"lint:check": "eslint .",
+					format: "prettier --write .",
+					"format:check": "prettier --check .",
+					test: "vitest run",
+				},
+			}),
+			"utf8",
+		);
+		writeFileSync(join(scratch, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n", "utf8");
+		writeFileSync(join(scratch, "index.ts"), "export const fixture = true;\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		ok(verification, "a repository with scripts must get a verification section");
+
+		strictEqual(/(?<!p)npm run/.test(verification.body), false, verification.body);
+		ok(verification.body.includes("`pnpm run typecheck`"), verification.body);
+		ok(verification.body.includes("`pnpm run lint:check`"), verification.body);
+		ok(verification.body.includes("`pnpm run format:check`"), verification.body);
+		strictEqual(verification.body.includes("`pnpm run lint`"), false, verification.body);
+		strictEqual(verification.body.includes("`pnpm run format`"), false, verification.body);
+	});
+
 	it("parses and serializes CLIO.md content and metadata footer", () => {
 		const text = serializeClioMd({
 			projectName: "Sample",

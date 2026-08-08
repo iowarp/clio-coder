@@ -416,14 +416,46 @@ function packageScripts(cwd: string): Record<string, string> {
 	return out;
 }
 
+export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+/**
+ * The command prefix an agent must actually type in this repository. The
+ * handbook used to hardcode `npm run`, which is simply wrong in a pnpm, yarn, or
+ * bun workspace. A handbook that names a command the repository cannot run is
+ * worse than one that names no command at all: the agent runs it, it fails, and
+ * the failure looks like the agent's own mistake.
+ */
+export function packageManager(cwd: string): PackageManager {
+	const declared = stringField(readJsonFile(join(cwd, "package.json")), "packageManager")?.split("@")[0];
+	if (declared === "pnpm" || declared === "yarn" || declared === "bun" || declared === "npm") return declared;
+	if (existsSync(join(cwd, "pnpm-lock.yaml"))) return "pnpm";
+	if (existsSync(join(cwd, "yarn.lock"))) return "yarn";
+	if (existsSync(join(cwd, "bun.lock")) || existsSync(join(cwd, "bun.lockb"))) return "bun";
+	return "npm";
+}
+
+/** A script whose command rewrites the tree cannot serve as a verification gate. */
+const MUTATING_SCRIPT_RE = /(?:^|\s)--(?:fix|write)(?:\s|$)/;
+
 function verificationSection(cwd: string): ClioMdSection | null {
 	const scripts = packageScripts(cwd);
+	const pm = packageManager(cwd);
 	const hasScript = (name: string) => typeof scripts[name] === "string";
-	const command = (name: string) => `\`npm run ${name}\``;
+	const command = (name: string) => `\`${pm} run ${name}\``;
+	// Prefer a non-mutating `:check` variant. Naming an autofixer as the gate
+	// tells the agent to rewrite the working tree instead of judging it, which
+	// turns a verification step into an unreviewed diff.
+	const gate = (name: string): string | null => {
+		if (hasScript(`${name}:check`)) return `${name}:check`;
+		return hasScript(name) && !MUTATING_SCRIPT_RE.test(scripts[name] ?? "") ? name : null;
+	};
 	const lines: string[] = [];
-	const baseline = ["typecheck", "lint"].filter(hasScript).map(command);
+	const baseline = ["typecheck", "lint", "format"]
+		.map(gate)
+		.filter((name): name is string => name !== null)
+		.map(command);
 	if (baseline.length > 0) {
-		lines.push(`Before handoff, run ${baseline.join(" and ")} for TypeScript and style checks.`);
+		lines.push(`Before handoff, run ${baseline.join(", ")}.`);
 	}
 	if (hasScript("build")) {
 		lines.push(`Run ${command("build")} after CLI, worker, packaging, or generated-dist changes.`);
