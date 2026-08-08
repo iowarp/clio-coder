@@ -242,9 +242,16 @@ describe("contracts/bootstrap", () => {
 		ok(parsed.ok);
 	});
 
+	/**
+	 * Scout enrichment used to be extractive: a line survived only when it was a
+	 * verbatim member of the sibling-file corpus. The rule now is that a line must
+	 * cite the repository and every citation must be real, so Scout can describe
+	 * what it read instead of copying what someone already wrote.
+	 */
 	it("keeps identity and hard rules evidence-owned while Scout contributes bounded sections", async () => {
-		const groundedRule = "Always run npm test before handing results to partners.";
-		const alteredRule = "Always run npm publish before handing results to partners.";
+		const citedRule = "The run entry point is `index.ts`.";
+		const inventedCommand = "Publish partner builds with `npm publish --tag partners`.";
+		const uncitedClaim = "A dedicated team owns every change.";
 		writeFileSync(
 			join(scratch, "package.json"),
 			JSON.stringify({
@@ -255,7 +262,7 @@ describe("contracts/bootstrap", () => {
 			"utf8",
 		);
 		writeFileSync(join(scratch, "index.ts"), "export const grounded = true;\n", "utf8");
-		writeFileSync(join(scratch, "AGENTS.md"), `- ${groundedRule}\n`, "utf8");
+		writeFileSync(join(scratch, "AGENTS.md"), "- Always run tests before handing results to partners.\n", "utf8");
 
 		const result = await runBootstrap({
 			cwd: scratch,
@@ -272,10 +279,10 @@ describe("contracts/bootstrap", () => {
 					conventions: ["python", "Always invent a framework."],
 					invariants: ["Dependency list is a hard invariant."],
 					sections: [
-						{ title: "Architecture & Ownership", body: "A dedicated team owns every change." },
+						{ title: "Architecture & Ownership", body: uncitedClaim },
 						{
 							title: "Operational workflow",
-							body: [alteredRule, ...Array.from({ length: 40 }, () => groundedRule)].join("\n"),
+							body: [inventedCommand, ...Array.from({ length: 40 }, () => citedRule)].join("\n"),
 						},
 					],
 				};
@@ -284,19 +291,65 @@ describe("contracts/bootstrap", () => {
 
 		strictEqual(result.output.projectName, "Grounded Project");
 		match(result.output.identity, /HPC workflow engine for scientific data/i);
-		deepStrictEqual(result.output.conventions, [groundedRule]);
+		deepStrictEqual(result.output.conventions, ["Always run tests before handing results to partners."]);
 		deepStrictEqual(result.output.invariants, []);
 		const sectionTitles = result.output.sections?.map((section) => section.title) ?? [];
 		ok(sectionTitles.includes("Context retrieval"));
 		ok(sectionTitles.includes("Repository shape"));
 		ok(sectionTitles.includes("Operational workflow"));
+		// Every line cites nothing, so the whole section goes, title included. No
+		// word-level surgery on the title is needed to reach that outcome.
 		strictEqual(sectionTitles.includes("Architecture & Ownership"), false);
 		const workflow = result.output.sections?.find((section) => section.title === "Operational workflow");
 		ok(workflow);
 		ok(workflow.body.length <= 1200);
-		ok(workflow.body.split("\n").every((line) => line === groundedRule));
+		ok(workflow.body.split("\n").every((line) => line === citedRule));
 		strictEqual(workflow.body.includes("npm publish"), false);
 		strictEqual(readFileSync(join(scratch, "CLIO.md"), "utf8").includes(scratch), false);
+		strictEqual(result.telemetry.generation.mode, "scout");
+	});
+
+	/**
+	 * The cold-start case, and the one `context init` exists for: no sibling agent
+	 * context, no prior handbook. Under the old extractive rule the evidence corpus
+	 * held only paths and symbol names, so no Scout sentence could ever match one
+	 * verbatim and every model-authored section was deleted before it was written.
+	 */
+	it("keeps Scout sections that cite the repository when no sibling context exists", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "cold-start", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "index.ts"), "export const coldStart = true;\n", "utf8");
+
+		const result = await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			generate: (input) => {
+				input.reportGeneration?.({
+					mode: "scout",
+					parserOutcome: "parsed",
+					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
+				});
+				return {
+					projectName: "Ignored",
+					identity: "Ignored",
+					conventions: [],
+					invariants: [],
+					sections: [
+						{
+							title: "Architecture",
+							body: [
+								"`index.ts` is the only module and exports the run flag directly.",
+								"A dedicated team reviews every change before merge.",
+							].join("\n"),
+						},
+					],
+				};
+			},
+		});
+
+		const architecture = result.output.sections?.find((section) => section.title === "Architecture");
+		ok(architecture, "a cited Scout section must survive a bootstrap with no sibling files");
+		ok(architecture.body.includes("`index.ts`"), architecture.body);
+		strictEqual(architecture.body.includes("dedicated team"), false, architecture.body);
 		strictEqual(result.telemetry.generation.mode, "scout");
 	});
 
@@ -428,7 +481,14 @@ describe("contracts/bootstrap", () => {
 		strictEqual(state?.lastBootstrap?.mode, "heuristic");
 	});
 
-	it("discloses when a parsed Scout draft is replaced by the source-sparse heuristic floor", async () => {
+	/**
+	 * This used to assert a separate "source-sparse heuristic floor": a second
+	 * mechanism, with its own risk-word regex, that replaced a whole Scout draft
+	 * when the repository had no sibling context. The citation rule already covers
+	 * the case it was built for, so the floor and its disclosure string are gone
+	 * and the same input reaches the same outcome through one mechanism.
+	 */
+	it("discloses a parsed Scout draft that cites nothing as a heuristic handbook", async () => {
 		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "floor-project", type: "module" }), "utf8");
 		writeFileSync(join(scratch, "index.ts"), "export const floor = true;\n", "utf8");
 
@@ -454,7 +514,10 @@ describe("contracts/bootstrap", () => {
 		strictEqual(result.output.projectName, "Floor Project");
 		strictEqual(result.telemetry.generation.mode, "heuristic");
 		strictEqual(result.telemetry.generation.parserOutcome, "parsed");
-		strictEqual(result.telemetry.generation.fallbackReason, "source-sparse Scout output triggered heuristic floor");
+		strictEqual(
+			result.telemetry.generation.fallbackReason,
+			"Scout draft contributed no evidence-grounded custom sections",
+		);
 		strictEqual(readClioState(scratch)?.lastBootstrap?.mode, "heuristic");
 		strictEqual(readClioState(scratch)?.lastBootstrap?.parserOutcome, "parsed");
 	});

@@ -488,43 +488,17 @@ function contextArtifactsSection(): ClioMdSection {
 
 const ARTIFACT_SECTION_RE = /\b(artifacts?|generated|local state|local files?|context artifacts?)\b/i;
 const VERIFICATION_SECTION_RE = /\bverification\b/i;
-const SOURCE_SPARSE_RISK_RE =
-	/\b(ownership|dedicated team|review requirement|migration chain|workflow traps|failure modes)\b/i;
-const MODEL_SECTION_EVIDENCE_TERMS = [
-	"ownership",
-	"dedicated team",
-	"review requirement",
-	"release process",
-	"migration chain",
-];
-function sourceSparseBootstrap(input: BootstrapGenerateInput): boolean {
-	return (
-		input.siblingFiles.length === 0 &&
-		input.adoption.importedRules.length === 0 &&
-		input.existingClioMd === undefined &&
-		input.existingClioMdText === undefined
-	);
-}
-
-function sourceSparseNeedsHeuristicFloor(input: BootstrapGenerateInput, output: BootstrapStructuredOutput): boolean {
-	if (!sourceSparseBootstrap(input)) return false;
-	return (output.sections ?? []).some((section) => SOURCE_SPARSE_RISK_RE.test(`${section.title}\n${section.body}`));
-}
 
 interface ModelGroundingCorpus {
 	lower: string;
-	lines: ReadonlySet<string>;
 	indexedPaths: ReadonlySet<string>;
 }
 
-function normalizeGroundingLine(value: string): string {
-	return value
-		.trim()
-		.replace(/^[>*+-]\s+|^\d+[.)]\s+/, "")
-		.replace(/\s+/g, " ")
-		.trim();
-}
-
+/**
+ * Everything Scout is allowed to cite: sibling agent-context prose, the existing
+ * handbook, every indexed path, every indexed symbol, and every runnable package
+ * script rendered the way this repository would type it.
+ */
 function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundingCorpus {
 	let siblingBudget = 64_000;
 	const siblingEvidence: string[] = [];
@@ -535,26 +509,47 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 		siblingBudget -= chunk.length;
 	}
 	const indexedPaths = new Set(input.codewiki.files.map((file) => file.path));
+	const pm = packageManager(input.cwd);
+	const scripts = packageScripts(input.cwd);
 	const evidence = [
 		...siblingEvidence,
 		(input.existingClioMdText ?? "").slice(0, 8000),
 		input.expectedProjectName ?? "",
 		input.projectType,
 		[...indexedPaths].join("\n").slice(0, 64_000),
+		...Object.entries(scripts).flatMap(([name, command]) => [`${pm} run ${name}`, `${pm} ${name}`, command]),
 		input.codewiki.symbols
 			.map((symbol) => symbol.name)
 			.join("\n")
 			.slice(0, 128_000),
 	].join("\n");
-	const lines = new Set(
-		evidence
-			.split(/\r?\n/)
-			.map(normalizeGroundingLine)
-			.filter((line) => line.length >= 8),
-	);
-	return { lower: evidence.toLowerCase(), lines, indexedPaths };
+	return { lower: evidence.toLowerCase(), indexedPaths };
 }
 
+const CODE_TOKEN_RE = /`([^`\n]+)`/g;
+
+function groundedToken(token: string, evidence: ModelGroundingCorpus): boolean {
+	return evidence.lower.includes(token.toLowerCase()) || evidence.indexedPaths.has(token.replace(/^\.\//, ""));
+}
+
+/**
+ * Keep a Scout line only when it cites the repository and every citation is real.
+ *
+ * This used to require the line to be a verbatim member of the sibling-file
+ * corpus, which made Scout a copier rather than a reader: in a repository with no
+ * sibling agent-context files, and that is exactly the repository `context init`
+ * exists for, the corpus held only paths and symbol names, so no sentence could
+ * ever match and the model's entire contribution was deleted by construction.
+ *
+ * The replacement rule is one sentence and strictly more general than the term
+ * blacklist it also replaces: a line must contain at least one backticked token,
+ * and every backticked token must name a real indexed path, symbol, script, or
+ * a string that occurs in the supplied evidence. "A dedicated team owns every
+ * change" cites nothing and is dropped. "`src/commands.ts` owns argv parsing and
+ * the help text" names a file that exists and survives. An invented command like
+ * `npm publish` in a repository with no publish script is dropped even though the
+ * rest of the sentence is unremarkable, which was the real failure mode.
+ */
 function groundedModelBody(body: string, evidence: ModelGroundingCorpus): string {
 	const kept: string[] = [];
 	let inFence = false;
@@ -564,30 +559,18 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus): string
 			inFence = !inFence;
 			continue;
 		}
-		if (inFence || trimmed.length === 0 || /^#{1,6}\s|^---+$/.test(trimmed)) continue;
-		if (
-			MODEL_SECTION_EVIDENCE_TERMS.some((term) => trimmed.toLowerCase().includes(term) && !evidence.lower.includes(term))
-		) {
-			continue;
-		}
-		const codeTokens = [...trimmed.matchAll(/`([^`\n]+)`/g)].map((match) => match[1]?.trim()).filter(Boolean);
-		if (
-			codeTokens.some(
-				(token) =>
-					token !== undefined &&
-					!evidence.lower.includes(token.toLowerCase()) &&
-					!evidence.indexedPaths.has(token.replace(/^\.\//, "")),
-			)
-		) {
-			continue;
-		}
-		const prose = trimmed.replace(/^[>*+-]\s+|^\d+[.)]\s+/, "").trim();
-		if (prose.length === 0) continue;
-		// Scout enrichment is extractive by construction. Fuzzy lexical overlap is
-		// unsafe here: one altered command verb can invert a repository rule while
-		// retaining nearly every other word. Normalize list markers and whitespace,
-		// then require membership in one complete evidence line.
-		if (evidence.lines.has(normalizeGroundingLine(prose))) kept.push(trimmed);
+		if (trimmed.length === 0 || /^#{1,6}\s|^---+$/.test(trimmed)) continue;
+		// A fenced command block is the single highest-value thing Scout can return,
+		// and dropping the fence used to drop the commands with it. Inline the line
+		// instead, so it faces the same citation rule as any other line.
+		const line = inFence ? `\`${trimmed.replace(/`/g, "")}\`` : trimmed;
+		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
+			.map((match) => match[1]?.trim())
+			.filter((token): token is string => token !== undefined && token.length > 0);
+		if (codeTokens.length === 0) continue;
+		if (!codeTokens.every((token) => groundedToken(token, evidence))) continue;
+		if (line.replace(CODE_TOKEN_RE, "").trim().length === 0 && !inFence) continue;
+		kept.push(line);
 	}
 	const bounded: string[] = [];
 	let length = 0;
@@ -603,37 +586,16 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus): string
 function sanitizeModelSection(section: ClioMdSection, evidence: ModelGroundingCorpus): ClioMdSection | null {
 	const body = groundedModelBody(section.body, evidence);
 	if (body.length < 40) return null;
-	let title = section.title;
-	for (const term of MODEL_SECTION_EVIDENCE_TERMS) {
-		if (!evidence.lower.includes(term)) title = title.replace(new RegExp(term, "gi"), "");
-	}
-	title = title
-		.replace(/\s+/g, " ")
-		.replace(/\s*(?:&|and|\/)\s*$/i, "")
-		.replace(/^(?:&|and|\/)\s*/i, "")
-		.trim();
+	const title = section.title.replace(/\s+/g, " ").trim();
 	return title.length > 0 ? { title, body } : null;
 }
 
 function stabilizeGeneratedOutput(
 	input: BootstrapGenerateInput,
-	output: BootstrapStructuredOutput,
-	onHeuristicFloor?: () => void,
+	base: BootstrapStructuredOutput,
 	onModelSectionRetained?: () => void,
 	groundModelOutput = false,
 ): BootstrapStructuredOutput {
-	const useHeuristicFloor = sourceSparseNeedsHeuristicFloor(input, output);
-	if (useHeuristicFloor) onHeuristicFloor?.();
-	const base = useHeuristicFloor
-		? {
-				...output,
-				projectName: projectName(input.cwd),
-				identity: defaultIdentity(input.cwd, input.projectType, input.siblingFiles),
-				conventions: inferConventions(input.cwd, input.projectType, input.siblingFiles),
-				invariants: inferInvariants(input.siblingFiles),
-				sections: inferHeuristicSections(input),
-			}
-		: output;
 	const existing = input.existingClioMd;
 	const conventions: string[] = [];
 	for (const convention of existing?.conventions ?? []) pushUnique(conventions, convention);
@@ -1232,7 +1194,6 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			reportGeneration,
 		});
 		generation = reportedGeneration ?? generation;
-		let heuristicFloorApplied = false;
 		let retainedModelSections = 0;
 		output = stabilizeGeneratedOutput(
 			{
@@ -1247,20 +1208,11 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			},
 			output,
 			() => {
-				heuristicFloorApplied = true;
-			},
-			() => {
 				retainedModelSections += 1;
 			},
 			generation.mode === "scout",
 		);
-		if (heuristicFloorApplied && generation.mode === "scout") {
-			generation = {
-				...generation,
-				mode: "heuristic",
-				fallbackReason: "source-sparse Scout output triggered heuristic floor",
-			};
-		} else if (generation.mode === "scout" && retainedModelSections === 0) {
+		if (generation.mode === "scout" && retainedModelSections === 0) {
 			generation = {
 				...generation,
 				mode: "heuristic",
