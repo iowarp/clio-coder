@@ -46,9 +46,9 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations]` | Refresh state metadata, apply migrations, and update npm installs when applicable. |
 | `clio agents [--json] [--all]` | List discovered agent specs. |
 | `clio fleet list\|run\|status` | List fleet contracts, run a contract, or show dispatch state. |
-| `clio components [list] [--json]` | List behavior-affecting harness components. |
-| `clio components snapshot --out <path>` | Write a component snapshot JSON file. |
-| `clio components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
+| `clio dev components [list] [--json]` | List behavior-affecting harness components. |
+| `clio dev components snapshot --out <path>` | Write a component snapshot JSON file. |
+| `clio dev components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
 | `clio evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
 | `clio eval validate\|run\|report\|compare\|gate` | Validate, run, report, compare, and gate local evaluation suites (Suite v2). |
 | `clio memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
@@ -58,13 +58,13 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio trace procs <runId> [--db PATH]` | Show the processes one run spawned. |
 | `clio trace sql <SELECT query> [--db PATH]` | Run one read-only SELECT against the mirror. Only SELECT is accepted. |
 | `clio trace ui [--db PATH] [--port N]` | Serve the localhost-only waterfall viewer. The viewer is not part of the published package. |
-| `clio evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
+| `clio dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. |
 | `clio skills list\|search\|inspect\|validate\|install\|update\|sync\|eval` | Manage discovered skills, Clio-native skills, and local marketplace installs. |
 | `clio docs [topic] [--no-open]` | Serve bundled HTML docs on 127.0.0.1. |
-| `clio share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
-| `clio share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
-| `clio share inspect <path> [--json]` | Inspect a share archive without importing it. |
+| `clio dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
+| `clio dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
+| `clio dev share inspect <path> [--json]` | Inspect a share archive without importing it. |
 | `clio context` | Show project context status, preload class, codewiki freshness, and the codewiki digest when present. |
 | `clio context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO.md`, `.clio/codewiki.json`, and `.clio/state.json`. |
 | `clio context refresh [--wiki]` | Rebuild the codewiki and state without touching `CLIO.md`; with `--wiki`, update an existing Markdown wiki. |
@@ -504,3 +504,11 @@ The detail pane displays structured descriptions, usage, or state metadata using
 For issue reports, include `clio --version`, `node --version`, `clio doctor`,
 `clio targets`, the command you ran, the target/model, expected behavior, and
 actual behavior. Redact secrets and private repository content.
+
+> [!NOTE]
+> `clio dev <command>` groups the instruments that answer a question about the
+> harness rather than about your own work. Nothing under it is deprecated: every
+> name still resolves without the prefix, so scripts and agents driving Clio over
+> bash keep working unchanged. The prefix exists so `clio --help` stays the set of
+> commands a person needs to read; `clio --help --all` prints both lists.
+

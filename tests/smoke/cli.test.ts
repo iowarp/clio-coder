@@ -153,6 +153,45 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		match(result.stdout, /clio run \[flags\] <task>/);
 	});
 
+	/**
+	 * Demoting a command must not remove it. An agent driving Clio over bash
+	 * reaches a wider surface than a person reading a help screen can hold, so
+	 * only the default listing shrinks: every demoted name still resolves at the
+	 * top level and every one is reachable under the prefix.
+	 */
+	it("keeps demoted commands working under both the dev prefix and their bare names", async () => {
+		const listing = await runCli(["dev", "--help"], { env: scratch.env });
+		strictEqual(listing.code, 0);
+		for (const name of ["components", "evolve", "share"]) {
+			match(listing.stdout, new RegExp(`clio dev ${name}`), `${name} must be listed under dev`);
+
+			const prefixed = await runCli(["dev", name, "--help"], { env: scratch.env });
+			const bare = await runCli([name, "--help"], { env: scratch.env });
+			strictEqual(prefixed.code, bare.code, `${name}: dev prefix must exit like the bare name`);
+			strictEqual(prefixed.stdout, bare.stdout, `${name}: dev prefix must forward, not reimplement`);
+		}
+	});
+
+	it("hides the demoted commands from the default help and shows them under --all", async () => {
+		const brief = await runCli(["--help"], { env: scratch.env });
+		const full = await runCli(["--help", "--all"], { env: scratch.env });
+		strictEqual(brief.code, 0);
+		strictEqual(full.code, 0);
+		for (const name of ["components", "evolve", "share"]) {
+			strictEqual(brief.stdout.includes(`clio ${name} `), false, `${name} must not be in the default listing`);
+			match(full.stdout, new RegExp(`clio dev ${name}`), `${name} must be in --all`);
+		}
+		match(brief.stdout, /clio dev <command>/);
+	});
+
+	it("refuses an unknown dev command with the listing instead of forwarding it", async () => {
+		const result = await runCli(["dev", "definitely-not-a-dev-command"], { env: scratch.env });
+		strictEqual(result.code, 2);
+		match(result.stderr, /unknown dev command/);
+		const bare = await runCli(["dev"], { env: scratch.env });
+		strictEqual(bare.code, 2, "a bare `clio dev` names no command and is a usage error");
+	});
+
 	it("-v routes through the lazily loaded version command", async () => {
 		// Guards the WS3 lazy dispatch: the version path must import ./version.js
 		// dynamically and still print the version, not fall through to a subcommand.
