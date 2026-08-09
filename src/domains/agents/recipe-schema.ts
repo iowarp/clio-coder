@@ -5,15 +5,24 @@ import {
 	type AgentCapabilityClass,
 	type AgentCategory,
 	type AgentLatencyClass,
+	type AgentProduct,
 	type AgentProjectContextTier,
 	isAgentAudience,
 	isAgentCapabilityClass,
 	isAgentCategory,
 	isAgentLatencyClass,
+	isAgentProduct,
 	isAgentProjectContextTier,
 } from "./spec.js";
 
-const RECIPE_KEYS = [
+/**
+ * The v1 recipe frontmatter schema, split into the keys every recipe must
+ * declare and the keys it may. Exported because `scripts/check-release.mjs`
+ * enforces the same schema against the built recipes in the tarball and used to
+ * carry its own copy of the list, which drifted the moment `product` was added.
+ * A contract test holds the gate against these two arrays.
+ */
+export const RECIPE_KEYS = [
 	"version",
 	"name",
 	"description",
@@ -29,7 +38,7 @@ const RECIPE_KEYS = [
 	"tags",
 ] as const;
 
-const OPTIONAL_RECIPE_KEYS = ["product"] as const;
+export const OPTIONAL_RECIPE_KEYS = ["product"] as const;
 const ALL_RECIPE_KEYS = [...RECIPE_KEYS, ...OPTIONAL_RECIPE_KEYS] as const;
 
 export interface ParseRecipeSchemaInput {
@@ -175,7 +184,12 @@ export function parseAgentRecipeSchema(input: ParseRecipeSchemaInput): AgentReci
 		),
 		budget,
 		resultContract: parseResultContract(frontmatter.resultContract, filepath),
-		...(typeof frontmatter.product === "string" ? { product: frontmatter.product } : {}),
+		// Optional, but not lenient. A misspelled product silently costs the run
+		// the delivery tools its reserve window was supposed to keep, and the
+		// only symptom is a blocked tool call deep in a dispatch log.
+		...(frontmatter.product === undefined
+			? {}
+			: { product: enumValue<AgentProduct>(frontmatter.product, `${filepath}: product`, isAgentProduct) }),
 		tags: requiredStringArray(frontmatter.tags, `${filepath}: tags`),
 		source: input.source,
 		filepath,

@@ -30,6 +30,7 @@ import {
 	workerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
 import { ToolNames } from "../core/tool-names.js";
+import type { AgentProduct } from "../domains/agents/spec.js";
 import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
@@ -1115,7 +1116,7 @@ export function isReserveAdmittedTool(tool: string | undefined, deliveryTools: R
 
 export function resolveDeliveryTools(
 	allowedTools: ReadonlyArray<string> | ReadonlySet<string>,
-	product?: string,
+	product?: AgentProduct,
 ): string[] {
 	const candidates: string[] =
 		product === "orientation" ? [ToolNames.Write, ToolNames.Edit, ToolNames.CodeNav] : [ToolNames.Write, ToolNames.Edit];

@@ -39,6 +39,22 @@ export type AgentProjectContextTier = "none" | "bounded";
 
 export type AgentAudience = "base" | "shadow" | "custom" | "internal";
 
+/**
+ * What a run delivers, which is what decides the shape of its reserve window.
+ * The reserve ends discovery, not the run's own product, so the delivery tools
+ * a run keeps inside it depend on what it is producing. An "orientation" run
+ * delivers a description of a codebase, so `code_nav` is a delivery tool for it
+ * the way `write` and `edit` are for a run that delivers files.
+ *
+ * Closed on purpose: it widens the reserve admission set, so an unrecognized
+ * value must be a loud parse error rather than a silent degrade back to the
+ * default set. `product: orientaton` in a recipe would otherwise cost the run
+ * its navigation tool with no diagnostic anywhere.
+ */
+export type AgentProduct = "orientation";
+
+export const AGENT_PRODUCTS: ReadonlyArray<AgentProduct> = ["orientation"];
+
 export const AGENT_CATEGORIES: ReadonlyArray<AgentCategory> = [
 	"explore",
 	"plan",
@@ -88,7 +104,7 @@ export interface AgentSpec {
 	tags: ReadonlyArray<string>;
 	skills: ReadonlyArray<string>;
 	resultContract: ResultContract;
-	product?: string;
+	product?: AgentProduct;
 	budget: AgentBudget;
 	body: string;
 }
@@ -115,6 +131,10 @@ export function isAgentAudience(value: unknown): value is AgentAudience {
 
 export function isAgentProjectContextTier(value: unknown): value is AgentProjectContextTier {
 	return includes(AGENT_PROJECT_CONTEXT_TIERS, value);
+}
+
+export function isAgentProduct(value: unknown): value is AgentProduct {
+	return includes(AGENT_PRODUCTS, value);
 }
 
 /**
