@@ -263,7 +263,7 @@ function receiptFailure(receipt: RunReceipt): string {
 	return `bootstrap scout failed with exit ${receipt.exitCode}${detail}`;
 }
 
-export async function generateBootstrapWithScout(
+async function generateBootstrapWithScout(
 	dispatch: DispatchContract,
 	input: BootstrapGenerateInput,
 	route?: BootstrapScoutRoute,

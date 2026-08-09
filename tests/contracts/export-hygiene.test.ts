@@ -25,8 +25,12 @@ export function findUnnecessaryExportsInArea(area: string): string[] {
 }
 
 describe("export hygiene contract", () => {
-	it("has no unnecessary export keywords in src/entry", () => {
-		const dead = findUnnecessaryExportsInArea("src/entry");
-		strictEqual(dead.length, 0, `Unnecessary export keywords in src/entry: ${dead.join(", ")}`);
-	});
+	const sweptAreas = ["src/entry", "src/cli"];
+
+	for (const area of sweptAreas) {
+		it(`has no unnecessary export keywords in ${area}`, () => {
+			const dead = findUnnecessaryExportsInArea(area);
+			strictEqual(dead.length, 0, `Unnecessary export keywords in ${area}: ${dead.join(", ")}`);
+		});
+	}
 });
