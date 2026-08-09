@@ -280,24 +280,61 @@ function readReadmeSummary(cwd: string): string | null {
 	return cleaned.length > 0 ? cleaned : null;
 }
 
-function defaultIdentity(cwd: string, projectType: ProjectType, files: ReadonlyArray<SiblingContextFile>): string {
+interface DeterministicIdentity {
+	/** The identity sentence the deterministic path produces. */
+	text: string;
+	/**
+	 * True when nothing but the project name and the stack label reached the
+	 * sentence, so `text` is the bare `<name> is a <stack> project.` template.
+	 * That happens when the `package.json` `description` and the `README.md`
+	 * summary are both absent, which is the ordinary case for a C++ or Fortran
+	 * repository. The flag is what decides whether a model-authored identity is
+	 * allowed to win, so the caller never has to pattern-match the rendering.
+	 */
+	bare: boolean;
+}
+
+function resolveDefaultIdentity(
+	cwd: string,
+	projectType: ProjectType,
+	files: ReadonlyArray<SiblingContextFile>,
+): DeterministicIdentity {
 	const name = projectName(cwd);
 	const context = allContextText(files);
 	if (/Clio owns the agent loop/i.test(context) && /pi-(?:ai|SDK)/i.test(context)) {
-		return [
-			"Clio Coder is IOWarp's orchestrator coding agent, named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech under PI @akougkas. CLIO stands for Context Layer for Input/Output.",
-			"pi-ai is accessed through the engine boundary.",
-			"Clio owns the agent loop, TUI, session format, tool registry, and identity.",
-		].join(" ");
+		return {
+			text: [
+				"Clio Coder is IOWarp's orchestrator coding agent, named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech under PI @akougkas. CLIO stands for Context Layer for Input/Output.",
+				"pi-ai is accessed through the engine boundary.",
+				"Clio owns the agent loop, TUI, session format, tool registry, and identity.",
+			].join(" "),
+			bare: false,
+		};
 	}
 	const pkg = readJsonFile(join(cwd, "package.json"));
 	const description = stringField(pkg, "description") ?? readReadmeSummary(cwd);
 	const stack = projectTypeLabel(projectType);
 	const head = `${name} is a ${stack} project.`;
-	if (!description) return head.slice(0, 600);
+	if (!description) return { text: head.slice(0, 600), bare: true };
 	const cleaned = description.replace(/\.$/, "").trim();
 	const role = /^[a-z]/.test(cleaned) ? `It is ${cleaned}.` : `${cleaned}.`;
-	return `${head} ${role}`.slice(0, 600);
+	return { text: `${head} ${role}`.slice(0, 600), bare: false };
+}
+
+/**
+ * Identity precedence for a stabilized handbook, below an existing `CLIO.md`
+ * identity, which always wins. The deterministic sentence is evidence read off
+ * the repository, so it outranks anything the model wrote. The single exception
+ * is the bare case: with no `package.json` description and no `README.md`
+ * summary the deterministic path can only say `<name> is a <stack> project.`,
+ * which tells a reader nothing the directory name did not. A model sentence is
+ * strictly better than that, and only than that.
+ */
+function stabilizedIdentity(input: BootstrapGenerateInput, modelIdentity: unknown): string {
+	const deterministic = resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles);
+	const model = typeof modelIdentity === "string" ? modelIdentity.trim() : "";
+	if (deterministic.bare && model.length > 0) return model;
+	return deterministic.text;
 }
 
 function pushUnique(target: string[], value: string): void {
@@ -602,11 +639,7 @@ function stabilizeGeneratedOutput(
 	return {
 		...base,
 		projectName: existing?.projectName ?? projectName(input.cwd),
-		identity:
-			existing?.identity ??
-			(typeof base.identity === "string" && base.identity.trim().length > 0
-				? base.identity
-				: defaultIdentity(input.cwd, input.projectType, input.siblingFiles)),
+		identity: existing?.identity ?? stabilizedIdentity(input, base.identity),
 		conventions: conventions.slice(0, 6),
 		invariants: invariants.slice(0, 3),
 		sections: [...retainedOrdinarySections, ...(verification ? [verification] : [])],
@@ -671,7 +704,7 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
 function heuristicBootstrapOutputSync(input: BootstrapGenerateInput): BootstrapStructuredOutput {
 	return stabilizeGeneratedOutput(input, {
 		projectName: projectName(input.cwd),
-		identity: defaultIdentity(input.cwd, input.projectType, input.siblingFiles),
+		identity: resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles).text,
 		conventions: inferConventions(input.cwd, input.projectType, input.siblingFiles),
 		invariants: inferInvariants(input.siblingFiles),
 		sections: inferHeuristicSections(input),

@@ -275,7 +275,7 @@ describe("contracts/bootstrap", () => {
 				});
 				return {
 					projectName: scratch,
-					identity: "",
+					identity: "Generic helper",
 					conventions: ["python", "Always invent a framework."],
 					invariants: ["Dependency list is a hard invariant."],
 					sections: [
@@ -1106,8 +1106,16 @@ describe("contracts/bootstrap", () => {
 		);
 	});
 
-	it("uses model identity on bare fallback when present before defaulting", async () => {
+	/**
+	 * The one case where a model identity outranks the deterministic one. With no
+	 * `package.json` description and no `README.md`, the deterministic path can
+	 * only render `<name> is a <stack> project.`, which repeats the directory
+	 * name and says nothing else. That is the ordinary state of a C++ or Fortran
+	 * repository, and a model sentence beats it.
+	 */
+	it("uses the model identity only when the deterministic path renders the bare template", async () => {
 		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "bare-identity-model", type: "module" }), "utf8");
+		strictEqual(existsSync(join(scratch, "README.md")), false);
 
 		const result = await runBootstrap({
 			cwd: scratch,
@@ -1129,5 +1137,43 @@ describe("contracts/bootstrap", () => {
 		});
 
 		strictEqual(result.output.identity, "Model derived identity for bare project.");
+		strictEqual(/ is a .* project\.$/.test(result.output.identity ?? ""), false);
+	});
+
+	/**
+	 * The narrow half of the same rule. A `README.md` summary is evidence read off
+	 * the repository, so the deterministic path is no longer bare and the model
+	 * does not get to overwrite it. Widening `bare` to mean "no `package.json`
+	 * description" alone would hand every documented repository to the model.
+	 */
+	it("keeps the deterministic identity when only a README supplies the description", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "readme-identity", type: "module" }), "utf8");
+		writeFileSync(
+			join(scratch, "README.md"),
+			"# readme-identity\n\na distributed checkpoint library for exascale simulation output\n",
+			"utf8",
+		);
+
+		const result = await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			generate: (input) => {
+				input.reportGeneration?.({
+					mode: "scout",
+					parserOutcome: "parsed",
+					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
+				});
+				return {
+					projectName: "Readme Identity",
+					identity: "Model derived identity that must not win.",
+					conventions: [],
+					invariants: [],
+					sections: [],
+				};
+			},
+		});
+
+		match(result.output.identity ?? "", /distributed checkpoint library for exascale simulation output/i);
+		strictEqual((result.output.identity ?? "").includes("must not win"), false);
 	});
 });
