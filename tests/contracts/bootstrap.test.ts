@@ -295,7 +295,7 @@ describe("contracts/bootstrap", () => {
 		deepStrictEqual(result.output.invariants, []);
 		const sectionTitles = result.output.sections?.map((section) => section.title) ?? [];
 		ok(sectionTitles.includes("Context retrieval"));
-		ok(sectionTitles.includes("Repository shape"));
+		strictEqual(sectionTitles.includes("Repository shape"), false);
 		ok(sectionTitles.includes("Operational workflow"));
 		// Every line cites nothing, so the whole section goes, title included. No
 		// word-level surgery on the title is needed to reach that outcome.

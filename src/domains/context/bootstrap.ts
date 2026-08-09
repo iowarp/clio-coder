@@ -375,12 +375,6 @@ function inferInvariants(files: ReadonlyArray<SiblingContextFile>): string[] {
 	return invariants.slice(0, 3);
 }
 
-function topTwoSegments(path: string): string {
-	const dirParts = path.split("/").slice(0, -1);
-	if (dirParts.length === 0) return ".";
-	return dirParts.slice(0, 2).join("/");
-}
-
 function indexedSourceFileCount(codewiki: Codewiki): number {
 	return codewiki.files.filter((file) => file.lang !== "config").length;
 }
@@ -389,19 +383,6 @@ function indexedSourceFileCount(codewiki: Codewiki): number {
 function measureProjectPreload(cwd: string): ProjectPreloadClass {
 	const promptContext = renderPromptContext(cwd);
 	return classifyProjectPreload({ hasClioMd: promptContext.clioMd !== null, text: promptContext.text });
-}
-
-function topCodewikiDirectories(codewiki: Codewiki, limit = 8): string[] {
-	const dirCounts = new Map<string, number>();
-	for (const file of codewiki.files) {
-		if (file.lang === "config") continue;
-		const top = topTwoSegments(file.path);
-		dirCounts.set(top, (dirCounts.get(top) ?? 0) + 1);
-	}
-	return [...dirCounts.entries()]
-		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-		.slice(0, limit)
-		.map(([dir, count]) => `${dir} (${count})`);
 }
 
 function packageScripts(cwd: string): Record<string, string> {
@@ -646,16 +627,6 @@ export function codewikiSections(codewiki: Codewiki): ClioMdSection[] {
 				`The codewiki currently indexes ${indexedCount} source file${indexedCount === 1 ? "" : "s"}.`,
 				`Start orientation with these indexed entry points: ${entryPoints.map((entry) => `\`${entry}\``).join(", ")}.`,
 				"Use `code_nav` (modes: symbol, path, entries, outline, deps, dependents, wiki) before broad reads when the task is navigational.",
-			].join(" "),
-		});
-	}
-	const topDirs = topCodewikiDirectories(codewiki);
-	if (topDirs.length > 0) {
-		sections.push({
-			title: "Repository shape",
-			body: [
-				`Largest indexed areas: ${topDirs.join(", ")}.`,
-				"Treat this as an orientation hint, not a complete file map; refresh the codewiki after structural edits.",
 			].join(" "),
 		});
 	}
