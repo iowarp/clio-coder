@@ -134,10 +134,6 @@ export function clioCacheDir(): string {
 	return cachedCacheDir;
 }
 
-export function clioDataPath(): string {
-	return cachedDataDir ?? resolveClioDirs().data;
-}
-
 export function clioStatePath(): string {
 	return cachedStateDir ?? resolveClioDirs().state;
 }

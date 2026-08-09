@@ -181,7 +181,7 @@ function schemaSyntaxError(value: Record<string, unknown>): string | null {
 }
 
 /** Return a user-facing reason when a response schema cannot safely cross the worker JSON boundary. */
-export function responseSchemaValidationError(value: unknown, source = "responseSchema"): string | null {
+function responseSchemaValidationError(value: unknown, source = "responseSchema"): string | null {
 	try {
 		if (!isPlainObject(value)) return `${source} must be a plain object`;
 		const valueError = jsonDataError(value);

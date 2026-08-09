@@ -129,7 +129,7 @@ function trimmedString(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-export function skillActivationFromSource(
+function skillActivationFromSource(
 	source: SkillActivationSource,
 	triggeredBy: SkillActivationTrigger,
 	turnId?: string,

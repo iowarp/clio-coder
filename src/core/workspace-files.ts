@@ -125,7 +125,7 @@ function normalizeRelativePath(path: string): string | null {
 	return segments.join("/");
 }
 
-export function isWorkspacePathExcluded(
+function isWorkspacePathExcluded(
 	relPath: string,
 	excludedDirs: ReadonlySet<string> = WORKSPACE_EXCLUDED_DIRS,
 ): boolean {
