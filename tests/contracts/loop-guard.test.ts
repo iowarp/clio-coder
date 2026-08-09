@@ -34,6 +34,7 @@ import {
 	ORCH_TURN_TOOL_CALL_HARD_MARGIN,
 	readOrchTurnToolCallBudget,
 	readWorkerToolCallCap,
+	resolveDeliveryTools,
 	sanitizeLockedSynthesisMessage,
 	WIDE_BATCH_DENIAL_FLOOR,
 	workerLoopBlockBudget,
@@ -1207,6 +1208,70 @@ describe("synthesis reserve at the cap tail", () => {
 		);
 		const discovery = await registry.invoke({ tool: ToolNames.Grep, args: { pattern: "still exploring" } });
 		ok(discovery.kind === "blocked" && isWorkerSynthesisReserveBlockReason(discovery.reason), "discovery still bounces");
+	});
+
+	it("admits code_nav inside the reserve window for orientation dispatches but refuses it for file-edit workers", async () => {
+		const safety = unknownClassSafety();
+		const allowedTools = [ToolNames.Read, ToolNames.Write, ToolNames.CodeNav, ToolNames.Grep];
+		const orientationDelivery = resolveDeliveryTools(allowedTools, "orientation");
+		const fileEditDelivery = resolveDeliveryTools(allowedTools, "workspace-edit");
+
+		strictEqual(orientationDelivery.includes(ToolNames.CodeNav), true, "orientation delivery tools include code_nav");
+		strictEqual(fileEditDelivery.includes(ToolNames.CodeNav), false, "file-edit delivery tools do not include code_nav");
+
+		const orientationGuard = createLoopGuardRegistration({
+			safety,
+			toolCallCap: 6,
+			toolCallReserve: 3,
+			deliveryTools: orientationDelivery,
+			turnSynthesisLockout: true,
+		});
+		const orientationBundle = createMiddlewareBundle({ registrations: [orientationGuard] });
+		const orientationRegistry = guardedRegistry({ safety, middleware: orientationBundle.contract });
+		orientationRegistry.register(mockReadSpec());
+		orientationRegistry.register(mockWriteSpec());
+		orientationRegistry.register({
+			name: ToolNames.CodeNav,
+			description: "code nav test tool",
+			parameters: Type.Object({}),
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: "symbol data" }),
+		});
+		for (let i = 0; i < 3; i += 1) {
+			strictEqual((await orientationRegistry.invoke({ tool: ToolNames.Read, args: { path: `pre-${i}.md` } })).kind, "ok");
+		}
+		strictEqual(
+			(await orientationRegistry.invoke({ tool: ToolNames.CodeNav, args: { query: "foo" } })).kind,
+			"ok",
+			"orientation worker gets code_nav admitted inside reserve window",
+		);
+
+		const editGuard = createLoopGuardRegistration({
+			safety,
+			toolCallCap: 6,
+			toolCallReserve: 3,
+			deliveryTools: fileEditDelivery,
+			turnSynthesisLockout: true,
+		});
+		const editBundle = createMiddlewareBundle({ registrations: [editGuard] });
+		const editRegistry = guardedRegistry({ safety, middleware: editBundle.contract });
+		editRegistry.register(mockReadSpec());
+		editRegistry.register(mockWriteSpec());
+		editRegistry.register({
+			name: ToolNames.CodeNav,
+			description: "code nav test tool",
+			parameters: Type.Object({}),
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: "symbol data" }),
+		});
+		for (let i = 0; i < 3; i += 1) {
+			strictEqual((await editRegistry.invoke({ tool: ToolNames.Read, args: { path: `pre-${i}.md` } })).kind, "ok");
+		}
+		const editNav = await editRegistry.invoke({ tool: ToolNames.CodeNav, args: { query: "foo" } });
+		ok(
+			editNav.kind === "blocked" && isWorkerSynthesisReserveBlockReason(editNav.reason),
+			"file edit worker gets code_nav refused inside reserve window",
+		);
 	});
 
 	it("never spends the lifetime cap on a call the reserve refused", async () => {

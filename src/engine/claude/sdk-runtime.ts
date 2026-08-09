@@ -13,9 +13,9 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { readClioVersion } from "../../core/package-root.js";
-import { ToolNames } from "../../core/tool-names.js";
 import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerBudget } from "../../worker/spec-contract.js";
+import { isReserveAdmittedTool, resolveDeliveryTools } from "../loop-guard.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 import { createWorkerSafety } from "../worker-tools.js";
@@ -326,7 +326,7 @@ export function createClaudeWorkerBudgetGate(
 	let admitted = 0;
 	let locked = false;
 	const phaseDecision = (canonicalToolName: string): { kind: "allow" } | { kind: "deny"; reason: string } => {
-		const reserveAdmits = canonicalToolName === ToolNames.Read || deliveryTools.includes(canonicalToolName);
+		const reserveAdmits = isReserveAdmittedTool(canonicalToolName, deliveryTools);
 		if (locked || admitted >= budget.toolCalls) {
 			// Same rule the native guard applies: the soft budget ends discovery,
 			// not the run's own product. An agent holding delivery tools keeps
@@ -529,7 +529,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 					emit({ type: "clio_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
 					abort();
 				},
-				[ToolNames.Write, ToolNames.Edit].filter((tool) => allowedToolSet.has(tool)),
+				resolveDeliveryTools(allowedToolSet, input.product),
 			)
 		: undefined;
 	const permissionGate: PermissionGateInput = {

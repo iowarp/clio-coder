@@ -72,6 +72,7 @@ export interface JobSpec {
 	target?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
+	product?: string;
 	/** Explicit fleet node pin; `local` or a configured fleet.nodes id. */
 	node?: string;
 	/** Sealed normalized routing intent. Raw callers use the model-facing `routing` object. */

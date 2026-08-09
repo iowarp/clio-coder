@@ -1498,6 +1498,8 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	if (appliesRecipeResultContract(input.req.gate?.role) && input.recipe?.resultContract) {
 		spec.resultContract = input.recipe.resultContract;
 	}
+	const product = input.req.product ?? input.recipe?.product;
+	if (product) spec.product = product;
 	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
 	// Configured model ids, so the worker's empty residency registry evicts nothing.

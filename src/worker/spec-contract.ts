@@ -87,6 +87,8 @@ interface WorkerSpecFields {
 	 * first and only notice that its result was the wrong shape.
 	 */
 	resultContract?: ResultContract;
+	/** Product nature for reserve delivery tool resolution. */
+	product?: string;
 	/** Orchestrator-resolved effective runtime/capability decision for receipts and debugging. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	allowedTools: ReadonlyArray<ToolName>;

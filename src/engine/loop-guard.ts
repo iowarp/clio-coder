@@ -216,6 +216,12 @@ function workerExplorationSynthesisDirective(limit: number): string {
 	);
 }
 
+function disallowedToolsText(deliveryTools: ReadonlyArray<string>): string {
+	const candidates = ["code_nav", "ls", "grep", "find", "context", "git", "shell commands"];
+	const excluded = candidates.filter((tool) => !deliveryTools.includes(tool));
+	return excluded.join(", ");
+}
+
 function workerLiveReadReserveDirective(remaining: number, deliveryTools: ReadonlyArray<string>): string {
 	const admitted = deliveryTools.length > 0 ? `read and ${deliveryTools.join("/")}` : "the read tool";
 	const finish =
@@ -224,7 +230,7 @@ function workerLiveReadReserveDirective(remaining: number, deliveryTools: Readon
 			: "Read a specific live file needed for the handoff.";
 	return (
 		`worker live-read reserve: broad orientation is complete and ${remaining} ${remaining === 1 ? "call remains" : "calls remain"}. ` +
-		`Only ${admitted} ${deliveryTools.length > 0 ? "are" : "is"} admitted now. ${finish} Do not substitute code_nav, ls, grep, find, context, git, or shell commands.`
+		`Only ${admitted} ${deliveryTools.length > 0 ? "are" : "is"} admitted now. ${finish} Do not substitute ${disallowedToolsText(deliveryTools)}.`
 	);
 }
 
@@ -240,7 +246,7 @@ export function workerDeliveryOnlyDirective(limit: number, deliveryTools: Readon
 	return (
 		`worker discovery budget reached (${limit}); exploration tools are disabled for the rest of this run. ` +
 		`Only read and ${deliveryTools.join("/")} are admitted now. Write what you have with ` +
-		`${deliveryTools.join(" or ")} and finish. Do not substitute code_nav, ls, grep, find, context, git, or shell commands.`
+		`${deliveryTools.join(" or ")} and finish. Do not substitute ${disallowedToolsText(deliveryTools)}.`
 	);
 }
 
@@ -469,8 +475,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const softReadReserveThreshold =
 		softLimit !== undefined && softReadReserve > 0 && softLimit > softReadReserve ? softLimit - softReadReserve : null;
 	const deliveryTools = [...new Set(options.deliveryTools ?? [])];
-	const reserveAdmits = (tool: string | undefined): boolean =>
-		tool === ToolNames.Read || (tool !== undefined && deliveryTools.includes(tool));
+	const reserveAdmits = (tool: string | undefined): boolean => isReserveAdmittedTool(tool, deliveryTools);
 	let softAdmittedCount = 0;
 	let softReadReserveEntered = false;
 	/**
@@ -1102,4 +1107,20 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			return boundRunDenials(decide(), input);
 		},
 	};
+}
+
+export function isReserveAdmittedTool(tool: string | undefined, deliveryTools: ReadonlyArray<string>): boolean {
+	return tool === ToolNames.Read || (tool !== undefined && deliveryTools.includes(tool));
+}
+
+export function resolveDeliveryTools(
+	allowedTools: ReadonlyArray<string> | ReadonlySet<string>,
+	product?: string,
+): string[] {
+	const candidates: string[] =
+		product === "orientation" ? [ToolNames.Write, ToolNames.Edit, ToolNames.CodeNav] : [ToolNames.Write, ToolNames.Edit];
+	if (allowedTools instanceof Set) {
+		return candidates.filter((tool) => allowedTools.has(tool));
+	}
+	return candidates.filter((tool) => (allowedTools as ReadonlyArray<string>).includes(tool));
 }

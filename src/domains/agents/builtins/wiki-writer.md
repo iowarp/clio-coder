@@ -13,6 +13,7 @@ latencyClass: balanced
 projectContextTier: bounded
 budget: {toolCalls: 40, readReserve: 6, synthesis: true}
 resultContract: {kind: artifact-report}
+product: orientation
 tags: [docs, wiki]
 ---
 
