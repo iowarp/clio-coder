@@ -242,7 +242,7 @@ function workerLiveReadReserveDirective(remaining: number, deliveryTools: Readon
  * that has an end: past the soft limit there is no countdown to report, only the
  * cap.
  */
-export function workerDeliveryOnlyDirective(limit: number, deliveryTools: ReadonlyArray<string>): string {
+function workerDeliveryOnlyDirective(limit: number, deliveryTools: ReadonlyArray<string>): string {
 	return (
 		`worker discovery budget reached (${limit}); exploration tools are disabled for the rest of this run. ` +
 		`Only read and ${deliveryTools.join("/")} are admitted now. Write what you have with ` +
@@ -268,7 +268,7 @@ const DEAD_TOOL_CALL_MARKUP_PATTERNS: ReadonlyArray<RegExp> = [
 ];
 
 /** Strip dead tool-call markup from locked-turn text; trims only when something was stripped. */
-export function stripDeadToolCallMarkup(text: string): string {
+function stripDeadToolCallMarkup(text: string): string {
 	let out = text;
 	for (const pattern of DEAD_TOOL_CALL_MARKUP_PATTERNS) {
 		out = out.replace(pattern, "");

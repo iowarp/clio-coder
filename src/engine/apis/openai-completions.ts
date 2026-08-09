@@ -201,10 +201,7 @@ function applyThinkingPayload(
 	return next;
 }
 
-export function applyLlamaCppPromptCachePayload(
-	payload: Record<string, unknown>,
-	model: Model<Api>,
-): Record<string, unknown> {
+function applyLlamaCppPromptCachePayload(payload: Record<string, unknown>, model: Model<Api>): Record<string, unknown> {
 	const metadata = runtimeMetadata(model);
 	if (model.provider !== "llamacpp" || metadata?.runtimeId !== "llamacpp") return payload;
 	if (payload.cache_prompt !== undefined) return payload;

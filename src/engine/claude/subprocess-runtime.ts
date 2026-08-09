@@ -47,7 +47,7 @@ export function claudeSubprocessPermissionConfigForAutonomy(
 	return { permissionMode: "default", extraArgs: [], dangerousBypass: false };
 }
 
-export function buildClaudeCodePrompt(input: WorkerRunInput): string {
+function buildClaudeCodePrompt(input: WorkerRunInput): string {
 	const parts = (input.dynamicPromptMessages ?? []).map((message) => message.body.trim()).filter(Boolean);
 	parts.push(input.task);
 	return parts.join("\n\n");

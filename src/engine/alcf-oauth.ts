@@ -26,7 +26,7 @@ function base64Url(bytes: Uint8Array): string {
 	return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
-export async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
+async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
 	const verifierBytes = new Uint8Array(32);
 	crypto.getRandomValues(verifierBytes);
 	const verifier = base64Url(verifierBytes);
