@@ -54,6 +54,7 @@ import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashbo
 import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
 import { createInteractiveSlashRuntime } from "./interactive-slash-runtime.js";
+import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
@@ -1181,7 +1182,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		overlayLifecycle.dispose();
 		agentProgress.stop();
 		deps.chat.dispose();
-		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
+		interactiveSubscriptions.dispose();
 		shell.stop();
 		// Drain the parked queue so any worker or agent loop still holding
 		// a pending tool-execution promise sees a terminal verdict rather
@@ -1310,50 +1311,14 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		},
 	});
 
-	const dispatchBoardRenderUnsubscribers = [
-		deps.bus.on(BusChannels.DispatchEnqueued, () => {
-			footer.refresh();
-			interactiveTickers.renderTaskIsland();
-			// The dispatch-board overlay renders live from the store, so this
-			// repaint request refreshes it too when it is open.
-			tui.requestRender();
-		}),
-		deps.bus.on(BusChannels.DispatchStarted, () => {
-			footer.refresh();
-			interactiveTickers.renderTaskIsland();
-			tui.requestRender();
-		}),
-		deps.bus.on(BusChannels.DispatchProgress, (payload) => {
-			const workerEvent = payload.event as { type?: unknown } | null | undefined;
-			if (workerEvent?.type === "clio_steer_received") {
-				notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
-			}
-			footer.refresh();
-			interactiveTickers.renderTaskIsland();
-			tui.requestRender();
-		}),
-		deps.bus.on(BusChannels.RunAborted, () => {
-			footer.refresh();
-			interactiveTickers.renderTaskIsland();
-			tui.requestRender();
-		}),
-		deps.bus.on(BusChannels.DispatchCompleted, () => {
-			footer.refresh();
-			interactiveTickers.renderTaskIsland();
-			tui.requestRender();
-		}),
-		deps.bus.on(BusChannels.DispatchFailed, () => {
-			footer.refresh();
-			interactiveTickers.renderTaskIsland();
-			tui.requestRender();
-		}),
-		deps.bus.on(BusChannels.ContextActivity, () => {
-			footer.refresh();
-			interactiveTickers.renderContextIsland();
-			interactiveTickers.renderTaskIsland();
-			tui.requestRender();
-		}),
-	];
+	const interactiveSubscriptions = createInteractiveSubscriptions({
+		bus: deps.bus,
+		refreshFooter: () => footer.refresh(),
+		renderTaskIsland: interactiveTickers.renderTaskIsland,
+		renderContextIsland: interactiveTickers.renderContextIsland,
+		requestRender: () => tui.requestRender(),
+		notify,
+	});
 
 	tui.addInputListener((data: string) => {
 		// A modal invalidates any half-entered leader sequence. Otherwise the key
