@@ -174,7 +174,7 @@ interface WikiDispatchOutcome {
  * throws: a failed page must not take down the pages around it, and whatever
  * the run wrote before it stopped is already on disk.
  */
-async function runWikiDispatch(input: {
+export async function runWikiDispatch(input: {
 	dispatch: DispatchContract;
 	cwd: string;
 	outputDir: string;
@@ -202,6 +202,15 @@ async function runWikiDispatch(input: {
 			// Containment: the worker safety seam blocks any write-class tool call
 			// whose target escapes the staging dir.
 			writeRoots: [input.outputDir],
+			// Admission patience must match execution patience. Without this the
+			// queue applies its 60s default while `deadlineMs` below allows six
+			// minutes to run, so a page waiting behind two in-flight writers was
+			// dropped before it ever started. Observed live: a 33-page plan lost
+			// `core.md` to `dispatch: admission timed_out` at 10/33 while every
+			// page ahead of it was taking 110 to 125 seconds. A page the caller is
+			// willing to wait six minutes for is a page it should be willing to
+			// queue for six minutes.
+			assignmentDeadlineAt: startedAt + input.deadlineMs,
 		});
 	} catch (err) {
 		return { ok: false, detail: err instanceof Error ? err.message : String(err) };
