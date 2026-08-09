@@ -103,7 +103,7 @@ for (const prefix of REQUIRED_PREFIXES) {
 	if (!files.some((f) => f.startsWith(prefix))) errors.push(`no files under required tree: ${prefix}`);
 }
 
-const recipeKeys = new Set([
+const requiredRecipeKeys = new Set([
 	"version",
 	"name",
 	"description",
@@ -118,6 +118,8 @@ const recipeKeys = new Set([
 	"resultContract",
 	"tags",
 ]);
+const optionalRecipeKeys = new Set(["product"]);
+const allowedRecipeKeys = new Set([...requiredRecipeKeys, ...optionalRecipeKeys]);
 const sourceRecipeDir = join(root, "src", "domains", "agents", "builtins");
 const distRecipeDir = join(root, "dist", "domains", "agents", "builtins");
 for (const name of readdirSync(sourceRecipeDir)
@@ -140,8 +142,8 @@ for (const name of readdirSync(sourceRecipeDir)
 		const keys = Object.keys(frontmatter);
 		if (
 			frontmatter.version !== 1 ||
-			keys.some((key) => !recipeKeys.has(key)) ||
-			[...recipeKeys].some((key) => !keys.includes(key))
+			keys.some((key) => !allowedRecipeKeys.has(key)) ||
+			[...requiredRecipeKeys].some((key) => !keys.includes(key))
 		) {
 			errors.push(`built recipe is not the strict v1 schema: ${packagePath}`);
 		}
