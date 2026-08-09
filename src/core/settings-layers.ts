@@ -106,7 +106,7 @@ function stripCredentials(value: unknown, origin: SettingsOrigin, path: string, 
  * Deep-merge raw layer blobs in precedence order, recording the origin that last
  * set each leaf. Objects recurse; arrays and scalars replace.
  */
-export function mergeLayersWithSources(layers: ReadonlyArray<RawLayer>): {
+function mergeLayersWithSources(layers: ReadonlyArray<RawLayer>): {
 	merged: Record<string, unknown>;
 	sources: Record<string, SettingsOrigin>;
 } {

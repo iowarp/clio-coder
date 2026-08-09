@@ -73,7 +73,7 @@ export function expandConfigPath(value: string, options?: ResolveConfigValueOpti
 	return resolve(cwd, expanded);
 }
 
-export function resolveStaticConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
+function resolveStaticConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
 	if (config.startsWith("!")) warnStaticCommand(config, options);
 	const sourceEnv = env(options);
 	const envValue = sourceEnv[config];

@@ -25,7 +25,7 @@ export function findUnnecessaryExportsInArea(area: string): string[] {
 }
 
 describe("export hygiene contract", () => {
-	const sweptAreas = ["src/entry", "src/cli"];
+	const sweptAreas = ["src/entry", "src/cli", "src/core"];
 
 	for (const area of sweptAreas) {
 		it(`has no unnecessary export keywords in ${area}`, () => {

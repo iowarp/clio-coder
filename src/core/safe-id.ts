@@ -21,7 +21,7 @@ export class InvalidIdError extends Error {
  * escape a fixed root, so rejecting them is sufficient without an allowlist that
  * would break existing id shapes.
  */
-export function isSafeId(id: string): boolean {
+function isSafeId(id: string): boolean {
 	if (id.length === 0) return false;
 	if (id.includes("/") || id.includes("\\")) return false;
 	if (id.includes("\0")) return false;
