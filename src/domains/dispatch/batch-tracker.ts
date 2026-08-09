@@ -50,7 +50,7 @@ export function onRunComplete(batch: BatchState, assignmentId: string, failed: b
 	};
 }
 
-export function isBatchDone(batch: BatchState): boolean {
+function isBatchDone(batch: BatchState): boolean {
 	return batch.assignmentIds.every((id) => batch.completed.has(id) || batch.failed.has(id));
 }
 

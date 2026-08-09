@@ -6,7 +6,7 @@ import type { EvalArtifactV4, EvalTokenAccountingV4 } from "../schema/artifact.j
 import { evalRoot } from "../store.js";
 import { redactArtifactForStorage } from "./redact.js";
 
-export function evalArtifactPathV4(dataDir: string, evalId: string): string {
+function evalArtifactPathV4(dataDir: string, evalId: string): string {
 	assertSafeId(evalId, "eval");
 	return join(evalRoot(dataDir), `${evalId}.json`);
 }

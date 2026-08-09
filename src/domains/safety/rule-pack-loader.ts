@@ -43,7 +43,7 @@ function emptyRuleset(version: number): DamageControlRuleset {
 	return { version, rules: [] };
 }
 
-export function loadRulePacks(yamlPath: string): RulePacks {
+function loadRulePacks(yamlPath: string): RulePacks {
 	const raw = readFileSync(yamlPath, "utf8");
 	const parsed = parseYaml(raw) as RawDocument | null;
 	if (!parsed || typeof parsed !== "object") {
@@ -80,7 +80,7 @@ export function loadRulePacks(yamlPath: string): RulePacks {
 	return out;
 }
 
-export function loadDefaultRulePacks(): RulePacks {
+function loadDefaultRulePacks(): RulePacks {
 	return loadRulePacks(join(resolvePackageRoot(), "damage-control-rules.yaml"));
 }
 

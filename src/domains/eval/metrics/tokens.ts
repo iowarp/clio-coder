@@ -21,7 +21,7 @@ export function tokenAccountingFrom(
 	return { measured: true, runs: coverage.total, measuredRuns: coverage.measured, ...totals };
 }
 
-export function tokenMetricsFrom(metrics: Readonly<Record<string, unknown>>): EvalTokenMetricsV4 {
+function tokenMetricsFrom(metrics: Readonly<Record<string, unknown>>): EvalTokenMetricsV4 {
 	return {
 		input: numberMetric(metrics, "tokens.input"),
 		output: numberMetric(metrics, "tokens.output"),
@@ -31,7 +31,7 @@ export function tokenMetricsFrom(metrics: Readonly<Record<string, unknown>>): Ev
 	};
 }
 
-export function addTokenMetrics(left: EvalTokenMetricsV4, right: EvalTokenMetricsV4): EvalTokenMetricsV4 {
+function addTokenMetrics(left: EvalTokenMetricsV4, right: EvalTokenMetricsV4): EvalTokenMetricsV4 {
 	return {
 		input: left.input + right.input,
 		output: left.output + right.output,
@@ -41,7 +41,7 @@ export function addTokenMetrics(left: EvalTokenMetricsV4, right: EvalTokenMetric
 	};
 }
 
-export function zeroTokenMetrics(): EvalTokenMetricsV4 {
+function zeroTokenMetrics(): EvalTokenMetricsV4 {
 	return { ...ZERO_TOKEN_METRICS_V4 };
 }
 

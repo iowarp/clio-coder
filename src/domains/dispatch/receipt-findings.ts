@@ -188,7 +188,7 @@ function classifyTags(draft: RunReceiptDraft, envelope: RunEnvelope): Set<Eviden
 	return tags;
 }
 
-export function hasValidationEvidence(draft: Pick<RunReceiptDraft, "toolStats">): boolean {
+function hasValidationEvidence(draft: Pick<RunReceiptDraft, "toolStats">): boolean {
 	return draft.toolStats.some((stat) => {
 		if (stat.ok <= 0 || stat.errors > 0) return false;
 		const tool = stat.tool.toLowerCase();

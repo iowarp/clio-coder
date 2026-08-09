@@ -106,7 +106,7 @@ interface RawSafetyPack {
 	value: unknown;
 }
 
-export async function scanComponents(root: string): Promise<HarnessComponent[]> {
+async function scanComponents(root: string): Promise<HarnessComponent[]> {
 	const absoluteRoot = resolve(root);
 	const components: HarnessComponent[] = [];
 	components.push(...(await collectRecursive(absoluteRoot, "src/domains/prompts/fragments", ".md", "prompt-fragment")));

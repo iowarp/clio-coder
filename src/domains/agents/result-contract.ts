@@ -803,7 +803,7 @@ export const RESULT_CONTRACT_ANCHOR_LIMIT = 12;
  * This is the one place a contract's wire example is written; agent recipes and
  * repair rounds both cite it, so a prompt cannot drift from its validator.
  */
-export function resultContractShape(contract: ResultContract): string {
+function resultContractShape(contract: ResultContract): string {
 	switch (contract.kind) {
 		case "architect-plan":
 			return `a plan artifact written to ${contract.path}, then optionally {"commitMessage":"...","summary":"..."} describing it`;

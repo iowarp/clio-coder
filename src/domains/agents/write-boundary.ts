@@ -80,7 +80,7 @@ export function normalizeWriteBoundary(entries: ReadonlyArray<string>): string[]
 }
 
 /** Repo-relative path with the separators this grammar speaks. */
-export function toRepoRelativePosix(path: string): string {
+function toRepoRelativePosix(path: string): string {
 	return path.split("\\").join("/");
 }
 

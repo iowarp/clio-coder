@@ -84,7 +84,7 @@ function readRuns(): RunEnvelope[] {
 	return parsed;
 }
 
-export function resolveMaxRuns(opt?: number | undefined): number {
+function resolveMaxRuns(opt?: number | undefined): number {
 	if (opt !== undefined && opt > 0) return Math.floor(opt);
 	// env (CLIO_MAX_RUNS) > settings guardrails > default; see core/guardrails.ts.
 	return resolveGuardrail("maxDispatchRuns");

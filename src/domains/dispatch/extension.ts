@@ -363,7 +363,7 @@ export function admissionMaxOutputTokens(settings: EffectiveSettings): number {
 	return settings?.defaults.maxTokens ?? DEFAULT_SETTINGS.defaults.maxTokens;
 }
 
-export function conservativeRouteAdmissionEstimateUsd(pricing: EffectivePricing, maxOutputTokens: number): number {
+function conservativeRouteAdmissionEstimateUsd(pricing: EffectivePricing, maxOutputTokens: number): number {
 	if (pricing.provenance === "known_free") return 0;
 	if (pricing.rates === null) return UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD;
 	return (
@@ -671,7 +671,7 @@ function mergeRouteWarningDetail(routeWarning: string | undefined, base: string 
 	return base !== null && base.length > 0 ? `${routeWarning}; ${base}` : routeWarning;
 }
 
-export function pickOrchestratorScope(safety: SafetyContract): ScopeSpec {
+function pickOrchestratorScope(safety: SafetyContract): ScopeSpec {
 	return safety.scopes.workspace;
 }
 
@@ -680,10 +680,7 @@ function pickWorkerScope(safety: SafetyContract, requestedActions: ReadonlyArray
 	return safety.scopes.workspace;
 }
 
-export function deriveRequestedActions(
-	tools: ReadonlyArray<ToolName>,
-	safety: SafetyContract,
-): ReadonlyArray<ActionClass> {
+function deriveRequestedActions(tools: ReadonlyArray<ToolName>, safety: SafetyContract): ReadonlyArray<ActionClass> {
 	const actions = new Set<ActionClass>();
 	for (const tool of tools) {
 		actions.add(safety.classify({ tool }).actionClass);
@@ -898,7 +895,7 @@ export function renderWorkerProjectContext(
 }
 
 /** True when the rendered project message body includes the verification block. */
-export function workerProjectContextIncludesVerification(body: string): boolean {
+function workerProjectContextIncludesVerification(body: string): boolean {
 	return body.includes("\nVerification expectations:\n");
 }
 
@@ -1457,7 +1454,7 @@ function resolveDelegationAdmissionStage(req: DispatchRequest, safety: SafetyCon
 	};
 }
 
-export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: ConfigContract): WorkerSpec {
+function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: ConfigContract): WorkerSpec {
 	assertResponseSchemaEnforceable(input.target.runtime, input.target.modelCapabilities, input.req.responseSchema);
 	const settings = input.settings ?? config?.get();
 	const spec: WorkerSpec = {
@@ -1564,7 +1561,7 @@ const AUTONOMY_ORDER: Record<AutonomyLevel, number> = {
 };
 
 /** Lower of the session level and the request's narrowing; requests cannot widen. */
-export function clampWorkerAutonomy(session: AutonomyLevel, requested: AutonomyLevel | undefined): AutonomyLevel {
+function clampWorkerAutonomy(session: AutonomyLevel, requested: AutonomyLevel | undefined): AutonomyLevel {
 	if (requested === undefined) return session;
 	return AUTONOMY_ORDER[requested] < AUTONOMY_ORDER[session] ? requested : session;
 }

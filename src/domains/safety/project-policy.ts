@@ -67,7 +67,7 @@ const COMMAND_KEYS = new Set([
 const ENV_KEYS = new Set(["mode", "allow"]);
 const ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/;
 
-export function projectSafetyPolicyPath(cwd: string = process.cwd()): string | null {
+function projectSafetyPolicyPath(cwd: string = process.cwd()): string | null {
 	let cursor = path.resolve(cwd);
 	while (true) {
 		const candidate = path.join(cursor, POLICY_RELATIVE_PATH);

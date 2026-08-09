@@ -1174,7 +1174,7 @@ export function parseCodewikiRaw(raw: string): Codewiki | null {
 	return upgradeCodewiki(parsed);
 }
 
-export function readCodewikiRaw(cwd: string): { raw: string; codewiki: Codewiki } | null {
+function readCodewikiRaw(cwd: string): { raw: string; codewiki: Codewiki } | null {
 	const filePath = codewikiPath(cwd);
 	if (!existsSync(filePath)) return null;
 	let raw: string;
@@ -1189,10 +1189,6 @@ export function readCodewikiRaw(cwd: string): { raw: string; codewiki: Codewiki 
 
 export function readCodewiki(cwd: string): Codewiki | null {
 	return readCodewikiRaw(cwd)?.codewiki ?? null;
-}
-
-export function isCodewiki(value: unknown): value is Codewiki {
-	return upgradeCodewiki(value) !== null;
 }
 
 export function codewikiEntries(codewiki: Codewiki): CodewikiEntry[] {

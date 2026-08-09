@@ -34,7 +34,7 @@ export interface AnthropicCompatSynthesisInput {
 	baseUrlForTarget?: (targetUrl: string) => string;
 }
 
-export function synthesizeAnthropicCompatModel(input: AnthropicCompatSynthesisInput): Model<Api> {
+function synthesizeAnthropicCompatModel(input: AnthropicCompatSynthesisInput): Model<Api> {
 	return synthLocalModel({
 		target: input.target,
 		wireModelId: input.wireModelId,

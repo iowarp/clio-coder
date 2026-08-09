@@ -202,7 +202,7 @@ function assertProjectionIdentity(
 }
 
 /** Enumerate every tuple and retain every hard-filter verdict before ranking. */
-export function enumerateJointRouteUniverse(input: JointRouteResolverInput): ReadonlyArray<EnumeratedJointRoute> {
+function enumerateJointRouteUniverse(input: JointRouteResolverInput): ReadonlyArray<EnumeratedJointRoute> {
 	const limit = Math.max(1, Math.floor(input.universeLimit ?? JOINT_ROUTE_UNIVERSE_LIMIT));
 	const universeSize = input.agents.length * input.targets.length * input.nodes.length;
 	if (universeSize > limit) {

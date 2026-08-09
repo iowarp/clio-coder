@@ -93,7 +93,7 @@ export function readEvidenceIndex(stateDir: string): EvidenceIndexRow[] {
  * ring keeps the most recently written entries when it is bounded. Returns the
  * full index as written.
  */
-export async function writeEvidenceIndexRow(stateDir: string, row: EvidenceIndexRow): Promise<EvidenceIndexRow[]> {
+async function writeEvidenceIndexRow(stateDir: string, row: EvidenceIndexRow): Promise<EvidenceIndexRow[]> {
 	let bounded: EvidenceIndexRow[] = [];
 	await withStateFileLock(indexPath(stateDir), () => {
 		const existing = readEvidenceIndex(stateDir).filter((entry) => entry.runId !== row.runId);

@@ -1075,7 +1075,7 @@ function summarizeAdoption(
  * Entries the indexer tagged as "entry point" come first; otherwise the most
  * imported modules (highest in-degree) stand in as the structural anchors.
  */
-export function codewikiEntryPoints(codewiki: Codewiki, limit = 6): string[] {
+function codewikiEntryPoints(codewiki: Codewiki, limit = 6): string[] {
 	const fileById = new Map(codewiki.files.map((file) => [file.id, file] as const));
 	const tagged = codewiki.files
 		.filter((file) => file.lang !== "config" && file.role === "entry")

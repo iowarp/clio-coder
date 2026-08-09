@@ -22,7 +22,7 @@ export async function loadComponentSnapshot(path: string): Promise<ComponentSnap
 	return parseComponentSnapshot(parsed, path);
 }
 
-export function parseComponentSnapshot(value: unknown, source = "snapshot"): ComponentSnapshot {
+function parseComponentSnapshot(value: unknown, source = "snapshot"): ComponentSnapshot {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
 	if (value.version !== 1) throw new Error(`${source}: expected version 1`);
 	if (typeof value.generatedAt !== "string" || value.generatedAt.length === 0) {

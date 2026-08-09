@@ -29,12 +29,10 @@ import {
 	commitCandidateWork,
 	createCandidateWorktree,
 	isGitRepository,
-	loadWorktreeGroup,
 	markCompeteGroupCleanupReady,
 	markCompeteGroupWinnerPreserved,
 	mergeWinnerBranch,
 	protectedPathsChangedByBranch,
-	recoverCleanupReadyWorktreeGroups,
 	removeCandidateWorktree,
 } from "../../tools/compete-worktrees.js";
 
@@ -291,17 +289,4 @@ export function closeWorkspaceTransaction(transaction: WorkspaceTransaction): vo
 		);
 	}
 	cleanupWorktreeGroup(markCompeteGroupCleanupReady(transaction.ownership));
-}
-
-/** Load a claim left by a previous process, or null when it cannot be proven. */
-export function loadWorkspaceTransaction(root: string, assignmentId: string): CompeteGroupOwnership | null {
-	return loadWorktreeGroup(ATTEMPT_NAMESPACE, root, groupName(assignmentId));
-}
-
-/**
- * Sweep attempt transactions abandoned by a dead coordinator. Live owners and
- * preserved winners are never swept, on the same evidence rules compete uses.
- */
-export function recoverWorkspaceTransactions(root: string): ReturnType<typeof recoverCleanupReadyWorktreeGroups> {
-	return recoverCleanupReadyWorktreeGroups(ATTEMPT_NAMESPACE, root);
 }

@@ -24,7 +24,7 @@ function isDirectory(path: string): boolean {
 	}
 }
 
-export function resolveProvidersModelsDir(importMetaUrl: string): string | null {
+function resolveProvidersModelsDir(importMetaUrl: string): string | null {
 	const start = dirname(fileURLToPath(importMetaUrl));
 	const directCandidates = [
 		join(start, "models"),

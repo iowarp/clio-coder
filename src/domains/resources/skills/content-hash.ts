@@ -44,7 +44,7 @@ export function frontmatterRegion(rawText: string): FrontmatterRegion | null {
 	};
 }
 
-export function isProvenanceLine(line: string): boolean {
+function isProvenanceLine(line: string): boolean {
 	const match = line.match(/^([A-Za-z][A-Za-z0-9-]*):/);
 	return match?.[1] !== undefined && PROVENANCE_KEYS.has(match[1]);
 }
