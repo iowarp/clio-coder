@@ -60,8 +60,14 @@ function name(value: unknown): string | null {
 	return clean(value, MAX_NAME_CHARS);
 }
 
+/**
+ * Descriptions come back without a trailing period. Callers embed them in a
+ * sentence they punctuate themselves, and normalizing here means every source
+ * hands back the same shape rather than each caller stripping again.
+ */
 function description(value: unknown): string | null {
-	return clean(value, MAX_DESCRIPTION_CHARS);
+	const cleaned = clean(value, MAX_DESCRIPTION_CHARS);
+	return cleaned === null ? null : (clean(cleaned.replace(/\.$/u, ""), MAX_DESCRIPTION_CHARS) ?? null);
 }
 
 function jsonRecord(cwd: string, relative: string): Record<string, unknown> | null {
@@ -352,7 +358,7 @@ const README_CANDIDATES: ReadonlyArray<string> = [
 	"doc/README.md",
 ];
 
-export function findReadme(cwd: string): { path: string; content: string } | null {
+function findReadme(cwd: string): { path: string; content: string } | null {
 	for (const candidate of README_CANDIDATES) {
 		if (!existsSync(join(cwd, candidate))) continue;
 		const content = readText(cwd, candidate);
@@ -368,24 +374,26 @@ export function findReadme(cwd: string): { path: string; content: string } | nul
  * because the constructs being removed do not collide across the three.
  */
 function stripReadmeMarkup(raw: string): string {
-	return raw
-		.replace(/<!--[\s\S]*?-->/gu, "")
-		.replace(/<picture\b[\s\S]*?<\/picture>/giu, "")
-		.replace(/^\s*<h[1-6]\b[^>]*>[\s\S]*?<\/h[1-6]>\s*$/gimu, "")
-		.replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/gu, "")
-		.replace(/!\[[^\]]*\]\([^)]*\)/gu, "")
-		.replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
-		.replace(/<img\b[^>]*>/giu, "")
-		.replace(/<[^>]+>/gu, "")
-		// reStructuredText directives and roles: `.. image::`, `|badge|`, `:ref:`.
-		.replace(/^\s*\.\.\s+\S+::.*(?:\n(?:[ \t]+.*)?)*/gmu, "")
-		.replace(/^\s*\.\.\s+_?\|?[^\n]*\|?:.*$/gmu, "")
-		.replace(/\|[A-Za-z0-9_-]+\|/gu, "")
-		.replace(/:[a-z]+:`([^`]*)`/gu, "$1")
-		// AsciiDoc attribute lines and block macros.
-		.replace(/^\s*:[A-Za-z0-9_-]+:.*$/gmu, "")
-		.replace(/^\s*image:{1,2}[^\n]*$/gmu, "")
-		.replace(/[*_~`]/gu, "");
+	return (
+		raw
+			.replace(/<!--[\s\S]*?-->/gu, "")
+			.replace(/<picture\b[\s\S]*?<\/picture>/giu, "")
+			.replace(/^\s*<h[1-6]\b[^>]*>[\s\S]*?<\/h[1-6]>\s*$/gimu, "")
+			.replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/gu, "")
+			.replace(/!\[[^\]]*\]\([^)]*\)/gu, "")
+			.replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
+			.replace(/<img\b[^>]*>/giu, "")
+			.replace(/<[^>]+>/gu, "")
+			// reStructuredText directives and roles: `.. image::`, `|badge|`, `:ref:`.
+			.replace(/^\s*\.\.\s+\S+::.*(?:\n(?:[ \t]+.*)?)*/gmu, "")
+			.replace(/^\s*\.\.\s+_?\|?[^\n]*\|?:.*$/gmu, "")
+			.replace(/\|[A-Za-z0-9_-]+\|/gu, "")
+			.replace(/:[a-z]+:`([^`]*)`/gu, "$1")
+			// AsciiDoc attribute lines and block macros.
+			.replace(/^\s*:[A-Za-z0-9_-]+:.*$/gmu, "")
+			.replace(/^\s*image:{1,2}[^\n]*$/gmu, "")
+			.replace(/[*_~`]/gu, "")
+	);
 }
 
 /** True for a line that is a heading or an underline rather than prose. */
@@ -401,15 +409,29 @@ function isStructuralLine(line: string): boolean {
 }
 
 /**
- * The first paragraph of a README that reads like a description of the project,
- * with headings, underlines, badge rows, and tables removed.
+ * A blockquote at the top of a README is an announcement, not a description.
+ * ChronoLog opens with a GitHub `> [!IMPORTANT]` callout advertising its MCP
+ * server, and taking that as the project's identity says nothing about what
+ * ChronoLog is. Every line of the paragraph has to be quoted for it to count as
+ * one, so a description that merely contains a quote still qualifies.
  */
-export function readmeSummary(content: string): string | null {
+function isCalloutParagraph(lines: ReadonlyArray<string>): boolean {
+	const content = lines.filter((line) => line.trim().length > 0);
+	if (content.length === 0) return false;
+	return content.every((line) => /^\s*>/u.test(line));
+}
+
+/**
+ * The first paragraph of a README that reads like a description of the project,
+ * with headings, underlines, badge rows, callouts, and tables removed.
+ */
+function readmeSummary(content: string): string | null {
 	const paragraphs = stripReadmeMarkup(content)
 		.split(/\n\s*\n/u)
-		.map((part) =>
-			part
-				.split(/\r?\n/u)
+		.map((part) => part.split(/\r?\n/u))
+		.filter((lines) => !isCalloutParagraph(lines))
+		.map((lines) =>
+			lines
 				.filter((line) => !isStructuralLine(line))
 				.join(" ")
 				.trim(),
@@ -420,7 +442,7 @@ export function readmeSummary(content: string): string | null {
 		);
 	const first = paragraphs[0];
 	if (!first) return null;
-	return description(first.replace(/\.$/u, ""));
+	return description(first);
 }
 
 /**

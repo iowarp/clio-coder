@@ -13,6 +13,7 @@ import {
 import { type ClioMdSection, type ParsedClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
 import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint } from "./fingerprint.js";
+import { type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
 import { renderPromptContext } from "./prompt-context.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 import {
@@ -196,18 +197,20 @@ function titleFromPackageName(raw: string): string {
 		.join(" ");
 }
 
-function projectName(cwd: string): string {
-	const pkg = readJsonFile(join(cwd, "package.json"));
-	const name = stringField(pkg, "name");
-	if (name) return titleFromPackageName(name);
-	try {
-		const readme = readFileSync(join(cwd, "README.md"), "utf8");
-		const heading = /^#\s+(.+?)\s*$/m.exec(readme)?.[1]?.trim();
-		if (heading) return heading.slice(0, 80);
-	} catch {
-		// fall back to directory name
+/**
+ * A name a manifest chose is already the project's own spelling; a name read
+ * off a package identifier or a directory is a slug that has to be titled.
+ */
+function projectNameFrom(metadata: ProjectMetadata, cwd: string): string {
+	const declared = metadata.name;
+	if (declared) {
+		return metadata.nameSource === "package.json" ? titleFromPackageName(declared) : declared.slice(0, 80);
 	}
 	return titleFromPackageName(parse(cwd).base || "Project");
+}
+
+function projectName(cwd: string): string {
+	return projectNameFrom(readProjectMetadata(cwd), cwd);
 }
 
 function projectTypeLabel(projectType: ProjectType): string {
@@ -245,53 +248,20 @@ function allContextText(files: ReadonlyArray<SiblingContextFile>): string {
 	return files.map((file) => file.content).join("\n\n");
 }
 
-function readReadmeSummary(cwd: string): string | null {
-	let readme: string;
-	try {
-		readme = readFileSync(join(cwd, "README.md"), "utf8");
-	} catch {
-		return null;
-	}
-	const cleanedReadme = readme
-		.replace(/<!--[\s\S]*?-->/g, "")
-		.replace(/<picture\b[\s\S]*?<\/picture>/gi, "")
-		.replace(/^\s*<h[1-6]\b[^>]*>[\s\S]*?<\/h[1-6]>\s*$/gim, "")
-		.replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/g, "")
-		.replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-		.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-		.replace(/<img\b[^>]*>/gi, "")
-		.replace(/<[^>]+>/g, "")
-		.replace(/[*_~]/g, "");
-	const paragraphs = cleanedReadme
-		.split(/\n\s*\n/)
-		.map((part) =>
-			part
-				.replace(/^\s*#{1,6}\s+.*$/gm, "")
-				.replace(/^\s*[-|: ]+\s*$/gm, "")
-				.trim(),
-		)
-		.filter(
-			(part) =>
-				part.length >= 20 && /[A-Za-z]{3}/.test(part) && !part.startsWith("```") && !/^table of contents$/i.test(part),
-		);
-	const first = paragraphs[0];
-	if (!first) return null;
-	const cleaned = first.replace(/\s+/g, " ").replace(/\.$/, "").trim();
-	return cleaned.length > 0 ? cleaned : null;
-}
-
 interface DeterministicIdentity {
 	/** The identity sentence the deterministic path produces. */
 	text: string;
 	/**
 	 * True when nothing but the project name and the stack label reached the
 	 * sentence, so `text` is the bare `<name> is a <stack> project.` template.
-	 * That happens when the `package.json` `description` and the `README.md`
-	 * summary are both absent, which is the ordinary case for a C++ or Fortran
-	 * repository. The flag is what decides whether a model-authored identity is
-	 * allowed to win, so the caller never has to pattern-match the rendering.
+	 * That happens only when no manifest, no research metadata, and no README
+	 * variant in this repository describes it at all. The flag is what decides
+	 * whether a model-authored identity is allowed to win, so the caller never
+	 * has to pattern-match the rendering.
 	 */
 	bare: boolean;
+	/** Repo-relative file the description came from, or null when bare. */
+	descriptionSource: string | null;
 }
 
 function resolveDefaultIdentity(
@@ -299,7 +269,8 @@ function resolveDefaultIdentity(
 	projectType: ProjectType,
 	files: ReadonlyArray<SiblingContextFile>,
 ): DeterministicIdentity {
-	const name = projectName(cwd);
+	const metadata = readProjectMetadata(cwd);
+	const name = projectNameFrom(metadata, cwd);
 	const context = allContextText(files);
 	if (/Clio owns the agent loop/i.test(context) && /pi-(?:ai|SDK)/i.test(context)) {
 		return {
@@ -309,16 +280,16 @@ function resolveDefaultIdentity(
 				"Clio owns the agent loop, TUI, session format, tool registry, and identity.",
 			].join(" "),
 			bare: false,
+			descriptionSource: null,
 		};
 	}
-	const pkg = readJsonFile(join(cwd, "package.json"));
-	const description = stringField(pkg, "description") ?? readReadmeSummary(cwd);
 	const stack = projectTypeLabel(projectType);
 	const head = `${name} is a ${stack} project.`;
-	if (!description) return { text: head.slice(0, 600), bare: true };
+	const description = metadata.description;
+	if (!description) return { text: head.slice(0, 600), bare: true, descriptionSource: null };
 	const cleaned = description.replace(/\.$/, "").trim();
 	const role = /^[a-z]/.test(cleaned) ? `It is ${cleaned}.` : `${cleaned}.`;
-	return { text: `${head} ${role}`.slice(0, 600), bare: false };
+	return { text: `${head} ${role}`.slice(0, 600), bare: false, descriptionSource: metadata.descriptionSource };
 }
 
 /**
