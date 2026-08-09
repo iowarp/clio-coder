@@ -49,9 +49,7 @@ import {
 	matchesKey,
 	type OverlayHandle,
 	ProcessTerminal,
-	Text,
 	TUI,
-	visibleWidth,
 } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
@@ -76,17 +74,12 @@ import {
 import { ClioEditor } from "./clio-editor.js";
 import { emitCommandNotice, runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice, createCommandOutputRunIo } from "./command-output.js";
-import {
-	CONTEXT_ISLAND_WIDTH,
-	createContextActivityStore,
-	formatContextActivityIslandLines,
-} from "./context-activity.js";
+import { createContextActivityStore } from "./context-activity.js";
 import { openContextOverlay } from "./context-overlay.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import {
 	createDispatchBoardStore,
 	createDispatchBoardView,
-	formatTaskIslandLines,
 	isDispatchBoardRowCancellable,
 	isDispatchBoardRowSteerable,
 } from "./dispatch-board.js";
@@ -103,6 +96,7 @@ import { openFleetOverlay } from "./fleet-overlay.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashboard.js";
 import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
+import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
 import { createLeaderKeyController } from "./leader-key.js";
@@ -1116,10 +1110,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		() => dispatchBoardStore.rows(),
 		() => observabilitySnapshot,
 	);
-	const taskIsland = new Text("", 0, 0);
-	const contextIsland = new Text("", 0, 0);
-	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
-
 	const chatRenderer = createCoalescingChatRenderer({
 		chatPanel,
 		requestRender: () => tui.requestRender(),
@@ -1898,8 +1888,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	let authDialogDismiss: (() => void) | null = null;
 	let authReturnOverlayHandle: OverlayHandle | null = null;
 	let authCloseResolve: (() => void) | null = null;
-	let dispatchBoardTicker: ReturnType<typeof setInterval> | null = null;
-	let contextIslandTicker: ReturnType<typeof setInterval> | null = null;
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
 	const leaderKeys = createLeaderKeyController({
@@ -1930,75 +1918,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	let askUserCancelledForTurn = false;
 	let unregisterAskUserHandler: (() => void) | null = null;
 	process.removeAllListeners("SIGINT");
-	const taskIslandHandle = tui.showOverlay(taskIsland, {
-		anchor: "top-right",
-		width: taskIslandWidth,
-		margin: { top: 1, right: 1 },
-		nonCapturing: true,
-		visible: (width, height) => width >= 80 && height >= 18,
+	const interactiveTickers = createInteractiveTickers({
+		tui,
+		dispatchBoardStore,
+		contextActivityStore,
+		getOverlayState: () => overlayState,
+		isFooterExpanded: () => footer.isExpanded(),
 	});
-	taskIslandHandle.setHidden(true);
-	const contextIslandHandle = tui.showOverlay(contextIsland, {
-		anchor: "top-right",
-		width: CONTEXT_ISLAND_WIDTH,
-		margin: { top: 1, right: 1 },
-		nonCapturing: true,
-		visible: (width, height) => width >= 92 && height >= 20,
-	});
-	contextIslandHandle.setHidden(true);
-
-	const renderTaskIsland = (): void => {
-		const rows = dispatchBoardStore.activeRows();
-		const contextActive = contextActivityStore.active();
-		taskIslandHandle.setHidden(overlayState !== "closed" || footer.isExpanded() || contextActive || rows.length === 0);
-		taskIsland.setText(formatTaskIslandLines(rows).join("\n"));
-		taskIsland.invalidate();
-	};
-
-	let contextIslandVisible = false;
-	const renderContextIsland = (): void => {
-		const activity = contextActivityStore.current();
-		contextIslandVisible = Boolean(activity) && overlayState === "closed" && !footer.isExpanded();
-		contextIslandHandle.setHidden(!contextIslandVisible);
-		if (activity) contextIsland.setText(formatContextActivityIslandLines(activity).join("\n"));
-		contextIsland.invalidate();
-	};
-
-	const stopDispatchBoardTicker = (): void => {
-		if (!dispatchBoardTicker) return;
-		clearInterval(dispatchBoardTicker);
-		dispatchBoardTicker = null;
-	};
-
-	const startDispatchBoardTicker = (): void => {
-		stopDispatchBoardTicker();
-		// The board component renders statelessly, so keeping spinners and
-		// elapsed times moving only needs a repaint request.
-		dispatchBoardTicker = setInterval(() => {
-			if (overlayState !== "dispatch-board") return;
-			tui.requestRender();
-		}, 250);
-	};
-
-	const stopContextIslandTicker = (): void => {
-		if (!contextIslandTicker) return;
-		clearInterval(contextIslandTicker);
-		contextIslandTicker = null;
-	};
-
-	const startContextIslandTicker = (): void => {
-		stopContextIslandTicker();
-		contextIslandTicker = setInterval(() => {
-			dispatchBoardStore.reconcile();
-			renderTaskIsland();
-			const fleetActive = dispatchBoardStore.activeRows().length > 0;
-			if (!contextActivityStore.active() && !contextIslandVisible && !fleetActive) return;
-			renderContextIsland();
-			tui.requestRender();
-		}, 250);
-		contextIslandTicker.unref?.();
-	};
-	startContextIslandTicker();
 
 	const finishAuthOverlay = (dismiss: boolean): void => {
 		if (overlayState !== "auth") return;
@@ -2014,8 +1940,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		authCloseResolve = null;
 		resolveAuthClose?.();
 		footer.refresh();
-		renderContextIsland();
-		renderTaskIsland();
+		interactiveTickers.renderContextIsland();
+		interactiveTickers.renderTaskIsland();
 		tui.requestRender();
 	};
 
@@ -2031,7 +1957,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		}
 		const leaving = overlayState;
 		overlayState = "closed";
-		stopDispatchBoardTicker();
+		interactiveTickers.stopDispatchBoardTicker();
 		overlayHandle?.hide();
 		overlayHandle = null;
 		if (leaving === "permission-confirm") {
@@ -2107,8 +2033,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls()) {
 			deps.toolRegistry.renotifyHead();
 		}
-		renderContextIsland();
-		renderTaskIsland();
+		interactiveTickers.renderContextIsland();
+		interactiveTickers.renderTaskIsland();
 		tui.requestRender();
 	};
 
@@ -2560,8 +2486,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			overlayHandle = null;
 		}
 		if (overlayState === "ask-user") overlayState = "closed";
-		renderContextIsland();
-		renderTaskIsland();
+		interactiveTickers.renderContextIsland();
+		interactiveTickers.renderTaskIsland();
 		tui.requestRender();
 	};
 
@@ -2597,8 +2523,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			if (result.cancelled === true) askUserCancelledForTurn = true;
 			closeAskUserSession();
 		} else {
-			renderContextIsland();
-			renderTaskIsland();
+			interactiveTickers.renderContextIsland();
+			interactiveTickers.renderTaskIsland();
 			tui.requestRender();
 		}
 		return result;
@@ -2668,7 +2594,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const toggleFooterDashboardState = (): void => {
 		if (overlayState !== "closed") return;
 		footer.toggleExpanded();
-		renderTaskIsland();
+		interactiveTickers.renderTaskIsland();
 		tui.requestRender();
 	};
 
@@ -3141,7 +3067,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			anchor: "center",
 			width: Math.max(44, Math.min(96, terminal.columns - 4)),
 		});
-		startDispatchBoardTicker();
+		interactiveTickers.startDispatchBoardTicker();
 		tui.requestRender();
 	};
 
@@ -3154,10 +3080,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (toolElapsedTicker) clearInterval(toolElapsedTicker);
 		if (workspaceTicker) clearInterval(workspaceTicker);
 		leaderKeys.dispose();
-		stopDispatchBoardTicker();
-		stopContextIslandTicker();
-		contextIslandHandle.hide();
-		taskIslandHandle.hide();
+		interactiveTickers.dispose();
 		footer.dispose();
 		unsubscribeObservability();
 		contextActivityStore.unsubscribe();
@@ -3323,14 +3246,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const dispatchBoardRenderUnsubscribers = [
 		deps.bus.on(BusChannels.DispatchEnqueued, () => {
 			footer.refresh();
-			renderTaskIsland();
+			interactiveTickers.renderTaskIsland();
 			// The dispatch-board overlay renders live from the store, so this
 			// repaint request refreshes it too when it is open.
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchStarted, () => {
 			footer.refresh();
-			renderTaskIsland();
+			interactiveTickers.renderTaskIsland();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchProgress, (payload) => {
@@ -3339,28 +3262,28 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
 			}
 			footer.refresh();
-			renderTaskIsland();
+			interactiveTickers.renderTaskIsland();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.RunAborted, () => {
 			footer.refresh();
-			renderTaskIsland();
+			interactiveTickers.renderTaskIsland();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchCompleted, () => {
 			footer.refresh();
-			renderTaskIsland();
+			interactiveTickers.renderTaskIsland();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchFailed, () => {
 			footer.refresh();
-			renderTaskIsland();
+			interactiveTickers.renderTaskIsland();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.ContextActivity, () => {
 			footer.refresh();
-			renderContextIsland();
-			renderTaskIsland();
+			interactiveTickers.renderContextIsland();
+			interactiveTickers.renderTaskIsland();
 			tui.requestRender();
 		}),
 	];
