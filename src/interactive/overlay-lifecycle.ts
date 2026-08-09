@@ -1,29 +1,20 @@
-import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import { appendNotice } from "./command-output.js";
-import { openContextOverlay } from "./context-overlay.js";
-import { openCostOverlay } from "./cost-overlay.js";
-import { isDispatchBoardRowCancellable, isDispatchBoardRowSteerable } from "./dispatch-board.js";
-import { openFleetOverlay } from "./fleet-overlay.js";
-import { openMemoryOverlay } from "./memory-overlay.js";
 import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { createOverlayGeneralOpeners } from "./overlay-general-openers.js";
 import { createOverlayModelSelectors } from "./overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle, type OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
 import { createOverlaySessionLifecycle } from "./overlay-session-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
-import { contextResetOptions, openContextResetOverlay } from "./overlays/context-reset.js";
 import { openExtensionsOverlay } from "./overlays/extensions.js";
 import { openHelpOverlay } from "./overlays/help-reference.js";
 import { openPromptsOverlay } from "./overlays/prompts.js";
 import { openSkillsHub } from "./overlays/skills-hub.js";
 import { createPermissionOverlayBody, PERMISSION_OVERLAY_WIDTH, permissionOverlayTitle } from "./permission-overlay.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
-import { openTasksOverlay } from "./tasks-overlay.js";
-import { createDefaultArtifactProviders } from "./view/artifacts.js";
-import { openViewOverlay } from "./view/view-overlay.js";
 
 export * from "./overlay-key-routing.js";
 
@@ -92,6 +83,13 @@ export interface OverlayLifecycleRuntimeDeps {
 	openTreeOverlay?: typeof import("./overlays/tree-selector.js").openTreeOverlay;
 	openMessagePickerOverlay?: typeof import("./overlays/message-picker.js").openMessagePickerOverlay;
 	openCwdFallbackOverlay?: typeof import("./overlays/cwd-fallback.js").openCwdFallbackOverlay;
+	openCostOverlay?: typeof import("./cost-overlay.js").openCostOverlay;
+	openContextOverlay?: typeof import("./context-overlay.js").openContextOverlay;
+	openContextResetOverlay?: typeof import("./overlays/context-reset.js").openContextResetOverlay;
+	openTasksOverlay?: typeof import("./tasks-overlay.js").openTasksOverlay;
+	openMemoryOverlay?: typeof import("./memory-overlay.js").openMemoryOverlay;
+	openFleetOverlay?: typeof import("./fleet-overlay.js").openFleetOverlay;
+	openViewOverlay?: typeof import("./view/view-overlay.js").openViewOverlay;
 }
 
 export interface OverlayLifecycleController {
@@ -158,6 +156,13 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openTreeOverlay: openTreeOverlayFactory,
 		openMessagePickerOverlay: openMessagePickerOverlayFactory,
 		openCwdFallbackOverlay: openCwdFallbackOverlayFactory,
+		openCostOverlay: openCostOverlayFactory,
+		openContextOverlay: openContextOverlayFactory,
+		openContextResetOverlay: openContextResetOverlayFactory,
+		openTasksOverlay: openTasksOverlayFactory,
+		openMemoryOverlay: openMemoryOverlayFactory,
+		openFleetOverlay: openFleetOverlayFactory,
+		openViewOverlay: openViewOverlayFactory,
 	} = deps;
 	let overlayPermission: OverlayPermissionLifecycle | null = null;
 	let overlayAskUser: OverlayAskUserLifecycle | null = null;
@@ -274,6 +279,48 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openCwdFallbackOverlayFactory ? { openCwdFallbackOverlay: openCwdFallbackOverlayFactory } : {}),
 	});
 
+	const overlayGeneralOpeners = createOverlayGeneralOpeners({
+		tui,
+		transitions: overlayTransitions,
+		observability: deps.app.observability,
+		...(deps.app.getSessionId ? { getSessionId: deps.app.getSessionId } : {}),
+		getContextLedger: () => deps.app.chat.contextLedger(),
+		contextChat: deps.app.chat,
+		bus: deps.app.bus,
+		...(deps.app.onContextClear ? { onContextClear: deps.app.onContextClear } : {}),
+		stderr: (text) => io.stderr(text),
+		refreshFooter: () => footer.refresh(),
+		toggleFooter: () => footer.toggleExpanded(),
+		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
+		requestRender: () => tui.requestRender(),
+		...(deps.app.getTaskBoard ? { getTaskBoard: deps.app.getTaskBoard } : {}),
+		...(deps.app.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.app.getTaskMemoryStatus } : {}),
+		dataDir: deps.app.dataDir,
+		notify,
+		dispatch: deps.app.dispatch,
+		providers: deps.app.providers,
+		getObservabilitySnapshot: deps.getObservabilitySnapshot,
+		...(deps.app.agents ? { agents: deps.app.agents } : {}),
+		...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
+		...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
+		...(deps.app.writeSettings ? { writeSettings: deps.app.writeSettings } : {}),
+		stateDir: deps.app.stateDir,
+		getSessionMeta: () => deps.app.session?.current() ?? null,
+		...(deps.app.readSessionEntries ? { readSessionEntries: deps.app.readSessionEntries } : {}),
+		terminal,
+		dispatchBoard,
+		startDispatchBoardTicker: () => interactiveTickers.startDispatchBoardTicker(),
+		closeOverlay,
+		showOverlayFrame,
+		...(openCostOverlayFactory ? { openCostOverlay: openCostOverlayFactory } : {}),
+		...(openContextOverlayFactory ? { openContextOverlay: openContextOverlayFactory } : {}),
+		...(openContextResetOverlayFactory ? { openContextResetOverlay: openContextResetOverlayFactory } : {}),
+		...(openTasksOverlayFactory ? { openTasksOverlay: openTasksOverlayFactory } : {}),
+		...(openMemoryOverlayFactory ? { openMemoryOverlay: openMemoryOverlayFactory } : {}),
+		...(openFleetOverlayFactory ? { openFleetOverlay: openFleetOverlayFactory } : {}),
+		...(openViewOverlayFactory ? { openViewOverlay: openViewOverlayFactory } : {}),
+	});
+
 	const openProvidersOverlayState = (): void => {
 		if (overlayTransitions.state !== "closed") return;
 		overlayTransitions.state = "providers";
@@ -294,130 +341,18 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		tui.requestRender();
 	};
 
-	const openCostOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "cost";
-		overlayTransitions.handle = openCostOverlay(tui, deps.app.observability, {
-			sessionId: deps.app.getSessionId?.() ?? null,
-		});
-		tui.requestRender();
-	};
-
-	const openContextViewOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "context-view";
-		overlayTransitions.handle = openContextOverlay(tui, () => deps.app.chat.contextLedger(), {
-			bus: deps.app.bus,
-			chat: deps.app.chat,
-		});
-		tui.requestRender();
-	};
-
-	const openContextResetOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed" || !deps.app.onContextClear) return;
-		overlayTransitions.state = "context-reset";
-		overlayTransitions.handle = openContextResetOverlay(tui, {
-			onReset: (choice) => {
-				closeOverlay();
-				const onContextClear = deps.app.onContextClear;
-				if (!onContextClear) return;
-				void Promise.resolve()
-					.then(() => onContextClear(contextResetOptions(choice)))
-					.catch((err) => {
-						const msg = err instanceof Error ? err.message : String(err);
-						io.stderr(`[/context reset] ${msg}\n`);
-					})
-					.finally(() => {
-						footer.refresh();
-						tui.requestRender();
-					});
-			},
-			onCancel: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
-	const toggleFooterDashboardState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		footer.toggleExpanded();
-		interactiveTickers.renderTaskIsland();
-		tui.requestRender();
-	};
-
-	const openTasksOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "tasks";
-		overlayTransitions.handle = openTasksOverlay(tui, () => deps.app.getTaskBoard?.() ?? null, {
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
-	const openMemoryOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed" || !deps.app.getTaskMemoryStatus) return;
-		let records: MemoryRecord[] = [];
-		try {
-			records = loadMemoryRecordsSync(deps.app.dataDir);
-		} catch (error) {
-			notify(
-				"warning",
-				`memory: durable lessons unavailable: ${error instanceof Error ? error.message : String(error)}`,
-				"memory:durable-read",
-			);
-		}
-		overlayTransitions.state = "memory";
-		overlayTransitions.handle = openMemoryOverlay(tui, deps.app.getTaskMemoryStatus, () => records, {
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
-	const openFleetOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "fleet";
-		overlayTransitions.handle = openFleetOverlay(tui, deps.app.dispatch, {
-			bus: deps.app.bus,
-			providers: deps.app.providers,
-			getObservability: () => deps.getObservabilitySnapshot(),
-			...(deps.app.agents ? { agents: deps.app.agents } : {}),
-			...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
-			...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
-			...(deps.app.writeSettings
-				? {
-						writeSettings: (next) => {
-							deps.app.writeSettings?.(next);
-							footer.refresh();
-						},
-					}
-				: {}),
-			notice: notify,
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
-	const openViewOverlayState = (initialFilter?: string): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "view";
-		const sessionMeta = deps.app.session?.current() ?? null;
-		overlayTransitions.handle = openViewOverlay(tui, {
-			providers: createDefaultArtifactProviders({
-				stateDir: deps.app.stateDir,
-				dataDir: deps.app.dataDir,
-				dispatch: deps.app.dispatch,
-				sessionMeta,
-				readSessionEntries: deps.app.readSessionEntries,
-			}),
-			...(initialFilter ? { initialFilter } : {}),
-			notice: (level, text, key) => notify(level, text, key),
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
 	const openResumeOverlayState = overlaySessions.openResume;
 	const openTreeOverlayState = overlaySessions.openTree;
 	const openMessagePickerOverlayState = overlaySessions.openMessagePicker;
+	const openCostOverlayState = overlayGeneralOpeners.openCost;
+	const openContextViewOverlayState = overlayGeneralOpeners.openContextView;
+	const openContextResetOverlayState = overlayGeneralOpeners.openContextReset;
+	const toggleFooterDashboardState = overlayGeneralOpeners.toggleFooter;
+	const openTasksOverlayState = overlayGeneralOpeners.openTasks;
+	const openMemoryOverlayState = overlayGeneralOpeners.openMemory;
+	const openFleetOverlayState = overlayGeneralOpeners.openFleet;
+	const openViewOverlayState = overlayGeneralOpeners.openView;
+	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
 
 	const openHelpOverlayState = (query?: string): void => {
 		if (overlayTransitions.state !== "closed") return;
@@ -464,37 +399,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		if (overlayTransitions.state !== "closed") return;
 		overlayTransitions.state = "extensions";
 		overlayTransitions.handle = openExtensionsOverlay(tui, deps.getSlashContext(), () => closeOverlay());
-		tui.requestRender();
-	};
-
-	const toggleDispatchBoardOverlay = (): void => {
-		if (overlayTransitions.state === "dispatch-board") {
-			closeOverlay();
-			return;
-		}
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "dispatch-board";
-		dispatchBoard.resetSelection();
-		// Size to the terminal at open: near-full width on narrow screens, capped
-		// at 96 columns so ultrawide terminals keep readable cards. pi clamps the
-		// overlay if the terminal shrinks and the live board re-renders to fit.
-		overlayTransitions.handle = showOverlayFrame(tui, dispatchBoard, {
-			title: "Fleet Runs",
-			footerHint: () => {
-				const row = dispatchBoard.selectedRow();
-				const entries = [{ key: "↑↓", verb: "select" }];
-				if (row && isDispatchBoardRowSteerable(row)) {
-					entries.push({ key: "s", verb: "steer" });
-				}
-				if (row && isDispatchBoardRowCancellable(row)) {
-					entries.push({ key: "x", verb: "cancel" });
-				}
-				return buildHint("browse", entries);
-			},
-			anchor: "center",
-			width: Math.max(44, Math.min(96, terminal.columns - 4)),
-		});
-		interactiveTickers.startDispatchBoardTicker();
 		tui.requestRender();
 	};
 
