@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runBashCommand } from "../core/bash-exec.js";
@@ -2292,11 +2292,31 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
+	/**
+	 * Hand a URL to the platform opener as an argument, never as shell text.
+	 *
+	 * This used to build a command string and escape only double quotes, which
+	 * leaves every other shell construct live inside the quoted argument: a URL
+	 * carrying a backtick or `$(...)` reaches the browser opener through a shell
+	 * that evaluates it first. The URLs are provider-supplied OAuth and console
+	 * links, so the string is not ours to trust. `src/cli/docs.ts` already opens
+	 * a browser the right way; this is the same shape.
+	 */
 	const maybeOpenExternalUrl = (url: string): void => {
-		const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-		exec(`${opener} "${url.replace(/"/g, '\\"')}"`, () => {
+		const platform = process.platform;
+		const command = platform === "darwin" ? "open" : platform === "win32" ? "cmd" : "xdg-open";
+		// `start` is a cmd builtin rather than an executable, and its first
+		// quoted argument is the window title, so the empty string is required.
+		const args = platform === "win32" ? ["/c", "start", "", url] : [url];
+		try {
+			const child = spawn(command, args, { stdio: "ignore", detached: true });
+			child.on("error", () => {
+				// Best effort only: the URL is also printed for the operator.
+			});
+			child.unref();
+		} catch {
 			// Best effort only.
-		});
+		}
 	};
 
 	const resolveConnectionReference = (target: string) => {
