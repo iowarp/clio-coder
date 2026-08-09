@@ -40,7 +40,7 @@ export interface CtrlCActionState {
 	now: number;
 }
 
-export function resolveApplicationCtrlCAction(state: CtrlCActionState): CtrlCAction {
+function resolveApplicationCtrlCAction(state: CtrlCActionState): CtrlCAction {
 	if (state.overlayState !== "closed") return "close-overlay";
 	if (state.lastCtrlCAt > 0 && state.now - state.lastCtrlCAt <= APPLICATION_DOUBLE_TAP_MS) return "shutdown";
 	if (state.streaming) return "cancel-stream";
