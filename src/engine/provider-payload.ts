@@ -211,7 +211,7 @@ export function patchToolChoiceNamedPayload(
 }
 
 /** Attach llama-server's native JSON-schema response constraint without changing its tool surface. */
-export function patchLlamaCppResponseSchemaPayload(
+function patchLlamaCppResponseSchemaPayload(
 	payload: unknown,
 	runtimeId: string,
 	responseSchema: Record<string, unknown> | undefined,
@@ -277,12 +277,4 @@ export function patchWorkerRequestPayload(
 	}
 
 	return changed ? patched : undefined;
-}
-
-export function patchReasoningSummaryPayload(
-	payload: unknown,
-	model: EngineModel,
-	thinkingLevel: ThinkingLevel | undefined,
-): unknown | undefined {
-	return patchProviderThinkingPayload(payload, model, thinkingLevel);
 }

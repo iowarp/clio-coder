@@ -10,7 +10,7 @@ function numberField(record: Record<string, number | undefined>, key: keyof Samp
  * Narrow the run-scoped sampling override (core/run-overrides.ts) to the
  * sampling keys the API layers understand. Unknown keys are dropped.
  */
-export function runSamplingOverrides(env: NodeJS.ProcessEnv = process.env): SamplingProfile | undefined {
+function runSamplingOverrides(env: NodeJS.ProcessEnv = process.env): SamplingProfile | undefined {
 	const sampling = runOverrides(env).sampling;
 	if (!sampling) return undefined;
 	const out: SamplingProfile = {};

@@ -325,7 +325,7 @@ function assertResponseSchemaRuntime(input: WorkerRunInput): void {
 }
 
 /** Return the admitted worker specification budget unchanged. */
-export function resolveWorkerRuntimeBudget(input: Pick<WorkerRunInput, "budget">): WorkerBudget {
+function resolveWorkerRuntimeBudget(input: Pick<WorkerRunInput, "budget">): WorkerBudget {
 	return input.budget;
 }
 

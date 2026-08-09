@@ -40,7 +40,7 @@ export interface EngineOAuthProvider {
 }
 
 /** Adapt Clio's legacy login callbacks to pi's AuthInteraction. */
-export function interactionFromLoginCallbacks(callbacks: OAuthLoginCallbacks): AuthInteraction {
+function interactionFromLoginCallbacks(callbacks: OAuthLoginCallbacks): AuthInteraction {
 	const interaction: AuthInteraction = {
 		notify(event) {
 			switch (event.type) {
@@ -155,17 +155,8 @@ export function listEngineOAuthProviders(): EngineOAuthProvider[] {
 	return [...registry().values()];
 }
 
-export function registerEngineOAuthProvider(provider: EngineOAuthProvider): void {
+function registerEngineOAuthProvider(provider: EngineOAuthProvider): void {
 	registry().set(provider.id, provider);
-}
-
-export function unregisterEngineOAuthProvider(providerId: string): void {
-	registry().delete(providerId);
-}
-
-export function resetEngineOAuthProviders(): void {
-	clioOAuthProvidersRegistered = false;
-	providers = null;
 }
 
 let clioOAuthProvidersRegistered = false;

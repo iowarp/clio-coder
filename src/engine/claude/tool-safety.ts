@@ -140,7 +140,7 @@ export function claudeToolsOutsideProfile(allowedTools: ReadonlySet<string>): st
 		.map(([claudeName]) => claudeName);
 }
 
-export function mapClaudeToolCall(toolName: string, input: Record<string, unknown>, cwd: string): MappedClaudeToolCall {
+function mapClaudeToolCall(toolName: string, input: Record<string, unknown>, cwd: string): MappedClaudeToolCall {
 	switch (toolName) {
 		case "Bash":
 			return { claudeToolName: toolName, clioToolName: ToolNames.Bash, args: commandArgs(input, cwd), known: true };
