@@ -88,6 +88,7 @@ export interface AgentSpec {
 	tags: ReadonlyArray<string>;
 	skills: ReadonlyArray<string>;
 	resultContract: ResultContract;
+	product?: string;
 	budget: AgentBudget;
 	body: string;
 }
@@ -231,6 +232,7 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 		tags: recipe.tags,
 		skills: recipe.skills,
 		resultContract: recipe.resultContract,
+		...(recipe.product !== undefined ? { product: recipe.product } : {}),
 		budget: recipe.budget,
 		body: recipe.body,
 	};

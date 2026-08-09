@@ -29,6 +29,9 @@ const RECIPE_KEYS = [
 	"tags",
 ] as const;
 
+const OPTIONAL_RECIPE_KEYS = ["product"] as const;
+const ALL_RECIPE_KEYS = [...RECIPE_KEYS, ...OPTIONAL_RECIPE_KEYS] as const;
+
 export interface ParseRecipeSchemaInput {
 	id: string;
 	source: AgentRecipe["source"];
@@ -131,7 +134,7 @@ function parseTools(
 export function parseAgentRecipeSchema(input: ParseRecipeSchemaInput): AgentRecipe {
 	const { frontmatter, filepath } = input;
 	for (const key of Object.keys(frontmatter)) {
-		if (!(RECIPE_KEYS as ReadonlyArray<string>).includes(key)) {
+		if (!(ALL_RECIPE_KEYS as ReadonlyArray<string>).includes(key)) {
 			throw new Error(`agent recipe: ${filepath}: unknown key '${key}'`);
 		}
 	}
@@ -172,6 +175,7 @@ export function parseAgentRecipeSchema(input: ParseRecipeSchemaInput): AgentReci
 		),
 		budget,
 		resultContract: parseResultContract(frontmatter.resultContract, filepath),
+		...(typeof frontmatter.product === "string" ? { product: frontmatter.product } : {}),
 		tags: requiredStringArray(frontmatter.tags, `${filepath}: tags`),
 		source: input.source,
 		filepath,
@@ -180,5 +184,5 @@ export function parseAgentRecipeSchema(input: ParseRecipeSchemaInput): AgentReci
 }
 
 export function recipeSchemaFieldNames(): ReadonlyArray<string> {
-	return RECIPE_KEYS;
+	return ALL_RECIPE_KEYS;
 }

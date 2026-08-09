@@ -69,6 +69,7 @@ import { startClaudeCodeWorkerRun } from "./claude/subprocess-runtime.js";
 import {
 	createLoopGuardRegistration,
 	isLoopGuardSynthesisBackstopReason,
+	resolveDeliveryTools,
 	sanitizeLockedSynthesisMessage,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
@@ -100,6 +101,8 @@ export interface WorkerRunInput {
 	 * orchestrator for a recoverable shape mistake it was never told about.
 	 */
 	resultContract?: ResultContract;
+	/** Product nature for reserve delivery tool resolution. */
+	product?: string;
 	/** Workspace root the result contract resolves relative paths against. */
 	cwd?: string;
 	/** Tool ids the worker is allowed to expose for this run. */
@@ -408,7 +411,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// The reserve ends discovery, not the run's own product. An agent that was
 	// granted mutation tools delivers by writing, so those stay admitted in the
 	// reserve window; a read-only agent has none and the window stays read-only.
-	const deliveryTools = [ToolNames.Write, ToolNames.Edit].filter((tool) => input.allowedTools.includes(tool));
+	const deliveryTools = resolveDeliveryTools(input.allowedTools, input.product);
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
 	// Tool calls emitted by one provider response share this correlation. The
 	// loop guard counts synthesis-lock noncompliance by model round, preventing

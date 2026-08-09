@@ -88,6 +88,7 @@ export interface AgentRecipe {
 	projectContextTier: AgentProjectContextTier;
 	budget: AgentBudget;
 	resultContract: ResultContract;
+	product?: string;
 	tags: ReadonlyArray<string>;
 	source: "builtin" | "user" | "project";
 	filepath: string;

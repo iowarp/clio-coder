@@ -151,6 +151,7 @@ async function main(): Promise<number> {
 			: {}),
 		...(spec.responseSchema !== undefined ? { responseSchema: spec.responseSchema } : {}),
 		...(spec.resultContract !== undefined ? { resultContract: spec.resultContract } : {}),
+		...(spec.product !== undefined ? { product: spec.product } : {}),
 		cwd: process.cwd(),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;
