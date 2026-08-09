@@ -867,7 +867,7 @@ const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama-native", "lm
 // also surfaces them under the Cloud API path.
 const PROTOCOL_COMPAT_RUNTIME_IDS: ReadonlySet<string> = new Set(["openai-compat", "anthropic-compat"]);
 
-export function runtimesForCategory(
+function runtimesForCategory(
 	entries: ReadonlyArray<ProviderSupportEntry>,
 	category: ConfigureCategory,
 ): ProviderSupportEntry[] {

@@ -157,7 +157,7 @@ function listHtmlFiles(htmlDir: string): string[] {
 }
 
 /** Build the static request handler for one html root. */
-export function createDocsRequestHandler(htmlDir: string): (req: IncomingMessage, res: ServerResponse) => void {
+function createDocsRequestHandler(htmlDir: string): (req: IncomingMessage, res: ServerResponse) => void {
 	const root = resolve(htmlDir);
 	return (req, res) => {
 		if (req.method !== "GET" && req.method !== "HEAD") {

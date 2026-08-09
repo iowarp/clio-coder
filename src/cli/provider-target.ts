@@ -20,7 +20,7 @@ export interface ConnectableProviderRow {
 	targetCount: number;
 }
 
-export function ensureSetupRuntimeRegistry(): void {
+function ensureSetupRuntimeRegistry(): void {
 	registerClioOAuthProviders();
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
