@@ -42,7 +42,6 @@ import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
-import { probeGit, probeWorkspace } from "../domains/session/workspace/index.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { OAuthSelectPrompt } from "../engine/oauth.js";
 import { openSession, sessionPaths } from "../engine/session.js";
@@ -164,6 +163,7 @@ import { abbreviateModelId } from "./theme/index.js";
 import { createDefaultArtifactProviders, verifyReceiptFile } from "./view/artifacts.js";
 import { openViewOverlay } from "./view/view-overlay.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
+import { createWorkspaceFacts } from "./workspace-facts.js";
 
 export {
 	IDLE_LEADER_STATE,
@@ -922,36 +922,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// so editor/select components honor overrides without explicit plumbing.
 	const keybindings = createKeybindingManager(deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings));
 
-	const bootWorkspace = probeWorkspace(process.cwd());
-	let liveWorkspaceSnapshot: ReturnType<typeof probeWorkspace> = deps.session?.current()?.workspace ?? bootWorkspace;
-	let lastWorkspaceProbeAt = 0;
-	const refreshLiveWorkspaceGit = (force = false): void => {
-		const base = deps.session?.current()?.workspace ?? bootWorkspace;
-		if (!force && Date.now() - lastWorkspaceProbeAt < 5_000) return;
-		lastWorkspaceProbeAt = Date.now();
-		if (!base.isGit) {
-			liveWorkspaceSnapshot = base;
-			return;
-		}
-		const git = probeGit(base.cwd);
-		liveWorkspaceSnapshot = {
-			...base,
-			branch: git.branch,
-			dirty: git.dirty,
-			ahead: git.ahead,
-			behind: git.behind,
-			recentCommits: git.recentCommits,
-		};
-	};
-	const getLiveWorkspaceSnapshot = (): typeof liveWorkspaceSnapshot => {
-		const base = deps.session?.current()?.workspace ?? bootWorkspace;
-		if (liveWorkspaceSnapshot.cwd !== base.cwd || liveWorkspaceSnapshot.capturedAt !== base.capturedAt) {
-			liveWorkspaceSnapshot = base;
-			refreshLiveWorkspaceGit(true);
-		}
-		return liveWorkspaceSnapshot;
-	};
-	refreshLiveWorkspaceGit(true);
+	const workspaceFacts = createWorkspaceFacts({
+		cwd: process.cwd(),
+		getSessionWorkspace: () => deps.session?.current()?.workspace ?? null,
+		...(deps.extensions ? { extensions: deps.extensions } : {}),
+	});
+	const { getExtensionStats, getLiveWorkspaceSnapshot, refreshLiveWorkspaceGit } = workspaceFacts;
 
 	let sessionCounter = {
 		id: deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,
@@ -978,20 +954,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		return typeof metaTurns === "number" ? Math.max(metaTurns, projected) : projected > 0 ? projected : null;
 	};
 
-	// Shared by the welcome banner and the footer: active counts extensions that
-	// are enabled and effective after precedence; installed counts all discovered.
-	const getExtensionStats = () => {
-		const items = deps.extensions?.list(process.cwd(), { all: true }) ?? [];
-		return {
-			active: items.filter((entry) => entry.enabled && entry.effective).length,
-			installed: items.length,
-		};
-	};
 	const banner = createWelcomeDashboard({
 		providers: deps.providers,
 		observability: deps.observability,
 		getContextUsage: () => deps.chat.contextUsage(),
-		getWorkspaceSnapshot: () => deps.session?.current()?.workspace ?? bootWorkspace,
+		getWorkspaceSnapshot: workspaceFacts.getWorkspaceSnapshot,
 		getExtensionStats,
 		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
