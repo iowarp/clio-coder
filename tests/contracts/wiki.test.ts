@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runWikiDispatch } from "../../src/cli/wiki-generate.js";
 import { type Codewiki, readCodewiki } from "../../src/domains/context/codewiki/indexer.js";
 import {
 	buildWikiPagePrompt,
@@ -136,6 +137,52 @@ function promptCodewiki(): Codewiki {
 		edges: [],
 	};
 }
+
+/**
+ * The admission queue applies a 60s default when a request declares no
+ * assignment deadline (`dispatch/extension.ts` admitAssignmentCapacity), while
+ * a wiki page dispatch allows six minutes to run. Observed live on a 33-page
+ * plan whose writers each took 110 to 125 seconds: `core.md` was refused at
+ * 10/33 with `dispatch: admission timed_out` without ever starting, because it
+ * waited longer than a minute for a capacity slot the caller was willing to
+ * wait six minutes for.
+ */
+describe("contracts/wiki dispatch admission", () => {
+	it("queues a page for as long as it is willing to run it", async () => {
+		const requests: Array<Record<string, unknown>> = [];
+		const dispatch = {
+			async dispatch(request: Record<string, unknown>) {
+				requests.push(request);
+				return {
+					runId: "run-1",
+					events: (async function* () {})(),
+					finalPromise: Promise.resolve({ exitCode: 0 } as never),
+				};
+			},
+			abort() {},
+		} as never;
+
+		const before = Date.now();
+		const outcome = await runWikiDispatch({
+			dispatch,
+			cwd: process.cwd(),
+			outputDir: process.cwd(),
+			task: "write one page",
+			route: {},
+			deadlineMs: 6 * 60 * 1000,
+			label: "page core.md",
+		});
+		const after = Date.now();
+
+		strictEqual(outcome.ok, true, outcome.detail);
+		const deadline = requests[0]?.assignmentDeadlineAt;
+		strictEqual(typeof deadline, "number", "the request must declare an assignment deadline");
+		ok(
+			(deadline as number) >= before + 6 * 60 * 1000 && (deadline as number) <= after + 6 * 60 * 1000,
+			`assignment deadline ${String(deadline)} must match the six-minute execution budget`,
+		);
+	});
+});
 
 describe("contracts/wiki", () => {
 	let scratch: string;

@@ -42,19 +42,47 @@ Usage:
   clio upgrade              upgrade Clio Coder and run pending migrations
   clio agents               list discovered agent recipes
   clio fleet list|run|status  repo-owned fleet contracts and dispatch status
-  clio components           list, snapshot, or diff harness components
   clio evidence             build, list, or inspect evidence artifacts
   clio eval                 run, report, or compare local eval task files
   clio memory               list, propose, approve, reject, or prune memory
   clio usage report         cross-session usage facts and opportunities (experimental)
   clio trace                query or view the durable dispatch trace mirror
-  clio evolve manifest      create, validate, or summarize change manifests
   clio extensions           install, list, enable, disable, or remove extension packages
   clio skills               list, inspect, validate, or install skills
   clio docs [topic]         serve bundled HTML docs on 127.0.0.1 (--no-open to skip browser)
-  clio share export|import  export or import Clio project/resource archives
+  clio dev <command>        harness instruments; run 'clio dev' for the list
   clio --help, -h           this message
+  clio --help --all         this message plus every command under 'clio dev'
 `;
+
+/**
+ * Commands that answer a question about the harness rather than about the
+ * user's own work.
+ *
+ * Nothing here is removed or deprecated. An agent driving Clio over bash can
+ * reach a wider surface than a person reading a help screen can hold, so the
+ * capability stays and only the default listing shrinks: every name below still
+ * resolves at the top level, and `clio --help --all` prints all of it.
+ */
+const DEV_COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
+	{ name: "components", summary: "list, snapshot, or diff harness components" },
+	{ name: "evolve", summary: "create, validate, or summarize change manifests" },
+	{ name: "share", summary: "export or import Clio project/resource archives" },
+];
+
+const DEV_HELP = `Clio Coder harness instruments
+
+Usage:
+${DEV_COMMANDS.map((entry) => `  clio dev ${entry.name.padEnd(20)}${entry.summary}`).join("\n")}
+
+Each also resolves without the 'dev' prefix, so existing scripts and agent
+callers keep working. The prefix exists so the default help stays the set of
+commands a person needs to read.
+`;
+
+function helpText(all: boolean): string {
+	return all ? `${HELP}\n${DEV_HELP}` : HELP;
+}
 
 /** Engines floor from package.json; npm only warns on EBADENGINE, so the CLI
  * states the requirement itself instead of failing with an arbitrary syntax
@@ -99,7 +127,7 @@ async function main(argv: string[]): Promise<number> {
 	const subcommandIndex = rest.findIndex((arg) => !arg.startsWith("-"));
 	const firstArg = rest[0];
 	if (firstArg === "--help" || firstArg === "-h" || ((flags.has("help") || flags.has("h")) && !subcommand)) {
-		process.stdout.write(HELP);
+		process.stdout.write(helpText(flags.has("all")));
 		return 0;
 	}
 	if (flags.has("version") || flags.has("v")) {
@@ -130,6 +158,7 @@ const RECOGNIZED_SUBCOMMANDS = new Set<string>([
 	"auth",
 	"config",
 	"configure",
+	"dev",
 	"targets",
 	"models",
 	"agents",
@@ -212,6 +241,22 @@ async function dispatch(
 			return (await import("./trace.js")).runTraceCommand(subArgs);
 		case "evolve":
 			return (await import("./evolve.js")).runEvolveCommand(subArgs);
+		case "dev": {
+			// `clio dev <name>` re-enters dispatch with the bare name, so there is
+			// exactly one implementation of every command and the prefix cannot
+			// drift from what it forwards to.
+			const devSubcommand = subArgs[0];
+			if (devSubcommand === undefined || devSubcommand === "--help" || devSubcommand === "-h") {
+				process.stdout.write(DEV_HELP);
+				return devSubcommand === undefined ? 2 : 0;
+			}
+			if (!DEV_COMMANDS.some((entry) => entry.name === devSubcommand)) {
+				printError(`unknown dev command: ${devSubcommand}`);
+				process.stdout.write(DEV_HELP);
+				return 2;
+			}
+			return dispatch(devSubcommand, subArgs.slice(1), bootOptions);
+		}
 		case "extensions":
 		case "ext":
 			return (await import("./extensions.js")).runExtensionsCommand(subArgs);
@@ -253,7 +298,7 @@ async function dispatch(
 			return 0;
 		default:
 			printError(`unknown subcommand: ${subcommand}`);
-			process.stdout.write(HELP);
+			process.stdout.write(helpText(false));
 			return 2;
 	}
 }
