@@ -9,8 +9,7 @@ const HELP = `Usage:
 Clear accumulated project context owned by the context engine:
 .clio/codewiki.json, .clio/state.json, .clio/handoffs/, and .clio/proposals/.
 
-Preserves user-authored project assets by default:
-CLIO.md, .clio/agents/, and .clio/skills/.
+Preserves by default: CLIO.md, .clio/agents/, .clio/skills/, and .clio/wiki/.
 
 Options:
   --all       also remove CLIO.md after a second confirmation

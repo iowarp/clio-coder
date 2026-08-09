@@ -39,3 +39,6 @@ tmp/
 
 
 
+
+# npm pack output. Verifying an installed tarball is routine; committing one is not.
+*.tgz
