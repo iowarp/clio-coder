@@ -4,7 +4,6 @@ import type { ThinkingLevel } from "../domains/providers/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract } from "../domains/session/index.js";
-import type { OverlayHandle } from "../engine/tui.js";
 import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
@@ -17,6 +16,7 @@ import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./o
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { createOverlayPermissionLifecycle, type OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
+import { createOverlayTransitions } from "./overlay-transitions.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
 import { contextResetOptions, openContextResetOverlay } from "./overlays/context-reset.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
@@ -180,10 +180,18 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openAskUserOverlay: openAskUserOverlayFactory,
 	} = deps;
 	let settingsOverlayRefresh: (() => void) | null = null;
-	let overlayState: OverlayState = "closed";
-	let overlayHandle: OverlayHandle | null = null;
 	let overlayPermission: OverlayPermissionLifecycle | null = null;
 	let overlayAskUser: OverlayAskUserLifecycle | null = null;
+	const overlayTransitions = createOverlayTransitions({
+		stopDispatchBoardTicker: () => interactiveTickers.stopDispatchBoardTicker(),
+		renderContextIsland: () => interactiveTickers.renderContextIsland(),
+		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
+		requestRender: () => tui.requestRender(),
+		cancelPendingAskUser: () => overlayAskUser?.cancelPending() ?? false,
+		finishAuth: (dismiss) => overlayAuth.finish(dismiss),
+		onPermissionOverlayClosed: () => overlayPermission?.onPermissionOverlayClosed(),
+	});
+	const closeOverlay = overlayTransitions.close;
 
 	const overlayAuth = createOverlayAuthLifecycle({
 		tui,
@@ -194,45 +202,27 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		renderContextIsland: () => interactiveTickers.renderContextIsland(),
 		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
 		requestRender: () => tui.requestRender(),
-		getOverlayState: () => overlayState,
+		getOverlayState: () => overlayTransitions.state,
 		setOverlayState: (state) => {
-			overlayState = state;
+			overlayTransitions.state = state;
 		},
-		getOverlayHandle: () => overlayHandle,
+		getOverlayHandle: () => overlayTransitions.handle,
 		setOverlayHandle: (handle) => {
-			overlayHandle = handle;
+			overlayTransitions.handle = handle;
 		},
 		...(openAuthDialogFactory ? { openAuthDialog: openAuthDialogFactory } : {}),
 	});
-
-	const closeOverlay = (): void => {
-		if (overlayState === "closed") return;
-		if (overlayState === "ask-user" && overlayAskUser?.cancelPending()) return;
-		if (overlayState === "auth") {
-			overlayAuth.finish(true);
-			return;
-		}
-		const leaving = overlayState;
-		overlayState = "closed";
-		interactiveTickers.stopDispatchBoardTicker();
-		overlayHandle?.hide();
-		overlayHandle = null;
-		if (leaving === "permission-confirm") overlayPermission?.onPermissionOverlayClosed();
-		interactiveTickers.renderContextIsland();
-		interactiveTickers.renderTaskIsland();
-		tui.requestRender();
-	};
 
 	overlayPermission = createOverlayPermissionLifecycle({
 		...(deps.app.toolRegistry ? { toolRegistry: deps.app.toolRegistry } : {}),
 		bus: deps.app.bus,
 		dispatch: deps.app.dispatch,
 		getAutonomy: () => deps.app.getSettings?.().autonomy ?? "auto-edit",
-		getOverlayState: () => overlayState,
+		getOverlayState: () => overlayTransitions.state,
 		openPermissionOverlay: (view) => {
-			if (overlayState !== "closed") return false;
-			overlayState = "permission-confirm";
-			overlayHandle = showOverlayFrame(tui, createPermissionOverlayBody(view), {
+			if (overlayTransitions.state !== "closed") return false;
+			overlayTransitions.state = "permission-confirm";
+			overlayTransitions.handle = showOverlayFrame(tui, createPermissionOverlayBody(view), {
 				anchor: "center",
 				width: PERMISSION_OVERLAY_WIDTH,
 				title: permissionOverlayTitle(),
@@ -249,13 +239,13 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 
 	overlayAskUser = createOverlayAskUserLifecycle({
 		tui,
-		getOverlayState: () => overlayState,
+		getOverlayState: () => overlayTransitions.state,
 		setOverlayState: (state) => {
-			overlayState = state;
+			overlayTransitions.state = state;
 		},
-		getOverlayHandle: () => overlayHandle,
+		getOverlayHandle: () => overlayTransitions.handle,
 		setOverlayHandle: (handle) => {
-			overlayHandle = handle;
+			overlayTransitions.handle = handle;
 		},
 		renderContextIsland: () => interactiveTickers.renderContextIsland(),
 		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
@@ -265,9 +255,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	});
 
 	const openProvidersOverlayState = (): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "providers";
-		overlayHandle = openProvidersOverlayFactory(tui, deps.app.providers, {
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "providers";
+		overlayTransitions.handle = openProvidersOverlayFactory(tui, deps.app.providers, {
 			bus: deps.app.bus,
 			...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
 			...(deps.app.writeSettings
@@ -285,18 +275,18 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openCostOverlayState = (): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "cost";
-		overlayHandle = openCostOverlay(tui, deps.app.observability, {
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "cost";
+		overlayTransitions.handle = openCostOverlay(tui, deps.app.observability, {
 			sessionId: deps.app.getSessionId?.() ?? null,
 		});
 		tui.requestRender();
 	};
 
 	const openContextViewOverlayState = (): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "context-view";
-		overlayHandle = openContextOverlay(tui, () => deps.app.chat.contextLedger(), {
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "context-view";
+		overlayTransitions.handle = openContextOverlay(tui, () => deps.app.chat.contextLedger(), {
 			bus: deps.app.bus,
 			chat: deps.app.chat,
 		});
@@ -304,9 +294,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openContextResetOverlayState = (): void => {
-		if (overlayState !== "closed" || !deps.app.onContextClear) return;
-		overlayState = "context-reset";
-		overlayHandle = openContextResetOverlay(tui, {
+		if (overlayTransitions.state !== "closed" || !deps.app.onContextClear) return;
+		overlayTransitions.state = "context-reset";
+		overlayTransitions.handle = openContextResetOverlay(tui, {
 			onReset: (choice) => {
 				closeOverlay();
 				const onContextClear = deps.app.onContextClear;
@@ -328,23 +318,23 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const toggleFooterDashboardState = (): void => {
-		if (overlayState !== "closed") return;
+		if (overlayTransitions.state !== "closed") return;
 		footer.toggleExpanded();
 		interactiveTickers.renderTaskIsland();
 		tui.requestRender();
 	};
 
 	const openTasksOverlayState = (): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "tasks";
-		overlayHandle = openTasksOverlay(tui, () => deps.app.getTaskBoard?.() ?? null, {
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "tasks";
+		overlayTransitions.handle = openTasksOverlay(tui, () => deps.app.getTaskBoard?.() ?? null, {
 			onClose: () => closeOverlay(),
 		});
 		tui.requestRender();
 	};
 
 	const openMemoryOverlayState = (): void => {
-		if (overlayState !== "closed" || !deps.app.getTaskMemoryStatus) return;
+		if (overlayTransitions.state !== "closed" || !deps.app.getTaskMemoryStatus) return;
 		let records: MemoryRecord[] = [];
 		try {
 			records = loadMemoryRecordsSync(deps.app.dataDir);
@@ -355,17 +345,17 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				"memory:durable-read",
 			);
 		}
-		overlayState = "memory";
-		overlayHandle = openMemoryOverlay(tui, deps.app.getTaskMemoryStatus, () => records, {
+		overlayTransitions.state = "memory";
+		overlayTransitions.handle = openMemoryOverlay(tui, deps.app.getTaskMemoryStatus, () => records, {
 			onClose: () => closeOverlay(),
 		});
 		tui.requestRender();
 	};
 
 	const openFleetOverlayState = (): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "fleet";
-		overlayHandle = openFleetOverlay(tui, deps.app.dispatch, {
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "fleet";
+		overlayTransitions.handle = openFleetOverlay(tui, deps.app.dispatch, {
 			bus: deps.app.bus,
 			providers: deps.app.providers,
 			getObservability: () => deps.getObservabilitySnapshot(),
@@ -387,10 +377,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openViewOverlayState = (initialFilter?: string): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "view";
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "view";
 		const sessionMeta = deps.app.session?.current() ?? null;
-		overlayHandle = openViewOverlay(tui, {
+		overlayTransitions.handle = openViewOverlay(tui, {
 			providers: createDefaultArtifactProviders({
 				stateDir: deps.app.stateDir,
 				dataDir: deps.app.dataDir,
@@ -406,8 +396,8 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openThinkingOverlayState = (): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "thinking";
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "thinking";
 		const settings = deps.app.getSettings?.();
 		const current = settings
 			? (resolveThinkingCapability(deps.app.providers, settings)?.effectiveLevel ?? readThinkingLevel(settings))
@@ -425,16 +415,16 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			onClose: () => closeOverlay(),
 			...(settings ? { labelFor: resolveThinkingLabeler(deps.app.providers, settings) } : {}),
 		};
-		overlayHandle = openThinkingOverlay(tui, thinkingOverlayDeps);
+		overlayTransitions.handle = openThinkingOverlay(tui, thinkingOverlayDeps);
 		tui.requestRender();
 	};
 
 	const openModelOverlayState = (): void => {
-		if (overlayState !== "closed") return;
+		if (overlayTransitions.state !== "closed") return;
 		const settings = deps.app.getSettings?.();
 		if (!settings) return;
-		overlayState = "model";
-		overlayHandle = openModelOverlay(tui, {
+		overlayTransitions.state = "model";
+		overlayTransitions.handle = openModelOverlay(tui, {
 			settings,
 			...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
 			providers: deps.app.providers,
@@ -463,11 +453,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openScopedModelsOverlayState = (): void => {
-		if (overlayState !== "closed") return;
+		if (overlayTransitions.state !== "closed") return;
 		const settings = deps.app.getSettings?.();
 		if (!settings) return;
-		overlayState = "scoped-models";
-		overlayHandle = openScopedOverlay(tui, {
+		overlayTransitions.state = "scoped-models";
+		overlayTransitions.handle = openScopedOverlay(tui, {
 			providers: deps.app.providers,
 			currentScope: extractScopeFromSettings(settings),
 			onCommit: (next) => {
@@ -480,9 +470,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openSettingsOverlayState = (): void => {
-		if (overlayState !== "closed") return;
+		if (overlayTransitions.state !== "closed") return;
 		if (!deps.app.getSettings || !deps.app.writeSettings) return;
-		overlayState = "settings";
+		overlayTransitions.state = "settings";
 		const getSettings = deps.app.getSettings;
 		const writeSettingsOut = deps.app.writeSettings;
 		const commitSettingOut = deps.app.commitSetting;
@@ -507,12 +497,12 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				closeOverlay();
 			},
 		});
-		overlayHandle = handle;
+		overlayTransitions.handle = handle;
 		settingsOverlayRefresh = handle.refreshRows;
 		void (async () => {
 			try {
 				await deps.app.providers.probeAllLive();
-				if (overlayState === "settings") settingsOverlayRefresh?.();
+				if (overlayTransitions.state === "settings") settingsOverlayRefresh?.();
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				notify("warning", `settings model refresh failed: ${msg}`, "settings:model-refresh");
@@ -522,15 +512,15 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openResumeOverlayState = (): void => {
-		if (overlayState !== "closed") return;
+		if (overlayTransitions.state !== "closed") return;
 		if (!deps.app.session) {
 			emitCommandNotice(deps.getSlashContext().notice, "error", "resume", "session contract unavailable");
 			return;
 		}
 		const sessionContract = deps.app.session;
 		const preResumeSessionId = sessionContract.current()?.id ?? null;
-		overlayState = "resume";
-		overlayHandle = openSessionOverlay(tui, {
+		overlayTransitions.state = "resume";
+		overlayTransitions.handle = openSessionOverlay(tui, {
 			session: sessionContract,
 			onResume: (sessionId) => {
 				deps.app.onResumeSession?.(sessionId);
@@ -583,14 +573,14 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openTreeOverlayState = (): void => {
-		if (overlayState !== "closed") return;
+		if (overlayTransitions.state !== "closed") return;
 		if (!deps.app.session) {
 			notify("error", "tree unavailable: session contract is not wired", "tree:unavailable");
 			return;
 		}
 		const sessionContract = deps.app.session;
-		overlayState = "tree";
-		overlayHandle = openTreeOverlay(tui, {
+		overlayTransitions.state = "tree";
+		overlayTransitions.handle = openTreeOverlay(tui, {
 			session: sessionContract,
 			onSwitchTurn: (turnId) => {
 				try {
@@ -614,7 +604,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openMessagePickerOverlayState = (): void => {
-		if (overlayState !== "closed") return;
+		if (overlayTransitions.state !== "closed") return;
 		if (!deps.app.session) {
 			emitCommandNotice(deps.getSlashContext().notice, "error", "fork", "session contract unavailable");
 			return;
@@ -631,8 +621,8 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			);
 			return;
 		}
-		overlayState = "message-picker";
-		overlayHandle = openMessagePickerOverlay(tui, {
+		overlayTransitions.state = "message-picker";
+		overlayTransitions.handle = openMessagePickerOverlay(tui, {
 			session: sessionContract,
 			onFork: (parentTurnId) => {
 				try {
@@ -682,11 +672,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		reason: "no-cwd" | "missing" | "not-a-directory";
 		preResumeSessionId: string | null;
 	}): void => {
-		if (overlayState !== "closed") return;
+		if (overlayTransitions.state !== "closed") return;
 		if (!deps.app.session) return;
 		const sessionContract = deps.app.session;
-		overlayState = "cwd-fallback";
-		overlayHandle = openCwdFallbackOverlay(tui, {
+		overlayTransitions.state = "cwd-fallback";
+		overlayTransitions.handle = openCwdFallbackOverlay(tui, {
 			sessionCwd: args.sessionCwd,
 			currentCwd: process.cwd(),
 			reason: args.reason,
@@ -712,23 +702,23 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openHelpOverlayState = (query?: string): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "help";
-		overlayHandle = openHelpOverlay(tui, keybindings, () => closeOverlay(), query);
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "help";
+		overlayTransitions.handle = openHelpOverlay(tui, keybindings, () => closeOverlay(), query);
 		tui.requestRender();
 	};
 
 	const openAgentsOverlayState = (): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "agents";
-		overlayHandle = openAgentsOverlay(tui, deps.getSlashContext(), () => closeOverlay());
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "agents";
+		overlayTransitions.handle = openAgentsOverlay(tui, deps.getSlashContext(), () => closeOverlay());
 		tui.requestRender();
 	};
 
 	const openSkillsHubState = (): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "skills-hub";
-		overlayHandle = openSkillsHub(tui, {
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "skills-hub";
+		overlayTransitions.handle = openSkillsHub(tui, {
 			listSkills: () => deps.app.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
 			cacheDir: deps.app.cacheDir,
 			setEditorText: (text) => {
@@ -746,31 +736,31 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	const openPromptsOverlayState = (): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "prompts";
-		overlayHandle = openPromptsOverlay(tui, deps.getSlashContext(), () => closeOverlay());
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "prompts";
+		overlayTransitions.handle = openPromptsOverlay(tui, deps.getSlashContext(), () => closeOverlay());
 		tui.requestRender();
 	};
 
 	const openExtensionsOverlayState = (): void => {
-		if (overlayState !== "closed") return;
-		overlayState = "extensions";
-		overlayHandle = openExtensionsOverlay(tui, deps.getSlashContext(), () => closeOverlay());
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "extensions";
+		overlayTransitions.handle = openExtensionsOverlay(tui, deps.getSlashContext(), () => closeOverlay());
 		tui.requestRender();
 	};
 
 	const toggleDispatchBoardOverlay = (): void => {
-		if (overlayState === "dispatch-board") {
+		if (overlayTransitions.state === "dispatch-board") {
 			closeOverlay();
 			return;
 		}
-		if (overlayState !== "closed") return;
-		overlayState = "dispatch-board";
+		if (overlayTransitions.state !== "closed") return;
+		overlayTransitions.state = "dispatch-board";
 		dispatchBoard.resetSelection();
 		// Size to the terminal at open: near-full width on narrow screens, capped
 		// at 96 columns so ultrawide terminals keep readable cards. pi clamps the
 		// overlay if the terminal shrinks and the live board re-renders to fit.
-		overlayHandle = showOverlayFrame(tui, dispatchBoard, {
+		overlayTransitions.handle = showOverlayFrame(tui, dispatchBoard, {
 			title: "Fleet Runs",
 			footerHint: () => {
 				const row = dispatchBoard.selectedRow();
@@ -791,7 +781,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	};
 
 	return {
-		getState: () => overlayState,
+		getState: () => overlayTransitions.state,
 		closeOverlay,
 		finishAuthOverlay: overlayAuth.finish,
 		openAskUserOverlayState: overlayAskUser.handler,
