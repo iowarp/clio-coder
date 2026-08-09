@@ -10,7 +10,7 @@ export interface SourceCitation {
 	line: number;
 }
 
-export function sourceCitations(text: string): SourceCitation[] {
+function sourceCitations(text: string): SourceCitation[] {
 	const citations: SourceCitation[] = [];
 	for (const match of text.matchAll(SOURCE_CITATION_PATTERN)) {
 		const path = match[1];
@@ -20,7 +20,7 @@ export function sourceCitations(text: string): SourceCitation[] {
 	return citations;
 }
 
-export function hasSourceCitation(text: string): boolean {
+function hasSourceCitation(text: string): boolean {
 	return sourceCitations(text).length > 0;
 }
 

@@ -169,7 +169,7 @@ function normalizeOptions(value: unknown, index: number): { options?: AskUserOpt
 	return options.length > 0 ? { options } : {};
 }
 
-export function normalizeAskUserQuestions(args: Record<string, unknown>): {
+function normalizeAskUserQuestions(args: Record<string, unknown>): {
 	questions?: AskUserQuestion[];
 	error?: string;
 } {

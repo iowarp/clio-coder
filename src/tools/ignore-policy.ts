@@ -42,7 +42,7 @@ export const GENERATED_DIRS: ReadonlyArray<string> = [
  * Walk up from the search path looking for a `.git` marker (a directory in a
  * normal repo, a file in worktrees/submodules).
  */
-export function isInsideGitRepo(startPath: string): boolean {
+function isInsideGitRepo(startPath: string): boolean {
 	let current = startPath;
 	for (;;) {
 		if (existsSync(join(current, ".git"))) return true;

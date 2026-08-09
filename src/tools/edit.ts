@@ -45,7 +45,7 @@ function parseEditsArray(value: unknown): Edit[] | null {
  * the registry `prepareArguments` hook and also called at the top of `run` so
  * direct callers get the same normalization.
  */
-export function prepareEditArguments(args: Record<string, unknown>): Record<string, unknown> {
+function prepareEditArguments(args: Record<string, unknown>): Record<string, unknown> {
 	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
 	const next: Record<string, unknown> = { ...args };
 	if (typeof next.edits === "string") {

@@ -76,10 +76,7 @@ export interface BuiltinToolPolicyOptions {
 	includeInteractiveTools?: boolean;
 }
 
-export function validateBuiltinToolPolicy(
-	specs: ReadonlyArray<ToolSpec>,
-	options: BuiltinToolPolicyOptions = {},
-): string[] {
+function validateBuiltinToolPolicy(specs: ReadonlyArray<ToolSpec>, options: BuiltinToolPolicyOptions = {}): string[] {
 	const errors: string[] = [];
 	const registered = new Map<ToolName, ToolSpec>();
 

@@ -19,7 +19,7 @@ export interface DeclaredCheckSource {
 	checks: string[];
 }
 
-export function declaredCheckSources(cwd: string): DeclaredCheckSource[] {
+function declaredCheckSources(cwd: string): DeclaredCheckSource[] {
 	const pkgPath = path.join(cwd, "package.json");
 	if (!existsSync(pkgPath)) return [];
 	const pkg = parsePackageJson(pkgPath);

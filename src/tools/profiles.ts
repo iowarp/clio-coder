@@ -37,7 +37,7 @@ export function isToolProfileName(value: string): value is ToolProfileName {
  * calls use this to refuse a profile they would otherwise silently ignore.
  * `full-agent` and `undefined` impose no narrowing.
  */
-export function narrowsToolSurface(profile: ToolProfileName | undefined): boolean {
+function narrowsToolSurface(profile: ToolProfileName | undefined): boolean {
 	return profile !== undefined && profile in NARROW_TOOL_PROFILES;
 }
 
@@ -83,11 +83,11 @@ function uniquePreservingOrder(tools: ReadonlyArray<ToolName>): ToolName[] {
 	return unique;
 }
 
-export function isCodewikiTool(tool: ToolName): boolean {
+function isCodewikiTool(tool: ToolName): boolean {
 	return (CODEWIKI_TOOL_NAMES as ReadonlyArray<ToolName>).includes(tool);
 }
 
-export function isNavigationHeavyTask(task: string | undefined): boolean {
+function isNavigationHeavyTask(task: string | undefined): boolean {
 	if (!task) return false;
 	return /\b(?:codewiki|symbol|symbols|entry\s*points?|where\s+is|code_nav|call\s*sites?|references?|imports?|exports?|map|mapping|navigate|navigation|topology|architecture|boundar(?:y|ies)|ownership|trace|locate|find\s+(?:the\s+)?(?:implementation|definition|module|file|path))\b|(?:^|\s)(?:src|tests?|cmd|pkg|lib)\/|\.(?:[cm]?[tj]sx?|py|pyw|go|rs|c|h|cc|cpp|cxx|hpp|hh|hxx|java|rb)\b/i.test(
 		task,
