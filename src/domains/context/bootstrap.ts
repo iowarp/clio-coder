@@ -602,7 +602,11 @@ function stabilizeGeneratedOutput(
 	return {
 		...base,
 		projectName: existing?.projectName ?? projectName(input.cwd),
-		identity: existing?.identity ?? defaultIdentity(input.cwd, input.projectType, input.siblingFiles),
+		identity:
+			existing?.identity ??
+			(typeof base.identity === "string" && base.identity.trim().length > 0
+				? base.identity
+				: defaultIdentity(input.cwd, input.projectType, input.siblingFiles)),
 		conventions: conventions.slice(0, 6),
 		invariants: invariants.slice(0, 3),
 		sections: [...retainedOrdinarySections, ...(verification ? [verification] : [])],
