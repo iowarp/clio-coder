@@ -1,0 +1,412 @@
+import type { ClioSettings } from "../core/config.js";
+import type { SafeEventBus } from "../core/event-bus.js";
+import type { ContextState } from "../domains/context/index.js";
+import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
+import type { ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
+import { type ProvidersContract, resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
+import type { ResourcesContract } from "../domains/resources/index.js";
+import { getMarketplaceSkills } from "../domains/resources/skills/marketplace.js";
+import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
+import type { Component, TUI } from "../engine/tui.js";
+import type { ChatLoop } from "./chat-loop.js";
+import { type ChatPanel, createChatPanel } from "./chat-panel.js";
+import { type CoalescingChatRenderer, createCoalescingChatRenderer } from "./chat-renderer.js";
+import { ClioEditor } from "./clio-editor.js";
+import { createCommandOutputRunIo } from "./command-output.js";
+import { createContextActivityStore } from "./context-activity.js";
+import { createDispatchBoardStore, createDispatchBoardView, type DispatchBoardView } from "./dispatch-board.js";
+import { createFollowUpQueuePanel, type FollowUpQueuePanel } from "./follow-up-queue-panel.js";
+import { buildFooterDashboard, type FooterDashboardDeps, type FooterDashboardPanel } from "./footer/dashboard.js";
+import { createNotificationCenter, type NotificationCenter } from "./footer/notifications.js";
+import { type ClioKeybindingManager, createKeybindingManager } from "./keybinding-manager.js";
+import { buildLayout } from "./layout.js";
+import type { TargetsHubNoticeLevel } from "./providers-overlay.js";
+import type { SessionTranscript } from "./session-transcript.js";
+import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
+import type { RunIo } from "./slash-commands.js";
+import { createStatusController, type StatusController, type TurnSummary } from "./status/index.js";
+import { abbreviateModelId } from "./theme/index.js";
+import { createWelcomeDashboard } from "./welcome-dashboard.js";
+import type { WorkspaceFacts } from "./workspace-facts.js";
+
+export interface PresentationTickerHandle {
+	unref?(): void;
+}
+
+type DispatchBoardStore = ReturnType<typeof createDispatchBoardStore>;
+type ContextActivityStore = ReturnType<typeof createContextActivityStore>;
+type AutocompleteProvider = ReturnType<typeof createSlashCommandAutocompleteProvider>;
+
+export interface InteractivePresentationFactories {
+	createKeybindings: typeof createKeybindingManager;
+	createBanner: typeof createWelcomeDashboard;
+	createChatPanel: typeof createChatPanel;
+	createFollowUpQueuePanel: typeof createFollowUpQueuePanel;
+	createStatusController: typeof createStatusController;
+	createDispatchBoardStore: typeof createDispatchBoardStore;
+	createContextActivityStore: typeof createContextActivityStore;
+	createNotificationCenter: typeof createNotificationCenter;
+	buildFooter: typeof buildFooterDashboard;
+	createEditor: (tui: TUI, chrome: ConstructorParameters<typeof ClioEditor>[1]) => ClioEditor;
+	createAutocomplete: typeof createSlashCommandAutocompleteProvider;
+	createDispatchBoardView: typeof createDispatchBoardView;
+	createChatRenderer: typeof createCoalescingChatRenderer;
+	createIo: typeof createCommandOutputRunIo;
+	buildLayout: typeof buildLayout;
+}
+
+export interface InteractivePresentationDeps {
+	bus: SafeEventBus;
+	providers: ProvidersContract;
+	dispatch: Pick<DispatchContract, "snapshot">;
+	observability: ObservabilityContract;
+	chat: ChatLoop;
+	workspaceFacts: WorkspaceFacts;
+	sessionTranscript: Pick<SessionTranscript, "liveSessionTurns">;
+	tui: TUI;
+	terminal: { readonly columns: number };
+	mount: (root: Component, editor: Component) => void;
+	getSettings?: () => Readonly<ClioSettings>;
+	resources?: Pick<ResourcesContract, "skills">;
+	session?: Pick<SessionContract, "current">;
+	getSessionId?: () => string | null;
+	getTaskBoard?: () => TaskBoardSnapshot | null;
+	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
+	getTaskMemorySeedOffer?: () => { source: string; count: number } | null;
+	getContextState?: (cwd?: string) => ContextState;
+	getCwd?: () => string;
+	scheduleInterval?: (callback: () => void, intervalMs: number) => PresentationTickerHandle;
+	clearScheduledInterval?: (handle: PresentationTickerHandle) => void;
+	factories?: Partial<InteractivePresentationFactories>;
+}
+
+export interface PresentationToolEnd {
+	toolCallId: string;
+	isError: boolean;
+	truncated: boolean;
+}
+
+export interface InteractivePresentation {
+	keybindings: ClioKeybindingManager;
+	banner: Component;
+	chatPanel: ChatPanel;
+	followUpQueuePanel: FollowUpQueuePanel;
+	statusController: StatusController;
+	dispatchBoardStore: DispatchBoardStore;
+	contextActivityStore: ContextActivityStore;
+	footer: FooterDashboardPanel;
+	notifications: NotificationCenter;
+	notify(level: TargetsHubNoticeLevel, text: string, key?: string): void;
+	dismissContextBootstrapNotices(): void;
+	announceTaskMemorySeedOffer(): void;
+	editor: ClioEditor;
+	dispatchBoard: DispatchBoardView;
+	chatRenderer: CoalescingChatRenderer;
+	io: RunIo;
+	root: Component;
+	getObservabilitySnapshot(): ObservabilitySnapshot;
+	recordToolStart(toolCallId: string, toolName: string): void;
+	recordToolEnd(result: PresentationToolEnd): void;
+	setLastTurnSummary(summary: TurnSummary | null): void;
+	resetToolTelemetry(): void;
+	stopTickers(): void;
+	disposeBeforeStatus(): void;
+	disposeStatus(): void;
+	dispose(): void;
+}
+
+const DEFAULT_FACTORIES: InteractivePresentationFactories = {
+	createKeybindings: createKeybindingManager,
+	createBanner: createWelcomeDashboard,
+	createChatPanel,
+	createFollowUpQueuePanel,
+	createStatusController,
+	createDispatchBoardStore,
+	createContextActivityStore,
+	createNotificationCenter,
+	buildFooter: buildFooterDashboard,
+	createEditor: (tui, chrome) => new ClioEditor(tui, chrome),
+	createAutocomplete: createSlashCommandAutocompleteProvider,
+	createDispatchBoardView,
+	createChatRenderer: createCoalescingChatRenderer,
+	createIo: createCommandOutputRunIo,
+	buildLayout,
+};
+
+/** Title-case a KeyId for the footer hint, preserving the historical fallback. */
+function formatKeyLabel(keyId: string | undefined): string {
+	if (!keyId || keyId.length === 0) return "Alt+X";
+	return keyId
+		.split("+")
+		.map((segment) => (segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1)))
+		.join("+");
+}
+
+/**
+ * Construct the terminal-independent presentation graph around an injected
+ * TUI. The composition root retains process/session ownership; this unit owns
+ * visual components, their mutable footer projection, and their refresh
+ * timers as one lifecycle.
+ */
+export function createInteractivePresentation(deps: InteractivePresentationDeps): InteractivePresentation {
+	const factories = { ...DEFAULT_FACTORIES, ...deps.factories };
+	const getCwd = deps.getCwd ?? (() => process.cwd());
+	const requestRender = (): void => deps.tui.requestRender();
+	const settings = deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings);
+	const keybindings = factories.createKeybindings(settings);
+	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
+		deps.workspaceFacts;
+
+	const banner = factories.createBanner({
+		providers: deps.providers,
+		observability: deps.observability,
+		getContextUsage: () => deps.chat.contextUsage(),
+		getWorkspaceSnapshot,
+		getExtensionStats,
+		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+	});
+	const chatPanel = factories.createChatPanel({
+		getToolExpandKey: () => {
+			const first = keybindings.getKeys("clio.tool.expand")[0];
+			return typeof first === "string" && first.length > 0 ? first : undefined;
+		},
+		getOutputVerbosity: () => deps.getSettings?.().terminal.outputVerbosity ?? "default",
+	});
+	const followUpQueuePanel = factories.createFollowUpQueuePanel({
+		getDequeueKey: () => {
+			const first = keybindings.getKeys("clio.message.dequeue")[0];
+			return typeof first === "string" && first.length > 0 ? first : undefined;
+		},
+	});
+	const statusController = factories.createStatusController({
+		chat: deps.chat,
+		providers: deps.providers,
+		bus: deps.bus,
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+	});
+	const dispatchBoardStore = factories.createDispatchBoardStore(deps.bus, () => deps.dispatch.snapshot());
+	const contextActivityStore = factories.createContextActivityStore(deps.bus);
+
+	const footerToolCounts = new Map<string, number>();
+	const footerActiveTools = new Set<string>();
+	let footerToolErrors = 0;
+	let footerToolTruncatedResults = 0;
+	let lastTurnSummary: TurnSummary | null = null;
+	let observabilitySnapshot = deps.observability.snapshot();
+	let footer: FooterDashboardPanel;
+	const notifications = factories.createNotificationCenter({
+		onChange: () => {
+			footer?.refresh();
+			requestRender();
+		},
+	});
+	const notify = (level: TargetsHubNoticeLevel, text: string, key?: string): void => {
+		notifications.add(key ? { level, text, key } : { level, text });
+	};
+	const dismissContextBootstrapNotices = (): void => {
+		for (const notice of notifications.list()) {
+			if (/^clio: (No CLIO\.md detected|malformed CLIO\.md ignored|Imported agent context changed)/.test(notice.text)) {
+				notifications.dismiss(notice.id);
+			}
+		}
+	};
+	const announceTaskMemorySeedOffer = (): void => {
+		const offer = deps.getTaskMemorySeedOffer?.() ?? null;
+		if (!offer || offer.count === 0) return;
+		notify(
+			"info",
+			`task memory: ${offer.count} handoff entr${offer.count === 1 ? "y" : "ies"} available from ${offer.source}; run /memory seed to import`,
+			"memory:seed-offer",
+		);
+	};
+
+	const footerDeps: FooterDashboardDeps = {
+		providers: deps.providers,
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		getAgentStatus: () => statusController.current(),
+		getTerminalColumns: () => deps.terminal.columns,
+		getSessionTokens: () => observabilitySnapshot.session.tokens,
+		getTokenThroughput: () => observabilitySnapshot.session.latestThroughput,
+		getSessionCost: () => observabilitySnapshot.session.cost,
+		getContextUsage: () => deps.chat.contextUsage(),
+		getContextLedger: () => deps.chat.contextLedger(),
+		getDispatchRows: () => dispatchBoardStore.rows(),
+		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
+		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
+		getContextActivity: () => contextActivityStore.current(),
+		getToolCounts: () => ({
+			tools: Object.fromEntries(footerToolCounts),
+			errors: footerToolErrors,
+			active: footerActiveTools.size,
+			truncatedResults: footerToolTruncatedResults,
+		}),
+		...(deps.getContextState
+			? { getContextState: () => deps.getContextState?.(getCwd()) ?? { clioMd: "none", memoryCount: 0 } }
+			: {}),
+		getWorkspaceSnapshot: getLiveWorkspaceSnapshot,
+		getExtensionStats,
+		getSessionInfo: () => {
+			const meta = deps.session?.current();
+			return {
+				id: meta?.id ?? deps.getSessionId?.() ?? null,
+				name: meta?.name ?? null,
+				turns: deps.sessionTranscript.liveSessionTurns(),
+			};
+		},
+		getLastTurnSummary: () => lastTurnSummary,
+		getNotifications: () => notifications.list(),
+		dismissKeyLabel: formatKeyLabel(keybindings.getKeys("clio.notifications.dismiss")[0]),
+	};
+	footer = factories.buildFooter(footerDeps);
+	const unsubscribeObservability = deps.observability.subscribe((snapshot) => {
+		observabilitySnapshot = snapshot;
+		footer.refresh();
+		requestRender();
+	});
+
+	const editor = factories.createEditor(deps.tui, {
+		getModelLabel: () => {
+			const current = deps.getSettings?.();
+			const model = current?.orchestrator?.model?.trim();
+			if (!model) return "no model";
+			const target = current?.orchestrator?.target?.trim();
+			const abbreviated = abbreviateModelId(model);
+			return target ? `${target}·${abbreviated}` : abbreviated;
+		},
+		getThinkingLabel: () => {
+			const current = deps.getSettings?.();
+			return (
+				resolveModelRuntimeCapabilitiesForProviders(
+					deps.providers,
+					current?.orchestrator?.target,
+					current?.orchestrator?.model,
+					current?.orchestrator?.thinkingLevel ?? "off",
+				)?.thinking.display ??
+				current?.orchestrator?.thinkingLevel ??
+				"off"
+			);
+		},
+	});
+	editor.focused = true;
+	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
+		listSkills: () => ({
+			installed: deps.resources?.skills(getCwd()).items ?? [],
+			marketplace: getMarketplaceSkills(),
+		}),
+	});
+	editor.setAutocompleteProvider(autocomplete);
+
+	const dispatchBoard = factories.createDispatchBoardView(
+		() => dispatchBoardStore.rows(),
+		() => observabilitySnapshot,
+	);
+	const chatRenderer = factories.createChatRenderer({ chatPanel, requestRender });
+	const io = factories.createIo({
+		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
+		requestRender,
+	});
+	const root = factories.buildLayout({
+		banner,
+		chat: chatPanel,
+		pending: followUpQueuePanel,
+		editor,
+		footer: footer.view,
+	});
+	deps.mount(root, editor);
+
+	const scheduleInterval = deps.scheduleInterval ?? ((callback, intervalMs) => setInterval(callback, intervalMs));
+	const clearScheduledInterval =
+		deps.clearScheduledInterval ??
+		((handle: PresentationTickerHandle): void => clearInterval(handle as ReturnType<typeof setInterval>));
+	const footerTicker = scheduleInterval(() => {
+		const statusActive = statusController.current().phase !== "idle";
+		if (!deps.chat.isStreaming() && !statusActive && !footer.isExpanded()) return;
+		footer.refresh();
+		requestRender();
+	}, 120);
+	footerTicker.unref?.();
+	const toolElapsedTicker = scheduleInterval(() => {
+		if (!deps.chat.isStreaming()) return;
+		chatPanel.invalidate?.();
+		requestRender();
+	}, 1_000);
+	toolElapsedTicker.unref?.();
+	const workspaceTicker = scheduleInterval(() => {
+		refreshLiveWorkspaceGit(true);
+		footer.refresh();
+		requestRender();
+	}, 5_000);
+	workspaceTicker.unref?.();
+
+	let tickersStopped = false;
+	let beforeStatusDisposed = false;
+	let statusDisposed = false;
+	const stopTickers = (): void => {
+		if (tickersStopped) return;
+		tickersStopped = true;
+		clearScheduledInterval(footerTicker);
+		clearScheduledInterval(toolElapsedTicker);
+		clearScheduledInterval(workspaceTicker);
+	};
+	const disposeBeforeStatus = (): void => {
+		if (beforeStatusDisposed) return;
+		beforeStatusDisposed = true;
+		footer.dispose();
+		unsubscribeObservability();
+		contextActivityStore.unsubscribe();
+		dispatchBoardStore.unsubscribe();
+	};
+	const disposeStatus = (): void => {
+		if (statusDisposed) return;
+		statusDisposed = true;
+		statusController.dispose();
+	};
+	return {
+		keybindings,
+		banner,
+		chatPanel,
+		followUpQueuePanel,
+		statusController,
+		dispatchBoardStore,
+		contextActivityStore,
+		footer,
+		notifications,
+		notify,
+		dismissContextBootstrapNotices,
+		announceTaskMemorySeedOffer,
+		editor,
+		dispatchBoard,
+		chatRenderer,
+		io,
+		root,
+		getObservabilitySnapshot: () => observabilitySnapshot,
+		recordToolStart: (toolCallId, toolName) => {
+			footerActiveTools.add(toolCallId);
+			footerToolCounts.set(toolName, (footerToolCounts.get(toolName) ?? 0) + 1);
+		},
+		recordToolEnd: ({ toolCallId, isError, truncated }) => {
+			footerActiveTools.delete(toolCallId);
+			if (isError) footerToolErrors += 1;
+			if (truncated) footerToolTruncatedResults += 1;
+		},
+		setLastTurnSummary: (summary) => {
+			lastTurnSummary = summary;
+		},
+		resetToolTelemetry: () => {
+			footerToolCounts.clear();
+			footerActiveTools.clear();
+			footerToolErrors = 0;
+			footerToolTruncatedResults = 0;
+		},
+		stopTickers,
+		disposeBeforeStatus,
+		disposeStatus,
+		dispose: () => {
+			stopTickers();
+			disposeBeforeStatus();
+			disposeStatus();
+		},
+	};
+}

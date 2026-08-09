@@ -9,14 +9,9 @@ import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
-import type { ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
-import {
-	type ProvidersContract,
-	resolveModelRuntimeCapabilitiesForProviders,
-	type ThinkingLevel,
-} from "../domains/providers/index.js";
+import type { ObservabilityContract } from "../domains/observability/index.js";
+import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
-import { getMarketplaceSkills } from "../domains/resources/skills/marketplace.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
@@ -30,25 +25,16 @@ import {
 	createApplicationController,
 } from "./application-controller.js";
 import type { ChatLoop } from "./chat-loop.js";
-import { createChatPanel } from "./chat-panel.js";
-import { createCoalescingChatRenderer } from "./chat-renderer.js";
-import { ClioEditor } from "./clio-editor.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
-import { appendNotice, createCommandOutputRunIo } from "./command-output.js";
-import { createContextActivityStore } from "./context-activity.js";
-import { createDispatchBoardStore, createDispatchBoardView } from "./dispatch-board.js";
+import { appendNotice } from "./command-output.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController } from "./editor-submit.js";
-import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
-import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashboard.js";
-import { createNotificationCenter } from "./footer/notifications.js";
 import { createInteractiveEventProjection } from "./interactive-event-projection.js";
+import { createInteractivePresentation } from "./interactive-presentation.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
 import { createInteractiveSlashRuntime } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
-import { createKeybindingManager } from "./keybinding-manager.js";
-import { buildLayout } from "./layout.js";
 import { createLeaderKeyController } from "./leader-key.js";
 import {
 	createOverlayLifecycle,
@@ -57,18 +43,13 @@ import {
 	routeOverlayKey,
 } from "./overlay-lifecycle.js";
 import { resolveAvailableThinkingLevels } from "./overlays/thinking-selector.js";
-import type { TargetsHubNoticeLevel } from "./providers-overlay.js";
 import { createSessionTranscript } from "./session-transcript.js";
-import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import type {
 	ContextClearCommandOptions,
 	InitCommandOptions,
 	RunIo,
 	TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
-import { createStatusController, type TurnSummary } from "./status/index.js";
-import { abbreviateModelId } from "./theme/index.js";
-import { createWelcomeDashboard } from "./welcome-dashboard.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
 
 export {
@@ -302,15 +283,6 @@ export interface CtrlCActionDeps {
 	now: number;
 }
 
-/** Title-case a KeyId for display, e.g. `alt+x` → `Alt+X`. Falls back to `Alt+X`. */
-function formatKeyLabel(keyId: string | undefined): string {
-	if (!keyId || keyId.length === 0) return "Alt+X";
-	return keyId
-		.split("+")
-		.map((segment) => (segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1)))
-		.join("+");
-}
-
 export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 	// A modal is an input boundary. Never let a global double-tap or an active
 	// run escape through it; Ctrl+C cancels/closes the focused overlay instead.
@@ -435,206 +407,62 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const { terminal, tui } = shell;
 	let applicationController: ApplicationController;
 
-	// Build the runtime keybinding manager from the current settings snapshot.
-	// This also installs the manager as pi-tui's global (via setKeybindings)
-	// so editor/select components honor overrides without explicit plumbing.
-	const keybindings = createKeybindingManager(deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings));
-
 	const workspaceFacts = createWorkspaceFacts({
 		cwd: process.cwd(),
 		getSessionWorkspace: () => deps.session?.current()?.workspace ?? null,
 		...(deps.extensions ? { extensions: deps.extensions } : {}),
 	});
-	const { getExtensionStats, getLiveWorkspaceSnapshot, refreshLiveWorkspaceGit } = workspaceFacts;
+	const { refreshLiveWorkspaceGit } = workspaceFacts;
 
-	let footer: FooterDashboardPanel;
+	let refreshPresentationFooter = (): void => {};
 	const sessionTranscript = createSessionTranscript({
 		...(deps.session ? { session: deps.session } : {}),
 		...(deps.getSessionId ? { getSessionId: deps.getSessionId } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.readSessionEntries ? { readSessionEntries: deps.readSessionEntries } : {}),
 		chat: deps.chat,
-		refreshStatus: () => footer.refresh(),
+		refreshStatus: () => refreshPresentationFooter(),
 	});
-	const { liveSessionTurns, readStructuredEntries, recordSubmittedTurn } = sessionTranscript;
+	const { readStructuredEntries, recordSubmittedTurn } = sessionTranscript;
 
-	const banner = createWelcomeDashboard({
-		providers: deps.providers,
-		observability: deps.observability,
-		getContextUsage: () => deps.chat.contextUsage(),
-		getWorkspaceSnapshot: workspaceFacts.getWorkspaceSnapshot,
-		getExtensionStats,
-		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
-		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
-	});
-	const chatPanel = createChatPanel({
-		// Surface the bound `clio.tool.expand` key on collapsed tool sublines so
-		// users can discover the Ctrl+O toggle. Pulls from the keybindings
-		// manager on every render so user rebinds flow through; the first bound
-		// key wins when multiple are configured.
-		getToolExpandKey: () => {
-			const keys = keybindings.getKeys("clio.tool.expand");
-			const first = keys[0];
-			return typeof first === "string" && first.length > 0 ? first : undefined;
-		},
-		getOutputVerbosity: () => deps.getSettings?.().terminal.outputVerbosity ?? "default",
-	});
-	const followUpQueuePanel = createFollowUpQueuePanel({
-		getDequeueKey: () => {
-			const keys = keybindings.getKeys("clio.message.dequeue");
-			const first = keys[0];
-			return typeof first === "string" && first.length > 0 ? first : undefined;
-		},
-	});
-	const statusController = createStatusController({
-		chat: deps.chat,
-		providers: deps.providers,
+	const presentation = createInteractivePresentation({
 		bus: deps.bus,
-		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
-	});
-	const dispatchBoardStore = createDispatchBoardStore(deps.bus, () => deps.dispatch.snapshot());
-	const contextActivityStore = createContextActivityStore(deps.bus);
-	const footerToolCounts = new Map<string, number>();
-	const footerActiveTools = new Set<string>();
-	let footerToolErrors = 0;
-	let footerToolTruncatedResults = 0;
-	// Metrics for the most recent completed turn. The faint per-turn summary no
-	// longer prints under the assistant reply; it lives in the footer instead so
-	// the transcript stays calm and the footer carries the live telemetry.
-	let lastTurnSummary: TurnSummary | null = null;
-	// Dedicated harness→user surface. Boot hints and live connect/probe notices
-	// route here (anchored in the footer region) instead of into the transcript,
-	// so they never leak into VT scrollback.
-	const dismissKeyLabel = formatKeyLabel(keybindings.getKeys("clio.notifications.dismiss")[0]);
-	const notifications = createNotificationCenter({
-		onChange: () => {
-			footer?.refresh();
-			tui.requestRender();
-		},
-	});
-	const notify = (level: TargetsHubNoticeLevel, text: string, key?: string): void => {
-		notifications.add(key ? { level, text, key } : { level, text });
-	};
-	const announceTaskMemorySeedOffer = (): void => {
-		const offer = deps.getTaskMemorySeedOffer?.() ?? null;
-		if (!offer || offer.count === 0) return;
-		notify(
-			"info",
-			`task memory: ${offer.count} handoff entr${offer.count === 1 ? "y" : "ies"} available from ${offer.source}; run /memory seed to import`,
-			"memory:seed-offer",
-		);
-	};
-	const dismissContextBootstrapNotices = (): void => {
-		for (const notice of notifications.list()) {
-			if (/^clio: (No CLIO\.md detected|malformed CLIO\.md ignored|Imported agent context changed)/.test(notice.text)) {
-				notifications.dismiss(notice.id);
-			}
-		}
-	};
-	// Live observability projection cache. The footer's session cost/token/
-	// throughput getters read this snapshot instead of the raw contract methods,
-	// so the projection is the single source path; the subscription below keeps
-	// it current and drives render invalidation on each coalesced update.
-	let observabilitySnapshot: ObservabilitySnapshot = deps.observability.snapshot();
-	footer = buildFooterDashboard({
 		providers: deps.providers,
+		dispatch: deps.dispatch,
+		observability: deps.observability,
+		chat: deps.chat,
+		workspaceFacts,
+		sessionTranscript,
+		tui,
+		terminal,
+		mount: (root, editor) => shell.mount(root, editor),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
-		getAgentStatus: () => statusController.current(),
-		getTerminalColumns: () => terminal.columns,
-		getSessionTokens: () => observabilitySnapshot.session.tokens,
-		getTokenThroughput: () => observabilitySnapshot.session.latestThroughput,
-		getSessionCost: () => observabilitySnapshot.session.cost,
-		getContextUsage: () => deps.chat.contextUsage(),
-		getContextLedger: () => deps.chat.contextLedger(),
-		getDispatchRows: () => dispatchBoardStore.rows(),
+		...(deps.resources ? { resources: deps.resources } : {}),
+		...(deps.session ? { session: deps.session } : {}),
+		...(deps.getSessionId ? { getSessionId: deps.getSessionId } : {}),
 		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
-		getContextActivity: () => contextActivityStore.current(),
-		getToolCounts: () => ({
-			tools: Object.fromEntries(footerToolCounts),
-			errors: footerToolErrors,
-			active: footerActiveTools.size,
-			truncatedResults: footerToolTruncatedResults,
-		}),
-		...(deps.getContextState
-			? { getContextState: () => deps.getContextState?.(process.cwd()) ?? { clioMd: "none", memoryCount: 0 } }
-			: {}),
-		getWorkspaceSnapshot: getLiveWorkspaceSnapshot,
-		getExtensionStats,
-		getSessionInfo: () => {
-			const meta = deps.session?.current();
-			return {
-				id: meta?.id ?? deps.getSessionId?.() ?? null,
-				name: meta?.name ?? null,
-				turns: liveSessionTurns(),
-			};
-		},
-		getLastTurnSummary: () => lastTurnSummary,
-		getNotifications: () => notifications.list(),
-		dismissKeyLabel,
+		...(deps.getTaskMemorySeedOffer ? { getTaskMemorySeedOffer: deps.getTaskMemorySeedOffer } : {}),
+		...(deps.getContextState ? { getContextState: deps.getContextState } : {}),
 	});
-	// Single observability subscription drives footer session cost/token/
-	// throughput refresh. The projection coalesces the dispatch terminal channels
-	// and every recordTokens/resetSession into one debounced update, so this
-	// replaces the per-event footer refresh patchwork for those facts. subscribe()
-	// fires immediately with the current snapshot; it is unsubscribed at shutdown.
-	const unsubscribeObservability = deps.observability.subscribe((snapshot) => {
-		observabilitySnapshot = snapshot;
-		footer.refresh();
-		tui.requestRender();
-	});
-	const editor = new ClioEditor(tui, {
-		getModelLabel: () => {
-			const settings = deps.getSettings?.();
-			const model = settings?.orchestrator?.model?.trim();
-			if (!model) return "no model";
-			const target = settings?.orchestrator?.target?.trim();
-			const abbreviated = abbreviateModelId(model);
-			return target ? `${target}·${abbreviated}` : abbreviated;
-		},
-		getThinkingLabel: () => {
-			const settings = deps.getSettings?.();
-			return (
-				resolveModelRuntimeCapabilitiesForProviders(
-					deps.providers,
-					settings?.orchestrator?.target,
-					settings?.orchestrator?.model,
-					settings?.orchestrator?.thinkingLevel ?? "off",
-				)?.thinking.display ??
-				settings?.orchestrator?.thinkingLevel ??
-				"off"
-			);
-		},
-	});
-	editor.focused = true;
-	editor.setAutocompleteProvider(
-		createSlashCommandAutocompleteProvider({
-			listSkills: () => {
-				const installed = deps.resources?.skills(process.cwd()).items ?? [];
-				const marketplace = getMarketplaceSkills();
-				return { installed, marketplace };
-			},
-		}),
-	);
-
-	// The permission overlay is rebuilt per open because its body depends on
-	// the parked tool call.
-	// The dispatch board renders live at the width the overlay actually grants;
-	// the cached observability snapshot supplies each card's evidence/proof
-	// state and is kept current by the single subscription above.
-	const dispatchBoard = createDispatchBoardView(
-		() => dispatchBoardStore.rows(),
-		() => observabilitySnapshot,
-	);
-	const chatRenderer = createCoalescingChatRenderer({
+	const {
+		keybindings,
 		chatPanel,
-		requestRender: () => tui.requestRender(),
-	});
-
-	const io: RunIo = createCommandOutputRunIo({
-		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
-		requestRender: () => tui.requestRender(),
-	});
+		followUpQueuePanel,
+		statusController,
+		dispatchBoardStore,
+		contextActivityStore,
+		footer,
+		notifications,
+		notify,
+		dismissContextBootstrapNotices,
+		announceTaskMemorySeedOffer,
+		editor,
+		dispatchBoard,
+		chatRenderer,
+		io,
+	} = presentation;
+	refreshPresentationFooter = () => footer.refresh();
 	// OSC 9;4 indeterminate progress around each agent turn. The terminal engine
 	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
 	// are idempotent and unit-testable.
@@ -658,19 +486,11 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		isAskUserWaiting: () => overlayLifecycle.isAskUserWaiting(),
 		closeAskUserSession: () => overlayLifecycle.closeAskUserSession(),
 		resetAskUserCancellation: () => overlayLifecycle.resetAskUserCancellation(),
-		recordToolStart: (toolName, toolCallId) => {
-			footerActiveTools.add(toolCallId);
-			footerToolCounts.set(toolName, (footerToolCounts.get(toolName) ?? 0) + 1);
-		},
-		recordToolEnd: (_toolName, toolCallId, isError, truncated) => {
-			footerActiveTools.delete(toolCallId);
-			if (isError) footerToolErrors += 1;
-			if (truncated) footerToolTruncatedResults += 1;
-		},
+		recordToolStart: (toolName, toolCallId) => presentation.recordToolStart(toolCallId, toolName),
+		recordToolEnd: (_toolName, toolCallId, isError, truncated) =>
+			presentation.recordToolEnd({ toolCallId, isError, truncated }),
 		setStatusLine: (line) => chatPanel.setStatusLine(line),
-		setLastTurnSummary: (summary) => {
-			lastTurnSummary = summary;
-		},
+		setLastTurnSummary: (summary) => presentation.setLastTurnSummary(summary),
 		startTerminalProgress: () => agentProgress.start(),
 		stopTerminalProgress: () => agentProgress.stop(),
 		refreshLiveWorkspaceGit,
@@ -754,34 +574,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 
 	editor.onSubmit = submitEditorText;
 
-	const root = buildLayout({ banner, chat: chatPanel, pending: followUpQueuePanel, editor, footer: footer.view });
-	shell.mount(root, editor);
-
-	const footerTicker = setInterval(() => {
-		const statusActive = statusController.current().phase !== "idle";
-		if (!deps.chat.isStreaming() && !statusActive && !footer.isExpanded()) return;
-		footer.refresh();
-		tui.requestRender();
-	}, 120);
-	footerTicker.unref?.();
-
-	// Running expanded/collapsed tool segments show live elapsed time; refresh
-	// the transcript once per second while a turn is streaming so the elapsed
-	// counter ticks without waiting for the next agent event.
-	const toolElapsedTicker = setInterval(() => {
-		if (!deps.chat.isStreaming()) return;
-		chatPanel.invalidate?.();
-		tui.requestRender();
-	}, 1_000);
-	toolElapsedTicker.unref?.();
-
-	const workspaceTicker = setInterval(() => {
-		refreshLiveWorkspaceGit(true);
-		footer.refresh();
-		tui.requestRender();
-	}, 5_000);
-	workspaceTicker.unref?.();
-
 	const leaderKeys = createLeaderKeyController({
 		matchesLeader: (input) => keybindings.matches(input, "clio.leader"),
 		leaderTargets: () => keybindings.leaderTargets(),
@@ -806,7 +598,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		notify,
 		terminal,
 		dispatchBoard,
-		getObservabilitySnapshot: () => observabilitySnapshot,
+		getObservabilitySnapshot: presentation.getObservabilitySnapshot,
 		chatPanel,
 		io,
 		readStructuredEntries,
@@ -866,10 +658,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		}
 		deps.onNewSession();
 		deps.observability.resetSession();
-		footerToolCounts.clear();
-		footerActiveTools.clear();
-		footerToolErrors = 0;
-		footerToolTruncatedResults = 0;
+		presentation.resetToolTelemetry();
 		chatPanel.reset();
 		deps.chat.resetForSession(null);
 		footer.refresh();
@@ -965,7 +754,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			setInterval: (callback, delayMs) => setInterval(callback, delayMs),
 			clearInterval: (handle: ApplicationIntervalHandle) => clearInterval(handle as NodeJS.Timeout),
 		},
-		intervalsToClear: [footerTicker, toolElapsedTicker, workspaceTicker],
+		intervalsToClear: [],
 		leaderKeys,
 		getOverlayState: () => overlayLifecycle.getState(),
 		routeOverlayKey: (data) =>
@@ -1007,14 +796,12 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		toggleLastThinking: () => chatPanel.toggleLastThinking(),
 		toggleAllThinking: () => chatPanel.toggleAllThinking(),
 		shutdownDisposers: [
+			() => presentation.stopTickers(),
 			() => leaderKeys.dispose(),
 			() => interactiveTickers.dispose(),
-			() => footer.dispose(),
-			unsubscribeObservability,
-			() => contextActivityStore.unsubscribe(),
-			() => dispatchBoardStore.unsubscribe(),
+			() => presentation.disposeBeforeStatus(),
 			() => eventProjection.disposePrimary(),
-			() => statusController.dispose(),
+			() => presentation.disposeStatus(),
 			() => eventProjection.disposeRemaining(),
 			() => overlayLifecycle.dispose(),
 			() => agentProgress.stop(),
