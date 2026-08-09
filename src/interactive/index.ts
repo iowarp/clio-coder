@@ -49,7 +49,6 @@ import { openSession, sessionPaths } from "../engine/session.js";
 import {
 	createAgentProgress,
 	isKeyRelease,
-	type KeyId,
 	matchesKey,
 	type OverlayHandle,
 	ProcessTerminal,
@@ -109,6 +108,7 @@ import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashbo
 import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
+import { createLeaderKeyController } from "./leader-key.js";
 import {
 	loopBlockedAuditReason,
 	loopBlockedStopReason,
@@ -165,6 +165,17 @@ import { createDefaultArtifactProviders, verifyReceiptFile } from "./view/artifa
 import { openViewOverlay } from "./view/view-overlay.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 
+export {
+	IDLE_LEADER_STATE,
+	LEADER_TIMEOUT_MS,
+	type LeaderKeyController,
+	type LeaderKeyControllerDeps,
+	type LeaderKeyRouteDeps,
+	type LeaderKeyRouteResult,
+	type LeaderKeyState,
+	type LeaderTarget,
+	routeLeaderKey,
+} from "./leader-key.js";
 // Re-exports preserve the public surface for diag scripts that import these
 // names from "interactive/index.js"; the implementations live in
 // slash-commands.ts.
@@ -412,29 +423,6 @@ export interface KeyBindingDeps {
 	restoreQueuedFollowUps: () => void;
 }
 
-export interface LeaderTarget {
-	key: string;
-	id: ClioKeybinding;
-}
-
-export type LeaderKeyState = { status: "idle" } | { status: "pending"; expiresAt: number };
-
-export interface LeaderKeyDeps extends KeyBindingDeps {
-	matchesLeader: (data: string) => boolean;
-	leaderTargets: ReadonlyArray<LeaderTarget>;
-	now: number;
-	timeoutMs?: number;
-	isRelease?: (data: string) => boolean;
-}
-
-export interface LeaderKeyRouteResult {
-	state: LeaderKeyState;
-	consumed: boolean;
-}
-
-export const LEADER_TIMEOUT_MS = 1500;
-export const IDLE_LEADER_STATE: LeaderKeyState = { status: "idle" };
-
 export interface PermissionOverlayKeyDeps {
 	cancelPermission: () => void;
 	confirmPermission: () => void;
@@ -545,18 +533,6 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 	return "arm-shutdown";
 }
 
-function baseLetterFromInput(data: string): string | null {
-	if (data.length === 1) {
-		const lower = data.toLowerCase();
-		return lower >= "a" && lower <= "z" ? lower : null;
-	}
-	for (let code = 97; code <= 122; code += 1) {
-		const key = String.fromCharCode(code) as KeyId;
-		if (matchesKey(data, key) || matchesKey(data, `shift+${key}` as KeyId)) return key;
-	}
-	return null;
-}
-
 export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
 	switch (id) {
 		case "clio.notifications.dismiss":
@@ -635,26 +611,6 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 		if (deps.matches(data, id)) return dispatchInteractiveAction(id, deps);
 	}
 	return false;
-}
-
-/** Pure leader-key router: returns the next leader state and whether input was swallowed. */
-function routeLeaderKey(data: string, state: LeaderKeyState, deps: LeaderKeyDeps): LeaderKeyRouteResult {
-	const timeoutMs = deps.timeoutMs ?? LEADER_TIMEOUT_MS;
-	if (state.status === "pending") {
-		if (deps.now > state.expiresAt) return { state: IDLE_LEADER_STATE, consumed: true };
-		if (deps.isRelease?.(data) ?? false) return { state, consumed: true };
-		if (isEscapeKey(data)) return { state: IDLE_LEADER_STATE, consumed: true };
-		const base = baseLetterFromInput(data);
-		const target = base ? deps.leaderTargets.find((entry) => entry.key === base) : undefined;
-		if (target) {
-			dispatchInteractiveAction(target.id, deps);
-			return { state: IDLE_LEADER_STATE, consumed: true };
-		}
-		return { state: IDLE_LEADER_STATE, consumed: true };
-	}
-	if (deps.isRelease?.(data) ?? false) return { state, consumed: false };
-	if (!deps.matchesLeader(data)) return { state, consumed: false };
-	return { state: { status: "pending", expiresAt: deps.now + timeoutMs }, consumed: true };
 }
 
 /** Pure permission overlay key router: returns true when the input was consumed. */
@@ -2010,24 +1966,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	let contextIslandTicker: ReturnType<typeof setInterval> | null = null;
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
-	let leaderState: LeaderKeyState = IDLE_LEADER_STATE;
-	let leaderTimer: ReturnType<typeof setTimeout> | null = null;
-	const setLeaderState = (next: LeaderKeyState): void => {
-		leaderState = next;
-		if (leaderTimer) {
-			clearTimeout(leaderTimer);
-			leaderTimer = null;
-		}
-		if (next.status !== "pending") return;
-		leaderTimer = setTimeout(
-			() => {
-				leaderState = IDLE_LEADER_STATE;
-				leaderTimer = null;
-			},
-			Math.max(0, next.expiresAt - Date.now()),
-		);
-		leaderTimer.unref?.();
-	};
+	const leaderKeys = createLeaderKeyController({
+		matchesLeader: (input) => keybindings.matches(input, "clio.leader"),
+		leaderTargets: () => keybindings.leaderTargets(),
+		dispatchAction: (id) => dispatchInteractiveAction(id, keyActionDeps()),
+		isRelease: isKeyRelease,
+	});
 	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision; meta?: PermissionRequiredMeta } | null = null;
 	// A parked worker escalation currently shown in the permission overlay. When
 	// set, the overlay's confirm/deny routes to resolveWorkerPermission over the
@@ -3273,7 +3217,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (footerTicker) clearInterval(footerTicker);
 		if (toolElapsedTicker) clearInterval(toolElapsedTicker);
 		if (workspaceTicker) clearInterval(workspaceTicker);
-		if (leaderTimer) clearTimeout(leaderTimer);
+		leaderKeys.dispose();
 		stopDispatchBoardTicker();
 		stopContextIslandTicker();
 		contextIslandHandle.hide();
@@ -3489,19 +3433,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		// A modal invalidates any half-entered leader sequence. Otherwise the key
 		// used to close /agents could become the first half of a shortcut after the
 		// overlay closes.
-		if (overlayOwnsInput(overlayState) && leaderState.status === "pending") setLeaderState(IDLE_LEADER_STATE);
+		if (overlayOwnsInput(overlayState) && leaderKeys.isPending()) leaderKeys.reset();
 		// A pending leader sequence belongs to the main editor, never an overlay.
 		// Modal input must win before leader/agent cancellation precedence.
-		if (!overlayOwnsInput(overlayState) && leaderState.status === "pending") {
-			const leader = routeLeaderKey(data, leaderState, {
-				...keyActionDeps(),
-				matchesLeader: (input) => keybindings.matches(input, "clio.leader"),
-				leaderTargets: keybindings.leaderTargets(),
-				now: Date.now(),
-				isRelease: isKeyRelease,
-			});
-			if (leader.state !== leaderState) setLeaderState(leader.state);
-			if (leader.consumed) return { consume: true };
+		if (!overlayOwnsInput(overlayState) && leaderKeys.isPending()) {
+			if (leaderKeys.route(data)) return { consume: true };
 		}
 
 		if (isCtrlCKey(data)) {
@@ -3548,15 +3484,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayOwnsInput(overlayState)) return undefined;
 
 		if (overlayState === "closed") {
-			const leader = routeLeaderKey(data, leaderState, {
-				...keyActionDeps(),
-				matchesLeader: (input) => keybindings.matches(input, "clio.leader"),
-				leaderTargets: keybindings.leaderTargets(),
-				now: Date.now(),
-				isRelease: isKeyRelease,
-			});
-			if (leader.state !== leaderState) setLeaderState(leader.state);
-			if (leader.consumed) return { consume: true };
+			if (leaderKeys.route(data)) return { consume: true };
 		}
 
 		// With no overlay, Esc cancels an active run (or an inline bash command).
