@@ -1,21 +1,14 @@
-import { exec } from "node:child_process";
 import { BusChannels, type PermissionRequestedPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import { ToolNames } from "../core/tool-names.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
-import {
-	getRuntimeRegistry,
-	resolveProviderReference,
-	type ThinkingLevel,
-	targetRequiresAuth,
-} from "../domains/providers/index.js";
+import type { ThinkingLevel } from "../domains/providers/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract } from "../domains/session/index.js";
-import type { OAuthSelectPrompt } from "../engine/oauth.js";
 import type { OverlayHandle } from "../engine/tui.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import type { PermissionRequiredMeta } from "../tools/registry.js";
@@ -28,10 +21,10 @@ import { openCostOverlay } from "./cost-overlay.js";
 import { isDispatchBoardRowCancellable, isDispatchBoardRowSteerable } from "./dispatch-board.js";
 import { openFleetOverlay } from "./fleet-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
+import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
 import { openAskUserOverlay } from "./overlays/ask-user.js";
-import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { contextResetOptions, openContextResetOverlay } from "./overlays/context-reset.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openExtensionsOverlay } from "./overlays/extensions.js";
@@ -120,6 +113,8 @@ export interface OverlayLifecycleRuntimeDeps {
 	editor: Pick<import("./clio-editor.js").ClioEditor, "getText" | "setText">;
 	getSlashContext: () => import("./slash-commands.js").SlashCommandContext;
 	showOverlayFrame?: typeof showClioOverlayFrame;
+	openAuthDialog?: typeof import("./overlays/auth-dialog.js").openAuthDialog;
+	openProvidersOverlay?: typeof openProvidersOverlay;
 }
 
 export interface OverlayLifecycleController {
@@ -212,13 +207,12 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		keybindings,
 		editor,
 		showOverlayFrame = showClioOverlayFrame,
+		openAuthDialog: openAuthDialogFactory,
+		openProvidersOverlay: openProvidersOverlayFactory = openProvidersOverlay,
 	} = deps;
 	let settingsOverlayRefresh: (() => void) | null = null;
 	let overlayState: OverlayState = "closed";
 	let overlayHandle: OverlayHandle | null = null;
-	let authDialogDismiss: (() => void) | null = null;
-	let authReturnOverlayHandle: OverlayHandle | null = null;
-	let authCloseResolve: (() => void) | null = null;
 	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision; meta?: PermissionRequiredMeta } | null = null;
 	// A parked worker escalation currently shown in the permission overlay. When
 	// set, the overlay's confirm/deny routes to resolveWorkerPermission over the
@@ -241,24 +235,25 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	let askUserCancelledForTurn = false;
 	let unregisterAskUserHandler: (() => void) | null = null;
 
-	const finishAuthOverlay = (dismiss: boolean): void => {
-		if (overlayState !== "auth") return;
-		if (dismiss) authDialogDismiss?.();
-		authDialogDismiss = null;
-		const authHandle = overlayHandle;
-		const returnHandle = authReturnOverlayHandle;
-		authReturnOverlayHandle = null;
-		overlayHandle = returnHandle;
-		overlayState = returnHandle ? "providers" : "closed";
-		authHandle?.hide();
-		const resolveAuthClose = authCloseResolve;
-		authCloseResolve = null;
-		resolveAuthClose?.();
-		footer.refresh();
-		interactiveTickers.renderContextIsland();
-		interactiveTickers.renderTaskIsland();
-		tui.requestRender();
-	};
+	const overlayAuth = createOverlayAuthLifecycle({
+		tui,
+		providers: deps.app.providers,
+		...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
+		notify,
+		refreshFooter: () => footer.refresh(),
+		renderContextIsland: () => interactiveTickers.renderContextIsland(),
+		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
+		requestRender: () => tui.requestRender(),
+		getOverlayState: () => overlayState,
+		setOverlayState: (state) => {
+			overlayState = state;
+		},
+		getOverlayHandle: () => overlayHandle,
+		setOverlayHandle: (handle) => {
+			overlayHandle = handle;
+		},
+		...(openAuthDialogFactory ? { openAuthDialog: openAuthDialogFactory } : {}),
+	});
 
 	const closeOverlay = (): void => {
 		if (overlayState === "closed") return;
@@ -267,7 +262,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			return;
 		}
 		if (overlayState === "auth") {
-			finishAuthOverlay(true);
+			overlayAuth.finish(true);
 			return;
 		}
 		const leaving = overlayState;
@@ -351,207 +346,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		interactiveTickers.renderContextIsland();
 		interactiveTickers.renderTaskIsland();
 		tui.requestRender();
-	};
-
-	const maybeOpenExternalUrl = (url: string): void => {
-		const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-		exec(`${opener} "${url.replace(/"/g, '\\"')}"`, () => {
-			// Best effort only.
-		});
-	};
-
-	const resolveConnectionReference = (target: string) => {
-		const settings = deps.app.getSettings?.();
-		if (!settings) return null;
-		return resolveProviderReference(
-			target,
-			settings,
-			(runtimeId) => deps.app.providers.getRuntime(runtimeId) ?? getRuntimeRegistry().get(runtimeId),
-		);
-	};
-
-	const openConnectFlowState = async (reference: string): Promise<void> => {
-		if (overlayState !== "closed" && overlayState !== "providers") return;
-		const returnHandle = overlayState === "providers" ? overlayHandle : null;
-		const resolved = resolveConnectionReference(reference);
-		if (!resolved?.target) {
-			notify("warning", `connect: unknown target ${reference}. Add it with clio targets add.`, `connect:${reference}`);
-			return;
-		}
-		const target = resolved.target;
-		const runtime = resolved.runtime;
-		const authTarget = resolved.authTarget;
-		const targetId = target.id;
-		const runtimeId = runtime.id;
-		await new Promise<void>((resolveAuthFlow) => {
-			const dialog = openAuthDialog(tui, `Connect ${targetId}`, () => closeOverlay());
-			authReturnOverlayHandle = returnHandle;
-			authCloseResolve = resolveAuthFlow;
-			overlayState = "auth";
-			overlayHandle = dialog.handle;
-
-			const probeTarget = async (): Promise<void> => {
-				dialog.controller.setLines([`Target: ${targetId}`, `Runtime: ${runtimeId}`, "Checking target..."]);
-				const status = await deps.app.providers.probeTarget(targetId);
-				if (!status) {
-					dialog.controller.setLines([`Target: ${targetId}`, "Target check failed: target is not configured."]);
-					notify("error", `connect: ${targetId} is not configured`, `connect:${targetId}`);
-					return;
-				}
-				const health = status.health.status;
-				const detail =
-					status.reason ||
-					status.health.lastError ||
-					(status.health.latencyMs !== null ? `${status.health.latencyMs}ms` : "no details");
-				dialog.controller.setLines([
-					`Target: ${targetId}`,
-					`Runtime: ${runtimeId}`,
-					status.available ? `Target ready (${health})` : `Target check failed (${health})`,
-					detail,
-				]);
-				notify(
-					status.available ? "info" : "warning",
-					status.available ? `connected ${targetId} (${health})` : `connect ${targetId} failed (${health})`,
-					`connect:${targetId}`,
-				);
-				footer.refresh();
-				tui.requestRender();
-			};
-
-			const selectOAuthOption = async (
-				prompt: OAuthSelectPrompt,
-				prefix: ReadonlyArray<string>,
-			): Promise<string | undefined> => {
-				const defaultId = prompt.options[0]?.id;
-				if (!defaultId) return undefined;
-				const ids = new Set(prompt.options.map((option) => option.id));
-				const baseLines = [
-					...prefix,
-					prompt.message,
-					...prompt.options.map((option, index) => {
-						const marker = option.id === defaultId ? "*" : " ";
-						return `${marker} ${String(index + 1).padStart(2)}. ${option.label} (${option.id})`;
-					}),
-				];
-				let errorLine: string | null = null;
-				for (;;) {
-					dialog.controller.setLines(errorLine ? [...baseLines, errorLine] : baseLines);
-					const answer = (await dialog.controller.prompt(`Selection (number or id, q to cancel) [${defaultId}]`)).trim();
-					if (answer.length === 0) return defaultId;
-					if (answer === "q" || answer === "quit" || answer === "cancel") return undefined;
-					const numeric = Number(answer);
-					if (Number.isInteger(numeric) && numeric >= 1 && numeric <= prompt.options.length) {
-						return prompt.options[numeric - 1]?.id;
-					}
-					if (ids.has(answer)) return answer;
-					errorLine = `Unknown selection: ${answer}`;
-				}
-			};
-
-			const requiresManagedAuth = targetRequiresAuth(target, runtime);
-			const authStatus = deps.app.providers.auth.statusForTarget(target, runtime);
-			if (!requiresManagedAuth || authStatus.available) {
-				void (async () => {
-					try {
-						await probeTarget();
-					} catch (error) {
-						dialog.controller.setLines([
-							`Target: ${targetId}`,
-							`Target check failed: ${error instanceof Error ? error.message : String(error)}`,
-						]);
-						tui.requestRender();
-					} finally {
-						finishAuthOverlay(false);
-					}
-				})();
-				tui.requestRender();
-				return;
-			}
-			if (resolved.runtime.auth === "api-key") {
-				authDialogDismiss = dialog.controller.dismiss;
-				dialog.controller.setLines([
-					`Target: ${targetId}`,
-					`Runtime: ${runtime.id}`,
-					"API key required before Clio can connect to this target.",
-				]);
-				void (async () => {
-					try {
-						const apiKey = (await dialog.controller.prompt("API key")).trim();
-						if (apiKey.length === 0) throw new Error("empty API key");
-						deps.app.providers.auth.setApiKey(authTarget.providerId, apiKey);
-						authDialogDismiss = null;
-						await probeTarget();
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						if (message !== "dismissed" && message !== "cancelled") {
-							notify("error", `connect ${targetId}: ${message}`, `connect:${targetId}`);
-						}
-					} finally {
-						authDialogDismiss = null;
-						finishAuthOverlay(false);
-					}
-				})();
-				tui.requestRender();
-				return;
-			}
-			authDialogDismiss = dialog.controller.dismiss;
-			dialog.controller.setLines([`Target: ${targetId}`, `Runtime: ${runtime.id}`, "Starting authorization flow..."]);
-			void (async () => {
-				let manualCodeTimer: NodeJS.Timeout | null = null;
-				try {
-					await deps.app.providers.auth.login(authTarget.providerId, {
-						onAuth: ({ url, instructions }) => {
-							dialog.controller.setLines(
-								[
-									`Open: ${url}`,
-									instructions ?? "Complete sign-in in your browser.",
-									"Waiting for the browser callback. A manual code prompt will appear if needed.",
-								].filter(Boolean),
-							);
-							maybeOpenExternalUrl(url);
-						},
-						onDeviceCode: ({ verificationUri, userCode }) => {
-							dialog.controller.setLines([
-								`Open: ${verificationUri}`,
-								`Enter code: ${userCode}`,
-								"Waiting for authentication...",
-							]);
-							maybeOpenExternalUrl(verificationUri);
-						},
-						onPrompt: async (prompt) => (await dialog.controller.prompt(prompt.message)).trim(),
-						onSelect: (prompt) => selectOAuthOption(prompt, [`Target: ${targetId}`, `Runtime: ${runtime.id}`]),
-						onManualCodeInput: async () =>
-							await new Promise<string>((resolve, reject) => {
-								manualCodeTimer = setTimeout(() => {
-									manualCodeTimer = null;
-									dialog.controller
-										.prompt("Verification code")
-										.then((value) => resolve(value.trim()))
-										.catch(reject);
-								}, 10_000);
-								manualCodeTimer.unref?.();
-							}),
-						onProgress: (message) => {
-							dialog.controller.appendLine(message);
-						},
-					});
-					authDialogDismiss = null;
-					await probeTarget();
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					if (message !== "dismissed" && message !== "cancelled") {
-						notify("error", `connect ${targetId}: ${message}`, `connect:${targetId}`);
-					}
-				} finally {
-					if (manualCodeTimer) {
-						clearTimeout(manualCodeTimer);
-					}
-					authDialogDismiss = null;
-					finishAuthOverlay(false);
-				}
-			})();
-			tui.requestRender();
-		});
 	};
 
 	const currentAutonomy = (): string => deps.app.getSettings?.().autonomy ?? "auto-edit";
@@ -789,7 +583,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openProvidersOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		overlayState = "providers";
-		overlayHandle = openProvidersOverlay(tui, deps.app.providers, {
+		overlayHandle = openProvidersOverlayFactory(tui, deps.app.providers, {
 			bus: deps.app.bus,
 			...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
 			...(deps.app.writeSettings
@@ -800,7 +594,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 						},
 					}
 				: {}),
-			connectTarget: (targetId) => openConnectFlowState(targetId),
+			connectTarget: (targetId) => overlayAuth.openConnectFlow(targetId),
 			notice: notify,
 		});
 		tui.requestRender();
@@ -1315,7 +1109,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	return {
 		getState: () => overlayState,
 		closeOverlay,
-		finishAuthOverlay,
+		finishAuthOverlay: overlayAuth.finish,
 		openAskUserOverlayState,
 		closeAskUserSession,
 		isAskUserWaiting: () => askUserSession?.isWaiting() ?? false,
