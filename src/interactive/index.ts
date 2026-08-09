@@ -39,12 +39,10 @@ import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
-import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { OAuthSelectPrompt } from "../engine/oauth.js";
-import { openSession, sessionPaths } from "../engine/session.js";
 import {
 	createAgentProgress,
 	isKeyRelease,
@@ -147,6 +145,7 @@ import {
 	permissionOverlayTitle,
 } from "./permission-overlay.js";
 import { openProvidersOverlay, type TargetsHubNoticeLevel } from "./providers-overlay.js";
+import { createSessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import {
 	type ContextClearCommandOptions,
@@ -929,30 +928,22 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	});
 	const { getExtensionStats, getLiveWorkspaceSnapshot, refreshLiveWorkspaceGit } = workspaceFacts;
 
-	let sessionCounter = {
-		id: deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,
-		baseTurns: deps.session?.current()?.messageCount ?? 0,
-		submittedTurns: 0,
-	};
-	const syncSessionCounter = (): void => {
-		const meta = deps.session?.current();
-		const id = meta?.id ?? deps.getSessionId?.() ?? null;
-		if (id === sessionCounter.id) return;
-		const baseTurns = meta?.messageCount ?? 0;
-		const previousProjected = sessionCounter.baseTurns + sessionCounter.submittedTurns;
-		const carryPending = sessionCounter.id === null ? Math.max(0, previousProjected - baseTurns) : 0;
-		sessionCounter = { id, baseTurns, submittedTurns: carryPending };
-	};
-	const recordSubmittedTurn = (): void => {
-		syncSessionCounter();
-		sessionCounter = { ...sessionCounter, submittedTurns: sessionCounter.submittedTurns + 1 };
-	};
-	const liveSessionTurns = (): number | null => {
-		syncSessionCounter();
-		const metaTurns = deps.session?.current()?.messageCount;
-		const projected = sessionCounter.baseTurns + sessionCounter.submittedTurns;
-		return typeof metaTurns === "number" ? Math.max(metaTurns, projected) : projected > 0 ? projected : null;
-	};
+	let footer: FooterDashboardPanel;
+	const sessionTranscript = createSessionTranscript({
+		...(deps.session ? { session: deps.session } : {}),
+		...(deps.getSessionId ? { getSessionId: deps.getSessionId } : {}),
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		...(deps.readSessionEntries ? { readSessionEntries: deps.readSessionEntries } : {}),
+		chat: deps.chat,
+		refreshStatus: () => footer.refresh(),
+	});
+	const {
+		ensureSessionForLocalEntry,
+		liveSessionTurns,
+		readStructuredEntries,
+		recordSubmittedTurn,
+		refreshChatContextFromSession,
+	} = sessionTranscript;
 
 	const banner = createWelcomeDashboard({
 		providers: deps.providers,
@@ -1001,7 +992,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// Dedicated harness→user surface. Boot hints and live connect/probe notices
 	// route here (anchored in the footer region) instead of into the transcript,
 	// so they never leak into VT scrollback.
-	let footer: FooterDashboardPanel;
 	let lastToolExpandAtMs = 0;
 	let lastThinkingExpandAtMs = 0;
 	let lastNotificationDismissAtMs = 0;
@@ -1411,27 +1401,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	let activeEditorBash: AbortController | null = null;
 	let activeContextInit = false;
-
-	const ensureSessionForLocalEntry = (): void => {
-		if (!deps.session || deps.session.current()) return;
-		const settings = deps.getSettings?.();
-		const input: { cwd: string; target?: string; model?: string } = { cwd: process.cwd() };
-		if (settings?.orchestrator.target) input.target = settings.orchestrator.target;
-		if (settings?.orchestrator.model) input.model = settings.orchestrator.model;
-		deps.session.create(input);
-	};
-
-	const readStructuredEntries = (sessionId: string): SessionEntry[] => {
-		const reader = openSession(sessionId);
-		return collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current);
-	};
-
-	const refreshChatContextFromSession = (leafTurnId: string | null): void => {
-		if (!deps.readSessionEntries) return;
-		const turns = deps.readSessionEntries();
-		deps.chat.resetForSession(leafTurnId, buildReplayAgentMessagesFromTurns(turns));
-		footer.refresh();
-	};
 
 	const runEditorBash = (text: string): boolean => {
 		const parsed = parseEditorBashCommand(text);
