@@ -1,7 +1,6 @@
 import { exec } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { runBashCommand } from "../core/bash-exec.js";
 import {
 	BusChannels,
 	type ContextPrunedPayload,
@@ -69,7 +68,6 @@ import {
 	buildReplayAgentMessagesFromTurns,
 	createCoalescingChatRenderer,
 	rehydrateChatPanelFromTurns,
-	renderBashExecutionEntry,
 } from "./chat-renderer.js";
 import { ClioEditor } from "./clio-editor.js";
 import { emitCommandNotice, runCompactWithNotice } from "./command-fallbacks.js";
@@ -84,15 +82,7 @@ import {
 	isDispatchBoardRowSteerable,
 } from "./dispatch-board.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
-import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
-import {
-	type EditorSteerMention,
-	formatSteerCandidates,
-	parseEditorSteerMention,
-	type RunningDispatchRef,
-	resolveSteerTarget,
-} from "./editor-steer.js";
-import { editTextExternally, resolveExternalEditor } from "./external-editor.js";
+import { createEditorSubmitController } from "./editor-submit.js";
 import { openFleetOverlay } from "./fleet-overlay.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashboard.js";
@@ -328,8 +318,6 @@ const ANSI_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
 function stripAnsiForExport(line: string): string {
 	return line.replace(ANSI_PATTERN, "");
 }
-const EDITOR_BASH_TIMEOUT_MS = 300_000;
-
 export interface InteractiveSubmitExpansion {
 	text: string;
 	images: ImageContent[];
@@ -932,13 +920,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		chat: deps.chat,
 		refreshStatus: () => footer.refresh(),
 	});
-	const {
-		ensureSessionForLocalEntry,
-		liveSessionTurns,
-		readStructuredEntries,
-		recordSubmittedTurn,
-		refreshChatContextFromSession,
-	} = sessionTranscript;
+	const { liveSessionTurns, readStructuredEntries, recordSubmittedTurn } = sessionTranscript;
 
 	const banner = createWelcomeDashboard({
 		providers: deps.providers,
@@ -1390,87 +1372,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	});
 
-	let activeEditorBash: AbortController | null = null;
 	let activeContextInit = false;
-
-	const runEditorBash = (text: string): boolean => {
-		const parsed = parseEditorBashCommand(text);
-		if (!parsed) return false;
-		if (deps.chat.isStreaming()) {
-			io.stderr("[bash] response in progress. Press Esc to cancel the active run before running a local command.\n");
-			return true;
-		}
-		if (activeEditorBash) {
-			io.stderr("[bash] command already running. Press Esc to cancel it first.\n");
-			return true;
-		}
-		const abort = new AbortController();
-		activeEditorBash = abort;
-		let parentTurnId: string | null = null;
-		try {
-			ensureSessionForLocalEntry();
-			parentTurnId = deps.session?.tree().leafId ?? null;
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			io.stderr(`[bash] session setup failed: ${msg}\n`);
-			activeEditorBash = null;
-			return true;
-		}
-
-		void (async () => {
-			try {
-				const result = await runBashCommand(parsed.command, {
-					cwd: process.cwd(),
-					timeoutMs: EDITOR_BASH_TIMEOUT_MS,
-					signal: abort.signal,
-				});
-				const input = bashExecutionEntryInput({
-					command: parsed.command,
-					result,
-					parentTurnId,
-					excludeFromContext: parsed.excludeFromContext,
-					timeoutMs: EDITOR_BASH_TIMEOUT_MS,
-				});
-				const entry = deps.session?.current()
-					? deps.session.appendEntry(input)
-					: ({ ...input, turnId: "local-bash-preview", timestamp: new Date().toISOString() } as SessionEntry);
-				if (entry.kind === "bashExecution") {
-					chatPanel.appendReplayBlock((width) => renderBashExecutionEntry(entry, width));
-				}
-				refreshChatContextFromSession(parentTurnId);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				io.stderr(`[bash] ${msg}\n`);
-			} finally {
-				if (activeEditorBash === abort) activeEditorBash = null;
-				tui.requestRender();
-			}
-		})();
-		return true;
-	};
-
-	const openExternalEditorForInput = (): void => {
-		const command = resolveExternalEditor();
-		if (!command) {
-			io.stderr("[editor] no external editor configured; set VISUAL or EDITOR\n");
-			return;
-		}
-		const currentText = editor.getText();
-		let result: ReturnType<typeof editTextExternally>;
-		try {
-			tui.stop();
-			result = editTextExternally(currentText, command);
-		} finally {
-			tui.start();
-			tui.requestRender(true);
-		}
-		if (result.ok) {
-			editor.setText(result.text ?? "");
-		} else if (result.error) {
-			io.stderr(`[editor] ${result.error}\n`);
-		}
-		tui.requestRender(true);
-	};
 
 	const appendCommandNotice: SlashCommandContext["notice"] = (level, text) => {
 		appendNotice(level, text, {
@@ -1732,112 +1634,21 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		render: () => tui.requestRender(),
 	};
 
-	/**
-	 * Route an `@<target> <text>` line to a running dispatch. Returns false
-	 * when no dispatches are running so the line falls through to normal chat
-	 * submission (where `@word` may be a file reference or plain prose); with
-	 * dispatches running, every parse hit is consumed here and resolution
-	 * failures surface as notices.
-	 */
-	const handleEditorSteerMention = (mention: EditorSteerMention): boolean => {
-		let running: RunningDispatchRef[] = [];
-		try {
-			running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
-		} catch {
-			running = [];
-		}
-		if (running.length === 0) return false;
-		const resolution = resolveSteerTarget(mention.target, running);
-		if (resolution.kind === "match") {
-			try {
-				deps.dispatch.steer(resolution.run.runId, mention.text);
-				notify(
-					"info",
-					`steer queued for ${resolution.run.agentId} (${resolution.run.runId}); awaiting worker acknowledgement`,
-					`steer:${resolution.run.runId}`,
-				);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				notify("error", `steer to @${mention.target} failed: ${msg}`, `steer:${mention.target}`);
-			}
-			return true;
-		}
-		if (resolution.kind === "ambiguous") {
-			notify(
-				"warning",
-				`@${mention.target} matches ${resolution.candidates.length} runs: ${formatSteerCandidates(resolution.candidates)}; use a runId prefix`,
-				`steer:${mention.target}`,
-			);
-			return true;
-		}
-		notify(
-			"warning",
-			`no running dispatch matches @${mention.target}; running: ${formatSteerCandidates(running)}`,
-			`steer:${mention.target}`,
-		);
-		return true;
-	};
-
-	const submitEditorText = (text: string): void => {
-		const trimmed = text.trim();
-		if (trimmed.length === 0) return;
-		const bashCommand = parseEditorBashCommand(text);
-		if (bashCommand) {
-			if (!deps.chat.isStreaming() && !activeEditorBash) editor.setText("");
-			if (runEditorBash(text)) tui.requestRender();
-			return;
-		}
-		const steerMention = parseEditorSteerMention(trimmed);
-		if (steerMention && handleEditorSteerMention(steerMention)) {
-			editor.addToHistory(text);
-			editor.setText("");
-			tui.requestRender();
-			return;
-		}
-		editor.setText("");
-		dispatchSlashCommand(parseSlashCommand(trimmed), slashCtx);
-		tui.requestRender();
-	};
-
-	const queueFollowUpFromEditor = (): void => {
-		const text = editor.getText().trim();
-		if (text.length === 0) return;
-		if (!deps.chat.isStreaming()) {
-			editor.setText("");
-			submitEditorText(text);
-			tui.requestRender();
-			return;
-		}
-		void (async () => {
-			const submitted = await expandInteractiveSubmitAsync(text, deps.resources);
-			if (submitted.images.length > 0) {
-				io.stderr("[follow-up] image references cannot be queued while a response is streaming\n");
-				return;
-			}
-			if (!deps.chat.queueFollowUp(submitted.text)) {
-				io.stderr("[follow-up] no active response to queue against\n");
-				return;
-			}
-			editor.addToHistory(text);
-			editor.setText("");
-			tui.requestRender();
-		})().catch((err) => {
-			const msg = err instanceof Error ? err.message : String(err);
-			io.stderr(`[follow-up] ${msg}\n`);
-		});
-	};
-
-	const restoreQueuedFollowUpsToEditor = (): void => {
-		const restored = deps.chat.clearQueuedFollowUps();
-		if (restored.length === 0) {
-			io.stderr("[follow-up] no queued messages to restore\n");
-			return;
-		}
-		const currentText = editor.getText();
-		const queuedText = restored.join("\n\n");
-		editor.setText([queuedText, currentText].filter((part) => part.trim().length > 0).join("\n\n"));
-		tui.requestRender();
-	};
+	const editorSubmit = createEditorSubmitController({
+		editor,
+		ui: tui,
+		io,
+		chat: deps.chat,
+		dispatch: deps.dispatch,
+		...(deps.session ? { session: deps.session } : {}),
+		sessionTranscript,
+		chatPanel,
+		dispatchCommand: (text) => dispatchSlashCommand(parseSlashCommand(text), slashCtx),
+		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
+		notify,
+	});
+	const { openExternalEditorForInput, queueFollowUpFromEditor, restoreQueuedFollowUpsToEditor, submitEditorText } =
+		editorSubmit;
 
 	editor.onSubmit = submitEditorText;
 
@@ -3307,8 +3118,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		// With no overlay, Esc cancels an active run (or an inline bash command).
 		// The modal boundary above is intentional: an overlay's Esc is delivered to
 		// its focused component and can never abort work behind the overlay.
-		if (isEscapeKey(data) && activeEditorBash) {
-			activeEditorBash.abort();
+		if (isEscapeKey(data) && editorSubmit.cancelActiveEditorBash()) {
 			return { consume: true };
 		}
 		if (isEscapeKey(data) && deps.chat.isStreaming()) {
