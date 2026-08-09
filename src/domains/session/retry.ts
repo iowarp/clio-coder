@@ -51,9 +51,41 @@ const RETRYABLE_PATTERN =
 	/overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|timed? out|timeout|terminated|retry delay/i;
 
 /**
- * True when an error message looks like a transient provider failure worth
- * retrying. Context-overflow errors are intentionally excluded: those route
- * through compaction + one-shot recovery, not this retry loop.
+ * A self-hosted server refusing a request because the model is not resident.
+ *
+ * Measured against LM Studio, which answers a request for an evicted model
+ * with `500 Internal Server Error` on the first attempt and the bare string
+ * `Model is unloaded.` on the next, while it loads. llama.cpp behind
+ * llama-swap and Ollama phrase the same condition differently, so the pattern
+ * covers the family rather than one vendor's wording.
+ *
+ * Deliberately not folded into {@link RETRYABLE_PATTERN}: this is transient in
+ * a different unit. A rate limit clears in a second or two; a 35B model loads
+ * off disk in twenty to sixty, and retrying it on a rate limit's backoff burns
+ * every attempt before the server is ready. `clio run --target dynamo --model
+ * qwopus3.6-35b-a3b-coder-mtp` failed exactly this way: two attempts, six
+ * seconds, "Model is unloaded." on stdout, while the load was still running.
+ */
+const MODEL_LOADING_PATTERN =
+	/model is unloaded|model is (?:still )?loading|model not loaded|no model (?:is )?loaded|loading model|model_?load(?:ing)?_?in_?progress|is not loaded/i;
+
+/** Floor for a retry that is waiting on a model load rather than on a provider. */
+const MODEL_LOADING_MIN_DELAY_MS = 15000;
+
+/**
+ * True when the error says the target is loading the model, so the wait should
+ * be sized for disk and VRAM rather than for a provider backing off.
+ */
+export function isModelLoadingErrorMessage(errorMessage: string | null | undefined): boolean {
+	if (!errorMessage || errorMessage.length === 0) return false;
+	return MODEL_LOADING_PATTERN.test(errorMessage);
+}
+
+/**
+ * True when an error message looks like a transient failure worth retrying:
+ * a provider backing off, or a self-hosted target loading the model.
+ * Context-overflow errors are intentionally excluded: those route through
+ * compaction + one-shot recovery, not this retry loop.
  *
  * Callers pass `assistantMessage.errorMessage` directly; an empty string
  * returns false so a missing provider error never triggers an unnecessary
@@ -61,7 +93,7 @@ const RETRYABLE_PATTERN =
  */
 export function isRetryableErrorMessage(errorMessage: string | null | undefined): boolean {
 	if (!errorMessage || errorMessage.length === 0) return false;
-	return RETRYABLE_PATTERN.test(errorMessage);
+	return RETRYABLE_PATTERN.test(errorMessage) || MODEL_LOADING_PATTERN.test(errorMessage);
 }
 
 /**
@@ -70,11 +102,20 @@ export function isRetryableErrorMessage(errorMessage: string | null | undefined)
  * the 4th retry never stalls for minutes. Attempt < 1 is normalized to 1 so
  * callers that miscount still get a sane first delay.
  */
-export function computeRetryDelayMs(attempt: number, settings: RetrySettings = DEFAULT_RETRY_SETTINGS): number {
+export function computeRetryDelayMs(
+	attempt: number,
+	settings: RetrySettings = DEFAULT_RETRY_SETTINGS,
+	errorMessage?: string | null,
+): number {
 	const safeAttempt = Math.max(1, Math.floor(attempt));
 	const raw = settings.baseDelayMs * 2 ** (safeAttempt - 1);
-	if (!Number.isFinite(raw) || raw <= 0) return Math.max(0, settings.baseDelayMs);
-	return Math.min(raw, settings.maxDelayMs);
+	const base =
+		!Number.isFinite(raw) || raw <= 0 ? Math.max(0, settings.baseDelayMs) : Math.min(raw, settings.maxDelayMs);
+	// A model load does not finish faster because the retry schedule was
+	// written for a rate limit. `maxDelayMs` still caps it, so an operator who
+	// wants short waits keeps them.
+	if (!isModelLoadingErrorMessage(errorMessage)) return base;
+	return Math.min(Math.max(base, MODEL_LOADING_MIN_DELAY_MS), settings.maxDelayMs);
 }
 
 /**
