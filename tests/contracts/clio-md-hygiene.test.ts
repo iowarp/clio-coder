@@ -1,9 +1,8 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 import { heuristicBootstrapOutput } from "../../src/domains/context/bootstrap.js";
 import { buildBootstrapPrompt } from "../../src/domains/context/bootstrap-prompt.js";
 import {
@@ -13,7 +12,6 @@ import {
 	serializeClioMd,
 } from "../../src/domains/context/index.js";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const OBSOLETE_TOOLS = ["entry_points", "where_is", "find_symbol"] as const;
 
 const scratchRoots: string[] = [];
