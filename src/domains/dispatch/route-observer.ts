@@ -52,21 +52,6 @@ export interface RouteSampleStore {
 	record(candidate: RouteCandidate, observation: RouteObservation): void;
 }
 
-export function createRouteSampleStore(): RouteSampleStore {
-	const byRoute = new Map<string, RouteObservation[]>();
-	return {
-		samplesFor(candidate) {
-			return byRoute.get(routeCandidateKey(candidate)) ?? [];
-		},
-		record(candidate, observation) {
-			const key = routeCandidateKey(candidate);
-			const samples = byRoute.get(key) ?? [];
-			samples.push(observation);
-			byRoute.set(key, samples);
-		},
-	};
-}
-
 // ---------------------------------------------------------------------------
 // Learner: the four evaluation families, aggregated
 // ---------------------------------------------------------------------------
@@ -118,7 +103,7 @@ function rateOf(values: ReadonlyArray<boolean>): number {
 	return values.filter(Boolean).length / values.length;
 }
 
-export function createRouteLearner(capacity = LEARNER_CAPACITY): RouteLearner {
+function createRouteLearner(capacity = LEARNER_CAPACITY): RouteLearner {
 	const buffer: RouteEvaluationRecord[] = [];
 	const taskTypes: AgentTaskType[] = [];
 	return {

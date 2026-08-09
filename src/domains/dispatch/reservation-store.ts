@@ -131,7 +131,7 @@ function peakBy(tasks: ReadonlyArray<Pick<ReservationPlanTask, "wave"> & { key: 
 	return result;
 }
 
-export function reservationAllocation(tasks: ReadonlyArray<ReservationPlanTask>): ReservationAllocation {
+function reservationAllocation(tasks: ReadonlyArray<ReservationPlanTask>): ReservationAllocation {
 	const globalSlots = Math.max(
 		0,
 		...Array.from(new Set(tasks.map((task) => task.wave))).map(
@@ -158,7 +158,7 @@ function outstandingBudget(record: DispatchReservationRecord): number {
 		.reduce((sum, member) => sum + member.costUpperBoundUsd, 0);
 }
 
-export function allocateReservation(
+function allocateReservation(
 	tasks: ReadonlyArray<ReservationPlanTask>,
 	existing: ReadonlyArray<DispatchReservationRecord>,
 	capacity: ReservationCapacitySnapshot,

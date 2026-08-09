@@ -25,7 +25,7 @@ export class ContextOverflowError extends Error {
  * can transport the classification across workers without re-hydrating a
  * class instance.
  */
-export function isContextOverflowError(err: unknown): err is ContextOverflowError {
+function isContextOverflowError(err: unknown): err is ContextOverflowError {
 	if (err instanceof ContextOverflowError) return true;
 	if (!err || typeof err !== "object") return false;
 	return (err as { kind?: unknown }).kind === "context-overflow";

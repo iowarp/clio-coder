@@ -101,7 +101,7 @@ function argsLength(value: unknown): number {
 	return typeof value === "string" ? value.length : jsonLength(value);
 }
 
-export function blockChars(block: unknown): number {
+function blockChars(block: unknown): number {
 	if (typeof block === "string") return block.length;
 	if (!isRecord(block)) return jsonLength(block);
 	if (block.type === "text" && typeof block.text === "string") return block.text.length;
@@ -124,7 +124,7 @@ export function contentChars(content: unknown): number {
 	return content.reduce((sum, block) => sum + blockChars(block), 0);
 }
 
-export function messageChars(message: unknown): number {
+function messageChars(message: unknown): number {
 	if (!isRecord(message)) return jsonLength(message);
 	let chars = 0;
 	chars += typeof message.role === "string" ? message.role.length : 0;
@@ -269,7 +269,7 @@ export function contextUsageSnapshot(
 }
 
 // Persisted snapshot helpers
-export function getSnapshotsFilePath(meta: SessionMeta): string {
+function getSnapshotsFilePath(meta: SessionMeta): string {
 	const safeMeta = {
 		...meta,
 		cwdHash: meta.cwdHash || cwdHash(meta.cwd || process.cwd()),
@@ -307,7 +307,7 @@ export function appendContextSnapshot(meta: SessionMeta, snapshot: ContextSnapsh
 	}
 }
 
-export function getContextSnapshots(meta: SessionMeta): ContextSnapshot[] {
+function getContextSnapshots(meta: SessionMeta): ContextSnapshot[] {
 	try {
 		const file = getSnapshotsFilePath(meta);
 		if (!existsSync(file)) return [];

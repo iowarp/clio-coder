@@ -41,7 +41,7 @@ export interface FindCutPointOptions {
  * found inside the supplied window. `branchSummary` entries count as turn
  * starts because they replace the upstream history at a fork point.
  */
-export function findTurnStartIndex(entries: ReadonlyArray<SessionEntry>, entryIndex: number, startIndex = 0): number {
+function findTurnStartIndex(entries: ReadonlyArray<SessionEntry>, entryIndex: number, startIndex = 0): number {
 	for (let i = entryIndex; i >= startIndex; i--) {
 		const entry = entries[i];
 		if (!entry) continue;

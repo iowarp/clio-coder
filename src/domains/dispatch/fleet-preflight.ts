@@ -27,7 +27,7 @@ import {
 	type RouteFactRequirement,
 	type RouteFactVerdict,
 } from "./route-facts.js";
-import { buildSshArgs, LOCAL_NODE_ID, type SshNodeEndpoint } from "./transport.js";
+import { buildSshArgs, type SshNodeEndpoint } from "./transport.js";
 import { endpointIdentityHash } from "./worker-protocol.js";
 
 export interface FleetPreflightChecks {
@@ -163,34 +163,6 @@ export function routeFactVerdict(
 	return evaluateRouteFacts(targets, resources, requirement, options);
 }
 
-/**
- * Record the local node's own facts. The orchestrator host is the local node,
- * so an orchestrator-side probe is a node-local probe here, and only here.
- */
-export function recordLocalNodeFacts(
-	projectRoot: string,
-	targets: ReadonlyArray<NodeTargetFact>,
-	resources: NodeResourceFact | null,
-	options?: { now?: () => Date },
-): void {
-	const checkedAt = (options?.now?.() ?? new Date()).toISOString();
-	recordFleetPreflight([
-		{
-			nodeId: LOCAL_NODE_ID,
-			host: LOCAL_NODE_ID,
-			projectRoot,
-			ok: true,
-			checkedAt,
-			localVersion: readClioVersion(),
-			remoteVersion: null,
-			detail: null,
-			checks: { reachable: true, clioPresent: true, versionMatch: true, pathParity: true, stateDirWritable: true },
-			targets: targets.map((fact) => ({ ...fact, nodeId: LOCAL_NODE_ID })),
-			resources: resources === null ? null : { ...resources, nodeId: LOCAL_NODE_ID },
-		},
-	]);
-}
-
 const PREFLIGHT_MARKER = "clio-preflight/1";
 const DEFAULT_PREFLIGHT_TIMEOUT_MS = 20_000;
 
@@ -200,7 +172,7 @@ const DEFAULT_PREFLIGHT_TIMEOUT_MS = 20_000;
  * mirrors the local xdg resolution's Linux default; per-node CLIO_* dir
  * overrides are not visible over this channel and are unsupported.
  */
-export function buildPreflightScript(
+function buildPreflightScript(
 	node: SshNodeEndpoint,
 	projectRoot: string,
 	targets: ReadonlyArray<FleetPreflightTarget> = [],

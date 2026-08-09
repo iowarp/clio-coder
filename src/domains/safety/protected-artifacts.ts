@@ -115,7 +115,7 @@ export function protectArtifact(state: ProtectedArtifactState, artifact: Protect
 	return stateFromMap(artifacts);
 }
 
-export function isProtectedPath(state: ProtectedArtifactState, artifactPath: string): boolean {
+function isProtectedPath(state: ProtectedArtifactState, artifactPath: string): boolean {
 	const candidate = normalizePathKey(artifactPath);
 	if (candidate === null) return false;
 	for (const artifact of normalizedArtifacts(state.artifacts)) {
@@ -124,7 +124,7 @@ export function isProtectedPath(state: ProtectedArtifactState, artifactPath: str
 	return false;
 }
 
-export function classifyDestructiveCommand(
+function classifyDestructiveCommand(
 	command: string,
 	protectedArtifacts: ReadonlyArray<ProtectedArtifact>,
 ): DestructiveCommandClassification {

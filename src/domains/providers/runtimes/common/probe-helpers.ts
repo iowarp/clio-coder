@@ -277,7 +277,7 @@ function booleanFlag(args: ReadonlyArray<string>, flag: string): boolean | undef
 	return undefined;
 }
 
-export function parseLlamaCppServerFlags(args: ReadonlyArray<string>): LlamaCppServerFlags {
+function parseLlamaCppServerFlags(args: ReadonlyArray<string>): LlamaCppServerFlags {
 	const flags: LlamaCppServerFlags = {};
 	const ctxSize = numberFlag(args, "--ctx-size");
 	if (ctxSize !== undefined) flags.contextSize = ctxSize;

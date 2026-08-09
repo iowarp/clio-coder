@@ -28,7 +28,7 @@ export function detectInstallMethod(entryPath: string | undefined = process.argv
 }
 
 /** The checkout root for a source install, or null for any other method. */
-export function sourceCheckoutRoot(entryPath: string | undefined = process.argv[1]): string | null {
+function sourceCheckoutRoot(entryPath: string | undefined = process.argv[1]): string | null {
 	if (!entryPath || entryPath.trim().length === 0) return null;
 	let entry: string;
 	try {

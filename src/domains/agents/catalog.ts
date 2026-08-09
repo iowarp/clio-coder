@@ -8,7 +8,7 @@ export interface AgentCatalogSections {
 	volatile: string;
 }
 
-export function renderAgentCatalogSections(recipes: ReadonlyArray<AgentRecipe>): AgentCatalogSections {
+function renderAgentCatalogSections(recipes: ReadonlyArray<AgentRecipe>): AgentCatalogSections {
 	return renderAgentCatalogSectionsFromSpecs(recipes.map(normalizeAgentSpec));
 }
 

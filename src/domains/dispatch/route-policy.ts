@@ -15,10 +15,6 @@ export type RoutingPosture = "manual" | "quality" | "balanced" | "latency" | "ec
 
 export const ROUTING_POSTURES: ReadonlyArray<RoutingPosture> = ["manual", "quality", "balanced", "latency", "economy"];
 
-export function isRoutingPosture(value: unknown): value is RoutingPosture {
-	return typeof value === "string" && (ROUTING_POSTURES as ReadonlyArray<string>).includes(value);
-}
-
 export interface RouteEstimate {
 	/** Quality denominators contain pass/fail labels only; unmeasured work is excluded. */
 	qualityLabeledCount: number;

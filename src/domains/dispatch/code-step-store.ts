@@ -22,7 +22,7 @@ export function codeStepDir(rootId: string): string {
 	return join(clioStateDir(), "code-steps", rootId);
 }
 
-export function codeStepRecordPath(rootId: string, runId: string): string {
+function codeStepRecordPath(rootId: string, runId: string): string {
 	return join(codeStepDir(rootId), `${runId}.json`);
 }
 

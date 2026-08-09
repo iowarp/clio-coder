@@ -92,7 +92,7 @@ interface Area {
  * filename is dropped first, so a file sitting directly in `src` joins the
  * `src` area instead of becoming an area of its own named after itself.
  */
-export function areaForPath(path: string, maxDepth: number): string {
+function areaForPath(path: string, maxDepth: number): string {
 	const directories = path.split("/").filter(Boolean).slice(0, -1);
 	if (directories.length === 0) return ".";
 	return directories.slice(0, Math.max(1, maxDepth)).join("/");

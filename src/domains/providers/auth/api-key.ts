@@ -17,7 +17,7 @@ export function normalizeStoredApiKeyRef(key: string): string | undefined {
 	return trimmed.length > 0 ? trimmed : undefined;
 }
 
-export function resolveProviderDynamicSecret(
+function resolveProviderDynamicSecret(
 	value: string,
 	context: { providerId: string; targetId?: string; field?: string },
 	options?: ResolveConfigValueOptions,

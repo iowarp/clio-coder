@@ -71,12 +71,12 @@ function stringList(value: unknown): string[] {
 }
 
 /** The page's own H1, or null when it has none. */
-export function wikiPageHeading(text: string): string | null {
+function wikiPageHeading(text: string): string | null {
 	return usableString(/^#\s+(.+?)\s*$/m.exec(stripFrontmatter(text).body)?.[1]);
 }
 
 /** A readable title from a page path, used only when the body supplies none. */
-export function titleFromPagePath(pagePath: string): string {
+function titleFromPagePath(pagePath: string): string {
 	const base = pagePath.replace(/^.*\//, "").replace(/\.md$/i, "");
 	const spaced = base.replace(/[-_]+/g, " ").trim();
 	return spaced.length > 0 ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : base;
@@ -186,7 +186,7 @@ function renderList(name: string, values: ReadonlyArray<string>): string[] {
 }
 
 /** Render a deterministic front-matter block. Empty lists are omitted. */
-export function renderFrontmatter(metadata: WikiPageMetadata): string {
+function renderFrontmatter(metadata: WikiPageMetadata): string {
 	const lines = [`title: ${JSON.stringify(metadata.title)}`];
 	if (metadata.summary.length > 0) lines.push(`summary: ${JSON.stringify(metadata.summary)}`);
 	for (const field of LIST_FIELDS) lines.push(...renderList(field, metadata[field]));

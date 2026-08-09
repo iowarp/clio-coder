@@ -394,7 +394,7 @@ export function assertWriteBoundaryInsideRoot(root: string, allow: WriteBoundary
 }
 
 /** Repo-relative form of an absolute path, or null when it is outside. */
-export function repoRelative(root: string, path: string): string | null {
+function repoRelative(root: string, path: string): string | null {
 	const rel = relative(resolve(root), resolve(path));
 	if (rel.length === 0 || rel.startsWith("..") || rel.startsWith(`..${sep}`)) return null;
 	return rel.split(sep).join("/");
@@ -415,7 +415,7 @@ export function writeBoundaryDir(rootId: string): string {
 	return join(clioStateDir(), "write-boundaries", rootId);
 }
 
-export function writeBoundaryVerdictPath(rootId: string, window: string): string {
+function writeBoundaryVerdictPath(rootId: string, window: string): string {
 	return join(writeBoundaryDir(rootId), `${window.replace(/[^A-Za-z0-9._-]/gu, "_")}.json`);
 }
 

@@ -116,7 +116,7 @@ export function sortMemoryRecords(records: ReadonlyArray<MemoryRecord>): MemoryR
 	return [...records].sort(compareMemoryRecords);
 }
 
-export function compareMemoryRecords(left: MemoryRecord, right: MemoryRecord): number {
+function compareMemoryRecords(left: MemoryRecord, right: MemoryRecord): number {
 	const byScope = scopeRank(left.scope) - scopeRank(right.scope);
 	if (byScope !== 0) return byScope;
 	const byKey = left.key.localeCompare(right.key);

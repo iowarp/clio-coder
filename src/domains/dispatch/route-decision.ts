@@ -527,7 +527,7 @@ export interface RouteRoleInput {
  * same value would compose the same worker prompt, which is the grouping route
  * statistics need, and it is computable for a tuple never dispatched.
  */
-export function promptCompositionIdentity(identity: RouteIdentityInput, role: RouteRoleInput): string {
+function promptCompositionIdentity(identity: RouteIdentityInput, role: RouteRoleInput): string {
 	const persona =
 		role.personaPrompt !== undefined ? createHash("sha256").update(role.personaPrompt, "utf8").digest("hex") : null;
 	return createHash("sha256")
@@ -959,7 +959,7 @@ function evaluationFor(decision: RouteDecisionV1, candidate: RouteCandidate): Ca
 	return decision.candidateEvaluations.find((evaluation) => routeCandidateKey(evaluation.candidate) === key);
 }
 
-export function routeRegret(decision: RouteDecisionV1): RouteRegret {
+function routeRegret(decision: RouteDecisionV1): RouteRegret {
 	const selected = evaluationFor(decision, decision.selected);
 	const executed = evaluationFor(decision, decision.executedRoute);
 	return {
@@ -1019,7 +1019,7 @@ function ratio(actual: number, expected: number): number {
 	return actual / expected;
 }
 
-export function routePredictionCalibration(
+function routePredictionCalibration(
 	decision: RouteDecisionV1,
 	realized: RouteRealizedOutcome,
 ): RoutePredictionCalibration {
@@ -1049,7 +1049,7 @@ export interface RouteOutcomeMetrics {
 	endToEndMs: number;
 }
 
-export function routeOutcomeMetrics(realized: RouteRealizedOutcome): RouteOutcomeMetrics {
+function routeOutcomeMetrics(realized: RouteRealizedOutcome): RouteOutcomeMetrics {
 	return {
 		outcome: realized.outcome,
 		qualityLabel: realized.qualityLabel,

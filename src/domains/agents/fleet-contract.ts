@@ -282,7 +282,7 @@ function firstSchemaError(frontmatter: Record<string, unknown>, version: FleetCo
 	return first ? `${first.instancePath || "(root)"}: ${first.message}` : "front matter failed validation";
 }
 
-export function fleetsDir(cwd: string): string {
+function fleetsDir(cwd: string): string {
 	return join(cwd, ".clio", "fleets");
 }
 

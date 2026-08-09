@@ -501,11 +501,7 @@ export function claimCompeteGroup(root: string, group: string): CompeteGroupOwne
 }
 
 /** Load an exact durable claim, or null when ownership cannot be proven. */
-export function loadWorktreeGroup(
-	namespace: WorktreeNamespace,
-	root: string,
-	group: string,
-): CompeteGroupOwnership | null {
+function loadWorktreeGroup(namespace: WorktreeNamespace, root: string, group: string): CompeteGroupOwnership | null {
 	validateGroup(group);
 	const manifest = readManifest(namespace, root, group);
 	return manifest === null ? null : ownershipFromManifest(namespace, manifest);
@@ -912,7 +908,7 @@ export function settleRecoveredCompeteDecision(
  * This function is safe at orchestrator startup and before every compete
  * operation. A failed termination keeps the ownership proof and worktrees.
  */
-export function recoverCleanupReadyWorktreeGroups(
+function recoverCleanupReadyWorktreeGroups(
 	namespace: WorktreeNamespace,
 	root: string,
 	options: CompeteRecoveryOptions = {},

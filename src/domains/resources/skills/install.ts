@@ -134,7 +134,7 @@ interface ProvenanceFields {
  * so they survive the install and keep pinned drift checks working on the
  * installed copy.
  */
-export function injectProvenanceFrontmatter(rawText: string, fields: ProvenanceFields): string {
+function injectProvenanceFrontmatter(rawText: string, fields: ProvenanceFields): string {
 	const region = frontmatterRegion(rawText);
 	if (!region) throw new Error("skill file is missing YAML frontmatter");
 	// Same removal the hash uses, so what is written and what is compared can

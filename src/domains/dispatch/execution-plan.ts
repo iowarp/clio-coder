@@ -272,25 +272,6 @@ function checkWriteBoundaryWaves(
 	}
 }
 
-/**
- * The paths one wave was permitted to change, or null when the wave declares no
- * boundary. Empty means the wave claims it changes nothing.
- */
-export function executionPlanWaveBoundary(
-	plan: ExecutionPlan,
-	waveIndex: number,
-): { stepIds: string[]; allow: string[] } | null {
-	const byId = new Map(plan.steps.map((step) => [step.id, step]));
-	const members = (plan.waves[waveIndex] ?? []).flatMap((id) => {
-		const step = byId.get(id);
-		return step === undefined ? [] : [step];
-	});
-	if (members.length === 0 || members.some((step) => step.writes === undefined)) return null;
-	const allow = new Set<string>();
-	for (const step of members) for (const entry of step.writes ?? []) allow.add(entry);
-	return { stepIds: members.map((step) => step.id), allow: [...allow].sort() };
-}
-
 export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 	const steps = canonicalSteps(input.steps);
 	const loops = (input.loops ?? []).map((loop) => ({

@@ -13,7 +13,7 @@ export type AdmissionQueueOutcome<T> =
 	| { state: "canceled" | "timed_out"; request: AdmissionQueueRequest<T> };
 
 /** Pure, total queue ordering: priority first, plan order where comparable, FIFO, request id. */
-export function compareAdmissionRequests<T>(a: AdmissionQueueRequest<T>, b: AdmissionQueueRequest<T>): number {
+function compareAdmissionRequests<T>(a: AdmissionQueueRequest<T>, b: AdmissionQueueRequest<T>): number {
 	if (a.priority !== b.priority) return b.priority - a.priority;
 	if (
 		a.planId !== null &&

@@ -96,7 +96,7 @@ export interface CompeteGateResult {
 export type GateResultParse<T> = { ok: true; result: T } | { ok: false; reason: string };
 
 /** Parse a reviewer answer under the Slice 2 Verifier contract. */
-export function parseReviewGateResult(output: string): GateResultParse<ReviewGateResult> {
+function parseReviewGateResult(output: string): GateResultParse<ReviewGateResult> {
 	const result = parseVerifierResult(output);
 	return result === null
 		? { ok: false, reason: "reviewer did not return a valid verifier report" }
