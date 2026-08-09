@@ -83,6 +83,7 @@ import {
 	isDispatchBoardRowCancellable,
 	isDispatchBoardRowSteerable,
 } from "./dispatch-board.js";
+import { createDispatchSteering } from "./dispatch-steering.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import {
 	type EditorSteerMention,
@@ -2038,58 +2039,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
-	const steerSelectedDispatch = (): void => {
-		const row = dispatchBoard.selectedRow();
-		if (!row) {
-			notify("warning", "no fleet run is selected", "dispatch-board:steer");
-			return;
-		}
-		if (row.runtimeKind === "acp-delegation") {
-			notify(
-				"warning",
-				`run ${row.runId} uses ACP delegation and cannot accept live steering`,
-				`dispatch-board:steer:${row.runId}`,
-			);
-			return;
-		}
-		if (!isDispatchBoardRowSteerable(row)) {
-			notify(
-				"warning",
-				`run ${row.runId} is ${row.status} and cannot accept steering`,
-				`dispatch-board:steer:${row.runId}`,
-			);
-			return;
-		}
-		const prefix = `@${row.runId} `;
-		const draft = editor.getText();
-		closeOverlay();
-		editor.setText(draft.length > 0 ? `${prefix}${draft}` : prefix);
-		editor.focused = true;
-		tui.requestRender();
-	};
-
-	const cancelSelectedDispatch = (): void => {
-		const row = dispatchBoard.selectedRow();
-		if (!row) {
-			notify("warning", "no fleet run is selected", "dispatch-board:cancel");
-			return;
-		}
-		if (row.status === "cancelling") {
-			notify("info", `cancellation is already in progress for ${row.runId}`, `dispatch-board:cancel:${row.runId}`);
-			return;
-		}
-		if (!isDispatchBoardRowCancellable(row)) {
-			notify("warning", `run ${row.runId} is ${row.status} and cannot be cancelled`, `dispatch-board:cancel:${row.runId}`);
-			return;
-		}
-		try {
-			deps.dispatch.abort(row.runId);
-			notify("info", `cancellation requested for ${row.agentId} (${row.runId})`, `dispatch-board:cancel:${row.runId}`);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			notify("error", `could not cancel ${row.runId}: ${msg}`, `dispatch-board:cancel:${row.runId}`);
-		}
-	};
+	const dispatchSteering = createDispatchSteering({
+		getSelectedRow: () => dispatchBoard.selectedRow(),
+		notify,
+		abortDispatch: (runId) => deps.dispatch.abort(runId),
+		editor,
+		closeOverlay,
+		requestRender: () => tui.requestRender(),
+	});
+	const { cancelSelectedDispatch, steerSelectedDispatch } = dispatchSteering;
 
 	const cancelActiveRun = (): void => {
 		deps.chat.cancel();
