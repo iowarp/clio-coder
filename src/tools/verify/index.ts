@@ -14,7 +14,7 @@ import { listChecks, runScriptCheck, VERIFICATION_SCRIPT_FAMILY_HINT } from "./s
  */
 
 /** Tolerate the weak-model shape of `args` sent as a JSON string. */
-export function prepareVerifyArguments(args: Record<string, unknown>): Record<string, unknown> {
+function prepareVerifyArguments(args: Record<string, unknown>): Record<string, unknown> {
 	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
 	const next: Record<string, unknown> = { ...args };
 	if (typeof next.args === "string") {

@@ -39,7 +39,7 @@ export interface TasksToolDeps {
 	board: TaskBoardStore;
 }
 
-export function renderTaskBoardText(board: TaskBoardSnapshot): string {
+function renderTaskBoardText(board: TaskBoardSnapshot): string {
 	const counts = taskBoardCounts(board);
 	const lines: string[] = [`board "${board.title}" ${counts.completed}/${counts.total} done`];
 	for (const task of board.tasks) {

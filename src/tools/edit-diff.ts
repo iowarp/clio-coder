@@ -59,7 +59,7 @@ export function stripBom(content: string): { bom: string; text: string } {
 	return content.startsWith("\uFEFF") ? { bom: "\uFEFF", text: content.slice(1) } : { bom: "", text: content };
 }
 
-export function normalizeForFuzzyMatch(text: string): string {
+function normalizeForFuzzyMatch(text: string): string {
 	return text
 		.normalize("NFKC")
 		.split("\n")

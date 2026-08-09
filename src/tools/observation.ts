@@ -113,7 +113,7 @@ function boundContinuation(next: string | undefined): string | undefined {
 	return `${Array.from(next).slice(0, MAX_CONTINUATION_CHARS).join("")}…`;
 }
 
-export function observationTurnBudgetLimit(env: NodeJS.ProcessEnv = process.env): number {
+function observationTurnBudgetLimit(env: NodeJS.ProcessEnv = process.env): number {
 	return Math.max(MIN_BUDGET_SLICE_BYTES, resolveGuardrail("observationTurnBudgetBytes", env));
 }
 

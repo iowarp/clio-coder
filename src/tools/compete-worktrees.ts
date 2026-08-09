@@ -442,13 +442,13 @@ export function isGitRepository(root: string): boolean {
 	}
 }
 
-export function worktreeBranch(namespace: WorktreeNamespace, group: string, index: number): string {
+function worktreeBranch(namespace: WorktreeNamespace, group: string, index: number): string {
 	validateGroup(group);
 	if (!Number.isInteger(index) || index < 1) throw new Error(`invalid ${namespace.label} index ${index}`);
 	return `clio/${namespace.branchSegment}/${group}/${index}`;
 }
 
-export function competeBranch(group: string, index: number): string {
+function competeBranch(group: string, index: number): string {
 	return worktreeBranch(COMPETE_NAMESPACE, group, index);
 }
 

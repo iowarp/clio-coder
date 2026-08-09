@@ -495,7 +495,7 @@ function snippetFor(section: IndexedSection, plan: QueryPlan): { text: string; s
 	};
 }
 
-export function clampDocsLimit(value: unknown): number {
+function clampDocsLimit(value: unknown): number {
 	if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.min(Math.floor(value), MAX_LIMIT);
 	return DEFAULT_LIMIT;
 }
