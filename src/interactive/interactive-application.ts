@@ -15,33 +15,24 @@ import type { ResourcesContract } from "../domains/resources/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
-import { createAgentProgress, isKeyRelease } from "../engine/tui.js";
+import { createAgentProgress } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import {
-	type ApplicationController,
-	type ApplicationIntervalHandle,
-	createApplicationController,
-} from "./application-controller.js";
+import type { ApplicationController } from "./application-controller.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController } from "./editor-submit.js";
 import { createInteractiveEventProjection } from "./interactive-event-projection.js";
+import { createInteractiveInputRuntime } from "./interactive-input-runtime.js";
 import { createInteractivePresentation } from "./interactive-presentation.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
 import { createInteractiveSlashRuntime } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
-import { createLeaderKeyController } from "./leader-key.js";
-import {
-	createOverlayLifecycle,
-	type OverlayLifecycleController,
-	type OverlayState,
-	routeOverlayKey,
-} from "./overlay-lifecycle.js";
+import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
 import { resolveAvailableThinkingLevels } from "./overlays/thinking-selector.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import type {
@@ -245,6 +236,11 @@ export async function expandInteractiveSubmitAsync(
 	};
 }
 
+function availableInteractiveThinkingLevels(deps: InteractiveDeps): ReadonlyArray<ThinkingLevel> {
+	const settings = deps.getSettings?.();
+	return settings ? resolveAvailableThinkingLevels(deps.providers, settings) : ["off"];
+}
+
 export interface KeyBindingDeps {
 	/**
 	 * Keybinding lookup injected by startInteractive. Defaults come from
@@ -406,14 +402,12 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const shell = createProcessInteractiveShell();
 	const { terminal, tui } = shell;
 	let applicationController: ApplicationController;
-
 	const workspaceFacts = createWorkspaceFacts({
 		cwd: process.cwd(),
 		getSessionWorkspace: () => deps.session?.current()?.workspace ?? null,
 		...(deps.extensions ? { extensions: deps.extensions } : {}),
 	});
 	const { refreshLiveWorkspaceGit } = workspaceFacts;
-
 	let refreshPresentationFooter = (): void => {};
 	const sessionTranscript = createSessionTranscript({
 		...(deps.session ? { session: deps.session } : {}),
@@ -424,7 +418,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		refreshStatus: () => refreshPresentationFooter(),
 	});
 	const { readStructuredEntries, recordSubmittedTurn } = sessionTranscript;
-
 	const presentation = createInteractivePresentation({
 		bus: deps.bus,
 		providers: deps.providers,
@@ -463,12 +456,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		io,
 	} = presentation;
 	refreshPresentationFooter = () => footer.refresh();
-	// OSC 9;4 indeterminate progress around each agent turn. The terminal engine
-	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
-	// are idempotent and unit-testable.
 	const agentProgress = createAgentProgress(terminal);
-	// Transcript sink shared by the bus-notice subscribers below (loop guard,
-	// budget alerts, safety blocks).
 	const busNoticeSink = {
 		appendReplayBlock: (renderBlock: Parameters<typeof chatPanel.appendReplayBlock>[0]) =>
 			chatPanel.appendReplayBlock(renderBlock),
@@ -501,7 +489,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		appendTranscriptNotice: (level, text) => appendNotice(level, text, busNoticeSink),
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 	});
-
 	const slashRuntime = createInteractiveSlashRuntime({
 		io,
 		bus: deps.bus,
@@ -569,17 +556,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		notify,
 	});
-	const { openExternalEditorForInput, queueFollowUpFromEditor, restoreQueuedFollowUpsToEditor, submitEditorText } =
-		editorSubmit;
+	editor.onSubmit = editorSubmit.submitEditorText;
 
-	editor.onSubmit = submitEditorText;
-
-	const leaderKeys = createLeaderKeyController({
-		matchesLeader: (input) => keybindings.matches(input, "clio.leader"),
-		leaderTargets: () => keybindings.leaderTargets(),
-		dispatchAction: (id) => dispatchInteractiveAction(id, keyActionDeps()),
-		isRelease: isKeyRelease,
-	});
 	let overlayLifecycle: OverlayLifecycleController;
 	const interactiveTickers = createInteractiveTickers({
 		tui,
@@ -614,7 +592,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openCostOverlayState,
 		openContextViewOverlayState,
 		openContextResetOverlayState,
-		toggleFooterDashboardState,
 		openTasksOverlayState,
 		openMemoryOverlayState,
 		openFleetOverlayState,
@@ -631,7 +608,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openSkillsHubState,
 		openPromptsOverlayState,
 		openExtensionsOverlayState,
-		toggleDispatchBoardOverlay,
 	} = overlayLifecycle;
 
 	const dispatchSteering = createDispatchSteering({
@@ -664,70 +640,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		footer.refresh();
 		tui.requestRender();
 	};
-	const keyActionDeps = (): KeyBindingDeps => ({
-		matches: (input, id) => keybindings.matches(input, id),
-		canExit: () => editor.getText().length === 0,
-		cycleThinking: () => {
-			const settings = deps.getSettings?.();
-			const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
-			if (available.length === 1 && available[0] === "off") {
-				footer.refresh();
-				tui.requestRender();
-				return;
-			}
-			deps.onCycleThinking?.();
-			footer.refresh();
-			tui.requestRender();
-		},
-		requestShutdown: () => {
-			void applicationController.shutdown();
-		},
-		toggleStatus: () => {
-			toggleFooterDashboardState();
-		},
-		toggleDispatchBoard: () => {
-			toggleDispatchBoardOverlay();
-		},
-		openModelSelector: () => {
-			openModelOverlayState();
-		},
-		openTree: () => {
-			openTreeOverlayState();
-		},
-		cycleScopedModelForward: () => {
-			deps.onCycleScopedModelForward?.();
-			footer.refresh();
-			tui.requestRender();
-		},
-		cycleScopedModelBackward: () => {
-			deps.onCycleScopedModelBackward?.();
-			footer.refresh();
-			tui.requestRender();
-		},
-		dismissNotifications: () => applicationController.dismissNotifications(),
-		toggleToolExpansion: () => applicationController.toggleToolExpansion(),
-		toggleAllToolExpansion: () => {
-			if (chatPanel.toggleAllToolsExpanded()) tui.requestRender();
-		},
-		toggleLiveToolOutput: () => {
-			chatPanel.toggleLiveToolOutput();
-			tui.requestRender();
-		},
-		toggleThinkingExpansion: () => applicationController.toggleThinkingExpansion(),
-		toggleAllThinkingExpansion: () => {
-			if (chatPanel.toggleAllThinking()) tui.requestRender();
-		},
-		openExternalEditor: () => {
-			openExternalEditorForInput();
-		},
-		queueFollowUp: () => {
-			queueFollowUpFromEditor();
-		},
-		restoreQueuedFollowUps: () => {
-			restoreQueuedFollowUpsToEditor();
-		},
-	});
-
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
 		refreshFooter: () => footer.refresh(),
@@ -737,82 +649,46 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		notify,
 	});
 
-	applicationController = createApplicationController({
-		clock: { now: Date.now },
-		signals: {
-			removeAllListeners: (signal) => {
-				process.removeAllListeners(signal);
-			},
-			on: (signal, listener) => {
-				process.on(signal, listener);
-			},
-			off: (signal, listener) => {
-				process.off(signal, listener);
-			},
+	applicationController = createInteractiveInputRuntime({
+		keybindings,
+		dispatchAction: dispatchInteractiveAction,
+		actions: {
+			canExit: () => editor.getText().length === 0,
+			availableThinkingLevels: () => availableInteractiveThinkingLevels(deps),
+			onCycleThinking: () => deps.onCycleThinking?.(),
+			cycleScopedModelForward: () => deps.onCycleScopedModelForward?.(),
+			cycleScopedModelBackward: () => deps.onCycleScopedModelBackward?.(),
 		},
-		intervals: {
-			setInterval: (callback, delayMs) => setInterval(callback, delayMs),
-			clearInterval: (handle: ApplicationIntervalHandle) => clearInterval(handle as NodeJS.Timeout),
-		},
-		intervalsToClear: [],
-		leaderKeys,
-		getOverlayState: () => overlayLifecycle.getState(),
-		routeOverlayKey: (data) =>
-			routeOverlayKey(
-				data,
-				overlayLifecycle.getState(),
-				{
-					cancelPermission: closeOverlay,
-					confirmPermission: () => overlayLifecycle.confirmPermission(),
-					closeOverlay,
-					selectPreviousDispatch: () => {
-						dispatchBoard.selectPrevious();
-						tui.requestRender();
-					},
-					selectNextDispatch: () => {
-						dispatchBoard.selectNext();
-						tui.requestRender();
-					},
-					steerSelectedDispatch,
-					cancelSelectedDispatch,
-					cancelAskUser: () => overlayLifecycle.cancelAskUser(),
-				},
-				(input, id) => keybindings.matches(input, id),
-			),
-		matchesAction: (data, id) => keybindings.matches(data, id),
-		dispatchAction: (id) => dispatchInteractiveAction(id, keyActionDeps()),
+		overlay: overlayLifecycle,
+		refreshFooter: () => footer.refresh(),
+		dispatchBoard,
+		steerSelectedDispatch,
+		cancelSelectedDispatch,
 		cancelActiveEditorBash: () => editorSubmit.cancelActiveEditorBash(),
 		isStreaming: () => deps.chat.isStreaming(),
 		cancelActiveRun,
-		getEditorText: () => editor.getText(),
-		clearEditor: () => editor.setText(""),
+		editor,
+		editorSubmit,
 		requestRender: () => tui.requestRender(),
-		closeOverlay,
-		listNotifications: () => notifications.list(),
-		dismissNotification: (id) => notifications.dismiss(id),
-		dismissAllNotifications: () => notifications.dismissAll(),
-		toggleLastToolExpanded: () => chatPanel.toggleLastToolExpanded(),
-		toggleAllToolsExpanded: () => chatPanel.toggleAllToolsExpanded(),
-		toggleLastThinking: () => chatPanel.toggleLastThinking(),
-		toggleAllThinking: () => chatPanel.toggleAllThinking(),
-		shutdownDisposers: [
-			() => presentation.stopTickers(),
-			() => leaderKeys.dispose(),
-			() => interactiveTickers.dispose(),
-			() => presentation.disposeBeforeStatus(),
-			() => eventProjection.disposePrimary(),
-			() => presentation.disposeStatus(),
-			() => eventProjection.disposeRemaining(),
-			() => overlayLifecycle.dispose(),
-			() => agentProgress.stop(),
-			() => deps.chat.dispose(),
-			() => interactiveSubscriptions.dispose(),
-		],
+		notifications,
+		chatPanel,
+		shutdown: {
+			stopTickers: presentation.stopTickers,
+			disposeInteractiveTickers: interactiveTickers.dispose,
+			disposeBeforeStatus: presentation.disposeBeforeStatus,
+			disposeProjectionPrimary: eventProjection.disposePrimary,
+			disposeStatus: presentation.disposeStatus,
+			disposeProjectionRemaining: eventProjection.disposeRemaining,
+			disposeOverlay: overlayLifecycle.dispose,
+			stopAgentProgress: agentProgress.stop,
+			disposeChat: () => deps.chat.dispose(),
+			disposeSubscriptions: interactiveSubscriptions.dispose,
+		},
 		stopUi: () => shell.stop(),
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
 		onShutdown: deps.onShutdown,
+		registerInputListener: (listener) => tui.addInputListener(listener),
 	});
-	tui.addInputListener((data: string) => applicationController.handleInput(data));
 
 	return applicationController.run;
 }
