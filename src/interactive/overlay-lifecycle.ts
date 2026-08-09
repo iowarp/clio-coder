@@ -1,4 +1,3 @@
-import { installSkill } from "../domains/resources/skills/marketplace.js";
 import { appendNotice } from "./command-output.js";
 import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
@@ -6,13 +5,9 @@ import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { createOverlayGeneralOpeners } from "./overlay-general-openers.js";
 import { createOverlayModelSelectors } from "./overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle, type OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
+import { createOverlayResourceOpeners } from "./overlay-resource-openers.js";
 import { createOverlaySessionLifecycle } from "./overlay-session-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
-import { openAgentsOverlay } from "./overlays/agents.js";
-import { openExtensionsOverlay } from "./overlays/extensions.js";
-import { openHelpOverlay } from "./overlays/help-reference.js";
-import { openPromptsOverlay } from "./overlays/prompts.js";
-import { openSkillsHub } from "./overlays/skills-hub.js";
 import { createPermissionOverlayBody, PERMISSION_OVERLAY_WIDTH, permissionOverlayTitle } from "./permission-overlay.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 
@@ -90,6 +85,11 @@ export interface OverlayLifecycleRuntimeDeps {
 	openMemoryOverlay?: typeof import("./memory-overlay.js").openMemoryOverlay;
 	openFleetOverlay?: typeof import("./fleet-overlay.js").openFleetOverlay;
 	openViewOverlay?: typeof import("./view/view-overlay.js").openViewOverlay;
+	openHelpOverlay?: typeof import("./overlays/help-reference.js").openHelpOverlay;
+	openAgentsOverlay?: typeof import("./overlays/agents.js").openAgentsOverlay;
+	openSkillsHub?: typeof import("./overlays/skills-hub.js").openSkillsHub;
+	openPromptsOverlay?: typeof import("./overlays/prompts.js").openPromptsOverlay;
+	openExtensionsOverlay?: typeof import("./overlays/extensions.js").openExtensionsOverlay;
 }
 
 export interface OverlayLifecycleController {
@@ -163,6 +163,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openMemoryOverlay: openMemoryOverlayFactory,
 		openFleetOverlay: openFleetOverlayFactory,
 		openViewOverlay: openViewOverlayFactory,
+		openHelpOverlay: openHelpOverlayFactory,
+		openAgentsOverlay: openAgentsOverlayFactory,
+		openSkillsHub: openSkillsHubFactory,
+		openPromptsOverlay: openPromptsOverlayFactory,
+		openExtensionsOverlay: openExtensionsOverlayFactory,
 	} = deps;
 	let overlayPermission: OverlayPermissionLifecycle | null = null;
 	let overlayAskUser: OverlayAskUserLifecycle | null = null;
@@ -256,6 +261,22 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openModelOverlayFactory ? { openModelOverlay: openModelOverlayFactory } : {}),
 		...(openScopedOverlayFactory ? { openScopedOverlay: openScopedOverlayFactory } : {}),
 		...(openSettingsOverlayFactory ? { openSettingsOverlay: openSettingsOverlayFactory } : {}),
+	});
+
+	const overlayResourceOpeners = createOverlayResourceOpeners({
+		tui,
+		transitions: overlayTransitions,
+		keybindings,
+		editor,
+		getSlashContext: deps.getSlashContext,
+		cacheDir: deps.app.cacheDir,
+		...(deps.app.resources ? { resources: deps.app.resources } : {}),
+		closeOverlay,
+		...(openHelpOverlayFactory ? { openHelpOverlay: openHelpOverlayFactory } : {}),
+		...(openAgentsOverlayFactory ? { openAgentsOverlay: openAgentsOverlayFactory } : {}),
+		...(openSkillsHubFactory ? { openSkillsHub: openSkillsHubFactory } : {}),
+		...(openPromptsOverlayFactory ? { openPromptsOverlay: openPromptsOverlayFactory } : {}),
+		...(openExtensionsOverlayFactory ? { openExtensionsOverlay: openExtensionsOverlayFactory } : {}),
 	});
 
 	const overlaySessions = createOverlaySessionLifecycle({
@@ -354,54 +375,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openViewOverlayState = overlayGeneralOpeners.openView;
 	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
 
-	const openHelpOverlayState = (query?: string): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "help";
-		overlayTransitions.handle = openHelpOverlay(tui, keybindings, () => closeOverlay(), query);
-		tui.requestRender();
-	};
-
-	const openAgentsOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "agents";
-		overlayTransitions.handle = openAgentsOverlay(tui, deps.getSlashContext(), () => closeOverlay());
-		tui.requestRender();
-	};
-
-	const openSkillsHubState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "skills-hub";
-		overlayTransitions.handle = openSkillsHub(tui, {
-			listSkills: () => deps.app.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
-			cacheDir: deps.app.cacheDir,
-			setEditorText: (text) => {
-				editor.setText(text);
-				tui.requestRender();
-			},
-			notice: (level, text) => deps.getSlashContext().notice(level, text),
-			installSkill: async (name) => {
-				const result = installSkill({ source: name, scope: "project" });
-				return { name: result.name, path: result.path, warnings: result.warnings };
-			},
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
-	const openPromptsOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "prompts";
-		overlayTransitions.handle = openPromptsOverlay(tui, deps.getSlashContext(), () => closeOverlay());
-		tui.requestRender();
-	};
-
-	const openExtensionsOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "extensions";
-		overlayTransitions.handle = openExtensionsOverlay(tui, deps.getSlashContext(), () => closeOverlay());
-		tui.requestRender();
-	};
-
 	return {
 		getState: () => overlayTransitions.state,
 		closeOverlay,
@@ -427,11 +400,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openResumeOverlayState,
 		openTreeOverlayState,
 		openMessagePickerOverlayState,
-		openHelpOverlayState,
-		openAgentsOverlayState,
-		openSkillsHubState,
-		openPromptsOverlayState,
-		openExtensionsOverlayState,
+		openHelpOverlayState: overlayResourceOpeners.openHelpOverlayState,
+		openAgentsOverlayState: overlayResourceOpeners.openAgentsOverlayState,
+		openSkillsHubState: overlayResourceOpeners.openSkillsHubState,
+		openPromptsOverlayState: overlayResourceOpeners.openPromptsOverlayState,
+		openExtensionsOverlayState: overlayResourceOpeners.openExtensionsOverlayState,
 		toggleDispatchBoardOverlay,
 		confirmPermission: () => {
 			overlayPermission?.confirm();
