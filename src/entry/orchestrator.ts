@@ -265,7 +265,7 @@ function resolveTarget(providers: ProvidersContract, targetId: string | null | u
 	return providers.getTarget(targetId);
 }
 
-export function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<ThinkingLevel>): ThinkingLevel {
+function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<ThinkingLevel>): ThinkingLevel {
 	const levels = available.length > 0 ? available : VALID_THINKING_LEVELS;
 	if (!levels.includes(current)) return levels[0] ?? "off";
 	const normalized = current;
@@ -329,7 +329,7 @@ function createBackgroundMemoryModelClient(
 	};
 }
 
-export function synthesizeOrchestratorModel(
+function synthesizeOrchestratorModel(
 	providers: ProvidersContract,
 	target: TargetDescriptor,
 	wireModelId: string,
