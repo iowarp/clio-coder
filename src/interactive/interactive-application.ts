@@ -1,0 +1,2797 @@
+import { exec } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import {
+	BusChannels,
+	type ContextPrunedPayload,
+	type ContextWarningPayload,
+	type LoopBlockedPayload,
+	type PermissionRequestedPayload,
+	type RuntimeNoticePayload,
+	type ToolBudgetExceededPayload,
+} from "../core/bus-events.js";
+import type { ClioSettings } from "../core/config.js";
+import type { SafeEventBus } from "../core/event-bus.js";
+import { expandInlineFileReferencesAsync } from "../core/file-references.js";
+import { routingChangeNotices } from "../core/session-routing.js";
+import type { PendingSkillRequest } from "../core/skill-activation.js";
+import { ToolNames } from "../core/tool-names.js";
+import { clioConfigDir } from "../core/xdg.js";
+import type { AgentsContract } from "../domains/agents/contract.js";
+import type { ClioKeybinding } from "../domains/config/keybindings.js";
+import type { ContextState } from "../domains/context/index.js";
+import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { ExtensionsContract } from "../domains/extensions/index.js";
+import { loadMemoryRecordsSync, type MemoryRecord, type TaskMemoryOperatorStatus } from "../domains/memory/index.js";
+import type { ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
+import {
+	getRuntimeRegistry,
+	type ProvidersContract,
+	resolveModelRuntimeCapabilitiesForProviders,
+	resolveProviderReference,
+	type ThinkingLevel,
+	targetRequiresAuth,
+} from "../domains/providers/index.js";
+import type { ResourcesContract } from "../domains/resources/index.js";
+import { getMarketplaceSkills, installSkill } from "../domains/resources/skills/marketplace.js";
+import type { ClassifierCall } from "../domains/safety/action-classifier.js";
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import type { SafetyDecision } from "../domains/safety/contract.js";
+import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
+import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
+import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
+import type { ShareContract } from "../domains/share/index.js";
+import type { OAuthSelectPrompt } from "../engine/oauth.js";
+import {
+	createAgentProgress,
+	isKeyRelease,
+	matchesKey,
+	type OverlayHandle,
+	ProcessTerminal,
+	TUI,
+} from "../engine/tui.js";
+import type { ImageContent } from "../engine/types.js";
+import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
+import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js";
+import {
+	approvalParkedNotice,
+	autonomyDeniedNotice,
+	budgetAlertNotice,
+	middlewareHookFailedSessionNotice,
+	restartRequiredNotice,
+	safetyBlockedNotice,
+	workerEscalationNotice,
+} from "./bus-notices.js";
+import type { ChatLoop } from "./chat-loop.js";
+import { createChatPanel } from "./chat-panel.js";
+import {
+	buildReplayAgentMessagesFromTurns,
+	createCoalescingChatRenderer,
+	rehydrateChatPanelFromTurns,
+} from "./chat-renderer.js";
+import { ClioEditor } from "./clio-editor.js";
+import { emitCommandNotice, runCompactWithNotice } from "./command-fallbacks.js";
+import { appendNotice, createCommandOutputRunIo } from "./command-output.js";
+import { createContextActivityStore } from "./context-activity.js";
+import { openContextOverlay } from "./context-overlay.js";
+import { openCostOverlay } from "./cost-overlay.js";
+import {
+	createDispatchBoardStore,
+	createDispatchBoardView,
+	isDispatchBoardRowCancellable,
+	isDispatchBoardRowSteerable,
+} from "./dispatch-board.js";
+import { createDispatchSteering } from "./dispatch-steering.js";
+import { createEditorSubmitController } from "./editor-submit.js";
+import { openFleetOverlay } from "./fleet-overlay.js";
+import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
+import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashboard.js";
+import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
+import { createInteractiveTickers } from "./interactive-tickers.js";
+import { createKeybindingManager } from "./keybinding-manager.js";
+import { buildLayout } from "./layout.js";
+import { createLeaderKeyController } from "./leader-key.js";
+import {
+	loopBlockedAuditReason,
+	loopBlockedStopReason,
+	toolBudgetAuditReason,
+	toolBudgetStopReason,
+} from "./loop-guard-interrupt.js";
+import { openMemoryOverlay } from "./memory-overlay.js";
+import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { isEscapeKey, type OverlayState, overlayOwnsInput, routeOverlayKey } from "./overlay-lifecycle.js";
+import { openAgentsOverlay } from "./overlays/agents.js";
+import { openAskUserOverlay } from "./overlays/ask-user.js";
+import { openAuthDialog } from "./overlays/auth-dialog.js";
+import { contextResetOptions, openContextResetOverlay } from "./overlays/context-reset.js";
+import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
+import { openExtensionsOverlay } from "./overlays/extensions.js";
+import { openHelpOverlay } from "./overlays/help-reference.js";
+import { openMessagePickerOverlay } from "./overlays/message-picker.js";
+import { openModelOverlay } from "./overlays/model-selector.js";
+import { openPromptsOverlay } from "./overlays/prompts.js";
+import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
+import { openSessionOverlay } from "./overlays/session-selector.js";
+import { openSettingsOverlay } from "./overlays/settings.js";
+import { openSkillsHub } from "./overlays/skills-hub.js";
+import {
+	openThinkingOverlay,
+	readThinkingLevel,
+	resolveAvailableThinkingLevels,
+	resolveThinkingCapability,
+	resolveThinkingLabeler,
+} from "./overlays/thinking-selector.js";
+import { openTreeOverlay } from "./overlays/tree-selector.js";
+import {
+	type ApprovalRequestView,
+	askAxis,
+	createPermissionOverlayBody,
+	describeCallTarget,
+	PERMISSION_OVERLAY_WIDTH,
+	permissionOverlayTitle,
+} from "./permission-overlay.js";
+import { openProvidersOverlay, type TargetsHubNoticeLevel } from "./providers-overlay.js";
+import { createSessionTranscript } from "./session-transcript.js";
+import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
+import {
+	type ContextClearCommandOptions,
+	dispatchSlashCommand,
+	type InitCommandOptions,
+	parseSlashCommand,
+	type RunIo,
+	type SlashCommandContext,
+	type TaskMemorySeedCommandResult,
+} from "./slash-commands.js";
+import { createStatusController, resolveInlineVerb, spinnerFrame, type TurnSummary } from "./status/index.js";
+import { openTasksOverlay } from "./tasks-overlay.js";
+import { abbreviateModelId } from "./theme/index.js";
+import { createDefaultArtifactProviders, verifyReceiptFile } from "./view/artifacts.js";
+import { openViewOverlay } from "./view/view-overlay.js";
+import { createWelcomeDashboard } from "./welcome-dashboard.js";
+import { createWorkspaceFacts } from "./workspace-facts.js";
+
+export {
+	IDLE_LEADER_STATE,
+	LEADER_TIMEOUT_MS,
+	type LeaderKeyController,
+	type LeaderKeyControllerDeps,
+	type LeaderKeyRouteDeps,
+	type LeaderKeyRouteResult,
+	type LeaderKeyState,
+	type LeaderTarget,
+	routeLeaderKey,
+} from "./leader-key.js";
+export * from "./overlay-lifecycle.js";
+// Re-exports preserve the public surface for diag scripts that import these
+// names from "interactive/index.js"; the implementations live in
+// slash-commands.ts.
+export {
+	BUILTIN_SLASH_COMMANDS,
+	type BuiltinSlashCommand,
+	type ContextClearCommandOptions,
+	dispatchSlashCommand,
+	type HandleRunDeps,
+	handleRun,
+	type InitCommandOptions,
+	parseSlashCommand,
+	type RunIo,
+	type SlashCommand,
+	type SlashCommandContext,
+	type SlashCommandKind,
+} from "./slash-commands.js";
+
+export function shouldAnnouncePermissionRequest(
+	seenRequestIds: Set<string>,
+	requestId: string,
+	maxSize = 2048,
+): boolean {
+	if (seenRequestIds.has(requestId)) return false;
+	seenRequestIds.add(requestId);
+	if (seenRequestIds.size > maxSize) {
+		const oldest = seenRequestIds.values().next().value;
+		if (oldest !== undefined) seenRequestIds.delete(oldest);
+	}
+	return true;
+}
+
+export function isLiveWorkerEscalationRequest(payload: PermissionRequestedPayload): boolean {
+	if (typeof payload.requestId !== "string") return false;
+	if (payload.escalation !== true) return false;
+	const origin = typeof payload.origin === "string" ? payload.origin : undefined;
+	const legacyWorkerEvent = origin === undefined && typeof payload.requestedBy === "string";
+	if (!(origin?.startsWith("worker:") || legacyWorkerEvent)) return false;
+	const runId = typeof payload.requestedBy === "string" ? payload.requestedBy : origin?.slice("worker:".length);
+	return typeof runId === "string" && runId.length > 0;
+}
+
+export interface InteractiveDeps {
+	bus: SafeEventBus;
+	providers: ProvidersContract;
+	dispatch: DispatchContract;
+	agents?: AgentsContract;
+	observability: ObservabilityContract;
+	chat: ChatLoop;
+	/** Startup notices collected before the TUI is ready; rendered in the transcript. */
+	initialNotices?: ReadonlyArray<string>;
+	resources?: ResourcesContract;
+	extensions?: ExtensionsContract;
+	share?: ShareContract;
+	/**
+	 * Shared tool registry. When wired, the permission overlay opens automatically
+	 * whenever a tool call is parked waiting for operator confirmation, and the
+	 * confirm / cancel overlay handlers drive `resumeParkedCalls` /
+	 * `cancelParkedCall` so blocked bash batches run (or reject cleanly)
+	 * after the permission decision rather than stalling indefinitely.
+	 */
+	toolRegistry?: ToolRegistry;
+	session?: SessionContract;
+	/** Read current session entries for replay/context rebuilds after local non-chat entries. */
+	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
+	/** Live session task board for the footer tasks row and the /tasks overlay. */
+	getTaskBoard?: () => TaskBoardSnapshot | null;
+	/** Live, read-only task-memory state for status surfaces and the /memory overlay. */
+	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
+	/** Newest structured handoff available for an opt-in seed, when enabled. */
+	getTaskMemorySeedOffer?: () => { source: string; count: number } | null;
+	/** Merge the newest structured handoff into the current task bank. */
+	seedTaskMemory?: () => TaskMemorySeedCommandResult;
+	/** XDG state dir (clioStateDir()). `/view verify` reads from <stateDir>/receipts/<id>.json. */
+	stateDir: string;
+	/** XDG data dir (clioDataDir()). `/view` reads durable evidence bundles from <dataDir>/evidence/. */
+	dataDir: string;
+	/** XDG cache dir (clioCacheDir()). The Skills Hub marketplace cache lives here. */
+	cacheDir: string;
+	/**
+	 * Resolver for the current `workers.default` block. `/run` uses this to
+	 * short-circuit with an actionable error when no provider is configured
+	 * instead of letting the dispatch throw with no config context.
+	 */
+	getWorkerDefault?: () => { target?: string; model?: string } | undefined;
+	/**
+	 * Resolver for current settings. Footer reads the orchestrator target
+	 * (what chat actually dispatches to) rather than the providers catalog's
+	 * first-available entry.
+	 */
+	getSettings?: () => Readonly<ClioSettings>;
+	/** Live fleet node snapshots for the /fleet nodes view and node-pin editor. */
+	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
+	/** Optional resolver for the active session id used as the cost overlay title suffix. */
+	getSessionId?: () => string | null;
+	/** Install the TUI-backed ask_user handler for this interactive process. */
+	registerAskUserHandler?: (handler: AskUserHandler) => () => void;
+	/** Live CLIO.md and memory state for the footer Context quadrant. */
+	getContextState?: (cwd?: string) => ContextState;
+	/** Persist a thinking level chosen in the /thinking overlay. */
+	onSetThinkingLevel?: (level: ThinkingLevel) => void;
+	/** Persist the next thinking level when Shift+Tab is pressed. */
+	onCycleThinking?: () => void;
+	/** Persist the orchestrator target selected in /model. */
+	onSelectModel?: (ref: { target: string; model: string }) => void;
+	/** Persist the next `provider.scope` list committed in /scoped-models. */
+	onSetScope?: (scope: string[]) => void;
+	/** Write handler the /settings overlay uses to persist cycled values. */
+	writeSettings?: (next: ClioSettings) => void;
+	/**
+	 * Scoped commit for a single /settings edit. `id` is the config-path id, `next`
+	 * the effective view with that one leaf changed. scope "session" applies live
+	 * only; "global" also persists it as the default. Absent ⇒ the overlay falls
+	 * back to writeSettings (global-only).
+	 */
+	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "global") => void;
+	/** Resume a past session id. Called from the /resume overlay. */
+	onResumeSession?: (sessionId: string) => void;
+	/** Start a fresh session. Called from /new. */
+	onNewSession?: () => void;
+	/**
+	 * Fork from a parent assistant turn picked in /fork. Default wiring
+	 * delegates to session.fork(parentTurnId); the override exists so
+	 * future slices can layer telemetry or settings merging on top.
+	 */
+	onForkSession?: (parentTurnId: string) => void;
+	/**
+	 * Run /compact for the current session. Resolves the compaction model
+	 * (settings.compaction.model with fallback to the orchestrator target),
+	 * reads session entries, streams a summary via the session compaction
+	 * engine, and persists a compactionSummary entry.
+	 */
+	onCompact?: (instructions: string | undefined) => Promise<void>;
+	/** Run /context init for the current working directory. */
+	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
+	/** Run /context reset for the current working directory. */
+	onContextClear?: (options: ContextClearCommandOptions) => Promise<void>;
+	/** Run /context refresh: re-index codewiki and refresh .clio state without touching CLIO.md. */
+	onContextRefresh?: () => Promise<void>;
+	/** Advance the orchestrator target one step forward through `provider.scope`. */
+	onCycleScopedModelForward?: () => void;
+	/** Advance the orchestrator target one step backward through `provider.scope`. */
+	onCycleScopedModelBackward?: () => void;
+	onShutdown: () => Promise<void>;
+}
+
+export const CTRL_C_DOUBLE_TAP_MS = 500;
+export const ENTER = "\r";
+export const ESC = "\x1b";
+
+// /export renders the transcript at a fixed width so exports are stable
+// regardless of the live terminal size.
+const EXPORT_RENDER_WIDTH = 100;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the ESC control character is the ANSI escape introducer this pattern exists to strip
+const ANSI_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
+function stripAnsiForExport(line: string): string {
+	return line.replace(ANSI_PATTERN, "");
+}
+export interface InteractiveSubmitExpansion {
+	text: string;
+	images: ImageContent[];
+	workingContextPaths: string[];
+	pendingSkillRequests: PendingSkillRequest[];
+}
+
+export async function expandInteractiveSubmitAsync(
+	text: string,
+	resources: ResourcesContract | undefined,
+	cwd = process.cwd(),
+): Promise<InteractiveSubmitExpansion> {
+	const parsed = resources?.parsePendingSkillRequests(text, cwd) ?? {
+		text,
+		pendingSkillRequests: [],
+	};
+	const promptExpansion = resources?.expandPromptTemplate(parsed.text, cwd);
+	const promptText = promptExpansion?.expanded ? promptExpansion.text : parsed.text;
+	const fileExpansion = await expandInlineFileReferencesAsync(promptText, {
+		cwd,
+		includeImages: true,
+		missing: "leave",
+	});
+	return {
+		text: fileExpansion.text,
+		images: fileExpansion.images,
+		workingContextPaths: fileExpansion.referencedPaths,
+		pendingSkillRequests: parsed.pendingSkillRequests,
+	};
+}
+
+export interface KeyBindingDeps {
+	/**
+	 * Keybinding lookup injected by startInteractive. Defaults come from
+	 * CLIO_KEYBINDINGS; user overrides from settings.keybindings. Tests may
+	 * substitute a narrower matcher via createKeybindingManagerForTesting.
+	 */
+	matches: (data: string, id: ClioKeybinding) => boolean;
+	/** App exit follows pi's editor rule: Ctrl+D exits only when the editor is empty. */
+	canExit?: () => boolean;
+	cycleThinking: () => void;
+	requestShutdown: () => void;
+	toggleStatus: () => void;
+	toggleDispatchBoard: () => void;
+	openModelSelector: () => void;
+	openTree: () => void;
+	cycleScopedModelForward: () => void;
+	cycleScopedModelBackward: () => void;
+	dismissNotifications: () => void;
+	toggleToolExpansion: () => void;
+	toggleAllToolExpansion: () => void;
+	toggleLiveToolOutput: () => void;
+	toggleThinkingExpansion: () => void;
+	toggleAllThinkingExpansion: () => void;
+	openExternalEditor: () => void;
+	queueFollowUp: () => void;
+	restoreQueuedFollowUps: () => void;
+}
+
+export type CtrlCAction = "cancel-stream" | "close-overlay" | "clear-editor" | "arm-shutdown" | "shutdown";
+
+export interface CtrlCActionDeps {
+	overlayState: OverlayState;
+	streaming: boolean;
+	editorText: string;
+	lastCtrlCAt: number;
+	now: number;
+}
+
+function isCtrlCKey(data: string): boolean {
+	return matchesKey(data, "ctrl+c") && !isKeyRelease(data);
+}
+
+/** Title-case a KeyId for display, e.g. `alt+x` → `Alt+X`. Falls back to `Alt+X`. */
+function formatKeyLabel(keyId: string | undefined): string {
+	if (!keyId || keyId.length === 0) return "Alt+X";
+	return keyId
+		.split("+")
+		.map((segment) => (segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1)))
+		.join("+");
+}
+
+export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
+	// A modal is an input boundary. Never let a global double-tap or an active
+	// run escape through it; Ctrl+C cancels/closes the focused overlay instead.
+	if (deps.overlayState !== "closed") return "close-overlay";
+	if (deps.lastCtrlCAt > 0 && deps.now - deps.lastCtrlCAt <= CTRL_C_DOUBLE_TAP_MS) {
+		return "shutdown";
+	}
+	if (deps.streaming) return "cancel-stream";
+	if (deps.editorText.length > 0) return "clear-editor";
+	return "arm-shutdown";
+}
+
+export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
+	switch (id) {
+		case "clio.notifications.dismiss":
+			deps.dismissNotifications();
+			return true;
+		case "clio.tool.expand":
+			deps.toggleToolExpansion();
+			return true;
+		case "clio.tool.expandAll":
+			deps.toggleAllToolExpansion();
+			return true;
+		case "clio.tool.liveOutput":
+			deps.toggleLiveToolOutput();
+			return true;
+		case "clio.editor.external":
+			deps.openExternalEditor();
+			return true;
+		case "clio.message.followUp":
+			deps.queueFollowUp();
+			return true;
+		case "clio.message.dequeue":
+			deps.restoreQueuedFollowUps();
+			return true;
+		case "clio.thinking.expand":
+			deps.toggleThinkingExpansion();
+			return true;
+		case "clio.thinking.expandAll":
+			deps.toggleAllThinkingExpansion();
+			return true;
+		case "clio.status.toggle":
+			deps.toggleStatus();
+			return true;
+		case "clio.thinking.cycle":
+			deps.cycleThinking();
+			return true;
+		case "clio.session.tree":
+			deps.openTree();
+			return true;
+		case "clio.dispatchBoard.toggle":
+			deps.toggleDispatchBoard();
+			return true;
+		case "clio.model.select":
+			deps.openModelSelector();
+			return true;
+		case "clio.model.cycleBackward":
+			deps.cycleScopedModelBackward();
+			return true;
+		case "clio.model.cycleForward":
+			deps.cycleScopedModelForward();
+			return true;
+		case "clio.exit":
+			if (deps.canExit && !deps.canExit()) return false;
+			deps.requestShutdown();
+			return true;
+		case "clio.leader":
+			return false;
+	}
+}
+
+/** Pure key router: returns true when the input was consumed. */
+export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean {
+	const order: ClioKeybinding[] = [
+		"clio.status.toggle",
+		"clio.thinking.cycle",
+		"clio.session.tree",
+		"clio.dispatchBoard.toggle",
+		"clio.model.select",
+		// Match cycleBackward before cycleForward so a user rebind where one key
+		// is a prefix of the other resolves to the more specific binding first.
+		// The defaults (alt+k / alt+j) do not prefix-match each other.
+		"clio.model.cycleBackward",
+		"clio.model.cycleForward",
+		"clio.exit",
+	];
+	for (const id of order) {
+		if (deps.matches(data, id)) return dispatchInteractiveAction(id, deps);
+	}
+	return false;
+}
+
+function recordObject(value: unknown): Record<string, unknown> | null {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: null;
+}
+
+function askUserInterviewClosedByToolResult(event: {
+	toolName?: unknown;
+	isError?: unknown;
+	result?: unknown;
+}): boolean {
+	if (event.toolName !== "ask_user" || event.isError === true) return false;
+	const result = recordObject(event.result);
+	const details = recordObject(result?.details);
+	const interview = recordObject(details?.interview);
+	return interview?.status === "complete" || interview?.status === "cancelled";
+}
+
+/**
+ * Pure cancel logic for the cwd-fallback overlay. Restores the prior session
+ * when one existed and differs from the just-resumed session id; otherwise
+ * reopens the /resume overlay so the user can pick again. Lifted out of the
+ * openCwdFallbackOverlayState closure so both Esc-via-SelectList and
+ * Cancel-row-via-Enter exercise the same code path under test.
+ */
+export interface CwdFallbackCancelDeps {
+	session: SessionContract;
+	openResumeOverlay: () => void;
+	onWarning: (msg: string) => void;
+}
+
+function handleCwdFallbackCancel(preResumeSessionId: string | null, deps: CwdFallbackCancelDeps): void {
+	const currentId = deps.session.current()?.id ?? null;
+	if (preResumeSessionId && preResumeSessionId !== currentId) {
+		try {
+			deps.session.switchBranch(preResumeSessionId);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			deps.onWarning(`[cwd-fallback] could not restore prior session: ${msg}\n`);
+		}
+		return;
+	}
+	deps.openResumeOverlay();
+}
+
+export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
+	const terminal = new ProcessTerminal();
+	const tui = new TUI(terminal);
+
+	// Build the runtime keybinding manager from the current settings snapshot.
+	// This also installs the manager as pi-tui's global (via setKeybindings)
+	// so editor/select components honor overrides without explicit plumbing.
+	const keybindings = createKeybindingManager(deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings));
+
+	const workspaceFacts = createWorkspaceFacts({
+		cwd: process.cwd(),
+		getSessionWorkspace: () => deps.session?.current()?.workspace ?? null,
+		...(deps.extensions ? { extensions: deps.extensions } : {}),
+	});
+	const { getExtensionStats, getLiveWorkspaceSnapshot, refreshLiveWorkspaceGit } = workspaceFacts;
+
+	let footer: FooterDashboardPanel;
+	const sessionTranscript = createSessionTranscript({
+		...(deps.session ? { session: deps.session } : {}),
+		...(deps.getSessionId ? { getSessionId: deps.getSessionId } : {}),
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		...(deps.readSessionEntries ? { readSessionEntries: deps.readSessionEntries } : {}),
+		chat: deps.chat,
+		refreshStatus: () => footer.refresh(),
+	});
+	const { liveSessionTurns, readStructuredEntries, recordSubmittedTurn } = sessionTranscript;
+
+	const banner = createWelcomeDashboard({
+		providers: deps.providers,
+		observability: deps.observability,
+		getContextUsage: () => deps.chat.contextUsage(),
+		getWorkspaceSnapshot: workspaceFacts.getWorkspaceSnapshot,
+		getExtensionStats,
+		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+	});
+	const chatPanel = createChatPanel({
+		// Surface the bound `clio.tool.expand` key on collapsed tool sublines so
+		// users can discover the Ctrl+O toggle. Pulls from the keybindings
+		// manager on every render so user rebinds flow through; the first bound
+		// key wins when multiple are configured.
+		getToolExpandKey: () => {
+			const keys = keybindings.getKeys("clio.tool.expand");
+			const first = keys[0];
+			return typeof first === "string" && first.length > 0 ? first : undefined;
+		},
+		getOutputVerbosity: () => deps.getSettings?.().terminal.outputVerbosity ?? "default",
+	});
+	const followUpQueuePanel = createFollowUpQueuePanel({
+		getDequeueKey: () => {
+			const keys = keybindings.getKeys("clio.message.dequeue");
+			const first = keys[0];
+			return typeof first === "string" && first.length > 0 ? first : undefined;
+		},
+	});
+	const statusController = createStatusController({
+		chat: deps.chat,
+		providers: deps.providers,
+		bus: deps.bus,
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+	});
+	const dispatchBoardStore = createDispatchBoardStore(deps.bus, () => deps.dispatch.snapshot());
+	const contextActivityStore = createContextActivityStore(deps.bus);
+	const footerToolCounts = new Map<string, number>();
+	const footerActiveTools = new Set<string>();
+	let footerToolErrors = 0;
+	let footerToolTruncatedResults = 0;
+	// Metrics for the most recent completed turn. The faint per-turn summary no
+	// longer prints under the assistant reply; it lives in the footer instead so
+	// the transcript stays calm and the footer carries the live telemetry.
+	let lastTurnSummary: TurnSummary | null = null;
+	// Dedicated harness→user surface. Boot hints and live connect/probe notices
+	// route here (anchored in the footer region) instead of into the transcript,
+	// so they never leak into VT scrollback.
+	let lastToolExpandAtMs = 0;
+	let lastThinkingExpandAtMs = 0;
+	let lastNotificationDismissAtMs = 0;
+	const dismissKeyLabel = formatKeyLabel(keybindings.getKeys("clio.notifications.dismiss")[0]);
+	const notifications = createNotificationCenter({
+		onChange: () => {
+			footer?.refresh();
+			tui.requestRender();
+		},
+	});
+	const notify = (level: TargetsHubNoticeLevel, text: string, key?: string): void => {
+		notifications.add(key ? { level, text, key } : { level, text });
+	};
+	const announceTaskMemorySeedOffer = (): void => {
+		const offer = deps.getTaskMemorySeedOffer?.() ?? null;
+		if (!offer || offer.count === 0) return;
+		notify(
+			"info",
+			`task memory: ${offer.count} handoff entr${offer.count === 1 ? "y" : "ies"} available from ${offer.source}; run /memory seed to import`,
+			"memory:seed-offer",
+		);
+	};
+	const dismissContextBootstrapNotices = (): void => {
+		for (const notice of notifications.list()) {
+			if (/^clio: (No CLIO\.md detected|malformed CLIO\.md ignored|Imported agent context changed)/.test(notice.text)) {
+				notifications.dismiss(notice.id);
+			}
+		}
+	};
+	// Live observability projection cache. The footer's session cost/token/
+	// throughput getters read this snapshot instead of the raw contract methods,
+	// so the projection is the single source path; the subscription below keeps
+	// it current and drives render invalidation on each coalesced update.
+	let observabilitySnapshot: ObservabilitySnapshot = deps.observability.snapshot();
+	footer = buildFooterDashboard({
+		providers: deps.providers,
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		getAgentStatus: () => statusController.current(),
+		getTerminalColumns: () => terminal.columns,
+		getSessionTokens: () => observabilitySnapshot.session.tokens,
+		getTokenThroughput: () => observabilitySnapshot.session.latestThroughput,
+		getSessionCost: () => observabilitySnapshot.session.cost,
+		getContextUsage: () => deps.chat.contextUsage(),
+		getContextLedger: () => deps.chat.contextLedger(),
+		getDispatchRows: () => dispatchBoardStore.rows(),
+		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
+		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
+		getContextActivity: () => contextActivityStore.current(),
+		getToolCounts: () => ({
+			tools: Object.fromEntries(footerToolCounts),
+			errors: footerToolErrors,
+			active: footerActiveTools.size,
+			truncatedResults: footerToolTruncatedResults,
+		}),
+		...(deps.getContextState
+			? { getContextState: () => deps.getContextState?.(process.cwd()) ?? { clioMd: "none", memoryCount: 0 } }
+			: {}),
+		getWorkspaceSnapshot: getLiveWorkspaceSnapshot,
+		getExtensionStats,
+		getSessionInfo: () => {
+			const meta = deps.session?.current();
+			return {
+				id: meta?.id ?? deps.getSessionId?.() ?? null,
+				name: meta?.name ?? null,
+				turns: liveSessionTurns(),
+			};
+		},
+		getLastTurnSummary: () => lastTurnSummary,
+		getNotifications: () => notifications.list(),
+		dismissKeyLabel,
+	});
+	// Single observability subscription drives footer session cost/token/
+	// throughput refresh. The projection coalesces the dispatch terminal channels
+	// and every recordTokens/resetSession into one debounced update, so this
+	// replaces the per-event footer refresh patchwork for those facts. subscribe()
+	// fires immediately with the current snapshot; it is unsubscribed at shutdown.
+	const unsubscribeObservability = deps.observability.subscribe((snapshot) => {
+		observabilitySnapshot = snapshot;
+		footer.refresh();
+		tui.requestRender();
+	});
+	const editor = new ClioEditor(tui, {
+		getModelLabel: () => {
+			const settings = deps.getSettings?.();
+			const model = settings?.orchestrator?.model?.trim();
+			if (!model) return "no model";
+			const target = settings?.orchestrator?.target?.trim();
+			const abbreviated = abbreviateModelId(model);
+			return target ? `${target}·${abbreviated}` : abbreviated;
+		},
+		getThinkingLabel: () => {
+			const settings = deps.getSettings?.();
+			return (
+				resolveModelRuntimeCapabilitiesForProviders(
+					deps.providers,
+					settings?.orchestrator?.target,
+					settings?.orchestrator?.model,
+					settings?.orchestrator?.thinkingLevel ?? "off",
+				)?.thinking.display ??
+				settings?.orchestrator?.thinkingLevel ??
+				"off"
+			);
+		},
+	});
+	editor.focused = true;
+	editor.setAutocompleteProvider(
+		createSlashCommandAutocompleteProvider({
+			listSkills: () => {
+				const installed = deps.resources?.skills(process.cwd()).items ?? [];
+				const marketplace = getMarketplaceSkills();
+				return { installed, marketplace };
+			},
+		}),
+	);
+
+	// The permission overlay is rebuilt per open because its body depends on
+	// the parked tool call.
+	// The dispatch board renders live at the width the overlay actually grants;
+	// the cached observability snapshot supplies each card's evidence/proof
+	// state and is kept current by the single subscription above.
+	const dispatchBoard = createDispatchBoardView(
+		() => dispatchBoardStore.rows(),
+		() => observabilitySnapshot,
+	);
+	const chatRenderer = createCoalescingChatRenderer({
+		chatPanel,
+		requestRender: () => tui.requestRender(),
+	});
+
+	const io: RunIo = createCommandOutputRunIo({
+		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
+		requestRender: () => tui.requestRender(),
+	});
+	// Boot hints (CLIO.md state, keybinding diagnostics) route into the
+	// NotificationCenter, not the transcript, so they stay out of scrollback.
+	for (const notice of deps.initialNotices ?? []) {
+		const text = notice.trim();
+		if (text.length === 0) continue;
+		const key = text.toLowerCase().includes("keybinding notice") ? "startup:keybinding-notice" : text;
+		notify(classifyNoticeLevel(text), text, key);
+	}
+	const unsubscribeChat = deps.chat.onEvent((event) => {
+		if (event.type === "notice") {
+			if (event.surface === "transcript") {
+				chatRenderer.applyEvent(event);
+				return;
+			}
+			notify(event.level, event.text, event.key);
+			return;
+		}
+		if (event.type === "queue_update") {
+			followUpQueuePanel.setMessages(event.messages);
+			tui.requestRender();
+			return;
+		}
+		if (askUserSession?.isWaiting() && event.type === "message_update") {
+			const assistantEvent = event.assistantMessageEvent as { type?: unknown };
+			if (assistantEvent.type === "text_delta" || assistantEvent.type === "thinking_delta") closeAskUserSession();
+		}
+		if (event.type === "agent_end") {
+			closeAskUserSession();
+			askUserCancelledForTurn = false;
+		}
+		if (event.type === "tool_execution_start") {
+			if (event.toolName.toLowerCase() === "dispatch") {
+				chatRenderer.applyEvent(event);
+				return;
+			}
+			footerActiveTools.add(event.toolCallId);
+			const current = footerToolCounts.get(event.toolName) ?? 0;
+			footerToolCounts.set(event.toolName, current + 1);
+			footer.refresh();
+		} else if (event.type === "tool_execution_end") {
+			if (event.toolName.toLowerCase() === "dispatch") {
+				chatRenderer.applyEvent(event);
+				return;
+			}
+			if (askUserInterviewClosedByToolResult(event)) {
+				closeAskUserSession();
+				askUserCancelledForTurn = false;
+			}
+			footerActiveTools.delete(event.toolCallId);
+			if (event.isError) footerToolErrors += 1;
+			const summary = (event as { resultSummary?: { truncated?: unknown } }).resultSummary;
+			if (summary?.truncated === true) footerToolTruncatedResults += 1;
+			footer.refresh();
+		}
+		chatRenderer.applyEvent(event);
+	});
+	let statusInlineFrame = 0;
+	const unsubscribeStatus = statusController.subscribe((status) => {
+		if (status.phase === "idle") {
+			chatPanel.setStatusLine(null);
+		} else if (status.phase === "ended") {
+			// Park the completed turn's metrics on the footer rather than printing
+			// a faint summary line under the reply. Keeps the transcript calm.
+			chatPanel.setStatusLine(null);
+			if (status.summary) lastTurnSummary = status.summary;
+		} else {
+			const verb = resolveInlineVerb(status, Date.now(), terminal.columns);
+			if (verb) {
+				const frame = terminal.columns < 30 ? "" : `${spinnerFrame(statusInlineFrame)} `;
+				chatPanel.setStatusLine({ phase: status.phase, verb: `${frame}${verb.text}`, toneHint: verb.toneHint });
+				statusInlineFrame = (statusInlineFrame + 1) % 10;
+			} else {
+				chatPanel.setStatusLine(null);
+			}
+		}
+		footer.refresh();
+		tui.requestRender();
+	});
+	// OSC 9;4 indeterminate progress around each agent turn. The terminal engine
+	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
+	// are idempotent and unit-testable.
+	const agentProgress = createAgentProgress(terminal);
+	const unsubscribeProgress = deps.chat.onEvent((event) => {
+		const settings = deps.getSettings?.();
+		const showProgress = settings?.terminal.showTerminalProgress ?? false;
+		if (event.type === "agent_start" && showProgress) agentProgress.start();
+		else if (event.type === "agent_end") agentProgress.stop();
+	});
+	const unsubscribeAbortedProgress = deps.bus.on(BusChannels.RunAborted, () => {
+		agentProgress.stop();
+	});
+	// Repaint the footer whenever an assistant message completes so the
+	// running `in:/out:` token counters reflect the latest usage. The
+	// existing 120ms ticker only refreshes while streaming, which means the
+	// final frame after a turn ends would otherwise be stale.
+	const unsubscribeFooterTokens = deps.chat.onEvent((event) => {
+		if (event.type !== "message_end" && event.type !== "agent_end") return;
+		if (event.type === "agent_end") refreshLiveWorkspaceGit(true);
+		footer.refresh();
+		tui.requestRender();
+	});
+	const unsubscribeContextPressure = deps.bus.on(BusChannels.ContextWarning, (payload) => {
+		const evt = payload as ContextWarningPayload | null | undefined;
+		if (evt && typeof evt === "object" && "warning" in evt) {
+			if (evt.warning !== null) notify("warning", evt.warning, "context-low-warning");
+			else notifications.dismiss("context-low-warning");
+		}
+		footer.refresh();
+		tui.requestRender();
+	});
+	const unsubscribeContextPruned = deps.bus.on(BusChannels.ContextPruned, (payload) => {
+		const evt = payload as ContextPrunedPayload | null | undefined;
+		if (evt && typeof evt === "object" && typeof evt.tokensBefore === "number" && typeof evt.tokensAfter === "number") {
+			notify(
+				"info",
+				`[Compaction] Reclaimed context: ${evt.tokensBefore} -> ${evt.tokensAfter} tokens (${evt.stage})`,
+				"compaction-notice",
+			);
+		}
+		footer.refresh();
+		tui.requestRender();
+	});
+	// Model-residency visibility. The capacity-aware reconciler
+	// (engine/apis/residency.ts) emits over the bus instead of importing TUI
+	// code; this subscriber renders each will-not-fit, about-to-evict, swap,
+	// co-resident, or stress notice. The key folds repeats of the same kind
+	// for one target so turns do not spam.
+	const unsubscribeRuntimeNotice = deps.bus.on(BusChannels.RuntimeNotice, (payload) => {
+		const evt = payload as RuntimeNoticePayload | null | undefined;
+		if (!evt || typeof evt !== "object" || typeof evt.message !== "string" || typeof evt.kind !== "string") return;
+		notify(evt.level, evt.message, `runtime-notice:${evt.kind}:${evt.targetId}`);
+		footer.refresh();
+		tui.requestRender();
+	});
+	// Transcript sink shared by the bus-notice subscribers below (loop guard,
+	// budget alerts, safety blocks).
+	const busNoticeSink = {
+		appendReplayBlock: (renderBlock: Parameters<typeof chatPanel.appendReplayBlock>[0]) =>
+			chatPanel.appendReplayBlock(renderBlock),
+		requestRender: () => tui.requestRender(),
+	};
+	// Loop-guard visibility. The backend guard (engine/loop-guard.ts)
+	// emits over the bus instead of importing TUI code; this subscriber turns
+	// each block into a warn notice and, when the per-turn budget is exhausted,
+	// stops the active turn with a durable closing message (cancel-with-reason)
+	// instead of leaving an empty aborted turn.
+	const unsubscribeLoopBlocked = deps.bus.on(BusChannels.LoopBlocked, (payload) => {
+		const evt = payload as LoopBlockedPayload | null | undefined;
+		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.repeatCount !== "number") return;
+		if (evt.disposition === "stop") {
+			// Backstop reached: the turn stayed in tool loops after the synthesis
+			// lockout, so stop it with a durable, visible closing message instead of
+			// the empty aborted turn a bare cancel leaves behind. The chat loop
+			// persists and renders it; the audit trail is tagged "loop_guard". The
+			// message text is shared with the headless/ACP subscriber.
+			deps.chat.cancel({
+				reason: loopBlockedStopReason(evt),
+				source: "loop_guard",
+				auditReason: loopBlockedAuditReason(evt),
+			});
+		} else if (evt.disposition === "lockout") {
+			// Budget reached: tools are locked for the rest of the turn so the model
+			// answers from what it gathered. The turn keeps running (no cancel); the
+			// operator gets one notice that the guard took over.
+			appendNotice(
+				"warn",
+				`[loop-guard] ${evt.tool} looped ${evt.repeatCount}x; tools disabled for the rest of this turn — the model is answering from what it gathered.`,
+				busNoticeSink,
+			);
+		} else {
+			appendNotice(
+				"warn",
+				`[loop-guard] blocked ${evt.tool}: identical call repeated ${evt.repeatCount}x in window (block ${evt.blocksThisTurn}/${evt.budget} this turn).`,
+				busNoticeSink,
+			);
+		}
+		tui.requestRender();
+	});
+	// Tool-call budget visibility. The orchestrator loop guard counts every
+	// distinct tool call in a turn (the identical-call loop guard above misses
+	// near-duplicate sprays) and emits over the bus. The soft budget renders a
+	// warn nudge; the hard ceiling stops the active turn with a durable closing
+	// message, matching the loop-budget interrupt path.
+	const unsubscribeToolBudget = deps.bus.on(BusChannels.ToolBudgetExceeded, (payload) => {
+		const evt = payload as ToolBudgetExceededPayload | null | undefined;
+		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.callsThisTurn !== "number") return;
+		if (evt.interrupted) {
+			deps.chat.cancel({
+				reason: toolBudgetStopReason(evt),
+				source: "loop_guard",
+				auditReason: toolBudgetAuditReason(evt),
+			});
+		} else {
+			appendNotice(
+				"warn",
+				`[loop-guard] tool-call budget reached: ${evt.callsThisTurn} calls this turn (soft budget ${evt.softBudget}); ${evt.tool} blocked, model asked to re-plan.`,
+				busNoticeSink,
+			);
+		}
+		tui.requestRender();
+	});
+	// Saved settings moved under a running session. Live routing is
+	// session-owned, so external writers (another Clio session, the CLI, a
+	// manual edit) only change defaults; surface a notice when the new defaults
+	// diverge from this session's active routing, and warn when the active
+	// target was removed from the shared target catalog.
+	let settingsOverlayRefresh: (() => void) | null = null;
+	const unsubscribeConfigRouting = deps.bus.on(BusChannels.ConfigNextTurn, (payload) => {
+		const evt = payload as { diff?: { nextTurn?: string[] }; settings?: Readonly<ClioSettings> } | null | undefined;
+		const effective = deps.getSettings?.();
+		if (!effective || !evt?.settings || !Array.isArray(evt.diff?.nextTurn)) return;
+		for (const notice of routingChangeNotices(evt.diff.nextTurn, evt.settings, effective, { commandHints: true })) {
+			notify(
+				notice.level,
+				notice.text,
+				notice.kind === "external-divergence" ? "config:routing-divergence" : "config:target-removed",
+			);
+		}
+		// Re-derive the /settings overlay rows while it is open: the shared
+		// snapshot just moved (target catalog, defaults), and rows like
+		// targets/fleet.profiles must track it.
+		settingsOverlayRefresh?.();
+		footer.refresh();
+		tui.requestRender();
+	});
+	// Hot-reload fields (theme, keybindings, autonomy) repaint immediately;
+	// the autonomy row of an open /settings overlay must follow.
+	const unsubscribeConfigHotReloadOverlay = deps.bus.on(BusChannels.ConfigHotReload, () => {
+		settingsOverlayRefresh?.();
+	});
+	// Restart-classified settings changed under a running session. Nothing in
+	// the session will pick them up; the notice is the only nudge the operator
+	// gets to restart.
+	const unsubscribeConfigRestartRequired = deps.bus.on(BusChannels.ConfigRestartRequired, (payload) => {
+		const text = restartRequiredNotice(payload);
+		if (text === null) return;
+		notify("warning", text, "config:restart-required");
+		footer.refresh();
+		tui.requestRender();
+	});
+	// Budget ceiling visibility. Scheduling emits budget.alert on enqueue when
+	// session spend meets or crosses the ceiling, and dispatch admission denies
+	// new dispatches at that point; this notice tells the operator why.
+	const unsubscribeBudgetAlert = deps.bus.on(BusChannels.BudgetAlert, (payload) => {
+		const notice = budgetAlertNotice(payload);
+		if (notice === null) return;
+		appendNotice(notice.level, notice.text, busNoticeSink);
+		tui.requestRender();
+	});
+	// Safety-policy block visibility. The transcript shows the rejection the
+	// model received; this notice adds the policy dimension (rule, action
+	// class, policy source) so the operator can tell which rule fired.
+	const unsubscribeSafetyBlocked = deps.bus.on(BusChannels.SafetyBlocked, (payload) => {
+		const notice = safetyBlockedNotice(payload);
+		if (notice === null) return;
+		appendNotice(notice.level, notice.text, busNoticeSink);
+		tui.requestRender();
+	});
+	// Middleware hook diagnostics. A throwing or budget-overrunning hook never
+	// breaks the turn, so without this warn notice a misbehaving guard or
+	// assessor would be invisible in interactive sessions (the composition
+	// root only writes stderr for non-interactive runs).
+	const seenMiddlewareBudgetWarnings = new Set<string>();
+	const unsubscribeMiddlewareHookFailed = deps.bus.on(BusChannels.MiddlewareHookFailed, (payload) => {
+		const notice = middlewareHookFailedSessionNotice(payload, seenMiddlewareBudgetWarnings);
+		if (notice === null) return;
+		appendNotice(notice.level, notice.text, busNoticeSink);
+		tui.requestRender();
+	});
+
+	let activeContextInit = false;
+
+	const appendCommandNotice: SlashCommandContext["notice"] = (level, text) => {
+		appendNotice(level, text, {
+			appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
+			requestRender: () => tui.requestRender(),
+		});
+	};
+
+	const slashCtx: SlashCommandContext = {
+		io,
+		notice: appendCommandNotice,
+		dispatch: deps.dispatch,
+		bus: deps.bus,
+		workerDefault: () => deps.getWorkerDefault?.(),
+		shutdown: () => {
+			void shutdown();
+		},
+		listPrompts: () => deps.resources?.prompts(process.cwd()) ?? { items: [], diagnostics: [] },
+		openSkillsHub: () => openSkillsHubState(),
+		listExtensions: () => deps.extensions?.list(process.cwd(), { all: true }) ?? [],
+		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
+		listDelegationAgents: () => deps.getSettings?.().delegation.agents ?? [],
+		exportShareArchive: (outPath) => {
+			if (!deps.share) throw new Error("share domain is not loaded");
+			const path = resolve(outPath);
+			const archive = deps.share.writeArchive(path, { scope: "project" });
+			return { fileCount: archive.files.length, path };
+		},
+		importShareArchive: (archivePath, options) => {
+			if (!deps.share) {
+				return {
+					archive: null,
+					actions: [],
+					diagnostics: [{ type: "error", message: "share domain is not loaded" }],
+				};
+			}
+			const importOptions = {
+				...(options.dryRun ? { dryRun: true } : {}),
+				...(options.force ? { force: true } : {}),
+			};
+			return options.dryRun
+				? deps.share.planImport(resolve(archivePath), importOptions)
+				: deps.share.importArchive(resolve(archivePath), importOptions);
+		},
+		openProviders: () => openProvidersOverlayState(),
+		openCost: () => openCostOverlayState(),
+		openContextView: () => openContextViewOverlayState(),
+		openFleet: () => openFleetOverlayState(),
+		openTasks: () => openTasksOverlayState(),
+		openMemory: () => openMemoryOverlayState(),
+		seedTaskMemory: () => {
+			const result = deps.seedTaskMemory?.() ?? { status: "not-found" as const };
+			footer.refresh();
+			tui.requestRender();
+			return result;
+		},
+		openView: (filter) => openViewOverlayState(filter),
+		openThinking: () => openThinkingOverlayState(),
+		setOutputVerbosity: (verbosity) => {
+			if (!verbosity || !deps.getSettings || !deps.writeSettings) {
+				appendCommandNotice("info", "usage: /output minimal|default|verbose");
+				return;
+			}
+			const next = structuredClone(deps.getSettings()) as ClioSettings;
+			if (verbosity !== "minimal" && verbosity !== "default" && verbosity !== "verbose") {
+				appendCommandNotice("error", "usage: /output minimal|default|verbose");
+				return;
+			}
+			next.terminal.outputVerbosity = verbosity;
+			deps.writeSettings(next);
+			appendCommandNotice("success", `output detail: ${verbosity}`);
+			tui.requestRender();
+		},
+		openModel: () => openModelOverlayState(),
+		providers: deps.providers,
+		applyModelRef: (ref) => {
+			deps.onSelectModel?.({ target: ref.target, model: ref.model });
+			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel);
+			tui.requestRender();
+		},
+		openScopedModels: () => openScopedModelsOverlayState(),
+		openSettings: () => openSettingsOverlayState(),
+		openResume: () => openResumeOverlayState(),
+		startNewSession: () => startNewSession(),
+		openTree: () => openTreeOverlayState(),
+		openMessagePicker: () => openMessagePickerOverlayState(),
+		openHelp: (query?: string) => openHelpOverlayState(query),
+		openAgents: () => openAgentsOverlayState(),
+		openPrompts: () => openPromptsOverlayState(),
+		openExtensions: () => openExtensionsOverlayState(),
+		setEditorText: (text) => {
+			editor.setText(text);
+			tui.requestRender();
+		},
+		runCompact: (instructions) => {
+			runCompactWithNotice(deps.onCompact, appendCommandNotice, instructions);
+		},
+		exportTranscript: (pathArg) => {
+			const sessionId = deps.chat.getSessionId();
+			if (!sessionId) {
+				appendCommandNotice("error", "[/export] no active session to export");
+				return;
+			}
+			try {
+				const turns = readStructuredEntries(sessionId);
+				// Same pure render pipeline as the live panel and /resume replay:
+				// a throwaway panel rehydrated from the ledger, every tool segment
+				// expanded, rendered at a fixed width, ANSI stripped. Unlike the
+				// live view, export renders full tool bodies (no middle-elision or
+				// char truncation) so the transcript reproduces the complete output.
+				const exportPanel = createChatPanel({ unboundedToolBodies: true });
+				rehydrateChatPanelFromTurns(exportPanel, turns, { unboundedToolBodies: true });
+				exportPanel.toggleAllToolsExpanded();
+				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripAnsiForExport);
+				const date = new Date().toISOString().slice(0, 10);
+				const target = resolve(
+					pathArg && pathArg.trim().length > 0 ? pathArg.trim() : join(".clio", "exports", `${sessionId}-${date}.md`),
+				);
+				mkdirSync(resolve(target, ".."), { recursive: true });
+				const header = [`# Clio session ${sessionId}`, "", `Exported ${new Date().toISOString()}`, "", "```text"];
+				writeFileSync(target, `${[...header, ...lines, "```", ""].join("\n")}`, "utf8");
+				appendCommandNotice("success", `[/export] wrote ${lines.length} lines to ${target}`);
+			} catch (err) {
+				appendCommandNotice("error", `[/export] ${err instanceof Error ? err.message : String(err)}`);
+			}
+		},
+		runInit: (options) => {
+			const onInit = deps.onInit;
+			if (!onInit) {
+				io.stderr("[/context init] context init not wired; pass onInit to startInteractive\n");
+				return;
+			}
+			if (activeContextInit) {
+				io.stderr("[/context init] bootstrap already running\n");
+				return;
+			}
+			activeContextInit = true;
+			void Promise.resolve()
+				.then(() => onInit(options, io))
+				.then(() => {
+					dismissContextBootstrapNotices();
+					footer.refresh();
+				})
+				.catch((err) => {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/context init] ${msg}\n`);
+				})
+				.finally(() => {
+					activeContextInit = false;
+					tui.requestRender();
+				});
+		},
+		runContextClear: () => {
+			if (!deps.onContextClear) {
+				io.stderr("[/context reset] context reset not wired; pass onContextClear to startInteractive\n");
+				return;
+			}
+			openContextResetOverlayState();
+		},
+		runContextRefresh: () => {
+			if (!deps.onContextRefresh) {
+				io.stderr("[/context refresh] context refresh not wired; pass onContextRefresh to startInteractive\n");
+				return;
+			}
+			void deps
+				.onContextRefresh()
+				.catch((err) => {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/context refresh] ${msg}\n`);
+				})
+				.finally(() => tui.requestRender());
+		},
+		verifyReceipt: (runId) => verifyReceiptFile(deps.stateDir, runId),
+		submitChat: (text) => {
+			const runSubmit = (sub: InteractiveSubmitExpansion) => {
+				void (async () => {
+					try {
+						recordSubmittedTurn();
+						footer.refresh();
+						chatPanel.appendUser(sub.text);
+						tui.requestRender();
+						await deps.chat.submit(sub.text, {
+							...(sub.images.length > 0 ? { images: sub.images } : {}),
+							...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
+							...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
+						});
+					} catch (err) {
+						const msg = err instanceof Error ? err.message : String(err);
+						io.stderr(`[interactive] chat failed: ${msg}\n`);
+					} finally {
+						tui.requestRender();
+					}
+				})();
+			};
+
+			void (async () => {
+				try {
+					const submitted = await expandInteractiveSubmitAsync(text, deps.resources);
+					const uninstalled = submitted.pendingSkillRequests.find((r) => !r.installed);
+					if (uninstalled && !uninstalled.marketplaceRef) {
+						io.stderr(`Skill "${uninstalled.name}" is not installed and no local marketplace entry is available.\n`);
+						return;
+					}
+					if (uninstalled) {
+						void openAskUserOverlayState([
+							{
+								question: `Skill "${uninstalled.name}" is not installed. Would you like to install it?`,
+								options: [
+									{
+										label: "Install and run",
+										description: `Install from ${uninstalled.marketplaceRef}`,
+									},
+									{ label: "Cancel", description: "Do not install." },
+								],
+							},
+						]).then((res) => {
+							if (res.cancelled || res.answers[0]?.answer !== "Install and run") {
+								io.stderr("Installation cancelled.\n");
+								return;
+							}
+							void (async () => {
+								try {
+									io.stdout(`Installing skill "${uninstalled.name}"...\n`);
+									let configDir: string | undefined;
+									try {
+										configDir = clioConfigDir();
+									} catch (configErr) {
+										io.stderr(
+											`Skill install: config dir unavailable (${configErr instanceof Error ? configErr.message : String(configErr)}); continuing without it.\n`,
+										);
+									}
+									installSkill({
+										source: uninstalled.name,
+										cwd: process.cwd(),
+										...(configDir ? { configDir } : {}),
+									});
+									io.stdout(`Successfully installed "${uninstalled.name}"!\n`);
+									await deps.resources?.reload();
+									const postInstallSubmitted = await expandInteractiveSubmitAsync(text, deps.resources);
+									runSubmit(postInstallSubmitted);
+								} catch (err) {
+									io.stderr(
+										`Failed to install skill "${uninstalled.name}": ${err instanceof Error ? err.message : String(err)}\n`,
+									);
+								}
+							})();
+						});
+						return;
+					}
+
+					runSubmit(submitted);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[interactive] chat failed: ${msg}\n`);
+					tui.requestRender();
+				}
+			})();
+		},
+		render: () => tui.requestRender(),
+	};
+
+	const editorSubmit = createEditorSubmitController({
+		editor,
+		ui: tui,
+		io,
+		chat: deps.chat,
+		dispatch: deps.dispatch,
+		...(deps.session ? { session: deps.session } : {}),
+		sessionTranscript,
+		chatPanel,
+		dispatchCommand: (text) => dispatchSlashCommand(parseSlashCommand(text), slashCtx),
+		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
+		notify,
+	});
+	const { openExternalEditorForInput, queueFollowUpFromEditor, restoreQueuedFollowUpsToEditor, submitEditorText } =
+		editorSubmit;
+
+	editor.onSubmit = submitEditorText;
+
+	const root = buildLayout({ banner, chat: chatPanel, pending: followUpQueuePanel, editor, footer: footer.view });
+	tui.addChild(root);
+	tui.setFocus(editor);
+	tui.start();
+
+	let footerTicker: NodeJS.Timeout | null = null;
+	footerTicker = setInterval(() => {
+		const statusActive = statusController.current().phase !== "idle";
+		if (!deps.chat.isStreaming() && !statusActive && !footer.isExpanded()) return;
+		footer.refresh();
+		tui.requestRender();
+	}, 120);
+	footerTicker.unref?.();
+
+	// Running expanded/collapsed tool segments show live elapsed time; refresh
+	// the transcript once per second while a turn is streaming so the elapsed
+	// counter ticks without waiting for the next agent event.
+	let toolElapsedTicker: NodeJS.Timeout | null = null;
+	toolElapsedTicker = setInterval(() => {
+		if (!deps.chat.isStreaming()) return;
+		chatPanel.invalidate?.();
+		tui.requestRender();
+	}, 1_000);
+	toolElapsedTicker.unref?.();
+
+	let workspaceTicker: NodeJS.Timeout | null = null;
+	workspaceTicker = setInterval(() => {
+		refreshLiveWorkspaceGit(true);
+		footer.refresh();
+		tui.requestRender();
+	}, 5_000);
+	workspaceTicker.unref?.();
+
+	let resolveRun: (code: number) => void = () => {};
+	const run = new Promise<number>((resolve) => {
+		resolveRun = resolve;
+	});
+
+	// Anchor the Node event loop while the TUI is alive. Piped or /dev/null
+	// stdin (used by diag harnesses) can close early, which would otherwise
+	// let the process exit before the termination coordinator runs.
+	const keepAlive = setInterval(() => {}, 1 << 30);
+
+	let overlayState: OverlayState = "closed";
+	let overlayHandle: OverlayHandle | null = null;
+	let authDialogDismiss: (() => void) | null = null;
+	let authReturnOverlayHandle: OverlayHandle | null = null;
+	let authCloseResolve: (() => void) | null = null;
+	let shuttingDown = false;
+	let lastCtrlCAt = 0;
+	const leaderKeys = createLeaderKeyController({
+		matchesLeader: (input) => keybindings.matches(input, "clio.leader"),
+		leaderTargets: () => keybindings.leaderTargets(),
+		dispatchAction: (id) => dispatchInteractiveAction(id, keyActionDeps()),
+		isRelease: isKeyRelease,
+	});
+	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision; meta?: PermissionRequiredMeta } | null = null;
+	// A parked worker escalation currently shown in the permission overlay. When
+	// set, the overlay's confirm/deny routes to resolveWorkerPermission over the
+	// dispatch contract instead of the local tool registry. Additional
+	// escalations that arrive while the overlay is busy wait in the queue.
+	let pendingWorkerEscalation: { runId: string; requestId: string; agentId: string } | null = null;
+	const workerEscalationQueue: Array<{
+		runId: string;
+		requestId: string;
+		agentId: string;
+		tool: string;
+		actionClass: string;
+		axis: ApprovalRequestView["axis"];
+		reason: string;
+	}> = [];
+	const announcedPermissionRequestIds = new Set<string>();
+	let permissionConfirmJustFired = false;
+	let pendingAskUserCancel: (() => void) | null = null;
+	let askUserSession: ReturnType<typeof openAskUserOverlay> | null = null;
+	let askUserCancelledForTurn = false;
+	let unregisterAskUserHandler: (() => void) | null = null;
+	process.removeAllListeners("SIGINT");
+	const interactiveTickers = createInteractiveTickers({
+		tui,
+		dispatchBoardStore,
+		contextActivityStore,
+		getOverlayState: () => overlayState,
+		isFooterExpanded: () => footer.isExpanded(),
+	});
+
+	const finishAuthOverlay = (dismiss: boolean): void => {
+		if (overlayState !== "auth") return;
+		if (dismiss) authDialogDismiss?.();
+		authDialogDismiss = null;
+		const authHandle = overlayHandle;
+		const returnHandle = authReturnOverlayHandle;
+		authReturnOverlayHandle = null;
+		overlayHandle = returnHandle;
+		overlayState = returnHandle ? "providers" : "closed";
+		authHandle?.hide();
+		const resolveAuthClose = authCloseResolve;
+		authCloseResolve = null;
+		resolveAuthClose?.();
+		footer.refresh();
+		interactiveTickers.renderContextIsland();
+		interactiveTickers.renderTaskIsland();
+		tui.requestRender();
+	};
+
+	const closeOverlay = (): void => {
+		if (overlayState === "closed") return;
+		if (overlayState === "ask-user" && pendingAskUserCancel) {
+			pendingAskUserCancel();
+			return;
+		}
+		if (overlayState === "auth") {
+			finishAuthOverlay(true);
+			return;
+		}
+		const leaving = overlayState;
+		overlayState = "closed";
+		interactiveTickers.stopDispatchBoardTicker();
+		overlayHandle?.hide();
+		overlayHandle = null;
+		if (leaving === "permission-confirm") {
+			const permission = pendingPermission;
+			const confirmed = permissionConfirmJustFired;
+			const workerEscalation = pendingWorkerEscalation;
+			pendingPermission = null;
+			pendingWorkerEscalation = null;
+			permissionConfirmJustFired = false;
+			if (workerEscalation) {
+				// The worker owns the resolution: send the decision down its stdin.
+				// It emits clio_permission_resolved, which dispatch republishes on
+				// the bus, so no PermissionResolved is emitted here.
+				try {
+					deps.dispatch.resolveWorkerPermission?.(
+						workerEscalation.runId,
+						workerEscalation.requestId,
+						confirmed ? "approve" : "deny",
+					);
+				} catch (err) {
+					appendNotice(
+						"warn",
+						`Could not deliver permission decision to run ${workerEscalation.runId}: ${err instanceof Error ? err.message : String(err)}`,
+						busNoticeSink,
+					);
+				}
+			} else if (confirmed && permission) {
+				deps.bus.emit(BusChannels.PermissionResolved, {
+					status: "granted",
+					...(permission.meta ? { requestId: permission.meta.requestId } : {}),
+					origin: "main",
+					decidedBy: "operator",
+					tool: permission.call.tool,
+					actionClass: permission.decision.classification.actionClass,
+					requestedBy: "tool",
+					at: Date.now(),
+				});
+				// The grant covers exactly this parked call: flip its segment back to
+				// the running style before the body executes so the approval gap
+				// never renders as lingering "awaiting approval" on live work.
+				if (permission.meta?.toolCallId !== undefined) {
+					chatRenderer.applyEvent({
+						type: "tool_approval_state",
+						toolCallId: permission.meta.toolCallId,
+						state: "resumed",
+					});
+				}
+				void deps.toolRegistry?.resumeParkedCalls({
+					actionClass: permission.decision.classification.actionClass,
+					...(permission.meta ? { requestId: permission.meta.requestId } : {}),
+					requestedBy: "tool:one_shot",
+				});
+			} else {
+				const cancellationReason =
+					"User cancelled this tool call from the permission confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.";
+				deps.bus.emit(BusChannels.PermissionResolved, {
+					status: "denied",
+					...(permission?.meta ? { requestId: permission.meta.requestId } : {}),
+					origin: "main",
+					decidedBy: "operator",
+					...(permission ? { tool: permission.call.tool } : {}),
+					...(permission ? { actionClass: permission.decision.classification.actionClass } : {}),
+					reason: "operator cancelled",
+					requestedBy: "tool",
+					at: Date.now(),
+				});
+				if (permission?.meta) deps.toolRegistry?.cancelParkedCall(permission.meta.requestId, cancellationReason);
+				else deps.toolRegistry?.cancelParkedCalls(cancellationReason);
+			}
+		}
+		// A worker escalation that arrived while the overlay was busy waits its turn.
+		maybeOpenWorkerEscalation();
+		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls()) {
+			deps.toolRegistry.renotifyHead();
+		}
+		interactiveTickers.renderContextIsland();
+		interactiveTickers.renderTaskIsland();
+		tui.requestRender();
+	};
+
+	const dispatchSteering = createDispatchSteering({
+		getSelectedRow: () => dispatchBoard.selectedRow(),
+		notify,
+		abortDispatch: (runId) => deps.dispatch.abort(runId),
+		editor,
+		closeOverlay,
+		requestRender: () => tui.requestRender(),
+	});
+	const { cancelSelectedDispatch, steerSelectedDispatch } = dispatchSteering;
+
+	const cancelActiveRun = (): void => {
+		deps.chat.cancel();
+		deps.toolRegistry?.cancelParkedCalls("run cancelled by operator");
+		footer.refresh();
+		tui.requestRender();
+	};
+
+	const maybeOpenExternalUrl = (url: string): void => {
+		const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+		exec(`${opener} "${url.replace(/"/g, '\\"')}"`, () => {
+			// Best effort only.
+		});
+	};
+
+	const resolveConnectionReference = (target: string) => {
+		const settings = deps.getSettings?.();
+		if (!settings) return null;
+		return resolveProviderReference(
+			target,
+			settings,
+			(runtimeId) => deps.providers.getRuntime(runtimeId) ?? getRuntimeRegistry().get(runtimeId),
+		);
+	};
+
+	const openConnectFlowState = async (reference: string): Promise<void> => {
+		if (overlayState !== "closed" && overlayState !== "providers") return;
+		const returnHandle = overlayState === "providers" ? overlayHandle : null;
+		const resolved = resolveConnectionReference(reference);
+		if (!resolved?.target) {
+			notify("warning", `connect: unknown target ${reference}. Add it with clio targets add.`, `connect:${reference}`);
+			return;
+		}
+		const target = resolved.target;
+		const runtime = resolved.runtime;
+		const authTarget = resolved.authTarget;
+		const targetId = target.id;
+		const runtimeId = runtime.id;
+		await new Promise<void>((resolveAuthFlow) => {
+			const dialog = openAuthDialog(tui, `Connect ${targetId}`, () => closeOverlay());
+			authReturnOverlayHandle = returnHandle;
+			authCloseResolve = resolveAuthFlow;
+			overlayState = "auth";
+			overlayHandle = dialog.handle;
+
+			const probeTarget = async (): Promise<void> => {
+				dialog.controller.setLines([`Target: ${targetId}`, `Runtime: ${runtimeId}`, "Checking target..."]);
+				const status = await deps.providers.probeTarget(targetId);
+				if (!status) {
+					dialog.controller.setLines([`Target: ${targetId}`, "Target check failed: target is not configured."]);
+					notify("error", `connect: ${targetId} is not configured`, `connect:${targetId}`);
+					return;
+				}
+				const health = status.health.status;
+				const detail =
+					status.reason ||
+					status.health.lastError ||
+					(status.health.latencyMs !== null ? `${status.health.latencyMs}ms` : "no details");
+				dialog.controller.setLines([
+					`Target: ${targetId}`,
+					`Runtime: ${runtimeId}`,
+					status.available ? `Target ready (${health})` : `Target check failed (${health})`,
+					detail,
+				]);
+				notify(
+					status.available ? "info" : "warning",
+					status.available ? `connected ${targetId} (${health})` : `connect ${targetId} failed (${health})`,
+					`connect:${targetId}`,
+				);
+				footer.refresh();
+				tui.requestRender();
+			};
+
+			const selectOAuthOption = async (
+				prompt: OAuthSelectPrompt,
+				prefix: ReadonlyArray<string>,
+			): Promise<string | undefined> => {
+				const defaultId = prompt.options[0]?.id;
+				if (!defaultId) return undefined;
+				const ids = new Set(prompt.options.map((option) => option.id));
+				const baseLines = [
+					...prefix,
+					prompt.message,
+					...prompt.options.map((option, index) => {
+						const marker = option.id === defaultId ? "*" : " ";
+						return `${marker} ${String(index + 1).padStart(2)}. ${option.label} (${option.id})`;
+					}),
+				];
+				let errorLine: string | null = null;
+				for (;;) {
+					dialog.controller.setLines(errorLine ? [...baseLines, errorLine] : baseLines);
+					const answer = (await dialog.controller.prompt(`Selection (number or id, q to cancel) [${defaultId}]`)).trim();
+					if (answer.length === 0) return defaultId;
+					if (answer === "q" || answer === "quit" || answer === "cancel") return undefined;
+					const numeric = Number(answer);
+					if (Number.isInteger(numeric) && numeric >= 1 && numeric <= prompt.options.length) {
+						return prompt.options[numeric - 1]?.id;
+					}
+					if (ids.has(answer)) return answer;
+					errorLine = `Unknown selection: ${answer}`;
+				}
+			};
+
+			const requiresManagedAuth = targetRequiresAuth(target, runtime);
+			const authStatus = deps.providers.auth.statusForTarget(target, runtime);
+			if (!requiresManagedAuth || authStatus.available) {
+				void (async () => {
+					try {
+						await probeTarget();
+					} catch (error) {
+						dialog.controller.setLines([
+							`Target: ${targetId}`,
+							`Target check failed: ${error instanceof Error ? error.message : String(error)}`,
+						]);
+						tui.requestRender();
+					} finally {
+						finishAuthOverlay(false);
+					}
+				})();
+				tui.requestRender();
+				return;
+			}
+			if (resolved.runtime.auth === "api-key") {
+				authDialogDismiss = dialog.controller.dismiss;
+				dialog.controller.setLines([
+					`Target: ${targetId}`,
+					`Runtime: ${runtime.id}`,
+					"API key required before Clio can connect to this target.",
+				]);
+				void (async () => {
+					try {
+						const apiKey = (await dialog.controller.prompt("API key")).trim();
+						if (apiKey.length === 0) throw new Error("empty API key");
+						deps.providers.auth.setApiKey(authTarget.providerId, apiKey);
+						authDialogDismiss = null;
+						await probeTarget();
+					} catch (error) {
+						const message = error instanceof Error ? error.message : String(error);
+						if (message !== "dismissed" && message !== "cancelled") {
+							notify("error", `connect ${targetId}: ${message}`, `connect:${targetId}`);
+						}
+					} finally {
+						authDialogDismiss = null;
+						finishAuthOverlay(false);
+					}
+				})();
+				tui.requestRender();
+				return;
+			}
+			authDialogDismiss = dialog.controller.dismiss;
+			dialog.controller.setLines([`Target: ${targetId}`, `Runtime: ${runtime.id}`, "Starting authorization flow..."]);
+			void (async () => {
+				let manualCodeTimer: NodeJS.Timeout | null = null;
+				try {
+					await deps.providers.auth.login(authTarget.providerId, {
+						onAuth: ({ url, instructions }) => {
+							dialog.controller.setLines(
+								[
+									`Open: ${url}`,
+									instructions ?? "Complete sign-in in your browser.",
+									"Waiting for the browser callback. A manual code prompt will appear if needed.",
+								].filter(Boolean),
+							);
+							maybeOpenExternalUrl(url);
+						},
+						onDeviceCode: ({ verificationUri, userCode }) => {
+							dialog.controller.setLines([
+								`Open: ${verificationUri}`,
+								`Enter code: ${userCode}`,
+								"Waiting for authentication...",
+							]);
+							maybeOpenExternalUrl(verificationUri);
+						},
+						onPrompt: async (prompt) => (await dialog.controller.prompt(prompt.message)).trim(),
+						onSelect: (prompt) => selectOAuthOption(prompt, [`Target: ${targetId}`, `Runtime: ${runtime.id}`]),
+						onManualCodeInput: async () =>
+							await new Promise<string>((resolve, reject) => {
+								manualCodeTimer = setTimeout(() => {
+									manualCodeTimer = null;
+									dialog.controller
+										.prompt("Verification code")
+										.then((value) => resolve(value.trim()))
+										.catch(reject);
+								}, 10_000);
+								manualCodeTimer.unref?.();
+							}),
+						onProgress: (message) => {
+							dialog.controller.appendLine(message);
+						},
+					});
+					authDialogDismiss = null;
+					await probeTarget();
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					if (message !== "dismissed" && message !== "cancelled") {
+						notify("error", `connect ${targetId}: ${message}`, `connect:${targetId}`);
+					}
+				} finally {
+					if (manualCodeTimer) {
+						clearTimeout(manualCodeTimer);
+					}
+					authDialogDismiss = null;
+					finishAuthOverlay(false);
+				}
+			})();
+			tui.requestRender();
+		});
+	};
+
+	const currentAutonomy = (): string => deps.getSettings?.().autonomy ?? "auto-edit";
+
+	const axisViewFromId = (axisId: string | undefined, fallbackLevel: string): ApprovalRequestView["axis"] | null => {
+		if (axisId?.startsWith("net:")) {
+			const ruleId = axisId.slice("net:".length);
+			return { kind: "net", ruleId: ruleId.length > 0 ? ruleId : "unknown" };
+		}
+		if (axisId?.startsWith("autonomy:")) {
+			const level = axisId.slice("autonomy:".length);
+			return { kind: "autonomy", level: level.length > 0 ? level : fallbackLevel };
+		}
+		return null;
+	};
+
+	const mainApprovalRequestView = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		meta: PermissionRequiredMeta | undefined,
+		autonomy: string,
+	): ApprovalRequestView => {
+		const axisFromMeta = axisViewFromId(meta?.axis, autonomy);
+		const axisFromDecision = askAxis(decision);
+		const axis =
+			axisFromMeta ??
+			(axisFromDecision.kind === "net"
+				? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
+				: { kind: "autonomy" as const, level: autonomy });
+		const queueDepth = deps.toolRegistry?.parkedCount();
+		const target = describeCallTarget(call.args);
+		return {
+			requestId: meta?.requestId ?? "permission-pending",
+			tool: call.tool,
+			actionClass: decision.classification.actionClass,
+			axis,
+			origin: { kind: "main" },
+			reason:
+				decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${decision.classification.actionClass}`,
+			...(call.tool === ToolNames.Dispatch && decision.kind === "ask"
+				? { artifact: { kind: "dispatch-plan" as const, text: decision.rejection.detail } }
+				: {}),
+			...(target.length > 0 ? { target } : {}),
+			...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
+		};
+	};
+
+	const openPermissionOverlay = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		meta?: PermissionRequiredMeta,
+	): void => {
+		if (overlayState !== "closed") return;
+		pendingPermission = { call, decision, ...(meta ? { meta } : {}) };
+		permissionConfirmJustFired = false;
+		overlayState = "permission-confirm";
+		overlayHandle = showClioOverlayFrame(
+			tui,
+			createPermissionOverlayBody(mainApprovalRequestView(call, decision, meta, currentAutonomy())),
+			{
+				anchor: "center",
+				width: PERMISSION_OVERLAY_WIDTH,
+				title: permissionOverlayTitle(),
+				footerHint: buildHint("commit", [{ key: "Enter", verb: "allow once" }]),
+			},
+		);
+		tui.requestRender();
+	};
+
+	const unsubscribePermissionRequired =
+		deps.toolRegistry?.onPermissionRequired((call, decision, meta) => {
+			// Re-notifies reopen overlays, but the transcript names each request
+			// once so tail wakeups do not print duplicate approval notices.
+			if (shouldAnnouncePermissionRequest(announcedPermissionRequestIds, meta.requestId)) {
+				const parkedNotice = approvalParkedNotice(call.tool, decision, currentAutonomy());
+				appendNotice(parkedNotice.level, parkedNotice.text, busNoticeSink);
+			}
+			// Restyle the parked call's transcript segment: pi already emitted its
+			// tool_execution_start, so without this the segment counts as running
+			// while the body sits at the gate. Idempotent under renotifyHead.
+			if (meta.toolCallId !== undefined) {
+				chatRenderer.applyEvent({ type: "tool_approval_state", toolCallId: meta.toolCallId, state: "awaiting-approval" });
+			}
+			openPermissionOverlay(call, decision, meta);
+		}) ?? (() => {});
+
+	const openWorkerPermissionOverlay = (entry: {
+		runId: string;
+		requestId: string;
+		agentId: string;
+		tool: string;
+		actionClass: string;
+		axis: ApprovalRequestView["axis"];
+		reason: string;
+		target?: string;
+	}): void => {
+		if (overlayState !== "closed") return;
+		pendingWorkerEscalation = { runId: entry.runId, requestId: entry.requestId, agentId: entry.agentId };
+		pendingPermission = null;
+		permissionConfirmJustFired = false;
+		overlayState = "permission-confirm";
+		overlayHandle = showClioOverlayFrame(
+			tui,
+			createPermissionOverlayBody({
+				requestId: entry.requestId,
+				tool: entry.tool,
+				actionClass: entry.actionClass,
+				axis: entry.axis,
+				origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId },
+				reason: entry.reason,
+				...(entry.target !== undefined && entry.target.length > 0 ? { target: entry.target } : {}),
+			}),
+			{
+				anchor: "center",
+				width: PERMISSION_OVERLAY_WIDTH,
+				title: permissionOverlayTitle(),
+				footerHint: buildHint("commit", [{ key: "Enter", verb: "allow once" }]),
+			},
+		);
+		tui.requestRender();
+	};
+
+	const maybeOpenWorkerEscalation = (): void => {
+		if (overlayState !== "closed") return;
+		const next = workerEscalationQueue.shift();
+		if (next) openWorkerPermissionOverlay(next);
+	};
+
+	// Worker permission escalations arrive as PermissionRequested bus events
+	// carrying a run id in requestedBy. Main-agent asks (no requestId) are driven
+	// by the tool registry above and are ignored here. Headless sessions have no
+	// subscriber, so the worker's timeout fallback governs there.
+	const unsubscribeWorkerEscalation = deps.bus.on(BusChannels.PermissionRequested, (payload) => {
+		if (!isLiveWorkerEscalationRequest(payload)) return;
+		const requestId = payload.requestId;
+		if (typeof requestId !== "string") return;
+		const origin = typeof payload.origin === "string" ? payload.origin : undefined;
+		const legacyWorkerEvent = origin === undefined && typeof payload.requestedBy === "string";
+		if (!(origin?.startsWith("worker:") || legacyWorkerEvent)) return;
+		const runId = typeof payload.requestedBy === "string" ? payload.requestedBy : origin?.slice("worker:".length);
+		if (!runId) return;
+		const entry = {
+			runId,
+			requestId,
+			agentId: typeof payload.agentId === "string" ? payload.agentId : "worker",
+			tool: typeof payload.tool === "string" ? payload.tool : "unknown",
+			actionClass: typeof payload.actionClass === "string" ? payload.actionClass : "unknown",
+			axis:
+				axisViewFromId(typeof payload.axis === "string" ? payload.axis : undefined, currentAutonomy()) ??
+				(typeof payload.ruleId === "string"
+					? { kind: "net" as const, ruleId: payload.ruleId }
+					: { kind: "autonomy" as const, level: currentAutonomy() }),
+			reason:
+				payload.rejection?.short ??
+				(typeof payload.summary === "string" ? payload.summary : `${payload.tool ?? "worker"} requires approval`),
+			// The preview crossed the worker's stdout, an untrusted seam, so it is
+			// re-sanitized here before it can style the overlay that approves it.
+			...(typeof payload.target === "string" && payload.target.length > 0
+				? { target: sanitizeCallTargetText(payload.target).slice(0, 200) }
+				: {}),
+		};
+		const notice = workerEscalationNotice(payload);
+		if (notice !== null) appendNotice(notice.level, notice.text, busNoticeSink);
+		workerEscalationQueue.push(entry);
+		maybeOpenWorkerEscalation();
+	});
+
+	// Autonomy auto-denials (read-only) never park, so without this notice the
+	// only trace is the rejection in the transcript, which reads like a model
+	// error rather than the dial doing its job.
+	const unsubscribeAutonomyDenied =
+		deps.toolRegistry?.onAutonomyDenied((_call, decision, level) => {
+			const notice = autonomyDeniedNotice(decision, level);
+			appendNotice(notice.level, notice.text, busNoticeSink);
+			tui.requestRender();
+		}) ?? (() => {});
+
+	const closeAskUserSession = (): void => {
+		pendingAskUserCancel = null;
+		const session = askUserSession;
+		askUserSession = null;
+		if (session) {
+			session.close();
+			if (overlayHandle === session) overlayHandle = null;
+		} else if (overlayState === "ask-user") {
+			overlayHandle?.hide();
+			overlayHandle = null;
+		}
+		if (overlayState === "ask-user") overlayState = "closed";
+		interactiveTickers.renderContextIsland();
+		interactiveTickers.renderTaskIsland();
+		tui.requestRender();
+	};
+
+	const ensureAskUserSession = (): ReturnType<typeof openAskUserOverlay> | null => {
+		if (overlayState !== "closed" && overlayState !== "ask-user") return null;
+		if (askUserSession) return askUserSession;
+		overlayState = "ask-user";
+		askUserSession = openAskUserOverlay(tui, {
+			onCancel: () => {
+				pendingAskUserCancel?.();
+			},
+		});
+		overlayHandle = askUserSession;
+		tui.requestRender();
+		return askUserSession;
+	};
+
+	const cancelAskUserSession = (): void => {
+		askUserCancelledForTurn = true;
+		const session = askUserSession;
+		session?.cancel();
+		closeAskUserSession();
+	};
+
+	const openAskUserOverlayState: AskUserHandler = async (questions, invokeOptions) => {
+		const toolBacked = Boolean(invokeOptions?.turnId || invokeOptions?.toolCallId);
+		if (toolBacked && askUserCancelledForTurn) return cancelledAskUserResult();
+		const session = ensureAskUserSession();
+		if (!session) return cancelledAskUserResult();
+		pendingAskUserCancel = cancelAskUserSession;
+		const result = await session.ask(questions);
+		if (result.cancelled === true || !toolBacked) {
+			if (result.cancelled === true) askUserCancelledForTurn = true;
+			closeAskUserSession();
+		} else {
+			interactiveTickers.renderContextIsland();
+			interactiveTickers.renderTaskIsland();
+			tui.requestRender();
+		}
+		return result;
+	};
+	unregisterAskUserHandler = deps.registerAskUserHandler?.(openAskUserOverlayState) ?? null;
+
+	const openProvidersOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "providers";
+		overlayHandle = openProvidersOverlay(tui, deps.providers, {
+			bus: deps.bus,
+			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+			...(deps.writeSettings
+				? {
+						writeSettings: (next) => {
+							deps.writeSettings?.(next);
+							footer.refresh();
+						},
+					}
+				: {}),
+			connectTarget: (targetId) => openConnectFlowState(targetId),
+			notice: notify,
+		});
+		tui.requestRender();
+	};
+
+	const openCostOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "cost";
+		overlayHandle = openCostOverlay(tui, deps.observability, {
+			sessionId: deps.getSessionId?.() ?? null,
+		});
+		tui.requestRender();
+	};
+
+	const openContextViewOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "context-view";
+		overlayHandle = openContextOverlay(tui, () => deps.chat.contextLedger(), { bus: deps.bus, chat: deps.chat });
+		tui.requestRender();
+	};
+
+	const openContextResetOverlayState = (): void => {
+		if (overlayState !== "closed" || !deps.onContextClear) return;
+		overlayState = "context-reset";
+		overlayHandle = openContextResetOverlay(tui, {
+			onReset: (choice) => {
+				closeOverlay();
+				const onContextClear = deps.onContextClear;
+				if (!onContextClear) return;
+				void Promise.resolve()
+					.then(() => onContextClear(contextResetOptions(choice)))
+					.catch((err) => {
+						const msg = err instanceof Error ? err.message : String(err);
+						io.stderr(`[/context reset] ${msg}\n`);
+					})
+					.finally(() => {
+						footer.refresh();
+						tui.requestRender();
+					});
+			},
+			onCancel: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const toggleFooterDashboardState = (): void => {
+		if (overlayState !== "closed") return;
+		footer.toggleExpanded();
+		interactiveTickers.renderTaskIsland();
+		tui.requestRender();
+	};
+
+	const openTasksOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "tasks";
+		overlayHandle = openTasksOverlay(tui, () => deps.getTaskBoard?.() ?? null, {
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openMemoryOverlayState = (): void => {
+		if (overlayState !== "closed" || !deps.getTaskMemoryStatus) return;
+		let records: MemoryRecord[] = [];
+		try {
+			records = loadMemoryRecordsSync(deps.dataDir);
+		} catch (error) {
+			notify(
+				"warning",
+				`memory: durable lessons unavailable: ${error instanceof Error ? error.message : String(error)}`,
+				"memory:durable-read",
+			);
+		}
+		overlayState = "memory";
+		overlayHandle = openMemoryOverlay(tui, deps.getTaskMemoryStatus, () => records, { onClose: () => closeOverlay() });
+		tui.requestRender();
+	};
+
+	const openFleetOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "fleet";
+		overlayHandle = openFleetOverlay(tui, deps.dispatch, {
+			bus: deps.bus,
+			providers: deps.providers,
+			getObservability: () => observabilitySnapshot,
+			...(deps.agents ? { agents: deps.agents } : {}),
+			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+			...(deps.getFleetNodes ? { getFleetNodes: deps.getFleetNodes } : {}),
+			...(deps.writeSettings
+				? {
+						writeSettings: (next) => {
+							deps.writeSettings?.(next);
+							footer.refresh();
+						},
+					}
+				: {}),
+			notice: notify,
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openViewOverlayState = (initialFilter?: string): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "view";
+		const sessionMeta = deps.session?.current() ?? null;
+		overlayHandle = openViewOverlay(tui, {
+			providers: createDefaultArtifactProviders({
+				stateDir: deps.stateDir,
+				dataDir: deps.dataDir,
+				dispatch: deps.dispatch,
+				sessionMeta,
+				readSessionEntries: deps.readSessionEntries,
+			}),
+			...(initialFilter ? { initialFilter } : {}),
+			notice: (level, text, key) => notify(level, text, key),
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openThinkingOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "thinking";
+		const settings = deps.getSettings?.();
+		const current = settings
+			? (resolveThinkingCapability(deps.providers, settings)?.effectiveLevel ?? readThinkingLevel(settings))
+			: "off";
+		const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
+		const thinkingOverlayDeps: Parameters<typeof openThinkingOverlay>[1] = {
+			current,
+			available,
+			onSelect: (next) => {
+				deps.onSetThinkingLevel?.(next);
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+			...(settings ? { labelFor: resolveThinkingLabeler(deps.providers, settings) } : {}),
+		};
+		overlayHandle = openThinkingOverlay(tui, thinkingOverlayDeps);
+		tui.requestRender();
+	};
+
+	const openModelOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		const settings = deps.getSettings?.();
+		if (!settings) return;
+		overlayState = "model";
+		overlayHandle = openModelOverlay(tui, {
+			settings,
+			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+			providers: deps.providers,
+			bus: deps.bus,
+			onSelect: (ref) => {
+				deps.onSelectModel?.(ref);
+				footer.refresh();
+			},
+			onToggleFavorite: (ref, favorite) => {
+				if (!deps.getSettings || !deps.writeSettings) return;
+				const next = structuredClone(deps.getSettings()) as ClioSettings;
+				const value = `${ref.target}/${ref.model}`;
+				const current = new Set(next.modelSelector?.favorites ?? []);
+				if (favorite) current.add(value);
+				else current.delete(value);
+				next.modelSelector = {
+					...(next.modelSelector ?? { recentLimit: 12, favorites: [] }),
+					favorites: [...current],
+				};
+				deps.writeSettings(next);
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openScopedModelsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		const settings = deps.getSettings?.();
+		if (!settings) return;
+		overlayState = "scoped-models";
+		overlayHandle = openScopedOverlay(tui, {
+			providers: deps.providers,
+			currentScope: extractScopeFromSettings(settings),
+			onCommit: (next) => {
+				deps.onSetScope?.(next);
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openSettingsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		if (!deps.getSettings || !deps.writeSettings) return;
+		overlayState = "settings";
+		const getSettings = deps.getSettings;
+		const writeSettingsOut = deps.writeSettings;
+		const commitSettingOut = deps.commitSetting;
+		const handle = openSettingsOverlay(tui, {
+			getSettings,
+			providers: deps.providers,
+			writeSettings: (next) => {
+				writeSettingsOut(next);
+				footer.refresh();
+			},
+			...(commitSettingOut
+				? {
+						commitSetting: (id, next, scope) => {
+							commitSettingOut(id, next, scope);
+							footer.refresh();
+						},
+					}
+				: {}),
+			notice: notify,
+			onClose: () => {
+				settingsOverlayRefresh = null;
+				closeOverlay();
+			},
+		});
+		overlayHandle = handle;
+		settingsOverlayRefresh = handle.refreshRows;
+		void (async () => {
+			try {
+				await deps.providers.probeAllLive();
+				if (overlayState === "settings") settingsOverlayRefresh?.();
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				notify("warning", `settings model refresh failed: ${msg}`, "settings:model-refresh");
+			}
+		})();
+		tui.requestRender();
+	};
+
+	const openResumeOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		if (!deps.session) {
+			emitCommandNotice(slashCtx.notice, "error", "resume", "session contract unavailable");
+			return;
+		}
+		const sessionContract = deps.session;
+		const preResumeSessionId = sessionContract.current()?.id ?? null;
+		overlayState = "resume";
+		overlayHandle = openSessionOverlay(tui, {
+			session: sessionContract,
+			onResume: (sessionId) => {
+				deps.onResumeSession?.(sessionId);
+				// Replay the resumed session's on-disk turns into the chat
+				// panel so the user sees their prior transcript, and reset
+				// chat-loop's lastTurnId + agent.state.messages so the next
+				// submit parents onto the resumed leaf rather than inheriting
+				// whatever state the previous session left behind. Row 51
+				// regression fix.
+				try {
+					const turns = readStructuredEntries(sessionId);
+					chatPanel.reset();
+					rehydrateChatPanelFromTurns(chatPanel, turns);
+					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
+					const leafTurnId = sessionContract.tree(sessionId).leafId;
+					deps.chat.resetForSession(leafTurnId, replayMessages);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/resume] transcript replay failed: ${msg}\n`);
+				}
+				if (sessionContract.current()?.id === sessionId && sessionId !== preResumeSessionId) {
+					announceTaskMemorySeedOffer();
+				}
+				footer.refresh();
+				tui.requestRender();
+			},
+			onClose: () => {
+				closeOverlay();
+				// Post-close cwd check: if /resume landed on a session whose
+				// recorded cwd is no longer valid, pop the cwd-fallback
+				// overlay so the user can either continue in the terminal's
+				// cwd or cancel back to the prior session. Queued as a
+				// microtask so the resume overlay state machine fully
+				// settles before the next overlay opens.
+				queueMicrotask(() => {
+					const current = sessionContract.current();
+					if (!current) return;
+					if (current.id === preResumeSessionId) return;
+					const probe = resolveSessionCwd(current);
+					if (probe.ok) return;
+					openCwdFallbackOverlayState({
+						sessionCwd: typeof current.cwd === "string" ? current.cwd : "",
+						reason: probe.reason,
+						preResumeSessionId,
+					});
+				});
+			},
+		});
+		tui.requestRender();
+	};
+
+	const openTreeOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		if (!deps.session) {
+			notify("error", "tree unavailable: session contract is not wired", "tree:unavailable");
+			return;
+		}
+		const sessionContract = deps.session;
+		overlayState = "tree";
+		overlayHandle = openTreeOverlay(tui, {
+			session: sessionContract,
+			onSwitchTurn: (turnId) => {
+				try {
+					sessionContract.switchTurn(turnId);
+					const sessionId = sessionContract.current()?.id ?? null;
+					if (!sessionId) throw new Error("no current session after turn switch");
+					const turns = readStructuredEntries(sessionId);
+					chatPanel.reset();
+					rehydrateChatPanelFromTurns(chatPanel, turns, { uptoTurnId: turnId });
+					const replayMessages = buildReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
+					deps.chat.resetForSession(turnId, replayMessages);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					notify("error", `tree switch failed: ${msg}`, "tree:switch-failed");
+				}
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openMessagePickerOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		if (!deps.session) {
+			emitCommandNotice(slashCtx.notice, "error", "fork", "session contract unavailable");
+			return;
+		}
+		const sessionContract = deps.session;
+		// No-op notice when there is no current session so the user can tell
+		// the overlay is intentionally inert rather than broken.
+		if (sessionContract.current() === null) {
+			emitCommandNotice(
+				slashCtx.notice,
+				"warn",
+				"fork",
+				"no current session to fork from; start one with /new or /resume first",
+			);
+			return;
+		}
+		overlayState = "message-picker";
+		overlayHandle = openMessagePickerOverlay(tui, {
+			session: sessionContract,
+			onFork: (parentTurnId) => {
+				try {
+					if (deps.onForkSession) {
+						deps.onForkSession(parentTurnId);
+					} else {
+						sessionContract.fork(parentTurnId);
+					}
+					chatPanel.reset();
+					const forkedSessionId = sessionContract.current()?.id ?? null;
+					if (forkedSessionId) {
+						try {
+							const forkedTurns = readStructuredEntries(forkedSessionId);
+							rehydrateChatPanelFromTurns(chatPanel, forkedTurns);
+							const replayMessages = buildReplayAgentMessagesFromTurns(forkedTurns);
+							const leafTurnId = sessionContract.tree(forkedSessionId).leafId ?? parentTurnId;
+							deps.chat.resetForSession(leafTurnId, replayMessages);
+						} catch (err) {
+							const msg = err instanceof Error ? err.message : String(err);
+							io.stderr(`[/fork] transcript replay failed: ${msg}\n`);
+							deps.chat.resetForSession(null);
+						}
+					}
+					if (!forkedSessionId) deps.chat.resetForSession(null);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/fork] fork failed: ${msg}\n`);
+				}
+				footer.refresh();
+				tui.requestRender();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const startNewSession = (): void => {
+		if (!deps.onNewSession) {
+			emitCommandNotice(slashCtx.notice, "error", "new", "session contract unavailable");
+			return;
+		}
+		deps.onNewSession();
+		deps.observability.resetSession();
+		footerToolCounts.clear();
+		footerActiveTools.clear();
+		footerToolErrors = 0;
+		footerToolTruncatedResults = 0;
+		chatPanel.reset();
+		// Same pre-switch cleanup as /resume and /fork: without this, the
+		// chat-loop closure keeps the prior session's lastTurnId and the
+		// agent's state.messages, so the first submit on the new session
+		// would reach back into context that the user believes was dropped.
+		deps.chat.resetForSession(null);
+		footer.refresh();
+		tui.requestRender();
+	};
+
+	/**
+	 * Pop the cwd-fallback overlay after /resume landed on a session whose
+	 * recorded cwd no longer exists on disk (see src/domains/session/
+	 * cwd-fallback.ts for the reasons). Continue silently accepts the
+	 * broken-cwd session. Downstream file ops will surface real errors.
+	 * Cancel restores the prior session when one existed, or re-opens the
+	 * /resume picker so the user can select a different session.
+	 */
+	const openCwdFallbackOverlayState = (args: {
+		sessionCwd: string;
+		reason: "no-cwd" | "missing" | "not-a-directory";
+		preResumeSessionId: string | null;
+	}): void => {
+		if (overlayState !== "closed") return;
+		if (!deps.session) return;
+		const sessionContract = deps.session;
+		overlayState = "cwd-fallback";
+		overlayHandle = openCwdFallbackOverlay(tui, {
+			sessionCwd: args.sessionCwd,
+			currentCwd: process.cwd(),
+			reason: args.reason,
+			onContinue: () => {
+				// Accept the broken-cwd session. First fs access will surface a
+				// real error; no extra bookkeeping here. The user chose this
+				// explicitly, so leave meta.cwd untouched.
+				footer.refresh();
+			},
+			onCancel: () => {
+				handleCwdFallbackCancel(args.preResumeSessionId, {
+					session: sessionContract,
+					// queueMicrotask defers past the current overlay's close so the
+					// resume overlay opens cleanly on a quiesced overlay stack.
+					openResumeOverlay: () => queueMicrotask(() => openResumeOverlayState()),
+					onWarning: (msg) => io.stderr(msg),
+				});
+				footer.refresh();
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openHelpOverlayState = (query?: string): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "help";
+		overlayHandle = openHelpOverlay(tui, keybindings, () => closeOverlay(), query);
+		tui.requestRender();
+	};
+
+	const openAgentsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "agents";
+		overlayHandle = openAgentsOverlay(tui, slashCtx, () => closeOverlay());
+		tui.requestRender();
+	};
+
+	const openSkillsHubState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "skills-hub";
+		overlayHandle = openSkillsHub(tui, {
+			listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
+			cacheDir: deps.cacheDir,
+			setEditorText: (text) => {
+				editor.setText(text);
+				tui.requestRender();
+			},
+			notice: (level, text) => slashCtx.notice(level, text),
+			installSkill: async (name) => {
+				const result = installSkill({ source: name, scope: "project" });
+				return { name: result.name, path: result.path, warnings: result.warnings };
+			},
+			onClose: () => closeOverlay(),
+		});
+		tui.requestRender();
+	};
+
+	const openPromptsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "prompts";
+		overlayHandle = openPromptsOverlay(tui, slashCtx, () => closeOverlay());
+		tui.requestRender();
+	};
+
+	const openExtensionsOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "extensions";
+		overlayHandle = openExtensionsOverlay(tui, slashCtx, () => closeOverlay());
+		tui.requestRender();
+	};
+
+	const toggleDispatchBoardOverlay = (): void => {
+		if (overlayState === "dispatch-board") {
+			closeOverlay();
+			return;
+		}
+		if (overlayState !== "closed") return;
+		overlayState = "dispatch-board";
+		dispatchBoard.resetSelection();
+		// Size to the terminal at open: near-full width on narrow screens, capped
+		// at 96 columns so ultrawide terminals keep readable cards. pi clamps the
+		// overlay if the terminal shrinks and the live board re-renders to fit.
+		overlayHandle = showClioOverlayFrame(tui, dispatchBoard, {
+			title: "Fleet Runs",
+			footerHint: () => {
+				const row = dispatchBoard.selectedRow();
+				const entries = [{ key: "↑↓", verb: "select" }];
+				if (row && isDispatchBoardRowSteerable(row)) {
+					entries.push({ key: "s", verb: "steer" });
+				}
+				if (row && isDispatchBoardRowCancellable(row)) {
+					entries.push({ key: "x", verb: "cancel" });
+				}
+				return buildHint("browse", entries);
+			},
+			anchor: "center",
+			width: Math.max(44, Math.min(96, terminal.columns - 4)),
+		});
+		interactiveTickers.startDispatchBoardTicker();
+		tui.requestRender();
+	};
+
+	const shutdown = async (): Promise<void> => {
+		if (shuttingDown) return;
+		shuttingDown = true;
+		process.off("SIGINT", handleCtrlC);
+		clearInterval(keepAlive);
+		if (footerTicker) clearInterval(footerTicker);
+		if (toolElapsedTicker) clearInterval(toolElapsedTicker);
+		if (workspaceTicker) clearInterval(workspaceTicker);
+		leaderKeys.dispose();
+		interactiveTickers.dispose();
+		footer.dispose();
+		unsubscribeObservability();
+		contextActivityStore.unsubscribe();
+		dispatchBoardStore.unsubscribe();
+		unsubscribeChat();
+		unsubscribeStatus();
+		statusController.dispose();
+		unsubscribeProgress();
+		unsubscribeAbortedProgress();
+		unsubscribeFooterTokens();
+		unsubscribeContextPressure();
+		unsubscribeContextPruned();
+		unsubscribeRuntimeNotice();
+		unsubscribeLoopBlocked();
+		unsubscribeToolBudget();
+		unsubscribeConfigRouting();
+		unsubscribeConfigHotReloadOverlay();
+		unsubscribeConfigRestartRequired();
+		unsubscribeBudgetAlert();
+		unsubscribeSafetyBlocked();
+		unsubscribeMiddlewareHookFailed();
+		unsubscribePermissionRequired();
+		unsubscribeWorkerEscalation();
+		unsubscribeAutonomyDenied();
+		unregisterAskUserHandler?.();
+		unregisterAskUserHandler = null;
+		pendingAskUserCancel?.();
+		agentProgress.stop();
+		deps.chat.dispose();
+		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
+		try {
+			tui.stop();
+		} catch {
+			// TUI may already be stopped; swallow.
+		}
+		// Drain the parked queue so any worker or agent loop still holding
+		// a pending tool-execution promise sees a terminal verdict rather
+		// than a promise that never settles across process exit.
+		deps.toolRegistry?.cancelParkedCalls("Clio Coder shutting down");
+		await deps.onShutdown();
+		resolveRun(0);
+	};
+
+	const handleCtrlC = (): void => {
+		const action = resolveCtrlCAction({
+			overlayState,
+			streaming: deps.chat.isStreaming(),
+			editorText: editor.getText(),
+			lastCtrlCAt,
+			now: Date.now(),
+		});
+		if (action === "shutdown") {
+			lastCtrlCAt = 0;
+			void shutdown();
+			return;
+		}
+		lastCtrlCAt = Date.now();
+		if (action === "cancel-stream") {
+			cancelActiveRun();
+			return;
+		}
+		if (action === "close-overlay") {
+			// Closing a modal is not the first half of the main-editor shutdown
+			// gesture. Reset the double-tap clock so a quick second Ctrl+C cannot
+			// exit Clio after merely dismissing /agents or /fleet.
+			lastCtrlCAt = 0;
+			closeOverlay();
+			return;
+		}
+		if (action === "clear-editor") {
+			editor.setText("");
+			tui.requestRender();
+		}
+	};
+	process.on("SIGINT", handleCtrlC);
+
+	const keyActionDeps = (): KeyBindingDeps => ({
+		matches: (input, id) => keybindings.matches(input, id),
+		canExit: () => editor.getText().length === 0,
+		cycleThinking: () => {
+			const settings = deps.getSettings?.();
+			const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
+			if (available.length === 1 && available[0] === "off") {
+				footer.refresh();
+				tui.requestRender();
+				return;
+			}
+			deps.onCycleThinking?.();
+			footer.refresh();
+			tui.requestRender();
+		},
+		requestShutdown: () => {
+			void shutdown();
+		},
+		toggleStatus: () => {
+			toggleFooterDashboardState();
+		},
+		toggleDispatchBoard: () => {
+			toggleDispatchBoardOverlay();
+		},
+		openModelSelector: () => {
+			openModelOverlayState();
+		},
+		openTree: () => {
+			openTreeOverlayState();
+		},
+		cycleScopedModelForward: () => {
+			deps.onCycleScopedModelForward?.();
+			footer.refresh();
+			tui.requestRender();
+		},
+		cycleScopedModelBackward: () => {
+			deps.onCycleScopedModelBackward?.();
+			footer.refresh();
+			tui.requestRender();
+		},
+		dismissNotifications: () => {
+			const nowMs = Date.now();
+			const isDoubleTap = lastNotificationDismissAtMs > 0 && nowMs - lastNotificationDismissAtMs <= CTRL_C_DOUBLE_TAP_MS;
+			lastNotificationDismissAtMs = nowMs;
+			if (isDoubleTap) {
+				notifications.dismissAll();
+				return;
+			}
+			const first = notifications.list()[0];
+			if (first) notifications.dismiss(first.id);
+		},
+		toggleToolExpansion: () => {
+			const nowMs = Date.now();
+			const isDoubleTap = lastToolExpandAtMs > 0 && nowMs - lastToolExpandAtMs <= CTRL_C_DOUBLE_TAP_MS;
+			lastToolExpandAtMs = nowMs;
+			const changed = isDoubleTap ? chatPanel.toggleAllToolsExpanded() : chatPanel.toggleLastToolExpanded();
+			if (changed) tui.requestRender();
+		},
+		toggleAllToolExpansion: () => {
+			if (chatPanel.toggleAllToolsExpanded()) tui.requestRender();
+		},
+		toggleLiveToolOutput: () => {
+			chatPanel.toggleLiveToolOutput();
+			tui.requestRender();
+		},
+		toggleThinkingExpansion: () => {
+			const nowMs = Date.now();
+			const isDoubleTap = lastThinkingExpandAtMs > 0 && nowMs - lastThinkingExpandAtMs <= CTRL_C_DOUBLE_TAP_MS;
+			lastThinkingExpandAtMs = nowMs;
+			const changed = isDoubleTap ? chatPanel.toggleAllThinking() : chatPanel.toggleLastThinking();
+			if (changed) tui.requestRender();
+		},
+		toggleAllThinkingExpansion: () => {
+			if (chatPanel.toggleAllThinking()) tui.requestRender();
+		},
+		openExternalEditor: () => {
+			openExternalEditorForInput();
+		},
+		queueFollowUp: () => {
+			queueFollowUpFromEditor();
+		},
+		restoreQueuedFollowUps: () => {
+			restoreQueuedFollowUpsToEditor();
+		},
+	});
+
+	const dispatchBoardRenderUnsubscribers = [
+		deps.bus.on(BusChannels.DispatchEnqueued, () => {
+			footer.refresh();
+			interactiveTickers.renderTaskIsland();
+			// The dispatch-board overlay renders live from the store, so this
+			// repaint request refreshes it too when it is open.
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.DispatchStarted, () => {
+			footer.refresh();
+			interactiveTickers.renderTaskIsland();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.DispatchProgress, (payload) => {
+			const workerEvent = payload.event as { type?: unknown } | null | undefined;
+			if (workerEvent?.type === "clio_steer_received") {
+				notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
+			}
+			footer.refresh();
+			interactiveTickers.renderTaskIsland();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.RunAborted, () => {
+			footer.refresh();
+			interactiveTickers.renderTaskIsland();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.DispatchCompleted, () => {
+			footer.refresh();
+			interactiveTickers.renderTaskIsland();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.DispatchFailed, () => {
+			footer.refresh();
+			interactiveTickers.renderTaskIsland();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.ContextActivity, () => {
+			footer.refresh();
+			interactiveTickers.renderContextIsland();
+			interactiveTickers.renderTaskIsland();
+			tui.requestRender();
+		}),
+	];
+
+	tui.addInputListener((data: string) => {
+		// A modal invalidates any half-entered leader sequence. Otherwise the key
+		// used to close /agents could become the first half of a shortcut after the
+		// overlay closes.
+		if (overlayOwnsInput(overlayState) && leaderKeys.isPending()) leaderKeys.reset();
+		// A pending leader sequence belongs to the main editor, never an overlay.
+		// Modal input must win before leader/agent cancellation precedence.
+		if (!overlayOwnsInput(overlayState) && leaderKeys.isPending()) {
+			if (leaderKeys.route(data)) return { consume: true };
+		}
+
+		if (isCtrlCKey(data)) {
+			handleCtrlC();
+			return { consume: true };
+		}
+
+		const overlayConsumed = routeOverlayKey(
+			data,
+			overlayState,
+			{
+				cancelPermission: () => {
+					closeOverlay();
+				},
+				confirmPermission: () => {
+					permissionConfirmJustFired = true;
+					closeOverlay();
+					footer.refresh();
+					tui.requestRender();
+				},
+				closeOverlay,
+				selectPreviousDispatch: () => {
+					dispatchBoard.selectPrevious();
+					tui.requestRender();
+				},
+				selectNextDispatch: () => {
+					dispatchBoard.selectNext();
+					tui.requestRender();
+				},
+				steerSelectedDispatch,
+				cancelSelectedDispatch,
+				cancelAskUser: () => {
+					pendingAskUserCancel?.();
+				},
+			},
+			(input, id) => keybindings.matches(input, id),
+		);
+		if (overlayConsumed) {
+			return { consume: true };
+		}
+		// A false route result means the focused overlay component owns the full
+		// keymap. Do not let its key fall through to editor shortcuts, bash abort,
+		// or cancellation of the active agent run.
+		if (overlayOwnsInput(overlayState)) return undefined;
+
+		if (overlayState === "closed") {
+			if (leaderKeys.route(data)) return { consume: true };
+		}
+
+		// With no overlay, Esc cancels an active run (or an inline bash command).
+		// The modal boundary above is intentional: an overlay's Esc is delivered to
+		// its focused component and can never abort work behind the overlay.
+		if (isEscapeKey(data) && editorSubmit.cancelActiveEditorBash()) {
+			return { consume: true };
+		}
+		if (isEscapeKey(data) && deps.chat.isStreaming()) {
+			cancelActiveRun();
+			return { consume: true };
+		}
+
+		if (overlayState === "closed" && !isKeyRelease(data)) {
+			for (const id of [
+				"clio.notifications.dismiss",
+				"clio.tool.expand",
+				"clio.tool.expandAll",
+				"clio.tool.liveOutput",
+				"clio.editor.external",
+				"clio.message.followUp",
+				"clio.message.dequeue",
+				"clio.thinking.expand",
+				"clio.thinking.expandAll",
+			] as const) {
+				if (keybindings.matches(data, id)) {
+					dispatchInteractiveAction(id, keyActionDeps());
+					return { consume: true };
+				}
+			}
+		}
+
+		const consumed = routeInteractiveKey(data, keyActionDeps());
+		return consumed ? { consume: true } : undefined;
+	});
+
+	return run;
+}
