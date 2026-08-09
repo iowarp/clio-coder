@@ -29,7 +29,7 @@ import { getMarketplaceSkills } from "../domains/resources/skills/marketplace.js
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
-import { createAgentProgress, isKeyRelease, matchesKey, ProcessTerminal, TUI } from "../engine/tui.js";
+import { createAgentProgress, isKeyRelease, matchesKey } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -52,6 +52,7 @@ import { createEditorSubmitController } from "./editor-submit.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashboard.js";
 import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
+import { createProcessInteractiveShell } from "./interactive-shell.js";
 import { createInteractiveSlashRuntime } from "./interactive-slash-runtime.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
@@ -468,8 +469,8 @@ function _handleCwdFallbackCancel(preResumeSessionId: string | null, deps: CwdFa
 }
 
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
-	const terminal = new ProcessTerminal();
-	const tui = new TUI(terminal);
+	const shell = createProcessInteractiveShell();
+	const { terminal, tui } = shell;
 
 	// Build the runtime keybinding manager from the current settings snapshot.
 	// This also installs the manager as pi-tui's global (via setKeybindings)
@@ -1018,9 +1019,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	editor.onSubmit = submitEditorText;
 
 	const root = buildLayout({ banner, chat: chatPanel, pending: followUpQueuePanel, editor, footer: footer.view });
-	tui.addChild(root);
-	tui.setFocus(editor);
-	tui.start();
+	shell.mount(root, editor);
 
 	let footerTicker: NodeJS.Timeout | null = null;
 	footerTicker = setInterval(() => {
@@ -1050,15 +1049,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	}, 5_000);
 	workspaceTicker.unref?.();
 
-	let resolveRun: (code: number) => void = () => {};
-	const run = new Promise<number>((resolve) => {
-		resolveRun = resolve;
-	});
-
-	// Anchor the Node event loop while the TUI is alive. Piped or /dev/null
-	// stdin (used by diag harnesses) can close early, which would otherwise
-	// let the process exit before the termination coordinator runs.
-	const keepAlive = setInterval(() => {}, 1 << 30);
+	const run = shell.anchor();
 
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
@@ -1160,7 +1151,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		if (shuttingDown) return;
 		shuttingDown = true;
 		process.off("SIGINT", handleCtrlC);
-		clearInterval(keepAlive);
+		shell.releaseAnchor();
 		if (footerTicker) clearInterval(footerTicker);
 		if (toolElapsedTicker) clearInterval(toolElapsedTicker);
 		if (workspaceTicker) clearInterval(workspaceTicker);
@@ -1191,17 +1182,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		agentProgress.stop();
 		deps.chat.dispose();
 		for (const unsubscribe of dispatchBoardRenderUnsubscribers) unsubscribe();
-		try {
-			tui.stop();
-		} catch {
-			// TUI may already be stopped; swallow.
-		}
+		shell.stop();
 		// Drain the parked queue so any worker or agent loop still holding
 		// a pending tool-execution promise sees a terminal verdict rather
 		// than a promise that never settles across process exit.
 		deps.toolRegistry?.cancelParkedCalls("Clio Coder shutting down");
 		await deps.onShutdown();
-		resolveRun(0);
+		shell.complete(0);
 	};
 
 	const handleCtrlC = (): void => {
