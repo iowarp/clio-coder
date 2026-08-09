@@ -38,14 +38,14 @@ export async function runContextInitRunner(
 	const stderr = payloadError
 		? `${result.stderr}${result.stderr.endsWith("\n") || result.stderr.length === 0 ? "" : "\n"}${payloadError}\n`
 		: result.stderr;
-	const scout = recordField(generation, "scout");
-	const tokens = recordField(scout, "tokens");
-	const effectiveTarget = stringField(scout, "targetId");
-	const effectiveModel = stringField(scout, "wireModelId");
-	const effectiveRuntime = stringField(scout, "runtimeId");
-	const effectiveRuntimeKind = stringField(scout, "runtimeKind");
-	const effectiveThinking = stringField(scout, "thinkingLevel");
-	const structuredOutputMode = stringField(scout, "structuredOutputMode");
+	const run = recordField(generation, "run");
+	const tokens = recordField(run, "tokens");
+	const effectiveTarget = stringField(run, "targetId");
+	const effectiveModel = stringField(run, "wireModelId");
+	const effectiveRuntime = stringField(run, "runtimeId");
+	const effectiveRuntimeKind = stringField(run, "runtimeKind");
+	const effectiveThinking = stringField(run, "thinkingLevel");
+	const structuredOutputMode = stringField(run, "structuredOutputMode");
 	const clioMdPath = join(cwd, "CLIO.md");
 	const clioMdBytes = existsSync(clioMdPath) ? statSync(clioMdPath).size : 0;
 	return {
@@ -57,21 +57,21 @@ export async function runContextInitRunner(
 		wallTimeMs: result.wallTimeMs,
 		metrics: {
 			"latency.wallMs": result.wallTimeMs,
-			"latency.modelMs": numberField(scout, "durationMs"),
+			"latency.modelMs": numberField(run, "durationMs"),
 			"tokens.input": numberField(tokens, "input"),
 			"tokens.output": numberField(tokens, "output"),
 			"tokens.total": numberField(tokens, "total"),
 			"tokens.cacheRead": numberField(tokens, "cacheRead"),
 			"tokens.cacheWrite": numberField(tokens, "cacheWrite"),
-			"tools.totalCalls": numberField(scout, "toolCalls"),
-			"tools.failed": numberField(scout, "toolFailures"),
-			"tools.blocked": numberField(scout, "toolBlocked"),
+			"tools.totalCalls": numberField(run, "toolCalls"),
+			"tools.failed": numberField(run, "toolFailures"),
+			"tools.blocked": numberField(run, "toolBlocked"),
 			"context.clioMdBytes": clioMdBytes,
 			"context.initMode": stringField(generation, "mode") ?? "unknown",
 			"context.initParserOutcome": stringField(generation, "parserOutcome") ?? "unknown",
 			"context.initFallback": stringField(generation, "fallbackReason") !== null,
-			"context.initPromptBytes": numberField(scout, "promptBytes"),
-			"context.initOutputBytes": numberField(scout, "outputBytes"),
+			"context.initPromptBytes": numberField(run, "promptBytes"),
+			"context.initOutputBytes": numberField(run, "outputBytes"),
 			"context.initTargetId": effectiveTarget,
 			"context.initModelId": effectiveModel,
 			"context.initRuntimeId": effectiveRuntime,
@@ -90,30 +90,30 @@ export async function runContextInitRunner(
 			effectiveModel,
 			effectiveRuntime,
 			effectiveThinking,
-			scoutRunId: stringField(scout, "runId"),
+			bootstrapRunId: stringField(run, "runId"),
 		},
 	};
 }
 
-const GENERATION_MODES = new Set(["scout", "heuristic", "existing"]);
+const GENERATION_MODES = new Set(["model", "heuristic", "existing"]);
 const PARSER_OUTCOMES = new Set(["parsed", "rejected", "not-run"]);
 
 function isNonnegativeFiniteNumber(value: unknown): boolean {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-function isValidScoutPayload(value: unknown): boolean {
-	const scout = recordField(value);
-	if (!scout) return false;
+function isValidRunPayload(value: unknown): boolean {
+	const run = recordField(value);
+	if (!run) return false;
 	for (const key of ["durationMs", "promptBytes", "outputBytes"] as const) {
-		if (!isNonnegativeFiniteNumber(scout[key])) return false;
+		if (!isNonnegativeFiniteNumber(run[key])) return false;
 	}
-	if (scout.structuredOutputMode !== "native-schema" && scout.structuredOutputMode !== "prompt-parser") return false;
+	if (run.structuredOutputMode !== "native-schema" && run.structuredOutputMode !== "prompt-parser") return false;
 	for (const key of ["toolCalls", "toolFailures", "toolBlocked"] as const) {
-		if (scout[key] !== undefined && !isNonnegativeFiniteNumber(scout[key])) return false;
+		if (run[key] !== undefined && !isNonnegativeFiniteNumber(run[key])) return false;
 	}
-	const tokens = recordField(scout, "tokens");
-	if (scout.tokens !== undefined && !tokens) return false;
+	const tokens = recordField(run, "tokens");
+	if (run.tokens !== undefined && !tokens) return false;
 	if (tokens) {
 		for (const key of ["total", "input", "output", "cacheRead", "cacheWrite", "reasoning"] as const) {
 			if (tokens[key] !== undefined && !isNonnegativeFiniteNumber(tokens[key])) return false;
@@ -122,10 +122,10 @@ function isValidScoutPayload(value: unknown): boolean {
 	return true;
 }
 
-function hasReceiptIdentity(scout: Record<string, unknown> | null): boolean {
-	if (!scout) return false;
+function hasReceiptIdentity(run: Record<string, unknown> | null): boolean {
+	if (!run) return false;
 	return ["runId", "targetId", "wireModelId", "runtimeId", "runtimeKind", "thinkingLevel"].every(
-		(key) => typeof scout[key] === "string" && (scout[key] as string).trim().length > 0,
+		(key) => typeof run[key] === "string" && (run[key] as string).trim().length > 0,
 	);
 }
 
@@ -144,29 +144,29 @@ function isValidGenerationPayload(
 	) {
 		return false;
 	}
-	const scoutPresent = generation.scout !== undefined;
-	if (scoutPresent && !isValidScoutPayload(generation.scout)) return false;
-	const scout = recordField(generation, "scout");
-	if (mode === "scout" && (parserOutcome !== "parsed" || !hasReceiptIdentity(scout))) return false;
-	if ((parserOutcome === "parsed" || parserOutcome === "rejected") && !scoutPresent) return false;
-	if (parserOutcome === "rejected" && !hasReceiptIdentity(scout)) return false;
+	const runPresent = generation.run !== undefined;
+	if (runPresent && !isValidRunPayload(generation.run)) return false;
+	const run = recordField(generation, "run");
+	if (mode === "model" && (parserOutcome !== "parsed" || !hasReceiptIdentity(run))) return false;
+	if ((parserOutcome === "parsed" || parserOutcome === "rejected") && !runPresent) return false;
+	if (parserOutcome === "rejected" && !hasReceiptIdentity(run)) return false;
 	return true;
 }
 
 function generationRouteError(generation: Record<string, unknown>, target: EvalSuiteTargetV2): string | null {
-	const scout = recordField(generation, "scout");
-	if (!scout) return null;
-	const actualTarget = stringField(scout, "targetId");
-	const actualModel = stringField(scout, "wireModelId");
-	const actualThinking = stringField(scout, "thinkingLevel");
+	const run = recordField(generation, "run");
+	if (!run) return null;
+	const actualTarget = stringField(run, "targetId");
+	const actualModel = stringField(run, "wireModelId");
+	const actualThinking = stringField(run, "thinkingLevel");
 	if (actualTarget !== null && actualTarget !== target.id) {
-		return `context-init runner requested target '${target.id}' but Scout receipt used '${actualTarget}'`;
+		return `context-init runner requested target '${target.id}' but the bootstrap receipt used '${actualTarget}'`;
 	}
 	if (target.model !== undefined && actualModel !== null && actualModel !== target.model) {
-		return `context-init runner requested model '${target.model}' but Scout receipt used '${actualModel}'`;
+		return `context-init runner requested model '${target.model}' but the bootstrap receipt used '${actualModel}'`;
 	}
 	if (target.thinking !== undefined && actualThinking !== null && actualThinking !== target.thinking) {
-		return `context-init runner requested thinking '${target.thinking}' but Scout receipt used '${actualThinking}'`;
+		return `context-init runner requested thinking '${target.thinking}' but the bootstrap receipt used '${actualThinking}'`;
 	}
 	return null;
 }

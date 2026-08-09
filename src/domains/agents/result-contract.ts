@@ -24,6 +24,17 @@ export type ResultContract =
 	 */
 	| { kind: "artifact-report" }
 	/**
+	 * The CLIO.md handbook payload `clio context init` parses. It exists as its
+	 * own kind because the alternative was dispatching Scout and telling it in
+	 * prose to ignore its own recipe: the recipe body and the repair directive
+	 * both name the findings shape, so a model that obeys the recipe returns
+	 * reconnaissance and the bootstrap parser rejects every run. A contract is
+	 * the wrong thing to override with a sentence in a task prompt.
+	 * Scout subtasks may not request it; it is a command's payload, not a
+	 * dependency edge.
+	 */
+	| { kind: "context-handbook" }
+	/**
 	 * A deterministic command's structured result. No agent recipe may declare
 	 * it (`parseResultContract` rejects the kind) and no Scout subtask may
 	 * request it: it is authored by the code-step runner, never by a model. It
@@ -330,7 +341,7 @@ function parseSubtasks(value: unknown): ScoutSubtask[] | null {
 	return subtasks;
 }
 
-function isBootstrapScoutResult(value: Record<string, unknown>): boolean {
+function isContextHandbookResult(value: Record<string, unknown>): boolean {
 	if (!hasOnlyKeys(value, ["projectName", "identity", "conventions", "invariants", "sections"])) return false;
 	if (!string(value.projectName) || !string(value.identity)) return false;
 	if (!Array.isArray(value.conventions) || value.conventions.some((entry) => !string(entry))) return false;
@@ -343,14 +354,28 @@ function isBootstrapScoutResult(value: Record<string, unknown>): boolean {
 	});
 }
 
+/**
+ * The handbook payload conforms or it does not. Quality stays unmeasured: a
+ * well-formed handbook is a shape, not evidence that the repository was read
+ * correctly, and routing statistics must not treat it as a correctness signal.
+ */
+function validateContextHandbook(contract: ResultContract, output: string | null): ResultContractValidation {
+	const parsed = parseJson(output);
+	if (!parsed.ok) return failure(contract, "fail", parsed.reason);
+	if (!isContextHandbookResult(parsed.value)) {
+		return failure(
+			contract,
+			"fail",
+			"context handbook result must carry projectName, identity, conventions[], invariants[], and sections[{title, body}] and nothing else",
+		);
+	}
+	return success(contract, "unmeasured", parsed.value);
+}
+
 function validateScout(contract: ResultContract, output: string | null): ResultContractValidation {
 	const parsed = parseJson(output);
 	if (!parsed.ok) return failure(contract, "fail", parsed.reason);
 	const value = parsed.value;
-	// Bootstrap explicitly replaces Scout's ordinary reconnaissance result with
-	// its own provider-enforced schema. It is a typed conformance variant, not
-	// correctness evidence, so it remains unmeasured for routing quality.
-	if (isBootstrapScoutResult(value)) return success(contract, "unmeasured", value);
 	if (!hasOnlyKeys(value, ["findings", "needsSplit", "proposedSubtasks"])) {
 		return failure(contract, "fail", "Scout result has unknown fields");
 	}
@@ -749,6 +774,8 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			// conforms, which is what stops a bounded repair round from being
 			// spent teaching a writer a JSON shape that proves nothing.
 			return success(input.contract, "unmeasured", { artifact: true });
+		case "context-handbook":
+			return validateContextHandbook(input.contract, input.output);
 		case "code-report":
 			return validateCodeReport(input.contract, input.output);
 	}
@@ -823,6 +850,8 @@ function resultContractShape(contract: ResultContract): string {
 			return "any final text";
 		case "artifact-report":
 			return "any final text; the artifact you wrote at the location the task named is the result";
+		case "context-handbook":
+			return '{"projectName":"string","identity":"one sentence","conventions":[],"invariants":[],"sections":[{"title":"Architecture","body":"markdown that cites `real/path.ts` tokens"}]}';
 		case "code-report":
 			return '{"passed":false,"exitCode":1,"checks":[{"name":"test","passed":false,"evidence":"exit 1"}],"artifactPaths":["/path/command.log"],"outputExcerpt":"..."}';
 	}
@@ -891,6 +920,7 @@ export function parseResultContract(value: unknown, sourcePath: string): ResultC
 		"provenance-report",
 		"external-delegation",
 		"artifact-report",
+		"context-handbook",
 	] as const;
 	if (!(kinds as ReadonlyArray<string>).includes(record.kind) || !only("kind")) {
 		throw new Error(`agent recipe: ${sourcePath}: resultContract.kind is unsupported or has unknown keys`);
