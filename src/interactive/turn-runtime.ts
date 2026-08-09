@@ -159,11 +159,44 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const now = Date.now();
 		if (lastTargetProbe?.key === key && now - lastTargetProbe.at < TARGET_PROBE_TTL_MS) return;
 		lastTargetProbe = { key, at: now };
+		let status: Awaited<ReturnType<ProvidersContract["probeTarget"]>> = null;
 		try {
-			await deps.providers.probeTarget(targetId);
+			status = await deps.providers.probeTarget(targetId);
 		} catch {
 			// Fall back to the last known target state.
 		}
+		announceColdModel(status, targetId, wireModelId);
+	};
+
+	/**
+	 * Say that the first request will pay for a load, before it does.
+	 *
+	 * A self-hosted server loads a model on demand, and a 30B at 4-bit takes
+	 * tens of seconds off disk. Clio sends the request and waits, which from
+	 * the outside is indistinguishable from a hang: no spinner explains it, no
+	 * notice names it, and the operator's next move is usually Ctrl-C. The
+	 * probe already knows the model is not resident, because llama-swap and
+	 * LM Studio both report per-model load state; nothing was reading it.
+	 *
+	 * Notice only, never a block. The server loads it either way, and a state
+	 * that says `unknown` says nothing worth interrupting for.
+	 */
+	const announcedColdModels = new Set<string>();
+	const announceColdModel = (
+		status: Awaited<ReturnType<ProvidersContract["probeTarget"]>>,
+		targetId: string,
+		wireModelId: string,
+	): void => {
+		const state = status?.discoveredModelStates?.[wireModelId]?.state;
+		if (state !== "unloaded" && state !== "loading") return;
+		const key = `${targetId}|${wireModelId}|${state}`;
+		if (announcedColdModels.has(key)) return;
+		announcedColdModels.add(key);
+		deps.emitNotice(
+			state === "loading"
+				? `[Clio Coder] ${wireModelId} is still loading on ${targetId}; the first reply waits for it.`
+				: `[Clio Coder] ${wireModelId} is not resident on ${targetId}; the first request loads it, which can take a minute.`,
+		);
 	};
 
 	const synthesizeModel = (target: ChatLoopTarget): EngineModel => {

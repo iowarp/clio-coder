@@ -184,7 +184,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				phase: "scheduled",
 				attempt,
 				maxAttempts: settings.maxRetries,
-				delayMs: computeRetryDelayMs(attempt, settings),
+				delayMs: computeRetryDelayMs(attempt, settings, failure.errorMessage),
 				errorMessage: failure.errorMessage,
 			};
 			recordRetryStatus(scheduled);
