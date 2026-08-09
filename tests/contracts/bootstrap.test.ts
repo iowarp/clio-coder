@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { WorkspaceEnumerationIncompleteError } from "../../src/core/workspace-files.js";
 import {
@@ -819,6 +820,21 @@ describe("contracts/bootstrap", () => {
 			"a wiki the reset keeps must be reported as kept, not omitted from both lists",
 		);
 		ok(!result.removed.includes(".clio/wiki"));
+	});
+
+	/**
+	 * The same drift, one file over. `.clio/wiki` was added to the preserved list
+	 * and the runtime output names it, while `clio context reset --help` went on
+	 * listing three paths. An operator reads the help before running a destructive
+	 * command, so a help text that omits a preserved path is the version they act
+	 * on. This holds the help against what the reset actually keeps.
+	 */
+	it("names every preserved path in the reset help text", async () => {
+		const result = await runContextClear({ cwd: scratch, confirmContext: () => false });
+		const help = readFileSync(fileURLToPath(new URL("../../src/cli/context-clear.ts", import.meta.url)), "utf8");
+		const helpText = help.slice(help.indexOf("const HELP = `"), help.indexOf("`;", help.indexOf("const HELP = `")));
+		const unnamed = result.preserved.filter((path) => !helpText.includes(path));
+		strictEqual(unnamed.join(", "), "", "clio context reset --help omits a path the reset preserves");
 	});
 
 	it("context-clear --all removes CLIO.md only after the extra confirmation", async () => {
