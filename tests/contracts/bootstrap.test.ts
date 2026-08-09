@@ -275,7 +275,7 @@ describe("contracts/bootstrap", () => {
 				});
 				return {
 					projectName: scratch,
-					identity: "Generic helper",
+					identity: "",
 					conventions: ["python", "Always invent a framework."],
 					invariants: ["Dependency list is a hard invariant."],
 					sections: [
@@ -1104,5 +1104,30 @@ describe("contracts/bootstrap", () => {
 			stdout.some((line) => line.includes("adoption imported")),
 			false,
 		);
+	});
+
+	it("uses model identity on bare fallback when present before defaulting", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "bare-identity-model", type: "module" }), "utf8");
+
+		const result = await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			generate: (input) => {
+				input.reportGeneration?.({
+					mode: "scout",
+					parserOutcome: "parsed",
+					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
+				});
+				return {
+					projectName: "Bare Model Project",
+					identity: "Model derived identity for bare project.",
+					conventions: [],
+					invariants: [],
+					sections: [],
+				};
+			},
+		});
+
+		strictEqual(result.output.identity, "Model derived identity for bare project.");
 	});
 });
