@@ -31,7 +31,7 @@ export {
 	type BootstrapGenerationTelemetry,
 	type BootstrapProgressEvent,
 	type BootstrapProgressSink,
-	type BootstrapScoutTelemetry,
+	type BootstrapRunTelemetry,
 	type BootstrapStructuredOutput,
 	existingClioMdBootstrapOutput,
 	fallbackBootstrapOutput,

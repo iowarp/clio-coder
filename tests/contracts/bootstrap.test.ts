@@ -249,7 +249,7 @@ describe("contracts/bootstrap", () => {
 	 * cite the repository and every citation must be real, so Scout can describe
 	 * what it read instead of copying what someone already wrote.
 	 */
-	it("keeps identity and hard rules evidence-owned while Scout contributes bounded sections", async () => {
+	it("keeps identity and hard rules evidence-owned while the model contributes bounded sections", async () => {
 		const citedRule = "The run entry point is `index.ts`.";
 		const inventedCommand = "Publish partner builds with `npm publish --tag partners`.";
 		const uncitedClaim = "A dedicated team owns every change.";
@@ -270,9 +270,9 @@ describe("contracts/bootstrap", () => {
 			confirmGitignore: () => true,
 			generate: (input) => {
 				input.reportGeneration?.({
-					mode: "scout",
+					mode: "model",
 					parserOutcome: "parsed",
-					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
+					run: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
 				});
 				return {
 					projectName: scratch,
@@ -307,7 +307,7 @@ describe("contracts/bootstrap", () => {
 		ok(workflow.body.split("\n").every((line) => line === citedRule));
 		strictEqual(workflow.body.includes("npm publish"), false);
 		strictEqual(readFileSync(join(scratch, "CLIO.md"), "utf8").includes(scratch), false);
-		strictEqual(result.telemetry.generation.mode, "scout");
+		strictEqual(result.telemetry.generation.mode, "model");
 	});
 
 	/**
@@ -316,7 +316,7 @@ describe("contracts/bootstrap", () => {
 	 * held only paths and symbol names, so no Scout sentence could ever match one
 	 * verbatim and every model-authored section was deleted before it was written.
 	 */
-	it("keeps Scout sections that cite the repository when no sibling context exists", async () => {
+	it("keeps model sections that cite the repository when no sibling context exists", async () => {
 		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "cold-start", type: "module" }), "utf8");
 		writeFileSync(join(scratch, "index.ts"), "export const coldStart = true;\n", "utf8");
 
@@ -325,9 +325,9 @@ describe("contracts/bootstrap", () => {
 			confirmGitignore: () => true,
 			generate: (input) => {
 				input.reportGeneration?.({
-					mode: "scout",
+					mode: "model",
 					parserOutcome: "parsed",
-					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
+					run: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
 				});
 				return {
 					projectName: "Ignored",
@@ -351,7 +351,7 @@ describe("contracts/bootstrap", () => {
 		ok(architecture, "a cited Scout section must survive a bootstrap with no sibling files");
 		ok(architecture.body.includes("`index.ts`"), architecture.body);
 		strictEqual(architecture.body.includes("dedicated team"), false, architecture.body);
-		strictEqual(result.telemetry.generation.mode, "scout");
+		strictEqual(result.telemetry.generation.mode, "model");
 	});
 
 	it("records a parsed Scout draft as heuristic when no enrichment survives grounding", async () => {
@@ -363,9 +363,9 @@ describe("contracts/bootstrap", () => {
 			confirmGitignore: () => true,
 			generate: (input) => {
 				input.reportGeneration?.({
-					mode: "scout",
+					mode: "model",
 					parserOutcome: "parsed",
-					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
+					run: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
 				});
 				return {
 					projectName: "Ignored",
@@ -412,9 +412,9 @@ describe("contracts/bootstrap", () => {
 			confirmGitignore: () => true,
 			generate: (input) => {
 				input.reportGeneration?.({
-					mode: "scout",
+					mode: "model",
 					parserOutcome: "parsed",
-					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
+					run: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
 				});
 				return {
 					projectName: "Ignored",
@@ -505,9 +505,9 @@ describe("contracts/bootstrap", () => {
 			confirmGitignore: () => true,
 			generate: (input) => {
 				input.reportGeneration?.({
-					mode: "scout",
+					mode: "model",
 					parserOutcome: "parsed",
-					scout: { structuredOutputMode: "native-schema", promptBytes: 10, outputBytes: 20 },
+					run: { structuredOutputMode: "native-schema", promptBytes: 10, outputBytes: 20 },
 				});
 				return {
 					projectName: "Invented Ownership",
@@ -1138,9 +1138,9 @@ describe("contracts/bootstrap", () => {
 			confirmGitignore: () => true,
 			generate: (input) => {
 				input.reportGeneration?.({
-					mode: "scout",
+					mode: "model",
 					parserOutcome: "parsed",
-					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
+					run: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
 				});
 				return {
 					projectName: "Bare Model Project",
@@ -1175,9 +1175,9 @@ describe("contracts/bootstrap", () => {
 			confirmGitignore: () => true,
 			generate: (input) => {
 				input.reportGeneration?.({
-					mode: "scout",
+					mode: "model",
 					parserOutcome: "parsed",
-					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
+					run: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
 				});
 				return {
 					projectName: "Readme Identity",

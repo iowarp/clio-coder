@@ -14,11 +14,11 @@ describe("contracts/eval context-init metrics", () => {
 				version: 1,
 				action: "wrote",
 				generation: {
-					mode: "scout",
+					mode: "model",
 					parserOutcome: "parsed",
-					scout: {
+					run: {
 						structuredOutputMode: "prompt-parser",
-						runId: "scout-eval-1",
+						runId: "bootstrap-eval-1",
 						targetId: "mini",
 						wireModelId: "Qwopus-test",
 						runtimeId: "llamacpp",
@@ -70,7 +70,7 @@ describe("contracts/eval context-init metrics", () => {
 					outputBytes: output.metrics["context.initOutputBytes"],
 				},
 				{
-					mode: "scout",
+					mode: "model",
 					parser: "parsed",
 					fallback: false,
 					modelMs: 875,
@@ -97,7 +97,7 @@ describe("contracts/eval context-init metrics", () => {
 				"off",
 			]);
 			strictEqual(output.artifacts.effectiveTarget, "mini");
-			strictEqual(output.artifacts.scoutRunId, "scout-eval-1");
+			strictEqual(output.artifacts.bootstrapRunId, "bootstrap-eval-1");
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -138,13 +138,13 @@ describe("contracts/eval context-init metrics", () => {
 		}
 	});
 
-	it("fails closed when receipt-backed Scout identity disagrees with the matrix row", async () => {
+	it("fails closed when receipt-backed bootstrap identity disagrees with the matrix row", async () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-eval-context-init-route-"));
 		try {
 			const entry = join(root, "fake-clio.mjs");
 			writeFileSync(
 				entry,
-				`process.stdout.write(JSON.stringify({version:1,generation:{mode:"scout",parserOutcome:"parsed",scout:{structuredOutputMode:"native-schema",runId:"run-1",targetId:"dynamo",wireModelId:"wrong",runtimeId:"lmstudio-native",runtimeKind:"http",thinkingLevel:"off",durationMs:1,promptBytes:1,outputBytes:1}}}));\n`,
+				`process.stdout.write(JSON.stringify({version:1,generation:{mode:"model",parserOutcome:"parsed",run:{structuredOutputMode:"native-schema",runId:"run-1",targetId:"dynamo",wireModelId:"wrong",runtimeId:"lmstudio-native",runtimeKind:"http",thinkingLevel:"off",durationMs:1,promptBytes:1,outputBytes:1}}}));\n`,
 				"utf8",
 			);
 

@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import chalk from "chalk";
-import { modelBootstrapGenerate, resolveBootstrapScoutRoute } from "../cli/bootstrap-generate.js";
+import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-generate.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
@@ -1561,7 +1561,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											dispatch,
 											resolveRoute: () => {
 												if (!config) throw new Error("bootstrap Scout configuration unavailable");
-												return resolveBootstrapScoutRoute(config.get());
+												return resolveBootstrapRoute(config.get());
 											},
 											onFallback: (err, mode) =>
 												runIo?.stderr(

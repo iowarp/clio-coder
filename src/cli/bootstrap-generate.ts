@@ -15,7 +15,7 @@ import {
 	type BootstrapGenerateInput,
 	type BootstrapGenerationTelemetry,
 	type BootstrapParserOutcome,
-	type BootstrapScoutTelemetry,
+	type BootstrapRunTelemetry,
 	type BootstrapStructuredOutput,
 	fallbackBootstrapOutput,
 } from "../domains/context/index.js";
@@ -33,43 +33,56 @@ import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 
-export const BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES = 256 * 1024;
+export const BOOTSTRAP_MAX_OUTPUT_BYTES = 256 * 1024;
 
 /**
- * Model-driven CLIO.md generation. Dispatches Clio's internal `scout` shadow
- * agent with a bootstrap prompt grounded in the codewiki structure, then
- * validates the structured JSON the model returns. Shared by
+ * The internal agent that reads a repository and returns the handbook payload.
+ * It exists as its own recipe rather than as a prompt layered over Scout: a
+ * recipe's `resultContract` is enforced in the worker and sealed by the
+ * orchestrator, so a task prompt claiming to override it changes nothing a
+ * model is graded on. Scout obeying its own recipe was the bug.
+ */
+export const CONTEXT_BOOTSTRAP_AGENT_ID = "context-bootstrap";
+
+/**
+ * Model-driven CLIO.md generation. Dispatches Clio's internal
+ * `context-bootstrap` agent with a prompt grounded in the codewiki structure,
+ * then validates the structured JSON the model returns. Shared by
  * `clio context init` and the interactive `/context init` command.
  */
 
 export interface ModelBootstrapGenerateOptions {
 	dispatch?: DispatchContract;
-	route?: BootstrapScoutRoute;
-	resolveRoute?: () => BootstrapScoutRoute;
+	route?: BootstrapRoute;
+	resolveRoute?: () => BootstrapRoute;
 	onFallback?: (err: Error, mode: BootstrapFallbackMode) => void;
 }
 
-export interface BootstrapScoutRoute {
+export interface BootstrapRoute {
 	target: string;
 	model?: string;
 	thinkingLevel?: ThinkingLevel;
 }
 
 /**
- * Scout's route, resolved with the same precedence every other internal
- * dispatch uses: an explicit `workers.agentBindings.scout` profile first, then
- * `workers.default`. Scout used to be the one internal agent that demanded an
- * explicit binding, so a fresh install with a perfectly good `workers.default`
- * silently never produced a model-driven CLIO.md. A dangling binding still
- * throws, because naming a profile that does not resolve is an operator error
- * rather than an absent opinion.
+ * The bootstrap agent's route, resolved with the same precedence every other
+ * internal dispatch uses: an explicit profile binding first, then
+ * `workers.default`. A fresh install with a perfectly good `workers.default`
+ * must still produce a model-driven CLIO.md, so an absent binding is an absent
+ * opinion rather than a refusal. A dangling binding still throws, because
+ * naming a profile that does not resolve is an operator error.
+ *
+ * A `scout` binding is honored as the second choice. Operators bound Scout
+ * back when bootstrap ran through it, and an upgrade must not silently move
+ * their handbook generation onto a different model.
  */
-export function resolveBootstrapScoutRoute(settings: Readonly<ClioSettings>): BootstrapScoutRoute {
-	const profileName = settings.workers.agentBindings.scout;
-	if (profileName) {
+export function resolveBootstrapRoute(settings: Readonly<ClioSettings>): BootstrapRoute {
+	for (const agentId of [CONTEXT_BOOTSTRAP_AGENT_ID, "scout"]) {
+		const profileName = settings.workers.agentBindings[agentId];
+		if (!profileName) continue;
 		const profile = settings.workers.profiles[profileName];
-		if (!profile) throw new Error(`bootstrap Scout profile '${profileName}' is not configured`);
-		if (!profile.target) throw new Error(`bootstrap Scout profile '${profileName}' has no target`);
+		if (!profile) throw new Error(`bootstrap profile '${profileName}' is not configured (bound to '${agentId}')`);
+		if (!profile.target) throw new Error(`bootstrap profile '${profileName}' has no target (bound to '${agentId}')`);
 		return {
 			target: profile.target,
 			...(profile.model ? { model: profile.model } : {}),
@@ -79,8 +92,9 @@ export function resolveBootstrapScoutRoute(settings: Readonly<ClioSettings>): Bo
 	const fallback = settings.workers.default;
 	if (!fallback?.target) {
 		throw new Error(
-			"bootstrap Scout has no route: workers.agentBindings.scout is unbound and workers.default has no target; " +
-				"bind a profile with 'clio targets profile bind scout <profile>' or set workers.default.target",
+			`bootstrap has no route: workers.agentBindings.${CONTEXT_BOOTSTRAP_AGENT_ID} is unbound and ` +
+				`workers.default has no target; bind a profile with ` +
+				`'clio targets profile bind ${CONTEXT_BOOTSTRAP_AGENT_ID} <profile>' or set workers.default.target`,
 		);
 	}
 	return {
@@ -128,22 +142,22 @@ function toolOutcomeFromEvent(event: unknown): string | null {
 	return typeof payload.outcome === "string" && payload.outcome.length > 0 ? payload.outcome : null;
 }
 
-class BootstrapScoutAttemptError extends Error {
+class BootstrapAttemptError extends Error {
 	readonly parserOutcome: Exclude<BootstrapParserOutcome, "parsed">;
-	readonly scout: BootstrapScoutTelemetry;
+	readonly telemetry: BootstrapRunTelemetry;
 
-	constructor(error: Error, parserOutcome: Exclude<BootstrapParserOutcome, "parsed">, scout: BootstrapScoutTelemetry) {
+	constructor(error: Error, parserOutcome: Exclude<BootstrapParserOutcome, "parsed">, telemetry: BootstrapRunTelemetry) {
 		super(error.message);
-		this.name = "BootstrapScoutAttemptError";
+		this.name = "BootstrapAttemptError";
 		this.parserOutcome = parserOutcome;
-		this.scout = scout;
+		this.telemetry = telemetry;
 	}
 }
 
-class BootstrapScoutOutputLimitError extends Error {
+class BootstrapOutputLimitError extends Error {
 	constructor(readonly observedBytes: number) {
-		super(`bootstrap scout output exceeded ${BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES} UTF-8 bytes`);
-		this.name = "BootstrapScoutOutputLimitError";
+		super(`bootstrap output exceeded ${BOOTSTRAP_MAX_OUTPUT_BYTES} UTF-8 bytes`);
+		this.name = "BootstrapOutputLimitError";
 	}
 }
 
@@ -154,16 +168,16 @@ function durationFromReceipt(receipt: RunReceipt): number | undefined {
 	return Math.max(0, endedAt - startedAt);
 }
 
-function scoutTelemetry(
+function bootstrapTelemetry(
 	prompt: string,
 	output: string,
 	startedAt: number,
-	structuredOutputMode: BootstrapScoutTelemetry["structuredOutputMode"],
+	structuredOutputMode: BootstrapRunTelemetry["structuredOutputMode"],
 	runId?: string,
 	receipt?: RunReceipt,
 	observedOutputBytes?: number,
-): BootstrapScoutTelemetry {
-	const telemetry: BootstrapScoutTelemetry = {
+): BootstrapRunTelemetry {
+	const telemetry: BootstrapRunTelemetry = {
 		structuredOutputMode,
 		promptBytes: Buffer.byteLength(prompt, "utf8"),
 		outputBytes: observedOutputBytes ?? Buffer.byteLength(output, "utf8"),
@@ -207,12 +221,16 @@ async function collectDispatchAssistantText(
 			input.progress?.({
 				phase: "generate",
 				status: "running",
-				message: "scout routing changed",
+				message: "bootstrap routing changed",
 				detail: event.message,
 			});
 		}
 		if (isRecord(event) && event.type === "agent_start") {
-			input.progress?.({ phase: "generate", status: "running", message: "scout started repository exploration" });
+			input.progress?.({
+				phase: "generate",
+				status: "running",
+				message: "bootstrap agent started repository exploration",
+			});
 		}
 		if (isRecord(event) && event.type === "clio_tool_start") {
 			const tool = toolNameFromEvent(event);
@@ -220,7 +238,7 @@ async function collectDispatchAssistantText(
 				input.progress?.({
 					phase: "generate",
 					status: "running",
-					message: `scout running ${tool}`,
+					message: `bootstrap running ${tool}`,
 					detail: "read-only repository exploration",
 				});
 			}
@@ -232,15 +250,15 @@ async function collectDispatchAssistantText(
 				input.progress?.({
 					phase: "generate",
 					status: "running",
-					message: `scout ${tool} ${outcome}`,
+					message: `bootstrap ${tool} ${outcome}`,
 				});
 			}
 		}
 		const delta = textDeltaFromEvent(event);
 		if (delta.length > 0) {
 			streamedBytes += Buffer.byteLength(delta, "utf8");
-			if (streamedBytes > BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES) {
-				throw new BootstrapScoutOutputLimitError(streamedBytes);
+			if (streamedBytes > BOOTSTRAP_MAX_OUTPUT_BYTES) {
+				throw new BootstrapOutputLimitError(streamedBytes);
 			}
 			streamedText += delta;
 		}
@@ -248,39 +266,39 @@ async function collectDispatchAssistantText(
 			const text = assistantTextFromMessage(event.message);
 			if (text.length > 0) {
 				const bytes = Buffer.byteLength(text, "utf8");
-				if (bytes > BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES) throw new BootstrapScoutOutputLimitError(bytes);
+				if (bytes > BOOTSTRAP_MAX_OUTPUT_BYTES) throw new BootstrapOutputLimitError(bytes);
 				lastAssistantText = text;
 			}
 		}
 	}
 	const text = (lastAssistantText || streamedText).trim();
-	if (text.length === 0) throw new Error("bootstrap scout did not return an assistant response");
+	if (text.length === 0) throw new Error("bootstrap agent did not return an assistant response");
 	return text;
 }
 
 function receiptFailure(receipt: RunReceipt): string {
 	const detail = receipt.failureMessage ? `: ${receipt.failureMessage}` : "";
-	return `bootstrap scout failed with exit ${receipt.exitCode}${detail}`;
+	return `bootstrap agent failed with exit ${receipt.exitCode}${detail}`;
 }
 
-async function generateBootstrapWithScout(
+async function generateBootstrapWithModel(
 	dispatch: DispatchContract,
 	input: BootstrapGenerateInput,
-	route?: BootstrapScoutRoute,
+	route?: BootstrapRoute,
 ): Promise<BootstrapStructuredOutput> {
 	const prompt = buildBootstrapPrompt(input);
 	const startedAt = Date.now();
 	input.progress?.({
 		phase: "generate",
 		status: "running",
-		message: "dispatching internal scout shadow agent",
-		detail: "agent=scout",
+		message: "dispatching internal context-bootstrap agent",
+		detail: `agent=${CONTEXT_BOOTSTRAP_AGENT_ID}`,
 	});
 	let handle: Awaited<ReturnType<DispatchContract["dispatch"]>>;
-	let structuredOutputMode: BootstrapScoutTelemetry["structuredOutputMode"] = "native-schema";
-	const dispatchScout = (nativeSchema: boolean) =>
+	let structuredOutputMode: BootstrapRunTelemetry["structuredOutputMode"] = "native-schema";
+	const dispatchBootstrap = (nativeSchema: boolean) =>
 		dispatch.dispatch({
-			agentId: "scout",
+			agentId: CONTEXT_BOOTSTRAP_AGENT_ID,
 			executionRole: "researcher",
 			task: prompt,
 			cwd: input.cwd,
@@ -292,33 +310,33 @@ async function generateBootstrapWithScout(
 			...(route?.model ? { model: route.model } : {}),
 		});
 	try {
-		handle = await dispatchScout(true);
+		handle = await dispatchBootstrap(true);
 	} catch (err) {
 		if (!(err instanceof UnsupportedResponseSchemaError)) {
 			const error = err instanceof Error ? err : new Error(String(err));
-			throw new BootstrapScoutAttemptError(error, "not-run", scoutTelemetry(prompt, "", startedAt, structuredOutputMode));
+			throw new BootstrapAttemptError(error, "not-run", bootstrapTelemetry(prompt, "", startedAt, structuredOutputMode));
 		}
 		structuredOutputMode = "prompt-parser";
 		input.progress?.({
 			phase: "generate",
 			status: "running",
-			message: "native schema unavailable; using bounded Scout output parser",
+			message: "native schema unavailable; using bounded output parser",
 			detail: err.message,
 		});
 		try {
-			handle = await dispatchScout(false);
+			handle = await dispatchBootstrap(false);
 		} catch (fallbackErr) {
 			const error = fallbackErr instanceof Error ? fallbackErr : new Error(String(fallbackErr));
-			throw new BootstrapScoutAttemptError(error, "not-run", scoutTelemetry(prompt, "", startedAt, structuredOutputMode));
+			throw new BootstrapAttemptError(error, "not-run", bootstrapTelemetry(prompt, "", startedAt, structuredOutputMode));
 		}
 	}
-	// No product cap. Scout is told to explore the repository with code_nav, and a
+	// No product cap. The bootstrap agent explores the repository with code_nav, and a
 	// 30s ceiling clamped over the operator's guardrail aborted every real run
 	// mid-exploration: an observed bootstrap burned 19k tokens across 5 tool calls
 	// and returned zero bytes at 29s. The wiki documenter in this same directory
 	// budgets minutes for the same shape of work. `internalDispatchTimeoutMs` is
 	// the operator's knob for slow targets; nothing here knows better than it does.
-	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "bootstrap scout", process.env);
+	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "context bootstrap", process.env);
 	let text = "";
 	let receipt: RunReceipt | undefined;
 	let parserAttempted = false;
@@ -332,13 +350,13 @@ async function generateBootstrapWithScout(
 		input.progress?.({
 			phase: "generate",
 			status: "running",
-			message: "scout returned structured bootstrap JSON",
+			message: "bootstrap agent returned the handbook payload",
 			detail: `${Buffer.byteLength(text, "utf8")} bytes`,
 		});
 		input.reportGeneration?.({
-			mode: "scout",
+			mode: "model",
 			parserOutcome: "parsed",
-			scout: scoutTelemetry(prompt, text, startedAt, structuredOutputMode, handle.runId, receipt),
+			run: bootstrapTelemetry(prompt, text, startedAt, structuredOutputMode, handle.runId, receipt),
 		});
 		return output;
 	} catch (err) {
@@ -349,17 +367,17 @@ async function generateBootstrapWithScout(
 			: err instanceof Error
 				? err
 				: new Error(String(err));
-		throw new BootstrapScoutAttemptError(
+		throw new BootstrapAttemptError(
 			error,
 			parserAttempted ? "rejected" : "not-run",
-			scoutTelemetry(
+			bootstrapTelemetry(
 				prompt,
 				text,
 				startedAt,
 				structuredOutputMode,
 				handle.runId,
 				receipt,
-				err instanceof BootstrapScoutOutputLimitError ? err.observedBytes : undefined,
+				err instanceof BootstrapOutputLimitError ? err.observedBytes : undefined,
 			),
 		);
 	} finally {
@@ -389,7 +407,7 @@ async function loadBootstrapDispatch(): Promise<{
 	const config = loaded.getContract<ConfigContract>("config");
 	if (!dispatch || !config) {
 		await loaded.stop();
-		throw new Error("bootstrap Scout dispatch or configuration unavailable");
+		throw new Error("bootstrap dispatch or configuration unavailable");
 	}
 	return { dispatch, config, loaded };
 }
@@ -405,30 +423,30 @@ export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = 
 		try {
 			if (options.dispatch) {
 				const route = options.route ?? options.resolveRoute?.();
-				return await generateBootstrapWithScout(options.dispatch, input, route);
+				return await generateBootstrapWithModel(options.dispatch, input, route);
 			}
 			{
 				const lazy = await loadBootstrapDispatch();
 				loaded = lazy.loaded;
-				const route = options.route ?? resolveBootstrapScoutRoute(lazy.config.get());
-				return await generateBootstrapWithScout(lazy.dispatch, input, route);
+				const route = options.route ?? resolveBootstrapRoute(lazy.config.get());
+				return await generateBootstrapWithModel(lazy.dispatch, input, route);
 			}
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));
 			const fallback = fallbackBootstrapOutput(input);
 			const generation: BootstrapGenerationTelemetry = {
 				mode: fallback.mode,
-				parserOutcome: err instanceof BootstrapScoutAttemptError ? err.parserOutcome : "not-run",
+				parserOutcome: err instanceof BootstrapAttemptError ? err.parserOutcome : "not-run",
 				fallbackReason: error.message,
-				...(err instanceof BootstrapScoutAttemptError ? { scout: err.scout } : {}),
+				...(err instanceof BootstrapAttemptError ? { run: err.telemetry } : {}),
 			};
 			input.progress?.({
 				phase: "generate",
 				status: "running",
 				message:
 					fallback.mode === "existing"
-						? "scout unavailable; preserving existing CLIO.md"
-						: "scout unavailable; using heuristic bootstrap",
+						? "bootstrap agent unavailable; preserving existing CLIO.md"
+						: "bootstrap agent unavailable; using heuristic bootstrap",
 				detail: error.message,
 			});
 			input.reportGeneration?.(generation);

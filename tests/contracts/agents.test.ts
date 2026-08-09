@@ -41,7 +41,7 @@ describe("contracts/agents", () => {
 	it("loads shipped recipes as explicit strict specs", () => {
 		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
 		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
-		strictEqual(recipes.length, 10);
+		strictEqual(recipes.length, 11);
 		for (const entry of recipes) {
 			strictEqual(entry.version, 1);
 			ok(entry.body.trim().length > 0);
@@ -59,6 +59,16 @@ describe("contracts/agents", () => {
 		// a typed report is what made a small model fabricate one.
 		const wikiWriter = recipes.find((entry) => entry.id === "wiki-writer");
 		deepStrictEqual(wikiWriter?.resultContract, { kind: "artifact-report" });
+		// `clio context init` needs a JSON handbook, and a recipe's result
+		// contract is enforced in the worker and sealed by the orchestrator. When
+		// bootstrap rode on Scout, every model that obeyed its recipe returned
+		// reconnaissance findings and the handbook parser rejected the run. The
+		// two agents must therefore keep two different contracts.
+		const bootstrap = recipes.find((entry) => entry.id === "context-bootstrap");
+		strictEqual(bootstrap?.audience, "internal");
+		deepStrictEqual(bootstrap?.resultContract, { kind: "context-handbook" });
+		const scout = recipes.find((entry) => entry.id === "scout");
+		deepStrictEqual(scout?.resultContract, { kind: "scout-report" });
 	});
 
 	it("keeps display metadata visible while policy reads hard semantics", () => {

@@ -565,7 +565,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 				const output = JSON.parse(result.stdout) as {
 					generation?: {
 						mode?: unknown;
-						scout?: {
+						run?: {
 							structuredOutputMode?: unknown;
 							targetId?: unknown;
 							wireModelId?: unknown;
@@ -573,16 +573,16 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 						};
 					};
 				};
-				strictEqual(output.generation?.mode, "scout", `target=${target} stdout=${result.stdout}`);
-				strictEqual(output.generation?.scout?.targetId, target);
-				strictEqual(output.generation?.scout?.wireModelId, "mock-model");
+				strictEqual(output.generation?.mode, "model", `target=${target} stdout=${result.stdout}`);
+				strictEqual(output.generation?.run?.targetId, target);
+				strictEqual(output.generation?.run?.wireModelId, "mock-model");
 				ok(existsSync(join(projectDir, "CLIO.md")), `target=${target} did not write validated bootstrap output`);
 				return output;
 			};
 
 			const llamaOutput = await runBootstrap("fixture-llama", join(scratch.dir, "llama-project"));
-			strictEqual(llamaOutput.generation?.scout?.structuredOutputMode, "native-schema");
-			strictEqual(llamaOutput.generation?.scout?.runtimeId, "llamacpp");
+			strictEqual(llamaOutput.generation?.run?.structuredOutputMode, "native-schema");
+			strictEqual(llamaOutput.generation?.run?.runtimeId, "llamacpp");
 			strictEqual(fixture.requests.length, 1);
 			const llamaRequest = fixture.requests[0];
 			strictEqual(llamaRequest?.stream, true);
@@ -612,8 +612,8 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			});
 
 			const compatOutput = await runBootstrap("fixture-openai-scout", join(scratch.dir, "openai-project"));
-			strictEqual(compatOutput.generation?.scout?.structuredOutputMode, "prompt-parser");
-			strictEqual(compatOutput.generation?.scout?.runtimeId, "openai-compat");
+			strictEqual(compatOutput.generation?.run?.structuredOutputMode, "prompt-parser");
+			strictEqual(compatOutput.generation?.run?.runtimeId, "openai-compat");
 			strictEqual(fixture.requests.length, 2, "unsupported schema attempt must retry once without an HTTP preflight");
 			const compatRequest = fixture.requests[1];
 			strictEqual(compatRequest?.stream, true);

@@ -63,7 +63,7 @@ export type BootstrapGenerate = (
 export type BootstrapProgressEvent = Omit<ContextActivityPayload, "kind" | "at">;
 export type BootstrapProgressSink = (event: BootstrapProgressEvent) => void;
 
-export interface BootstrapScoutTelemetry {
+export interface BootstrapRunTelemetry {
 	structuredOutputMode: "native-schema" | "prompt-parser";
 	runId?: string;
 	targetId?: string;
@@ -91,7 +91,7 @@ export interface BootstrapGenerationTelemetry {
 	mode: BootstrapGenerationMode;
 	parserOutcome: BootstrapParserOutcome;
 	fallbackReason?: string;
-	scout?: BootstrapScoutTelemetry;
+	run?: BootstrapRunTelemetry;
 }
 
 export type BootstrapGenerationSink = (telemetry: BootstrapGenerationTelemetry) => void;
@@ -963,26 +963,26 @@ function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): Bo
 	};
 	const fallbackReason = boundedStateString(telemetry.fallbackReason, 500);
 	if (fallbackReason) state.fallbackReason = fallbackReason;
-	const scout = telemetry.scout;
-	if (!scout) return state;
-	state.structuredOutputMode = scout.structuredOutputMode;
+	const run = telemetry.run;
+	if (!run) return state;
+	state.structuredOutputMode = run.structuredOutputMode;
 	for (const [key, value] of [
-		["runId", scout.runId],
-		["targetId", scout.targetId],
-		["wireModelId", scout.wireModelId],
-		["runtimeId", scout.runtimeId],
-		["runtimeKind", scout.runtimeKind],
-		["thinkingLevel", scout.thinkingLevel],
+		["runId", run.runId],
+		["targetId", run.targetId],
+		["wireModelId", run.wireModelId],
+		["runtimeId", run.runtimeId],
+		["runtimeKind", run.runtimeKind],
+		["thinkingLevel", run.thinkingLevel],
 	] as const) {
 		const bounded = boundedStateString(value, 512);
 		if (bounded) state[key] = bounded;
 	}
 	for (const [key, value] of [
-		["tokenCount", scout.tokens?.total],
-		["toolCalls", scout.toolCalls],
-		["durationMs", scout.durationMs],
-		["promptBytes", scout.promptBytes],
-		["outputBytes", scout.outputBytes],
+		["tokenCount", run.tokens?.total],
+		["toolCalls", run.toolCalls],
+		["durationMs", run.durationMs],
+		["promptBytes", run.promptBytes],
+		["outputBytes", run.outputBytes],
 	] as const) {
 		const counter = safeStateCounter(value);
 		if (counter !== undefined) state[key] = counter;
@@ -1006,7 +1006,7 @@ function writeProjectState(
 	const prev = readClioState(cwd);
 	// lastBootstrap describes how the CLIO.md on disk was produced, not what the
 	// most recent run happened to do. A run that generated nothing leaves the
-	// handbook untouched, so overwriting a recorded `scout` provenance with
+	// handbook untouched, so overwriting a recorded `model` provenance with
 	// `existing` would claim the handbook has no model authorship behind it.
 	const lastBootstrap = generated
 		? durableGenerationTelemetry(generation)
@@ -1186,7 +1186,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		progress(input, {
 			phase: "generate",
 			status: "started",
-			message: input.generate ? "drafting CLIO.md with scout" : "drafting CLIO.md with heuristic",
+			message: input.generate ? "drafting CLIO.md with the bootstrap agent" : "drafting CLIO.md with heuristic",
 		});
 		output = await (input.generate ?? heuristicBootstrapOutput)({
 			cwd,
@@ -1217,9 +1217,9 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			() => {
 				retainedModelSections += 1;
 			},
-			generation.mode === "scout",
+			generation.mode === "model",
 		);
-		if (generation.mode === "scout" && retainedModelSections === 0) {
+		if (generation.mode === "model" && retainedModelSections === 0) {
 			generation = {
 				...generation,
 				mode: "heuristic",

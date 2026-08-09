@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
 import {
-	BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES,
+	BOOTSTRAP_MAX_OUTPUT_BYTES,
 	modelBootstrapGenerate,
-	resolveBootstrapScoutRoute,
+	resolveBootstrapRoute,
 } from "../../src/cli/bootstrap-generate.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { UnsupportedResponseSchemaError } from "../../src/core/response-schema.js";
@@ -142,7 +142,7 @@ function fakeDispatch(
 	return { contract, tasks, requests };
 }
 
-describe("contracts/bootstrap Scout generation", () => {
+describe("contracts/bootstrap model generation", () => {
 	it("keeps the wire schema inside the deployed llama.cpp grammar subset", () => {
 		const serialized = JSON.stringify(BOOTSTRAP_OUTPUT_JSON_SCHEMA);
 		strictEqual(serialized.includes("minLength"), false);
@@ -151,14 +151,14 @@ describe("contracts/bootstrap Scout generation", () => {
 	});
 
 	/**
-	 * The bootstrap Scout used to be clamped to a 30s product ceiling layered over
-	 * the operator's `internalDispatchTimeoutMs` guardrail. Scout is instructed to
-	 * explore the repository with code_nav first, so that ceiling aborted real runs
-	 * mid-exploration and every model-driven bootstrap silently degraded to the
-	 * heuristic. The guardrail is the operator's knob for slow targets; the call
-	 * site has no better information than it does.
+	 * The bootstrap dispatch used to be clamped to a 30s product ceiling layered
+	 * over the operator's `internalDispatchTimeoutMs` guardrail. The agent is
+	 * instructed to explore the repository with code_nav first, so that ceiling
+	 * aborted real runs mid-exploration and every model-driven bootstrap silently
+	 * degraded to the heuristic. The guardrail is the operator's knob for slow
+	 * targets; the call site has no better information than it does.
 	 */
-	it("lets the operator guardrail govern the Scout deadline instead of a product ceiling", async () => {
+	it("lets the operator guardrail govern the bootstrap deadline instead of a product ceiling", async () => {
 		const input = await bootstrapInput();
 		const response = JSON.stringify({
 			projectName: "Deadline Fixture",
@@ -203,7 +203,7 @@ describe("contracts/bootstrap Scout generation", () => {
 		}
 	});
 
-	it("reports receipt-backed Scout telemetry with UTF-8 byte counts", async () => {
+	it("reports receipt-backed bootstrap telemetry with UTF-8 byte counts", async () => {
 		const input = await bootstrapInput();
 		const response = JSON.stringify({
 			projectName: "Telemetry Fixture",
@@ -226,9 +226,9 @@ describe("contracts/bootstrap Scout generation", () => {
 		strictEqual(output.projectName, "Telemetry Fixture");
 		strictEqual(reports.length, 1);
 		deepStrictEqual(reports[0], {
-			mode: "scout",
+			mode: "model",
 			parserOutcome: "parsed",
-			scout: {
+			run: {
 				structuredOutputMode: "native-schema",
 				runId: "scout-run-1",
 				targetId: "mini",
@@ -252,37 +252,37 @@ describe("contracts/bootstrap Scout generation", () => {
 		deepStrictEqual(dispatch.requests[0]?.responseSchema, BOOTSTRAP_OUTPUT_JSON_SCHEMA);
 	});
 
-	it("resolves the configured Scout binding and refuses dangling profiles", () => {
+	it("resolves the configured bootstrap binding and refuses dangling profiles", () => {
 		const configured = structuredClone(DEFAULT_SETTINGS);
-		configured.workers.profiles.scout = {
+		configured.workers.profiles.handbook = {
 			target: "mini",
 			model: "MiniCPM-test",
 			thinkingLevel: "off",
 		};
-		configured.workers.agentBindings.scout = "scout";
-		deepStrictEqual(resolveBootstrapScoutRoute(configured), {
+		configured.workers.agentBindings["context-bootstrap"] = "handbook";
+		deepStrictEqual(resolveBootstrapRoute(configured), {
 			target: "mini",
 			model: "MiniCPM-test",
 			thinkingLevel: "off",
 		});
 
 		const dangling = structuredClone(DEFAULT_SETTINGS);
-		dangling.workers.agentBindings.scout = "missing";
-		throws(() => resolveBootstrapScoutRoute(dangling), /profile 'missing' is not configured/);
+		dangling.workers.agentBindings["context-bootstrap"] = "missing";
+		throws(() => resolveBootstrapRoute(dangling), /profile 'missing' is not configured/);
 
 		const targetless = structuredClone(DEFAULT_SETTINGS);
 		targetless.workers.profiles.empty = { target: null, model: null, thinkingLevel: "off" };
-		targetless.workers.agentBindings.scout = "empty";
-		throws(() => resolveBootstrapScoutRoute(targetless), /profile 'empty' has no target/);
+		targetless.workers.agentBindings["context-bootstrap"] = "empty";
+		throws(() => resolveBootstrapRoute(targetless), /profile 'empty' has no target/);
 	});
 
-	// Scout used to throw when no binding existed, which made it the only
+	// Bootstrap used to throw when no binding existed, which made it the only
 	// internal dispatch that could not run off workers.default. A fresh install
 	// with a working default therefore never produced a model-driven CLIO.md.
-	it("falls back to workers.default when no Scout binding is configured", () => {
+	it("falls back to workers.default when no bootstrap binding is configured", () => {
 		const unbound = structuredClone(DEFAULT_SETTINGS);
 		unbound.workers.default = { target: "dynamo", model: "qwopus-coder", thinkingLevel: "off" };
-		deepStrictEqual(resolveBootstrapScoutRoute(unbound), {
+		deepStrictEqual(resolveBootstrapRoute(unbound), {
 			target: "dynamo",
 			model: "qwopus-coder",
 			thinkingLevel: "off",
@@ -290,14 +290,34 @@ describe("contracts/bootstrap Scout generation", () => {
 
 		const bound = structuredClone(unbound);
 		bound.workers.profiles.fast = { target: "mini", model: "MiniCPM-test", thinkingLevel: "off" };
-		bound.workers.agentBindings.scout = "fast";
-		strictEqual(resolveBootstrapScoutRoute(bound).target, "mini", "an explicit binding still wins over the default");
+		bound.workers.agentBindings["context-bootstrap"] = "fast";
+		strictEqual(resolveBootstrapRoute(bound).target, "mini", "an explicit binding still wins over the default");
 
 		const routeless = structuredClone(DEFAULT_SETTINGS);
-		throws(() => resolveBootstrapScoutRoute(routeless), /workers.default has no target/);
+		throws(() => resolveBootstrapRoute(routeless), /workers.default has no target/);
 	});
 
-	it("retries a valid non-schema Scout route through the bounded prompt parser", async () => {
+	// Bootstrap used to run through the Scout recipe, so operators who cared
+	// which model wrote their handbook bound `scout`. An upgrade that ignored
+	// that binding would silently move handbook generation onto workers.default.
+	it("honors a legacy scout binding when no context-bootstrap binding exists", () => {
+		const legacy = structuredClone(DEFAULT_SETTINGS);
+		legacy.workers.default = { target: "dynamo", model: "qwopus-coder", thinkingLevel: "off" };
+		legacy.workers.profiles.fast = { target: "mini", model: "MiniCPM-test", thinkingLevel: "off" };
+		legacy.workers.agentBindings.scout = "fast";
+		strictEqual(resolveBootstrapRoute(legacy).target, "mini");
+
+		const both = structuredClone(legacy);
+		both.workers.profiles.handbook = { target: "zbook", model: "handbook-model", thinkingLevel: "off" };
+		both.workers.agentBindings["context-bootstrap"] = "handbook";
+		strictEqual(
+			resolveBootstrapRoute(both).target,
+			"zbook",
+			"an explicit context-bootstrap binding outranks the legacy scout binding",
+		);
+	});
+
+	it("retries a valid non-schema bootstrap route through the bounded prompt parser", async () => {
 		const input = await bootstrapInput();
 		const response = JSON.stringify({
 			projectName: "Telemetry Fixture",
@@ -329,13 +349,13 @@ describe("contracts/bootstrap Scout generation", () => {
 		strictEqual(dispatch.requests[1]?.target, "dynamo");
 		strictEqual(dispatch.requests[1]?.model, "qwopus");
 		strictEqual(dispatch.requests[1]?.thinkingLevel, "medium");
-		strictEqual(reports[0]?.mode, "scout");
-		strictEqual(reports[0]?.scout?.structuredOutputMode, "prompt-parser");
+		strictEqual(reports[0]?.mode, "model");
+		strictEqual(reports[0]?.run?.structuredOutputMode, "prompt-parser");
 	});
 
-	it("bounds Scout output before parsing and discloses the observed bytes", async () => {
+	it("bounds bootstrap output before parsing and discloses the observed bytes", async () => {
 		const input = await bootstrapInput();
-		const oversized = "x".repeat(BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES + 1);
+		const oversized = "x".repeat(BOOTSTRAP_MAX_OUTPUT_BYTES + 1);
 		const dispatch = fakeDispatch(oversized);
 		const reports: BootstrapGenerationTelemetry[] = [];
 
@@ -348,10 +368,10 @@ describe("contracts/bootstrap Scout generation", () => {
 		strictEqual(reports[0]?.mode, "heuristic");
 		strictEqual(reports[0]?.parserOutcome, "not-run");
 		match(reports[0]?.fallbackReason ?? "", /output exceeded/);
-		strictEqual(reports[0]?.scout?.outputBytes, BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES + 1);
+		strictEqual(reports[0]?.run?.outputBytes, BOOTSTRAP_MAX_OUTPUT_BYTES + 1);
 	});
 
-	it("reports rejected parsing once and retains the successful Scout receipt on fallback", async () => {
+	it("reports rejected parsing once and retains the successful bootstrap receipt on fallback", async () => {
 		const input = await bootstrapInput();
 		const invalid = "not JSON μ";
 		const dispatch = fakeDispatch(invalid);
@@ -367,9 +387,9 @@ describe("contracts/bootstrap Scout generation", () => {
 		strictEqual(reports[0]?.mode, "heuristic");
 		strictEqual(reports[0]?.parserOutcome, "rejected");
 		match(reports[0]?.fallbackReason ?? "", /did not contain a JSON object/);
-		strictEqual(reports[0]?.scout?.runId, "scout-run-1");
-		strictEqual(reports[0]?.scout?.tokens?.total, 321);
-		strictEqual(reports[0]?.scout?.outputBytes, Buffer.byteLength(invalid, "utf8"));
+		strictEqual(reports[0]?.run?.runId, "scout-run-1");
+		strictEqual(reports[0]?.run?.tokens?.total, 321);
+		strictEqual(reports[0]?.run?.outputBytes, Buffer.byteLength(invalid, "utf8"));
 	});
 
 	it("reports dispatch failures as a non-parser heuristic fallback", async () => {
@@ -390,7 +410,7 @@ describe("contracts/bootstrap Scout generation", () => {
 		strictEqual(reports[0]?.mode, "heuristic");
 		strictEqual(reports[0]?.parserOutcome, "not-run");
 		match(reports[0]?.fallbackReason ?? "", /local Scout target unavailable/);
-		ok((reports[0]?.scout?.promptBytes ?? 0) > 0);
-		strictEqual(reports[0]?.scout?.outputBytes, 0);
+		ok((reports[0]?.run?.promptBytes ?? 0) > 0);
+		strictEqual(reports[0]?.run?.outputBytes, 0);
 	});
 });

@@ -15,7 +15,7 @@ import {
 const scratchRoots: string[] = [];
 const fingerprint = { treeHash: "a".repeat(64), gitHead: null, loc: 0 };
 const completeBootstrapState: BootstrapGenerationState = {
-	mode: "scout",
+	mode: "model",
 	parserOutcome: "parsed",
 	structuredOutputMode: "prompt-parser",
 	runId: "run-1",
@@ -88,7 +88,7 @@ describe("contracts/context-state", () => {
 		const cwd = scratchProject();
 		const valid = { mode: "heuristic", parserOutcome: "not-run" };
 		const invalid: ReadonlyArray<unknown> = [
-			{ ...valid, mode: "model" },
+			{ ...valid, mode: "agent" },
 			{ ...valid, parserOutcome: "unknown" },
 			{ ...valid, structuredOutputMode: "grammar" },
 			{ ...valid, fallbackReason: " " },
@@ -106,5 +106,13 @@ describe("contracts/context-state", () => {
 			writeRawBootstrapState(cwd, value);
 			strictEqual(readClioState(cwd), null, `accepted invalid telemetry: ${JSON.stringify(value)}`);
 		}
+	});
+
+	it("reads a pre-0.3.0 'scout' generation mode as 'model' instead of discarding the state", () => {
+		const cwd = scratchProject();
+		writeRawBootstrapState(cwd, { ...completeBootstrapState, mode: "scout" });
+		const state = readClioState(cwd);
+		strictEqual(state?.lastBootstrap?.mode, "model");
+		strictEqual(state?.lastBootstrap?.runId, "run-1", "the rest of the recorded provenance survives the migration");
 	});
 });
