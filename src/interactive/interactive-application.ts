@@ -1,16 +1,7 @@
-import {
-	BusChannels,
-	type ContextPrunedPayload,
-	type ContextWarningPayload,
-	type LoopBlockedPayload,
-	type PermissionRequestedPayload,
-	type RuntimeNoticePayload,
-	type ToolBudgetExceededPayload,
-} from "../core/bus-events.js";
+import type { PermissionRequestedPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
-import { routingChangeNotices } from "../core/session-routing.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
@@ -33,12 +24,6 @@ import { createAgentProgress, isKeyRelease, matchesKey } from "../engine/tui.js"
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import {
-	budgetAlertNotice,
-	middlewareHookFailedSessionNotice,
-	restartRequiredNotice,
-	safetyBlockedNotice,
-} from "./bus-notices.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
 import { createCoalescingChatRenderer } from "./chat-renderer.js";
@@ -51,7 +36,8 @@ import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController } from "./editor-submit.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashboard.js";
-import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
+import { createNotificationCenter } from "./footer/notifications.js";
+import { createInteractiveEventProjection } from "./interactive-event-projection.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
 import { createInteractiveSlashRuntime } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
@@ -59,12 +45,6 @@ import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
 import { createLeaderKeyController } from "./leader-key.js";
-import {
-	loopBlockedAuditReason,
-	loopBlockedStopReason,
-	toolBudgetAuditReason,
-	toolBudgetStopReason,
-} from "./loop-guard-interrupt.js";
 import {
 	createOverlayLifecycle,
 	isEscapeKey,
@@ -83,7 +63,7 @@ import type {
 	RunIo,
 	TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
-import { createStatusController, resolveInlineVerb, spinnerFrame, type TurnSummary } from "./status/index.js";
+import { createStatusController, type TurnSummary } from "./status/index.js";
 import { abbreviateModelId } from "./theme/index.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
@@ -424,24 +404,6 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 	return false;
 }
 
-function recordObject(value: unknown): Record<string, unknown> | null {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
-function askUserInterviewClosedByToolResult(event: {
-	toolName?: unknown;
-	isError?: unknown;
-	result?: unknown;
-}): boolean {
-	if (event.toolName !== "ask_user" || event.isError === true) return false;
-	const result = recordObject(event.result);
-	const details = recordObject(result?.details);
-	const interview = recordObject(details?.interview);
-	return interview?.status === "complete" || interview?.status === "cancelled";
-}
-
 /**
  * Pure cancel logic for the cwd-fallback overlay. Restores the prior session
  * when one existed and differs from the just-resumed session id; otherwise
@@ -676,142 +638,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
 		requestRender: () => tui.requestRender(),
 	});
-	// Boot hints (CLIO.md state, keybinding diagnostics) route into the
-	// NotificationCenter, not the transcript, so they stay out of scrollback.
-	for (const notice of deps.initialNotices ?? []) {
-		const text = notice.trim();
-		if (text.length === 0) continue;
-		const key = text.toLowerCase().includes("keybinding notice") ? "startup:keybinding-notice" : text;
-		notify(classifyNoticeLevel(text), text, key);
-	}
-	const unsubscribeChat = deps.chat.onEvent((event) => {
-		if (event.type === "notice") {
-			if (event.surface === "transcript") {
-				chatRenderer.applyEvent(event);
-				return;
-			}
-			notify(event.level, event.text, event.key);
-			return;
-		}
-		if (event.type === "queue_update") {
-			followUpQueuePanel.setMessages(event.messages);
-			tui.requestRender();
-			return;
-		}
-		if (overlayLifecycle.isAskUserWaiting() && event.type === "message_update") {
-			const assistantEvent = event.assistantMessageEvent as { type?: unknown };
-			if (assistantEvent.type === "text_delta" || assistantEvent.type === "thinking_delta") {
-				overlayLifecycle.closeAskUserSession();
-			}
-		}
-		if (event.type === "agent_end") {
-			overlayLifecycle.closeAskUserSession();
-			overlayLifecycle.resetAskUserCancellation();
-		}
-		if (event.type === "tool_execution_start") {
-			if (event.toolName.toLowerCase() === "dispatch") {
-				chatRenderer.applyEvent(event);
-				return;
-			}
-			footerActiveTools.add(event.toolCallId);
-			const current = footerToolCounts.get(event.toolName) ?? 0;
-			footerToolCounts.set(event.toolName, current + 1);
-			footer.refresh();
-		} else if (event.type === "tool_execution_end") {
-			if (event.toolName.toLowerCase() === "dispatch") {
-				chatRenderer.applyEvent(event);
-				return;
-			}
-			if (askUserInterviewClosedByToolResult(event)) {
-				overlayLifecycle.closeAskUserSession();
-				overlayLifecycle.resetAskUserCancellation();
-			}
-			footerActiveTools.delete(event.toolCallId);
-			if (event.isError) footerToolErrors += 1;
-			const summary = (event as { resultSummary?: { truncated?: unknown } }).resultSummary;
-			if (summary?.truncated === true) footerToolTruncatedResults += 1;
-			footer.refresh();
-		}
-		chatRenderer.applyEvent(event);
-	});
-	let statusInlineFrame = 0;
-	const unsubscribeStatus = statusController.subscribe((status) => {
-		if (status.phase === "idle") {
-			chatPanel.setStatusLine(null);
-		} else if (status.phase === "ended") {
-			// Park the completed turn's metrics on the footer rather than printing
-			// a faint summary line under the reply. Keeps the transcript calm.
-			chatPanel.setStatusLine(null);
-			if (status.summary) lastTurnSummary = status.summary;
-		} else {
-			const verb = resolveInlineVerb(status, Date.now(), terminal.columns);
-			if (verb) {
-				const frame = terminal.columns < 30 ? "" : `${spinnerFrame(statusInlineFrame)} `;
-				chatPanel.setStatusLine({ phase: status.phase, verb: `${frame}${verb.text}`, toneHint: verb.toneHint });
-				statusInlineFrame = (statusInlineFrame + 1) % 10;
-			} else {
-				chatPanel.setStatusLine(null);
-			}
-		}
-		footer.refresh();
-		tui.requestRender();
-	});
 	// OSC 9;4 indeterminate progress around each agent turn. The terminal engine
 	// exposes Terminal.setProgress; the engine helper wraps it so start/stop
 	// are idempotent and unit-testable.
 	const agentProgress = createAgentProgress(terminal);
-	const unsubscribeProgress = deps.chat.onEvent((event) => {
-		const settings = deps.getSettings?.();
-		const showProgress = settings?.terminal.showTerminalProgress ?? false;
-		if (event.type === "agent_start" && showProgress) agentProgress.start();
-		else if (event.type === "agent_end") agentProgress.stop();
-	});
-	const unsubscribeAbortedProgress = deps.bus.on(BusChannels.RunAborted, () => {
-		agentProgress.stop();
-	});
-	// Repaint the footer whenever an assistant message completes so the
-	// running `in:/out:` token counters reflect the latest usage. The
-	// existing 120ms ticker only refreshes while streaming, which means the
-	// final frame after a turn ends would otherwise be stale.
-	const unsubscribeFooterTokens = deps.chat.onEvent((event) => {
-		if (event.type !== "message_end" && event.type !== "agent_end") return;
-		if (event.type === "agent_end") refreshLiveWorkspaceGit(true);
-		footer.refresh();
-		tui.requestRender();
-	});
-	const unsubscribeContextPressure = deps.bus.on(BusChannels.ContextWarning, (payload) => {
-		const evt = payload as ContextWarningPayload | null | undefined;
-		if (evt && typeof evt === "object" && "warning" in evt) {
-			if (evt.warning !== null) notify("warning", evt.warning, "context-low-warning");
-			else notifications.dismiss("context-low-warning");
-		}
-		footer.refresh();
-		tui.requestRender();
-	});
-	const unsubscribeContextPruned = deps.bus.on(BusChannels.ContextPruned, (payload) => {
-		const evt = payload as ContextPrunedPayload | null | undefined;
-		if (evt && typeof evt === "object" && typeof evt.tokensBefore === "number" && typeof evt.tokensAfter === "number") {
-			notify(
-				"info",
-				`[Compaction] Reclaimed context: ${evt.tokensBefore} -> ${evt.tokensAfter} tokens (${evt.stage})`,
-				"compaction-notice",
-			);
-		}
-		footer.refresh();
-		tui.requestRender();
-	});
-	// Model-residency visibility. The capacity-aware reconciler
-	// (engine/apis/residency.ts) emits over the bus instead of importing TUI
-	// code; this subscriber renders each will-not-fit, about-to-evict, swap,
-	// co-resident, or stress notice. The key folds repeats of the same kind
-	// for one target so turns do not spam.
-	const unsubscribeRuntimeNotice = deps.bus.on(BusChannels.RuntimeNotice, (payload) => {
-		const evt = payload as RuntimeNoticePayload | null | undefined;
-		if (!evt || typeof evt !== "object" || typeof evt.message !== "string" || typeof evt.kind !== "string") return;
-		notify(evt.level, evt.message, `runtime-notice:${evt.kind}:${evt.targetId}`);
-		footer.refresh();
-		tui.requestRender();
-	});
 	// Transcript sink shared by the bus-notice subscribers below (loop guard,
 	// budget alerts, safety blocks).
 	const busNoticeSink = {
@@ -819,132 +649,40 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			chatPanel.appendReplayBlock(renderBlock),
 		requestRender: () => tui.requestRender(),
 	};
-	// Loop-guard visibility. The backend guard (engine/loop-guard.ts)
-	// emits over the bus instead of importing TUI code; this subscriber turns
-	// each block into a warn notice and, when the per-turn budget is exhausted,
-	// stops the active turn with a durable closing message (cancel-with-reason)
-	// instead of leaving an empty aborted turn.
-	const unsubscribeLoopBlocked = deps.bus.on(BusChannels.LoopBlocked, (payload) => {
-		const evt = payload as LoopBlockedPayload | null | undefined;
-		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.repeatCount !== "number") return;
-		if (evt.disposition === "stop") {
-			// Backstop reached: the turn stayed in tool loops after the synthesis
-			// lockout, so stop it with a durable, visible closing message instead of
-			// the empty aborted turn a bare cancel leaves behind. The chat loop
-			// persists and renders it; the audit trail is tagged "loop_guard". The
-			// message text is shared with the headless/ACP subscriber.
-			deps.chat.cancel({
-				reason: loopBlockedStopReason(evt),
-				source: "loop_guard",
-				auditReason: loopBlockedAuditReason(evt),
-			});
-		} else if (evt.disposition === "lockout") {
-			// Budget reached: tools are locked for the rest of the turn so the model
-			// answers from what it gathered. The turn keeps running (no cancel); the
-			// operator gets one notice that the guard took over.
-			appendNotice(
-				"warn",
-				`[loop-guard] ${evt.tool} looped ${evt.repeatCount}x; tools disabled for the rest of this turn — the model is answering from what it gathered.`,
-				busNoticeSink,
-			);
-		} else {
-			appendNotice(
-				"warn",
-				`[loop-guard] blocked ${evt.tool}: identical call repeated ${evt.repeatCount}x in window (block ${evt.blocksThisTurn}/${evt.budget} this turn).`,
-				busNoticeSink,
-			);
-		}
-		tui.requestRender();
-	});
-	// Tool-call budget visibility. The orchestrator loop guard counts every
-	// distinct tool call in a turn (the identical-call loop guard above misses
-	// near-duplicate sprays) and emits over the bus. The soft budget renders a
-	// warn nudge; the hard ceiling stops the active turn with a durable closing
-	// message, matching the loop-budget interrupt path.
-	const unsubscribeToolBudget = deps.bus.on(BusChannels.ToolBudgetExceeded, (payload) => {
-		const evt = payload as ToolBudgetExceededPayload | null | undefined;
-		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.callsThisTurn !== "number") return;
-		if (evt.interrupted) {
-			deps.chat.cancel({
-				reason: toolBudgetStopReason(evt),
-				source: "loop_guard",
-				auditReason: toolBudgetAuditReason(evt),
-			});
-		} else {
-			appendNotice(
-				"warn",
-				`[loop-guard] tool-call budget reached: ${evt.callsThisTurn} calls this turn (soft budget ${evt.softBudget}); ${evt.tool} blocked, model asked to re-plan.`,
-				busNoticeSink,
-			);
-		}
-		tui.requestRender();
-	});
-	// Saved settings moved under a running session. Live routing is
-	// session-owned, so external writers (another Clio session, the CLI, a
-	// manual edit) only change defaults; surface a notice when the new defaults
-	// diverge from this session's active routing, and warn when the active
-	// target was removed from the shared target catalog.
-	const unsubscribeConfigRouting = deps.bus.on(BusChannels.ConfigNextTurn, (payload) => {
-		const evt = payload as { diff?: { nextTurn?: string[] }; settings?: Readonly<ClioSettings> } | null | undefined;
-		const effective = deps.getSettings?.();
-		if (!effective || !evt?.settings || !Array.isArray(evt.diff?.nextTurn)) return;
-		for (const notice of routingChangeNotices(evt.diff.nextTurn, evt.settings, effective, { commandHints: true })) {
-			notify(
-				notice.level,
-				notice.text,
-				notice.kind === "external-divergence" ? "config:routing-divergence" : "config:target-removed",
-			);
-		}
-		// Re-derive the /settings overlay rows while it is open: the shared
-		// snapshot just moved (target catalog, defaults), and rows like
-		// targets/fleet.profiles must track it.
-		overlayLifecycle.refreshSettingsOverlay();
-		footer.refresh();
-		tui.requestRender();
-	});
-	// Hot-reload fields (theme, keybindings, autonomy) repaint immediately;
-	// the autonomy row of an open /settings overlay must follow.
-	const unsubscribeConfigHotReloadOverlay = deps.bus.on(BusChannels.ConfigHotReload, () => {
-		overlayLifecycle.refreshSettingsOverlay();
-	});
-	// Restart-classified settings changed under a running session. Nothing in
-	// the session will pick them up; the notice is the only nudge the operator
-	// gets to restart.
-	const unsubscribeConfigRestartRequired = deps.bus.on(BusChannels.ConfigRestartRequired, (payload) => {
-		const text = restartRequiredNotice(payload);
-		if (text === null) return;
-		notify("warning", text, "config:restart-required");
-		footer.refresh();
-		tui.requestRender();
-	});
-	// Budget ceiling visibility. Scheduling emits budget.alert on enqueue when
-	// session spend meets or crosses the ceiling, and dispatch admission denies
-	// new dispatches at that point; this notice tells the operator why.
-	const unsubscribeBudgetAlert = deps.bus.on(BusChannels.BudgetAlert, (payload) => {
-		const notice = budgetAlertNotice(payload);
-		if (notice === null) return;
-		appendNotice(notice.level, notice.text, busNoticeSink);
-		tui.requestRender();
-	});
-	// Safety-policy block visibility. The transcript shows the rejection the
-	// model received; this notice adds the policy dimension (rule, action
-	// class, policy source) so the operator can tell which rule fired.
-	const unsubscribeSafetyBlocked = deps.bus.on(BusChannels.SafetyBlocked, (payload) => {
-		const notice = safetyBlockedNotice(payload);
-		if (notice === null) return;
-		appendNotice(notice.level, notice.text, busNoticeSink);
-		tui.requestRender();
-	});
-	// Middleware hook diagnostics. A throwing or budget-overrunning hook never
-	// breaks the turn, so without this warn notice a misbehaving guard or
-	// assessor would be invisible in interactive sessions (the composition
-	// root only writes stderr for non-interactive runs).
-	const seenMiddlewareBudgetWarnings = new Set<string>();
-	const unsubscribeMiddlewareHookFailed = deps.bus.on(BusChannels.MiddlewareHookFailed, (payload) => {
-		const notice = middlewareHookFailedSessionNotice(payload, seenMiddlewareBudgetWarnings);
-		if (notice === null) return;
-		appendNotice(notice.level, notice.text, busNoticeSink);
-		tui.requestRender();
+	const eventProjection = createInteractiveEventProjection({
+		bus: deps.bus,
+		chat: deps.chat,
+		status: statusController,
+		...(deps.initialNotices ? { initialNotices: deps.initialNotices } : {}),
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		getTerminalColumns: () => terminal.columns,
+		applyChatEvent: (event) => chatRenderer.applyEvent(event),
+		setFollowUpMessages: (messages) => followUpQueuePanel.setMessages(messages),
+		isAskUserWaiting: () => overlayLifecycle.isAskUserWaiting(),
+		closeAskUserSession: () => overlayLifecycle.closeAskUserSession(),
+		resetAskUserCancellation: () => overlayLifecycle.resetAskUserCancellation(),
+		recordToolStart: (toolName, toolCallId) => {
+			footerActiveTools.add(toolCallId);
+			footerToolCounts.set(toolName, (footerToolCounts.get(toolName) ?? 0) + 1);
+		},
+		recordToolEnd: (_toolName, toolCallId, isError, truncated) => {
+			footerActiveTools.delete(toolCallId);
+			if (isError) footerToolErrors += 1;
+			if (truncated) footerToolTruncatedResults += 1;
+		},
+		setStatusLine: (line) => chatPanel.setStatusLine(line),
+		setLastTurnSummary: (summary) => {
+			lastTurnSummary = summary;
+		},
+		startTerminalProgress: () => agentProgress.start(),
+		stopTerminalProgress: () => agentProgress.stop(),
+		refreshLiveWorkspaceGit,
+		refreshFooter: () => footer.refresh(),
+		requestRender: () => tui.requestRender(),
+		notify,
+		dismissNotification: (key) => notifications.dismiss(key),
+		appendTranscriptNotice: (level, text) => appendNotice(level, text, busNoticeSink),
+		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 	});
 
 	const slashRuntime = createInteractiveSlashRuntime({
@@ -1162,23 +900,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		unsubscribeObservability();
 		contextActivityStore.unsubscribe();
 		dispatchBoardStore.unsubscribe();
-		unsubscribeChat();
-		unsubscribeStatus();
+		eventProjection.disposePrimary();
 		statusController.dispose();
-		unsubscribeProgress();
-		unsubscribeAbortedProgress();
-		unsubscribeFooterTokens();
-		unsubscribeContextPressure();
-		unsubscribeContextPruned();
-		unsubscribeRuntimeNotice();
-		unsubscribeLoopBlocked();
-		unsubscribeToolBudget();
-		unsubscribeConfigRouting();
-		unsubscribeConfigHotReloadOverlay();
-		unsubscribeConfigRestartRequired();
-		unsubscribeBudgetAlert();
-		unsubscribeSafetyBlocked();
-		unsubscribeMiddlewareHookFailed();
+		eventProjection.disposeRemaining();
 		overlayLifecycle.dispose();
 		agentProgress.stop();
 		deps.chat.dispose();
