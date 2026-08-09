@@ -20,10 +20,15 @@ import { getMarketplaceSkills } from "../domains/resources/skills/marketplace.js
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
-import { createAgentProgress, isKeyRelease, matchesKey } from "../engine/tui.js";
+import { createAgentProgress, isKeyRelease } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import {
+	type ApplicationController,
+	type ApplicationIntervalHandle,
+	createApplicationController,
+} from "./application-controller.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
 import { createCoalescingChatRenderer } from "./chat-renderer.js";
@@ -47,10 +52,8 @@ import { buildLayout } from "./layout.js";
 import { createLeaderKeyController } from "./leader-key.js";
 import {
 	createOverlayLifecycle,
-	isEscapeKey,
 	type OverlayLifecycleController,
 	type OverlayState,
-	overlayOwnsInput,
 	routeOverlayKey,
 } from "./overlay-lifecycle.js";
 import { resolveAvailableThinkingLevels } from "./overlays/thinking-selector.js";
@@ -299,10 +302,6 @@ export interface CtrlCActionDeps {
 	now: number;
 }
 
-function isCtrlCKey(data: string): boolean {
-	return matchesKey(data, "ctrl+c") && !isKeyRelease(data);
-}
-
 /** Title-case a KeyId for display, e.g. `alt+x` → `Alt+X`. Falls back to `Alt+X`. */
 function formatKeyLabel(keyId: string | undefined): string {
 	if (!keyId || keyId.length === 0) return "Alt+X";
@@ -434,6 +433,7 @@ function _handleCwdFallbackCancel(preResumeSessionId: string | null, deps: CwdFa
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
 	const shell = createProcessInteractiveShell();
 	const { terminal, tui } = shell;
+	let applicationController: ApplicationController;
 
 	// Build the runtime keybinding manager from the current settings snapshot.
 	// This also installs the manager as pi-tui's global (via setKeybindings)
@@ -505,9 +505,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	// Dedicated harness→user surface. Boot hints and live connect/probe notices
 	// route here (anchored in the footer region) instead of into the transcript,
 	// so they never leak into VT scrollback.
-	let lastToolExpandAtMs = 0;
-	let lastThinkingExpandAtMs = 0;
-	let lastNotificationDismissAtMs = 0;
 	const dismissKeyLabel = formatKeyLabel(keybindings.getKeys("clio.notifications.dismiss")[0]);
 	const notifications = createNotificationCenter({
 		onChange: () => {
@@ -706,7 +703,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.onContextClear ? { onContextClear: deps.onContextClear } : {}),
 		...(deps.onContextRefresh ? { onContextRefresh: deps.onContextRefresh } : {}),
 		stateDir: deps.stateDir,
-		shutdown: () => shutdown(),
+		shutdown: () => applicationController.shutdown(),
 		requestRender: () => tui.requestRender(),
 		refreshFooter: () => footer.refresh(),
 		dismissContextBootstrapNotices,
@@ -760,8 +757,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const root = buildLayout({ banner, chat: chatPanel, pending: followUpQueuePanel, editor, footer: footer.view });
 	shell.mount(root, editor);
 
-	let footerTicker: NodeJS.Timeout | null = null;
-	footerTicker = setInterval(() => {
+	const footerTicker = setInterval(() => {
 		const statusActive = statusController.current().phase !== "idle";
 		if (!deps.chat.isStreaming() && !statusActive && !footer.isExpanded()) return;
 		footer.refresh();
@@ -772,33 +768,26 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	// Running expanded/collapsed tool segments show live elapsed time; refresh
 	// the transcript once per second while a turn is streaming so the elapsed
 	// counter ticks without waiting for the next agent event.
-	let toolElapsedTicker: NodeJS.Timeout | null = null;
-	toolElapsedTicker = setInterval(() => {
+	const toolElapsedTicker = setInterval(() => {
 		if (!deps.chat.isStreaming()) return;
 		chatPanel.invalidate?.();
 		tui.requestRender();
 	}, 1_000);
 	toolElapsedTicker.unref?.();
 
-	let workspaceTicker: NodeJS.Timeout | null = null;
-	workspaceTicker = setInterval(() => {
+	const workspaceTicker = setInterval(() => {
 		refreshLiveWorkspaceGit(true);
 		footer.refresh();
 		tui.requestRender();
 	}, 5_000);
 	workspaceTicker.unref?.();
 
-	const run = shell.anchor();
-
-	let shuttingDown = false;
-	let lastCtrlCAt = 0;
 	const leaderKeys = createLeaderKeyController({
 		matchesLeader: (input) => keybindings.matches(input, "clio.leader"),
 		leaderTargets: () => keybindings.leaderTargets(),
 		dispatchAction: (id) => dispatchInteractiveAction(id, keyActionDeps()),
 		isRelease: isKeyRelease,
 	});
-	process.removeAllListeners("SIGINT");
 	let overlayLifecycle: OverlayLifecycleController;
 	const interactiveTickers = createInteractiveTickers({
 		tui,
@@ -886,69 +875,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		footer.refresh();
 		tui.requestRender();
 	};
-	const shutdown = async (): Promise<void> => {
-		if (shuttingDown) return;
-		shuttingDown = true;
-		process.off("SIGINT", handleCtrlC);
-		shell.releaseAnchor();
-		if (footerTicker) clearInterval(footerTicker);
-		if (toolElapsedTicker) clearInterval(toolElapsedTicker);
-		if (workspaceTicker) clearInterval(workspaceTicker);
-		leaderKeys.dispose();
-		interactiveTickers.dispose();
-		footer.dispose();
-		unsubscribeObservability();
-		contextActivityStore.unsubscribe();
-		dispatchBoardStore.unsubscribe();
-		eventProjection.disposePrimary();
-		statusController.dispose();
-		eventProjection.disposeRemaining();
-		overlayLifecycle.dispose();
-		agentProgress.stop();
-		deps.chat.dispose();
-		interactiveSubscriptions.dispose();
-		shell.stop();
-		// Drain the parked queue so any worker or agent loop still holding
-		// a pending tool-execution promise sees a terminal verdict rather
-		// than a promise that never settles across process exit.
-		deps.toolRegistry?.cancelParkedCalls("Clio Coder shutting down");
-		await deps.onShutdown();
-		shell.complete(0);
-	};
-
-	const handleCtrlC = (): void => {
-		const action = resolveCtrlCAction({
-			overlayState: overlayLifecycle.getState(),
-			streaming: deps.chat.isStreaming(),
-			editorText: editor.getText(),
-			lastCtrlCAt,
-			now: Date.now(),
-		});
-		if (action === "shutdown") {
-			lastCtrlCAt = 0;
-			void shutdown();
-			return;
-		}
-		lastCtrlCAt = Date.now();
-		if (action === "cancel-stream") {
-			cancelActiveRun();
-			return;
-		}
-		if (action === "close-overlay") {
-			// Closing a modal is not the first half of the main-editor shutdown
-			// gesture. Reset the double-tap clock so a quick second Ctrl+C cannot
-			// exit Clio after merely dismissing /agents or /fleet.
-			lastCtrlCAt = 0;
-			closeOverlay();
-			return;
-		}
-		if (action === "clear-editor") {
-			editor.setText("");
-			tui.requestRender();
-		}
-	};
-	process.on("SIGINT", handleCtrlC);
-
 	const keyActionDeps = (): KeyBindingDeps => ({
 		matches: (input, id) => keybindings.matches(input, id),
 		canExit: () => editor.getText().length === 0,
@@ -965,7 +891,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			tui.requestRender();
 		},
 		requestShutdown: () => {
-			void shutdown();
+			void applicationController.shutdown();
 		},
 		toggleStatus: () => {
 			toggleFooterDashboardState();
@@ -989,24 +915,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			footer.refresh();
 			tui.requestRender();
 		},
-		dismissNotifications: () => {
-			const nowMs = Date.now();
-			const isDoubleTap = lastNotificationDismissAtMs > 0 && nowMs - lastNotificationDismissAtMs <= CTRL_C_DOUBLE_TAP_MS;
-			lastNotificationDismissAtMs = nowMs;
-			if (isDoubleTap) {
-				notifications.dismissAll();
-				return;
-			}
-			const first = notifications.list()[0];
-			if (first) notifications.dismiss(first.id);
-		},
-		toggleToolExpansion: () => {
-			const nowMs = Date.now();
-			const isDoubleTap = lastToolExpandAtMs > 0 && nowMs - lastToolExpandAtMs <= CTRL_C_DOUBLE_TAP_MS;
-			lastToolExpandAtMs = nowMs;
-			const changed = isDoubleTap ? chatPanel.toggleAllToolsExpanded() : chatPanel.toggleLastToolExpanded();
-			if (changed) tui.requestRender();
-		},
+		dismissNotifications: () => applicationController.dismissNotifications(),
+		toggleToolExpansion: () => applicationController.toggleToolExpansion(),
 		toggleAllToolExpansion: () => {
 			if (chatPanel.toggleAllToolsExpanded()) tui.requestRender();
 		},
@@ -1014,13 +924,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			chatPanel.toggleLiveToolOutput();
 			tui.requestRender();
 		},
-		toggleThinkingExpansion: () => {
-			const nowMs = Date.now();
-			const isDoubleTap = lastThinkingExpandAtMs > 0 && nowMs - lastThinkingExpandAtMs <= CTRL_C_DOUBLE_TAP_MS;
-			lastThinkingExpandAtMs = nowMs;
-			const changed = isDoubleTap ? chatPanel.toggleAllThinking() : chatPanel.toggleLastThinking();
-			if (changed) tui.requestRender();
-		},
+		toggleThinkingExpansion: () => applicationController.toggleThinkingExpansion(),
 		toggleAllThinkingExpansion: () => {
 			if (chatPanel.toggleAllThinking()) tui.requestRender();
 		},
@@ -1044,90 +948,84 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		notify,
 	});
 
-	tui.addInputListener((data: string) => {
-		// A modal invalidates any half-entered leader sequence. Otherwise the key
-		// used to close /agents could become the first half of a shortcut after the
-		// overlay closes.
-		if (overlayOwnsInput(overlayLifecycle.getState()) && leaderKeys.isPending()) leaderKeys.reset();
-		// A pending leader sequence belongs to the main editor, never an overlay.
-		// Modal input must win before leader/agent cancellation precedence.
-		if (!overlayOwnsInput(overlayLifecycle.getState()) && leaderKeys.isPending()) {
-			if (leaderKeys.route(data)) return { consume: true };
-		}
-
-		if (isCtrlCKey(data)) {
-			handleCtrlC();
-			return { consume: true };
-		}
-
-		const overlayConsumed = routeOverlayKey(
-			data,
-			overlayLifecycle.getState(),
-			{
-				cancelPermission: () => {
-					closeOverlay();
-				},
-				confirmPermission: () => overlayLifecycle.confirmPermission(),
-				closeOverlay,
-				selectPreviousDispatch: () => {
-					dispatchBoard.selectPrevious();
-					tui.requestRender();
-				},
-				selectNextDispatch: () => {
-					dispatchBoard.selectNext();
-					tui.requestRender();
-				},
-				steerSelectedDispatch,
-				cancelSelectedDispatch,
-				cancelAskUser: () => overlayLifecycle.cancelAskUser(),
+	applicationController = createApplicationController({
+		clock: { now: Date.now },
+		signals: {
+			removeAllListeners: (signal) => {
+				process.removeAllListeners(signal);
 			},
-			(input, id) => keybindings.matches(input, id),
-		);
-		if (overlayConsumed) {
-			return { consume: true };
-		}
-		// A false route result means the focused overlay component owns the full
-		// keymap. Do not let its key fall through to editor shortcuts, bash abort,
-		// or cancellation of the active agent run.
-		if (overlayOwnsInput(overlayLifecycle.getState())) return undefined;
-
-		if (overlayLifecycle.getState() === "closed") {
-			if (leaderKeys.route(data)) return { consume: true };
-		}
-
-		// With no overlay, Esc cancels an active run (or an inline bash command).
-		// The modal boundary above is intentional: an overlay's Esc is delivered to
-		// its focused component and can never abort work behind the overlay.
-		if (isEscapeKey(data) && editorSubmit.cancelActiveEditorBash()) {
-			return { consume: true };
-		}
-		if (isEscapeKey(data) && deps.chat.isStreaming()) {
-			cancelActiveRun();
-			return { consume: true };
-		}
-
-		if (overlayLifecycle.getState() === "closed" && !isKeyRelease(data)) {
-			for (const id of [
-				"clio.notifications.dismiss",
-				"clio.tool.expand",
-				"clio.tool.expandAll",
-				"clio.tool.liveOutput",
-				"clio.editor.external",
-				"clio.message.followUp",
-				"clio.message.dequeue",
-				"clio.thinking.expand",
-				"clio.thinking.expandAll",
-			] as const) {
-				if (keybindings.matches(data, id)) {
-					dispatchInteractiveAction(id, keyActionDeps());
-					return { consume: true };
-				}
-			}
-		}
-
-		const consumed = routeInteractiveKey(data, keyActionDeps());
-		return consumed ? { consume: true } : undefined;
+			on: (signal, listener) => {
+				process.on(signal, listener);
+			},
+			off: (signal, listener) => {
+				process.off(signal, listener);
+			},
+		},
+		intervals: {
+			setInterval: (callback, delayMs) => setInterval(callback, delayMs),
+			clearInterval: (handle: ApplicationIntervalHandle) => clearInterval(handle as NodeJS.Timeout),
+		},
+		intervalsToClear: [footerTicker, toolElapsedTicker, workspaceTicker],
+		leaderKeys,
+		getOverlayState: () => overlayLifecycle.getState(),
+		routeOverlayKey: (data) =>
+			routeOverlayKey(
+				data,
+				overlayLifecycle.getState(),
+				{
+					cancelPermission: closeOverlay,
+					confirmPermission: () => overlayLifecycle.confirmPermission(),
+					closeOverlay,
+					selectPreviousDispatch: () => {
+						dispatchBoard.selectPrevious();
+						tui.requestRender();
+					},
+					selectNextDispatch: () => {
+						dispatchBoard.selectNext();
+						tui.requestRender();
+					},
+					steerSelectedDispatch,
+					cancelSelectedDispatch,
+					cancelAskUser: () => overlayLifecycle.cancelAskUser(),
+				},
+				(input, id) => keybindings.matches(input, id),
+			),
+		matchesAction: (data, id) => keybindings.matches(data, id),
+		dispatchAction: (id) => dispatchInteractiveAction(id, keyActionDeps()),
+		cancelActiveEditorBash: () => editorSubmit.cancelActiveEditorBash(),
+		isStreaming: () => deps.chat.isStreaming(),
+		cancelActiveRun,
+		getEditorText: () => editor.getText(),
+		clearEditor: () => editor.setText(""),
+		requestRender: () => tui.requestRender(),
+		closeOverlay,
+		listNotifications: () => notifications.list(),
+		dismissNotification: (id) => notifications.dismiss(id),
+		dismissAllNotifications: () => notifications.dismissAll(),
+		toggleLastToolExpanded: () => chatPanel.toggleLastToolExpanded(),
+		toggleAllToolsExpanded: () => chatPanel.toggleAllToolsExpanded(),
+		toggleLastThinking: () => chatPanel.toggleLastThinking(),
+		toggleAllThinking: () => chatPanel.toggleAllThinking(),
+		shutdownDisposers: [
+			() => leaderKeys.dispose(),
+			() => interactiveTickers.dispose(),
+			() => footer.dispose(),
+			unsubscribeObservability,
+			() => contextActivityStore.unsubscribe(),
+			() => dispatchBoardStore.unsubscribe(),
+			() => eventProjection.disposePrimary(),
+			() => statusController.dispose(),
+			() => eventProjection.disposeRemaining(),
+			() => overlayLifecycle.dispose(),
+			() => agentProgress.stop(),
+			() => deps.chat.dispose(),
+			() => interactiveSubscriptions.dispose(),
+		],
+		stopUi: () => shell.stop(),
+		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
+		onShutdown: deps.onShutdown,
 	});
+	tui.addInputListener((data: string) => applicationController.handleInput(data));
 
-	return run;
+	return applicationController.run;
 }
