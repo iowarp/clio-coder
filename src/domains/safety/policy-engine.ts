@@ -211,7 +211,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const rawClassification = classify(call);
 			const command = commandArg(call.args);
 			const callCwd = cwdArg(call.args, cwd);
-			const scan = serializeArgs(call.args);
+			const scan = damageControlScan(call);
 			const hit = scan ? matchSourcedRule(scan, sourcedRules) : null;
 			const classification = effectiveClassification(rawClassification, hit?.match);
 
@@ -801,6 +801,39 @@ function pathArg(args: Record<string, unknown> | undefined): string | null {
 function cwdArg(args: Record<string, unknown> | undefined, fallback: string): string {
 	const resolved = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(fallback, args.cwd) : fallback;
 	return canonicalizeExistingPath(resolved);
+}
+
+/**
+ * Tools whose arguments are a file's contents rather than a command line.
+ * Their damage-control scan is the destination path alone.
+ */
+const CONTENT_BEARING_TOOLS: ReadonlySet<string> = new Set([ToolNames.Write, ToolNames.Edit, ToolNames.Artifact]);
+
+/**
+ * The text damage-control rules are matched against.
+ *
+ * Every rule in the pack is a command pattern: shell (`rm -rf /`, `chmod -R
+ * 777`), cloud CLI (`aws s3 rm --recursive`), or SQL (`DROP TABLE`). Matching
+ * them against a file's contents asks whether the file *mentions* a dangerous
+ * command, which is a different question from whether the call *runs* one, and
+ * the two are indistinguishable once the text is in the haystack.
+ *
+ * That cost a real feature. `clio context wiki` could not write its own
+ * `domains/safety.md`: the page documents what the classifier blocks, so it
+ * quotes `rm -rf /`, and the write was refused as `system_modify` with reason
+ * `damage-control:rm-rf-root`. The same defect blocks writing a SQL migration
+ * containing `DROP TABLE` or a test fixture for the classifier itself.
+ *
+ * Writing a file is not executing it. A script written with a destructive body
+ * still has to be run, and that run is an execute-class call scanned here in
+ * full. Only the destination path is scanned for a mutation tool, which keeps
+ * any path-shaped rule working; where the file may land is the write tool's own
+ * gate in `writePathClass`.
+ */
+function damageControlScan(call: ClassifierCall): string {
+	if (!CONTENT_BEARING_TOOLS.has(call.tool)) return serializeArgs(call.args);
+	const pathArg = call.args?.path;
+	return typeof pathArg === "string" ? pathArg : "";
 }
 
 function serializeArgs(args?: Record<string, unknown>): string {
