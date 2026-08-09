@@ -5,7 +5,6 @@ import { installSkill } from "../domains/resources/skills/marketplace.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract } from "../domains/session/index.js";
 import type { OverlayHandle } from "../engine/tui.js";
-import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
@@ -14,11 +13,11 @@ import { openCostOverlay } from "./cost-overlay.js";
 import { isDispatchBoardRowCancellable, isDispatchBoardRowSteerable } from "./dispatch-board.js";
 import { openFleetOverlay } from "./fleet-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
+import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { createOverlayPermissionLifecycle, type OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
-import { openAskUserOverlay } from "./overlays/ask-user.js";
 import { contextResetOptions, openContextResetOverlay } from "./overlays/context-reset.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openExtensionsOverlay } from "./overlays/extensions.js";
@@ -102,6 +101,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	showOverlayFrame?: typeof showClioOverlayFrame;
 	openAuthDialog?: typeof import("./overlays/auth-dialog.js").openAuthDialog;
 	openProvidersOverlay?: typeof openProvidersOverlay;
+	openAskUserOverlay?: typeof import("./overlays/ask-user.js").openAskUserOverlay;
 }
 
 export interface OverlayLifecycleController {
@@ -177,15 +177,13 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		showOverlayFrame = showClioOverlayFrame,
 		openAuthDialog: openAuthDialogFactory,
 		openProvidersOverlay: openProvidersOverlayFactory = openProvidersOverlay,
+		openAskUserOverlay: openAskUserOverlayFactory,
 	} = deps;
 	let settingsOverlayRefresh: (() => void) | null = null;
 	let overlayState: OverlayState = "closed";
 	let overlayHandle: OverlayHandle | null = null;
 	let overlayPermission: OverlayPermissionLifecycle | null = null;
-	let pendingAskUserCancel: (() => void) | null = null;
-	let askUserSession: ReturnType<typeof openAskUserOverlay> | null = null;
-	let askUserCancelledForTurn = false;
-	let unregisterAskUserHandler: (() => void) | null = null;
+	let overlayAskUser: OverlayAskUserLifecycle | null = null;
 
 	const overlayAuth = createOverlayAuthLifecycle({
 		tui,
@@ -209,10 +207,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 
 	const closeOverlay = (): void => {
 		if (overlayState === "closed") return;
-		if (overlayState === "ask-user" && pendingAskUserCancel) {
-			pendingAskUserCancel();
-			return;
-		}
+		if (overlayState === "ask-user" && overlayAskUser?.cancelPending()) return;
 		if (overlayState === "auth") {
 			overlayAuth.finish(true);
 			return;
@@ -252,62 +247,22 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		requestRender: () => tui.requestRender(),
 	});
 
-	const closeAskUserSession = (): void => {
-		pendingAskUserCancel = null;
-		const session = askUserSession;
-		askUserSession = null;
-		if (session) {
-			session.close();
-			if (overlayHandle === session) overlayHandle = null;
-		} else if (overlayState === "ask-user") {
-			overlayHandle?.hide();
-			overlayHandle = null;
-		}
-		if (overlayState === "ask-user") overlayState = "closed";
-		interactiveTickers.renderContextIsland();
-		interactiveTickers.renderTaskIsland();
-		tui.requestRender();
-	};
-
-	const ensureAskUserSession = (): ReturnType<typeof openAskUserOverlay> | null => {
-		if (overlayState !== "closed" && overlayState !== "ask-user") return null;
-		if (askUserSession) return askUserSession;
-		overlayState = "ask-user";
-		askUserSession = openAskUserOverlay(tui, {
-			onCancel: () => {
-				pendingAskUserCancel?.();
-			},
-		});
-		overlayHandle = askUserSession;
-		tui.requestRender();
-		return askUserSession;
-	};
-
-	const cancelAskUserSession = (): void => {
-		askUserCancelledForTurn = true;
-		const session = askUserSession;
-		session?.cancel();
-		closeAskUserSession();
-	};
-
-	const openAskUserOverlayState: AskUserHandler = async (questions, invokeOptions) => {
-		const toolBacked = Boolean(invokeOptions?.turnId || invokeOptions?.toolCallId);
-		if (toolBacked && askUserCancelledForTurn) return cancelledAskUserResult();
-		const session = ensureAskUserSession();
-		if (!session) return cancelledAskUserResult();
-		pendingAskUserCancel = cancelAskUserSession;
-		const result = await session.ask(questions);
-		if (result.cancelled === true || !toolBacked) {
-			if (result.cancelled === true) askUserCancelledForTurn = true;
-			closeAskUserSession();
-		} else {
-			interactiveTickers.renderContextIsland();
-			interactiveTickers.renderTaskIsland();
-			tui.requestRender();
-		}
-		return result;
-	};
-	unregisterAskUserHandler = deps.app.registerAskUserHandler?.(openAskUserOverlayState) ?? null;
+	overlayAskUser = createOverlayAskUserLifecycle({
+		tui,
+		getOverlayState: () => overlayState,
+		setOverlayState: (state) => {
+			overlayState = state;
+		},
+		getOverlayHandle: () => overlayHandle,
+		setOverlayHandle: (handle) => {
+			overlayHandle = handle;
+		},
+		renderContextIsland: () => interactiveTickers.renderContextIsland(),
+		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
+		requestRender: () => tui.requestRender(),
+		...(deps.app.registerAskUserHandler ? { registerHandler: deps.app.registerAskUserHandler } : {}),
+		...(openAskUserOverlayFactory ? { openAskUserOverlay: openAskUserOverlayFactory } : {}),
+	});
 
 	const openProvidersOverlayState = (): void => {
 		if (overlayState !== "closed") return;
@@ -839,12 +794,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		getState: () => overlayState,
 		closeOverlay,
 		finishAuthOverlay: overlayAuth.finish,
-		openAskUserOverlayState,
-		closeAskUserSession,
-		isAskUserWaiting: () => askUserSession?.isWaiting() ?? false,
-		resetAskUserCancellation: () => {
-			askUserCancelledForTurn = false;
-		},
+		openAskUserOverlayState: overlayAskUser.handler,
+		closeAskUserSession: overlayAskUser.close,
+		isAskUserWaiting: overlayAskUser.isWaiting,
+		resetAskUserCancellation: overlayAskUser.resetCancellation,
 		refreshSettingsOverlay: () => settingsOverlayRefresh?.(),
 		openProvidersOverlayState,
 		openCostOverlayState,
@@ -873,12 +826,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			footer.refresh();
 			tui.requestRender();
 		},
-		cancelAskUser: () => pendingAskUserCancel?.(),
+		cancelAskUser: overlayAskUser.cancel,
 		dispose: () => {
 			overlayPermission?.dispose();
-			unregisterAskUserHandler?.();
-			unregisterAskUserHandler = null;
-			pendingAskUserCancel?.();
+			overlayAskUser?.dispose();
 		},
 	};
 }
