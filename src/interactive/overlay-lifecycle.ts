@@ -1,18 +1,11 @@
-import { BusChannels, type PermissionRequestedPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
-import { ToolNames } from "../core/tool-names.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
-import type { ClassifierCall } from "../domains/safety/action-classifier.js";
-import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import type { SafetyDecision } from "../domains/safety/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract } from "../domains/session/index.js";
 import type { OverlayHandle } from "../engine/tui.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
-import type { PermissionRequiredMeta } from "../tools/registry.js";
-import { approvalParkedNotice, autonomyDeniedNotice, workerEscalationNotice } from "./bus-notices.js";
 import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
@@ -23,6 +16,7 @@ import { openFleetOverlay } from "./fleet-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { createOverlayPermissionLifecycle, type OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
 import { openAskUserOverlay } from "./overlays/ask-user.js";
 import { contextResetOptions, openContextResetOverlay } from "./overlays/context-reset.js";
@@ -44,14 +38,7 @@ import {
 	resolveThinkingLabeler,
 } from "./overlays/thinking-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
-import {
-	type ApprovalRequestView,
-	askAxis,
-	createPermissionOverlayBody,
-	describeCallTarget,
-	PERMISSION_OVERLAY_WIDTH,
-	permissionOverlayTitle,
-} from "./permission-overlay.js";
+import { createPermissionOverlayBody, PERMISSION_OVERLAY_WIDTH, permissionOverlayTitle } from "./permission-overlay.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
 import { createDefaultArtifactProviders } from "./view/artifacts.js";
@@ -153,25 +140,6 @@ export interface OverlayLifecycleController {
 	dispose(): void;
 }
 
-function shouldAnnouncePermissionRequest(seenRequestIds: Set<string>, requestId: string, maxSize = 2048): boolean {
-	if (seenRequestIds.has(requestId)) return false;
-	seenRequestIds.add(requestId);
-	if (seenRequestIds.size > maxSize) {
-		const oldest = seenRequestIds.values().next().value;
-		if (oldest !== undefined) seenRequestIds.delete(oldest);
-	}
-	return true;
-}
-
-function isLiveWorkerEscalationRequest(payload: PermissionRequestedPayload): boolean {
-	if (typeof payload.requestId !== "string" || payload.escalation !== true) return false;
-	const origin = typeof payload.origin === "string" ? payload.origin : undefined;
-	const legacyWorkerEvent = origin === undefined && typeof payload.requestedBy === "string";
-	if (!(origin?.startsWith("worker:") || legacyWorkerEvent)) return false;
-	const runId = typeof payload.requestedBy === "string" ? payload.requestedBy : origin?.slice("worker:".length);
-	return typeof runId === "string" && runId.length > 0;
-}
-
 function handleCwdFallbackCancel(
 	preResumeSessionId: string | null,
 	deps: { session: SessionContract; openResumeOverlay: () => void; onWarning: (msg: string) => void },
@@ -213,23 +181,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	let settingsOverlayRefresh: (() => void) | null = null;
 	let overlayState: OverlayState = "closed";
 	let overlayHandle: OverlayHandle | null = null;
-	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision; meta?: PermissionRequiredMeta } | null = null;
-	// A parked worker escalation currently shown in the permission overlay. When
-	// set, the overlay's confirm/deny routes to resolveWorkerPermission over the
-	// dispatch contract instead of the local tool registry. Additional
-	// escalations that arrive while the overlay is busy wait in the queue.
-	let pendingWorkerEscalation: { runId: string; requestId: string; agentId: string } | null = null;
-	const workerEscalationQueue: Array<{
-		runId: string;
-		requestId: string;
-		agentId: string;
-		tool: string;
-		actionClass: string;
-		axis: ApprovalRequestView["axis"];
-		reason: string;
-	}> = [];
-	const announcedPermissionRequestIds = new Set<string>();
-	let permissionConfirmJustFired = false;
+	let overlayPermission: OverlayPermissionLifecycle | null = null;
 	let pendingAskUserCancel: (() => void) | null = null;
 	let askUserSession: ReturnType<typeof openAskUserOverlay> | null = null;
 	let askUserCancelledForTurn = false;
@@ -270,258 +222,35 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		interactiveTickers.stopDispatchBoardTicker();
 		overlayHandle?.hide();
 		overlayHandle = null;
-		if (leaving === "permission-confirm") {
-			const permission = pendingPermission;
-			const confirmed = permissionConfirmJustFired;
-			const workerEscalation = pendingWorkerEscalation;
-			pendingPermission = null;
-			pendingWorkerEscalation = null;
-			permissionConfirmJustFired = false;
-			if (workerEscalation) {
-				// The worker owns the resolution: send the decision down its stdin.
-				// It emits clio_permission_resolved, which dispatch republishes on
-				// the bus, so no PermissionResolved is emitted here.
-				try {
-					deps.app.dispatch.resolveWorkerPermission?.(
-						workerEscalation.runId,
-						workerEscalation.requestId,
-						confirmed ? "approve" : "deny",
-					);
-				} catch (err) {
-					appendNotice(
-						"warn",
-						`Could not deliver permission decision to run ${workerEscalation.runId}: ${err instanceof Error ? err.message : String(err)}`,
-						busNoticeSink,
-					);
-				}
-			} else if (confirmed && permission) {
-				deps.app.bus.emit(BusChannels.PermissionResolved, {
-					status: "granted",
-					...(permission.meta ? { requestId: permission.meta.requestId } : {}),
-					origin: "main",
-					decidedBy: "operator",
-					tool: permission.call.tool,
-					actionClass: permission.decision.classification.actionClass,
-					requestedBy: "tool",
-					at: Date.now(),
-				});
-				// The grant covers exactly this parked call: flip its segment back to
-				// the running style before the body executes so the approval gap
-				// never renders as lingering "awaiting approval" on live work.
-				if (permission.meta?.toolCallId !== undefined) {
-					chatRenderer.applyEvent({
-						type: "tool_approval_state",
-						toolCallId: permission.meta.toolCallId,
-						state: "resumed",
-					});
-				}
-				void deps.app.toolRegistry?.resumeParkedCalls({
-					actionClass: permission.decision.classification.actionClass,
-					...(permission.meta ? { requestId: permission.meta.requestId } : {}),
-					requestedBy: "tool:one_shot",
-				});
-			} else {
-				const cancellationReason =
-					"User cancelled this tool call from the permission confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.";
-				deps.app.bus.emit(BusChannels.PermissionResolved, {
-					status: "denied",
-					...(permission?.meta ? { requestId: permission.meta.requestId } : {}),
-					origin: "main",
-					decidedBy: "operator",
-					...(permission ? { tool: permission.call.tool } : {}),
-					...(permission ? { actionClass: permission.decision.classification.actionClass } : {}),
-					reason: "operator cancelled",
-					requestedBy: "tool",
-					at: Date.now(),
-				});
-				if (permission?.meta) deps.app.toolRegistry?.cancelParkedCall(permission.meta.requestId, cancellationReason);
-				else deps.app.toolRegistry?.cancelParkedCalls(cancellationReason);
-			}
-		}
-		// A worker escalation that arrived while the overlay was busy waits its turn.
-		maybeOpenWorkerEscalation();
-		if (overlayState === "closed" && deps.app.toolRegistry?.hasParkedCalls()) {
-			deps.app.toolRegistry.renotifyHead();
-		}
+		if (leaving === "permission-confirm") overlayPermission?.onPermissionOverlayClosed();
 		interactiveTickers.renderContextIsland();
 		interactiveTickers.renderTaskIsland();
 		tui.requestRender();
 	};
 
-	const currentAutonomy = (): string => deps.app.getSettings?.().autonomy ?? "auto-edit";
-
-	const axisViewFromId = (axisId: string | undefined, fallbackLevel: string): ApprovalRequestView["axis"] | null => {
-		if (axisId?.startsWith("net:")) {
-			const ruleId = axisId.slice("net:".length);
-			return { kind: "net", ruleId: ruleId.length > 0 ? ruleId : "unknown" };
-		}
-		if (axisId?.startsWith("autonomy:")) {
-			const level = axisId.slice("autonomy:".length);
-			return { kind: "autonomy", level: level.length > 0 ? level : fallbackLevel };
-		}
-		return null;
-	};
-
-	const mainApprovalRequestView = (
-		call: ClassifierCall,
-		decision: SafetyDecision,
-		meta: PermissionRequiredMeta | undefined,
-		autonomy: string,
-	): ApprovalRequestView => {
-		const axisFromMeta = axisViewFromId(meta?.axis, autonomy);
-		const axisFromDecision = askAxis(decision);
-		const axis =
-			axisFromMeta ??
-			(axisFromDecision.kind === "net"
-				? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
-				: { kind: "autonomy" as const, level: autonomy });
-		const queueDepth = deps.app.toolRegistry?.parkedCount();
-		const target = describeCallTarget(call.args);
-		return {
-			requestId: meta?.requestId ?? "permission-pending",
-			tool: call.tool,
-			actionClass: decision.classification.actionClass,
-			axis,
-			origin: { kind: "main" },
-			reason:
-				decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${decision.classification.actionClass}`,
-			...(call.tool === ToolNames.Dispatch && decision.kind === "ask"
-				? { artifact: { kind: "dispatch-plan" as const, text: decision.rejection.detail } }
-				: {}),
-			...(target.length > 0 ? { target } : {}),
-			...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
-		};
-	};
-
-	const openPermissionOverlay = (
-		call: ClassifierCall,
-		decision: SafetyDecision,
-		meta?: PermissionRequiredMeta,
-	): void => {
-		if (overlayState !== "closed") return;
-		pendingPermission = { call, decision, ...(meta ? { meta } : {}) };
-		permissionConfirmJustFired = false;
-		overlayState = "permission-confirm";
-		overlayHandle = showOverlayFrame(
-			tui,
-			createPermissionOverlayBody(mainApprovalRequestView(call, decision, meta, currentAutonomy())),
-			{
+	overlayPermission = createOverlayPermissionLifecycle({
+		...(deps.app.toolRegistry ? { toolRegistry: deps.app.toolRegistry } : {}),
+		bus: deps.app.bus,
+		dispatch: deps.app.dispatch,
+		getAutonomy: () => deps.app.getSettings?.().autonomy ?? "auto-edit",
+		getOverlayState: () => overlayState,
+		openPermissionOverlay: (view) => {
+			if (overlayState !== "closed") return false;
+			overlayState = "permission-confirm";
+			overlayHandle = showOverlayFrame(tui, createPermissionOverlayBody(view), {
 				anchor: "center",
 				width: PERMISSION_OVERLAY_WIDTH,
 				title: permissionOverlayTitle(),
 				footerHint: buildHint("commit", [{ key: "Enter", verb: "allow once" }]),
-			},
-		);
-		tui.requestRender();
-	};
-
-	const unsubscribePermissionRequired =
-		deps.app.toolRegistry?.onPermissionRequired((call, decision, meta) => {
-			// Re-notifies reopen overlays, but the transcript names each request
-			// once so tail wakeups do not print duplicate approval notices.
-			if (shouldAnnouncePermissionRequest(announcedPermissionRequestIds, meta.requestId)) {
-				const parkedNotice = approvalParkedNotice(call.tool, decision, currentAutonomy());
-				appendNotice(parkedNotice.level, parkedNotice.text, busNoticeSink);
-			}
-			// Restyle the parked call's transcript segment: pi already emitted its
-			// tool_execution_start, so without this the segment counts as running
-			// while the body sits at the gate. Idempotent under renotifyHead.
-			if (meta.toolCallId !== undefined) {
-				chatRenderer.applyEvent({ type: "tool_approval_state", toolCallId: meta.toolCallId, state: "awaiting-approval" });
-			}
-			openPermissionOverlay(call, decision, meta);
-		}) ?? (() => {});
-
-	const openWorkerPermissionOverlay = (entry: {
-		runId: string;
-		requestId: string;
-		agentId: string;
-		tool: string;
-		actionClass: string;
-		axis: ApprovalRequestView["axis"];
-		reason: string;
-		target?: string;
-	}): void => {
-		if (overlayState !== "closed") return;
-		pendingWorkerEscalation = { runId: entry.runId, requestId: entry.requestId, agentId: entry.agentId };
-		pendingPermission = null;
-		permissionConfirmJustFired = false;
-		overlayState = "permission-confirm";
-		overlayHandle = showOverlayFrame(
-			tui,
-			createPermissionOverlayBody({
-				requestId: entry.requestId,
-				tool: entry.tool,
-				actionClass: entry.actionClass,
-				axis: entry.axis,
-				origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId },
-				reason: entry.reason,
-				...(entry.target !== undefined && entry.target.length > 0 ? { target: entry.target } : {}),
-			}),
-			{
-				anchor: "center",
-				width: PERMISSION_OVERLAY_WIDTH,
-				title: permissionOverlayTitle(),
-				footerHint: buildHint("commit", [{ key: "Enter", verb: "allow once" }]),
-			},
-		);
-		tui.requestRender();
-	};
-
-	const maybeOpenWorkerEscalation = (): void => {
-		if (overlayState !== "closed") return;
-		const next = workerEscalationQueue.shift();
-		if (next) openWorkerPermissionOverlay(next);
-	};
-
-	// Worker permission escalations arrive as PermissionRequested bus events
-	// carrying a run id in requestedBy. Main-agent asks (no requestId) are driven
-	// by the tool registry above and are ignored here. Headless sessions have no
-	// subscriber, so the worker's timeout fallback governs there.
-	const unsubscribeWorkerEscalation = deps.app.bus.on(BusChannels.PermissionRequested, (payload) => {
-		if (!isLiveWorkerEscalationRequest(payload)) return;
-		const requestId = payload.requestId;
-		if (typeof requestId !== "string") return;
-		const origin = typeof payload.origin === "string" ? payload.origin : undefined;
-		const legacyWorkerEvent = origin === undefined && typeof payload.requestedBy === "string";
-		if (!(origin?.startsWith("worker:") || legacyWorkerEvent)) return;
-		const runId = typeof payload.requestedBy === "string" ? payload.requestedBy : origin?.slice("worker:".length);
-		if (!runId) return;
-		const entry = {
-			runId,
-			requestId,
-			agentId: typeof payload.agentId === "string" ? payload.agentId : "worker",
-			tool: typeof payload.tool === "string" ? payload.tool : "unknown",
-			actionClass: typeof payload.actionClass === "string" ? payload.actionClass : "unknown",
-			axis:
-				axisViewFromId(typeof payload.axis === "string" ? payload.axis : undefined, currentAutonomy()) ??
-				(typeof payload.ruleId === "string"
-					? { kind: "net" as const, ruleId: payload.ruleId }
-					: { kind: "autonomy" as const, level: currentAutonomy() }),
-			reason:
-				payload.rejection?.short ??
-				(typeof payload.summary === "string" ? payload.summary : `${payload.tool ?? "worker"} requires approval`),
-			// The preview crossed the worker's stdout, an untrusted seam, so it is
-			// re-sanitized here before it can style the overlay that approves it.
-			...(typeof payload.target === "string" && payload.target.length > 0
-				? { target: sanitizeCallTargetText(payload.target).slice(0, 200) }
-				: {}),
-		};
-		const notice = workerEscalationNotice(payload);
-		if (notice !== null) appendNotice(notice.level, notice.text, busNoticeSink);
-		workerEscalationQueue.push(entry);
-		maybeOpenWorkerEscalation();
-	});
-
-	// Autonomy auto-denials (read-only) never park, so without this notice the
-	// only trace is the rejection in the transcript, which reads like a model
-	// error rather than the dial doing its job.
-	const unsubscribeAutonomyDenied =
-		deps.app.toolRegistry?.onAutonomyDenied((_call, decision, level) => {
-			const notice = autonomyDeniedNotice(decision, level);
-			appendNotice(notice.level, notice.text, busNoticeSink);
+			});
 			tui.requestRender();
-		}) ?? (() => {});
+			return true;
+		},
+		closeOverlay,
+		appendNotice: (level, text) => appendNotice(level, text, busNoticeSink),
+		applyApprovalState: (event) => chatRenderer.applyEvent(event),
+		requestRender: () => tui.requestRender(),
+	});
 
 	const closeAskUserSession = (): void => {
 		pendingAskUserCancel = null;
@@ -1140,16 +869,13 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openExtensionsOverlayState,
 		toggleDispatchBoardOverlay,
 		confirmPermission: () => {
-			permissionConfirmJustFired = true;
-			closeOverlay();
+			overlayPermission?.confirm();
 			footer.refresh();
 			tui.requestRender();
 		},
 		cancelAskUser: () => pendingAskUserCancel?.(),
 		dispose: () => {
-			unsubscribePermissionRequired();
-			unsubscribeWorkerEscalation();
-			unsubscribeAutonomyDenied();
+			overlayPermission?.dispose();
 			unregisterAskUserHandler?.();
 			unregisterAskUserHandler = null;
 			pendingAskUserCancel?.();
