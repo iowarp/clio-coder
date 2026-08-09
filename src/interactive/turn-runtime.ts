@@ -14,6 +14,7 @@ import {
 	type ProvidersContract,
 	refineRuntimeTargetWithModelHints,
 	resolveRuntimeTarget,
+	runtimeResolutionWarnings,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import type { RetrySettings } from "../domains/session/retry.js";
@@ -88,6 +89,16 @@ export interface TurnRuntime {
 export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const { state, context, persistence, middleware, middlewareToolChoice } = deps;
 
+	/**
+	 * Resolution warnings the operator has already been shown, keyed by
+	 * target+model+message. A resolution runs on every turn, so without this the
+	 * same context-window warning would print on every submit; without any
+	 * surfacing at all, it printed nowhere. The chat is the only place an
+	 * interactive operator will see it: dispatch receipts carry the same facts,
+	 * but nobody reads a receipt for the run they are in the middle of.
+	 */
+	const announcedResolutionWarnings = new Set<string>();
+
 	const readTarget = (): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
 		const targetId = settings.orchestrator.target?.trim();
@@ -105,6 +116,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			const message = firstRuntimeResolutionError(resolved.diagnostics) ?? resolved.diagnostics[0]?.message;
 			throw new Error(`[Clio Coder] ${message ?? "orchestrator target resolution failed"}`);
 		}
+		for (const message of runtimeResolutionWarnings(resolved.diagnostics)) {
+			const key = `${targetId}|${wireModelId}|${message}`;
+			if (announcedResolutionWarnings.has(key)) continue;
+			announcedResolutionWarnings.add(key);
+			deps.emitNotice(`[Clio Coder] ${message}`);
+		}
 		return {
 			target: resolved.target.target,
 			runtime: resolved.target.runtime,
@@ -114,11 +131,18 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	};
 
 	/**
-	 * Probe a local-native target once per target+model selection, not on
+	 * Probe a self-hosted target once per target+model selection, not on
 	 * every submit (T3.1). The probe re-runs when the selection key changes
 	 * (which is also when the runtime is rebuilt or hot-swapped) or after a
 	 * generous TTL. Failures keep the last known target state; the TTL
 	 * retries later.
+	 *
+	 * Every tier but `cloud` is probed. Only a hosted provider's window is
+	 * knowable without asking: a self-hosted OpenAI-compatible gateway serves
+	 * whatever context it was launched with, and that number lives on the
+	 * server. Restricting this to `local-native` meant an `openai-compat`
+	 * target ran the whole session on an assumed window while the server was
+	 * one HTTP GET away from reporting the real one.
 	 */
 	const TARGET_PROBE_TTL_MS = 5 * 60 * 1000;
 	let lastTargetProbe: { key: string; at: number } | null = null;
@@ -130,7 +154,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const target = deps.providers.getTarget(targetId);
 		if (!target) return;
 		const runtimeDesc = deps.providers.getRuntime(target.runtime);
-		if (runtimeDesc?.tier !== "local-native") return;
+		if (!runtimeDesc || runtimeDesc.tier === "cloud") return;
 		const key = `${targetId}|${wireModelId}`;
 		const now = Date.now();
 		if (lastTargetProbe?.key === key && now - lastTargetProbe.at < TARGET_PROBE_TTL_MS) return;

@@ -22,6 +22,39 @@ export interface OpenAIModelCatalogProbe {
 	modelStates: Record<string, ProbeModelStatus>;
 }
 
+/**
+ * Vendor detail endpoints that describe the same models `/v1/models` lists,
+ * with the numbers `/v1/models` omits. LM Studio's `/api/v0/models` reports
+ * `max_context_length`, `loaded_context_length`, `state`, and `capabilities`;
+ * the OpenAI schema has nowhere to put any of them, so a self-hosted LM Studio
+ * reached over `openai-compat` looks like a target that declared nothing and
+ * Clio has to assume a window instead of reading one. Asking costs one GET
+ * that 404s harmlessly on servers that do not implement it.
+ */
+const OPENAI_COMPAT_DETAIL_PATHS: ReadonlyArray<string> = ["/api/v0/models"];
+
+async function probeModelDetailRows(
+	base: string,
+	ctx: ProbeContext,
+	modelsPath: string,
+): Promise<Map<string, Record<string, unknown>>> {
+	const rows = new Map<string, Record<string, unknown>>();
+	for (const detailPath of OPENAI_COMPAT_DETAIL_PATHS) {
+		if (detailPath === modelsPath) continue;
+		const opts = { url: `${base}${detailPath}`, timeoutMs: ctx.httpTimeoutMs } as const;
+		const result = await (ctx.signal
+			? probeJson<OpenAIModelsResponse>({ ...opts, signal: ctx.signal })
+			: probeJson<OpenAIModelsResponse>(opts));
+		if (!result.ok || !Array.isArray(result.data?.data)) continue;
+		for (const row of result.data.data) {
+			if (typeof row?.id !== "string" || row.id.length === 0) continue;
+			if (!rows.has(row.id)) rows.set(row.id, row);
+		}
+		if (rows.size > 0) break;
+	}
+	return rows;
+}
+
 export async function probeOpenAIModelCatalog(
 	base: string,
 	ctx: ProbeContext,
@@ -32,15 +65,24 @@ export async function probeOpenAIModelCatalog(
 		? probeJson<OpenAIModelsResponse>({ ...opts, signal: ctx.signal })
 		: probeJson<OpenAIModelsResponse>(opts));
 	if (!result.ok || !result.data?.data) return { models: [], modelCapabilities: {}, modelStates: {} };
+	const detail = await probeModelDetailRows(base, ctx, modelsPath);
 	const models: string[] = [];
 	const modelCapabilities: Record<string, Partial<CapabilityFlags>> = {};
 	const modelStates: Record<string, ProbeModelStatus> = {};
 	for (const row of result.data.data) {
 		if (typeof row?.id !== "string" || row.id.length === 0) continue;
 		models.push(row.id);
-		const caps = capabilitiesFromOpenAIModelEntry(row);
+		const detailRow = detail.get(row.id);
+		// The listing row wins on any field it fills. It is the endpoint the
+		// target chose to serve as canonical; the detail row only answers the
+		// questions the OpenAI schema cannot ask.
+		const caps = {
+			...(detailRow ? capabilitiesFromOpenAIModelEntry(detailRow) : {}),
+			...capabilitiesFromOpenAIModelEntry(row),
+		};
 		if (Object.keys(caps).length > 0) modelCapabilities[row.id] = caps;
-		const state = modelStateFromOpenAIModelEntry(row);
+		const state =
+			modelStateFromOpenAIModelEntry(row) ?? (detailRow ? modelStateFromOpenAIModelEntry(detailRow) : undefined);
 		if (state) modelStates[row.id] = state;
 	}
 	return { models, modelCapabilities, modelStates };
@@ -60,6 +102,17 @@ function firstPositiveNumber(record: Record<string, unknown>, keys: ReadonlyArra
 		if (value !== undefined) return value;
 	}
 	return undefined;
+}
+
+/**
+ * `capabilities: ["tool_use"]`, the shape LM Studio uses. A listed capability
+ * is a claim of support; an absent one is silence, not a denial, so this
+ * returns true or undefined and never false.
+ */
+function capabilityListFlag(record: Record<string, unknown>, name: string): true | undefined {
+	const list = record.capabilities;
+	if (!Array.isArray(list)) return undefined;
+	return list.some((entry) => entry === name) ? true : undefined;
 }
 
 function booleanFromAny(record: Record<string, unknown>, keys: ReadonlyArray<string>): boolean | undefined {
@@ -142,6 +195,11 @@ function capabilitiesFromOpenAIModelEntry(row: Record<string, unknown>): Partial
 	const contextWindow =
 		positiveNumber(flags.contextSize) ??
 		firstPositiveNumber(row, [
+			// What is actually loaded outranks what the model could support: a
+			// model served at 8k out of a possible 262k has an 8k window today,
+			// and the run has to be planned against the real one.
+			"loaded_context_length",
+			"loadedContextLength",
 			"context_window",
 			"contextWindow",
 			"context_length",
@@ -164,7 +222,10 @@ function capabilitiesFromOpenAIModelEntry(row: Record<string, unknown>): Partial
 			"n_predict",
 		]);
 	if (maxTokens !== undefined) caps.maxTokens = Math.floor(maxTokens);
-	const tools = flags.jinja ?? booleanFromAny(row, ["tools", "tool_use", "toolUse", "trained_for_tool_use"]);
+	const tools =
+		flags.jinja ??
+		booleanFromAny(row, ["tools", "tool_use", "toolUse", "trained_for_tool_use"]) ??
+		capabilityListFlag(row, "tool_use");
 	if (tools !== undefined) caps.tools = tools;
 	const reasoning =
 		flags.reasoning ??

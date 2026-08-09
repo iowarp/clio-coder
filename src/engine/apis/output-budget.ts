@@ -1,8 +1,15 @@
 import type { Api, Context, Model, StreamOptions } from "@earendil-works/pi-ai";
+import { CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../core/context-floor.js";
 import { ceilChars, estimateAgentMessageTokens, toolSchemaChars } from "../../domains/session/context-accounting.js";
 
 const CONTEXT_BUDGET_SAFETY_TOKENS = 1024;
-const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+/**
+ * Output budget when nothing more specific applies. It is the product floor,
+ * not a conservative guess: a turn that writes a source file or a wiki page
+ * routinely needs tens of thousands of tokens, and every runtime Clio targets
+ * serves at least this much.
+ */
+const DEFAULT_MAX_OUTPUT_TOKENS = CLIO_MIN_MAX_OUTPUT_TOKENS;
 
 /**
  * Process-wide default output budget requested per turn, sourced from
@@ -34,7 +41,7 @@ export function setGlobalDefaultMaxOutputTokens(value: number): void {
  * separately by assessToolProseLoop, so this number only has to be large
  * enough to let legitimate large outputs through.
  */
-export const LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS = 32768;
+export const LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS = CLIO_MIN_MAX_OUTPUT_TOKENS;
 
 /**
  * Tokens a preflight context check should hold back for the response: the
@@ -42,7 +49,7 @@ export const LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS = 32768;
  * budget. The safety margin is deliberately not added here; at request time
  * {@link remainingContextMaxTokens} subtracts it from the window and degrades
  * the output budget gracefully, so a hard preflight reservation of
- * limit + safety would block small-window targets the engine can still serve.
+ * limit + safety would compact earlier than the engine actually needs.
  */
 export function resolveReservedOutputTokens(maxOutputTokens?: number | null): number {
 	const limit =

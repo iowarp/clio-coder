@@ -46,7 +46,7 @@ function providers(): ProvidersContract {
 		id: "test-target",
 		runtime: "fake-runtime",
 		defaultModel: "model",
-		capabilities: { contextWindow: 100000, maxTokens: 256, tools: true, chat: true },
+		capabilities: { contextWindow: 262144, maxTokens: 256, tools: true, chat: true },
 	};
 	const runtime: RuntimeDescriptor = {
 		id: "fake-runtime",
@@ -54,14 +54,14 @@ function providers(): ProvidersContract {
 		kind: "http",
 		apiFamily: "openai-completions",
 		auth: "none",
-		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 100000, maxTokens: 256 },
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 262144, maxTokens: 256 },
 		synthesizeModel: () =>
 			({
 				id: "model",
 				name: "model",
 				api: "openai-completions",
 				provider: "fake-runtime",
-				contextWindow: 100000,
+				contextWindow: 262144,
 				maxTokens: 256,
 				reasoning: false,
 				input: [],

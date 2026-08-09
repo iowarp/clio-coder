@@ -1,3 +1,4 @@
+import { CLIO_CONTEXT_WINDOW_WARN_BELOW, CLIO_MIN_CONTEXT_WINDOW } from "../../core/context-floor.js";
 import { runOverrides } from "../../core/run-overrides.js";
 import { targetRequiresAuth } from "./auth/index.js";
 import { getCatalogModelForRuntime, resolveCostProvenance } from "./catalog.js";
@@ -387,7 +388,12 @@ export function resolveRuntimeTarget(
 		diagnostics.push(diagnostic("warning", "context-window-low", contextWindowDetails.warning));
 	}
 	if (contextWindowDetails.provenanceNotice) {
-		diagnostics.push(diagnostic("info", "context-window-unverified", contextWindowDetails.provenanceNotice));
+		// A warning, not info. Clio now assumes its own minimum when a target
+		// reports nothing, so an unverified window is a number that could be
+		// larger than the truth, and overrunning it fails the request rather
+		// than merely wasting capacity. As info this reached only the dispatch
+		// receipt JSON, which nobody reads during the run it describes.
+		diagnostics.push(diagnostic("warning", "context-window-unverified", contextWindowDetails.provenanceNotice));
 	}
 
 	const modelRuntime = resolveTargetRuntimeCapabilities(
@@ -548,10 +554,14 @@ export function runtimeResolutionWarnings(diagnostics: ReadonlyArray<RuntimeReso
 	return diagnostics.filter((entry) => entry.severity === "warning").map((entry) => entry.message);
 }
 
-/** Recommended minimum context for coding against a local-native runtime. Advisory, not provider truth. */
-const LOCAL_NATIVE_DESIRED_CONTEXT_WINDOW = 128000;
+/**
+ * Minimum context Clio is built for, applied to every tier rather than only to
+ * local-native. A hosted target that reports less than this is as unable to
+ * hold a repository's worth of tool results as a local one.
+ */
+const DESIRED_CONTEXT_WINDOW = CLIO_MIN_CONTEXT_WINDOW;
 /** Last-resort window when nothing declares one. */
-const FALLBACK_CONTEXT_WINDOW = 8192;
+const FALLBACK_CONTEXT_WINDOW = CLIO_MIN_CONTEXT_WINDOW;
 
 function positiveWindow(value: number | null | undefined): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
@@ -603,10 +613,7 @@ export function resolveContextWindowDetails(
 	const runtimeDefault = positiveWindow(runtime.defaultCapabilities?.contextWindow);
 	const declaredContextWindow = modelDeclared ?? runtimeDefault ?? FALLBACK_CONTEXT_WINDOW;
 
-	const desired =
-		runtime.tier === "local-native"
-			? Math.max(declaredContextWindow, LOCAL_NATIVE_DESIRED_CONTEXT_WINDOW)
-			: declaredContextWindow;
+	const desired = Math.max(declaredContextWindow, DESIRED_CONTEXT_WINDOW);
 
 	const probeWindow = positiveWindow(probedContextWindow);
 	const overrideWindow = positiveWindow(target.capabilities?.contextWindow);
@@ -638,22 +645,25 @@ export function resolveContextWindowDetails(
 		source = "target-override";
 	}
 
+	// Below the floor is a warning on every tier. A target that reports less
+	// than Clio's minimum will compact on the first substantial read no matter
+	// where it runs, and the operator can act on that only if they are told.
 	let warning: string | null = null;
-	if (runtime.tier === "local-native" && effective < LOCAL_NATIVE_DESIRED_CONTEXT_WINDOW) {
-		warning = `Connected target offers ${effective} tokens, which is below the recommended 128k for local coding.`;
+	if (effective < CLIO_CONTEXT_WINDOW_WARN_BELOW) {
+		warning =
+			`Target offers ${effective} context tokens, below the ${CLIO_CONTEXT_WINDOW_WARN_BELOW} Clio needs. ` +
+			`Load the model with a larger context, or set capabilities.contextWindow on this target.`;
 	}
 
 	// Deliberately not folded into `warning`. That field means the window is
-	// smaller than this kind of work wants, which is a degradation an operator
-	// can act on. Provenance is the separate question of whether the number is
-	// real, and it is `info` because it holds for every target Clio has no
-	// model-specific knowledge of; raising it to `warning` would put one on
-	// every hosted dispatch and dilute the field that means something is wrong.
+	// smaller than the work needs, which is a degradation an operator can act
+	// on. Provenance is the separate question of whether the number is real:
+	// Clio assumes the floor rather than a number nobody declared, and says so.
 	let provenanceNotice: string | null = null;
-	if (source === "descriptor-default") {
-		provenanceNotice = `Context window ${effective} is the ${runtime.id} runtime default, not a figure this target reported.`;
-	} else if (source === "unknown") {
-		provenanceNotice = `No context window was declared for this target; assuming ${effective} tokens.`;
+	if (source === "descriptor-default" || source === "unknown") {
+		provenanceNotice =
+			`Context window ${effective} is Clio's assumed minimum, not a figure this target reported. ` +
+			`Run 'clio targets --probe' to read the real one.`;
 	}
 
 	return {

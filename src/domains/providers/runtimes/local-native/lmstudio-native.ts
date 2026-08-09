@@ -1,6 +1,6 @@
 import { LMStudioClient } from "@lmstudio/sdk";
+import { CLIO_MIN_CONTEXT_WINDOW, CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../../../core/context-floor.js";
 import type { Api, Model } from "../../../../engine/types.js";
-
 import { mergeCapabilities } from "../../capabilities.js";
 import { probeJson } from "../../probe/http.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../types/capability-flags.js";
@@ -18,8 +18,8 @@ const defaultCapabilities: CapabilityFlags = {
 	toolCallFormat: "openai",
 	vision: true,
 	structuredOutputs: "json-schema",
-	contextWindow: 8192,
-	maxTokens: 4096,
+	contextWindow: CLIO_MIN_CONTEXT_WINDOW,
+	maxTokens: CLIO_MIN_MAX_OUTPUT_TOKENS,
 };
 
 function toWebSocketUrl(url: string): string {
