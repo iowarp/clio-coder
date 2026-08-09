@@ -1,5 +1,3 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
 import {
 	BusChannels,
 	type ContextPrunedPayload,
@@ -14,7 +12,6 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { routingChangeNotices } from "../core/session-routing.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
-import { clioConfigDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
@@ -28,7 +25,7 @@ import {
 	type ThinkingLevel,
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
-import { getMarketplaceSkills, installSkill } from "../domains/resources/skills/marketplace.js";
+import { getMarketplaceSkills } from "../domains/resources/skills/marketplace.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
@@ -44,9 +41,9 @@ import {
 } from "./bus-notices.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
-import { createCoalescingChatRenderer, rehydrateChatPanelFromTurns } from "./chat-renderer.js";
+import { createCoalescingChatRenderer } from "./chat-renderer.js";
 import { ClioEditor } from "./clio-editor.js";
-import { emitCommandNotice, runCompactWithNotice } from "./command-fallbacks.js";
+import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice, createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore } from "./context-activity.js";
 import { createDispatchBoardStore, createDispatchBoardView } from "./dispatch-board.js";
@@ -55,6 +52,7 @@ import { createEditorSubmitController } from "./editor-submit.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashboard.js";
 import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
+import { createInteractiveSlashRuntime } from "./interactive-slash-runtime.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
@@ -77,18 +75,14 @@ import { resolveAvailableThinkingLevels } from "./overlays/thinking-selector.js"
 import type { TargetsHubNoticeLevel } from "./providers-overlay.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
-import {
-	type ContextClearCommandOptions,
-	dispatchSlashCommand,
-	type InitCommandOptions,
-	parseSlashCommand,
-	type RunIo,
-	type SlashCommandContext,
-	type TaskMemorySeedCommandResult,
+import type {
+	ContextClearCommandOptions,
+	InitCommandOptions,
+	RunIo,
+	TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
 import { createStatusController, resolveInlineVerb, spinnerFrame, type TurnSummary } from "./status/index.js";
 import { abbreviateModelId } from "./theme/index.js";
-import { verifyReceiptFile } from "./view/artifacts.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
 
@@ -254,14 +248,6 @@ export const CTRL_C_DOUBLE_TAP_MS = 500;
 export const ENTER = "\r";
 export const ESC = "\x1b";
 
-// /export renders the transcript at a fixed width so exports are stable
-// regardless of the live terminal size.
-const EXPORT_RENDER_WIDTH = 100;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: the ESC control character is the ANSI escape introducer this pattern exists to strip
-const ANSI_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
-function stripAnsiForExport(line: string): string {
-	return line.replace(ANSI_PATTERN, "");
-}
 export interface InteractiveSubmitExpansion {
 	text: string;
 	images: ImageContent[];
@@ -959,267 +945,59 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		tui.requestRender();
 	});
 
-	let activeContextInit = false;
-
-	const appendCommandNotice: SlashCommandContext["notice"] = (level, text) => {
-		appendNotice(level, text, {
-			appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
-			requestRender: () => tui.requestRender(),
-		});
-	};
-
-	const slashCtx: SlashCommandContext = {
+	const slashRuntime = createInteractiveSlashRuntime({
 		io,
-		notice: appendCommandNotice,
-		dispatch: deps.dispatch,
 		bus: deps.bus,
-		workerDefault: () => deps.getWorkerDefault?.(),
-		shutdown: () => {
-			void shutdown();
-		},
-		listPrompts: () => deps.resources?.prompts(process.cwd()) ?? { items: [], diagnostics: [] },
+		dispatch: deps.dispatch,
+		providers: deps.providers,
+		chat: deps.chat,
+		chatPanel,
+		...(deps.resources ? { resources: deps.resources } : {}),
+		...(deps.extensions ? { extensions: deps.extensions } : {}),
+		...(deps.agents ? { agents: deps.agents } : {}),
+		...(deps.share ? { share: deps.share } : {}),
+		...(deps.getWorkerDefault ? { getWorkerDefault: deps.getWorkerDefault } : {}),
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		...(deps.writeSettings ? { writeSettings: deps.writeSettings } : {}),
+		...(deps.onSelectModel ? { onSelectModel: deps.onSelectModel } : {}),
+		...(deps.onSetThinkingLevel ? { onSetThinkingLevel: deps.onSetThinkingLevel } : {}),
+		...(deps.onCompact ? { onCompact: deps.onCompact } : {}),
+		...(deps.onInit ? { onInit: deps.onInit } : {}),
+		...(deps.onContextClear ? { onContextClear: deps.onContextClear } : {}),
+		...(deps.onContextRefresh ? { onContextRefresh: deps.onContextRefresh } : {}),
+		stateDir: deps.stateDir,
+		shutdown: () => shutdown(),
+		requestRender: () => tui.requestRender(),
+		refreshFooter: () => footer.refresh(),
+		dismissContextBootstrapNotices,
+		recordSubmittedTurn,
+		readStructuredEntries,
+		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
+		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
 		openSkillsHub: () => openSkillsHubState(),
-		listExtensions: () => deps.extensions?.list(process.cwd(), { all: true }) ?? [],
-		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
-		listDelegationAgents: () => deps.getSettings?.().delegation.agents ?? [],
-		exportShareArchive: (outPath) => {
-			if (!deps.share) throw new Error("share domain is not loaded");
-			const path = resolve(outPath);
-			const archive = deps.share.writeArchive(path, { scope: "project" });
-			return { fileCount: archive.files.length, path };
-		},
-		importShareArchive: (archivePath, options) => {
-			if (!deps.share) {
-				return {
-					archive: null,
-					actions: [],
-					diagnostics: [{ type: "error", message: "share domain is not loaded" }],
-				};
-			}
-			const importOptions = {
-				...(options.dryRun ? { dryRun: true } : {}),
-				...(options.force ? { force: true } : {}),
-			};
-			return options.dryRun
-				? deps.share.planImport(resolve(archivePath), importOptions)
-				: deps.share.importArchive(resolve(archivePath), importOptions);
-		},
 		openProviders: () => openProvidersOverlayState(),
 		openCost: () => openCostOverlayState(),
 		openContextView: () => openContextViewOverlayState(),
 		openFleet: () => openFleetOverlayState(),
 		openTasks: () => openTasksOverlayState(),
 		openMemory: () => openMemoryOverlayState(),
-		seedTaskMemory: () => {
-			const result = deps.seedTaskMemory?.() ?? { status: "not-found" as const };
-			footer.refresh();
-			tui.requestRender();
-			return result;
-		},
+		...(deps.seedTaskMemory ? { seedTaskMemory: deps.seedTaskMemory } : {}),
 		openView: (filter) => openViewOverlayState(filter),
 		openThinking: () => openThinkingOverlayState(),
-		setOutputVerbosity: (verbosity) => {
-			if (!verbosity || !deps.getSettings || !deps.writeSettings) {
-				appendCommandNotice("info", "usage: /output minimal|default|verbose");
-				return;
-			}
-			const next = structuredClone(deps.getSettings()) as ClioSettings;
-			if (verbosity !== "minimal" && verbosity !== "default" && verbosity !== "verbose") {
-				appendCommandNotice("error", "usage: /output minimal|default|verbose");
-				return;
-			}
-			next.terminal.outputVerbosity = verbosity;
-			deps.writeSettings(next);
-			appendCommandNotice("success", `output detail: ${verbosity}`);
-			tui.requestRender();
-		},
 		openModel: () => openModelOverlayState(),
-		providers: deps.providers,
-		applyModelRef: (ref) => {
-			deps.onSelectModel?.({ target: ref.target, model: ref.model });
-			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel);
-			tui.requestRender();
-		},
 		openScopedModels: () => openScopedModelsOverlayState(),
 		openSettings: () => openSettingsOverlayState(),
 		openResume: () => openResumeOverlayState(),
 		startNewSession: () => startNewSession(),
 		openTree: () => openTreeOverlayState(),
 		openMessagePicker: () => openMessagePickerOverlayState(),
-		openHelp: (query?: string) => openHelpOverlayState(query),
+		openHelp: (query) => openHelpOverlayState(query),
 		openAgents: () => openAgentsOverlayState(),
 		openPrompts: () => openPromptsOverlayState(),
 		openExtensions: () => openExtensionsOverlayState(),
-		setEditorText: (text) => {
-			editor.setText(text);
-			tui.requestRender();
-		},
-		runCompact: (instructions) => {
-			runCompactWithNotice(deps.onCompact, appendCommandNotice, instructions);
-		},
-		exportTranscript: (pathArg) => {
-			const sessionId = deps.chat.getSessionId();
-			if (!sessionId) {
-				appendCommandNotice("error", "[/export] no active session to export");
-				return;
-			}
-			try {
-				const turns = readStructuredEntries(sessionId);
-				// Same pure render pipeline as the live panel and /resume replay:
-				// a throwaway panel rehydrated from the ledger, every tool segment
-				// expanded, rendered at a fixed width, ANSI stripped. Unlike the
-				// live view, export renders full tool bodies (no middle-elision or
-				// char truncation) so the transcript reproduces the complete output.
-				const exportPanel = createChatPanel({ unboundedToolBodies: true });
-				rehydrateChatPanelFromTurns(exportPanel, turns, { unboundedToolBodies: true });
-				exportPanel.toggleAllToolsExpanded();
-				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripAnsiForExport);
-				const date = new Date().toISOString().slice(0, 10);
-				const target = resolve(
-					pathArg && pathArg.trim().length > 0 ? pathArg.trim() : join(".clio", "exports", `${sessionId}-${date}.md`),
-				);
-				mkdirSync(resolve(target, ".."), { recursive: true });
-				const header = [`# Clio session ${sessionId}`, "", `Exported ${new Date().toISOString()}`, "", "```text"];
-				writeFileSync(target, `${[...header, ...lines, "```", ""].join("\n")}`, "utf8");
-				appendCommandNotice("success", `[/export] wrote ${lines.length} lines to ${target}`);
-			} catch (err) {
-				appendCommandNotice("error", `[/export] ${err instanceof Error ? err.message : String(err)}`);
-			}
-		},
-		runInit: (options) => {
-			const onInit = deps.onInit;
-			if (!onInit) {
-				io.stderr("[/context init] context init not wired; pass onInit to startInteractive\n");
-				return;
-			}
-			if (activeContextInit) {
-				io.stderr("[/context init] bootstrap already running\n");
-				return;
-			}
-			activeContextInit = true;
-			void Promise.resolve()
-				.then(() => onInit(options, io))
-				.then(() => {
-					dismissContextBootstrapNotices();
-					footer.refresh();
-				})
-				.catch((err) => {
-					const msg = err instanceof Error ? err.message : String(err);
-					io.stderr(`[/context init] ${msg}\n`);
-				})
-				.finally(() => {
-					activeContextInit = false;
-					tui.requestRender();
-				});
-		},
-		runContextClear: () => {
-			if (!deps.onContextClear) {
-				io.stderr("[/context reset] context reset not wired; pass onContextClear to startInteractive\n");
-				return;
-			}
-			openContextResetOverlayState();
-		},
-		runContextRefresh: () => {
-			if (!deps.onContextRefresh) {
-				io.stderr("[/context refresh] context refresh not wired; pass onContextRefresh to startInteractive\n");
-				return;
-			}
-			void deps
-				.onContextRefresh()
-				.catch((err) => {
-					const msg = err instanceof Error ? err.message : String(err);
-					io.stderr(`[/context refresh] ${msg}\n`);
-				})
-				.finally(() => tui.requestRender());
-		},
-		verifyReceipt: (runId) => verifyReceiptFile(deps.stateDir, runId),
-		submitChat: (text) => {
-			const runSubmit = (sub: InteractiveSubmitExpansion) => {
-				void (async () => {
-					try {
-						recordSubmittedTurn();
-						footer.refresh();
-						chatPanel.appendUser(sub.text);
-						tui.requestRender();
-						await deps.chat.submit(sub.text, {
-							...(sub.images.length > 0 ? { images: sub.images } : {}),
-							...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
-							...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
-						});
-					} catch (err) {
-						const msg = err instanceof Error ? err.message : String(err);
-						io.stderr(`[interactive] chat failed: ${msg}\n`);
-					} finally {
-						tui.requestRender();
-					}
-				})();
-			};
-
-			void (async () => {
-				try {
-					const submitted = await expandInteractiveSubmitAsync(text, deps.resources);
-					const uninstalled = submitted.pendingSkillRequests.find((r) => !r.installed);
-					if (uninstalled && !uninstalled.marketplaceRef) {
-						io.stderr(`Skill "${uninstalled.name}" is not installed and no local marketplace entry is available.\n`);
-						return;
-					}
-					if (uninstalled) {
-						void openAskUserOverlayState([
-							{
-								question: `Skill "${uninstalled.name}" is not installed. Would you like to install it?`,
-								options: [
-									{
-										label: "Install and run",
-										description: `Install from ${uninstalled.marketplaceRef}`,
-									},
-									{ label: "Cancel", description: "Do not install." },
-								],
-							},
-						]).then((res) => {
-							if (res.cancelled || res.answers[0]?.answer !== "Install and run") {
-								io.stderr("Installation cancelled.\n");
-								return;
-							}
-							void (async () => {
-								try {
-									io.stdout(`Installing skill "${uninstalled.name}"...\n`);
-									let configDir: string | undefined;
-									try {
-										configDir = clioConfigDir();
-									} catch (configErr) {
-										io.stderr(
-											`Skill install: config dir unavailable (${configErr instanceof Error ? configErr.message : String(configErr)}); continuing without it.\n`,
-										);
-									}
-									installSkill({
-										source: uninstalled.name,
-										cwd: process.cwd(),
-										...(configDir ? { configDir } : {}),
-									});
-									io.stdout(`Successfully installed "${uninstalled.name}"!\n`);
-									await deps.resources?.reload();
-									const postInstallSubmitted = await expandInteractiveSubmitAsync(text, deps.resources);
-									runSubmit(postInstallSubmitted);
-								} catch (err) {
-									io.stderr(
-										`Failed to install skill "${uninstalled.name}": ${err instanceof Error ? err.message : String(err)}\n`,
-									);
-								}
-							})();
-						});
-						return;
-					}
-
-					runSubmit(submitted);
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
-					io.stderr(`[interactive] chat failed: ${msg}\n`);
-					tui.requestRender();
-				}
-			})();
-		},
-		render: () => tui.requestRender(),
-	};
+		openContextReset: () => openContextResetOverlayState(),
+		setEditorText: (text) => editor.setText(text),
+	});
 
 	const editorSubmit = createEditorSubmitController({
 		editor,
@@ -1230,7 +1008,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.session ? { session: deps.session } : {}),
 		sessionTranscript,
 		chatPanel,
-		dispatchCommand: (text) => dispatchSlashCommand(parseSlashCommand(text), slashCtx),
+		dispatchCommand: slashRuntime.dispatchCommand,
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		notify,
 	});
@@ -1316,7 +1094,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		announceTaskMemorySeedOffer,
 		keybindings,
 		editor,
-		getSlashContext: () => slashCtx,
+		getSlashContext: () => slashRuntime.context,
 	});
 	const {
 		closeOverlay,
@@ -1364,7 +1142,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 
 	const startNewSession = (): void => {
 		if (!deps.onNewSession) {
-			emitCommandNotice(slashCtx.notice, "error", "new", "session contract unavailable");
+			emitCommandNotice(slashRuntime.notice, "error", "new", "session contract unavailable");
 			return;
 		}
 		deps.onNewSession();
