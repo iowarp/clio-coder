@@ -6,6 +6,7 @@
 		"src/domains/prompts/fragments/identity/clio.md",
 		"src/domains/prompts/fragments/identity/clio-worker.md",
 		"assets/clio-coder-logo-128.webp",
+		"docs/html/index.html",
 		"damage-control-rules.yaml",
 		"README.md",
 		"LICENSE",
@@ -17,6 +18,7 @@
 		"src/domains/agents/builtins/",
 		"dist/domains/agents/builtins/",
 		"skills/cut-it/",
-		"src/domains/providers/models/"
+		"src/domains/providers/models/",
+		"docs/html/"
 	]
 }
