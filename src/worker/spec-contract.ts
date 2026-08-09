@@ -1,6 +1,7 @@
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
+import type { AgentProduct } from "../domains/agents/spec.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
 	CapabilityFlags,
@@ -87,8 +88,12 @@ interface WorkerSpecFields {
 	 * first and only notice that its result was the wrong shape.
 	 */
 	resultContract?: ResultContract;
-	/** Product nature for reserve delivery tool resolution. */
-	product?: string;
+	/**
+	 * What this run delivers. It widens the reserve window's delivery-tool set,
+	 * so it is validated here like every other closed field on the wire rather
+	 * than trusted as free text.
+	 */
+	product?: AgentProduct;
 	/** Orchestrator-resolved effective runtime/capability decision for receipts and debugging. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	allowedTools: ReadonlyArray<ToolName>;
@@ -211,6 +216,7 @@ const TOOL_PROFILE_NAMES = [
 	"science-local",
 	"full-agent",
 ] as const satisfies ReadonlyArray<ToolProfileName>;
+const WORKER_PRODUCTS = ["orientation"] as const satisfies ReadonlyArray<AgentProduct>;
 const TARGET_LIFECYCLES = ["user-managed", "clio-managed"] as const;
 const MIDDLEWARE_HOOKS = ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"] as const;
 const MIDDLEWARE_EFFECT_KINDS = [
@@ -569,6 +575,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		throw new Error("WorkerSpec.trustProjectCompatRoots must be a boolean");
 	}
 	readOptionalEnum(spec, "toolProfile", "WorkerSpec", TOOL_PROFILE_NAMES);
+	readOptionalEnum(spec, "product", "WorkerSpec", WORKER_PRODUCTS);
 	if (
 		spec.onPermission !== undefined &&
 		spec.onPermission !== "deny" &&

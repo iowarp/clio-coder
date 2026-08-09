@@ -84,6 +84,28 @@ describe("contracts/agent recipe schema", () => {
 		}
 	});
 
+	/**
+	 * `product` is optional but closed. It widens what the reserve window admits,
+	 * so a typo cannot be allowed to degrade into "no product" silently: the
+	 * author would ship a wiki writer that loses `code_nav` at exactly the point
+	 * in the run where it needs it, and nothing anywhere would say so.
+	 */
+	it("rejects a product the reserve window does not know", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-product-recipe-"));
+		try {
+			writeFileSync(join(dir, "typo.md"), frontmatter([...validLines(), "product: orientaton"]));
+			const diagnostics: AgentRecipeDiagnostic[] = [];
+			deepStrictEqual(loadRecipesFromDir({ dir, source: "project" }, diagnostics), []);
+			strictEqual(diagnostics.length, 1);
+			match(diagnostics[0]?.message ?? "", /product has an unsupported value/);
+
+			writeFileSync(join(dir, "typo.md"), frontmatter([...validLines(), "product: orientation"]));
+			strictEqual(loadRecipesFromDir({ dir, source: "project" })[0]?.product, "orientation");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("a discovered recipe cannot claim an audience its provenance does not give it", () => {
 		const dir = mkdtempSync(join(tmpdir(), "clio-audience-recipe-"));
 		try {

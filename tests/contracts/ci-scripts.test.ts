@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
+import { OPTIONAL_RECIPE_KEYS, RECIPE_KEYS } from "../../src/domains/agents/recipe-schema.js";
 
 interface PackageJson {
 	scripts: Record<string, string>;
@@ -54,6 +55,28 @@ describe("contracts/ci scripts", () => {
 		const required: string[] = JSON.parse(readFileSync("scripts/release-manifest.json", "utf8")).requiredFiles;
 		ok(required.includes("src/domains/prompts/fragments/identity/clio.md"));
 		ok(required.includes("src/domains/prompts/fragments/identity/clio-worker.md"));
+	});
+
+	/**
+	 * `product` was added to the v1 recipe schema without touching the release
+	 * gate, so the gate failed every builtin recipe that declared it and a later
+	 * commit patched the gate's private key list to match. The schema did not
+	 * need a version bump for that: an optional key leaves every existing v1
+	 * recipe parsing unchanged, and an older Clio meeting one still refuses it
+	 * loudly through the unknown-key rule, which is the correct outcome for a
+	 * field it cannot honor. What it needed was for the gate to stop keeping its
+	 * own copy of the schema. This holds the two in step.
+	 */
+	it("enforces the recipe frontmatter schema the parser actually defines", () => {
+		const gate = readFileSync("scripts/check-release.mjs", "utf8");
+		const listed = (name: string): string[] => {
+			const match = gate.match(new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\)`));
+			ok(match, `check-release.mjs must declare ${name}`);
+			return [...(match[1] as string).matchAll(/"([^"]+)"/g)].map((entry) => entry[1] as string);
+		};
+
+		deepStrictEqual(listed("requiredRecipeKeys").sort(), [...RECIPE_KEYS].sort());
+		deepStrictEqual(listed("optionalRecipeKeys").sort(), [...OPTIONAL_RECIPE_KEYS].sort());
 	});
 
 	it("keeps the deterministic local ci script aligned with the release-relevant checks", () => {

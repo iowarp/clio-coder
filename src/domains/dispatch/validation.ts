@@ -8,6 +8,7 @@
 import path from "node:path";
 import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
+import type { AgentProduct } from "../agents/spec.js";
 import { type AutonomyLevel, isAutonomyLevel } from "../safety/autonomy.js";
 import {
 	EXECUTION_HANDOFF_MAX_ITEMS,
@@ -72,7 +73,18 @@ export interface JobSpec {
 	target?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
-	product?: string;
+	/**
+	 * What this run delivers, which decides what its reserve window admits.
+	 * "orientation" adds `code_nav` to the delivery tools kept live inside the
+	 * reserve, so unlike `denyTools` this field *widens* an admission set and
+	 * origin matters. It is not in the model-facing dispatch tool schema and
+	 * should stay out of it: a model that could set it could hand itself a
+	 * navigation tool past the reserve simply by claiming its work is
+	 * orientation. The two origins that may set it are internal dispatch
+	 * callers and the admitted agent recipe's `product` frontmatter, both of
+	 * which are authored artifacts rather than model output.
+	 */
+	product?: AgentProduct;
 	/** Explicit fleet node pin; `local` or a configured fleet.nodes id. */
 	node?: string;
 	/** Sealed normalized routing intent. Raw callers use the model-facing `routing` object. */

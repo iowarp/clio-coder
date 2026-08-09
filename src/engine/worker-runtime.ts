@@ -28,6 +28,7 @@ import {
 	resultContractRepairMessage,
 	validateResultContract,
 } from "../domains/agents/result-contract.js";
+import type { AgentProduct } from "../domains/agents/spec.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import { createMiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import { shouldRequestStalledTurnContinuation } from "../domains/middleware/stalled-turn.js";
@@ -101,8 +102,8 @@ export interface WorkerRunInput {
 	 * orchestrator for a recoverable shape mistake it was never told about.
 	 */
 	resultContract?: ResultContract;
-	/** Product nature for reserve delivery tool resolution. */
-	product?: string;
+	/** What this run delivers; decides which delivery tools the reserve keeps live. */
+	product?: AgentProduct;
 	/** Workspace root the result contract resolves relative paths against. */
 	cwd?: string;
 	/** Tool ids the worker is allowed to expose for this run. */

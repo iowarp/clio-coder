@@ -738,6 +738,21 @@ describe("contracts/providers/runtime-cleanup", () => {
 		}
 	});
 
+	/**
+	 * `product` widens the reserve window's delivery-tool set, so an unrecognized
+	 * value must not cross the process boundary. Untyped, `product: "orientaton"`
+	 * parsed clean and then quietly resolved to the non-orientation delivery set,
+	 * costing an orientation worker its `code_nav` with no diagnostic anywhere in
+	 * the dispatch. The strict parser for the wire document is where that stops.
+	 */
+	it("admits only the closed product set on the worker spec wire", () => {
+		strictEqual(parseWorkerSpec(minimalWorkerSpec({ product: "orientation" })).product, "orientation");
+		strictEqual(parseWorkerSpec(minimalWorkerSpec()).product, undefined);
+		for (const bad of ["orientaton", "workspace-edit", "", 42, null]) {
+			throws(() => parseWorkerSpec(minimalWorkerSpec({ product: bad })), /WorkerSpec\.product must be one of/);
+		}
+	});
+
 	it("carries residency-protected model ids through the worker spec contract", () => {
 		const parsed = parseWorkerSpec(
 			minimalWorkerSpec({ protectedModels: ["Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K", "MiniCPM5-1B-Q8_0-131K"] }),

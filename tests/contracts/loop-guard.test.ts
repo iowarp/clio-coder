@@ -1214,7 +1214,11 @@ describe("synthesis reserve at the cap tail", () => {
 		const safety = unknownClassSafety();
 		const allowedTools = [ToolNames.Read, ToolNames.Write, ToolNames.CodeNav, ToolNames.Grep];
 		const orientationDelivery = resolveDeliveryTools(allowedTools, "orientation");
-		const fileEditDelivery = resolveDeliveryTools(allowedTools, "workspace-edit");
+		// The ordinary file-edit worker declares no product at all. The previous
+		// fixture passed "workspace-edit" here, which is a capability class and was
+		// never a product; it reached the non-orientation branch by being
+		// unrecognized, which is the failure mode the closed union removes.
+		const fileEditDelivery = resolveDeliveryTools(allowedTools, undefined);
 
 		strictEqual(orientationDelivery.includes(ToolNames.CodeNav), true, "orientation delivery tools include code_nav");
 		strictEqual(fileEditDelivery.includes(ToolNames.CodeNav), false, "file-edit delivery tools do not include code_nav");

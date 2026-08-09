@@ -5,6 +5,7 @@ import type {
 	AgentCapabilityClass,
 	AgentCategory,
 	AgentLatencyClass,
+	AgentProduct,
 	AgentProjectContextTier,
 } from "./spec.js";
 
@@ -88,7 +89,7 @@ export interface AgentRecipe {
 	projectContextTier: AgentProjectContextTier;
 	budget: AgentBudget;
 	resultContract: ResultContract;
-	product?: string;
+	product?: AgentProduct;
 	tags: ReadonlyArray<string>;
 	source: "builtin" | "user" | "project";
 	filepath: string;
