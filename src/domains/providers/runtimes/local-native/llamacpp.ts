@@ -1,5 +1,5 @@
+import { CLIO_MIN_CONTEXT_WINDOW, CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../../../core/context-floor.js";
 import type { Api, Model } from "../../../../engine/types.js";
-
 import { probeHttp } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
@@ -33,8 +33,8 @@ const defaultCapabilities: CapabilityFlags = {
 	embeddings: false,
 	rerank: false,
 	fim: false,
-	contextWindow: 8192,
-	maxTokens: 4096,
+	contextWindow: CLIO_MIN_CONTEXT_WINDOW,
+	maxTokens: CLIO_MIN_MAX_OUTPUT_TOKENS,
 };
 
 function targetUrl(target: TargetDescriptor): string | null {

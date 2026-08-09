@@ -312,13 +312,62 @@ describe("contracts/providers", () => {
 			resolution.diagnostics.filter((entry) => entry.severity === "warning").map((entry) => entry.message),
 		);
 
-		const clean = resolveRuntimeTarget(mockProviders, {
-			targetId: status.target.id,
+		// A target that reports its own window has nothing left to warn about.
+		// Without the override the resolution is clean except for the context
+		// window, which this fixture genuinely never declared.
+		const declaring = fakeLiveStatus(["served-model"], {
+			target: {
+				...status.target,
+				capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 262144 },
+			},
+		});
+		const declaringProviders: ProvidersContract = {
+			list: () => [declaring],
+			getTarget: (id: string) => (id === declaring.target.id ? declaring.target : null),
+			getRuntime: (id: string) => (id === declaring.runtime?.id ? declaring.runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
+		const clean = resolveRuntimeTarget(declaringProviders, {
+			targetId: declaring.target.id,
 			wireModelId: "served-model",
 			requestedThinkingLevel: "off",
 		});
 		ok(clean.ok);
 		deepStrictEqual(runtimeResolutionWarnings(clean.diagnostics), []);
+	});
+
+	/**
+	 * The provenance notice used to be `info`, which meant it reached the
+	 * dispatch receipt JSON and nowhere else: not the event stream, not the
+	 * interactive chat, not a headless run. Clio now assumes its own floor when
+	 * a target declares nothing, so an unverified window can be larger than the
+	 * truth and overrunning it fails the request outright.
+	 */
+	it("raises an unverified context window to a warning an operator can actually see", () => {
+		const status = fakeLiveStatus(["served-model"]);
+		const mockProviders: ProvidersContract = {
+			list: () => [status],
+			getTarget: (id: string) => (id === status.target.id ? status.target : null),
+			getRuntime: (id: string) => (id === status.runtime?.id ? status.runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
+
+		const resolution = resolveRuntimeTarget(mockProviders, {
+			targetId: status.target.id,
+			wireModelId: "served-model",
+			requestedThinkingLevel: "off",
+		});
+
+		ok(resolution.ok);
+		const unverified = resolution.diagnostics.find((entry) => entry.code === "context-window-unverified");
+		ok(unverified, "a target that declared no window must produce the provenance diagnostic");
+		strictEqual(unverified.severity, "warning");
+		ok(
+			runtimeResolutionWarnings(resolution.diagnostics).includes(unverified.message),
+			"and it must survive the filter every human-facing surface reads",
+		);
 	});
 
 	it("stays silent about unknown models when there is no catalog basis to judge", () => {

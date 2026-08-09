@@ -1,3 +1,4 @@
+import { CLIO_MIN_CONTEXT_WINDOW, CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../../../core/context-floor.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import { makeOpenAICompatRuntime } from "../protocol/openai-compat.js";
 
@@ -11,8 +12,8 @@ const defaultCapabilities: CapabilityFlags = {
 	embeddings: false,
 	rerank: false,
 	fim: false,
-	contextWindow: 8192,
-	maxTokens: 4096,
+	contextWindow: CLIO_MIN_CONTEXT_WINDOW,
+	maxTokens: CLIO_MIN_MAX_OUTPUT_TOKENS,
 };
 
 export default makeOpenAICompatRuntime({

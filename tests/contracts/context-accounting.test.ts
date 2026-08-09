@@ -1,5 +1,6 @@
 import { ok, strictEqual } from "node:assert";
 import { describe, it } from "node:test";
+import { CLIO_MIN_CONTEXT_WINDOW } from "../../src/core/context-floor.js";
 import {
 	EMPTY_CAPABILITIES,
 	type RuntimeDescriptor,
@@ -26,7 +27,7 @@ function testRuntime(id: "ollama-native" | "lmstudio-native"): RuntimeDescriptor
 		tier: "local-native",
 		apiFamily: id,
 		auth: "none",
-		defaultCapabilities: { ...EMPTY_CAPABILITIES, contextWindow: 8192 },
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, contextWindow: CLIO_MIN_CONTEXT_WINDOW },
 		synthesizeModel() {
 			throw new Error("not used in this test");
 		},
@@ -223,16 +224,18 @@ describe("contracts/context-accounting", () => {
 		strictEqual(details.contextWindowSource, "descriptor-default");
 		strictEqual(details.warning, null, "a 128k window is not a degradation to warn about");
 		ok(details.provenanceNotice !== null, "a blanket runtime default must be reported as one");
-		ok(details.provenanceNotice.includes("runtime default"));
+		ok(details.provenanceNotice.includes("not a figure this target reported"));
 	});
 
 	/**
-	 * `descriptor-default` asserts the runtime descriptor supplied the number.
-	 * When it supplied nothing the number is the module's own 8192 fallback, and
-	 * labelling that as the descriptor's makes a hardcoded guess indistinguishable
-	 * from a declared capability in the persisted ledger.
+	 * The old fallback was 8192, a number that predates every model Clio runs
+	 * against. It was indistinguishable from a real answer at every call site
+	 * that consumed it, so a target that merely failed to report its window ran
+	 * the whole session at 6% of its real capacity with no way to notice.
+	 * Assuming the floor and labelling it an assumption is both closer to the
+	 * truth and recoverable.
 	 */
-	it("reports a window nothing declared as unknown rather than a descriptor default", () => {
+	it("assumes Clio's floor, not 8192, when nothing declares a window", () => {
 		const runtime: RuntimeDescriptor = {
 			id: "custom-runtime",
 			displayName: "custom-runtime",
@@ -249,13 +252,14 @@ describe("contracts/context-accounting", () => {
 
 		const details = resolveContextWindowDetails(target, runtime, "model", null, null);
 
-		strictEqual(details.effectiveContextWindow, 8192);
+		strictEqual(details.effectiveContextWindow, CLIO_MIN_CONTEXT_WINDOW);
 		strictEqual(details.contextWindowSource, "unknown");
 		ok(details.provenanceNotice !== null, "an undeclared window must be reported as an assumption");
-		ok(details.provenanceNotice.includes("No context window was declared"));
+		ok(details.provenanceNotice.includes("assumed minimum"));
+		strictEqual(details.warning, null, "the assumed floor is not itself a degradation");
 	});
 
-	it("keeps local-native 128k as advisory and does not inflate unknown effective context", () => {
+	it("carries Clio's floor through a local-native descriptor default", () => {
 		const target: TargetDescriptor = {
 			id: "local-target",
 			runtime: "ollama-native",
@@ -264,13 +268,19 @@ describe("contracts/context-accounting", () => {
 		const runtime = testRuntime("ollama-native");
 
 		const details = resolveContextWindowDetails(target, runtime, "model", null, null);
-		strictEqual(details.desiredContextWindow, 128000);
-		strictEqual(details.effectiveContextWindow, 8192);
+		strictEqual(details.desiredContextWindow, CLIO_MIN_CONTEXT_WINDOW);
+		strictEqual(details.effectiveContextWindow, CLIO_MIN_CONTEXT_WINDOW);
 		strictEqual(details.contextWindowSource, "descriptor-default");
-		ok(details.warning !== null);
+		ok(details.provenanceNotice !== null, "a descriptor blanket is still an assumption");
 	});
 
-	it("caps effectiveContextWindow and warns if probed/loaded context below 128k", () => {
+	/**
+	 * A probed number always wins, including when it is small. The floor is what
+	 * Clio assumes in the absence of an answer, never a value it substitutes for
+	 * one it was given: a model served at 32k really does have 32k today, and
+	 * planning against 131072 would overrun every request.
+	 */
+	it("keeps a probed window that is below the floor and warns about it", () => {
 		const target: TargetDescriptor = {
 			id: "local-target",
 			runtime: "lmstudio-native",
@@ -279,11 +289,38 @@ describe("contracts/context-accounting", () => {
 		const runtime = testRuntime("lmstudio-native");
 
 		const details = resolveContextWindowDetails(target, runtime, "model", null, 32000);
-		strictEqual(details.desiredContextWindow, 128000);
+		strictEqual(details.desiredContextWindow, CLIO_MIN_CONTEXT_WINDOW);
 		strictEqual(details.effectiveContextWindow, 32000);
 		strictEqual(details.contextWindowSource, "loaded");
 		ok(details.warning !== null);
-		ok(details.warning.includes("below the recommended 128k"));
+		ok(details.warning.includes("32000"));
+		strictEqual(details.provenanceNotice, null, "a probed number is not an assumption");
+	});
+
+	/**
+	 * Several frontier models ship at exactly 128,000 rather than 2^17. Warning
+	 * that such a target is 2% short of Clio's assumed floor is noise on a
+	 * target that is entirely adequate, so the warn line sits below the
+	 * assumption rather than at it.
+	 */
+	it("does not warn about a 128,000-token window three thousand tokens under the floor", () => {
+		const runtime: RuntimeDescriptor = {
+			id: "hosted-128k",
+			displayName: "hosted-128k",
+			kind: "http",
+			tier: "cloud",
+			apiFamily: "openai-completions",
+			auth: "api-key",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, contextWindow: 128000 },
+			synthesizeModel() {
+				throw new Error("not used in this test");
+			},
+		};
+		const target: TargetDescriptor = { id: "hosted", runtime: "hosted-128k", capabilities: {} };
+
+		const details = resolveContextWindowDetails(target, runtime, "model", null, 128000);
+		strictEqual(details.effectiveContextWindow, 128000);
+		strictEqual(details.warning, null);
 	});
 
 	it("exposes lastCompaction in the context ledger", () => {
