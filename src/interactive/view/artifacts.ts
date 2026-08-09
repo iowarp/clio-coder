@@ -404,7 +404,7 @@ function pushCapped(lines: string[], line: string, maxLines: number): boolean {
 	return lines.length < maxLines;
 }
 
-export async function readTextFileLinesCapped(
+async function readTextFileLinesCapped(
 	path: string,
 	maxLines = VIEW_ARTIFACT_LINE_CAP,
 ): Promise<{ lines: string[]; truncated: boolean }> {

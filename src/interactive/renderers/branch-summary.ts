@@ -36,7 +36,7 @@ export interface RenderBranchSummaryOptions {
  * replay path can use it as a placeholder when the full block is rendered
  * lazily (future `Ctrl+O`-style expand).
  */
-export function renderBranchSummaryHeader(entry: BranchSummaryEntry, width: number): string[] {
+function renderBranchSummaryHeader(entry: BranchSummaryEntry, width: number): string[] {
 	const label = theme.style("title", `[${LABEL}]`, { bold: true });
 	const meta = theme.fg("dim", `from turn ${entry.fromTurnId}`);
 	return wrapTextWithAnsi(`${label} ${meta}`, width);

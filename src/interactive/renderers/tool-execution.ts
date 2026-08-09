@@ -176,7 +176,7 @@ function unquoteShellScript(value: string): string {
 	return inner.replace(/\\"/g, '"').replace(/\\`/g, "`").replace(/\\\$/g, "$").replace(/\\\\/g, "\\");
 }
 
-export function stripShellWrapperForDisplay(command: string): string {
+function stripShellWrapperForDisplay(command: string): string {
 	const trimmed = command.trim();
 	const match = /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|zsh|sh))\s+-lc\s+([\s\S]+)$/u.exec(trimmed);
 	if (!match?.[1]) return command;

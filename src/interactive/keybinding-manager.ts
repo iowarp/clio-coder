@@ -156,7 +156,7 @@ const MODIFIERS = new Set(["ctrl", "shift", "alt", "super"]);
  * attempt to exercise pi-tui's matcher; we just reject identifiers that
  * would silently fail at match time.
  */
-export function isValidKeyId(keyId: unknown): boolean {
+function isValidKeyId(keyId: unknown): boolean {
 	if (typeof keyId !== "string" || keyId.length === 0) return false;
 	const parts = keyId.toLowerCase().split("+");
 	if (parts.length === 0) return false;
@@ -289,7 +289,7 @@ export function detectTerminalKeySupport(
 	};
 }
 
-export function keyRequiresCsiU(keyId: string): boolean {
+function keyRequiresCsiU(keyId: string): boolean {
 	const parts = keyId.toLowerCase().split("+");
 	if (parts.length < 3) return false;
 	const base = parts[parts.length - 1] ?? "";

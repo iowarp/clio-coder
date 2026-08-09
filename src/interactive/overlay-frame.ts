@@ -50,11 +50,11 @@ export class FocusBox extends Box {
 	}
 }
 
-export function clioFrame(text: string): string {
+function clioFrame(text: string): string {
 	return clioTheme().fg("frame", text);
 }
 
-export function clioTitle(text: string): string {
+function clioTitle(text: string): string {
 	return clioTheme().style("title", text, { bold: true });
 }
 
@@ -67,7 +67,7 @@ function padAnsi(text: string, width: number): string {
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
-export function brandedTopBorder(label: string, innerWidth: number): string {
+function brandedTopBorder(label: string, innerWidth: number): string {
 	const clean = label.replace(/^[┌┐└┘├┤─│\s]+/, "").replace(/[┌┐└┘├┤─│\s]+$/, "");
 	const formatted = clean.length > 0 ? `─ ${clean} ` : "─";
 	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "...", true) : formatted;
@@ -130,7 +130,7 @@ export function elideHint(hint: string, maxCleanWidth: number): string {
 	return keepIndices.map((i) => parts[i]).join(" · ");
 }
 
-export function brandedBottomBorder(innerWidth: number, hint?: string): string {
+function brandedBottomBorder(innerWidth: number, hint?: string): string {
 	if (!hint || hint.trim().length === 0) {
 		return `${clioFrame("└")}${clioFrame("─".repeat(innerWidth))}${clioFrame("┘")}`;
 	}

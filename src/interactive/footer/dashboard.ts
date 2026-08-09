@@ -135,7 +135,7 @@ function costSegment(value: CostAggregate | undefined): string | null {
 }
 
 /** Compact footer: two always-on lines, deliberately free of model/mode/thinking (the editor rail owns those). */
-export function renderFooterCompactLines(state: FooterDashboardRenderState, width: number): string[] {
+function renderFooterCompactLines(state: FooterDashboardRenderState, width: number): string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
 	return [
 		compactPrimaryLine(
@@ -164,7 +164,7 @@ export function renderFooterCompactLines(state: FooterDashboardRenderState, widt
 }
 
 /** Notice surface, composed by the view below the grid: compact badge or expanded panel. */
-export function renderFooterNotices(
+function renderFooterNotices(
 	notices: ReadonlyArray<Notification>,
 	width: number,
 	mode: FooterDashboardMode,
@@ -178,7 +178,7 @@ export function renderFooterNotices(
 	return badge ? [badge] : [];
 }
 
-export function renderFooterDashboardLines(
+function renderFooterDashboardLines(
 	state: FooterDashboardRenderState,
 	width: number,
 	mode: FooterDashboardMode = "compact",

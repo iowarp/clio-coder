@@ -54,7 +54,7 @@ export interface AllocateMeterCellsOptions {
  * window via largest-remainder. With `ensureVisible`, guarantee one cell per
  * non-empty content category by borrowing from free space.
  */
-export function allocateMeterCells(
+function allocateMeterCells(
 	meter: ReadonlyArray<ContextLedgerGroup>,
 	contextWindow: number,
 	totalCells: number,
@@ -183,7 +183,7 @@ export function workerContextSeverity(pct: number): WorkerContextSeverity {
 	return "healthy";
 }
 
-export function workerContextToken(severity: WorkerContextSeverity): ClioToken {
+function workerContextToken(severity: WorkerContextSeverity): ClioToken {
 	if (severity === "critical") return "error";
 	if (severity === "warn") return "warning";
 	return "muted";

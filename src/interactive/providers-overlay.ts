@@ -119,7 +119,7 @@ function formatAuthRow(authText: string): string {
 	return `    auth: ${authText}`;
 }
 
-export function formatCapabilitiesRow(caps: CapabilityFlags): string {
+function formatCapabilitiesRow(caps: CapabilityFlags): string {
 	const ctx = caps.contextWindow > 0 ? `${caps.contextWindow}ctx` : "?ctx";
 	const max = caps.maxTokens > 0 ? `${caps.maxTokens}max` : "?max";
 	const flags: string[] = [];
@@ -180,7 +180,7 @@ function authSummaryForRuntimeAuth(runtimeAuth: string): string {
 	return runtimeAuth;
 }
 
-export function formatTargetAuthDisplay(status: TargetStatus, auth: AuthStatus | null): TargetAuthDisplay {
+function formatTargetAuthDisplay(status: TargetStatus, auth: AuthStatus | null): TargetAuthDisplay {
 	if (!status.runtime) return { summary: "unknown", detail: "unknown-runtime" };
 	if (!auth) return defaultAuthDisplay(status);
 	if (!auth.available) {
@@ -377,7 +377,7 @@ export function buildTargetHubUseSettings(settings: Readonly<ClioSettings>, targ
 	return next;
 }
 
-export function buildTargetHubFleetSettings(settings: Readonly<ClioSettings>, targetId: string): ClioSettings {
+function buildTargetHubFleetSettings(settings: Readonly<ClioSettings>, targetId: string): ClioSettings {
 	const next = structuredClone(settings) as ClioSettings;
 	applySettingChange(next, "workers.default.target", targetId);
 	return next;
@@ -397,7 +397,7 @@ export function applyTargetsHubUseAction(targetId: string, deps: TargetsHubUseDe
 	return next;
 }
 
-export function applyTargetsHubFleetAction(targetId: string, deps: TargetsHubUseDeps): ClioSettings | null {
+function applyTargetsHubFleetAction(targetId: string, deps: TargetsHubUseDeps): ClioSettings | null {
 	const current = deps.getSettings();
 	if (!current) return null;
 	const next = buildTargetHubFleetSettings(current, targetId);

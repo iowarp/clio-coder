@@ -62,7 +62,7 @@ export interface RenderCompactionSummaryOptions {
  * Used on its own for placeholder replays and as the first line of
  * `renderCompactionSummaryEntry` when the body is included too.
  */
-export function renderCompactionSummaryHeader(entry: CompactionSummaryEntry, width: number): string[] {
+function renderCompactionSummaryHeader(entry: CompactionSummaryEntry, width: number): string[] {
 	const label = theme.style("title", `[${LABEL}]`, { bold: true });
 	const tokens = Number.isFinite(entry.tokensBefore) ? entry.tokensBefore.toLocaleString() : "0";
 	const trigger = entry.trigger ? ` via ${entry.trigger}` : "";

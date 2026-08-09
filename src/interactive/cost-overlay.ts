@@ -185,7 +185,7 @@ export interface CostSnapshot {
 // supplied (the subscribe path holds the latest one), the running USD total is
 // read from `snapshot.session.costUsd`. The per-provider/model rows still fold
 // `costEntries()`, which the snapshot schema deliberately does not carry.
-export function buildCostSnapshot(
+function buildCostSnapshot(
 	observability: ObservabilityContract,
 	sessionId: string | null,
 	snapshot?: ObservabilitySnapshot,

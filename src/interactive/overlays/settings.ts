@@ -756,7 +756,7 @@ export function buildSettingsSections(items: readonly SettingsCenterItem[]): Set
 	}));
 }
 
-export function refreshSettingItemsInPlace(items: SettingsCenterItem[], next: readonly SettingsCenterItem[]): void {
+function refreshSettingItemsInPlace(items: SettingsCenterItem[], next: readonly SettingsCenterItem[]): void {
 	const byId = new Map(next.map((item) => [item.id, item] as const));
 	for (const item of items) {
 		const updated = byId.get(item.id);
@@ -1525,7 +1525,7 @@ export interface OpenSettingsOverlayDeps {
 	onClose: () => void;
 }
 
-export function formatSettingChangeNotice(id: string, value: string, scope: "session" | "global"): string {
+function formatSettingChangeNotice(id: string, value: string, scope: "session" | "global"): string {
 	return `${id} set to ${value} (${scope === "global" ? "saved globally" : "this session"})`;
 }
 

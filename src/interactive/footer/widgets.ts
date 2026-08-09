@@ -120,7 +120,7 @@ function cell(text: string, width: number): string {
 	return `${clipped}${" ".repeat(Math.max(0, safe - visibleWidth(clipped)))}`;
 }
 
-export function joinColumns(left: string, right: string, width: number): string {
+function joinColumns(left: string, right: string, width: number): string {
 	const safe = Math.max(0, Math.floor(width));
 	if (safe === 0) return "";
 	if (visibleWidth(right) === 0) return cell(left, safe);
@@ -177,7 +177,7 @@ function gitValue(theme: ClioTheme, branch: string | null, dirty: boolean | null
 }
 
 /** `github.com/owner/repo` → `owner/repo`; otherwise the host or the raw value, trimmed. */
-export function collapseRemote(remote: string | null): string | null {
+function collapseRemote(remote: string | null): string | null {
 	if (!remote) return null;
 	const cleaned = remote
 		.replace(/^git@/, "")
@@ -665,7 +665,7 @@ export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
 	return parts.join(theme.fg("dim", " · "));
 }
 
-export function workerLine(theme: ClioTheme, row: DispatchBoardRow): string {
+function workerLine(theme: ClioTheme, row: DispatchBoardRow): string {
 	const presentation = dispatchStatusPresentation(row.status, { compact: true });
 	const glyph = theme.fg(presentation.token, presentation.glyph);
 	return `${glyph} ${theme.fg("muted", agentDisplayLabel(row))} ${theme.fg("dim", `${presentation.label} ${formatCompactMs(row.elapsedMs)}`)}`;

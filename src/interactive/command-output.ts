@@ -44,11 +44,7 @@ export interface CommandOutputSink {
 
 export type CommandOutputWrap = (line: string, width: number) => string[];
 
-export function appendCommandOutput(
-	text: string,
-	sink: CommandOutputSink,
-	wrap: CommandOutputWrap = wrapTextWithAnsi,
-): void {
+function appendCommandOutput(text: string, sink: CommandOutputSink, wrap: CommandOutputWrap = wrapTextWithAnsi): void {
 	const normalized = text.replace(/\r/g, "").replace(/\n$/u, "");
 	if (normalized.length === 0) return;
 	sink.appendReplayBlock((width) => {
