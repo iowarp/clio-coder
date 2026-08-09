@@ -1,6 +1,4 @@
-import type { ClioSettings } from "../core/config.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
-import type { ThinkingLevel } from "../domains/providers/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract } from "../domains/session/index.js";
@@ -15,6 +13,7 @@ import { openMemoryOverlay } from "./memory-overlay.js";
 import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { createOverlayModelSelectors } from "./overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle, type OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
@@ -23,19 +22,9 @@ import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openExtensionsOverlay } from "./overlays/extensions.js";
 import { openHelpOverlay } from "./overlays/help-reference.js";
 import { openMessagePickerOverlay } from "./overlays/message-picker.js";
-import { openModelOverlay } from "./overlays/model-selector.js";
 import { openPromptsOverlay } from "./overlays/prompts.js";
-import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
 import { openSessionOverlay } from "./overlays/session-selector.js";
-import { openSettingsOverlay } from "./overlays/settings.js";
 import { openSkillsHub } from "./overlays/skills-hub.js";
-import {
-	openThinkingOverlay,
-	readThinkingLevel,
-	resolveAvailableThinkingLevels,
-	resolveThinkingCapability,
-	resolveThinkingLabeler,
-} from "./overlays/thinking-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { createPermissionOverlayBody, PERMISSION_OVERLAY_WIDTH, permissionOverlayTitle } from "./permission-overlay.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
@@ -102,6 +91,10 @@ export interface OverlayLifecycleRuntimeDeps {
 	openAuthDialog?: typeof import("./overlays/auth-dialog.js").openAuthDialog;
 	openProvidersOverlay?: typeof openProvidersOverlay;
 	openAskUserOverlay?: typeof import("./overlays/ask-user.js").openAskUserOverlay;
+	openThinkingOverlay?: typeof import("./overlays/thinking-selector.js").openThinkingOverlay;
+	openModelOverlay?: typeof import("./overlays/model-selector.js").openModelOverlay;
+	openScopedOverlay?: typeof import("./overlays/scoped-models.js").openScopedOverlay;
+	openSettingsOverlay?: typeof import("./overlays/settings.js").openSettingsOverlay;
 }
 
 export interface OverlayLifecycleController {
@@ -178,8 +171,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openAuthDialog: openAuthDialogFactory,
 		openProvidersOverlay: openProvidersOverlayFactory = openProvidersOverlay,
 		openAskUserOverlay: openAskUserOverlayFactory,
+		openThinkingOverlay: openThinkingOverlayFactory,
+		openModelOverlay: openModelOverlayFactory,
+		openScopedOverlay: openScopedOverlayFactory,
+		openSettingsOverlay: openSettingsOverlayFactory,
 	} = deps;
-	let settingsOverlayRefresh: (() => void) | null = null;
 	let overlayPermission: OverlayPermissionLifecycle | null = null;
 	let overlayAskUser: OverlayAskUserLifecycle | null = null;
 	const overlayTransitions = createOverlayTransitions({
@@ -252,6 +248,26 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		requestRender: () => tui.requestRender(),
 		...(deps.app.registerAskUserHandler ? { registerHandler: deps.app.registerAskUserHandler } : {}),
 		...(openAskUserOverlayFactory ? { openAskUserOverlay: openAskUserOverlayFactory } : {}),
+	});
+
+	const overlayModelSelectors = createOverlayModelSelectors({
+		tui,
+		transitions: overlayTransitions,
+		providers: deps.app.providers,
+		bus: deps.app.bus,
+		refreshFooter: () => footer.refresh(),
+		notify,
+		closeOverlay,
+		...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
+		...(deps.app.writeSettings ? { writeSettings: deps.app.writeSettings } : {}),
+		...(deps.app.commitSetting ? { commitSetting: deps.app.commitSetting } : {}),
+		...(deps.app.onSelectModel ? { onSelectModel: deps.app.onSelectModel } : {}),
+		...(deps.app.onSetScope ? { onSetScope: deps.app.onSetScope } : {}),
+		...(deps.app.onSetThinkingLevel ? { onSetThinkingLevel: deps.app.onSetThinkingLevel } : {}),
+		...(openThinkingOverlayFactory ? { openThinkingOverlay: openThinkingOverlayFactory } : {}),
+		...(openModelOverlayFactory ? { openModelOverlay: openModelOverlayFactory } : {}),
+		...(openScopedOverlayFactory ? { openScopedOverlay: openScopedOverlayFactory } : {}),
+		...(openSettingsOverlayFactory ? { openSettingsOverlay: openSettingsOverlayFactory } : {}),
 	});
 
 	const openProvidersOverlayState = (): void => {
@@ -392,122 +408,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			notice: (level, text, key) => notify(level, text, key),
 			onClose: () => closeOverlay(),
 		});
-		tui.requestRender();
-	};
-
-	const openThinkingOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "thinking";
-		const settings = deps.app.getSettings?.();
-		const current = settings
-			? (resolveThinkingCapability(deps.app.providers, settings)?.effectiveLevel ?? readThinkingLevel(settings))
-			: "off";
-		const available = settings
-			? resolveAvailableThinkingLevels(deps.app.providers, settings)
-			: (["off"] as ThinkingLevel[]);
-		const thinkingOverlayDeps: Parameters<typeof openThinkingOverlay>[1] = {
-			current,
-			available,
-			onSelect: (next) => {
-				deps.app.onSetThinkingLevel?.(next);
-				footer.refresh();
-			},
-			onClose: () => closeOverlay(),
-			...(settings ? { labelFor: resolveThinkingLabeler(deps.app.providers, settings) } : {}),
-		};
-		overlayTransitions.handle = openThinkingOverlay(tui, thinkingOverlayDeps);
-		tui.requestRender();
-	};
-
-	const openModelOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		const settings = deps.app.getSettings?.();
-		if (!settings) return;
-		overlayTransitions.state = "model";
-		overlayTransitions.handle = openModelOverlay(tui, {
-			settings,
-			...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
-			providers: deps.app.providers,
-			bus: deps.app.bus,
-			onSelect: (ref) => {
-				deps.app.onSelectModel?.(ref);
-				footer.refresh();
-			},
-			onToggleFavorite: (ref, favorite) => {
-				if (!deps.app.getSettings || !deps.app.writeSettings) return;
-				const next = structuredClone(deps.app.getSettings()) as ClioSettings;
-				const value = `${ref.target}/${ref.model}`;
-				const current = new Set(next.modelSelector?.favorites ?? []);
-				if (favorite) current.add(value);
-				else current.delete(value);
-				next.modelSelector = {
-					...(next.modelSelector ?? { recentLimit: 12, favorites: [] }),
-					favorites: [...current],
-				};
-				deps.app.writeSettings(next);
-				footer.refresh();
-			},
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
-	const openScopedModelsOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		const settings = deps.app.getSettings?.();
-		if (!settings) return;
-		overlayTransitions.state = "scoped-models";
-		overlayTransitions.handle = openScopedOverlay(tui, {
-			providers: deps.app.providers,
-			currentScope: extractScopeFromSettings(settings),
-			onCommit: (next) => {
-				deps.app.onSetScope?.(next);
-				footer.refresh();
-			},
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
-	const openSettingsOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		if (!deps.app.getSettings || !deps.app.writeSettings) return;
-		overlayTransitions.state = "settings";
-		const getSettings = deps.app.getSettings;
-		const writeSettingsOut = deps.app.writeSettings;
-		const commitSettingOut = deps.app.commitSetting;
-		const handle = openSettingsOverlay(tui, {
-			getSettings,
-			providers: deps.app.providers,
-			writeSettings: (next) => {
-				writeSettingsOut(next);
-				footer.refresh();
-			},
-			...(commitSettingOut
-				? {
-						commitSetting: (id, next, scope) => {
-							commitSettingOut(id, next, scope);
-							footer.refresh();
-						},
-					}
-				: {}),
-			notice: notify,
-			onClose: () => {
-				settingsOverlayRefresh = null;
-				closeOverlay();
-			},
-		});
-		overlayTransitions.handle = handle;
-		settingsOverlayRefresh = handle.refreshRows;
-		void (async () => {
-			try {
-				await deps.app.providers.probeAllLive();
-				if (overlayTransitions.state === "settings") settingsOverlayRefresh?.();
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				notify("warning", `settings model refresh failed: ${msg}`, "settings:model-refresh");
-			}
-		})();
 		tui.requestRender();
 	};
 
@@ -788,7 +688,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		closeAskUserSession: overlayAskUser.close,
 		isAskUserWaiting: overlayAskUser.isWaiting,
 		resetAskUserCancellation: overlayAskUser.resetCancellation,
-		refreshSettingsOverlay: () => settingsOverlayRefresh?.(),
+		refreshSettingsOverlay: overlayModelSelectors.refreshSettingsOverlay,
 		openProvidersOverlayState,
 		openCostOverlayState,
 		openContextViewOverlayState,
@@ -798,10 +698,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openMemoryOverlayState,
 		openFleetOverlayState,
 		openViewOverlayState,
-		openThinkingOverlayState,
-		openModelOverlayState,
-		openScopedModelsOverlayState,
-		openSettingsOverlayState,
+		openThinkingOverlayState: overlayModelSelectors.openThinkingOverlayState,
+		openModelOverlayState: overlayModelSelectors.openModelOverlayState,
+		openScopedModelsOverlayState: overlayModelSelectors.openScopedModelsOverlayState,
+		openSettingsOverlayState: overlayModelSelectors.openSettingsOverlayState,
 		openResumeOverlayState,
 		openTreeOverlayState,
 		openMessagePickerOverlayState,
