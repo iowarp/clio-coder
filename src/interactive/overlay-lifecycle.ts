@@ -1,9 +1,5 @@
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
-import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
-import type { SessionContract } from "../domains/session/index.js";
-import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "./chat-renderer.js";
-import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
 import { openContextOverlay } from "./context-overlay.js";
 import { openCostOverlay } from "./cost-overlay.js";
@@ -15,17 +11,14 @@ import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { createOverlayModelSelectors } from "./overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle, type OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
+import { createOverlaySessionLifecycle } from "./overlay-session-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
 import { contextResetOptions, openContextResetOverlay } from "./overlays/context-reset.js";
-import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openExtensionsOverlay } from "./overlays/extensions.js";
 import { openHelpOverlay } from "./overlays/help-reference.js";
-import { openMessagePickerOverlay } from "./overlays/message-picker.js";
 import { openPromptsOverlay } from "./overlays/prompts.js";
-import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openSkillsHub } from "./overlays/skills-hub.js";
-import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { createPermissionOverlayBody, PERMISSION_OVERLAY_WIDTH, permissionOverlayTitle } from "./permission-overlay.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
@@ -95,6 +88,10 @@ export interface OverlayLifecycleRuntimeDeps {
 	openModelOverlay?: typeof import("./overlays/model-selector.js").openModelOverlay;
 	openScopedOverlay?: typeof import("./overlays/scoped-models.js").openScopedOverlay;
 	openSettingsOverlay?: typeof import("./overlays/settings.js").openSettingsOverlay;
+	openSessionOverlay?: typeof import("./overlays/session-selector.js").openSessionOverlay;
+	openTreeOverlay?: typeof import("./overlays/tree-selector.js").openTreeOverlay;
+	openMessagePickerOverlay?: typeof import("./overlays/message-picker.js").openMessagePickerOverlay;
+	openCwdFallbackOverlay?: typeof import("./overlays/cwd-fallback.js").openCwdFallbackOverlay;
 }
 
 export interface OverlayLifecycleController {
@@ -133,24 +130,6 @@ export interface OverlayLifecycleController {
 	dispose(): void;
 }
 
-function handleCwdFallbackCancel(
-	preResumeSessionId: string | null,
-	deps: { session: SessionContract; openResumeOverlay: () => void; onWarning: (msg: string) => void },
-): void {
-	const currentId = deps.session.current()?.id ?? null;
-	if (preResumeSessionId && preResumeSessionId !== currentId) {
-		try {
-			deps.session.switchBranch(preResumeSessionId);
-		} catch (err) {
-			deps.onWarning(
-				`[cwd-fallback] could not restore prior session: ${err instanceof Error ? err.message : String(err)}\n`,
-			);
-		}
-		return;
-	}
-	deps.openResumeOverlay();
-}
-
 export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): OverlayLifecycleController {
 	const {
 		tui,
@@ -175,6 +154,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openModelOverlay: openModelOverlayFactory,
 		openScopedOverlay: openScopedOverlayFactory,
 		openSettingsOverlay: openSettingsOverlayFactory,
+		openSessionOverlay: openSessionOverlayFactory,
+		openTreeOverlay: openTreeOverlayFactory,
+		openMessagePickerOverlay: openMessagePickerOverlayFactory,
+		openCwdFallbackOverlay: openCwdFallbackOverlayFactory,
 	} = deps;
 	let overlayPermission: OverlayPermissionLifecycle | null = null;
 	let overlayAskUser: OverlayAskUserLifecycle | null = null;
@@ -268,6 +251,27 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openModelOverlayFactory ? { openModelOverlay: openModelOverlayFactory } : {}),
 		...(openScopedOverlayFactory ? { openScopedOverlay: openScopedOverlayFactory } : {}),
 		...(openSettingsOverlayFactory ? { openSettingsOverlay: openSettingsOverlayFactory } : {}),
+	});
+
+	const overlaySessions = createOverlaySessionLifecycle({
+		tui,
+		transitions: overlayTransitions,
+		...(deps.app.session ? { session: deps.app.session } : {}),
+		chat: deps.app.chat,
+		chatPanel,
+		readStructuredEntries,
+		getSlashNotice: () => deps.getSlashContext().notice,
+		...(deps.app.onResumeSession ? { onResumeSession: deps.app.onResumeSession } : {}),
+		...(deps.app.onForkSession ? { onForkSession: deps.app.onForkSession } : {}),
+		announceTaskMemorySeedOffer,
+		refreshFooter: () => footer.refresh(),
+		requestRender: () => tui.requestRender(),
+		stderr: (text) => io.stderr(text),
+		notify,
+		...(openSessionOverlayFactory ? { openSessionOverlay: openSessionOverlayFactory } : {}),
+		...(openTreeOverlayFactory ? { openTreeOverlay: openTreeOverlayFactory } : {}),
+		...(openMessagePickerOverlayFactory ? { openMessagePickerOverlay: openMessagePickerOverlayFactory } : {}),
+		...(openCwdFallbackOverlayFactory ? { openCwdFallbackOverlay: openCwdFallbackOverlayFactory } : {}),
 	});
 
 	const openProvidersOverlayState = (): void => {
@@ -411,195 +415,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		tui.requestRender();
 	};
 
-	const openResumeOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		if (!deps.app.session) {
-			emitCommandNotice(deps.getSlashContext().notice, "error", "resume", "session contract unavailable");
-			return;
-		}
-		const sessionContract = deps.app.session;
-		const preResumeSessionId = sessionContract.current()?.id ?? null;
-		overlayTransitions.state = "resume";
-		overlayTransitions.handle = openSessionOverlay(tui, {
-			session: sessionContract,
-			onResume: (sessionId) => {
-				deps.app.onResumeSession?.(sessionId);
-				// Replay the resumed session's on-disk turns into the chat
-				// panel so the user sees their prior transcript, and reset
-				// chat-loop's lastTurnId + agent.state.messages so the next
-				// submit parents onto the resumed leaf rather than inheriting
-				// whatever state the previous session left behind. Row 51
-				// regression fix.
-				try {
-					const turns = readStructuredEntries(sessionId);
-					chatPanel.reset();
-					rehydrateChatPanelFromTurns(chatPanel, turns);
-					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
-					const leafTurnId = sessionContract.tree(sessionId).leafId;
-					deps.app.chat.resetForSession(leafTurnId, replayMessages);
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
-					io.stderr(`[/resume] transcript replay failed: ${msg}\n`);
-				}
-				if (sessionContract.current()?.id === sessionId && sessionId !== preResumeSessionId) {
-					announceTaskMemorySeedOffer();
-				}
-				footer.refresh();
-				tui.requestRender();
-			},
-			onClose: () => {
-				closeOverlay();
-				// Post-close cwd check: if /resume landed on a session whose
-				// recorded cwd is no longer valid, pop the cwd-fallback
-				// overlay so the user can either continue in the terminal's
-				// cwd or cancel back to the prior session. Queued as a
-				// microtask so the resume overlay state machine fully
-				// settles before the next overlay opens.
-				queueMicrotask(() => {
-					const current = sessionContract.current();
-					if (!current) return;
-					if (current.id === preResumeSessionId) return;
-					const probe = resolveSessionCwd(current);
-					if (probe.ok) return;
-					openCwdFallbackOverlayState({
-						sessionCwd: typeof current.cwd === "string" ? current.cwd : "",
-						reason: probe.reason,
-						preResumeSessionId,
-					});
-				});
-			},
-		});
-		tui.requestRender();
-	};
-
-	const openTreeOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		if (!deps.app.session) {
-			notify("error", "tree unavailable: session contract is not wired", "tree:unavailable");
-			return;
-		}
-		const sessionContract = deps.app.session;
-		overlayTransitions.state = "tree";
-		overlayTransitions.handle = openTreeOverlay(tui, {
-			session: sessionContract,
-			onSwitchTurn: (turnId) => {
-				try {
-					sessionContract.switchTurn(turnId);
-					const sessionId = sessionContract.current()?.id ?? null;
-					if (!sessionId) throw new Error("no current session after turn switch");
-					const turns = readStructuredEntries(sessionId);
-					chatPanel.reset();
-					rehydrateChatPanelFromTurns(chatPanel, turns, { uptoTurnId: turnId });
-					const replayMessages = buildReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
-					deps.app.chat.resetForSession(turnId, replayMessages);
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
-					notify("error", `tree switch failed: ${msg}`, "tree:switch-failed");
-				}
-				footer.refresh();
-			},
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
-	const openMessagePickerOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		if (!deps.app.session) {
-			emitCommandNotice(deps.getSlashContext().notice, "error", "fork", "session contract unavailable");
-			return;
-		}
-		const sessionContract = deps.app.session;
-		// No-op notice when there is no current session so the user can tell
-		// the overlay is intentionally inert rather than broken.
-		if (sessionContract.current() === null) {
-			emitCommandNotice(
-				deps.getSlashContext().notice,
-				"warn",
-				"fork",
-				"no current session to fork from; start one with /new or /resume first",
-			);
-			return;
-		}
-		overlayTransitions.state = "message-picker";
-		overlayTransitions.handle = openMessagePickerOverlay(tui, {
-			session: sessionContract,
-			onFork: (parentTurnId) => {
-				try {
-					if (deps.app.onForkSession) {
-						deps.app.onForkSession(parentTurnId);
-					} else {
-						sessionContract.fork(parentTurnId);
-					}
-					chatPanel.reset();
-					const forkedSessionId = sessionContract.current()?.id ?? null;
-					if (forkedSessionId) {
-						try {
-							const forkedTurns = readStructuredEntries(forkedSessionId);
-							rehydrateChatPanelFromTurns(chatPanel, forkedTurns);
-							const replayMessages = buildReplayAgentMessagesFromTurns(forkedTurns);
-							const leafTurnId = sessionContract.tree(forkedSessionId).leafId ?? parentTurnId;
-							deps.app.chat.resetForSession(leafTurnId, replayMessages);
-						} catch (err) {
-							const msg = err instanceof Error ? err.message : String(err);
-							io.stderr(`[/fork] transcript replay failed: ${msg}\n`);
-							deps.app.chat.resetForSession(null);
-						}
-					}
-					if (!forkedSessionId) deps.app.chat.resetForSession(null);
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
-					io.stderr(`[/fork] fork failed: ${msg}\n`);
-				}
-				footer.refresh();
-				tui.requestRender();
-			},
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
-
-	/**
-	 * Pop the cwd-fallback overlay after /resume landed on a session whose
-	 * recorded cwd no longer exists on disk (see src/domains/session/
-	 * cwd-fallback.ts for the reasons). Continue silently accepts the
-	 * broken-cwd session. Downstream file ops will surface real errors.
-	 * Cancel restores the prior session when one existed, or re-opens the
-	 * /resume picker so the user can select a different session.
-	 */
-	const openCwdFallbackOverlayState = (args: {
-		sessionCwd: string;
-		reason: "no-cwd" | "missing" | "not-a-directory";
-		preResumeSessionId: string | null;
-	}): void => {
-		if (overlayTransitions.state !== "closed") return;
-		if (!deps.app.session) return;
-		const sessionContract = deps.app.session;
-		overlayTransitions.state = "cwd-fallback";
-		overlayTransitions.handle = openCwdFallbackOverlay(tui, {
-			sessionCwd: args.sessionCwd,
-			currentCwd: process.cwd(),
-			reason: args.reason,
-			onContinue: () => {
-				// Accept the broken-cwd session. First fs access will surface a
-				// real error; no extra bookkeeping here. The user chose this
-				// explicitly, so leave meta.cwd untouched.
-				footer.refresh();
-			},
-			onCancel: () => {
-				handleCwdFallbackCancel(args.preResumeSessionId, {
-					session: sessionContract,
-					// queueMicrotask defers past the current overlay's close so the
-					// resume overlay opens cleanly on a quiesced overlay stack.
-					openResumeOverlay: () => queueMicrotask(() => openResumeOverlayState()),
-					onWarning: (msg) => io.stderr(msg),
-				});
-				footer.refresh();
-			},
-			onClose: () => closeOverlay(),
-		});
-		tui.requestRender();
-	};
+	const openResumeOverlayState = overlaySessions.openResume;
+	const openTreeOverlayState = overlaySessions.openTree;
+	const openMessagePickerOverlayState = overlaySessions.openMessagePicker;
 
 	const openHelpOverlayState = (query?: string): void => {
 		if (overlayTransitions.state !== "closed") return;
