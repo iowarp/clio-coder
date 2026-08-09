@@ -21,7 +21,7 @@ export interface LoopGuardStoppableChat {
 	cancel(options?: ChatCancelOptions): void;
 }
 
-export function isLoopBlockedInterrupt(payload: unknown): payload is LoopBlockedPayload {
+function isLoopBlockedInterrupt(payload: unknown): payload is LoopBlockedPayload {
 	const evt = payload as LoopBlockedPayload | null | undefined;
 	return (
 		!!evt &&
@@ -32,7 +32,7 @@ export function isLoopBlockedInterrupt(payload: unknown): payload is LoopBlocked
 	);
 }
 
-export function isToolBudgetInterrupt(payload: unknown): payload is ToolBudgetExceededPayload {
+function isToolBudgetInterrupt(payload: unknown): payload is ToolBudgetExceededPayload {
 	const evt = payload as ToolBudgetExceededPayload | null | undefined;
 	return (
 		!!evt &&

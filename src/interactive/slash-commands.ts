@@ -172,7 +172,7 @@ export async function handleRun(
 	}
 }
 
-export async function handleDelegate(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
+async function handleDelegate(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
 	const { dispatch, notice, bus } = deps;
 	const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
 	try {

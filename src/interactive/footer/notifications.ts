@@ -52,14 +52,14 @@ export const DEFAULT_INFO_TTL_MS = 12_000;
 
 const SEVERITY: Record<NotificationLevel, number> = { error: 4, warning: 3, success: 2, info: 1 };
 
-export function notificationGlyph(level: NotificationLevel): string {
+function notificationGlyph(level: NotificationLevel): string {
 	if (level === "error") return GLYPH.error;
 	if (level === "warning") return GLYPH.warn;
 	if (level === "success") return GLYPH.ok;
 	return GLYPH.info;
 }
 
-export function notificationToken(level: NotificationLevel): ClioToken {
+function notificationToken(level: NotificationLevel): ClioToken {
 	if (level === "error") return "error";
 	if (level === "warning") return "warning";
 	if (level === "success") return "success";

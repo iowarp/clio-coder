@@ -172,7 +172,7 @@ function matchesExactArtifactValue(artifact: ViewArtifact, value: string): boole
 	return exact.length > 0 && artifactSearchValues(artifact).some((candidate) => candidate === exact);
 }
 
-export function formatArtifactSize(sizeBytes: number | undefined): string {
+function formatArtifactSize(sizeBytes: number | undefined): string {
 	if (sizeBytes === undefined) return "";
 	if (sizeBytes < 1024) return `${sizeBytes} B`;
 	if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;

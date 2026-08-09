@@ -76,7 +76,7 @@ export interface MessagePickerRow {
  * row per assistant turn in reverse-chronological order. Exposed for unit
  * tests so the overlay layer stays render-only.
  */
-export function buildMessagePickerRows(turns: ReadonlyArray<MessageEntry>): MessagePickerRow[] {
+function buildMessagePickerRows(turns: ReadonlyArray<MessageEntry>): MessagePickerRow[] {
 	const assistantTurns = turns.filter((entry) => entry.role === "assistant");
 	const rows: MessagePickerRow[] = [];
 	for (let i = assistantTurns.length - 1; i >= 0; i--) {

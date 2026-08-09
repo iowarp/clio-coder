@@ -60,7 +60,7 @@ export interface ClioTheme {
 	fgSequence(token: ClioToken): string;
 }
 
-export function detectTruecolor(env: NodeJS.ProcessEnv = process.env): boolean {
+function detectTruecolor(env: NodeJS.ProcessEnv = process.env): boolean {
 	const colorTerm = (env.COLORTERM ?? "").toLowerCase();
 	if (colorTerm.includes("truecolor") || colorTerm.includes("24bit")) return true;
 	const term = (env.TERM ?? "").toLowerCase();

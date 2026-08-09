@@ -32,7 +32,7 @@ function legendRow(group: ContextLedgerGroup, contentWidth: number): string {
 	return `${swatch} ${theme.fg(labelToken, labelText)} ${theme.fg("muted", right)}`;
 }
 
-export function renderContextLedgerLines(ledger: ContextLedger, contentWidth: number): string[] {
+function renderContextLedgerLines(ledger: ContextLedger, contentWidth: number): string[] {
 	const theme = clioTheme();
 	const lines: string[] = [];
 
