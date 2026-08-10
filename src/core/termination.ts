@@ -66,6 +66,7 @@ class TerminationCoordinator {
 	private readonly persistHooks: Hook[] = [];
 	private exitCode = 0;
 	private started = false;
+	private signalHandler: ((signal: NodeJS.Signals) => void) | null = null;
 
 	getPhase(): TerminationPhase {
 		return this.phase;
@@ -148,12 +149,35 @@ class TerminationCoordinator {
 	}
 
 	installSignalHandlers(): void {
+		if (this.signalHandler) return;
 		const handler = (signal: NodeJS.Signals): void => {
 			process.stderr.write(`\nClio Coder: received ${signal}, shutting down...\n`);
 			void this.shutdown(signal === "SIGINT" ? 130 : 143);
 		};
+		this.signalHandler = handler;
 		process.once("SIGINT", handler);
 		process.once("SIGTERM", handler);
+	}
+
+	/**
+	 * Hand SIGINT to a foreground owner and return the call that takes it back.
+	 *
+	 * Boot arms this coordinator before any interactive surface exists, and Node
+	 * runs signal listeners in registration order, so a TUI that merely added its
+	 * own listener would lose every first press to a shutdown already underway.
+	 * One owner holds the interrupt at a time and the transfer is explicit.
+	 * SIGTERM is not part of the handover; it is never an interactive gesture.
+	 */
+	releaseInterruptOwnership(): () => void {
+		const handler = this.signalHandler;
+		if (!handler) return () => {};
+		process.off("SIGINT", handler);
+		let restored = false;
+		return () => {
+			if (restored) return;
+			restored = true;
+			process.once("SIGINT", handler);
+		};
 	}
 }
 

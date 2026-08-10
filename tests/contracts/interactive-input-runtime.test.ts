@@ -80,7 +80,7 @@ it("constructs the input runtime without a terminal and wires controller-owned a
 			inputListener = listener;
 		},
 		clock: { now: () => 1_000 },
-		signals: { on: () => {}, off: () => {} },
+		signals: { takeInterruptOwnership: () => () => {}, on: () => {}, off: () => {} },
 		intervals: { setInterval: () => ({}), clearInterval: () => {} },
 	});
 

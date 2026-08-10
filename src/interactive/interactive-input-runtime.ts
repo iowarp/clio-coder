@@ -1,3 +1,4 @@
+import { getTerminationCoordinator } from "../core/termination.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import { isKeyRelease } from "../engine/tui.js";
 import {
@@ -162,6 +163,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 	controller = createApplicationController({
 		clock: deps.clock ?? { now: Date.now },
 		signals: deps.signals ?? {
+			takeInterruptOwnership: () => getTerminationCoordinator().releaseInterruptOwnership(),
 			on: (signal, listener) => void process.on(signal, listener),
 			off: (signal, listener) => void process.off(signal, listener),
 		},

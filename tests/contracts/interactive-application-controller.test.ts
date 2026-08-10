@@ -52,6 +52,10 @@ function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harn
 	const deps: ApplicationControllerDeps = {
 		clock: { now: () => now },
 		signals: {
+			takeInterruptOwnership: () => {
+				events.push("signal:take");
+				return () => events.push("signal:restore");
+			},
 			on: (_signal, listener) => {
 				events.push("signal:on");
 				sigintListener = listener;
@@ -268,6 +272,7 @@ describe("contracts/interactive application controller", () => {
 		await controller.run;
 		deepStrictEqual(harness.events, [
 			"signal:off",
+			"signal:restore",
 			"interval:clear:keepalive",
 			"ui:stop",
 			"parked:Clio Coder shutting down",
@@ -289,6 +294,7 @@ describe("contracts/interactive application controller", () => {
 		strictEqual(await controller.run, 0);
 		deepStrictEqual(harness.events, [
 			"signal:off",
+			"signal:restore",
 			"interval:clear:keepalive",
 			"interval:clear:owned",
 			"interval:clear:owned",
@@ -351,6 +357,54 @@ describe("contracts/interactive application controller", () => {
 		deepStrictEqual(harness.events.slice(-3), ["ui:stop", "parked:Clio Coder shutting down", "app:shutdown"]);
 	});
 
+	it("takes SIGINT from the shutdown that boot already armed", async () => {
+		// Boot installs the core termination handler before an interactive surface
+		// exists, and Node runs signal listeners in registration order. A
+		// controller that only appends its own handler always loses the first
+		// press to the shutdown that was armed first, so the contract where the
+		// first press cancels and the second exits can never run.
+		const listeners: Array<() => void> = [];
+		const journal: string[] = [];
+		const coreTermination = (): void => {
+			journal.push("core:shutdown");
+		};
+		listeners.push(coreTermination);
+		const deliver = (): void => {
+			for (const listener of [...listeners]) listener();
+		};
+		const harness = createHarness({
+			signals: {
+				takeInterruptOwnership: () => {
+					const index = listeners.indexOf(coreTermination);
+					if (index >= 0) listeners.splice(index, 1);
+					return () => void listeners.push(coreTermination);
+				},
+				on: (_signal, listener) => void listeners.push(listener),
+				off: (_signal, listener) => {
+					const index = listeners.indexOf(listener);
+					if (index >= 0) listeners.splice(index, 1);
+				},
+			},
+		});
+		const controller = createApplicationController(harness.deps);
+		harness.events.length = 0;
+
+		deliver();
+		deepStrictEqual(journal, []);
+		deepStrictEqual(harness.events, []);
+
+		deliver();
+		strictEqual(await controller.run, 0);
+		deepStrictEqual(journal, []);
+		strictEqual(harness.events.at(-1), "app:shutdown");
+
+		// Ownership goes back when the controller is done with it, so an interrupt
+		// during a slow teardown still reaches a handler that exits the process.
+		deepStrictEqual(listeners, [coreTermination]);
+		deliver();
+		deepStrictEqual(journal, ["core:shutdown"]);
+	});
+
 	it("leaves a SIGINT listener it did not install in place", async () => {
 		// The production coordinator binds to process.removeAllListeners, so a
 		// controller that clears the signal wholesale silently disarms an
@@ -362,6 +416,7 @@ describe("contracts/interactive application controller", () => {
 		});
 		const harness = createHarness({
 			signals: {
+				takeInterruptOwnership: () => () => {},
 				on: (_signal, listener) => void listeners.add(listener),
 				off: (_signal, listener) => void listeners.delete(listener),
 			},
