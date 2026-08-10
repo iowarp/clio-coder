@@ -401,6 +401,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			footerToolErrors = 0;
 			footerToolTruncatedResults = 0;
 			lastTurnSummary = null;
+			statusController.reset();
 		},
 		stopTickers,
 		disposeBeforeStatus,
