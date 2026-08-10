@@ -126,21 +126,39 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 
 	const isDoubleTap = (lastAt: number, now: number): boolean => lastAt > 0 && now - lastAt <= APPLICATION_DOUBLE_TAP_MS;
 
+	/**
+	 * Release one process-level resource. A step that throws has left a resource
+	 * either already released or beyond this boundary's reach; either way the
+	 * remaining steps still have to run. The terminal is the common case, since
+	 * it can close before shutdown begins and stopping it twice is harmless.
+	 */
+	const release = (step: () => void): void => {
+		try {
+			step();
+		} catch {
+			// Intentionally ignored; see above.
+		}
+	};
+
 	const shutdown = async (): Promise<void> => {
 		if (shuttingDown) return;
 		shuttingDown = true;
-		deps.signals.off("SIGINT", handleCtrlC);
-		deps.intervals.clearInterval(keepAlive);
-		for (const interval of deps.intervalsToClear) deps.intervals.clearInterval(interval);
-		for (const dispose of deps.shutdownDisposers) dispose();
+		// The signal path calls this without awaiting it, so a failing step must
+		// not escape as an unhandled rejection, and `run` has to settle either
+		// way or the process hangs with nothing left to resolve it.
 		try {
-			deps.stopUi();
+			release(() => deps.signals.off("SIGINT", handleCtrlC));
+			release(() => deps.intervals.clearInterval(keepAlive));
+			for (const interval of deps.intervalsToClear) release(() => deps.intervals.clearInterval(interval));
+			for (const dispose of deps.shutdownDisposers) release(dispose);
+			release(() => deps.stopUi());
+			release(() => deps.cancelParkedCalls("Clio Coder shutting down"));
+			await deps.onShutdown();
 		} catch {
-			// The terminal can close before shutdown begins; stopping it twice is harmless.
+			// Same rule as the synchronous steps.
+		} finally {
+			resolveRun(0);
 		}
-		deps.cancelParkedCalls("Clio Coder shutting down");
-		await deps.onShutdown();
-		resolveRun(0);
 	};
 
 	const handleCtrlC = (): void => {
