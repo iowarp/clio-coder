@@ -52,7 +52,6 @@ function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harn
 	const deps: ApplicationControllerDeps = {
 		clock: { now: () => now },
 		signals: {
-			removeAllListeners: () => events.push("signal:remove-all"),
 			on: (_signal, listener) => {
 				events.push("signal:on");
 				sigintListener = listener;
@@ -312,5 +311,29 @@ describe("contracts/interactive application controller", () => {
 
 		strictEqual(await controller.run, 0);
 		strictEqual(harness.events.at(-1), "app:shutdown");
+	});
+
+	it("leaves a SIGINT listener it did not install in place", async () => {
+		// The production coordinator binds to process.removeAllListeners, so a
+		// controller that clears the signal wholesale silently disarms an
+		// embedder's own interrupt handling.
+		const listeners = new Set<() => void>();
+		let foreignRan = 0;
+		listeners.add(() => {
+			foreignRan += 1;
+		});
+		const harness = createHarness({
+			signals: {
+				on: (_signal, listener) => void listeners.add(listener),
+				off: (_signal, listener) => void listeners.delete(listener),
+			},
+		});
+		const controller = createApplicationController(harness.deps);
+
+		for (const listener of [...listeners]) listener();
+		strictEqual(foreignRan, 1);
+
+		await controller.shutdown();
+		strictEqual(await controller.run, 0);
 	});
 });

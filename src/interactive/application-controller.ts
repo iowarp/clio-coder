@@ -53,7 +53,6 @@ export interface ApplicationClock {
 }
 
 export interface ApplicationSignalCoordinator {
-	removeAllListeners(signal: "SIGINT"): void;
 	on(signal: "SIGINT", listener: () => void): void;
 	off(signal: "SIGINT", listener: () => void): void;
 }
@@ -237,7 +236,9 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		return undefined;
 	};
 
-	deps.signals.removeAllListeners("SIGINT");
+	// Only this controller's own listener is installed and, in shutdown, removed.
+	// Clearing the signal wholesale would disarm handlers this process did not
+	// install, including an embedder's.
 	deps.signals.on("SIGINT", handleCtrlC);
 
 	return {
