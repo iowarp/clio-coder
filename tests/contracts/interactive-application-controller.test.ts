@@ -313,6 +313,44 @@ describe("contracts/interactive application controller", () => {
 		strictEqual(harness.events.at(-1), "app:shutdown");
 	});
 
+	it("settles the run when the application's own shutdown rejects", async () => {
+		// handleCtrlC calls shutdown fire-and-forget, so a rejecting step must
+		// neither hang the run promise nor escape as an unhandled rejection.
+		const harness = createHarness({
+			onShutdown: async () => {
+				throw new Error("shutdown boom");
+			},
+		});
+		const controller = createApplicationController(harness.deps);
+
+		await controller.shutdown();
+		const settled = await Promise.race([
+			controller.run,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250).unref()),
+		]);
+		strictEqual(settled, 0);
+	});
+
+	it("finishes the ordered release when a shutdown disposer throws", async () => {
+		const harness = createHarness({
+			shutdownDisposers: [
+				() => {
+					throw new Error("disposer boom");
+				},
+			],
+		});
+		const controller = createApplicationController(harness.deps);
+		harness.events.length = 0;
+
+		await controller.shutdown();
+		const settled = await Promise.race([
+			controller.run,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250).unref()),
+		]);
+		strictEqual(settled, 0);
+		deepStrictEqual(harness.events.slice(-3), ["ui:stop", "parked:Clio Coder shutting down", "app:shutdown"]);
+	});
+
 	it("leaves a SIGINT listener it did not install in place", async () => {
 		// The production coordinator binds to process.removeAllListeners, so a
 		// controller that clears the signal wholesale silently disarms an
