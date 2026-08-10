@@ -53,6 +53,11 @@ export interface ApplicationClock {
 }
 
 export interface ApplicationSignalCoordinator {
+	/**
+	 * Take SIGINT from whatever armed it before this controller existed and
+	 * return the call that gives it back.
+	 */
+	takeInterruptOwnership(): () => void;
 	on(signal: "SIGINT", listener: () => void): void;
 	off(signal: "SIGINT", listener: () => void): void;
 }
@@ -148,6 +153,9 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		// way or the process hangs with nothing left to resolve it.
 		try {
 			release(() => deps.signals.off("SIGINT", handleCtrlC));
+			// Ownership goes back before teardown runs, so an interrupt during a
+			// slow release still reaches a handler that exits the process.
+			release(() => restoreInterruptOwner());
 			release(() => deps.intervals.clearInterval(keepAlive));
 			for (const interval of deps.intervalsToClear) release(() => deps.intervals.clearInterval(interval));
 			for (const dispose of deps.shutdownDisposers) release(dispose);
@@ -254,9 +262,12 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		return undefined;
 	};
 
-	// Only this controller's own listener is installed and, in shutdown, removed.
-	// Clearing the signal wholesale would disarm handlers this process did not
-	// install, including an embedder's.
+	// One owner holds SIGINT at a time. Boot arms process termination first and
+	// Node runs listeners in registration order, so this controller only sees the
+	// first press if the previous owner hands it over. Everything else on the
+	// signal stays put: clearing it wholesale would disarm handlers this process
+	// never installed, including an embedder's.
+	const restoreInterruptOwner = deps.signals.takeInterruptOwnership();
 	deps.signals.on("SIGINT", handleCtrlC);
 
 	return {
