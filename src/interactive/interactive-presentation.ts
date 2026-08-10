@@ -109,7 +109,8 @@ export interface InteractivePresentation {
 	recordToolStart(toolCallId: string, toolName: string): void;
 	recordToolEnd(result: PresentationToolEnd): void;
 	setLastTurnSummary(summary: TurnSummary | null): void;
-	resetToolTelemetry(): void;
+	/** Drop every piece of presentation state that belonged to the old session. */
+	resetForNewSession(): void;
 	stopTickers(): void;
 	disposeBeforeStatus(): void;
 	disposeStatus(): void;
@@ -394,11 +395,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		setLastTurnSummary: (summary) => {
 			lastTurnSummary = summary;
 		},
-		resetToolTelemetry: () => {
+		resetForNewSession: () => {
 			footerToolCounts.clear();
 			footerActiveTools.clear();
 			footerToolErrors = 0;
 			footerToolTruncatedResults = 0;
+			lastTurnSummary = null;
 		},
 		stopTickers,
 		disposeBeforeStatus,

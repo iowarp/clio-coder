@@ -634,7 +634,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		}
 		deps.onNewSession();
 		deps.observability.resetSession();
-		presentation.resetToolTelemetry();
+		presentation.resetForNewSession();
 		chatPanel.reset();
 		deps.chat.resetForSession(null);
 		footer.refresh();

@@ -308,9 +308,12 @@ describe("interactive presentation ownership", () => {
 		const summary = { stopReason: "stop" } as TurnSummary;
 		presentation.setLastTurnSummary(summary);
 		strictEqual(input.getLastTurnSummary?.(), summary);
-		presentation.resetToolTelemetry();
+
+		// A new session starts with no history, so the footer must not still be
+		// reporting the turn the previous session ended on.
+		presentation.resetForNewSession();
 		deepStrictEqual(input.getToolCounts?.(), { tools: {}, errors: 0, active: 0, truncatedResults: 0 });
-		strictEqual(input.getLastTurnSummary?.(), summary);
+		strictEqual(input.getLastTurnSummary?.(), null);
 
 		const next = snapshot("next");
 		test.emitObservability(next);
