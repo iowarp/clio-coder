@@ -162,7 +162,6 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 	controller = createApplicationController({
 		clock: deps.clock ?? { now: Date.now },
 		signals: deps.signals ?? {
-			removeAllListeners: (signal) => void process.removeAllListeners(signal),
 			on: (signal, listener) => void process.on(signal, listener),
 			off: (signal, listener) => void process.off(signal, listener),
 		},
