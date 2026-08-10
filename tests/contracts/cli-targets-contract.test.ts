@@ -1,4 +1,6 @@
 import { match, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
@@ -53,5 +55,45 @@ describe("contracts/cli-targets-contract", () => {
 		const result = await runCli(["targets", "--json", "--target", "local"], { env: scratch.env });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 		match(result.stdout, /"targets"/);
+	});
+
+	// One node orchestrating while another runs the workers is the documented
+	// fleet topology, and `targets use` used to force both onto one target with
+	// no flag able to separate them.
+	it("clio targets use local --fleet-target worker splits orchestrator from workers", async () => {
+		const added = await runCli(
+			[
+				"configure",
+				"--id",
+				"worker",
+				"--runtime",
+				"llamacpp",
+				"--url",
+				"http://127.0.0.1:2",
+				"--model",
+				"worker-model",
+				"--force",
+			],
+			{ env: scratch.env, timeoutMs: 30_000 },
+		);
+		strictEqual(added.code, 0, `configure worker failed: ${added.stderr}`);
+
+		const used = await runCli(["targets", "use", "local", "--fleet-target", "worker"], { env: scratch.env });
+		strictEqual(used.code, 0, `stderr=${used.stderr}`);
+
+		const settings = readFileSync(join(scratch.dir, "config", "settings.yaml"), "utf8");
+		const orchestrator = settings.match(/orchestrator:\n\s+target:\s*(\S+)/)?.[1];
+		const workerTarget = settings.match(/workers:\n\s+default:\n\s+target:\s*(\S+)/)?.[1];
+		const workerModel = settings.match(/workers:\n\s+default:\n\s+target:\s*\S+\n\s+model:\s*(\S+)/)?.[1];
+		strictEqual(orchestrator, "local");
+		strictEqual(workerTarget, "worker");
+		// The orchestrator's model id means nothing on the worker node.
+		strictEqual(workerModel, "worker-model");
+	});
+
+	it("clio targets use local --fleet-target missing rejects the unknown worker target", async () => {
+		const result = await runCli(["targets", "use", "local", "--fleet-target", "missing"], { env: scratch.env });
+		strictEqual(result.code, 2, `stderr=${result.stderr}`);
+		match(result.stderr, /no target with id missing/i);
 	});
 });

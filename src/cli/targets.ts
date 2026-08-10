@@ -27,7 +27,8 @@ List and manage configured model targets.
 Usage:
   clio targets [--json] [--probe] [--target <id>]
   clio targets add [configure flags]
-  clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-model <id>]
+  clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
+                       [--fleet-target <id>] [--fleet-model <id>]
   clio targets fleet [--json]
   clio targets profile list [--json]
   clio targets profile set <name> <id> [--model <id>] [--thinking <level>]
@@ -55,6 +56,7 @@ interface UseArgs {
 	orchestratorModel?: string;
 	backgroundModel?: string;
 	workerModel?: string;
+	workerTarget?: string;
 }
 
 type WorkerThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -216,6 +218,10 @@ function parseUseArgs(args: ReadonlyArray<string>): UseArgs | null {
 			parsed.workerModel = need();
 			continue;
 		}
+		if (arg === "--fleet-target" || arg === "--worker-target") {
+			parsed.workerTarget = need();
+			continue;
+		}
 		if (arg?.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
 		throw new Error(`unknown targets use argument: ${arg}`);
 	}
@@ -232,7 +238,7 @@ function runUse(args: ReadonlyArray<string>): number {
 	}
 	if (!parsed) {
 		printError(
-			"usage: clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-model <id>]",
+			"usage: clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]",
 		);
 		return 2;
 	}
@@ -258,9 +264,19 @@ function runUse(args: ReadonlyArray<string>): number {
 		);
 		return 1;
 	}
+	// A worker target of its own is the split topology: one node orchestrates
+	// and another runs the workers. Its model defaults to that node's own
+	// default, because the orchestrator's model id means nothing on it.
+	let workerTarget = target;
+	if (parsed.workerTarget !== undefined && parsed.workerTarget !== target.id) {
+		const resolved = resolveDispatchProfileTarget(settings, parsed.workerTarget, "fleet worker target");
+		if ("exitCode" in resolved) return resolved.exitCode;
+		workerTarget = resolved.target;
+	}
 	const sharedModel = parsed.model ?? target.defaultModel ?? null;
 	const orchestratorModel = parsed.orchestratorModel ?? sharedModel;
-	const workerModel = parsed.workerModel ?? sharedModel;
+	const workerModel =
+		parsed.workerModel ?? (workerTarget === target ? sharedModel : (workerTarget.defaultModel ?? null));
 	const backgroundModel = parsed.backgroundModel;
 	// Locked read-modify-write so a concurrent session's field-level
 	// write-through (Shift+Tab, Alt+L, …) cannot be lost between our read
@@ -268,15 +284,17 @@ function runUse(args: ReadonlyArray<string>): number {
 	updateSettings((fresh) => {
 		fresh.orchestrator.target = target.id;
 		fresh.orchestrator.model = orchestratorModel;
-		fresh.workers.default.target = target.id;
+		fresh.workers.default.target = workerTarget.id;
 		fresh.workers.default.model = workerModel;
 		if (backgroundModel !== undefined) {
 			fresh.background.target = target.id;
 			fresh.background.model = backgroundModel;
 		}
 	});
+	const dispatchWhere = workerTarget === target ? "" : ` and ${workerTarget.id} for fleet dispatch`;
+	const chatWhere = workerTarget === target ? "for chat and fleet dispatch" : "for chat";
 	printOk(
-		`using target ${target.id} for chat and fleet dispatch${backgroundModel === undefined ? "" : " and background memory"}`,
+		`using target ${target.id} ${chatWhere}${dispatchWhere}${backgroundModel === undefined ? "" : ", and background memory"}`,
 	);
 	return 0;
 }
@@ -353,6 +371,7 @@ function parseProfileBindArgs(args: ReadonlyArray<string>): ProfileBindArgs | nu
 function resolveDispatchProfileTarget(
 	settings: ClioSettings,
 	targetId: string,
+	role = "fleet profile target",
 ): { target: ClioSettings["targets"][number] } | { exitCode: number } {
 	const target = settings.targets.find((entry) => entry.id === targetId);
 	if (!target) {
@@ -363,14 +382,12 @@ function resolveDispatchProfileTarget(
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 	const runtime = registry.get(target.runtime);
 	if (!runtime) {
-		printError(
-			`cannot use target '${target.id}' as fleet profile target because runtime '${target.runtime}' is not registered`,
-		);
+		printError(`cannot use target '${target.id}' as ${role} because runtime '${target.runtime}' is not registered`);
 		return { exitCode: 1 };
 	}
 	if (!isDispatchEligibleRuntime(runtime)) {
 		printError(
-			`cannot use target '${target.id}' as fleet profile target because runtime '${runtime.id}' is not a fleet-dispatch target`,
+			`cannot use target '${target.id}' as ${role} because runtime '${runtime.id}' is not a fleet-dispatch target`,
 		);
 		return { exitCode: 1 };
 	}
