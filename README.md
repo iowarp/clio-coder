@@ -153,7 +153,7 @@ Once the target probes healthy, teach Clio about your project, try a headless
 turn, then open the TUI:
 
 ```bash
-clio context init      # writes a checked-in CLIO.md grounded in your real source tree
+clio context init      # bootstraps local generated CLIO.md context from your real source tree
 clio run "Summarize this repository layout and identify the main entry points."
 clio                   # interactive terminal UI
 ```
@@ -342,15 +342,12 @@ authenticated plan approval or authority already granted by full-auto policy.
 
 ## Project context: CLIO.md
 
-Clio loads a checked-in `CLIO.md` as the canonical project guide on every
-session. `clio context init` bootstraps one by exploring your actual source
-tree, and it can adopt existing `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor,
-and Copilot context with provenance and conflict reporting.
-
-This repository's own [CLIO.md](CLIO.md) is the maintained reference example
-of the format: one identity paragraph, a short list of verifiable conventions,
-build-enforced hard invariants, and dense sections covering architecture
-boundaries, workflow traps, and artifact policy.
+Clio loads a local `CLIO.md` as generated project context on every session.
+`clio context init` grounds a draft in the actual source tree, preserves an
+existing handbook until an explicit replacement action, and can adopt existing
+`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor, and Copilot context with
+provenance and conflict reporting. `CLIO.md` is a gitignored runtime artifact,
+not canonical repository documentation.
 
 Alongside it, `clio context index` builds a structural codewiki that the
 `code_nav` tool navigates, so a model can find a symbol without reading half
@@ -435,9 +432,9 @@ Use `code_nav` in `entries`, `path`, or `symbol` mode before any wide read.
 The indexed entry points are `src/cli/index.ts`, `src/domains/agents/index.ts`,
 `src/domains/components/index.ts`, `src/domains/config/index.ts`,
 `src/domains/context/bootstrap.ts`, `src/domains/context/index.ts`,
-`src/domains/dispatch/index.ts`, and `src/domains/eval/index.ts`. Read
-[CLIO.md](CLIO.md) first; it carries the invariants that are enforced at build
-time and the traps that are not obvious from the source.
+`src/domains/dispatch/index.ts`, and `src/domains/eval/index.ts`. When present,
+read the local generated `CLIO.md` after that index-led orientation; it carries
+the project-specific invariants and traps that are not obvious from the source.
 
 ## The tool surface
 
