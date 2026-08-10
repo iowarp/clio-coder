@@ -102,6 +102,7 @@ export interface InteractiveInputRuntimeDeps {
 	stopUi: () => void;
 	cancelParkedCalls: (reason: string) => void;
 	onShutdown: () => Promise<void>;
+	reportShutdownFailure?: (step: string, error: unknown) => void;
 	registerInputListener: (listener: (data: string) => ApplicationInputResult) => void;
 	intervalsToClear?: ReadonlyArray<ApplicationIntervalHandle>;
 	clock?: ApplicationClock;
@@ -228,6 +229,15 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		stopUi: deps.stopUi,
 		cancelParkedCalls: deps.cancelParkedCalls,
 		onShutdown: deps.onShutdown,
+		// stderr for the same reason src/core/termination.ts uses it for a failed
+		// hook: by the time teardown fails there is no UI left to carry a notice.
+		reportShutdownFailure:
+			deps.reportShutdownFailure ??
+			((step, error) => {
+				process.stderr.write(
+					`[clio:interactive] ${step} failed: ${error instanceof Error ? error.message : String(error)}\n`,
+				);
+			}),
 	});
 	deps.registerInputListener(controller.handleInput);
 	return controller;

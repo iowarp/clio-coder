@@ -12,6 +12,7 @@ import type { OverlayState } from "../../src/interactive/overlay-lifecycle.js";
 interface Harness {
 	deps: ApplicationControllerDeps;
 	events: string[];
+	diagnostics: string[];
 	setNow(value: number): void;
 	setOverlay(value: OverlayState): void;
 	setStreaming(value: boolean): void;
@@ -26,6 +27,7 @@ interface Harness {
 
 function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harness {
 	const events: string[] = [];
+	const diagnostics: string[] = [];
 	let now = 1_000;
 	let overlay: OverlayState = "closed";
 	let streaming = false;
@@ -122,11 +124,15 @@ function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harn
 		onShutdown: async () => {
 			events.push("app:shutdown");
 		},
+		reportShutdownFailure: (step, error) => {
+			diagnostics.push(`${step}: ${error instanceof Error ? error.message : String(error)}`);
+		},
 		...overrides,
 	};
 	return {
 		deps,
 		events,
+		diagnostics,
 		setNow: (value) => {
 			now = value;
 		},
@@ -334,7 +340,41 @@ describe("contracts/interactive application controller", () => {
 			controller.run,
 			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250).unref()),
 		]);
-		strictEqual(settled, 0);
+		strictEqual(settled, 1);
+		deepStrictEqual(harness.diagnostics, ["application shutdown: shutdown boom"]);
+	});
+
+	it("reports every teardown step that failed rather than claiming a clean exit", async () => {
+		// Swallowing has to mean "finish cleanup and report", not "finish cleanup
+		// and call it a success". The notice channel is unavailable here because
+		// interactive teardown may already have disposed it.
+		const harness = createHarness({
+			shutdownDisposers: [
+				() => {
+					throw new Error("disposer boom");
+				},
+				() => harness.events.push("dispose:second"),
+			],
+			stopUi: () => {
+				throw new Error("ui boom");
+			},
+		});
+		const controller = createApplicationController(harness.deps);
+		harness.events.length = 0;
+
+		await controller.shutdown();
+		strictEqual(await controller.run, 1);
+		deepStrictEqual(harness.diagnostics, ["shutdown disposer: disposer boom", "terminal stop: ui boom"]);
+		// Every later step still ran, and the failures were reported after the
+		// terminal was released so the report cannot land on a live TUI.
+		deepStrictEqual(harness.events, [
+			"signal:off",
+			"signal:restore",
+			"interval:clear:keepalive",
+			"dispose:second",
+			"parked:Clio Coder shutting down",
+			"app:shutdown",
+		]);
 	});
 
 	it("finishes the ordered release when a shutdown disposer throws", async () => {
@@ -353,7 +393,7 @@ describe("contracts/interactive application controller", () => {
 			controller.run,
 			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250).unref()),
 		]);
-		strictEqual(settled, 0);
+		strictEqual(settled, 1);
 		deepStrictEqual(harness.events.slice(-3), ["ui:stop", "parked:Clio Coder shutting down", "app:shutdown"]);
 	});
 

@@ -99,6 +99,12 @@ export interface ApplicationControllerDeps {
 	stopUi: () => void;
 	cancelParkedCalls: (reason: string) => void;
 	onShutdown: () => Promise<void>;
+	/**
+	 * Report a teardown step that failed. Deliberately not the UI notice channel:
+	 * interactive teardown disposes that before the application's own shutdown
+	 * runs, so a notice raised here would have nowhere to land.
+	 */
+	reportShutdownFailure: (step: string, error: unknown) => void;
 }
 
 export type ApplicationInputResult = { consume: true } | undefined;
@@ -131,41 +137,71 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 
 	const isDoubleTap = (lastAt: number, now: number): boolean => lastAt > 0 && now - lastAt <= APPLICATION_DOUBLE_TAP_MS;
 
+	/** Teardown steps that threw, held until the terminal is safe to write past. */
+	const failures: Array<{ step: string; error: unknown }> = [];
+
 	/**
 	 * Release one process-level resource. A step that throws has left a resource
 	 * either already released or beyond this boundary's reach; either way the
 	 * remaining steps still have to run. The terminal is the common case, since
 	 * it can close before shutdown begins and stopping it twice is harmless.
+	 * Continuing is not the same as calling it a success, so the failure is kept.
 	 */
-	const release = (step: () => void): void => {
+	const release = (step: string, action: () => void): void => {
 		try {
-			step();
-		} catch {
-			// Intentionally ignored; see above.
+			action();
+		} catch (error) {
+			failures.push({ step, error });
+		}
+	};
+
+	/**
+	 * Hand the collected failures to the diagnostic. Draining means a second call
+	 * cannot repeat what the first already reported.
+	 */
+	const reportFailures = (): void => {
+		for (const failure of failures.splice(0)) {
+			try {
+				deps.reportShutdownFailure(failure.step, failure.error);
+			} catch {
+				// A diagnostic that cannot report has nowhere left to report to.
+			}
 		}
 	};
 
 	const shutdown = async (): Promise<void> => {
 		if (shuttingDown) return;
 		shuttingDown = true;
+		let failed = false;
 		// The signal path calls this without awaiting it, so a failing step must
 		// not escape as an unhandled rejection, and `run` has to settle either
 		// way or the process hangs with nothing left to resolve it.
 		try {
-			release(() => deps.signals.off("SIGINT", handleCtrlC));
+			release("signal handoff", () => deps.signals.off("SIGINT", handleCtrlC));
 			// Ownership goes back before teardown runs, so an interrupt during a
 			// slow release still reaches a handler that exits the process.
-			release(() => restoreInterruptOwner());
-			release(() => deps.intervals.clearInterval(keepAlive));
-			for (const interval of deps.intervalsToClear) release(() => deps.intervals.clearInterval(interval));
-			for (const dispose of deps.shutdownDisposers) release(dispose);
-			release(() => deps.stopUi());
-			release(() => deps.cancelParkedCalls("Clio Coder shutting down"));
+			release("signal handoff", () => restoreInterruptOwner());
+			release("keep-alive interval", () => deps.intervals.clearInterval(keepAlive));
+			for (const interval of deps.intervalsToClear) {
+				release("owned interval", () => deps.intervals.clearInterval(interval));
+			}
+			for (const dispose of deps.shutdownDisposers) release("shutdown disposer", dispose);
+			release("terminal stop", () => deps.stopUi());
+			release("parked calls", () => deps.cancelParkedCalls("Clio Coder shutting down"));
+			// Reported here rather than as each step fails: the terminal is down by
+			// now, so a diagnostic cannot land on top of a TUI still painting. It
+			// also has to precede onShutdown, which exits the process.
+			failed = failures.length > 0;
+			reportFailures();
 			await deps.onShutdown();
-		} catch {
-			// Same rule as the synchronous steps.
+		} catch (error) {
+			failed = true;
+			failures.push({ step: "application shutdown", error });
+			reportFailures();
 		} finally {
-			resolveRun(0);
+			// Nothing reads this code today, which is exactly why it should not
+			// claim a clean teardown that did not happen.
+			resolveRun(failed ? 1 : 0);
 		}
 	};
 
