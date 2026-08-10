@@ -36,7 +36,7 @@ Usage:
   clio context init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO.md and codewiki
   clio context refresh [--wiki]  re-index the codewiki and optionally update the Markdown wiki
   clio context wiki [--update] [--status] [--depth auto|simple|medium|detailed] [--target <id>] [--model <id>]
-  clio context reset [--all]  clear accumulated project context artifacts
+  clio context reset [--all] [--yes]  clear accumulated project context artifacts
   clio context index [--json]  build the codewiki index without model calls
   clio uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
   clio upgrade              upgrade Clio Coder and run pending migrations
