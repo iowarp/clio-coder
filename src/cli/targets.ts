@@ -41,6 +41,10 @@ Usage:
   clio targets convert <id> --runtime <runtimeId>
   clio targets remove <id>
   clio targets rename <old> <new>
+
+Aliases:
+  --worker-target and --worker-model are accepted for --fleet-target and
+  --fleet-model, carried over from before the worker/fleet rename.
 `;
 
 interface ListArgs {

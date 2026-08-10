@@ -29,7 +29,7 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio configure --list --all` | List every registered runtime, including aliases. |
 | `clio targets [--json] [--probe] [--target <id>]` | List configured targets, health, auth, runtime, model, and capabilities. |
 | `clio targets add` | Add a target interactively or through configure flags. |
-| `clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--fleet-model <id>]` | Set chat and fleet defaults to one orchestrator-capable target. |
+| `clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]` | Point the orchestrator at one target. Without `--fleet-target` the fleet default follows it; with `--fleet-target` the fleet runs on a different node. `--worker-target` and `--worker-model` are accepted aliases from before the worker/fleet rename. |
 | `clio targets profile list\|set\|remove\|rename\|bind\|unbind\|bindings` | Manage named fleet profiles and agent bindings. |
 | `clio targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
 | `clio targets remove <id>` | Remove a target. |
@@ -69,7 +69,7 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO.md`, `.clio/codewiki.json`, and `.clio/state.json`. |
 | `clio context refresh [--wiki]` | Rebuild the codewiki and state without touching `CLIO.md`; with `--wiki`, update an existing Markdown wiki. |
 | `clio context wiki [--update\|--status]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio/wiki/`. |
-| `clio context reset [--all]` | Clear accumulated project context artifacts. |
+| `clio context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
 | `clio context index [--json]` | Build the structural codewiki index without model calls; writes `.clio/codewiki.json` and `.clio/state.json` and prints coverage plus a structural hash. |
 
 ## Headless Run Flags

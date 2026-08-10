@@ -516,7 +516,8 @@ Useful flags:
 ```bash
 clio targets [--json] [--probe] [--target <id>]
 clio targets add [configure flags]
-clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--fleet-model <id>]
+clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
+                      [--fleet-target <id>] [--fleet-model <id>]
 clio targets fleet [--json]
 clio targets profile list [--json]
 clio targets profile set <name> <id> [--model <id>] [--thinking <level>]
@@ -531,7 +532,11 @@ clio targets remove <id>
 clio targets rename <old> <new>
 ```
 
-`clio targets use <id>` sets both the orchestrator and the default fleet target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat. Use `clio configure --set-fleet-default` or `clio targets profile` when dispatch should prefer worker-only runtimes such as `claude-sdk`, `claude-code`, or `antigravity-code`.
+`clio targets use <id>` sets the orchestrator target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat.
+
+Without `--fleet-target` the default fleet target follows the orchestrator, which is the single-node case. Pass `--fleet-target <id>` to keep them apart when one node orchestrates and another runs the fleet. The fleet target is validated for fleet dispatch through the same check a fleet profile uses, so it can be a worker-only runtime such as `claude-sdk`, `claude-code`, or `antigravity-code`. Its model defaults to that target's own default rather than the orchestrator's, because a model id resolved against one target means nothing on another; `--fleet-model <id>` names it explicitly. `clio configure --set-fleet-default` and `clio targets profile` remain the routes for per-agent fleet routing.
+
+`--worker-target` and `--worker-model` are accepted as aliases of `--fleet-target` and `--fleet-model`, carried over from before the worker/fleet rename.
 
 ### Target-Profile Subcommands
 

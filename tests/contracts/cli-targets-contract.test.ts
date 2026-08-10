@@ -96,4 +96,41 @@ describe("contracts/cli-targets-contract", () => {
 		strictEqual(result.code, 2, `stderr=${result.stderr}`);
 		match(result.stderr, /no target with id missing/i);
 	});
+
+	// The worker/fleet rename left these two names accepted with nothing naming
+	// them, so a script written against the old spelling worked by luck.
+	it("accepts --worker-target and --worker-model as the pre-rename spelling", async () => {
+		const added = await runCli(
+			[
+				"configure",
+				"--id",
+				"legacy-worker",
+				"--runtime",
+				"llamacpp",
+				"--url",
+				"http://127.0.0.1:3",
+				"--model",
+				"legacy-default",
+				"--force",
+			],
+			{ env: scratch.env, timeoutMs: 30_000 },
+		);
+		strictEqual(added.code, 0, `configure legacy-worker failed: ${added.stderr}`);
+
+		const used = await runCli(
+			["targets", "use", "local", "--worker-target", "legacy-worker", "--worker-model", "legacy-chosen"],
+			{ env: scratch.env },
+		);
+		strictEqual(used.code, 0, `stderr=${used.stderr}`);
+
+		const settings = readFileSync(join(scratch.dir, "config", "settings.yaml"), "utf8");
+		const workerTarget = settings.match(/workers:\n\s+default:\n\s+target:\s*(\S+)/)?.[1];
+		const workerModel = settings.match(/workers:\n\s+default:\n\s+target:\s*\S+\n\s+model:\s*(\S+)/)?.[1];
+		strictEqual(workerTarget, "legacy-worker");
+		strictEqual(workerModel, "legacy-chosen");
+
+		const help = await runCli(["targets", "--help"], { env: scratch.env });
+		strictEqual(help.code, 0, `stderr=${help.stderr}`);
+		match(help.stdout, /--worker-target and --worker-model are accepted/);
+	});
 });
