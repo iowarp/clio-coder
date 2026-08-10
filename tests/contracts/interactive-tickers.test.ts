@@ -174,7 +174,10 @@ describe("interactive ticker ownership", () => {
 		]);
 	});
 
-	it("keeps starts restart-safe, stops idempotent, and only unrefs the context ticker", () => {
+	it("keeps starts restart-safe, stops idempotent, and unrefs every ticker it schedules", () => {
+		// Process liveness has one owner, the application controller's keepAlive
+		// interval. A repaint ticker that also holds the event loop keeps the
+		// process alive for as long as its overlay is open.
 		const harness = createHarness();
 		const tickers = createInteractiveTickers(harness.deps);
 		tickers.startDispatchBoardTicker();
@@ -189,8 +192,10 @@ describe("interactive ticker ownership", () => {
 				"schedule:1:250",
 				"unref:1",
 				"schedule:2:250",
+				"unref:2",
 				"clear:2",
 				"schedule:3:250",
+				"unref:3",
 				"clear:3",
 				"clear:1",
 				"schedule:4:250",
