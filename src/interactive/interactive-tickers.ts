@@ -101,6 +101,10 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 			if (deps.getOverlayState() !== "dispatch-board") return;
 			deps.tui.requestRender();
 		}, 250);
+		// Process liveness belongs to the application controller's keepAlive
+		// interval alone. A repaint ticker that also holds the loop keeps the
+		// process alive for as long as the board is open.
+		dispatchBoardTicker.unref?.();
 	};
 
 	const stopContextIslandTicker = (): void => {
