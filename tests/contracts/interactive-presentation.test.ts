@@ -6,7 +6,7 @@ import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { ObservabilityContract, ObservabilitySnapshot } from "../../src/domains/observability/index.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { Component, TUI } from "../../src/engine/tui.js";
-import type { ChatLoop } from "../../src/interactive/chat-loop.js";
+import type { ChatLoop, ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import type { ChatPanel } from "../../src/interactive/chat-panel.js";
 import type { CoalescingChatRenderer } from "../../src/interactive/chat-renderer.js";
 import type { ClioEditor } from "../../src/interactive/clio-editor.js";
@@ -22,7 +22,7 @@ import {
 } from "../../src/interactive/interactive-presentation.js";
 import type { ClioKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import type { RunIo } from "../../src/interactive/slash-commands.js";
-import type { StatusController, TurnSummary } from "../../src/interactive/status/index.js";
+import { createStatusController, type StatusController, type TurnSummary } from "../../src/interactive/status/index.js";
 import type { WorkspaceFacts } from "../../src/interactive/workspace-facts.js";
 
 interface TestTicker extends PresentationTickerHandle {
@@ -85,6 +85,7 @@ function harness() {
 	const statusController = {
 		current: () => ({ phase: statusPhase }),
 		subscribe: () => () => {},
+		reset: () => log.push("status.reset"),
 		dispose: () => log.push("status.dispose"),
 	} as unknown as StatusController;
 	const dispatchBoardStore = {
@@ -318,6 +319,47 @@ describe("interactive presentation ownership", () => {
 		const next = snapshot("next");
 		test.emitObservability(next);
 		strictEqual(presentation.getObservabilitySnapshot(), next);
+	});
+
+	it("clears the terminal status a finished turn left on the footer", () => {
+		// The status controller only settles an ended turn back to idle five
+		// seconds later. Without a reset a session started inside that window
+		// opens showing the previous session's stop verb and elapsed time,
+		// because the footer reads the live status independently of the turn
+		// summary that /new already clears.
+		const test = harness();
+		let chatListener: ((event: ChatLoopEvent) => void) | null = null;
+		test.deps.chat = {
+			contextUsage: () => ({}),
+			contextLedger: () => ({}),
+			isStreaming: () => false,
+			getSessionId: () => "session-one",
+			onEvent: (listener: (event: ChatLoopEvent) => void) => {
+				chatListener = listener;
+				return () => {};
+			},
+		} as unknown as ChatLoop;
+		test.deps.providers = { list: () => [] } as unknown as ProvidersContract;
+		test.deps.bus = { on: () => () => {}, emit: () => {} } as unknown as SafeEventBus;
+		test.deps.factories = { ...test.deps.factories, createStatusController };
+		const presentation = createInteractivePresentation(test.deps);
+		const input = test.getFooterDeps();
+		if (!input) throw new Error("footer dependencies were not captured");
+		if (!chatListener) throw new Error("the status controller did not subscribe to the chat loop");
+
+		const emit = chatListener as (event: ChatLoopEvent) => void;
+		try {
+			emit({ type: "agent_start" } as ChatLoopEvent);
+			emit({ type: "agent_end", messages: [] } as unknown as ChatLoopEvent);
+			strictEqual(input.getAgentStatus?.().phase, "ended");
+
+			presentation.resetForNewSession();
+			strictEqual(input.getAgentStatus?.().phase, "idle");
+			strictEqual(input.getAgentStatus?.().summary, undefined);
+		} finally {
+			// The real controller owns a live tick interval and a settle timer.
+			presentation.dispose();
+		}
 	});
 
 	it("preserves each ticker guard and disposes owned phases in exact order once", () => {

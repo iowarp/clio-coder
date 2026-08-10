@@ -22,6 +22,12 @@ export interface StatusControllerDeps {
 export interface StatusController {
 	current(): AgentStatus;
 	subscribe(listener: (status: AgentStatus) => void): () => void;
+	/**
+	 * Drop the status the previous session ended on. An ended turn only settles
+	 * back to idle five seconds later, so a session started inside that window
+	 * would otherwise open reporting work it never did.
+	 */
+	reset(): void;
 	dispose(): void;
 }
 
@@ -198,6 +204,14 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			return () => {
 				listeners.delete(listener);
 			};
+		},
+		reset() {
+			if (disposed) return;
+			clearSettle();
+			clearAbortCeiling();
+			const prev = status;
+			status = { ...INITIAL_STATUS, localRuntime: isLocalRuntime() };
+			notify(prev, status, true);
 		},
 		dispose() {
 			disposed = true;
