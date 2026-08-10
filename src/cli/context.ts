@@ -7,7 +7,7 @@ const HELP = `Usage:
   clio context refresh [--wiki]
   clio context wiki [--update] [--status] [--depth auto|simple|medium|detailed]
                     [--target <id>] [--model <id>] [--thinking off|low|medium|high]
-  clio context reset [--all]
+  clio context reset [--all] [--yes]
   clio context index [--json]
 
 Project context commands:
