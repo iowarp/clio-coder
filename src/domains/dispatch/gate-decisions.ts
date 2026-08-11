@@ -282,8 +282,9 @@ export interface PendingGateDecisionReadResult {
 	errors: Array<{ path: string; message: string }>;
 }
 
-export interface PendingGateDecisionRecoveryResult {
-	materialized: Array<{ artifact: GateDecisionArtifact; path: string }>;
+export interface PendingGateDecisionRecoveryPlan {
+	/** Resolved records that passed final-artifact collision checks but are not materialized yet. */
+	ready: PendingGateDecisionHandle[];
 	/** Output-first records need the caller's protocol/policy parser and receipt digest. */
 	unresolved: PendingGateDecisionHandle[];
 }
@@ -964,12 +965,25 @@ export function readPendingGateDecisions(stateDir = clioStateDir()): PendingGate
 	return { records, errors };
 }
 
+/** Fail closed on any final artifact that conflicts with a resolved WAL record. */
+export function preflightPendingGateDecisionMaterialization(handles: ReadonlyArray<PendingGateDecisionHandle>): void {
+	for (const handle of handles) {
+		if (handle.record.kind !== "decision") continue;
+		const path = decisionArtifactPath(handle.record.decision.id, handle.stateDir);
+		if (!existsSync(path)) continue;
+		const existing = readVerifiedArtifact(path);
+		if (existing.integrity.digest !== handle.record.decision.integrity.digest) {
+			throw new Error(`gate decision artifact conflicts with pending record: ${handle.record.id}`);
+		}
+	}
+}
+
 /**
- * Restart reconciliation for fully resolved records. Raw-output records are
- * returned untouched so dispatch can apply its verdict/winner policy with the
- * now-discoverable receipt digest. Any corrupt record fails the journal closed.
+ * Build a mutation-free restart plan. Raw-output records remain unresolved so
+ * dispatch can apply its receipt-backed protocol parser. Corrupt journals and
+ * conflicting final artifacts fail closed before external resources settle.
  */
-export function recoverPendingGateDecisions(stateDir = clioStateDir()): PendingGateDecisionRecoveryResult {
+export function preparePendingGateDecisionRecovery(stateDir = clioStateDir()): PendingGateDecisionRecoveryPlan {
 	const pending = readPendingGateDecisions(stateDir);
 	if (pending.errors.length > 0) {
 		throw new Error(
@@ -979,17 +993,9 @@ export function recoverPendingGateDecisions(stateDir = clioStateDir()): PendingG
 		);
 	}
 	const ready = pending.records.filter((handle) => handle.record.kind === "decision");
-	for (const handle of ready) {
-		if (handle.record.kind !== "decision") continue;
-		const path = decisionArtifactPath(handle.record.decision.id, stateDir);
-		if (!existsSync(path)) continue;
-		const existing = readVerifiedArtifact(path);
-		if (existing.integrity.digest !== handle.record.decision.integrity.digest) {
-			throw new Error(`gate decision artifact conflicts with pending record: ${handle.record.id}`);
-		}
-	}
+	preflightPendingGateDecisionMaterialization(ready);
 	return {
-		materialized: ready.map((handle) => materializePendingGateDecision(handle)),
+		ready,
 		unresolved: pending.records.filter((handle) => handle.record.kind === "output"),
 	};
 }
