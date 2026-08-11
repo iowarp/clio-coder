@@ -24,6 +24,7 @@ import {
 	approvedIdentityForSpec,
 	createBoundedEventQueue,
 	endpointIdentityHash,
+	toolSignatureOf,
 	verifyWorkerAttestation,
 	WORKER_STDIN_FRAME_MAX_BYTES,
 	WorkerChannelFailure,
@@ -444,6 +445,8 @@ describe("worker attestation and transport bounds", () => {
 		strictEqual(attestation.runtimeId, "openai");
 		strictEqual(attestation.wireModelId, "gpt-4o");
 		strictEqual(attestation.endpointIdentityHash, endpointIdentityHash(undefined));
+		strictEqual(attestation.toolSignature, toolSignatureOf(TEST_SPEC.allowedTools));
+		strictEqual(attestation.toolSignature, approved.toolSignature);
 		deepStrictEqual(verifyWorkerAttestation(attestation, approved), { ok: true });
 		// Unknown is explicit, never an optimistic zero.
 		deepStrictEqual(attestation.resources.gpuCount, { known: false });
@@ -461,10 +464,11 @@ describe("worker attestation and transport bounds", () => {
 		strictEqual(worker.attestation?.(), null);
 	});
 
-	it("spec digest and target drift are refused with the same fail-closed rule", async () => {
+	it("spec, target, and tool-surface drift are refused with the same fail-closed rule", async () => {
 		for (const [scenario, pattern] of [
 			["spec-drift", /WorkerSpec digest drift/],
 			["target-drift", /target drift/],
+			["tool-drift", /tool surface drift/],
 		] as const) {
 			const worker = localWorker(scenario);
 			const events = await drain(worker.events);
