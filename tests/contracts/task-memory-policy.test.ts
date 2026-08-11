@@ -179,7 +179,8 @@ describe("contracts/task memory prompted policy", () => {
 		// The prompt's worked examples are the strongest lever on a small local
 		// model's output shape, which makes an example the parser would reject a
 		// direct instruction to produce malformed steps.
-		const envelope = /^<operations>.*?<\/operations>\n(?:<no_intervention\/>|<context_for_action>.*?<\/context_for_action>)$/gmu;
+		const envelope =
+			/^<operations>.*?<\/operations>\n(?:<no_intervention\/>|<context_for_action>.*?<\/context_for_action>)$/gmu;
 		const examples = [...MEMORY_INTERVENTION_SYSTEM_PROMPT.matchAll(envelope)]
 			.map((found) => found[0])
 			// The bare grammar sketch at the top of the prompt is a shape, not an example.
