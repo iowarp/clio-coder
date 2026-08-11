@@ -475,7 +475,7 @@ Then invoke it using `/delegate claude-code <task>`.
 
 The `antigravity-code` runtime drives your local Google Antigravity CLI (`agy`) installation to execute subagent tasks. It runs the CLI as a subprocess using the `agy --print` command and maps Clio autonomy levels onto the CLI's permission flags.
 
-Google Antigravity supports a context window of up to 1,000,000 tokens and is suitable for large-context codebase reasoning. Because `agy` emits plain text without structured events, Clio cannot perform fine-grained tool call interception. Gating is applied coarsely by passing the `--sandbox` flag for read-only autonomy levels or `--dangerously-skip-permissions` for the full-auto autonomy level when the environment variable `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` is explicitly set.
+Google Antigravity supports a context window of up to 1,000,000 tokens and is suitable for large-context codebase reasoning. Because `agy` emits plain text without structured events, Clio cannot perform fine-grained tool call interception. Gating is applied coarsely: read-only runs pass both `--mode plan` (the no-change agent posture) and `--sandbox` (terminal restrictions). Full-auto passes `--dangerously-skip-permissions` only when the environment variable `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` is explicitly set.
 
 Configured targets use your existing local `agy` login and credentials. Supported model names include `Gemini 3.5 Flash (High)` as the default tier, `Gemini 3.5 Flash (Medium)`, `Gemini 3.5 Flash (Low)`, `Gemini 3.1 Pro (High)`, `Gemini 3.1 Pro (Low)`, `Claude Sonnet 4.6 (Thinking)`, `Claude Opus 4.6 (Thinking)`, and `GPT-OSS 120B (Medium)`.
 

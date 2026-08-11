@@ -41,7 +41,8 @@ describe("contracts/antigravity subprocess permission gate", () => {
 			);
 		}
 
-		strictEqual(antigravitySubprocessConfigForAutonomy("read-only", {}).extraArgs.includes("--sandbox"), true);
+		strictEqual(antigravitySubprocessConfigForAutonomy("read-only", {}).externalMode, "plan+sandbox");
+		strictEqual(antigravitySubprocessConfigForAutonomy("read-only", {}).extraArgs.join(" "), "--mode plan --sandbox");
 		strictEqual(antigravitySubprocessConfigForAutonomy("auto-edit", {}).extraArgs.length, 0);
 		throws(() => antigravitySubprocessConfigForAutonomy("suggest", {}), /cannot enforce autonomy 'suggest'/);
 		throws(
@@ -52,6 +53,23 @@ describe("contracts/antigravity subprocess permission gate", () => {
 		const fullAutoWithEnv = antigravitySubprocessConfigForAutonomy("full-auto", { CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1" });
 		strictEqual(fullAutoWithEnv.dangerousBypass, true);
 		ok(fullAutoWithEnv.extraArgs.includes("--dangerously-skip-permissions"));
+		strictEqual(fullAutoWithEnv.externalMode, "bypassPermissions");
+	});
+
+	it("builds a read-only invocation with both the no-change mode and terminal sandbox", () => {
+		const args = buildAgyArgs({
+			systemPrompt: "",
+			agentId: "contract",
+			task: "Inspect without editing.",
+			target: { id: "contract", runtime: "antigravity-code" },
+			runtime: antigravityCodeRuntime,
+			wireModelId: "Gemini 3.5 Flash (High)",
+			allowedTools: [],
+			budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
+			autonomy: "read-only",
+		});
+		strictEqual(args.slice(0, 4).join(" "), "--print --mode plan --sandbox");
+		ok(!args.includes("--dangerously-skip-permissions"));
 	});
 
 	it("refuses suggest before building agy args", () => {
