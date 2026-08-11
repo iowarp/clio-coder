@@ -241,7 +241,6 @@ rl.on("line", (line) => {
 		return;
 	}
 	if (value.type === "steer") {
-		control({ kind: "steer_ack", sequence: 1 });
 		emit({ type: "clio_steer_received", payload: { text: value.text } });
 		assistant("steered: " + value.text);
 		process.exit(0);

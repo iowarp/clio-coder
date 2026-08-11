@@ -225,6 +225,7 @@ import {
 	type RunReceiptUpstreamResponse,
 	type RunStatus,
 	type RunSteeringProvenance,
+	runKindSupportsLiveSteering,
 	type SafetyBlockedAttempt,
 	type ToolCallStat,
 } from "./types.js";
@@ -253,8 +254,8 @@ interface ActiveRun {
 	/** Hard termination used by the reconciler; for native workers this is the SIGTERM→SIGKILL path. */
 	kill: () => void;
 	/**
-	 * Send an operator steer line to the run's input channel. Returns false
-	 * when the channel is gone. Absent for run kinds without one (ACP).
+	 * Send operator guidance to a live-input HTTP/SDK worker. Returns false when
+	 * the channel is gone. Absent for single-shot subprocess and ACP runs.
 	 */
 	steer?: (text: string) => boolean;
 	/**
@@ -3903,24 +3904,27 @@ export function createDispatchBundle(
 		const sendToWorker = worker.send?.bind(worker);
 		const steeringProvenance: RunSteeringProvenance[] = [];
 		let steeringProvenanceClosed = false;
-		const steer = sendToWorker
-			? (text: string): boolean => {
-					if (steeringProvenanceClosed) return false;
-					const canonicalText = text.trim();
-					if (canonicalText.length === 0 || !sendToWorker({ type: "steer", text: canonicalText })) return false;
-					steeringProvenance.push({
-						sequence: steeringProvenance.length + 1,
-						bytes: Buffer.byteLength(canonicalText, "utf8"),
-						contentHash: sha256(canonicalText),
-						sentAt: new Date().toISOString(),
-						acknowledged: false,
-					});
-					return true;
-				}
-			: undefined;
-		const acknowledgeOldestSteer = (): void => {
+		const steer =
+			sendToWorker && runKindSupportsLiveSteering(lifecycle.runtimeKind)
+				? (text: string): boolean => {
+						if (steeringProvenanceClosed) return false;
+						const canonicalText = text.trim();
+						const sequence = steeringProvenance.length + 1;
+						if (canonicalText.length === 0 || !sendToWorker({ type: "steer", text: canonicalText, sequence })) return false;
+						steeringProvenance.push({
+							sequence,
+							bytes: Buffer.byteLength(canonicalText, "utf8"),
+							contentHash: sha256(canonicalText),
+							sentAt: new Date().toISOString(),
+							acknowledged: false,
+						});
+						return true;
+					}
+				: undefined;
+		const acknowledgeSteer = (sequence: unknown): void => {
 			if (steeringProvenanceClosed) return;
-			const pending = steeringProvenance.find((entry) => !entry.acknowledged);
+			if (!Number.isSafeInteger(sequence) || Number(sequence) <= 0) return;
+			const pending = steeringProvenance.find((entry) => entry.sequence === sequence && !entry.acknowledged);
 			if (pending === undefined) return;
 			pending.acknowledged = true;
 			pending.acknowledgedAt = new Date().toISOString();
@@ -3981,6 +3985,7 @@ export function createDispatchBundle(
 				};
 				payload?: {
 					tool?: string;
+					sequence?: number;
 					outcomeCode?: unknown;
 					posture?: string;
 					durationMs?: number;
@@ -4009,7 +4014,7 @@ export function createDispatchBundle(
 			if (event.type === "clio_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
 			}
-			if (event.type === "clio_steer_received") acknowledgeOldestSteer();
+			if (event.type === "clio_steer_received") acknowledgeSteer(event.payload?.sequence);
 			if (
 				event.type === "clio_run_outcome" &&
 				isRunOutcomeCode(event.payload?.outcomeCode) &&
@@ -5464,15 +5469,16 @@ export function createDispatchBundle(
 			}
 			const run = currentAssignmentRun(runId);
 			if (!run) {
-				throw new Error(`steer: run or assignment '${runId}' is not active; only running native workers accept steers`);
+				throw new Error(`steer: run or assignment '${runId}' is not active; only running HTTP/SDK workers accept guidance`);
 			}
 			if (run.aborted || run.stallKilled) {
 				throw new Error(`steer: run '${runId}' is ${run.aborted ? "aborting" : "terminating"} and cannot be steered`);
 			}
 			if (!run.steer) {
-				throw new Error(
-					`steer: run '${runId}' (${run.runtimeKind}) has no input channel; only native workers accept steers`,
-				);
+				if (runKindSupportsLiveSteering(run.runtimeKind)) {
+					throw new Error(`steer: run '${runId}' (${run.runtimeKind}:${run.runtimeId}) has no input channel`);
+				}
+				throw new Error(`steer: run '${runId}' (${run.runtimeKind}:${run.runtimeId}) does not support live steering`);
 			}
 			if (!run.steer(trimmed)) {
 				throw new Error(`steer: run '${runId}' no longer accepts input; the worker has exited or its stdin is closed`);

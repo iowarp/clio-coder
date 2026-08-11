@@ -321,10 +321,12 @@ describe("dispatch status presentation", () => {
 });
 
 describe("dispatch board operator capabilities", () => {
-	it("offers steering only for live native rows", () => {
+	it("offers steering only for live HTTP and SDK rows", () => {
 		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "running" })), true);
+		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "running", runtimeKind: "sdk" })), true);
 		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "stale" })), true);
 		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "enqueued" })), true);
+		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "running", runtimeKind: "subprocess" })), false);
 		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "running", runtimeKind: "acp-delegation" })), false);
 		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "retrying" })), false);
 		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "completed" })), false);

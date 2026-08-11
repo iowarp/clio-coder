@@ -269,6 +269,11 @@ export interface RunPlanProvenance {
  * agents.
  */
 export type RunKind = "http" | "sdk" | "subprocess" | "acp-delegation";
+
+/** True only for worker runtimes whose live agent API can consume guidance. */
+export function runKindSupportsLiveSteering(kind: RunKind): boolean {
+	return kind === "http" || kind === "sdk";
+}
 export type DispatchRequestOrigin = "user" | "agent" | "internal";
 
 /** Durable routing-system phase marks. They live on the ledger envelope, not the sealed receipt. */

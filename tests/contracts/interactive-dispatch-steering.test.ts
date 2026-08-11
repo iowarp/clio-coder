@@ -84,17 +84,28 @@ describe("interactive dispatch steering", () => {
 		deepStrictEqual(test.calls, ["selected", "notice:warning"]);
 	});
 
-	it("rejects ACP and non-steerable rows without changing the editor", () => {
+	it("rejects runtimes without live input and non-steerable rows without changing the editor", () => {
 		const acp = harness(row({ runtimeKind: "acp-delegation" }), "keep me");
 		acp.controller.steerSelectedDispatch();
 		deepStrictEqual(acp.notices, [
 			{
 				level: "warning",
-				text: "run run-1 uses ACP delegation and cannot accept live steering",
+				text: "run run-1 uses worker (acp-delegation) and cannot accept live steering",
 				key: "dispatch-board:steer:run-1",
 			},
 		]);
 		strictEqual(acp.editor.text, "keep me");
+
+		const subprocess = harness(row({ runtimeKind: "subprocess", runtimeId: "claude-code" }), "keep me");
+		subprocess.controller.steerSelectedDispatch();
+		deepStrictEqual(subprocess.notices, [
+			{
+				level: "warning",
+				text: "run run-1 uses claude-code (subprocess) and cannot accept live steering",
+				key: "dispatch-board:steer:run-1",
+			},
+		]);
+		strictEqual(subprocess.editor.text, "keep me");
 
 		const completed = harness(row({ status: "completed" }), "keep me");
 		completed.controller.steerSelectedDispatch();

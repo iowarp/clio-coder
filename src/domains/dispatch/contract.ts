@@ -227,14 +227,13 @@ export interface DispatchContract {
 	abort(runId: string, reason?: AbortReason): void;
 
 	/**
-	 * Queue an operator steer on a running native worker. A logical assignment id
-	 * addresses its current attempt. The text is sent as
-	 * a JSON line on the worker's open stdin and injected into its transcript
-	 * as a user message at the next loop boundary; the worker acks with a
-	 * `clio_steer_received` event on its stream. Throws with an operator-facing
-	 * message when the run is unknown or no longer active, when the run kind
-	 * has no stdin channel (acp-delegation), or when the worker's stdin is
-	 * already gone.
+	 * Queue operator guidance on a running HTTP or SDK worker. A logical
+	 * assignment id addresses its current attempt. The text is sent as a JSON
+	 * line on the worker's open stdin and injected into its transcript at the
+	 * next loop boundary; the worker acknowledges runtime acceptance with a
+	 * `clio_steer_received` event. Throws with an operator-facing message when
+	 * the run is unknown or inactive, when the runtime is a single-shot
+	 * subprocess or ACP delegation, or when the worker's stdin is already gone.
 	 */
 	steer(runId: string, text: string): void;
 

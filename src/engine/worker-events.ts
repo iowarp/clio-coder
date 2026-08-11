@@ -78,6 +78,8 @@ export interface ClioSteerReceivedEvent {
 	type: "clio_steer_received";
 	payload: {
 		chars: number;
+		/** Exact parent-side steering provenance entry this acceptance closes. */
+		sequence: number;
 	};
 }
 

@@ -154,12 +154,11 @@ export interface WorkerRunHandle {
 	promise: Promise<WorkerRunResult>;
 	abort(): void;
 	/**
-	 * Queue an operator steer on the agent's steering queue. pi-agent-core
-	 * drains the queue after every tool batch and injects the text as a user
-	 * message before the next assistant response. Fire-and-forget: a steer
-	 * that races run completion is dropped with the run.
+	 * Queue operator guidance on a runtime that exposes a live input API. Absent
+	 * for single-shot subprocess runtimes. Returns true only after the runtime
+	 * accepts the input; a steer that races run completion may return false.
 	 */
-	steer(text: string): void;
+	steer?(text: string): boolean | Promise<boolean>;
 	/**
 	 * Apply an operator decision to a parked escalation. Present only on native
 	 * pi-agent workers (the runtimes with a registry park loop); external
@@ -921,9 +920,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		},
 		steer: (text: string) => {
 			const trimmed = text.trim();
-			if (trimmed.length === 0) return;
-			emit({ type: "clio_steer_received", payload: { chars: trimmed.length } });
+			if (trimmed.length === 0) return false;
 			agent.steer(taskMessage(trimmed));
+			return true;
 		},
 		resolvePermission: (requestId: string, decision: "approve" | "deny") =>
 			resolveEscalation(requestId, decision, "operator"),

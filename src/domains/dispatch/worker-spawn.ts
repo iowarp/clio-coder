@@ -11,7 +11,7 @@
  *     land in a bounded queue that drops display-only frames under pressure
  *     and never drops a receipt-bearing frame.
  *   - stderr carries the structured control lane behind a marker prefix
- *     (announce, heartbeat, steer and cancellation acknowledgements) plus
+ *     (announce, heartbeat, and cancellation acknowledgements) plus
  *     free-form diagnostics, which are tailed. A bulk flood cannot delay a
  *     heartbeat, because the lanes are separate pipes.
  *
@@ -106,11 +106,10 @@ export interface WorkerProcessOptions {
 	 */
 	onForcedKill?: () => void;
 	/**
-	 * Control-lane frames other than the announce. The dispatch domain uses the
-	 * steer acknowledgement to close out steering provenance without waiting on
-	 * the bulk lane.
+	 * Control-lane frames other than the announce. Heartbeats and cancellation
+	 * acknowledgements remain observable even when the bulk lane is saturated.
 	 */
-	onControl?: (frame: { kind: "heartbeat" | "steer_ack" | "cancel_ack"; sequence?: number }) => void;
+	onControl?: (frame: { kind: "heartbeat" | "cancel_ack" }) => void;
 	/**
 	 * Identity the plan approved. Defaults to the identity of the spec actually
 	 * written to stdin, which is what every production caller wants; a caller
@@ -365,10 +364,6 @@ export function spawnWorkerProcess(
 			attestation = frame.value.attestation;
 			opts?.onAnnounce?.(frame.value.attestation);
 			releaseHeldFrames();
-			return;
-		}
-		if (frame.value.kind === "steer_ack") {
-			opts?.onControl?.({ kind: "steer_ack", sequence: frame.value.sequence });
 			return;
 		}
 		opts?.onControl?.({ kind: frame.value.kind });

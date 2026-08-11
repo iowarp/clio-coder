@@ -327,9 +327,5 @@ export function startClaudeCodeWorkerRun(input: WorkerRunInput, emit: WorkerEven
 	return {
 		promise,
 		abort,
-		steer(_text: string) {
-			// `claude -p` is started as a single prompt subprocess. Steering is
-			// supported by the SDK runtime; this path stays single-turn.
-		},
 	};
 }

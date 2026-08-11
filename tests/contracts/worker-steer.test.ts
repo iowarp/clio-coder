@@ -23,13 +23,27 @@ import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "../../
 import { lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
 import { startWorkerRun, type WorkerRunHandle, type WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
-import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
+import { createOrderedSteerHandler, createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { fixtureSettingsFingerprint, STUB_ANNOUNCE_SOURCE } from "../harness/worker-attestation.js";
 
 const SCOUT_TOOL_CALLS = 18;
 const SCOUT_BUDGET = { toolCalls: 18, readReserve: 4, synthesis: true, hardCap: 50 } as const;
+
+function singleShotSubprocessRuntime(id: "claude-code" | "antigravity-code"): RuntimeDescriptor {
+	const model = id === "claude-code" ? "claude-sonnet" : "Gemini 3.5 Flash (High)";
+	return {
+		id,
+		displayName: id,
+		kind: "subprocess",
+		apiFamily: id === "claude-code" ? "claude-code-subprocess" : "google-generative-ai",
+		auth: id === "claude-code" ? "claude-cli" : "none",
+		knownModels: [model],
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+		synthesizeModel: () => ({ id: model, provider: id }) as never,
+	};
+}
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -197,22 +211,26 @@ function fauxRuntimeInput(
 	};
 }
 
-function stubContext(): DomainContext {
+function stubContext(runtimeOverride?: RuntimeDescriptor): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	const target: TargetDescriptor = { id: "default", runtime: "openai", defaultModel: "gpt-4o" };
+	const runtimeId = runtimeOverride?.id ?? "openai";
+	const defaultModel = runtimeOverride?.knownModels?.[0] ?? "gpt-4o";
+	const target: TargetDescriptor = { id: "default", runtime: runtimeId, defaultModel };
 	settings.targets = [target];
 	settings.workers.default.target = target.id;
-	settings.workers.default.model = "gpt-4o";
+	settings.workers.default.model = defaultModel;
 
-	const runtime: RuntimeDescriptor = {
-		id: target.runtime,
-		displayName: "OpenAI",
-		kind: "http",
-		apiFamily: "openai-completions",
-		auth: "api-key",
-		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
-		synthesizeModel: () => ({ id: target.defaultModel, provider: target.runtime }) as never,
-	};
+	const runtime: RuntimeDescriptor =
+		runtimeOverride ??
+		({
+			id: target.runtime,
+			displayName: "OpenAI",
+			kind: "http",
+			apiFamily: "openai-completions",
+			auth: "api-key",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			synthesizeModel: () => ({ id: target.defaultModel, provider: target.runtime }) as never,
+		} satisfies RuntimeDescriptor);
 	const status: TargetStatus = {
 		target,
 		runtime,
@@ -329,12 +347,42 @@ function stubContext(): DomainContext {
 
 describe("contracts/worker-steer", () => {
 	describe("stdin demux", () => {
+		it("serializes async runtime acceptance so later steers cannot acknowledge earlier receipt entries", async () => {
+			const first = deferred<boolean>();
+			const order: string[] = [];
+			const accepted: number[] = [];
+			const rejected: string[] = [];
+			const handle = createOrderedSteerHandler(
+				async (text) => {
+					order.push(`start:${text}`);
+					const verdict = text === "first" ? await first.promise : true;
+					order.push(`end:${text}`);
+					return verdict;
+				},
+				(steer) => accepted.push(steer.sequence),
+				(reason) => rejected.push(reason),
+			);
+
+			const firstDelivery = handle({ text: "first", sequence: 1 });
+			const secondDelivery = handle({ text: "second", sequence: 2 });
+			await new Promise((resolve) => setImmediate(resolve));
+			deepStrictEqual(order, ["start:first"], "the second steer cannot overtake pending acceptance");
+
+			first.resolve(false);
+			await Promise.all([firstDelivery, secondDelivery]);
+			deepStrictEqual(order, ["start:first", "end:first", "start:second", "end:second"]);
+			deepStrictEqual(rejected, ["runtime does not accept live guidance"]);
+			// A rejected steer acknowledges nothing, so only the accepted sequence
+			// can close out a receipt entry.
+			deepStrictEqual(accepted, [2]);
+		});
+
 		it("dispatches a post-spec steer line to the registered handler", async () => {
 			const demux = createWorkerStdinDemux();
 			const received: string[] = [];
-			demux.onSteer((text) => received.push(text));
+			demux.onSteer((steer) => received.push(steer.text));
 			demux.feed(MINIMAL_SPEC_LINE);
-			demux.feed(`${JSON.stringify({ type: "steer", text: "focus on tests/" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "focus on tests/", sequence: 1 })}\n`);
 			const spec = await demux.readSpec();
 			strictEqual(spec.agentId, "coder");
 			deepStrictEqual(received, ["focus on tests/"]);
@@ -344,34 +392,52 @@ describe("contracts/worker-steer", () => {
 		it("buffers steers that arrive before the handler registers and flushes them in order", () => {
 			const demux = createWorkerStdinDemux();
 			demux.feed(MINIMAL_SPEC_LINE);
-			demux.feed(`${JSON.stringify({ type: "steer", text: "first" })}\n`);
-			demux.feed(`${JSON.stringify({ type: "steer", text: "second" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "first", sequence: 1 })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "second", sequence: 2 })}\n`);
 			const received: string[] = [];
-			demux.onSteer((text) => received.push(text));
+			demux.onSteer((steer) => received.push(steer.text));
 			deepStrictEqual(received, ["first", "second"]);
-			demux.feed(`${JSON.stringify({ type: "steer", text: "third" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "third", sequence: 3 })}\n`);
 			deepStrictEqual(received, ["first", "second", "third"]);
 		});
 
 		it("counts and drops malformed, unknown, and empty post-spec lines without losing later steers", () => {
 			const demux = createWorkerStdinDemux();
 			const received: string[] = [];
-			demux.onSteer((text) => received.push(text));
+			demux.onSteer((steer) => received.push(steer.text));
 			demux.feed(MINIMAL_SPEC_LINE);
 			demux.feed("not json at all\n");
 			demux.feed(`${JSON.stringify({ type: "mystery" })}\n`);
-			demux.feed(`${JSON.stringify({ type: "steer", text: "   " })}\n`);
-			demux.feed(`${JSON.stringify({ type: "steer", text: 42 })}\n`);
-			demux.feed(`${JSON.stringify({ type: "steer", text: "still works" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "   ", sequence: 1 })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: 42, sequence: 2 })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "still works", sequence: 3 })}\n`);
 			deepStrictEqual(received, ["still works"]);
+			strictEqual(demux.droppedLineCount(), 4);
+		});
+
+		it("drops a steer that carries no usable sequence", () => {
+			// The sequence is what lets clio_steer_received acknowledge one exact
+			// receipt entry. A steer without one could only be acknowledged by
+			// guessing, so it is dropped rather than delivered unattributed.
+			const demux = createWorkerStdinDemux();
+			const received: string[] = [];
+			demux.onSteer((steer) => received.push(steer.text));
+			demux.feed(MINIMAL_SPEC_LINE);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "no sequence" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "zero", sequence: 0 })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "fractional", sequence: 1.5 })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "stringly", sequence: "1" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "attributable", sequence: 1 })}\n`);
+
+			deepStrictEqual(received, ["attributable"]);
 			strictEqual(demux.droppedLineCount(), 4);
 		});
 
 		it("handles spec and steer arriving in one chunk and split steer lines across chunks", async () => {
 			const demux = createWorkerStdinDemux();
 			const received: string[] = [];
-			demux.onSteer((text) => received.push(text));
-			const steerLine = `${JSON.stringify({ type: "steer", text: "split delivery" })}\n`;
+			demux.onSteer((steer) => received.push(steer.text));
+			const steerLine = `${JSON.stringify({ type: "steer", text: "split delivery", sequence: 1 })}\n`;
 			const combined = MINIMAL_SPEC_LINE + steerLine;
 			demux.feed(combined.slice(0, MINIMAL_SPEC_LINE.length + 5));
 			demux.feed(combined.slice(MINIMAL_SPEC_LINE.length + 5));
@@ -383,12 +449,12 @@ describe("contracts/worker-steer", () => {
 			const demux = createWorkerStdinDemux() as PermissionCapableDemux;
 			const steers: string[] = [];
 			const decisions: Array<{ requestId: string; decision: PermissionDecision }> = [];
-			demux.onSteer((text) => steers.push(text));
+			demux.onSteer((steer) => steers.push(steer.text));
 			demux.onPermissionDecision((decision) => decisions.push(decision));
 
 			demux.feed(MINIMAL_SPEC_LINE);
 			demux.feed(`${JSON.stringify({ type: "permission_decision", requestId: "perm-1", decision: "approve" })}\n`);
-			demux.feed(`${JSON.stringify({ type: "steer", text: "keep going" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "keep going", sequence: 1 })}\n`);
 			const spec = await demux.readSpec();
 
 			strictEqual(spec.agentId, "coder");
@@ -402,13 +468,13 @@ describe("contracts/worker-steer", () => {
 			const decisions: Array<{ requestId: string; decision: PermissionDecision }> = [];
 			const steers: string[] = [];
 			demux.onPermissionDecision((decision) => decisions.push(decision));
-			demux.onSteer((text) => steers.push(text));
+			demux.onSteer((steer) => steers.push(steer.text));
 
 			demux.feed(MINIMAL_SPEC_LINE);
 			demux.feed(`${JSON.stringify({ type: "permission_decision", requestId: "", decision: "approve" })}\n`);
 			demux.feed(`${JSON.stringify({ type: "permission_decision", requestId: "perm-2", decision: "maybe" })}\n`);
 			demux.feed(`${JSON.stringify({ type: "permission_decision", requestId: "perm-3", decision: "deny" })}\n`);
-			demux.feed(`${JSON.stringify({ type: "steer", text: "still alive" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "still alive", sequence: 1 })}\n`);
 
 			deepStrictEqual(decisions, [{ requestId: "perm-3", decision: "deny" }]);
 			deepStrictEqual(steers, ["still alive"]);
@@ -1319,7 +1385,7 @@ rl.on("line", (line) => {
 			try {
 				const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "steerable" });
 				bundle.contract.steer(handle.runId, "  focus on tests/  ");
-				deepStrictEqual(sent, [{ type: "steer", text: "focus on tests/" }]);
+				deepStrictEqual(sent, [{ type: "steer", text: "focus on tests/", sequence: 1 }]);
 				exit.resolve({ exitCode: 0, signal: null });
 				await handle.finalPromise;
 			} finally {
@@ -1360,6 +1426,45 @@ rl.on("line", (line) => {
 				throws(() => bundle.contract.steer(handle.runId, "hello"), /not active/);
 			} finally {
 				await bundle.extension.stop?.();
+			}
+		});
+
+		it("never sends steers to single-shot Claude or Antigravity subprocess workers", async () => {
+			for (const runtimeId of ["claude-code", "antigravity-code"] as const) {
+				const context = stubContext(singleShotSubprocessRuntime(runtimeId));
+				const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+				const sent: unknown[] = [];
+				const bundle = makeDispatchBundle(context, {
+					spawnWorker: () => ({
+						pid: 9999,
+						promise: exit.promise,
+						events: emptyEvents(),
+						abort: () => {},
+						heartbeatAt: { current: Date.now() },
+						send: (value: unknown) => {
+							sent.push(value);
+							return true;
+						},
+					}),
+				});
+
+				await bundle.extension.start();
+				try {
+					const handle = await bundle.contract.dispatch({
+						agentId: "coder",
+						executionRole: "builder",
+						task: `single-shot ${runtimeId}`,
+					});
+					throws(
+						() => bundle.contract.steer(handle.runId, "must not disappear"),
+						new RegExp(`${runtimeId.replace("-", "\\-")}.*does not support live steering`),
+					);
+					deepStrictEqual(sent, [], `${runtimeId} received no steer frame`);
+					exit.resolve({ exitCode: 0, signal: null });
+					await handle.finalPromise;
+				} finally {
+					await bundle.extension.stop?.();
+				}
 			}
 		});
 
