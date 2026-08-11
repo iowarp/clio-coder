@@ -17,10 +17,11 @@ import type { TargetDescriptor } from "../../types/target-descriptor.js";
  *
  * `agy --print` prints plain text (there is no structured event stream), so the
  * worker runner cannot mediate individual agy tool calls the way the Claude SDK
- * runner does. Permission gating is coarse: `--sandbox` for read-only-leaning
- * levels and `--dangerously-skip-permissions` only under `full-auto` plus the
- * explicit `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` environment gate. agy's own
- * `settings.json` still governs its real tool surface.
+ * runner does. Permission gating is coarse: `--mode plan --sandbox` for
+ * read-only runs and `--dangerously-skip-permissions` only under `full-auto`
+ * plus the explicit `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` environment gate.
+ * agy's own `settings.json` still governs modes that Clio does not explicitly
+ * constrain.
  */
 
 export const ANTIGRAVITY_AUTH_NOTICE =

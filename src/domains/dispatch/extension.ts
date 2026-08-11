@@ -1615,7 +1615,7 @@ function autonomyEnforcementForWorkerSpec(
 				grade: config.dangerousBypass ? "bypassed" : "approximated",
 				autonomy,
 				...authorityEvidence,
-				externalMode: config.extraArgs.includes("--sandbox") ? "sandbox" : "agy-settings-default",
+				externalMode: config.externalMode,
 				dangerousBypass: config.dangerousBypass,
 			};
 		} catch {

@@ -23,17 +23,19 @@ const ZERO_USAGE: Usage = {
 export interface AntigravitySubprocessConfig {
 	extraArgs: string[];
 	dangerousBypass: boolean;
+	externalMode: "plan+sandbox" | "bypassPermissions" | "agy-settings-default";
 }
 
 /**
  * agy `--print` permission flags for a given autonomy level, mirroring the
- * Claude Code runner's posture against agy's coarser flag surface (agy exposes
- * only `--sandbox` and `--dangerously-skip-permissions`; it has no per-tool
- * allowlist or accept-edits mode).
+ * Claude Code runner's posture against agy's coarser flag surface. agy exposes
+ * an agent execution mode and a terminal sandbox, but no per-tool callback or
+ * allowlist Clio can mediate.
  *
  *  - `full-auto` + `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` opens the dangerous
  *    bypass (`--dangerously-skip-permissions`); nothing else does.
- *  - `read-only` runs `--sandbox`.
+ *  - `read-only` runs `--mode plan --sandbox`: plan prevents agent edits and
+ *    sandbox independently restricts terminal execution.
  *  - `suggest` is refused because `agy --print` cannot pause to ask.
  *  - `auto-edit` and ungated `full-auto` pass no permission flag and defer to
  *    agy's own `settings.json`.
@@ -43,7 +45,11 @@ export function antigravitySubprocessConfigForAutonomy(
 	env: NodeJS.ProcessEnv = process.env,
 ): AntigravitySubprocessConfig {
 	if (level === "full-auto" && env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
-		return { extraArgs: ["--dangerously-skip-permissions"], dangerousBypass: true };
+		return {
+			extraArgs: ["--dangerously-skip-permissions"],
+			dangerousBypass: true,
+			externalMode: "bypassPermissions",
+		};
 	}
 	if (level === "suggest") {
 		throw new Error(
@@ -51,9 +57,9 @@ export function antigravitySubprocessConfigForAutonomy(
 		);
 	}
 	if (level === "read-only") {
-		return { extraArgs: ["--sandbox"], dangerousBypass: false };
+		return { extraArgs: ["--mode", "plan", "--sandbox"], dangerousBypass: false, externalMode: "plan+sandbox" };
 	}
-	return { extraArgs: [], dangerousBypass: false };
+	return { extraArgs: [], dangerousBypass: false, externalMode: "agy-settings-default" };
 }
 
 export function buildAntigravityPrompt(input: WorkerRunInput): string {

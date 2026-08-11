@@ -1576,7 +1576,7 @@ describe("contracts/dispatch", () => {
 				},
 			},
 			{
-				name: "antigravity sandbox",
+				name: "antigravity plan and sandbox",
 				runtime: runtimeDescriptor({
 					id: "antigravity-code",
 					kind: "subprocess",
@@ -1586,7 +1586,7 @@ describe("contracts/dispatch", () => {
 				expected: {
 					grade: "approximated",
 					autonomy: "read-only",
-					externalMode: "sandbox",
+					externalMode: "plan+sandbox",
 					dangerousBypass: false,
 				},
 			},
@@ -1602,7 +1602,7 @@ describe("contracts/dispatch", () => {
 				expected: {
 					grade: "bypassed",
 					autonomy: "full-auto",
-					externalMode: "agy-settings-default",
+					externalMode: "bypassPermissions",
 					dangerousBypass: true,
 				},
 			},
