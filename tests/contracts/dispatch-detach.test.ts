@@ -102,7 +102,16 @@ function steerableGatedWorker(): {
 			heartbeatAt: { current: Date.now() },
 			send: (value: unknown) => {
 				sent.push(value);
-				emit({ type: "clio_steer_received", payload: { text: "focus on tests" } });
+				// The real worker echoes back the sequence it was handed, which is what
+				// lets one acknowledgement close out one receipt entry.
+				const steer = value as { text?: unknown; sequence?: unknown };
+				emit({
+					type: "clio_steer_received",
+					payload: {
+						chars: typeof steer.text === "string" ? steer.text.trim().length : 0,
+						sequence: steer.sequence,
+					},
+				});
 				return true;
 			},
 		},
@@ -310,9 +319,11 @@ describe("detached dispatch + collect", () => {
 				approvedDispatch,
 			)) as ToolRunResult;
 			strictEqual(guidedAgain.kind, "ok");
+			// Each steer carries the parent-assigned sequence that its
+			// clio_steer_received acknowledgement echoes back.
 			deepStrictEqual(gated.sent, [
-				{ type: "steer", text: "focus on tests" },
-				{ type: "steer", text: "verify café" },
+				{ type: "steer", text: "focus on tests", sequence: 1 },
+				{ type: "steer", text: "verify café", sequence: 2 },
 			]);
 			await waitFor(
 				() => runEvents.eventTail(active.id)?.entries.some((entry) => entry.type === "clio_steer_received") === true,

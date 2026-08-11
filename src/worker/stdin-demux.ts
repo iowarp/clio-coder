@@ -7,11 +7,14 @@ export interface WorkerStdinDemux {
 	readSpec(): Promise<WorkerSpec>;
 	/**
 	 * Register the handler for post-spec steer lines
-	 * (`{"type":"steer","text":"..."}`). Steers that arrive before
-	 * registration are buffered in order and flushed to the handler.
-	 * Single handler; a second registration replaces the first.
+	 * (`{"type":"steer","text":"...","sequence":1}`). The sequence is assigned by
+	 * the parent and is what lets `clio_steer_received` acknowledge one exact
+	 * receipt entry, so a line without a positive integer sequence is dropped
+	 * rather than delivered unattributed. Steers that arrive before registration
+	 * are buffered in order and flushed to the handler. Single handler; a second
+	 * registration replaces the first.
 	 */
-	onSteer(handler: (text: string) => void): void;
+	onSteer(handler: (steer: WorkerSteerMessage) => void): void;
 	/**
 	 * Register the handler for post-spec permission-decision lines
 	 * (`{"type":"permission_decision","requestId":"...","decision":"approve"|"deny"}`).
@@ -30,6 +33,46 @@ export interface WorkerStdinDemux {
 	onChannelClose(handler: () => void): void;
 }
 
+export interface WorkerSteerMessage {
+	text: string;
+	/** Parent-assigned receipt-provenance sequence for exact acknowledgement. */
+	sequence: number;
+}
+
+/**
+ * Preserve stdin order while a runtime accepts guidance asynchronously.
+ * `clio_steer_received` echoes the parent-assigned sequence, so an
+ * acknowledgement closes out one exact receipt entry. Ordering still matters
+ * for the runtime itself: a later steer must never reach it ahead of an earlier
+ * pending one, or the guidance arrives out of the order the operator sent it.
+ */
+export function createOrderedSteerHandler(
+	deliver: (text: string) => boolean | Promise<boolean>,
+	onAccepted: (steer: WorkerSteerMessage) => void,
+	onRejected: (reason: string) => void,
+): (steer: WorkerSteerMessage) => Promise<void> {
+	let tail = Promise.resolve();
+	return (steer: WorkerSteerMessage): Promise<void> => {
+		tail = tail.then(async () => {
+			let rejection: string | null = null;
+			try {
+				if (await deliver(steer.text)) onAccepted(steer);
+				else rejection = "runtime does not accept live guidance";
+			} catch (error) {
+				rejection = error instanceof Error ? error.message : String(error);
+			}
+			if (rejection !== null) {
+				try {
+					onRejected(rejection);
+				} catch {
+					// Diagnostics cannot be allowed to poison subsequent delivery.
+				}
+			}
+		});
+		return tail;
+	};
+}
+
 export function createWorkerStdinDemux(): WorkerStdinDemux {
 	let buffer = "";
 	let specResolve: ((spec: WorkerSpec) => void) | null = null;
@@ -38,8 +81,8 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 	let specError: Error | null = null;
 	let specReceived = false;
 	let closed = false;
-	let steerHandler: ((text: string) => void) | null = null;
-	const pendingSteers: string[] = [];
+	let steerHandler: ((steer: WorkerSteerMessage) => void) | null = null;
+	const pendingSteers: WorkerSteerMessage[] = [];
 	let permissionHandler: ((decision: { requestId: string; decision: "approve" | "deny" }) => void) | null = null;
 	const pendingPermissionDecisions: Array<{ requestId: string; decision: "approve" | "deny" }> = [];
 	let droppedLines = 0;
@@ -63,12 +106,12 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 		specReject?.(err);
 	}
 
-	function deliverSteer(text: string): void {
+	function deliverSteer(steer: WorkerSteerMessage): void {
 		if (steerHandler) {
-			steerHandler(text);
+			steerHandler(steer);
 			return;
 		}
-		pendingSteers.push(text);
+		pendingSteers.push(steer);
 	}
 
 	function deliverPermissionDecision(requestId: string, decision: "approve" | "deny"): void {
@@ -92,9 +135,14 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			value !== null &&
 			(value as { type?: unknown }).type === "steer" &&
 			typeof (value as { text?: unknown }).text === "string" &&
-			(value as { text: string }).text.trim().length > 0
+			(value as { text: string }).text.trim().length > 0 &&
+			Number.isSafeInteger((value as { sequence?: unknown }).sequence) &&
+			Number((value as { sequence: number }).sequence) > 0
 		) {
-			deliverSteer((value as { text: string }).text);
+			deliverSteer({
+				text: (value as { text: string }).text,
+				sequence: (value as { sequence: number }).sequence,
+			});
 			return;
 		}
 		if (
@@ -195,11 +243,11 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 				specReject = reject;
 			});
 		},
-		onSteer(handler: (text: string) => void): void {
+		onSteer(handler: (steer: WorkerSteerMessage) => void): void {
 			steerHandler = handler;
 			while (pendingSteers.length > 0) {
-				const text = pendingSteers.shift();
-				if (text !== undefined) handler(text);
+				const steer = pendingSteers.shift();
+				if (steer !== undefined) handler(steer);
 			}
 		},
 		onPermissionDecision(handler: (decision: { requestId: string; decision: "approve" | "deny" }) => void): void {

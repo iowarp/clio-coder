@@ -670,11 +670,16 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	return {
 		promise,
 		abort,
-		steer(text: string) {
+		async steer(text: string): Promise<boolean> {
 			const trimmed = text.trim();
-			if (trimmed.length === 0) return;
-			emit({ type: "clio_steer_received", payload: { chars: trimmed.length } });
-			void queryHandle?.streamInput(oneSdkUserMessage(sdkUserTextMessage(trimmed, true))).catch(() => {});
+			const activeQuery = queryHandle;
+			if (trimmed.length === 0 || activeQuery === null) return false;
+			try {
+				await activeQuery.streamInput(oneSdkUserMessage(sdkUserTextMessage(trimmed, true)));
+				return true;
+			} catch {
+				return false;
+			}
 		},
 	};
 }

@@ -21,7 +21,7 @@ import { endpointIdentityHash, WORKER_PROTOCOL_VERSION, workerSpecDigest } from 
 import { observeHostIdentity, observeWorkerResourceFacts } from "./resource-facts.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
 import { validateRehydratedWorkerRuntime, type WorkerSpec } from "./spec-contract.js";
-import { createWorkerStdinDemux } from "./stdin-demux.js";
+import { createOrderedSteerHandler, createWorkerStdinDemux } from "./stdin-demux.js";
 
 /** Bound between channel-close abort and forced exit for a hung run. */
 const CHANNEL_CLOSE_EXIT_GRACE_MS = 5000;
@@ -169,16 +169,17 @@ async function main(): Promise<number> {
 	// .partial), which reserializes quadratically on stdout. No worker-stdout
 	// consumer reads those cumulative snapshots (see event-projection.ts).
 	const handle = startWorkerRun(input, (event) => emitEvent(projectWorkerEventForStdout(event)));
-	// Steer lines arriving on stdin after the spec queue onto the agent's
-	// steering queue; the demux buffers any that landed before this point.
-	// The acknowledgement rides the control lane, so a saturated stdout queue
-	// cannot delay it past the orchestrator's steering bound.
-	let steerSequence = 0;
-	demux.onSteer((text) => {
-		steerSequence += 1;
-		emitControlFrame({ kind: "steer_ack", sequence: steerSequence });
-		handle.steer(text);
-	});
+	// The demux buffers lines that landed before the runtime handle existed.
+	// Single-shot subprocesses expose no steer method, and an SDK query can race
+	// completion. The runtime emits the receipt-bearing clio_steer_received event
+	// only after it accepts the message; rejected input is diagnostic-only.
+	demux.onSteer(
+		createOrderedSteerHandler(
+			(text) => handle.steer?.(text) ?? false,
+			({ text, sequence }) => emitEvent({ type: "clio_steer_received", payload: { chars: text.trim().length, sequence } }),
+			(reason) => process.stderr.write(`[worker] dropped steer: ${reason}\n`),
+		),
+	);
 	// Permission-decision lines resolve a parked escalation. Unknown or
 	// duplicate requestIds return false and are dropped without crashing the
 	// worker; runtimes without an escalation loop simply have no handler.

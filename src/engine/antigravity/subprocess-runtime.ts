@@ -216,9 +216,5 @@ export function startAntigravityWorkerRun(input: WorkerRunInput, emit: WorkerEve
 	return {
 		promise,
 		abort,
-		steer(_text: string) {
-			// `agy --print` is a single-shot subprocess and does not surface a
-			// resumable conversation id on stdout, so there is nothing to steer.
-		},
 	};
 }

@@ -27,10 +27,10 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 			deps.notify("warning", "no fleet run is selected", "dispatch-board:steer");
 			return;
 		}
-		if (row.runtimeKind === "acp-delegation") {
+		if (row.runtimeKind === "acp-delegation" || row.runtimeKind === "subprocess") {
 			deps.notify(
 				"warning",
-				`run ${row.runId} uses ACP delegation and cannot accept live steering`,
+				`run ${row.runId} uses ${row.runtimeId} (${row.runtimeKind}) and cannot accept live steering`,
 				`dispatch-board:steer:${row.runId}`,
 			);
 			return;

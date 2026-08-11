@@ -8,7 +8,7 @@
  *     pressure.
  *   - The control lane is worker stderr, restricted to lines that carry the
  *     CONTROL_FRAME_PREFIX marker. It carries the announce, heartbeats, and
- *     steer and cancellation acknowledgements. A bulk flood cannot delay it,
+ *     cancellation acknowledgements. A bulk flood cannot delay it,
  *     and unmarked stderr stays free-form operator diagnostics.
  *
  * Every lane has an explicit byte limit that is enforced on the raw line
@@ -98,7 +98,6 @@ export interface WorkerAttestation {
 export type WorkerControlFrame =
 	| { kind: "announce"; attestation: WorkerAttestation }
 	| { kind: "heartbeat"; at: number }
-	| { kind: "steer_ack"; sequence: number }
 	| { kind: "cancel_ack"; at: number };
 
 function sha256Hex(input: string): string {
@@ -309,11 +308,6 @@ export function parseControlFrame(line: string): FrameParseResult<WorkerControlF
 			const at = readFiniteNumber(record, "at");
 			if (at === null) return { ok: false, reason: "heartbeat frame requires a finite at" };
 			return { ok: true, value: { kind: "heartbeat", at } };
-		}
-		case "steer_ack": {
-			const sequence = readFiniteNumber(record, "sequence");
-			if (sequence === null) return { ok: false, reason: "steer_ack frame requires a finite sequence" };
-			return { ok: true, value: { kind: "steer_ack", sequence } };
 		}
 		case "cancel_ack": {
 			const at = readFiniteNumber(record, "at");

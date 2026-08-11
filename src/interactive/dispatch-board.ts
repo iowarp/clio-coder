@@ -8,7 +8,12 @@ import {
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
-import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
+import {
+	type DispatchRequestOrigin,
+	type RunKind,
+	type RunStatus,
+	runKindSupportsLiveSteering,
+} from "../domains/dispatch/types.js";
 import {
 	costAggregateForAmount,
 	formatCostAggregate,
@@ -94,10 +99,10 @@ export interface DispatchBoardRow {
 	steerAcknowledgement?: DispatchSteerAcknowledgement;
 }
 
-/** Native, live rows are the only rows whose stdin can accept operator guidance. */
+/** Live HTTP/SDK rows are the only rows whose runtime can consume operator guidance. */
 export function isDispatchBoardRowSteerable(row: DispatchBoardRow): boolean {
 	return (
-		row.runtimeKind !== "acp-delegation" &&
+		runKindSupportsLiveSteering(row.runtimeKind) &&
 		(row.status === "running" || row.status === "stale" || row.status === "enqueued")
 	);
 }
