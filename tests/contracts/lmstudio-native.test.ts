@@ -62,6 +62,23 @@ function withKvCacheMode<T>(value: string, fn: () => T): T {
 	}
 }
 
+/**
+ * Predictions go over LM Studio's OpenAI-compatible port by default. Tests
+ * that drive the SDK prediction surface through injected deps opt back into it
+ * so they keep asserting on the transport they are about, and so no contract
+ * test reaches for a socket.
+ */
+async function withSdkPrediction<T>(fn: () => Promise<T>): Promise<T> {
+	const previous = process.env.CLIO_LMSTUDIO_SDK_PREDICT;
+	process.env.CLIO_LMSTUDIO_SDK_PREDICT = "1";
+	try {
+		return await fn();
+	} finally {
+		if (previous === undefined) delete process.env.CLIO_LMSTUDIO_SDK_PREDICT;
+		else process.env.CLIO_LMSTUDIO_SDK_PREDICT = previous;
+	}
+}
+
 function captureStderr<T>(fn: () => T): { result: T; stderr: string } {
 	const original = process.stderr.write.bind(process.stderr);
 	let stderr = "";
@@ -210,9 +227,11 @@ describe("lmstudio-native thinking replay", () => {
 		};
 
 		const events: Array<{ type: string; message?: AssistantMessage }> = [];
-		for await (const event of runStream(noThinkingModel, context, undefined, deps, { thinkingLevel: "off" })) {
-			events.push(event as { type: string; message?: AssistantMessage });
-		}
+		await withSdkPrediction(async () => {
+			for await (const event of runStream(noThinkingModel, context, undefined, deps, { thinkingLevel: "off" })) {
+				events.push(event as { type: string; message?: AssistantMessage });
+			}
+		});
 
 		ok(capturedHistory.messages, "history should have been sent to LM Studio");
 		const replayedAssistant = capturedHistory.messages.find((entry) => entry.role === "assistant");
@@ -282,14 +301,22 @@ describe("contracts/lmstudio-native KV-cache env override", () => {
 });
 
 describe("contracts/lmstudio-native co-resident residency", () => {
+	let previousSdkPredict: string | undefined;
+
 	beforeEach(() => {
 		resetResidencyState();
 		setResidencyNoticeSink(() => {});
+		// These assert on residency, and reach the prediction only to observe that
+		// the turn completed. Pinning the SDK transport keeps them off the network.
+		previousSdkPredict = process.env.CLIO_LMSTUDIO_SDK_PREDICT;
+		process.env.CLIO_LMSTUDIO_SDK_PREDICT = "1";
 	});
 
 	afterEach(() => {
 		setResidencyNoticeSink(null);
 		resetResidencyState();
+		if (previousSdkPredict === undefined) delete process.env.CLIO_LMSTUDIO_SDK_PREDICT;
+		else process.env.CLIO_LMSTUDIO_SDK_PREDICT = previousSdkPredict;
 	});
 
 	function residencyDeps(opts: {
@@ -381,5 +408,91 @@ describe("contracts/lmstudio-native co-resident residency", () => {
 
 		const error = events.find((event) => event.type === "error");
 		ok(error?.error?.errorMessage?.includes("could not load"), error?.error?.errorMessage);
+	});
+});
+
+describe("contracts/lmstudio-native prediction transport", () => {
+	function sseResponse(text: string): Response {
+		const chunks = [
+			`data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", content: text } }] })}\n\n`,
+			`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 3, completion_tokens: 2 } })}\n\n`,
+			"data: [DONE]\n\n",
+		];
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+				controller.close();
+			},
+		});
+		return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+	}
+
+	function captureRequest(): {
+		deps: LmStudioRunDeps;
+		fetch: typeof globalThis.fetch;
+		seen: { url?: string; body?: Record<string, unknown> };
+	} {
+		const seen: { url?: string; body?: Record<string, unknown> } = {};
+		const deps: LmStudioRunDeps = {
+			createClient: () =>
+				({
+					files: {
+						prepareImageBase64: async () => {
+							throw new Error("image preparation not expected");
+						},
+					},
+					llm: {
+						listLoaded: async () => [],
+						model: async () => ({
+							respond: () => {
+								throw new Error("prediction must not go over the SDK");
+							},
+						}),
+					},
+				}) as ReturnType<LmStudioRunDeps["createClient"]>,
+			reconcile: async () => ({ decision: "observe", evict: [], fallbackEvict: [], keepResident: false, notices: [] }),
+			discoverLoadedContext: async () => undefined,
+		};
+		const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+			seen.url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			seen.body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+			return sseResponse("Visible answer.");
+		}) as typeof globalThis.fetch;
+		return { deps, fetch: fetchImpl, seen };
+	}
+
+	const context = {
+		messages: [{ role: "user", content: "hello", timestamp: 0 }],
+	} as Parameters<typeof runStream>[1];
+
+	/**
+	 * The defect this pins: `off` used to reach the SDK, which has no channel to
+	 * carry it, so a model that reasons by default kept reasoning at every dial.
+	 * LM Studio's OpenAI-compatible port reads `reasoning_effort`, and `none` is
+	 * the value that suppresses reasoning there.
+	 */
+	it("sends thinking off to LM Studio's HTTP surface as reasoning_effort none", async () => {
+		const { deps, fetch, seen } = captureRequest();
+		const events: Array<{ type: string }> = [];
+		for await (const event of runStream(model(undefined, { reasoning: true }), context, { fetch }, deps, {
+			thinkingLevel: "off",
+		})) {
+			events.push(event as { type: string });
+		}
+
+		ok(seen.url?.startsWith("http://127.0.0.1:1234/v1/"), seen.url);
+		strictEqual(seen.body?.reasoning_effort, "none");
+		ok(events.some((event) => event.type === "done"));
+	});
+
+	it("sends an on dial as reasoning_effort low", async () => {
+		const { deps, fetch, seen } = captureRequest();
+		for await (const _event of runStream(model(undefined, { reasoning: true }), context, { fetch }, deps, {
+			thinkingLevel: "low",
+		})) {
+			// draining the stream is what drives the request
+		}
+
+		strictEqual(seen.body?.reasoning_effort, "low");
 	});
 });

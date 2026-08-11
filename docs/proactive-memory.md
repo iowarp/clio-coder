@@ -208,9 +208,16 @@ does not need to be clever. A small non-reasoning model is the right choice, and
 Clio always requests the background route with thinking off regardless of
 `background.thinkingLevel`.
 
-A model that reasons anyway still works. Reasoning blocks are discarded and only
-the envelope is kept, and the output budget is sized to let a reasoning preamble
-run its course first. The cost is latency, which the detached step absorbs.
+That request reaches the wire wherever the runtime carries a thinking control:
+llama.cpp reads `chat_template_kwargs.enable_thinking`, and LM Studio reads
+`reasoning_effort`, where `none` is the off value.
+
+A model that reasons anyway still works. Some genuinely cannot be silenced, and
+the catalog records those as always-on so the level reads `forced` rather than
+`off`; the shipped background model `qwopus3.5-9b-v3` is one of them. Reasoning
+blocks are discarded and only the envelope is kept, and the output budget is
+sized to let a reasoning preamble run its course first. The cost is latency,
+which the detached step absorbs.
 
 One configuration is refused rather than degraded. If the background role names
 the same target and model as the orchestrator, and that model reasons, the LLM

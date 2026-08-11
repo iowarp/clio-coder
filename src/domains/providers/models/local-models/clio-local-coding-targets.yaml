@@ -967,14 +967,17 @@
       openaiCompat: "Verified through the LM Studio gateway for read and artifact tool calls; use when the native SDK produces thinking-only length stops or malformed tools."
       anthropicCompat: "LM Studio's Anthropic Messages surface streams simple text with the server root URL as baseUrl; keep as a protocol fallback until tool and reasoning behavior are proven."
     thinking:
-      mechanism: budget-tokens
-      budgetByLevel:
-        low: 512
-        medium: 2048
-        high: 4096
+      # Measured 2026-08-11 against LM Studio on this exact model: baseline 56
+      # reasoning tokens, reasoning_effort none 120, reasoning_effort minimal
+      # 243, chat_template_kwargs.enable_thinking false 45, both together 44.
+      # No spelling silences it, and the budget-tokens mechanism it used to
+      # claim is informational on both LM Studio and llama.cpp, so nothing ever
+      # reached the wire. Always-on is what the model actually does.
+      mechanism: always-on
       guidance: |
-        Qwopus 9B distilled from Opus reasoning; thinking emits via the qwen
-        chat template. Output cap is tighter than the 32GB-class MoE families
-        because this is the 16GB emulation target. Keep thinking budgets
-        modest for tool-calling workflows.
+        Qwopus 9B distilled from Opus reasoning; the chain-of-thought comes out
+        of the chat template unconditionally and the dial cannot stop it, so
+        Clio shows the level as forced. Output cap is tighter than the
+        32GB-class MoE families because this is the 16GB emulation target;
+        budget for a reasoning preamble ahead of every answer.
     serving: "LM Studio reports trained_for_tool_use for the local qwopus3.5-9b-v3 target. Native model override successfully switched residency to granite-4.0-h-350m through the SDK."
