@@ -43,6 +43,66 @@ export interface TaskMemoryModelClient {
 
 export type TaskMemoryPolicyDecision = "silent" | "injected" | "gated" | "timeout" | "malformed";
 
+/**
+ * Why a step ended where it did.
+ *
+ * `decision` alone cannot be acted on. Six distinct situations resolve to a
+ * null reminder, and they call for opposite responses: a route that refused the
+ * connection needs the server started, a model that wrote `<no_intervention/>`
+ * needs nothing at all, and an answer whose every operation named an invented
+ * verb needs the prompt changed. A session that recorded four `silent` steps and
+ * zero bank writes was indistinguishable from a healthy quiet one, which is how
+ * a broken tier survived a whole session unnoticed.
+ */
+export type TaskMemoryPolicyReason =
+	/** A cited reminder reached the visible channel. */
+	| "intervened"
+	/** The model answered and chose `<no_intervention/>` or wrote no phase two. */
+	| "model_silent"
+	/** The reminder repeated the one already on screen. */
+	| "duplicate_reminder"
+	/** The rules tier already spoke for this boundary; phase one still applied. */
+	| "suppressed"
+	/** A spontaneous reminder cited no bank entry. */
+	| "uncited"
+	/** The reminder exceeded the token cap and was dropped rather than truncated. */
+	| "over_budget"
+	/** No envelope was found, or its operation list violated the grammar. */
+	| "unparseable"
+	/** Every operation named a verb the bank has no writer for. */
+	| "all_operations_invalid"
+	/** The request did not answer inside the policy timeout. */
+	| "deadline"
+	/** The model client threw: unreachable route, auth failure, malformed request. */
+	| "client_error"
+	/** No background role is configured, so the llm tier never ran. */
+	| "no_client"
+	/** A step was already in flight, so this boundary's triggers stayed pending. */
+	| "step_in_flight"
+	/** Rules tier: the turn ended with no repeated failure worth reporting. */
+	| "no_repeated_failure"
+	/** Rules tier: compaction reactivation found no knowledge entries to restore. */
+	| "bank_empty";
+
+/**
+ * The model's own words for one step, handed to an observer before they are
+ * discarded. Content-bearing by construction, so the composition root only wires
+ * it when the operator asked for a trace.
+ */
+export interface TaskMemoryEnvelope {
+	systemPrompt: string;
+	userPrompt: string;
+	/** Raw completion text, or empty when the call threw or timed out. */
+	response: string;
+	decision: TaskMemoryPolicyDecision;
+	reason: TaskMemoryPolicyReason;
+	bankOperations: number;
+	droppedOperations: number;
+	reminder: string | null;
+	/** Client failure message, redacted of nothing because it never carries bank text. */
+	error: string | null;
+}
+
 export interface TaskMemoryPolicyInput {
 	task: string;
 	trajectory: ReadonlyArray<TaskMemoryTrajectoryStep>;
@@ -53,11 +113,16 @@ export interface TaskMemoryPolicyInput {
 	suppressIntervention?: boolean;
 	/** Last visible memory reminder, used to keep repeated model output silent. */
 	previousReminder?: string | null;
+	/** Opt-in raw-envelope observer. Absent unless an operator turned tracing on. */
+	onEnvelope?: (envelope: TaskMemoryEnvelope) => void;
 }
 
 export interface TaskMemoryPolicyResult {
 	decision: TaskMemoryPolicyDecision;
+	reason: TaskMemoryPolicyReason;
 	bankOperations: number;
+	/** Operations the bank refused. Nonzero with `bankOperations` at zero is a total loss. */
+	droppedOperations: number;
 	reminder: string | null;
 	inputTokens: number;
 	outputTokens: number;
@@ -88,19 +153,48 @@ export async function runTaskMemoryPolicy(
 	client: TaskMemoryModelClient,
 	input: TaskMemoryPolicyInput,
 ): Promise<TaskMemoryPolicyResult> {
-	const empty = (decision: TaskMemoryPolicyDecision): TaskMemoryPolicyResult => ({
-		decision,
-		bankOperations: 0,
-		reminder: null,
-		inputTokens: 0,
-		outputTokens: 0,
-	});
 	const controller = new AbortController();
 	const timeoutMs = positiveInteger(input.timeoutMs, TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS);
 	const timeoutMarker = Symbol("task-memory-timeout");
 	let timer: NodeJS.Timeout | undefined;
+	let userPrompt = "";
+	let rawResponse = "";
+	let clientError: string | null = null;
+	// Every exit reports through here so the trace sees the same envelope the
+	// telemetry row summarizes, including the paths that used to throw away both.
+	const settle = (
+		decision: TaskMemoryPolicyDecision,
+		reason: TaskMemoryPolicyReason,
+		parts: Partial<Omit<TaskMemoryPolicyResult, "decision" | "reason">> = {},
+	): TaskMemoryPolicyResult => {
+		const result: TaskMemoryPolicyResult = {
+			decision,
+			reason,
+			bankOperations: parts.bankOperations ?? 0,
+			droppedOperations: parts.droppedOperations ?? 0,
+			reminder: parts.reminder ?? null,
+			inputTokens: parts.inputTokens ?? 0,
+			outputTokens: parts.outputTokens ?? 0,
+		};
+		try {
+			input.onEnvelope?.({
+				systemPrompt: MEMORY_INTERVENTION_SYSTEM_PROMPT,
+				userPrompt,
+				response: rawResponse,
+				decision,
+				reason,
+				bankOperations: result.bankOperations,
+				droppedOperations: result.droppedOperations,
+				reminder: result.reminder,
+				error: clientError,
+			});
+		} catch {
+			// A failing observer is an operator's diagnostic, never the policy's problem.
+		}
+		return result;
+	};
 	try {
-		const userPrompt = buildMemoryInterventionUserPrompt({
+		userPrompt = buildMemoryInterventionUserPrompt({
 			task: input.task.slice(0, TASK_PROMPT_MAX_CHARS),
 			bank: bank.render(input.maxTokens),
 			trajectory: JSON.stringify(input.trajectory).slice(0, TRAJECTORY_PROMPT_MAX_CHARS),
@@ -118,43 +212,40 @@ export async function runTaskMemoryPolicy(
 		if (response === timeoutMarker) {
 			controller.abort();
 			void completion.catch(() => undefined);
-			return empty("timeout");
+			return settle("timeout", "deadline");
 		}
-		const parsed = parseTaskMemoryPolicyResponse(response.text);
-		if (parsed === null) {
-			return {
-				...empty("malformed"),
-				inputTokens: nonNegativeInteger(response.inputTokens),
-				outputTokens: nonNegativeInteger(response.outputTokens),
-			};
-		}
-		const operations = resolveOperations(bank, parsed.operations);
-		applyOperations(bank, operations);
+		rawResponse = typeof response.text === "string" ? response.text : "";
 		const usage = {
 			inputTokens: nonNegativeInteger(response.inputTokens),
 			outputTokens: nonNegativeInteger(response.outputTokens),
 		};
-		if (parsed.context === null) {
-			return { decision: "silent", bankOperations: operations.length, reminder: null, ...usage };
-		}
+		const read = readPolicyStep(rawResponse);
+		if (!read.ok) return settle("malformed", read.reason, { ...usage, droppedOperations: read.dropped });
+		const operations = resolveOperations(bank, read.step.operations);
+		applyOperations(bank, operations);
+		// A model's operation is dropped either by the grammar, which does not know
+		// the verb, or by identity repair, which could not resolve a delete target.
+		// Both are model output the bank refused, so both belong in one count.
+		const counts = {
+			...usage,
+			bankOperations: operations.length,
+			droppedOperations: read.dropped + (read.step.operations.length - operations.length),
+		};
+		if (read.step.context === null) return settle("silent", "model_silent", counts);
 		// An over-budget reminder is a phase-two policy violation, not a parse
 		// failure. Truncating it would strip the citation that earns it a voice, so
 		// the reminder is suppressed while phase one stays applied.
-		const reminder = withMemoryPrefix(parsed.context, input.maxTokens);
-		if (reminder.length === 0) {
-			return { decision: "gated", bankOperations: operations.length, reminder: null, ...usage };
-		}
-		if (input.suppressIntervention === true || reminder === input.previousReminder) {
-			return { decision: "silent", bankOperations: operations.length, reminder: null, ...usage };
-		}
+		const reminder = withMemoryPrefix(read.step.context, input.maxTokens);
+		if (reminder.length === 0) return settle("gated", "over_budget", counts);
+		if (input.suppressIntervention === true) return settle("silent", "suppressed", counts);
+		if (reminder === input.previousReminder) return settle("silent", "duplicate_reminder", counts);
 		const citedIds = citedRenderableEntryIds(bank, reminder);
-		if (!input.deterministicTrigger && citedIds.length === 0) {
-			return { decision: "gated", bankOperations: operations.length, reminder: null, ...usage };
-		}
+		if (!input.deterministicTrigger && citedIds.length === 0) return settle("gated", "uncited", counts);
 		bank.recordInjection(citedIds);
-		return { decision: "injected", bankOperations: operations.length, reminder, ...usage };
-	} catch {
-		return empty("silent");
+		return settle("injected", "intervened", { ...counts, reminder });
+	} catch (error) {
+		clientError = errorMessage(error);
+		return settle("silent", "client_error");
 	} finally {
 		if (timer !== undefined) clearTimeout(timer);
 	}
@@ -192,26 +283,48 @@ function stripTagShapes(value: string): string {
 	return value.replace(/<\/?[a-zA-Z][^>]*>/gu, " ");
 }
 
-export function parseTaskMemoryPolicyResponse(response: string): ParsedMemoryStep | null {
-	if (typeof response !== "string" || response.length === 0) return null;
+type ReadPolicyStepResult =
+	| { ok: true; step: ParsedMemoryStep; dropped: number }
+	| { ok: false; reason: "unparseable" | "all_operations_invalid"; dropped: number };
+
+/**
+ * The rejecting variant of the parser. It separates "the model produced no
+ * envelope" from "the model produced an envelope whose every operation named a
+ * verb the bank does not have", because those two point at different fixes and
+ * the boolean form of this function could not tell them apart.
+ */
+function readPolicyStep(response: string): ReadPolicyStepResult {
+	const unparseable = { ok: false, reason: "unparseable", dropped: 0 } as const;
+	if (typeof response !== "string" || response.length === 0) return unparseable;
 	const text = cleanPolicyResponse(response);
 	const opensAt = text.indexOf(OPERATIONS_OPEN);
-	if (opensAt === -1) return null;
+	if (opensAt === -1) return unparseable;
 	const closesAt = text.indexOf(OPERATIONS_CLOSE, opensAt);
-	if (closesAt === -1) return null;
+	if (closesAt === -1) return unparseable;
 	let rawOperations: unknown;
 	try {
 		rawOperations = JSON.parse(text.slice(opensAt + OPERATIONS_OPEN.length, closesAt)) as unknown;
 	} catch {
-		return null;
+		return unparseable;
 	}
 	const read = readOperations(rawOperations);
-	if (read === null) return null;
+	if (read === null) return unparseable;
 	// Recovering nothing is not silence. A step whose every operation was invented
 	// stays malformed so the operator can see the model answered in a shape the
 	// bank could not use.
-	if (read.operations.length === 0 && read.dropped > 0) return null;
-	return { operations: read.operations, context: readContext(text.slice(closesAt + OPERATIONS_CLOSE.length)) };
+	if (read.operations.length === 0 && read.dropped > 0) {
+		return { ok: false, reason: "all_operations_invalid", dropped: read.dropped };
+	}
+	return {
+		ok: true,
+		step: { operations: read.operations, context: readContext(text.slice(closesAt + OPERATIONS_CLOSE.length)) },
+		dropped: read.dropped,
+	};
+}
+
+export function parseTaskMemoryPolicyResponse(response: string): ParsedMemoryStep | null {
+	const read = readPolicyStep(response);
+	return read.ok ? read.step : null;
 }
 
 /**
@@ -380,4 +493,9 @@ function positiveInteger(value: number | undefined, fallback: number): number {
 
 function nonNegativeInteger(value: number | undefined): number {
 	return value !== undefined && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function errorMessage(error: unknown): string {
+	if (error instanceof Error) return error.message.length > 0 ? error.message : error.name;
+	return typeof error === "string" && error.length > 0 ? error : "an unknown client failure";
 }

@@ -1,5 +1,5 @@
 import type { TaskMemorySnapshot } from "./task-bank.js";
-import type { TaskMemoryPolicyDecision } from "./task-memory-policy.js";
+import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason } from "./task-memory-policy.js";
 import type {
 	TaskMemoryTelemetryDecision,
 	TaskMemoryTelemetryTier,
@@ -18,6 +18,7 @@ export interface TaskMemoryActivityEvent {
 	triggerReasons: ReadonlyArray<TaskMemoryTelemetryTrigger>;
 	tier: TaskMemoryTelemetryTier;
 	decision: TaskMemoryTelemetryDecision;
+	reason: TaskMemoryPolicyReason;
 	citedEntries: number;
 	bankWrites: number;
 	latencyMs: number;
@@ -36,9 +37,17 @@ export interface TaskMemoryOperatorStatus {
 	stepInFlight: boolean;
 }
 
-/** Compact operator wording for one memory step, used by the TUI surfaces. */
+/**
+ * Compact operator wording for one memory step, used by the TUI surfaces.
+ *
+ * The reason rides alongside the decision because `silent` on its own is the
+ * line an operator cannot act on: it reads the same whether the model declined
+ * to write, the route refused the connection, or the answer was unreadable.
+ * `intervened` is omitted, since `injected` already says it.
+ */
 export function describeTaskMemoryActivity(event: TaskMemoryActivityEvent): string {
 	const parts: string[] = [event.decision];
+	if (event.reason !== "intervened") parts.push(event.reason);
 	if (event.bankWrites > 0) parts.push(`${event.bankWrites}w`);
 	if (event.citedEntries > 0) parts.push(`${event.citedEntries} cited`);
 	return `${event.triggerReasons.join("+")} ${parts.join(" ")}`;

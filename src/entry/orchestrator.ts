@@ -52,12 +52,14 @@ import {
 	buildMemoryPromptSection,
 	canonicalMemoryRepositoryIdentity,
 	createTaskMemoryTelemetrySink,
+	createTaskMemoryTrace,
 	loadMemoryRecordsSync,
 	renderTaskMemoryHandoffSource,
 	seedTaskMemoryFromNewestHandoff,
 	type TaskMemoryModelClient,
 	taskMemoryBankSize,
 	taskMemoryHandoffSeedOffer,
+	taskMemoryTracePath,
 } from "../domains/memory/index.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import {
@@ -997,9 +999,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Bound late: the registration is built here, but the buffer a deferred
 	// reminder lands in belongs to the chat loop that has not been composed yet.
 	let deferredMemoryReminderSink: ((message: string) => void) | null = null;
+	// Content-bearing, so it exists only when the operator named a file. The
+	// telemetry row says which silence happened; this says what the model wrote.
+	const memoryTracePath = taskMemoryTracePath();
+	const memoryTrace = memoryTracePath === null ? null : createTaskMemoryTrace(memoryTracePath);
 	const memoryIntervention = createMemoryInterventionRegistration({
 		bank: taskMemoryBank,
 		telemetry: createTaskMemoryTelemetrySink(),
+		...(memoryTrace === null ? {} : { onEnvelope: (envelope) => memoryTrace.record(envelope) }),
 		onDeferredReminder: (message) => deferredMemoryReminderSink?.(message),
 		getSettings: () => {
 			ensureTaskMemorySession();

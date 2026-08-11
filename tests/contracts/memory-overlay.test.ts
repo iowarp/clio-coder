@@ -185,6 +185,7 @@ describe("contracts/memory overlay", () => {
 					triggerReasons: ["interval"],
 					tier: "llm",
 					decision: "gated",
+					reason: "uncited",
 					citedEntries: 0,
 					bankWrites: 2,
 					latencyMs: 41_200,
@@ -194,6 +195,7 @@ describe("contracts/memory overlay", () => {
 					triggerReasons: ["tool_error_streak", "loop_signal"],
 					tier: "rules",
 					decision: "injected",
+					reason: "intervened",
 					citedEntries: 1,
 					bankWrites: 1,
 					latencyMs: 3,
@@ -207,7 +209,9 @@ describe("contracts/memory overlay", () => {
 		// A gated step wrote to the bank and said nothing; without this row the
 		// operator would see an unchanged transcript and assume memory was idle.
 		ok(body.includes("09:41:07"), body);
-		ok(body.includes("interval gated 2w"), body);
+		// The reason is what makes the row actionable: `gated` alone does not say
+		// whether the model cited nothing or overran the token cap.
+		ok(body.includes("interval gated uncited 2w"), body);
 		ok(body.includes("llm 41200ms"), body);
 		ok(body.includes("tool_error_streak+loop_signal injected 1w 1 cited"), body);
 	});

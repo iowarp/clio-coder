@@ -49,7 +49,9 @@ describe("contracts/task memory prompted policy", () => {
 
 		deepStrictEqual(result, {
 			decision: "silent",
+			reason: "model_silent",
 			bankOperations: 4,
+			droppedOperations: 0,
 			reminder: null,
 			inputTokens: 17,
 			outputTokens: 9,
@@ -264,6 +266,7 @@ describe("contracts/task memory prompted policy", () => {
 			BASE_INPUT,
 		);
 		strictEqual(throwing.decision, "silent");
+		strictEqual(throwing.reason, "client_error", "a route that threw is not a model that chose silence");
 		deepStrictEqual(throwingBank.snapshot(), { version: 1, status: null, knowledge: [], procedural: [] });
 
 		const timeoutBank = new TaskMemoryBank();
@@ -281,8 +284,120 @@ describe("contracts/task memory prompted policy", () => {
 			{ ...BASE_INPUT, timeoutMs: 5 },
 		);
 		strictEqual(timedOut.decision, "timeout");
+		strictEqual(timedOut.reason, "deadline");
 		strictEqual(aborted, true);
 		deepStrictEqual(timeoutBank.snapshot(), { version: 1, status: null, knowledge: [], procedural: [] });
+	});
+
+	it("names why a step wrote nothing rather than reporting one undifferentiated silence", async () => {
+		// Six paths reach a null reminder and the operator needs to act differently
+		// on each: a broken route, an unconfigured one, a model that chose silence,
+		// a duplicate, a yielded channel, and an answer the bank could not read.
+		const knowledge = "tm-k-1";
+		const cases = [
+			{
+				text: response([{ op: "save_knowledge", content: "A fact." }]),
+				input: BASE_INPUT,
+				decision: "silent",
+				reason: "model_silent",
+			},
+			{
+				text: response([], `<context_for_action>[${knowledge}] Same reminder.</context_for_action>`),
+				input: { ...BASE_INPUT, previousReminder: `Memory: [${knowledge}] Same reminder.` },
+				decision: "silent",
+				reason: "duplicate_reminder",
+			},
+			{
+				text: response([], `<context_for_action>[${knowledge}] Fresh reminder.</context_for_action>`),
+				input: { ...BASE_INPUT, suppressIntervention: true },
+				decision: "silent",
+				reason: "suppressed",
+			},
+			{
+				text: response([], "<context_for_action>Uncited advice.</context_for_action>"),
+				input: BASE_INPUT,
+				decision: "gated",
+				reason: "uncited",
+			},
+			{
+				text: response([], `<context_for_action>${"x".repeat(800)}</context_for_action>`),
+				input: { ...BASE_INPUT, deterministicTrigger: true },
+				decision: "gated",
+				reason: "over_budget",
+			},
+			{ text: "no envelope at all", input: BASE_INPUT, decision: "malformed", reason: "unparseable" },
+			{
+				text: response([{ op: "read", path: "src/cli/index.ts" }]),
+				input: BASE_INPUT,
+				decision: "malformed",
+				reason: "all_operations_invalid",
+			},
+		] as const;
+
+		for (const testCase of cases) {
+			const bank = new TaskMemoryBank();
+			bank.saveKnowledge("The operator requires visible reminders.");
+			const result = await runTaskMemoryPolicy(bank, clientReturning(testCase.text), testCase.input);
+			strictEqual(result.decision, testCase.decision, testCase.reason);
+			strictEqual(result.reason, testCase.reason, JSON.stringify(testCase.text.slice(0, 60)));
+		}
+	});
+
+	it("counts the operations the bank refused so a total loss is visible in telemetry", async () => {
+		const bank = new TaskMemoryBank();
+		const result = await runTaskMemoryPolicy(
+			bank,
+			clientReturning(
+				response([
+					{ op: "save_knowledge", content: "Target selection runs through placement.ts." },
+					{ op: "read", path: "src/domains/dispatch/index.ts" },
+					{ op: "grep", pattern: "placement" },
+				]),
+			),
+			BASE_INPUT,
+		);
+
+		strictEqual(result.bankOperations, 1);
+		strictEqual(result.droppedOperations, 2, "two invented verbs were discarded and the count must survive");
+	});
+
+	it("hands the raw envelope to an observer so a rejected step can be read, not guessed", async () => {
+		const seen: Array<{ response: string; decision: string; reason: string }> = [];
+		const bank = new TaskMemoryBank();
+		await runTaskMemoryPolicy(bank, clientReturning("I think I should probably save something."), {
+			...BASE_INPUT,
+			onEnvelope: (envelope) => {
+				seen.push({ response: envelope.response, decision: envelope.decision, reason: envelope.reason });
+			},
+		});
+
+		strictEqual(seen.length, 1);
+		strictEqual(seen[0]?.response, "I think I should probably save something.");
+		strictEqual(seen[0]?.decision, "malformed");
+		strictEqual(seen[0]?.reason, "unparseable");
+	});
+
+	it("reports a route failure to the envelope observer instead of an empty response", async () => {
+		const seen: Array<{ response: string; error: string | null; reason: string }> = [];
+		await runTaskMemoryPolicy(
+			new TaskMemoryBank(),
+			{
+				async complete() {
+					throw new Error("connect ECONNREFUSED 127.0.0.1:1234");
+				},
+			},
+			{
+				...BASE_INPUT,
+				onEnvelope: (envelope) => {
+					seen.push({ response: envelope.response, error: envelope.error, reason: envelope.reason });
+				},
+			},
+		);
+
+		strictEqual(seen.length, 1);
+		strictEqual(seen[0]?.reason, "client_error");
+		strictEqual(seen[0]?.response, "");
+		match(seen[0]?.error ?? "", /ECONNREFUSED/u);
 	});
 
 	it("locates the envelope inside the packaging a small local model adds around it", () => {

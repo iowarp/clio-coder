@@ -219,7 +219,9 @@ describe("contracts/memory intervention rules tier", () => {
 		strictEqual(routeResolutions, 1);
 		deepStrictEqual(result, {
 			decision: "silent",
+			reason: "no_client",
 			bankOperations: 0,
+			droppedOperations: 0,
 			reminder: null,
 			inputTokens: 0,
 			outputTokens: 0,
