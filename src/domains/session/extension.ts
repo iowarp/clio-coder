@@ -4,9 +4,7 @@ import {
 	type SessionResumeVia as ResumeVia,
 } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { openSession, sessionPaths } from "../../engine/session.js";
 import { performCheckpoint } from "./checkpoint.js";
-import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import type { LabelEntry } from "./entries.js";
 import { listSessionsForCwd } from "./history.js";
@@ -73,15 +71,13 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		// Prefer the live in-memory meta when we are looking at the current
 		// session so checkpoint/fork pointers are fresh; otherwise fall back
 		// to the on-disk read.
-		const meta: SessionMeta = state?.meta.id === sessionId ? state.meta : (openSession(sessionId).meta() as SessionMeta);
+		const meta: SessionMeta = state?.meta.id === sessionId ? state.meta : bundle.meta;
 		// Build a turnId → preview map so /tree rows show distinguishing
 		// payload slices. Reading turns is cheap (single jsonl scan) and
 		// happens only when the overlay opens.
 		const previews = new Map<string, string>();
 		try {
-			const reader = openSession(sessionId);
-			const filePath = sessionPaths(reader.meta()).current;
-			for (const entry of collectSessionEntries(reader.turns(), filePath)) {
+			for (const entry of bundle.entries) {
 				if (entry.kind !== "message") continue;
 				const text = buildTurnPreview({ kind: entry.role, payload: entry.payload });
 				if (text.length > 0) previews.set(entry.turnId, text);
@@ -167,24 +163,24 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				state = null;
 				void prior.writer.close();
 			}
-			const next = resumeSessionState(sessionId);
-			state = next;
-			currentTurnId = computeLeafId(readTreeBundle(sessionId).nodes);
-			emitResume(next.meta.id, "resume");
-			return next.meta;
+			const resumed = resumeSessionState(sessionId);
+			state = resumed.state;
+			currentTurnId = computeLeafId(resumed.nodes);
+			emitResume(resumed.state.meta.id, "resume");
+			return resumed.state.meta;
 		},
 		fork(parentTurnId, input) {
 			if (!state) throw new Error("session.fork: no current session to fork from");
 			const prior = state;
 			emitPark(prior.meta.id, "fork");
 			state = null;
-			const { next } = forkFromState({
+			const { next, nodes } = forkFromState({
 				from: prior,
 				parentTurnId,
 				...(input?.cwd !== undefined ? { cwd: input.cwd } : {}),
 			});
 			state = next;
-			currentTurnId = computeLeafId(readTreeBundle(next.meta.id).nodes);
+			currentTurnId = computeLeafId(nodes);
 			return next.meta;
 		},
 		tree(sessionId) {
@@ -210,11 +206,11 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				state = null;
 				void prior.writer.close();
 			}
-			const next = resumeSessionState(sessionId);
-			state = next;
-			currentTurnId = computeLeafId(readTreeBundle(sessionId).nodes);
-			emitResume(next.meta.id, "switch_branch");
-			return next.meta;
+			const resumed = resumeSessionState(sessionId);
+			state = resumed.state;
+			currentTurnId = computeLeafId(resumed.nodes);
+			emitResume(resumed.state.meta.id, "switch_branch");
+			return resumed.state.meta;
 		},
 		switchTurn(turnId) {
 			if (!state) throw new Error("session.switchTurn: no current session");

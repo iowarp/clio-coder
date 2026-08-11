@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
@@ -357,6 +357,29 @@ describe("contracts/persistence", () => {
 		strictEqual(entries.length, 3);
 		strictEqual((entries[1] as { turnId?: string }).turnId, "t1");
 		strictEqual((entries[2] as { turnId?: string }).turnId, "t2");
+	});
+
+	it("appends an off-current label without rewriting away a torn transcript tail", () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const first = contract.create({ cwd: scratch });
+		const turn = contract.append({ parentId: null, kind: "user", payload: { text: "label me" } });
+		contract.create({ cwd: scratch });
+		const current = sessionPaths(first).current;
+		appendFileSync(current, '{"kind":"message"', "utf8");
+
+		contract.editLabel(turn.id, "checkpoint", first.id);
+
+		const warnings: string[] = [];
+		const entries = readSessionFileEntries(current, { onWarning: (warning) => warnings.push(warning.message) });
+		strictEqual(warnings.length, 1, "the pre-existing torn record remains observable instead of being dropped");
+		ok(warnings[0]?.startsWith("invalid JSON skipped"));
+		ok(
+			entries.some(
+				(entry) =>
+					isSessionEntry(entry) && entry.kind === "label" && entry.targetTurnId === turn.id && entry.label === "checkpoint",
+			),
+		);
 	});
 
 	it("reopens the append fd after replaceEntries so later appends land in the new file", () => {

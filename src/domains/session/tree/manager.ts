@@ -1,14 +1,15 @@
 import { existsSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+	appendSessionFileEntry,
 	openSession,
-	readSessionFileEntries,
+	readSessionMeta,
 	type SessionTreeNode,
 	sessionPaths,
-	writeJsonlFileAtomic,
 } from "../../../engine/session.js";
 import { collectSessionEntries } from "../compaction/session-entries.js";
-import { isSessionHeader, type SessionEntry, type SessionInfoEntry } from "../entries.js";
+import type { SessionMeta } from "../contract.js";
+import type { SessionEntry, SessionInfoEntry } from "../entries.js";
 
 /**
  * Domain-level tree-file helpers. Operates directly on the on-disk artifacts
@@ -29,7 +30,9 @@ export interface ResolvedLabel {
 
 export interface SessionTreeFileBundle {
 	sessionId: string;
+	meta: SessionMeta;
 	nodes: SessionTreeNode[];
+	entries: SessionEntry[];
 	labels: Map<string, ResolvedLabel>;
 }
 
@@ -40,18 +43,12 @@ export interface SessionTreeFileBundle {
  */
 export function readTreeBundle(sessionId: string): SessionTreeFileBundle {
 	const reader = openSession(sessionId);
-	const nodes = [...reader.tree()];
-	const labels = resolveLabelMap(readRichEntries(sessionId));
-	return { sessionId, nodes, labels };
-}
-
-/** Read the structured SessionEntry records from `current.jsonl`. */
-function readRichEntries(sessionId: string): SessionEntry[] {
-	const meta = openSession(sessionId).meta();
+	const meta = reader.meta() as SessionMeta;
 	const paths = sessionPaths(meta);
-	if (!existsSync(paths.current)) return [];
-	const records = readSessionFileEntries(paths.current).filter((entry) => !isSessionHeader(entry));
-	return collectSessionEntries(records, paths.current);
+	const nodes = [...reader.tree()];
+	const entries = collectSessionEntries(reader.turns(), paths.current);
+	const labels = resolveLabelMap(entries);
+	return { sessionId, meta, nodes, entries, labels };
 }
 
 /**
@@ -95,15 +92,13 @@ function labelFields(entry: SessionEntry): { targetTurnId: string; timestamp: st
 
 /**
  * Append a single SessionEntry line to an arbitrary session's
- * `current.jsonl`. Uses appendFileSync + fsync for atomicity of the single
- * line. Intended for the not-current session case in editLabel; the
- * current-session case goes through the engine writer.
+ * `current.jsonl`. Intended for the not-current session case in editLabel;
+ * the current-session case goes through the engine writer.
  */
 export function appendEntryToSessionFile(sessionId: string, entry: SessionEntry): void {
-	const meta = openSession(sessionId).meta();
+	const meta = readSessionMeta(sessionId);
 	const paths = sessionPaths(meta);
-	const entries = readSessionFileEntries(paths.current);
-	writeJsonlFileAtomic(paths.current, [...entries, entry]);
+	appendSessionFileEntry(paths.current, entry);
 }
 
 /**
@@ -112,7 +107,7 @@ export function appendEntryToSessionFile(sessionId: string, entry: SessionEntry)
  * Used by deleteSession when `keepFiles` is not requested.
  */
 export function removeSessionDirectory(sessionId: string): void {
-	const meta = openSession(sessionId).meta();
+	const meta = readSessionMeta(sessionId);
 	const paths = sessionPaths(meta);
 	const dir = dirname(paths.meta);
 	rmSync(dir, { recursive: true, force: true });
@@ -125,7 +120,7 @@ export function removeSessionDirectory(sessionId: string): void {
  * Resume can still target the session id directly via manual recovery.
  */
 export function tombstoneSession(sessionId: string): void {
-	const meta = openSession(sessionId).meta();
+	const meta = readSessionMeta(sessionId);
 	const paths = sessionPaths(meta);
 	if (!existsSync(paths.meta)) return;
 	const tombstone = join(dirname(paths.meta), "meta.deleted.json");
