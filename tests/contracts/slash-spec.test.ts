@@ -265,17 +265,56 @@ describe("contracts/slash-spec", () => {
 			["/delegate agent", { kind: "delegate-usage" }],
 
 			// share
-			["/share", { kind: "share", args: "" }],
-			["/share export /my/path", { kind: "share", args: "export /my/path" }],
-			["/share export /my/path extra", { kind: "share", args: "export /my/path extra" }],
-			["/share import --dry-run /my/path", { kind: "share", args: "import --dry-run /my/path" }],
-			["/share import --force /my/path", { kind: "share", args: "import --force /my/path" }],
-			["/share import --dry-run --force /my/path", { kind: "share", args: "import --dry-run --force /my/path" }],
-			["/share import /my/path --dry-run", { kind: "share", args: "import /my/path --dry-run" }],
-			["/share import /my/path --dry-run --force", { kind: "share", args: "import /my/path --dry-run --force" }],
-			["/share import --dry-run /my/path --force", { kind: "share", args: "import --dry-run /my/path --force" }],
-			["/share import /my/path", { kind: "share", args: "import /my/path" }],
-			["/share invalid", { kind: "share", args: "invalid" }],
+			["/share", { kind: "share", action: "usage" }],
+			["/share export /my/path", { kind: "share", action: "export", path: "/my/path" }],
+			[
+				"/share export /my/path extra",
+				{
+					kind: "share",
+					action: "usage",
+					subcommand: "export",
+					error: "Unexpected argument: extra",
+				},
+			],
+			[
+				"/share import --dry-run /my/path",
+				{ kind: "share", action: "import", path: "/my/path", dryRun: true, force: false },
+			],
+			[
+				"/share import --force /my/path",
+				{ kind: "share", action: "import", path: "/my/path", dryRun: false, force: true },
+			],
+			[
+				"/share import --dry-run --force /my/path",
+				{ kind: "share", action: "import", path: "/my/path", dryRun: true, force: true },
+			],
+			[
+				"/share import /my/path --dry-run",
+				{ kind: "share", action: "import", path: "/my/path", dryRun: true, force: false },
+			],
+			[
+				"/share import /my/path --dry-run --force",
+				{ kind: "share", action: "import", path: "/my/path", dryRun: true, force: true },
+			],
+			[
+				"/share import --dry-run /my/path --force",
+				{ kind: "share", action: "import", path: "/my/path", dryRun: true, force: true },
+			],
+			["/share import /my/path", { kind: "share", action: "import", path: "/my/path", dryRun: false, force: false }],
+			[
+				"/share import --dry-rnu /my/path",
+				{ kind: "share", action: "usage", subcommand: "import", error: "Unknown flag: --dry-rnu" },
+			],
+			[
+				"/share import /my/path extra",
+				{
+					kind: "share",
+					action: "usage",
+					subcommand: "import",
+					error: "Unexpected argument: extra",
+				},
+			],
+			["/share invalid", { kind: "share", action: "usage", error: "Unexpected argument: invalid" }],
 
 			// view
 			["/view", { kind: "view" }],
