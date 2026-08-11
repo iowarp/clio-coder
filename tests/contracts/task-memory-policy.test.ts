@@ -7,6 +7,7 @@ import {
 	type TaskMemoryModelClient,
 	type TaskMemoryModelRequest,
 } from "../../src/domains/memory/task-memory-policy.js";
+import { MEMORY_INTERVENTION_SYSTEM_PROMPT } from "../../src/domains/prompts/memory-intervention.js";
 
 const BASE_INPUT = {
 	task: "Implement proactive task memory without changing the action-agent prompt.",
@@ -171,6 +172,37 @@ describe("contracts/task memory prompted policy", () => {
 			const result = await runTaskMemoryPolicy(bank, clientReturning(text), BASE_INPUT);
 			strictEqual(result.decision, "malformed", JSON.stringify(text));
 			deepStrictEqual(bank.snapshot(), before, JSON.stringify(text));
+		}
+	});
+
+	it("teaches the memory model a grammar its own parser accepts", () => {
+		// The prompt's worked examples are the strongest lever on a small local
+		// model's output shape, which makes an example the parser would reject a
+		// direct instruction to produce malformed steps.
+		const envelope = /^<operations>.*?<\/operations>\n(?:<no_intervention\/>|<context_for_action>.*?<\/context_for_action>)$/gmu;
+		const examples = [...MEMORY_INTERVENTION_SYSTEM_PROMPT.matchAll(envelope)]
+			.map((found) => found[0])
+			// The bare grammar sketch at the top of the prompt is a shape, not an example.
+			.filter((example) => !example.includes("[JSON operations]"));
+
+		strictEqual(examples.length, 2, "one example anchoring silence and one anchoring a cited reminder");
+		for (const example of examples) {
+			const parsed = parseTaskMemoryPolicyResponse(example);
+			ok(parsed !== null, `the prompt's own example must parse: ${example}`);
+			ok(parsed.operations.length > 0, "an example that writes nothing teaches nothing");
+		}
+		const [silent, intervening] = examples;
+		strictEqual(parseTaskMemoryPolicyResponse(silent ?? "")?.context, null, "the first example stays silent");
+		const reminder = parseTaskMemoryPolicyResponse(intervening ?? "")?.context ?? "";
+		match(reminder, /\[tm-p-1\]/u, "the second example models a cited reminder, not a bare one");
+	});
+
+	it("tells the memory model that operations are never tool calls", () => {
+		// Handed a JSON tool trajectory, the reference model answered with that
+		// trajectory's shape until the prompt ruled it out in words.
+		match(MEMORY_INTERVENTION_SYSTEM_PROMPT, /never a list of tool calls/u);
+		for (const op of ["update_status", "save_knowledge", "save_procedural", "delete"]) {
+			match(MEMORY_INTERVENTION_SYSTEM_PROMPT, new RegExp(`"op":"${op}"`, "u"));
 		}
 	});
 
