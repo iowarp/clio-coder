@@ -125,6 +125,47 @@ describe("contracts/slash-spec", () => {
 		ok(notices.some((notice) => notice.includes("seeded 2 entries from handoff-latest.md; skipped 1 duplicate")));
 	});
 
+	/**
+	 * The defect this pins: `/thinking off` parsed as a command with a bad
+	 * argument, fell through to `unknown`, and was submitted to the model, which
+	 * answered it conversationally. The operator believed a setting had changed,
+	 * the model believed it had been instructed, and nothing had happened.
+	 */
+	it("reports a registered command with bad arguments instead of sending it to the model", () => {
+		const submitted: string[] = [];
+		const notices: string[] = [];
+		const ctx = {
+			notice: (_level: string, text: string) => notices.push(text),
+			submitChat: (text: string) => submitted.push(text),
+			render: () => undefined,
+			openThinking: () => undefined,
+			shutdown: () => undefined,
+			setThinkingLevel: (level: string) =>
+				level === "off"
+					? ({ status: "applied", level, display: "off" } as const)
+					: ({ status: "unsupported", level, supported: ["off", "low"] } as const),
+		} as unknown as SlashCommandContext;
+
+		dispatchSlashCommand(parseSlashCommand("/thinking off"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/thinking sideways"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/quit now"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/just some prose"), ctx);
+
+		deepStrictEqual(submitted, ["/just some prose"], "only unregistered input reaches the model");
+		ok(
+			notices.some((notice) => notice === "thinking: off"),
+			notices.join(" | "),
+		);
+		ok(
+			notices.some((notice) => notice.includes('"sideways" is not available here') && notice.includes("off, low")),
+			notices.join(" | "),
+		);
+		ok(
+			notices.some((notice) => notice.includes("Unexpected argument: now") && notice.includes("usage: /quit")),
+			notices.join(" | "),
+		);
+	});
+
 	it("parses all slash commands according to the v0.2.3 registry contract", () => {
 		const testCases: Array<[string, unknown]> = [
 			// Empty and whitespace inputs
@@ -143,31 +184,37 @@ describe("contracts/slash-spec", () => {
 			["/context init", { kind: "init", options: {} }],
 			["/context init   ", { kind: "init", options: {} }],
 			...["--preview", "--adopt", "--apply", "--rewrite", "--propose", "--global", "--heuristic"].map(
-				(flag): [string, unknown] => [`/context init ${flag}`, { kind: "unknown", text: `/context init ${flag}` }],
+				(flag): [string, unknown] => [
+					`/context init ${flag}`,
+					{ kind: "usage-error", command: "context", reason: `Unknown flag: ${flag}` },
+				],
 			),
-			["/context init --include-global", { kind: "unknown", text: "/context init --include-global" }],
-			["/context init --no-generate", { kind: "unknown", text: "/context init --no-generate" }],
-			["/context init extra", { kind: "unknown", text: "/context init extra" }],
+			[
+				"/context init --include-global",
+				{ kind: "usage-error", command: "context", reason: "Unknown flag: --include-global" },
+			],
+			["/context init --no-generate", { kind: "usage-error", command: "context", reason: "Unknown flag: --no-generate" }],
+			["/context init extra", { kind: "usage-error", command: "context", reason: "Unexpected argument: extra" }],
 			["/context-init", { kind: "unknown", text: "/context-init" }],
 			["/context-init --preview", { kind: "unknown", text: "/context-init --preview" }],
 
 			// context reset is zero-argument; confirmation happens in its chooser
 			["/context reset", { kind: "context-clear", options: {} }],
 			["/context reset   ", { kind: "context-clear", options: {} }],
-			["/context reset --all", { kind: "unknown", text: "/context reset --all" }],
-			["/context reset --confirm", { kind: "unknown", text: "/context reset --confirm" }],
-			["/context reset --confirm-all", { kind: "unknown", text: "/context reset --confirm-all" }],
-			["/context reset --invalid", { kind: "unknown", text: "/context reset --invalid" }],
-			["/context reset extra", { kind: "unknown", text: "/context reset extra" }],
+			["/context reset --all", { kind: "usage-error", command: "context", reason: "Unknown flag: --all" }],
+			["/context reset --confirm", { kind: "usage-error", command: "context", reason: "Unknown flag: --confirm" }],
+			["/context reset --confirm-all", { kind: "usage-error", command: "context", reason: "Unknown flag: --confirm-all" }],
+			["/context reset --invalid", { kind: "usage-error", command: "context", reason: "Unknown flag: --invalid" }],
+			["/context reset extra", { kind: "usage-error", command: "context", reason: "Unexpected argument: extra" }],
 			["/context-clear", { kind: "unknown", text: "/context-clear" }],
 			["/context-clear --all", { kind: "unknown", text: "/context-clear --all" }],
 
 			// context refresh (hub)
 			["/context refresh", { kind: "context-refresh" }],
-			["/context refresh extra", { kind: "unknown", text: "/context refresh extra" }],
+			["/context refresh extra", { kind: "usage-error", command: "context", reason: "Unexpected argument: extra" }],
 
 			// session reset stays /new; there is deliberately no /context clear subcommand
-			["/context clear", { kind: "unknown", text: "/context clear" }],
+			["/context clear", { kind: "usage-error", command: "context", reason: "Unexpected argument: clear" }],
 
 			// skill selector and invocation forms
 			["/skill", { kind: "skill-selector" }],
@@ -367,25 +414,30 @@ describe("contracts/slash-spec", () => {
 
 			// unknown / invalid
 			["/invalid-command", { kind: "unknown", text: "/invalid-command" }],
-			["/quit now", { kind: "unknown", text: "/quit now" }],
-			["/prompts query", { kind: "unknown", text: "/prompts query" }],
-			["/extensions query", { kind: "unknown", text: "/extensions query" }],
-			["/agents query", { kind: "unknown", text: "/agents query" }],
-			["/targets query", { kind: "unknown", text: "/targets query" }],
-			["/cost query", { kind: "unknown", text: "/cost query" }],
-			["/context query", { kind: "unknown", text: "/context query" }],
-			["/fleet query", { kind: "unknown", text: "/fleet query" }],
-			["/tasks query", { kind: "unknown", text: "/tasks query" }],
+			// A registered command with unparseable arguments is a usage error, not
+			// a chat message. `unknown` stays for input that matched no command.
+			["/quit now", { kind: "usage-error", command: "quit", reason: "Unexpected argument: now" }],
+			["/prompts query", { kind: "usage-error", command: "prompts", reason: "Unexpected argument: query" }],
+			["/extensions query", { kind: "usage-error", command: "extensions", reason: "Unexpected argument: query" }],
+			["/agents query", { kind: "usage-error", command: "agents", reason: "Unexpected argument: query" }],
+			["/targets query", { kind: "usage-error", command: "targets", reason: "Unexpected argument: query" }],
+			["/cost query", { kind: "usage-error", command: "cost", reason: "Unexpected argument: query" }],
+			["/context query", { kind: "usage-error", command: "context", reason: "Unexpected argument: query" }],
+			["/fleet query", { kind: "usage-error", command: "fleet", reason: "Unexpected argument: query" }],
+			["/tasks query", { kind: "usage-error", command: "tasks", reason: "Unexpected argument: query" }],
 			["/memory", { kind: "memory" }],
 			["/memory seed", { kind: "memory-seed" }],
-			["/memory query", { kind: "unknown", text: "/memory query" }],
-			["/thinking query", { kind: "unknown", text: "/thinking query" }],
-			["/scoped-models query", { kind: "unknown", text: "/scoped-models query" }],
-			["/settings query", { kind: "unknown", text: "/settings query" }],
-			["/resume query", { kind: "unknown", text: "/resume query" }],
-			["/new query", { kind: "unknown", text: "/new query" }],
-			["/tree query", { kind: "unknown", text: "/tree query" }],
-			["/fork query", { kind: "unknown", text: "/fork query" }],
+			["/memory query", { kind: "usage-error", command: "memory", reason: "Unexpected argument: query" }],
+			["/thinking", { kind: "thinking" }],
+			["/thinking off", { kind: "thinking-set", level: "off" }],
+			["/thinking query", { kind: "thinking-set", level: "query" }],
+			["/thinking off extra", { kind: "usage-error", command: "thinking", reason: "Unexpected argument: extra" }],
+			["/scoped-models query", { kind: "usage-error", command: "scoped-models", reason: "Unexpected argument: query" }],
+			["/settings query", { kind: "usage-error", command: "settings", reason: "Unexpected argument: query" }],
+			["/resume query", { kind: "usage-error", command: "resume", reason: "Unexpected argument: query" }],
+			["/new query", { kind: "usage-error", command: "new", reason: "Unexpected argument: query" }],
+			["/tree query", { kind: "usage-error", command: "tree", reason: "Unexpected argument: query" }],
+			["/fork query", { kind: "usage-error", command: "fork", reason: "Unexpected argument: query" }],
 			["/hotkeys query", { kind: "unknown", text: "/hotkeys query" }],
 		];
 

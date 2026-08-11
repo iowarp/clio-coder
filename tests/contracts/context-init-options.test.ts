@@ -84,10 +84,13 @@ describe("contracts/context-init-options", () => {
 			rewriteClioMd: true,
 		});
 		deepStrictEqual(slashInitOptions("/context init"), {});
+		// A shell-only flag typed at the interactive prompt is reported as a usage
+		// error rather than submitted to the model as prose.
 		for (const flag of ["--rewrite", "--apply", "--include-global"]) {
 			deepStrictEqual(parseSlashCommand(`/context init ${flag}`), {
-				kind: "unknown",
-				text: `/context init ${flag}`,
+				kind: "usage-error",
+				command: "context",
+				reason: `Unknown flag: ${flag}`,
 			});
 		}
 	});
