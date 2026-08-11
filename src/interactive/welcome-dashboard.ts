@@ -32,6 +32,26 @@ export interface WelcomeDashboardDeps {
 	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
 	getExtensionStats?: () => { active: number; installed: number };
 	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
+	/** Overridable repository probe. Tests count calls through it; production uses the default. */
+	readRepositoryFacts?: (cwd: string) => WelcomeRepositoryFacts;
+}
+
+/**
+ * The part of the banner that costs subprocesses and disk reads rather than a
+ * map lookup: CLIO.md presence, the codewiki, wiki staleness and completeness,
+ * and the handoff directory. None of it can change as a result of drawing a
+ * frame, and re-deriving it per frame ran three `git` subprocesses and a full
+ * codewiki parse inside the render timer.
+ */
+export interface WelcomeRepositoryFacts {
+	clioMdStatus: string;
+	hasCodewiki: boolean;
+	codewikiCount: number;
+	wikiPageCount: number;
+	wikiStatus: string;
+	wikiDigestExcerpt: string[];
+	handoffCount: number;
+	handoffFreshness: string;
 }
 
 export interface WelcomeDashboardStats {
@@ -149,32 +169,7 @@ function entryPointExcerpt(codewikiDigest: string): string[] {
 	return out.slice(0, 4);
 }
 
-export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboardStats {
-	const settings = deps.getSettings?.();
-	const statuses = deps.providers.list();
-	const current = findCurrentStatus(statuses, settings);
-	const targetLabel = current?.target.id ?? settings?.orchestrator?.target ?? "not configured";
-	const modelLabel = settings?.orchestrator?.model ?? current?.target.defaultModel ?? "not configured";
-	const workspace = deps.getWorkspaceSnapshot?.() ?? null;
-	const cwd = workspace?.cwd ?? process.cwd();
-	const currentAvailable = current ? activeStatus(current) : false;
-	const activeCapabilities = capabilityLabels(selectedModelCapabilities(current, settings, deps.providers));
-	const thinkingLevel =
-		resolveModelRuntimeCapabilitiesForProviders(
-			deps.providers,
-			settings?.orchestrator?.target,
-			settings?.orchestrator?.model,
-			settings?.orchestrator?.thinkingLevel ?? "off",
-		)?.thinking.display ??
-		settings?.orchestrator?.thinkingLevel ??
-		"off";
-
-	const autonomy = settings?.autonomy ?? "auto-edit";
-	const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
-	const threshold = settings?.compaction?.threshold;
-	const compactionThreshold =
-		typeof threshold === "number" && Number.isFinite(threshold) ? `${Math.round(threshold * 100)}%` : "80%";
-
+export function readWelcomeRepositoryFacts(cwd: string): WelcomeRepositoryFacts {
 	let clioMdStatus = "none";
 	let hasCodewiki = false;
 	let codewikiCount = 0;
@@ -230,6 +225,55 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 			// Ignore
 		}
 	}
+
+	return {
+		clioMdStatus,
+		hasCodewiki,
+		codewikiCount,
+		wikiPageCount,
+		wikiStatus,
+		wikiDigestExcerpt,
+		handoffCount,
+		handoffFreshness,
+	};
+}
+
+export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboardStats {
+	const settings = deps.getSettings?.();
+	const statuses = deps.providers.list();
+	const current = findCurrentStatus(statuses, settings);
+	const targetLabel = current?.target.id ?? settings?.orchestrator?.target ?? "not configured";
+	const modelLabel = settings?.orchestrator?.model ?? current?.target.defaultModel ?? "not configured";
+	const workspace = deps.getWorkspaceSnapshot?.() ?? null;
+	const cwd = workspace?.cwd ?? process.cwd();
+	const currentAvailable = current ? activeStatus(current) : false;
+	const activeCapabilities = capabilityLabels(selectedModelCapabilities(current, settings, deps.providers));
+	const thinkingLevel =
+		resolveModelRuntimeCapabilitiesForProviders(
+			deps.providers,
+			settings?.orchestrator?.target,
+			settings?.orchestrator?.model,
+			settings?.orchestrator?.thinkingLevel ?? "off",
+		)?.thinking.display ??
+		settings?.orchestrator?.thinkingLevel ??
+		"off";
+
+	const autonomy = settings?.autonomy ?? "auto-edit";
+	const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
+	const threshold = settings?.compaction?.threshold;
+	const compactionThreshold =
+		typeof threshold === "number" && Number.isFinite(threshold) ? `${Math.round(threshold * 100)}%` : "80%";
+
+	const {
+		clioMdStatus,
+		hasCodewiki,
+		codewikiCount,
+		wikiPageCount,
+		wikiStatus,
+		wikiDigestExcerpt,
+		handoffCount,
+		handoffFreshness,
+	} = (deps.readRepositoryFacts ?? readWelcomeRepositoryFacts)(cwd);
 
 	return {
 		activeTargets: statuses.filter(activeStatus).length,
@@ -415,20 +459,51 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	}
 }
 
+/**
+ * How long a repository probe is trusted. The probe costs three `git`
+ * subprocesses, a codewiki parse, and a workspace walk, and the render timer
+ * asks for a frame every 16ms; at that rate an uncached banner spent 38% of the
+ * process's CPU re-reading facts that had not changed, on the same event loop
+ * that decodes the model stream. Ten seconds is far longer than a frame and far
+ * shorter than a person's patience for a stale `changed files` count, and any
+ * command that can actually change these facts drops the cache outright.
+ */
+export const WELCOME_REPOSITORY_FACTS_TTL_MS = 10_000;
+
 export class WelcomeDashboard implements Component {
 	private readonly logo: Component | null;
+	private cachedFacts: { cwd: string; at: number; facts: WelcomeRepositoryFacts } | null = null;
 
-	constructor(private readonly deps: WelcomeDashboardDeps) {
+	constructor(
+		private readonly deps: WelcomeDashboardDeps,
+		private readonly now: () => number = () => Date.now(),
+	) {
 		this.logo = createLogoImage(clioTheme());
 	}
 
 	render(width: number): string[] {
-		const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(this.deps), width);
+		const stats = deriveWelcomeDashboardStats({ ...this.deps, readRepositoryFacts: (cwd) => this.facts(cwd) });
+		const lines = buildWelcomeDashboardLines(stats, width);
 		if (width < WIDE_MIN || !getCapabilities().images || !this.logo) return lines;
 		return [...this.logo.render(width), ...lines];
 	}
 
-	invalidate(): void {}
+	/** Drops the repository probe so the next frame re-reads it. */
+	invalidate(): void {
+		this.cachedFacts = null;
+	}
+
+	private facts(cwd: string): WelcomeRepositoryFacts {
+		const at = this.now();
+		const cached = this.cachedFacts;
+		// A changed cwd is a different repository, not a stale reading of this one.
+		if (cached !== null && cached.cwd === cwd && at - cached.at < WELCOME_REPOSITORY_FACTS_TTL_MS) {
+			return cached.facts;
+		}
+		const facts = (this.deps.readRepositoryFacts ?? readWelcomeRepositoryFacts)(cwd);
+		this.cachedFacts = { cwd, at, facts };
+		return facts;
+	}
 }
 
 export function createWelcomeDashboard(deps: WelcomeDashboardDeps): Component {
