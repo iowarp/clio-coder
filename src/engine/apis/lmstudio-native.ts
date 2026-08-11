@@ -49,6 +49,7 @@ import { ceilChars } from "../../domains/session/context-accounting.js";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
+import { openAICompletionsApiProvider } from "./openai-completions.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import {
 	emitResidencyNotice,
@@ -607,6 +608,81 @@ function describeLoadFailure(
 	].join(" ");
 }
 
+/**
+ * LM Studio's native SDK carries no thinking control. Measured against SDK
+ * 1.5.0 and a live server on 2026-08-11: `reasoning_effort`,
+ * `chat_template_kwargs`, and every `raw` KVConfig spelling are accepted and
+ * ignored (a deliberately bogus key behaved identically), and prompt-level
+ * markers such as `/no_think` change nothing. The same server's
+ * OpenAI-compatible port honours `reasoning_effort: "none"` and suppresses
+ * reasoning outright. Predictions therefore run over HTTP, and the SDK keeps
+ * the work it is the only surface for: listing, loading, and unloading models.
+ * Set CLIO_LMSTUDIO_SDK_PREDICT=1 to send predictions over the SDK again.
+ */
+function sdkPredictionEnabled(): boolean {
+	return process.env.CLIO_LMSTUDIO_SDK_PREDICT === "1";
+}
+
+/**
+ * Project the model onto LM Studio's OpenAI-compatible surface. Identity,
+ * catalog metadata, and budgets carry over verbatim, so capability resolution
+ * still keys on runtime id `lmstudio-native` and picks LM Studio's wire
+ * spelling for the thinking control. Only the transport changes.
+ */
+function toOpenAICompletionsModel(model: Model<"lmstudio-native">): Model<"openai-completions"> {
+	const projected = {
+		...model,
+		api: "openai-completions",
+		baseUrl: `${normalizeHttpBaseUrl(model.baseUrl)}/v1`,
+		// Matches what every other local OpenAI-compatible target synthesizes.
+		// Clio injects the thinking fields from its own `onPayload`, so pi-ai's
+		// reasoning-effort path stays off here rather than writing a second,
+		// unresolved spelling into the same body.
+		compat: {
+			supportsStore: false,
+			supportsDeveloperRole: false,
+			supportsReasoningEffort: false,
+			supportsUsageInStreaming: true,
+			maxTokensField: "max_tokens",
+			supportsStrictMode: false,
+		},
+	} as unknown as Model<"openai-completions">;
+	return projected;
+}
+
+/**
+ * Forward one prediction over LM Studio's OpenAI-compatible port and republish
+ * its events on this stream. Residency has already run, so the model is loaded
+ * with the context length Clio asked for and the output budget was computed
+ * against the window the server actually has open.
+ */
+async function pumpOpenAICompletions(
+	stream: AssistantMessageEventStream,
+	model: Model<"lmstudio-native">,
+	context: Context,
+	options: StreamOptions | undefined,
+	hints: RunStreamHints,
+	maxTokens: number,
+): Promise<void> {
+	const simple: SimpleStreamOptions = {
+		...(options ?? {}),
+		maxTokens,
+		// The SDK treats a passkey as optional and an unsecured LM Studio server
+		// accepts any bearer, but the HTTP client refuses to build a request with
+		// no key at all. `lm-studio` is LM Studio's own documented placeholder.
+		apiKey: options?.apiKey ?? "lm-studio",
+		...(hints.thinkingLevel && hints.thinkingLevel !== "off" ? { reasoning: hints.thinkingLevel } : {}),
+	};
+	for await (const event of openAICompletionsApiProvider.streamSimple(
+		toOpenAICompletionsModel(model),
+		context,
+		simple,
+	)) {
+		stream.push(event);
+	}
+	stream.end();
+}
+
 export function runStream(
 	model: Model<"lmstudio-native">,
 	context: Context,
@@ -756,6 +832,14 @@ export function runStream(
 				} catch (retryErr) {
 					failWillNotFit(retryErr);
 				}
+			}
+			if (!sdkPredictionEnabled()) {
+				// The SDK opened no prediction channel on this path, so nothing is
+				// left for a late abort to race; the HTTP transport owns the signal
+				// from here.
+				predictionDone = true;
+				await pumpOpenAICompletions(stream, model, context, options, hints, requestedMaxTokens);
+				return;
 			}
 			stream.push({ type: "start", partial: output });
 			// Resolve once per request and make the resolved reasoning class

@@ -1143,15 +1143,13 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 		];
 	}
 	if (runtimeId === "lmstudio-native") {
-		// The LM Studio SDK's prediction config carries no chat-template-kwargs
-		// channel, so `enable_thinking` and `reasoning_effort` cannot reach the
-		// template on this transport and the resolved thinking level never
-		// becomes a wire control. A catalog `reasoning: false` is then a belief
-		// about the model rather than something imposed on it. Naming it here
-		// keeps a no-op dial from reading like an applied one; the same server's
-		// HTTP port under `openai-compat` does carry the kwargs.
+		// The SDK owns model management only. Predictions go over the same
+		// server's OpenAI-compatible port, which is the surface that carries a
+		// thinking control, so the resolved level does reach the wire. What the
+		// SDK still cannot do is unload a model another client loaded outside
+		// Clio's residency plan, which is the one dispatch-visible limit left.
 		return [
-			"LM Studio native SDK exposes no chat-template-kwargs channel; the thinking level is not sent to the model and only governs how Clio renders what comes back",
+			"LM Studio residency is reconciled through the native SDK; models loaded outside Clio are observed rather than evicted",
 		];
 	}
 	// HTTP/native runtimes run through pi-agent-core, which Clio observes and

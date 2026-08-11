@@ -468,9 +468,26 @@ function resolveThinkingCapability(
 	};
 }
 
+/**
+ * Runtimes whose OpenAI-compatible surface reads the on-off thinking control
+ * from `reasoning_effort` rather than `chat_template_kwargs.enable_thinking`.
+ * Measured against the live fleet on 2026-08-11 with
+ * `nvidia-nemotron-3.5-lightning-30b-a3b`: LM Studio suppressed reasoning
+ * entirely for `reasoning_effort: "none"` and ignored `enable_thinking: false`,
+ * while llama.cpp did the reverse. Sending the wrong spelling reads as "no
+ * preference" to the server, so the model keeps reasoning at every dial.
+ */
+const REASONING_EFFORT_ON_OFF_RUNTIMES: ReadonlySet<string> = new Set(["lmstudio-native", "lmstudio"]);
+
+/** `none` is LM Studio's documented off value; on-off models have no finer dial than `low`. */
+function onOffReasoningEffort(thinkingActive: boolean): string {
+	return thinkingActive ? "low" : "none";
+}
+
 function resolveRequestCapability(
 	thinking: ResolvedThinkingCapability,
 	parser: ResponseParserKind,
+	runtimeId: string,
 ): ResolvedRequestCapability {
 	const request: ResolvedRequestCapability = { budgetEnforcement: thinking.budgetEnforcement };
 	if (thinking.mechanism === "effort-levels" && thinking.effort) {
@@ -481,6 +498,9 @@ function resolveRequestCapability(
 	}
 	if (thinking.mechanism === "on-off" && thinking.chatTemplateKwargs) {
 		request.chatTemplateKwargs = { ...thinking.chatTemplateKwargs };
+		if (REASONING_EFFORT_ON_OFF_RUNTIMES.has(runtimeId)) {
+			request.reasoningEffort = onOffReasoningEffort(thinking.thinkingActive);
+		}
 	}
 	if (parser === "harmony" && thinking.effort) {
 		request.reasoningEffort = thinking.effort;
@@ -504,7 +524,7 @@ export function resolveModelRuntimeCapabilities(
 		family,
 		capabilities: input.capabilities,
 		thinking,
-		request: resolveRequestCapability(thinking, parser),
+		request: resolveRequestCapability(thinking, parser, input.runtimeId),
 		response: {
 			parser,
 			stripTokenizerSentinels: true,
