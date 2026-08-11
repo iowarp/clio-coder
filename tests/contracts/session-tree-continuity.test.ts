@@ -209,6 +209,32 @@ describe("contracts/session-tree-continuity", () => {
 		await contract.close();
 	});
 
+	it("honors an explicit earlier leaf before a linear session has appended a sibling", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "u1" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "a1" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "u2" } });
+		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "a2" } });
+		const entries = sessionEntries(meta.id);
+
+		deepStrictEqual(
+			filterEntriesToActivePath(entries, a1.id)
+				.filter((entry) => entry.kind === "message")
+				.map((entry) => entry.turnId),
+			[u1.id, a1.id],
+		);
+		deepStrictEqual(filterEntriesToActivePath(entries, a2.id), entries, "the latest explicit leaf keeps linear replay");
+		deepStrictEqual(
+			filterEntriesToActivePath(entries, "missing-turn"),
+			entries,
+			"an invalid legacy leaf still falls back",
+		);
+
+		await contract.close();
+	});
+
 	it("fork copies pre-fork unanchored sidecars and excludes post-fork ones", async () => {
 		const bundle = createSessionBundle(stubContext());
 		const contract = bundle.contract;

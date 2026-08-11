@@ -15,10 +15,10 @@ import type { MessageEntry, SessionEntry } from "../entries.js";
  *   - unanchored sidecars (parentTurnId null), which cannot be attributed to
  *     a branch and keep their historical always-included behavior.
  *
- * When the message graph is a plain chain (no turn has two or more message
- * children) the list is returned unchanged, so linear sessions replay
- * identically to the pre-tree behavior even if an old rewrite left gaps in
- * the parent chain.
+ * A plain chain is returned unchanged unless a live caller explicitly pins an
+ * earlier leaf. That preserves historical linear replay (including old parent
+ * gaps) while making a backward /tree selection authoritative before the next
+ * append creates a structural sibling.
  */
 export function filterEntriesToActivePath(entries: ReadonlyArray<SessionEntry>, leafTurnId?: string): SessionEntry[] {
 	const messages: MessageEntry[] = [];
@@ -28,13 +28,14 @@ export function filterEntriesToActivePath(entries: ReadonlyArray<SessionEntry>, 
 		messages.push(entry);
 		messagesById.set(entry.turnId, entry);
 	}
-	if (!hasBranch(messages)) return [...entries];
-
 	// Without a live-session pointer, offline readers fall back to the most
 	// recent message in file order. Current-session runtime paths must pass the
 	// explicit leaf because switchTurn() changes the next append point without
 	// appending a message to the ledger.
-	const leaf = resolveLeafMessage(entries, messagesById, leafTurnId) ?? messages[messages.length - 1];
+	const latest = messages[messages.length - 1];
+	const pinnedLeaf = resolveLeafMessage(entries, messagesById, leafTurnId);
+	if (!hasBranch(messages) && (pinnedLeaf === undefined || pinnedLeaf.turnId === latest?.turnId)) return [...entries];
+	const leaf = pinnedLeaf ?? latest;
 	if (!leaf) return [...entries];
 
 	const pathIds = new Set<string>();

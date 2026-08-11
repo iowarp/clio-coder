@@ -653,16 +653,15 @@ describe("contracts/production compaction failure wiring", () => {
 				kind: "assistant",
 				payload: { text: "selected branch response" },
 			});
-			session.switchTurn(rootAssistant.id);
 			const abandonedUser = session.append({
-				parentId: rootAssistant.id,
+				parentId: selectedAssistant.id,
 				kind: "user",
-				payload: { text: "abandoned branch request" },
+				payload: { text: "abandoned later request" },
 			});
 			session.append({
 				parentId: abandonedUser.id,
 				kind: "assistant",
-				payload: { text: "abandoned branch response" },
+				payload: { text: "abandoned later response" },
 			});
 			session.switchTurn(selectedAssistant.id);
 
@@ -701,7 +700,7 @@ describe("contracts/production compaction failure wiring", () => {
 			const replayText = JSON.stringify(liveAgent?.state.messages ?? []);
 			ok(replayText.includes("Preserve the selected branch only"), replayText);
 			ok(replayText.includes("selected branch request"), replayText);
-			ok(!replayText.includes("abandoned branch"), replayText);
+			ok(!replayText.includes("abandoned later"), replayText);
 		} finally {
 			await session.close();
 			faux.unregister();
