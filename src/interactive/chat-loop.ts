@@ -613,6 +613,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 			state.currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
 			state.toolProseAbortReason = null;
+			state.toolProseAssessedChars = 0;
 			state.activeInterruptReason = null;
 
 			// 6. Cache-disturbance honesty (T3.3)

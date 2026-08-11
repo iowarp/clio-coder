@@ -19,6 +19,7 @@ import { createDispatchBoardStore, createDispatchBoardView, type DispatchBoardVi
 import { createFollowUpQueuePanel, type FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { buildFooterDashboard, type FooterDashboardDeps, type FooterDashboardPanel } from "./footer/dashboard.js";
 import { createNotificationCenter, type NotificationCenter } from "./footer/notifications.js";
+import { getActiveRenderTrace } from "./interactive-shell.js";
 import { type ClioKeybindingManager, createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
 import type { TargetsHubNoticeLevel } from "./providers-overlay.js";
@@ -168,12 +169,14 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
+	const renderTrace = getActiveRenderTrace();
 	const chatPanel = factories.createChatPanel({
 		getToolExpandKey: () => {
 			const first = keybindings.getKeys("clio.tool.expand")[0];
 			return typeof first === "string" && first.length > 0 ? first : undefined;
 		},
 		getOutputVerbosity: () => deps.getSettings?.().terminal.outputVerbosity ?? "default",
+		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 	});
 	const followUpQueuePanel = factories.createFollowUpQueuePanel({
 		getDequeueKey: () => {
@@ -303,7 +306,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		() => dispatchBoardStore.rows(),
 		() => observabilitySnapshot,
 	);
-	const chatRenderer = factories.createChatRenderer({ chatPanel, requestRender });
+	const chatRenderer = factories.createChatRenderer({
+		chatPanel,
+		requestRender,
+		...(renderTrace ? { onDelta: () => renderTrace.recordDelta() } : {}),
+	});
 	const io = factories.createIo({
 		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
 		requestRender,

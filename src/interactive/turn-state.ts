@@ -82,6 +82,8 @@ export interface ChatTurnState {
 	synthesisToolLock: boolean;
 	/** Reason a streaming tool-prose cutoff (or hard-block reminder) aborted the run. */
 	toolProseAbortReason: string | null;
+	/** Answer length at the last tool-prose scan, so the scan samples instead of running per delta. */
+	toolProseAssessedChars: number;
 	/** Tool calls observed in the current turn; feeds turn_end metadata. */
 	turnToolCalls: number;
 	/** One stalled-turn nudge per user prompt; reset when a real prompt arrives. */
@@ -104,6 +106,7 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		activeInterruptReason: null,
 		synthesisToolLock: false,
 		toolProseAbortReason: null,
+		toolProseAssessedChars: 0,
 		turnToolCalls: 0,
 		stalledTurnNudgeSpent: false,
 		pendingRequestContinuation: false,

@@ -1,5 +1,6 @@
 import type { Component, Terminal } from "../engine/tui.js";
 import { ProcessTerminal, TUI } from "../engine/tui.js";
+import { createRenderTrace, type RenderTrace, renderTracePath, traceTerminalWrites } from "./render-trace.js";
 
 export interface InteractiveShellTui {
 	addChild(component: Component): void;
@@ -103,10 +104,31 @@ export function createInteractiveShell<TTerminal extends Terminal, TTui extends 
 	};
 }
 
+/**
+ * Trace for the current process, created once when CLIO_RENDER_TRACE names a
+ * file. The panel wires its render metrics into the same instance, so the
+ * frame rows carry both the build cost and the write cost.
+ */
+let activeRenderTrace: RenderTrace | null = null;
+
+export function getActiveRenderTrace(): RenderTrace | null {
+	return activeRenderTrace;
+}
+
 /** Production factories stay here so the composition root does not own them. */
 export function createProcessInteractiveShell(): InteractiveShell<ProcessTerminal, TUI> {
+	const tracePath = renderTracePath();
+	if (tracePath) {
+		activeRenderTrace = createRenderTrace(tracePath);
+		const trace = activeRenderTrace;
+		process.once("exit", () => trace.close());
+	}
+	const trace = activeRenderTrace;
 	return createInteractiveShell({
-		createTerminal: () => new ProcessTerminal(),
+		createTerminal: () => {
+			const terminal = new ProcessTerminal();
+			return trace ? traceTerminalWrites(terminal, trace) : terminal;
+		},
 		createTui: (terminal) => new TUI(terminal),
 	});
 }
