@@ -1232,6 +1232,17 @@ function competeErrorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Prefix the tool name once. Errors raised inside the dispatch domain already
+ * name themselves, and blind prefixing turned those into `dispatch: dispatch:
+ * ...`, which spends the first eleven bytes of a short error saying the same
+ * thing twice.
+ */
+function dispatchErrorMessage(err: unknown): string {
+	const message = competeErrorMessage(err);
+	return message.startsWith("dispatch: ") ? message : `dispatch: ${message}`;
+}
+
 function rejectedReasons(results: ReadonlyArray<PromiseSettledResult<unknown>>): unknown[] {
 	return results
 		.filter((result): result is PromiseRejectedResult => result.status === "rejected")
@@ -2665,7 +2676,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				try {
 					return await runDetached(deps, requests, options?.sessionId ?? null);
 				} catch (err) {
-					return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
+					return { kind: "error", message: dispatchErrorMessage(err) };
 				}
 			}
 
@@ -2694,7 +2705,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					const outcome = await runCompete(deps, requests[0], compete, autonomy, timeoutMs, options?.signal);
 					return competeResult(deps, outcome, autonomy, maxOutputBytes);
 				} catch (err) {
-					return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
+					return { kind: "error", message: dispatchErrorMessage(err) };
 				}
 			}
 
@@ -2709,7 +2720,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					const outcome = await runReviewGated(deps, requests[0], review, timeoutMs, options?.signal);
 					return reviewGateResult(deps, outcome, maxOutputBytes);
 				} catch (err) {
-					return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
+					return { kind: "error", message: dispatchErrorMessage(err) };
 				}
 			}
 
@@ -2739,7 +2750,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 						details: dispatchDetails(deps, "pipeline", err.runs),
 					};
 				}
-				return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
+				return { kind: "error", message: dispatchErrorMessage(err) };
 			}
 		},
 	};

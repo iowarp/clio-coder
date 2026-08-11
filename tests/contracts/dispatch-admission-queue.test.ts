@@ -114,6 +114,35 @@ describe("bounded dispatch admission queue", () => {
 			isolated.restore();
 		}
 	});
+	/**
+	 * The defect this pins: a live dispatch waited nearly two minutes and came
+	 * back with "dispatch: admission timed_out", 39 bytes that named neither the
+	 * wall it hit nor a way past it, so the model had nothing to act on.
+	 */
+	it("an admission timeout names the capacity it waited on and what would clear it", async () => {
+		const isolated = isolateClioEnv("clio-admit-");
+		const controller = createCapacityAdmissionController({
+			limits: () => ({ global: 1, nodes: { local: 1 } }),
+			usage: () => ({ global: 1, nodes: { local: 1 } }),
+		});
+		try {
+			const held = await controller.admit({ assignmentId: "held", nodeId: "local", deadlineAt: Date.now() + 10_000 });
+			await rejects(
+				controller.admit({ assignmentId: "queued", nodeId: "local", deadlineAt: Date.now() + 120 }),
+				(error: Error) => {
+					strictEqual(error.message.startsWith("dispatch: dispatch:"), false, error.message);
+					for (const fragment of ["admission timed out after", "1/1 worker slots in use on 'local'", "concurrency"]) {
+						strictEqual(error.message.includes(fragment), true, `${fragment} missing from: ${error.message}`);
+					}
+					return true;
+				},
+			);
+			controller.release(held.lease.leaseId);
+		} finally {
+			controller.stop();
+			isolated.restore();
+		}
+	});
 	it("a rejected admission leaves nothing pending behind it", async () => {
 		const isolated = isolateClioEnv("clio-admit-");
 		const controller = createCapacityAdmissionController({

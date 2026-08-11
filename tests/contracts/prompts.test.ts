@@ -694,7 +694,7 @@ describe("contracts/prompts compiler logic", () => {
 			"# Tool Contract",
 			"The attached schemas are the session's complete direct-tool surface; follow each schema exactly.",
 			"Harness model: direct tools are attached schemas; fleet agents are workers behind dispatch; skills are operator-activated workflows reached through context. Keep these capability sets distinct.",
-			'When answering capability-inventory questions, list direct tools without calls; add dispatch(list:true) only if agents or the fleet are requested; add context(scope="skills") only if skills are requested.',
+			'When answering capability-inventory questions, copy the Direct tools line above verbatim rather than recalling the attached schemas, and make no calls; add dispatch(list:true) only if agents or the fleet are requested; add context(scope="skills") only if skills are requested.',
 			"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 			'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available, explicit broad repository/codebase exploration uses agent:"auto" before repo-wide reads.',
 			'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded agent:"auto" handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
@@ -737,7 +737,7 @@ describe("contracts/prompts compiler logic", () => {
 
 		ok(result.systemPrompt.includes("Direct tools: `context`, `dispatch`, `read`."));
 		ok(result.systemPrompt.includes("Keep these capability sets distinct."));
-		ok(result.systemPrompt.includes("list direct tools without calls"));
+		ok(result.systemPrompt.includes("copy the Direct tools line above verbatim"));
 		ok(result.systemPrompt.includes("never use it to inventory direct tools"));
 	});
 
