@@ -53,6 +53,8 @@ export interface CreateCoalescingChatRendererDeps {
 	setTimer?: (cb: () => void, ms: number) => unknown;
 	/** Override for tests. Mirrors the clearTimeout signature. */
 	clearTimer?: (id: unknown) => void;
+	/** Opt-in instrument; counts deltas so a frame row can report how many it absorbed. */
+	onDelta?: () => void;
 }
 
 export interface CoalescingChatRenderer {
@@ -88,6 +90,7 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 		applyEvent(event) {
 			deps.chatPanel.applyEvent(event);
 			if (DELTA_TYPES.has(event.type)) {
+				deps.onDelta?.();
 				if (pendingTimer !== null) return;
 				pendingTimer = setTimer(fireCoalesced, coalesceMs);
 				return;
