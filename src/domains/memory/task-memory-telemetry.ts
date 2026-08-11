@@ -24,6 +24,15 @@ export type TaskMemoryTelemetryTrigger =
 
 export type TaskMemoryTelemetryTier = "rules" | "llm";
 
+/**
+ * A memory boundary that never ran has no policy decision, but it is exactly the
+ * outcome an operator needs to distinguish a starved cadence from a quiet one.
+ * `dropped` is therefore a telemetry-only outcome: the boundary triggered, a
+ * step was already in flight, and its triggers stayed pending for a later
+ * boundary.
+ */
+export type TaskMemoryTelemetryDecision = TaskMemoryPolicyDecision | "dropped";
+
 export interface TaskMemoryClassDelta {
 	added: number;
 	updated: number;
@@ -48,7 +57,7 @@ export interface TaskMemoryTelemetryRecord {
 	triggerReasons: TaskMemoryTelemetryTrigger[];
 	tier: TaskMemoryTelemetryTier;
 	bankDelta: TaskMemoryBankDelta;
-	decision: TaskMemoryPolicyDecision;
+	decision: TaskMemoryTelemetryDecision;
 	citedEntries: number;
 	tokenCost: TaskMemoryTokenCost;
 	latencyMs: number;
@@ -58,7 +67,7 @@ export interface TaskMemoryTelemetryStep {
 	triggerReasons: ReadonlyArray<TaskMemoryTelemetryTrigger>;
 	tier: TaskMemoryTelemetryTier;
 	bankDelta: TaskMemoryBankDelta;
-	decision: TaskMemoryPolicyDecision;
+	decision: TaskMemoryTelemetryDecision;
 	citedEntries: number;
 	inputTokens: number;
 	outputTokens: number;
@@ -167,7 +176,14 @@ const TRIGGERS = new Set<TaskMemoryTelemetryTrigger>([
 	"post_compaction",
 	"manual",
 ]);
-const DECISIONS = new Set<TaskMemoryPolicyDecision>(["silent", "injected", "gated", "timeout", "malformed"]);
+const DECISIONS = new Set<TaskMemoryTelemetryDecision>([
+	"silent",
+	"injected",
+	"gated",
+	"timeout",
+	"malformed",
+	"dropped",
+]);
 
 function entryDelta(
 	before: ReadonlyArray<TaskMemoryEntry>,
@@ -235,8 +251,8 @@ function isTier(value: unknown): value is TaskMemoryTelemetryTier {
 	return value === "rules" || value === "llm";
 }
 
-function isDecision(value: unknown): value is TaskMemoryPolicyDecision {
-	return typeof value === "string" && DECISIONS.has(value as TaskMemoryPolicyDecision);
+function isDecision(value: unknown): value is TaskMemoryTelemetryDecision {
+	return typeof value === "string" && DECISIONS.has(value as TaskMemoryTelemetryDecision);
 }
 
 function validIsoTimestamp(value: unknown): value is string {

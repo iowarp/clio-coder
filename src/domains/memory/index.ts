@@ -95,6 +95,7 @@ export {
 	TASK_MEMORY_TELEMETRY_VERSION,
 	type TaskMemoryBankDelta,
 	type TaskMemoryClassDelta,
+	type TaskMemoryTelemetryDecision,
 	type TaskMemoryTelemetryRecord,
 	type TaskMemoryTelemetrySink,
 	type TaskMemoryTelemetryStep,

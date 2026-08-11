@@ -10,6 +10,7 @@ import {
 import type { TaskMemoryActivityEvent } from "../memory/task-memory-status.js";
 import {
 	type TaskMemoryBankDelta,
+	type TaskMemoryTelemetryDecision,
 	type TaskMemoryTelemetrySink,
 	type TaskMemoryTelemetryTier,
 	type TaskMemoryTelemetryTrigger,
@@ -136,6 +137,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	const annotatedThisTurn = new Set<string>();
 	let telemetryBankSnapshot = deps.bank.snapshot();
 	let promptedStepInFlight = false;
+	// The tier of the step currently holding the single in-flight slot, so a
+	// dropped boundary can name what it was starved by.
+	let promptedStepTier: TaskMemoryTelemetryTier = "rules";
 	let outstandingStep: Promise<void> = Promise.resolve();
 	let rulesInjectedSincePromptedStep = false;
 	let annotatedSinceTurnEnd = false;
@@ -220,8 +224,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			const boundary = input.turnId ?? input.metadata?.userTurnId?.toString() ?? `tool-step:${toolStep}`;
 			if (boundary === lastPromptedBoundary) return NO_EFFECTS;
 			// A step slower than the turns that trigger it must not queue: dropping
-			// this boundary keeps at most one background call alive per session.
-			if (promptedStepInFlight) return NO_EFFECTS;
+			// this boundary keeps at most one background call alive per session. The
+			// drop is recorded, because a starved cadence and a quiet one are
+			// otherwise indistinguishable in the telemetry log. Triggers stay pending
+			// so the next free boundary still runs for them.
+			if (promptedStepInFlight) {
+				emitTelemetry([...pendingTriggers], promptedStepTier, "dropped", 0, 0, 0, process.hrtime.bigint());
+				return NO_EFFECTS;
+			}
 			lastPromptedBoundary = boundary;
 			const triggers = [...pendingTriggers];
 			pendingTriggers.clear();
@@ -302,6 +312,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const started = process.hrtime.bigint();
 		const triggers = input.triggerReasons?.length ? input.triggerReasons : ["manual" as const];
 		let tier: TaskMemoryTelemetryTier = "rules";
+		promptedStepTier = tier;
 		let promptedResult: TaskMemoryPolicyResult;
 		try {
 			const client = deps.getModelClient?.() ?? null;
@@ -309,6 +320,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				promptedResult = silent();
 			} else {
 				tier = "llm";
+				promptedStepTier = tier;
 				promptedResult = await runTaskMemoryPolicy(deps.bank, client, {
 					task: input.task?.trim() || currentTask,
 					trajectory: [...trajectory],
@@ -344,7 +356,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	function emitTelemetry(
 		triggerReasons: ReadonlyArray<TaskMemoryTelemetryTrigger>,
 		tier: TaskMemoryTelemetryTier,
-		decision: TaskMemoryPolicyResult["decision"],
+		decision: TaskMemoryTelemetryDecision,
 		citedEntries: number,
 		inputTokens: number,
 		outputTokens: number,

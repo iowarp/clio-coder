@@ -305,7 +305,63 @@ describe("contracts/memory intervention rules tier", () => {
 		release();
 		await registration.whenIdle();
 		strictEqual(registration.stepInFlight(), false);
-		strictEqual(registration.recentActivity().length, 1, "the dropped boundary ran no second step");
+		const activity = registration.recentActivity();
+		strictEqual(activity.length, 2, "the drop is recorded even though it ran no second step");
+		// Newest first: the slow step outlives the boundary it starved.
+		strictEqual(activity[0]?.decision, "silent", "the step that held the slot");
+		strictEqual(activity[1]?.decision, "dropped", "the boundary that arrived mid-step");
+		deepStrictEqual(activity[1]?.triggerReasons, ["loop_signal"]);
+		ok((activity[1]?.latencyMs ?? Number.POSITIVE_INFINITY) < 5, "a drop costs nothing");
+	});
+
+	it("records a dropped boundary without discarding its triggers or the visible outcome", async () => {
+		const bank = new TaskMemoryBank();
+		const rows: TaskMemoryTelemetryStep[] = [];
+		let release = (): void => undefined;
+		const blocked = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let calls = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			everyNTools: 2,
+			telemetry: {
+				record(step) {
+					rows.push(step);
+				},
+			},
+			getModelClient: () => ({
+				async complete() {
+					calls += 1;
+					if (calls === 1) await blocked;
+					return { text: SILENT_MODEL_RESPONSE };
+				},
+			}),
+		});
+
+		execute(registration, 1, { command: "one" });
+		execute(registration, 2, { command: "two" });
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "boundary-1" });
+		strictEqual(registration.stepInFlight(), true);
+
+		// A boundary arriving mid-step is dropped, but its triggers stay pending so
+		// the next free boundary still runs for them.
+		execute(registration, 3, { command: "three" });
+		execute(registration, 4, { command: "four" });
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "boundary-2" });
+		strictEqual(calls, 1, "the dropped boundary started no second call");
+		const dropped = rows.filter((row) => row.decision === "dropped");
+		strictEqual(dropped.length, 1);
+		deepStrictEqual(dropped[0]?.triggerReasons, ["interval"]);
+		strictEqual(dropped[0]?.tier, "llm", "the tier of the step that held the slot");
+		strictEqual(dropped[0]?.inputTokens, 0);
+		strictEqual(dropped[0]?.outputTokens, 0);
+
+		release();
+		await registration.whenIdle();
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "boundary-3" });
+		await registration.whenIdle();
+		strictEqual(calls, 2, "the dropped boundary's triggers survived to the next free boundary");
 	});
 
 	it("coalesces simultaneous triggers and runs at most once for one turn boundary", async () => {

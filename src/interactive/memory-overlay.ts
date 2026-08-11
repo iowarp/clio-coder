@@ -3,7 +3,7 @@ import {
 	type MemoryRecord,
 	type TaskMemoryEntry,
 	type TaskMemoryOperatorStatus,
-	type TaskMemoryPolicyDecision,
+	type TaskMemoryTelemetryDecision,
 } from "../domains/memory/index.js";
 import {
 	type Component,
@@ -119,7 +119,7 @@ function activityLines(status: TaskMemoryOperatorStatus, width: number): string[
 	return lines;
 }
 
-function decisionToken(decision: TaskMemoryPolicyDecision): "success" | "warning" | "muted" {
+function decisionToken(decision: TaskMemoryTelemetryDecision): "success" | "warning" | "muted" {
 	if (decision === "injected") return "success";
 	return decision === "silent" ? "muted" : "warning";
 }

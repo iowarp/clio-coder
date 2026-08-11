@@ -1,6 +1,10 @@
 import type { TaskMemorySnapshot } from "./task-bank.js";
 import type { TaskMemoryPolicyDecision } from "./task-memory-policy.js";
-import type { TaskMemoryTelemetryTier, TaskMemoryTelemetryTrigger } from "./task-memory-telemetry.js";
+import type {
+	TaskMemoryTelemetryDecision,
+	TaskMemoryTelemetryTier,
+	TaskMemoryTelemetryTrigger,
+} from "./task-memory-telemetry.js";
 
 export type TaskMemoryTier = "rules" | "llm";
 
@@ -13,7 +17,7 @@ export interface TaskMemoryActivityEvent {
 	at: string;
 	triggerReasons: ReadonlyArray<TaskMemoryTelemetryTrigger>;
 	tier: TaskMemoryTelemetryTier;
-	decision: TaskMemoryPolicyDecision;
+	decision: TaskMemoryTelemetryDecision;
 	citedEntries: number;
 	bankWrites: number;
 	latencyMs: number;
