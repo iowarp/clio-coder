@@ -1158,10 +1158,17 @@ function assertRuntimeCanHonorWorkerPermissionMode(
 	runtime: RuntimeDescriptor,
 	onPermission: WorkerPermissionMode,
 ): void {
-	if (runtime.kind !== "subprocess" || onPermission === "deny") return;
-	throw new Error(
-		`dispatch: runtime '${runtime.id}' cannot enforce workers.onPermission='${onPermission}' because subprocess workers do not expose per-tool permission mediation; set workers.onPermission='deny' or choose a mediated runtime`,
-	);
+	if (onPermission === "deny") return;
+	if (runtime.kind === "subprocess") {
+		throw new Error(
+			`dispatch: runtime '${runtime.id}' cannot enforce workers.onPermission='${onPermission}' because subprocess workers do not expose per-tool permission mediation; set workers.onPermission='deny' or choose a mediated runtime`,
+		);
+	}
+	if (runtime.id === "claude-sdk" && onPermission === "escalate") {
+		throw new Error(
+			"dispatch: runtime 'claude-sdk' cannot enforce workers.onPermission='escalate' because its SDK permission callback cannot park for an operator decision; choose 'deny' or 'fail', or use a native mediated runtime",
+		);
+	}
 }
 
 /**
