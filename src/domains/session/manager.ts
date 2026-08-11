@@ -4,8 +4,8 @@ import {
 	type ClioSessionWriter,
 	type ClioTurnRecord,
 	createSession as engineCreateSession,
-	openSession as engineOpenSession,
 	resumeSession as engineResumeSession,
+	readSessionMeta,
 	type SessionTreeNode,
 	sessionPaths,
 } from "../../engine/session.js";
@@ -59,12 +59,15 @@ export function persistSessionMeta(state: SessionManagerState): void {
 	atomicWrite(sessionPaths(state.meta).meta, JSON.stringify(state.meta, null, 2));
 }
 
-export function resumeSessionState(sessionId: string): SessionManagerState {
-	const sessionMeta = engineOpenSession(sessionId).meta() as SessionMeta;
-	const paths = sessionPaths(sessionMeta);
-	runMigrations(sessionMeta, paths.meta);
-	const { writer } = engineResumeSession(sessionId);
-	return { meta: sessionMeta, writer };
+export function resumeSessionState(sessionId: string): {
+	state: SessionManagerState;
+	nodes: ReadonlyArray<SessionTreeNode>;
+} {
+	const persistedMeta = readSessionMeta(sessionId) as SessionMeta;
+	const paths = sessionPaths(persistedMeta);
+	runMigrations(persistedMeta, paths.meta);
+	const { meta, writer, tree } = engineResumeSession(sessionId);
+	return { state: { meta: meta as SessionMeta, writer }, nodes: tree };
 }
 
 export function appendTurn(state: SessionManagerState, input: TurnInput): ClioTurnRecord {

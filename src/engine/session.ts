@@ -25,6 +25,7 @@ import { createHash, randomBytes } from "node:crypto";
 import {
 	closeSync,
 	existsSync,
+	constants as fsConstants,
 	fstatSync,
 	fsyncSync,
 	mkdirSync,
@@ -557,6 +558,11 @@ function findSessionDir(id: string): string {
 	throw new Error(`session not found: ${id}`);
 }
 
+/** Read only meta.json for callers that do not need to parse the transcript. */
+export function readSessionMeta(id: string): ClioSessionMeta {
+	return readMetaFile(join(findSessionDir(id), "meta.json"));
+}
+
 const APPEND_FSYNC_DEBOUNCE_MS = 500;
 
 /**
@@ -578,6 +584,31 @@ function endsWithNewline(path: string): boolean {
 		const buf = Buffer.alloc(1);
 		readSync(fd, buf, 0, 1, size - 1);
 		return buf[0] === 0x0a;
+	} finally {
+		closeSync(fd);
+	}
+}
+
+/**
+ * Durably append one entry to an existing session JSONL file without reading
+ * or replacing its prior contents. This is the off-current counterpart to the
+ * long-lived writer: a torn final fragment is terminated and left visible to
+ * the tolerant reader, then the new record is written through O_APPEND and
+ * fsynced before returning.
+ */
+export function appendSessionFileEntry(targetPath: string, entry: unknown): void {
+	const appendPath = recoverJsonlTargetIfMissing(targetPath);
+	if (appendPath === null) throw new Error(`session JSONL file not found: ${targetPath}`);
+	const serialized = JSON.stringify(entry);
+	if (serialized === undefined) throw new Error("session JSONL entry is not serializable");
+	const line = Buffer.from(`${endsWithNewline(appendPath) ? "" : "\n"}${serialized}\n`, "utf8");
+	const fd = openSync(appendPath, fsConstants.O_WRONLY | fsConstants.O_APPEND);
+	try {
+		const written = writeSync(fd, line);
+		if (written !== line.length) {
+			throw new Error(`short session JSONL append: wrote ${written} of ${line.length} bytes`);
+		}
+		fsyncSync(fd);
 	} finally {
 		closeSync(fd);
 	}
@@ -759,7 +790,11 @@ export function openSession(id: string): ClioSessionReader {
 	};
 }
 
-export function resumeSession(id: string): { meta: ClioSessionMeta; writer: ClioSessionWriter } {
+export function resumeSession(id: string): {
+	meta: ClioSessionMeta;
+	writer: ClioSessionWriter;
+	tree: ReadonlyArray<SessionTreeNode>;
+} {
 	const dir = findSessionDir(id);
 	const metaPath = join(dir, "meta.json");
 	const meta = readMetaFile(metaPath);
@@ -771,5 +806,5 @@ export function resumeSession(id: string): { meta: ClioSessionMeta; writer: Clio
 	const existingFileEntries = readSessionFileEntries(join(dir, "current.jsonl"));
 	const existingTree = recoverTreeFromJsonl(readTreeFile(join(dir, "tree.json")), existingFileEntries);
 	const writer = createWriter(meta, existingTree, existingFileEntries);
-	return { meta, writer };
+	return { meta, writer, tree: existingTree };
 }

@@ -28,6 +28,7 @@ export interface ForkInput {
 export interface ForkResult {
 	next: SessionManagerState;
 	parentMeta: SessionMeta;
+	nodes: ReadonlyArray<SessionTreeNode>;
 }
 
 interface LinkedRecord {
@@ -155,5 +156,5 @@ export function forkFromState(input: ForkInput): ForkResult {
 		parentTurnId: input.parentTurnId,
 	});
 	enrichForkMeta(next.meta, parentMeta.id, input.parentTurnId);
-	return { next, parentMeta };
+	return { next, parentMeta, nodes: branch.tree };
 }
