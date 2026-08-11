@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Only argument parsing and boot tracing load statically. Every subcommand is
-// imported dynamically inside its switch case (see `dispatch`), so a bare `clio`
+// imported dynamically through the command registry (see `dispatch`), so a bare `clio`
 // (interactive) or `clio --version` pays for its own module graph and nothing
 // else — this is the highest-value cut of the cold module-load tax. Code
 // splitting (tsup.config.ts) keeps each command's transitive heavy externals in
 // its own chunk.
 import { traceBoot } from "../core/boot-trace.js";
-import { extractApiKeyFlag, extractNoContextFilesFlag, extractSkillsFlags, parseFlags, printError } from "./argv.js";
+import { extractGlobalFlags, parseFlags, printError } from "./argv.js";
 
 const HELP = `Clio Coder command line
 
@@ -89,6 +89,15 @@ function helpText(all: boolean): string {
  * or API error on old Node versions. */
 const MIN_NODE = [22, 19, 0] as const;
 
+interface CliBootOptions {
+	apiKey?: string;
+	noContextFiles?: boolean;
+	noSkills?: boolean;
+	skillPaths?: string[];
+}
+
+type CommandHandler = (subArgs: string[], bootOptions: CliBootOptions) => Promise<number>;
+
 function nodeVersionError(): string | null {
 	const parts = process.versions.node.split(".").map((part) => Number.parseInt(part, 10));
 	for (let i = 0; i < MIN_NODE.length; i += 1) {
@@ -111,15 +120,16 @@ async function main(argv: string[]): Promise<number> {
 		printError(versionError);
 		return 1;
 	}
-	const { apiKey, rest: afterApiKey, error: apiKeyError } = extractApiKeyFlag(argv, isCommandToken);
-	if (apiKeyError) {
-		printError(apiKeyError);
-		return 2;
-	}
-	const { noContextFiles, rest: afterNoContextFiles } = extractNoContextFilesFlag(afterApiKey);
-	const { noSkills, skillPaths, rest, error: skillError } = extractSkillsFlags(afterNoContextFiles, isCommandToken);
-	if (skillError) {
-		printError(skillError);
+	const {
+		apiKey,
+		noContextFiles,
+		noSkills,
+		skillPaths,
+		rest,
+		error: globalFlagError,
+	} = extractGlobalFlags(argv, isCommandToken);
+	if (globalFlagError) {
+		printError(globalFlagError);
 		return 2;
 	}
 	const { flags, positional } = parseFlags(rest);
@@ -150,101 +160,33 @@ async function main(argv: string[]): Promise<number> {
 	return dispatch(subcommand, subArgs, bootOptions);
 }
 
-// Every subcommand name dispatch() routes. The top-level value flags
-// (--api-key, --skill) consult this so they refuse to consume an intended
-// subcommand as their value. Keep in sync with the dispatch() switch below.
-const RECOGNIZED_SUBCOMMANDS = new Set<string>([
-	"acp",
-	"auth",
-	"config",
-	"configure",
-	"dev",
-	"targets",
-	"models",
-	"agents",
-	"components",
-	"evidence",
-	"eval",
-	"memory",
-	"usage",
-	"trace",
-	"evolve",
-	"extensions",
-	"ext",
-	"fleet",
-	"skills",
-	"docs",
-	"share",
-	"export",
-	"import",
-	"context",
-	"run",
-	"doctor",
-	"paths",
-	"reset",
-	"uninstall",
-	"upgrade",
-	"version",
-	"worker",
-]);
-
-// Retired commands are not dispatchable, but remain command-shaped tombstones
-// so top-level value flags cannot consume them and accidentally boot another mode.
-const RETIRED_SUBCOMMANDS = new Set<string>(["context-init", "context-index", "context-clear"]);
-
-function isCommandToken(token: string): boolean {
-	return RECOGNIZED_SUBCOMMANDS.has(token) || RETIRED_SUBCOMMANDS.has(token);
-}
-
 /**
- * Route a subcommand to its handler, importing only that command's module. Each
- * case is an isolated dynamic import so the process never loads a command it did
- * not run. Keep every `MODULE` string a plain literal — the bundler splits on
- * static import specifiers, so a computed path would not code-split.
+ * The dispatcher is also the command-recognition source used by top-level
+ * value flags. Every dynamic import stays a literal so tsup can split command
+ * graphs, while adding a command in one place cannot leave --api-key/--skill
+ * free to swallow it as a value.
  */
-async function dispatch(
-	subcommand: string,
-	subArgs: string[],
-	bootOptions: {
-		apiKey?: string;
-		noContextFiles?: boolean;
-		noSkills?: boolean;
-		skillPaths?: string[];
-	},
-): Promise<number> {
-	switch (subcommand) {
-		case "acp":
-			return (await import("./acp.js")).runAcpCommand(subArgs, bootOptions);
-		case "auth":
-			return (await import("./auth.js")).runAuthCommand(subArgs);
-		case "config":
-			return (await import("./config.js")).runConfigCommand(subArgs);
-		case "configure":
-			return (await import("./configure.js")).runConfigureCommand(subArgs);
-		case "targets":
-			return (await import("./targets.js")).runTargetsCommand(subArgs);
-		case "models":
-			return (await import("./models.js")).runModelsCommand(subArgs);
-		case "agents":
-			return (await import("./agents.js")).runAgentsCommand(subArgs);
-		case "components":
-			return (await import("./components.js")).runComponentsCommand(subArgs);
-		case "evidence":
-			return (await import("./evidence.js")).runEvidenceCommand(subArgs);
-		case "eval":
-			return (await import("./eval.js")).runEvalCommand(subArgs);
-		case "memory":
-			return (await import("./memory.js")).runMemoryCommand(subArgs);
-		case "usage":
-			return (await import("./usage.js")).runUsageCommand(subArgs);
-		case "trace":
-			return (await import("./trace.js")).runTraceCommand(subArgs);
-		case "evolve":
-			return (await import("./evolve.js")).runEvolveCommand(subArgs);
-		case "dev": {
-			// `clio dev <name>` re-enters dispatch with the bare name, so there is
-			// exactly one implementation of every command and the prefix cannot
-			// drift from what it forwards to.
+const extensionsCommand: CommandHandler = async (subArgs) =>
+	(await import("./extensions.js")).runExtensionsCommand(subArgs);
+
+const COMMAND_HANDLERS = new Map<string, CommandHandler>([
+	["acp", async (subArgs, bootOptions) => (await import("./acp.js")).runAcpCommand(subArgs, bootOptions)],
+	["auth", async (subArgs) => (await import("./auth.js")).runAuthCommand(subArgs)],
+	["config", async (subArgs) => (await import("./config.js")).runConfigCommand(subArgs)],
+	["configure", async (subArgs) => (await import("./configure.js")).runConfigureCommand(subArgs)],
+	["targets", async (subArgs) => (await import("./targets.js")).runTargetsCommand(subArgs)],
+	["models", async (subArgs) => (await import("./models.js")).runModelsCommand(subArgs)],
+	["agents", async (subArgs) => (await import("./agents.js")).runAgentsCommand(subArgs)],
+	["components", async (subArgs) => (await import("./components.js")).runComponentsCommand(subArgs)],
+	["evidence", async (subArgs) => (await import("./evidence.js")).runEvidenceCommand(subArgs)],
+	["eval", async (subArgs) => (await import("./eval.js")).runEvalCommand(subArgs)],
+	["memory", async (subArgs) => (await import("./memory.js")).runMemoryCommand(subArgs)],
+	["usage", async (subArgs) => (await import("./usage.js")).runUsageCommand(subArgs)],
+	["trace", async (subArgs) => (await import("./trace.js")).runTraceCommand(subArgs)],
+	["evolve", async (subArgs) => (await import("./evolve.js")).runEvolveCommand(subArgs)],
+	[
+		"dev",
+		async (subArgs, bootOptions) => {
 			const devSubcommand = subArgs[0];
 			if (devSubcommand === undefined || devSubcommand === "--help" || devSubcommand === "-h") {
 				process.stdout.write(DEV_HELP);
@@ -256,51 +198,54 @@ async function dispatch(
 				return 2;
 			}
 			return dispatch(devSubcommand, subArgs.slice(1), bootOptions);
-		}
-		case "extensions":
-		case "ext":
-			return (await import("./extensions.js")).runExtensionsCommand(subArgs);
-		case "fleet":
-			return (await import("./fleet.js")).runFleetCommand(subArgs);
-		case "skills":
-			return (await import("./skills.js")).runSkillsCommand(subArgs);
-		case "docs":
-			return (await import("./docs.js")).runDocsCommand(subArgs);
-		case "share":
-			return (await import("./share.js")).runShareCommand(subArgs);
-		case "export":
-			return (await import("./share.js")).runExportCommand(subArgs);
-		case "import":
-			return (await import("./share.js")).runImportCommand(subArgs);
-		case "context":
-			return (await import("./context.js")).runContextCommand(subArgs);
-		case "run":
-			return (await import("./run.js")).runClioRun(subArgs, bootOptions);
-		case "doctor":
-			return (await import("./doctor.js")).runDoctorCommand(subArgs);
-		case "paths":
-			return (await import("./paths.js")).runPathsCommand(subArgs);
-		case "reset":
-			return (await import("./reset.js")).runResetCommand(subArgs);
-		case "uninstall":
-			return (await import("./uninstall.js")).runUninstallCommand(subArgs);
-		case "upgrade":
-			return (await import("./upgrade.js")).runUpgradeCommand(subArgs);
-		case "version":
-			return (await import("./version.js")).runVersionCommand();
-		case "worker":
+		},
+	],
+	["extensions", extensionsCommand],
+	["ext", extensionsCommand],
+	["fleet", async (subArgs) => (await import("./fleet.js")).runFleetCommand(subArgs)],
+	["skills", async (subArgs) => (await import("./skills.js")).runSkillsCommand(subArgs)],
+	["docs", async (subArgs) => (await import("./docs.js")).runDocsCommand(subArgs)],
+	["share", async (subArgs) => (await import("./share.js")).runShareCommand(subArgs)],
+	["export", async (subArgs) => (await import("./share.js")).runExportCommand(subArgs)],
+	["import", async (subArgs) => (await import("./share.js")).runImportCommand(subArgs)],
+	["context", async (subArgs) => (await import("./context.js")).runContextCommand(subArgs)],
+	["run", async (subArgs, bootOptions) => (await import("./run.js")).runClioRun(subArgs, bootOptions)],
+	["doctor", async (subArgs) => (await import("./doctor.js")).runDoctorCommand(subArgs)],
+	["paths", async (subArgs) => (await import("./paths.js")).runPathsCommand(subArgs)],
+	["reset", async (subArgs) => (await import("./reset.js")).runResetCommand(subArgs)],
+	["uninstall", async (subArgs) => (await import("./uninstall.js")).runUninstallCommand(subArgs)],
+	["upgrade", async (subArgs) => (await import("./upgrade.js")).runUpgradeCommand(subArgs)],
+	["version", async () => (await import("./version.js")).runVersionCommand()],
+	[
+		"worker",
+		async () => {
 			// Internal: the native worker stream server (WorkerSpec on stdin,
-			// NDJSON on stdout). SSH fleet transports invoke `clio worker` on
-			// remote nodes; operators never run it by hand, so it stays out of
-			// HELP. The entry module runs main() on import and owns process
-			// exit; the promise below settles only on a pre-run import failure.
+			// NDJSON on stdout). The entry module runs main() on import and owns
+			// process exit; this settles only on a pre-run import failure.
 			await import("../worker/entry.js");
 			return 0;
-		default:
-			printError(`unknown subcommand: ${subcommand}`);
-			process.stdout.write(helpText(false));
-			return 2;
-	}
+		},
+	],
+]);
+
+// Retired commands are not dispatchable, but remain command-shaped tombstones
+// so top-level value flags cannot consume them and accidentally boot another mode.
+const RETIRED_SUBCOMMANDS = new Set<string>(["context-init", "context-index", "context-clear"]);
+
+function isCommandToken(token: string): boolean {
+	return COMMAND_HANDLERS.has(token) || RETIRED_SUBCOMMANDS.has(token);
+}
+
+/**
+ * Route a subcommand to its registered handler, importing only that command's
+ * module. Unknown names fail before loading any command graph.
+ */
+async function dispatch(subcommand: string, subArgs: string[], bootOptions: CliBootOptions): Promise<number> {
+	const handler = COMMAND_HANDLERS.get(subcommand);
+	if (handler) return handler(subArgs, bootOptions);
+	printError(`unknown subcommand: ${subcommand}`);
+	process.stdout.write(helpText(false));
+	return 2;
 }
 
 main(process.argv.slice(2))

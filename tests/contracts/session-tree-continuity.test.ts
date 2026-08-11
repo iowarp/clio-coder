@@ -96,6 +96,61 @@ describe("contracts/session-tree-continuity", () => {
 		await bundle.contract.close();
 	});
 
+	it("selects a live branch without truncating a compaction summary appended after its leaf", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const rootUser = contract.append({ parentId: null, kind: "user", payload: { text: "root request" } });
+		const rootAssistant = contract.append({
+			parentId: rootUser.id,
+			kind: "assistant",
+			payload: { text: "root response" },
+		});
+		const selectedUser = contract.append({
+			parentId: rootAssistant.id,
+			kind: "user",
+			payload: { text: "selected branch request" },
+		});
+		const selectedAssistant = contract.append({
+			parentId: selectedUser.id,
+			kind: "assistant",
+			payload: { text: "selected branch response" },
+		});
+		contract.switchTurn(rootAssistant.id);
+		const abandonedUser = contract.append({
+			parentId: rootAssistant.id,
+			kind: "user",
+			payload: { text: "abandoned branch request" },
+		});
+		contract.append({
+			parentId: abandonedUser.id,
+			kind: "assistant",
+			payload: { text: "abandoned branch response" },
+		});
+		contract.switchTurn(selectedAssistant.id);
+		contract.appendEntry({
+			kind: "compactionSummary",
+			parentTurnId: selectedUser.id,
+			summary: "selected branch summary",
+			tokensBefore: 1000,
+			firstKeptTurnId: selectedUser.id,
+		});
+
+		const turns = sessionEntries(meta.id);
+		const liveTexts = textBlocks(buildReplayAgentMessagesFromTurns(turns, { activeLeafTurnId: selectedAssistant.id }));
+		ok(liveTexts.some((text) => text.includes("selected branch summary")));
+		ok(liveTexts.some((text) => text.includes("selected branch request")));
+		ok(!liveTexts.some((text) => text.includes("abandoned branch")));
+
+		const historicalTexts = textBlocks(buildReplayAgentMessagesFromTurns(turns, { uptoTurnId: selectedAssistant.id }));
+		ok(
+			!historicalTexts.some((text) => text.includes("selected branch summary")),
+			"uptoTurnId keeps its historical truncation semantics",
+		);
+
+		await contract.close();
+	});
+
 	it("keeps anchored sidecars with their branch during replay", async () => {
 		const bundle = createSessionBundle(stubContext());
 		const contract = bundle.contract;

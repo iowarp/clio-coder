@@ -6,6 +6,7 @@ import { parse as parseYaml } from "yaml";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
 import { expandConfigPath, expandConfigValue } from "../../src/core/resolve-config-value.js";
+import { MAX_TIMER_DELAY_MS } from "../../src/core/timers.js";
 import { diffSettings } from "../../src/domains/config/classify.js";
 import { advanceScopedTarget } from "../../src/entry/orchestrator.js";
 
@@ -335,6 +336,50 @@ describe("contracts/config", () => {
 		deepStrictEqual(diff.hotReload, []);
 		deepStrictEqual(diff.nextTurn, ["delegation.agents.0"]);
 		deepStrictEqual(diff.restartRequired, []);
+	});
+
+	it("rejects unschedulable ACP request bounds while preserving the documented zero stall disable", () => {
+		for (const invalid of [0, MAX_TIMER_DELAY_MS + 1]) {
+			const result = validateSettings({
+				delegation: {
+					defaults: {
+						connectTimeoutMs: invalid,
+						turnTimeoutMs: invalid,
+						permissionTimeoutMs: invalid,
+					},
+					agents: [
+						{
+							id: "silent",
+							command: "silent-acp",
+							connectTimeoutMs: invalid,
+							turnTimeoutMs: invalid,
+							permissionTimeoutMs: invalid,
+							stallTimeoutMs: 0,
+						},
+					],
+				},
+			});
+
+			deepStrictEqual(result.issues.map((issue) => issue.path).sort(), [
+				"delegation.agents[0].connectTimeoutMs",
+				"delegation.agents[0].permissionTimeoutMs",
+				"delegation.agents[0].turnTimeoutMs",
+				"delegation.defaults.connectTimeoutMs",
+				"delegation.defaults.permissionTimeoutMs",
+				"delegation.defaults.turnTimeoutMs",
+			]);
+			deepStrictEqual(result.settings.delegation.defaults, DEFAULT_SETTINGS.delegation.defaults);
+			strictEqual(
+				result.settings.delegation.agents[0]?.connectTimeoutMs,
+				DEFAULT_SETTINGS.delegation.defaults.connectTimeoutMs,
+			);
+			strictEqual(result.settings.delegation.agents[0]?.turnTimeoutMs, DEFAULT_SETTINGS.delegation.defaults.turnTimeoutMs);
+			strictEqual(
+				result.settings.delegation.agents[0]?.permissionTimeoutMs,
+				DEFAULT_SETTINGS.delegation.defaults.permissionTimeoutMs,
+			);
+			strictEqual(result.settings.delegation.agents[0]?.stallTimeoutMs, 0);
+		}
 	});
 
 	it("classifies settings changes next-turn updates", () => {

@@ -1,16 +1,9 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { clampTimerDelayMs } from "./timers.js";
 
 export const SAFE_EXEC_DEFAULT_TIMEOUT_MS = 120_000;
 export const SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES = 600_000;
-
-// setTimeout clamps delays above 2^31-1 (or non-finite) down to 1ms; clamp the
-// caller-supplied timeout so a huge value never inverts into a near-instant kill.
-const TIMEOUT_MAX_MS = 2_147_483_647;
-function clampTimeoutMs(ms: number): number {
-	if (Number.isNaN(ms) || ms <= 0) return 0;
-	return ms >= TIMEOUT_MAX_MS ? TIMEOUT_MAX_MS : Math.floor(ms);
-}
 
 const ENV_ALLOWLIST = [
 	"PATH",
@@ -78,7 +71,7 @@ export function runCommandVector(
 	return new Promise((resolve) => {
 		const startedAt = Date.now();
 		const cwd = resolveSafeCwd(options.cwd, options.workspaceRoot);
-		const timeoutMs = clampTimeoutMs(options.timeoutMs ?? SAFE_EXEC_DEFAULT_TIMEOUT_MS);
+		const timeoutMs = clampTimerDelayMs(options.timeoutMs ?? SAFE_EXEC_DEFAULT_TIMEOUT_MS);
 		const maxOutputBytes = options.maxOutputBytes ?? SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES;
 		let aborted = false;
 		let timedOut = false;

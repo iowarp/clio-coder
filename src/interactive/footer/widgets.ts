@@ -60,7 +60,13 @@ export interface SessionFacts {
 	/** Active transcript detail mode, shown in the dashboard so visibility is never implicit. */
 	outputVerbosity?: OutputVerbosity | null;
 	/** Proactive-memory status; kept as one atomic fact row in the expanded dashboard. */
-	memoryIntervention?: { enabled: boolean; tier: "rules" | "llm"; size: number } | null;
+	memoryIntervention?: {
+		enabled: boolean;
+		tier: "rules" | "llm";
+		size: number;
+		stepInFlight?: boolean;
+		lastDecision?: string | null;
+	} | null;
 }
 
 /** Context engine telemetry. */
@@ -455,6 +461,10 @@ export function sessionQuadrant(facts: SessionFacts, options: ExpandedQuadrantOp
 					theme.fg(memory.enabled ? "success" : "dim", memory.enabled ? "on" : "off"),
 					theme.fg(memory.tier === "llm" ? "reason" : "muted", `tier ${memory.tier === "llm" ? "LLM" : "rules"}`),
 					theme.fg("muted", `bank ${memory.size}`),
+					// A background step runs for tens of seconds on a small local model.
+					// Saying so is the difference between a quiet feature and a dead one.
+					...(memory.stepInFlight ? [theme.fg("reason", "working")] : []),
+					...(memory.lastDecision ? [theme.fg("dim", memory.lastDecision)] : []),
 				],
 				Math.max(1, (options.width ?? Number.POSITIVE_INFINITY) - 9),
 			)

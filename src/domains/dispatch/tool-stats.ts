@@ -54,6 +54,20 @@ export function snapshotToolStats(stats: Map<string, ToolCallStat>): ToolCallSta
 	return [...stats.values()].sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
 }
 
+/**
+ * Whether a receipt contains an executed tool call that may have changed
+ * state. Failed calls are included because an error result does not prove the
+ * tool rolled back partial filesystem or external side effects. Blocked calls
+ * are excluded because admission stopped them before execution. Unknown tools
+ * are treated conservatively as potentially mutating.
+ */
+export function hasPotentiallyMutatingAttempt(
+	stats: ReadonlyArray<ToolCallStat>,
+	classify: (tool: string) => ActionClass,
+): boolean {
+	return stats.some((stat) => stat.count > stat.blocked && classify(stat.tool) !== "read");
+}
+
 /** Action classes that can change state outside the worker's own context. */
 const MUTATING_ACTION_CLASSES: ReadonlySet<ActionClass> = new Set([
 	"write",

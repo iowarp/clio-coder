@@ -147,6 +147,9 @@ describe("contracts/task memory telemetry", () => {
 		}
 		registration.evaluate({ hook: "turn_end", turnId: "turn-1" });
 		await registration.evaluateAsync({ hook: "turn_end", turnId: "turn-1" });
+		// The prompted step is detached from the boundary that started it, so its
+		// telemetry row lands after the turn has already been released.
+		await registration.whenIdle();
 
 		strictEqual(records.length, 2);
 		deepStrictEqual((records[0] as { triggerReasons: string[] }).triggerReasons, ["turn_end"]);

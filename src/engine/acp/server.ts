@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { BusChannels } from "../../core/bus-events.js";
+import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../../domains/safety/autonomy.js";
 import type { SessionContract } from "../../domains/session/contract.js";
@@ -506,7 +507,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	let initialized = false;
 	let activeSessionId: string | null = null;
 	const cwd = options.cwd ?? process.cwd();
-	const permissionTimeoutMs = options.permissionTimeoutMs ?? 120_000;
+	const permissionTimeoutMs = options.permissionTimeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS;
 	const unregisterPermission = installPermissionBridge({
 		transport: options.transport,
 		toolRegistry: options.toolRegistry,

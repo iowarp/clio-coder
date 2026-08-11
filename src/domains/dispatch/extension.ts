@@ -77,7 +77,7 @@ import {
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../providers/index.js";
-import type { ActionClass } from "../safety/action-classifier.js";
+import { type ActionClass, classify as classifyAction } from "../safety/action-classifier.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
 import { assessFinishContract, type FinishContractAssessment } from "../safety/finish-contract.js";
@@ -192,6 +192,7 @@ import { detectRunIdentity } from "./run-identity.js";
 import { type Ledger, openLedger } from "./state.js";
 import {
 	countToolCalls,
+	hasPotentiallyMutatingAttempt,
 	recordToolFinish,
 	snapshotToolStats,
 	summarizeToolActivity,
@@ -2278,19 +2279,21 @@ export function createDispatchBundle(
 		capacityAdmission.releaseAssignment(rootRunId);
 	}
 
+	type RetryScheduleResult = { scheduled: true } | { scheduled: false; settlementDetail?: string };
+
 	function maybeScheduleRetry(
 		run: ActiveRun,
 		outcome: RunOutcome,
 		detail: string | null,
 		receipt: RunReceipt,
 		failureClass: FailureClass,
-	): boolean {
-		if (draining) return false;
+	): RetryScheduleResult {
+		if (draining) return { scheduled: false };
 		const rootRunId = run.lineage.rootRunId;
-		if (assignments.get(rootRunId)?.status !== "running") return false;
+		if (assignments.get(rootRunId)?.status !== "running") return { scheduled: false };
 		if (!RETRYABLE_OUTCOMES.has(outcome)) {
 			retryBackoff.delete(rootRunId);
-			return false;
+			return { scheduled: false };
 		}
 		const maxRetries = assignments.get(rootRunId)?.policy.maxRetries ?? assignmentPolicyFor(run.req).maxRetries;
 		const baseDecision = decideRetry(failureClass, run.lineage.attempt, maxRetries);
@@ -2301,7 +2304,18 @@ export function createDispatchBundle(
 			// Deterministic outcomes are intentionally not retried. This is a normal
 			// policy decision carried by the receipt, not an operational diagnostic
 			// that should leak into an embedding command's stderr.
-			return false;
+			return { scheduled: false };
+		}
+		const potentiallyMutated =
+			receipt.toolActivity?.mutatingSucceeded === true ||
+			hasPotentiallyMutatingAttempt(receipt.toolStats, (tool) => classifyAction({ tool }).actionClass);
+		if (potentiallyMutated) {
+			retryBackoff.delete(rootRunId);
+			return {
+				scheduled: false,
+				settlementDetail:
+					"automatic retry suppressed because the failed attempt executed a potentially state-changing tool call and retries do not yet have isolated workspaces",
+			};
 		}
 		const backoff = retryBackoff.get(rootRunId) ?? createBackoff();
 		const { state: nextBackoff, delayMs: backoffDelayMs } = nextDelay(backoff);
@@ -2340,7 +2354,7 @@ export function createDispatchBundle(
 			runtimeKind: run.runtimeKind,
 			event: { type: "retry_scheduled", attempt, dueAt: new Date(dueAt).toISOString(), reason },
 		});
-		return true;
+		return { scheduled: true };
 	}
 
 	function retryReasonKey(rootRunId: string, attempt: number): string {
@@ -2368,7 +2382,8 @@ export function createDispatchBundle(
 			retryReason,
 		});
 		persistAssignment(recordAssignmentAttempt(assignment.id, run.runId), `${assignment.id}:attempt:${run.runId}`);
-		if (maybeScheduleRetry(run, outcome, detail, receipt, failureClass)) return;
+		const retry = maybeScheduleRetry(run, outcome, detail, receipt, failureClass);
+		if (retry.scheduled) return;
 		const currentStatus = assignments.get(assignment.id)?.status;
 		const terminalStatus =
 			currentStatus === "canceled" || outcome === "canceled"
@@ -2376,7 +2391,7 @@ export function createDispatchBundle(
 				: outcome === "succeeded"
 					? "succeeded"
 					: "failed";
-		settleAssignmentDurably(assignment.id, receipt, terminalStatus);
+		settleAssignmentDurably(assignment.id, receipt, terminalStatus, retry.settlementDetail);
 	}
 
 	function assertRouteWithinApprovedEnvelope(req: DispatchRequest, effective: DispatchFailoverCandidate): void {

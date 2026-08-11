@@ -108,6 +108,13 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
  */
 export interface RehydrateChatPanelOptions {
 	/**
+	 * Select the active branch ancestry without truncating later sidecars.
+	 * Live compaction replay uses this so a summary appended after the current
+	 * message leaf remains visible. Unset offline readers retain their
+	 * file-order fallback.
+	 */
+	activeLeafTurnId?: string;
+	/**
 	 * Pin the active-branch leaf and stop replay after that turn (inclusive).
 	 * /tree switches and /fork pass the selected turn id so replay follows
 	 * that turn's ancestry. Unset (default) treats the most recently appended
@@ -630,18 +637,18 @@ function repairToolResultOrphans(
 /**
  * Normalize a heterogeneous session JSONL stream into the entry sequence the
  * replay surfaces should show. The stream is first narrowed to the active
- * branch of the turn tree (uptoTurnId pins the leaf; otherwise the most
- * recent append wins), so abandoned sibling turns from earlier /tree
- * switches never replay. When the remaining slice contains a compaction
- * boundary, render the latest summary first and keep only the retained
- * suffix plus later entries, mirroring pi-coding-agent's
- * buildSessionContext behavior.
+ * branch of the turn tree (activeLeafTurnId selects a live branch;
+ * uptoTurnId selects and historically truncates; otherwise the most recent
+ * append wins), so abandoned sibling turns from earlier /tree switches never
+ * replay. When the remaining slice contains a compaction boundary, render the
+ * latest summary first and keep only the retained suffix plus later entries,
+ * mirroring pi-coding-agent's buildSessionContext behavior.
  */
 export function selectReplayEntries(
 	turns: ReadonlyArray<SessionEntry>,
 	options: RehydrateChatPanelOptions = {},
 ): SessionEntry[] {
-	const active = filterEntriesToActivePath(turns, options.uptoTurnId);
+	const active = filterEntriesToActivePath(turns, options.activeLeafTurnId ?? options.uptoTurnId);
 	const entries = truncateAtTurn(active, options.uptoTurnId);
 	const compactionIndex = latestCompactionIndex(entries);
 	if (compactionIndex < 0) return dropLegacyToolResultAssistantDuplicates(entries);

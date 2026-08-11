@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -12,6 +12,7 @@ import {
 } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { canonicalizeExistingPath } from "../../src/core/path-canonical.js";
+import { MAX_TIMER_DELAY_MS } from "../../src/core/timers.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
@@ -1426,6 +1427,29 @@ setInterval(() => {}, 1000);
 		strictEqual(resolutions[0]?.status, "denied");
 		strictEqual(resolutions[0]?.decidedBy, "timeout");
 		strictEqual(resolutions[0]?.requestId, requests[0]?.requestId);
+	});
+
+	it("rejects explicit unschedulable ACP request timeouts instead of disabling or overflowing the timer", async () => {
+		const clientToServer = new PassThrough();
+		const serverToClient = new PassThrough();
+		const peer = createStdioServerTransport({ input: clientToServer, output: serverToClient });
+		const processTransport = createStdioTransport(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+			terminationGraceMs: 25,
+			terminationWaitMs: 1_000,
+		});
+		try {
+			for (const transport of [peer, processTransport]) {
+				for (const timeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, MAX_TIMER_DELAY_MS + 1]) {
+					throws(
+						() => transport.request("session/request_permission", {}, timeoutMs),
+						/timeout must be between 1 and 2147483647 ms/,
+					);
+				}
+			}
+		} finally {
+			peer.close();
+			await processTransport.forceTerminate();
+		}
 	});
 
 	it("ACP server pins autonomy at session/new until the next session", async () => {

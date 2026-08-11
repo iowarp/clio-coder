@@ -1,6 +1,7 @@
 import type { ClioSettings } from "../../core/config.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
+import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import {
 	type ProvidersContract,
 	resolveModelRuntimeCapabilitiesForProviders,
@@ -182,8 +183,8 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"orchestrator.target": "Active chat target id.",
 	"orchestrator.model": "Active chat wire model id.",
 	"background.target": "Optional target for LLM memory steps; unset keeps rules-only memory.",
-	"background.model": "Wire model id used only for proactive task memory.",
-	"background.thinkingLevel": "Reasoning budget for the background memory model.",
+	"background.model": "Small non-reasoning model for task memory; reuses the chat model only if that model does not reason.",
+	"background.thinkingLevel": "Unused: memory steps always request thinking off.",
 	"memory.intervention.enabled": "Master switch for rules-only and model-backed task memory.",
 	"memory.intervention.everyNTools": "Maximum tool executions between prompted memory steps.",
 	"memory.intervention.windowSteps": "Recent completed tool steps visible to the memory policy.",
@@ -791,6 +792,11 @@ function applyNonNegativeInteger(value: string, set: (next: number) => void): vo
 	if (Number.isFinite(parsed) && parsed >= 0) set(Math.floor(parsed));
 }
 
+function applyPositiveInteger(value: string, set: (next: number) => void): void {
+	const parsed = Number(value);
+	if (Number.isInteger(parsed) && parsed >= 1 && parsed <= MAX_TIMER_DELAY_MS) set(parsed);
+}
+
 /**
  * Pure mutation applied in place for Settings Center editable rows.
  */
@@ -920,17 +926,17 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 				.filter(Boolean);
 			return;
 		case "delegation.defaults.connectTimeoutMs":
-			applyNonNegativeInteger(value, (next) => {
+			applyPositiveInteger(value, (next) => {
 				settings.delegation.defaults.connectTimeoutMs = next;
 			});
 			return;
 		case "delegation.defaults.turnTimeoutMs":
-			applyNonNegativeInteger(value, (next) => {
+			applyPositiveInteger(value, (next) => {
 				settings.delegation.defaults.turnTimeoutMs = next;
 			});
 			return;
 		case "delegation.defaults.permissionTimeoutMs":
-			applyNonNegativeInteger(value, (next) => {
+			applyPositiveInteger(value, (next) => {
 				settings.delegation.defaults.permissionTimeoutMs = next;
 			});
 			return;

@@ -1,4 +1,10 @@
-import type { MemoryRecord, TaskMemoryEntry, TaskMemoryOperatorStatus } from "../domains/memory/index.js";
+import {
+	describeTaskMemoryActivity,
+	type MemoryRecord,
+	type TaskMemoryEntry,
+	type TaskMemoryOperatorStatus,
+	type TaskMemoryPolicyDecision,
+} from "../domains/memory/index.js";
 import {
 	type Component,
 	matchesKey,
@@ -82,7 +88,40 @@ export function formatMemoryOverlayBodyLines(
 		...taskClassLines("status (private)", bank.status === null ? [] : [bank.status], width),
 		...taskClassLines("knowledge", bank.knowledge, width),
 		...taskClassLines("procedural", bank.procedural, width),
+		"",
+		...activityLines(status, width),
 	];
+}
+
+/**
+ * Memory steps are otherwise invisible: a capture, a gate, or a timeout leaves
+ * no transcript trace, and only an injection reaches the operator. This is the
+ * record of what the memory agent has actually been doing.
+ */
+function activityLines(status: TaskMemoryOperatorStatus, width: number): string[] {
+	const theme = clioTheme();
+	const lines = [theme.style("title", `Recent steps (${status.activity.length})`, { bold: true })];
+	if (status.stepInFlight) lines.push(fitLine(theme.fg("reason", "  a background step is running"), width));
+	if (status.activity.length === 0) {
+		return [...lines, theme.fg("dim", status.stepInFlight ? "  no completed step yet" : "  none")];
+	}
+	for (const event of status.activity) {
+		lines.push(
+			fitLine(
+				`  ${theme.fg("dim", event.at.slice(11, 19))} ${theme.fg(
+					decisionToken(event.decision),
+					describeTaskMemoryActivity(event),
+				)} ${theme.fg("dim", `${event.tier} ${Math.round(event.latencyMs)}ms`)}`,
+				width,
+			),
+		);
+	}
+	return lines;
+}
+
+function decisionToken(decision: TaskMemoryPolicyDecision): "success" | "warning" | "muted" {
+	if (decision === "injected") return "success";
+	return decision === "silent" ? "muted" : "warning";
 }
 
 interface OpenMemoryOverlayOptions {

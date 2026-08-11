@@ -21,6 +21,8 @@ function operatorStatus(): TaskMemoryOperatorStatus {
 		tier: "llm",
 		size: taskMemoryBankSize(snapshot),
 		lastDecision: "injected",
+		activity: [],
+		stepInFlight: false,
 		bank: snapshot,
 	};
 }
@@ -129,6 +131,8 @@ describe("contracts/memory overlay", () => {
 			tier: "llm",
 			size: taskMemoryBankSize(snapshot),
 			lastDecision: "injected",
+			activity: [],
+			stepInFlight: false,
 			bank: snapshot,
 		};
 
@@ -169,5 +173,53 @@ describe("contracts/memory overlay", () => {
 		ok(body.includes("Approved lessons (1)"), "approved lessons section present");
 		ok(body.includes("knowledge (1)"), "knowledge section present");
 		ok(body.includes("status (private)"), "status section present");
+	});
+
+	it("reports memory steps that leave no other trace", () => {
+		const status: TaskMemoryOperatorStatus = {
+			...operatorStatus(),
+			stepInFlight: true,
+			activity: [
+				{
+					at: "2026-07-13T09:41:07.000Z",
+					triggerReasons: ["interval"],
+					tier: "llm",
+					decision: "gated",
+					citedEntries: 0,
+					bankWrites: 2,
+					latencyMs: 41_200,
+				},
+				{
+					at: "2026-07-13T09:39:55.000Z",
+					triggerReasons: ["tool_error_streak", "loop_signal"],
+					tier: "rules",
+					decision: "injected",
+					citedEntries: 1,
+					bankWrites: 1,
+					latencyMs: 3,
+				},
+			],
+		};
+		const body = stripAnsi(formatMemoryOverlayBodyLines(status, [], 84).join("\n"));
+
+		ok(body.includes("Recent steps (2)"), body);
+		ok(body.includes("a background step is running"), body);
+		// A gated step wrote to the bank and said nothing; without this row the
+		// operator would see an unchanged transcript and assume memory was idle.
+		ok(body.includes("09:41:07"), body);
+		ok(body.includes("interval gated 2w"), body);
+		ok(body.includes("llm 41200ms"), body);
+		ok(body.includes("tool_error_streak+loop_signal injected 1w 1 cited"), body);
+	});
+
+	it("distinguishes a bank with no steps yet from a step that has not finished", () => {
+		const idle = stripAnsi(formatMemoryOverlayBodyLines(operatorStatus(), [], 84).join("\n"));
+		ok(idle.includes("Recent steps (0)"), idle);
+		ok(idle.includes("none"), idle);
+
+		const working = stripAnsi(
+			formatMemoryOverlayBodyLines({ ...operatorStatus(), stepInFlight: true }, [], 84).join("\n"),
+		);
+		ok(working.includes("no completed step yet"), working);
 	});
 });

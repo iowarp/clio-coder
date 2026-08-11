@@ -207,6 +207,20 @@ describe("welcome-dashboard and footer integration tests", () => {
 		ok(joined.includes("gemini-3.5-flash"), `model label should keep its version suffix, got: ${joined}`);
 	});
 
+	it("shows the experimental warning across wide, mid, and narrow startup dashboards", () => {
+		const stats = deriveWelcomeDashboardStats({
+			providers: mockProviders,
+			observability: mockObservability,
+			getSettings: () => mockSettings,
+		});
+
+		for (const width of [100, 64, 30]) {
+			const rendered = buildWelcomeDashboardLines(stats, width).map(stripAnsi).join("\n");
+			ok(rendered.includes("EXPERIMENTAL"), `width ${width}: ${rendered}`);
+			ok(rendered.includes("break or change"), `width ${width}: ${rendered}`);
+		}
+	});
+
 	it("shows truthful proactive-memory status and drops narrow facts whole", () => {
 		const bank = { version: 1 as const, status: null, knowledge: [], procedural: [] };
 		const stats = deriveWelcomeDashboardStats({
@@ -219,6 +233,8 @@ describe("welcome-dashboard and footer integration tests", () => {
 				size: 3,
 				lastDecision: "injected",
 				bank,
+				activity: [],
+				stepInFlight: false,
 			}),
 		});
 
@@ -370,6 +386,8 @@ describe("welcome-dashboard and footer integration tests", () => {
 				tier: "rules",
 				size: 2,
 				lastDecision: "silent",
+				activity: [],
+				stepInFlight: false,
 				bank: { version: 1, status: null, knowledge: [], procedural: [] },
 			}),
 		});

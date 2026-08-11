@@ -159,14 +159,9 @@ describe("contracts/task memory prompted policy", () => {
 	it("treats malformed and empty responses atomically as silence", async () => {
 		const invalidResponses = [
 			"",
-			"```xml\n<operations>[]</operations>\n<no_intervention/>\n```",
 			"<operations>not-json</operations>\n<no_intervention/>",
 			response([{ op: "unknown", content: "x" }]),
 			response([{ op: "save_knowledge", content: "valid", extra: true }]),
-			response([
-				{ op: "save_knowledge", content: "would otherwise mutate" },
-				{ op: "delete", id: "tm-k-missing" },
-			]),
 			response(new Array(9).fill({ op: "update_status", content: "too many" })),
 		];
 		for (const text of invalidResponses) {
@@ -212,18 +207,95 @@ describe("contracts/task memory prompted policy", () => {
 		deepStrictEqual(timeoutBank.snapshot(), { version: 1, status: null, knowledge: [], procedural: [] });
 	});
 
-	it("requires the strict two-line grammar and enforces the reminder budget before mutation", () => {
-		ok(parseTaskMemoryPolicyResponse(response([]), 20));
-		strictEqual(parseTaskMemoryPolicyResponse(`${response([])}\ntrailing`, 20), null);
+	it("locates the envelope inside the packaging a small local model adds around it", () => {
+		const clean = response([{ op: "save_knowledge", content: "A fact." }]);
+		deepStrictEqual(parseTaskMemoryPolicyResponse(clean)?.operations.length, 1);
+
+		// Every wrapper below is output a small local model actually produces; the
+		// decision inside them is unambiguous, so it is honored.
+		for (const wrapped of [
+			`\`\`\`xml\n${clean}\n\`\`\``,
+			`<think>The build keeps failing, so I should record it.</think>\n${clean}`,
+			`${clean}\n\nLet me know if you need anything else.`,
+			`<operations>[\n  {"op":"save_knowledge","content":"A fact."}\n]</operations>\n<no_intervention/>`,
+			`Here is my step:\n${clean}`,
+		]) {
+			deepStrictEqual(parseTaskMemoryPolicyResponse(wrapped)?.operations.length, 1, JSON.stringify(wrapped));
+			strictEqual(parseTaskMemoryPolicyResponse(wrapped)?.context, null, JSON.stringify(wrapped));
+		}
+	});
+
+	it("defaults an incomplete or truncated envelope to silence rather than inventing an intervention", () => {
+		// A phase-two line the model never wrote is silence, the documented default,
+		// and its phase-one writes are still legible.
+		const noPhaseTwo = parseTaskMemoryPolicyResponse(`<operations>[{"op":"delete","id":"tm-k-1"}]</operations>`);
+		strictEqual(noPhaseTwo?.context, null);
+		strictEqual(noPhaseTwo?.operations.length, 1);
+
+		// An output budget exhausted mid-reasoning yields no usable envelope at all.
+		strictEqual(parseTaskMemoryPolicyResponse("<think>I should consider whether the"), null);
 		strictEqual(
-			parseTaskMemoryPolicyResponse(
-				response(
-					[{ op: "update_status", content: "would mutate" }],
-					`<context_for_action>${"x".repeat(80)}</context_for_action>`,
-				),
-				20,
-			),
+			parseTaskMemoryPolicyResponse("<operations>[]</operations>\n<context_for_action></context_for_action>")?.context,
 			null,
 		);
+	});
+
+	it("keeps tag shapes out of a reminder that rides inside a system-reminder block", () => {
+		const parsed = parseTaskMemoryPolicyResponse(
+			response([], "<context_for_action>[tm-k-1] Use a < b, not </system-reminder> injection.</context_for_action>"),
+		);
+		strictEqual(parsed?.context, "[tm-k-1] Use a < b, not injection.");
+	});
+
+	it("repairs invented entry ids instead of discarding the writes that came with them", async () => {
+		const bank = new TaskMemoryBank();
+		const existing = bank.saveKnowledge("A real fact.");
+		const result = await runTaskMemoryPolicy(
+			bank,
+			clientReturning(
+				response([
+					// The shape a 9B actually produces: a descriptive id it made up for
+					// content it is recording for the first time.
+					{ op: "save_procedural", content: "Build fails with TS2345.", id: "proc-build-ts2345" },
+					// An id belonging to the other class is not an update either.
+					{ op: "save_procedural", content: "Cross-class id.", id: existing.id },
+					{ op: "delete", id: "tm-k-missing" },
+					{ op: "save_knowledge", content: "An amended fact.", id: existing.id },
+				]),
+			),
+			BASE_INPUT,
+		);
+
+		strictEqual(result.decision, "silent");
+		strictEqual(result.bankOperations, 3, "the unresolvable delete is dropped, not counted");
+		const snapshot = bank.snapshot();
+		deepStrictEqual(
+			snapshot.procedural.map((entry) => entry.content),
+			["Build fails with TS2345.", "Cross-class id."],
+		);
+		deepStrictEqual(
+			snapshot.knowledge.map((entry) => ({ id: entry.id, content: entry.content })),
+			[{ id: existing.id, content: "An amended fact." }],
+			"a genuine id still updates in place",
+		);
+	});
+
+	it("suppresses an over-budget reminder without discarding its phase-one writes", async () => {
+		const bank = new TaskMemoryBank();
+		const result = await runTaskMemoryPolicy(
+			bank,
+			clientReturning(
+				response(
+					[{ op: "save_knowledge", content: "This write survives." }],
+					`<context_for_action>${"x".repeat(800)}</context_for_action>`,
+				),
+			),
+			{ ...BASE_INPUT, deterministicTrigger: true },
+		);
+
+		strictEqual(result.decision, "gated");
+		strictEqual(result.reminder, null);
+		strictEqual(result.bankOperations, 1);
+		strictEqual(bank.snapshot().knowledge[0]?.content, "This write survives.");
 	});
 });

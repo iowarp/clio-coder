@@ -406,10 +406,10 @@ describe("contracts/persistence", () => {
 		const bundle = createSessionBundle(stubContext());
 		const contract = bundle.contract;
 
-		const _parent = contract.create({ cwd: scratch });
+		contract.create({ cwd: scratch });
 		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "first question" } });
 		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "first reply" } });
-		const _u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "alternative branch" } });
+		contract.append({ parentId: a1.id, kind: "user", payload: { text: "alternative branch" } });
 
 		// Fork the session at the first assistant response
 		const forkedMeta = contract.fork(a1.id);

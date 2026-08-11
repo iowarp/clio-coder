@@ -122,6 +122,15 @@ export interface SkillsSettings {
 
 export type DelegationToolGovernance = "clio-policy" | "agent-managed" | "deny-all";
 
+/**
+ * Application-level ACP request bounds. Unlike the separate stall watchdog,
+ * these values never use zero as a disable sentinel: connect, turn, and
+ * permission requests must always settle within a finite window.
+ */
+export const DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS = 30_000;
+export const DEFAULT_DELEGATION_TURN_TIMEOUT_MS = 300_000;
+export const DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120_000;
+
 export interface DelegationAgentConfig {
 	/** Stable id used by /delegate and dispatch receipts. */
 	id: string;
@@ -298,9 +307,9 @@ export const DEFAULT_SETTINGS = {
 	delegation: {
 		agents: [] as DelegationAgentConfig[],
 		defaults: {
-			connectTimeoutMs: 30000,
-			turnTimeoutMs: 300000,
-			permissionTimeoutMs: 120000,
+			connectTimeoutMs: DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS,
+			turnTimeoutMs: DEFAULT_DELEGATION_TURN_TIMEOUT_MS,
+			permissionTimeoutMs: DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 			toolGovernance: "clio-policy" as DelegationToolGovernance,
 		},
 	} as DelegationSettings,
@@ -515,9 +524,9 @@ skills:
 # targets[], orchestrator, workers, and model pickers.
 delegation:
   defaults:
-    connectTimeoutMs: 30000
-    turnTimeoutMs: 300000
-    permissionTimeoutMs: 120000
+    connectTimeoutMs: ${DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS}
+    turnTimeoutMs: ${DEFAULT_DELEGATION_TURN_TIMEOUT_MS}
+    permissionTimeoutMs: ${DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS}
     toolGovernance: clio-policy   # clio-policy | agent-managed | deny-all
   agents: []
   # OpenCode native ACP:

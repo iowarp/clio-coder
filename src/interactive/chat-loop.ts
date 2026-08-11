@@ -281,6 +281,12 @@ export interface CreateChatLoopDeps {
 	getMemorySection?: () => string;
 	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
 	getTaskMemoryHandoffSource?: () => string;
+	/**
+	 * Hand the composition root a delivery path for reminders that background
+	 * observers produce after their turn boundary closed. Called once during
+	 * composition; the loop owns the buffer the reminder lands in.
+	 */
+	registerDeferredReminderSink?: (sink: (message: string) => void) => void;
 	/** True when an interactive TUI can handle Esc cancellation notices. */
 	interactiveTui?: boolean;
 }
@@ -359,6 +365,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitNotice,
 		emitFooterNotice,
 	});
+
+	try {
+		deps.registerDeferredReminderSink?.((message) => middleware.injectDeferredReminder(message));
+	} catch {
+		// A background observer losing its delivery path must not stop the loop
+		// from starting; it simply stays silent.
+	}
 
 	const context = createTurnContext({
 		state,

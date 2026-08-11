@@ -7,7 +7,9 @@ import {
 	type TaskMemoryPolicyResult,
 	type TaskMemoryTrajectoryStep,
 } from "../memory/task-memory-policy.js";
+import type { TaskMemoryActivityEvent } from "../memory/task-memory-status.js";
 import {
+	type TaskMemoryBankDelta,
 	type TaskMemoryTelemetrySink,
 	type TaskMemoryTelemetryTier,
 	type TaskMemoryTelemetryTrigger,
@@ -22,6 +24,8 @@ export const MEMORY_INTERVENTION_REGISTRATION_ID = "observer.memory-intervention
 export const MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS = 8;
 export const MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS = 400;
 export const MEMORY_INTERVENTION_DEFAULT_EVERY_N_TOOLS = 10;
+
+export const MEMORY_INTERVENTION_ACTIVITY_LIMIT = 20;
 
 export type MemoryInterventionTriggerReason = "interval" | "tool_error_streak" | "loop_signal";
 
@@ -68,6 +72,12 @@ export interface MemoryInterventionDeps {
 	getSettings?: () => Readonly<MemoryInterventionSettings>;
 	/** Best-effort content-free telemetry; sink failures never affect intervention. */
 	telemetry?: TaskMemoryTelemetrySink;
+	/**
+	 * Delivery channel for a reminder produced after its turn boundary already
+	 * closed. The composition root buffers it into the next submitted turn, which
+	 * is where a synchronous turn_end reminder would have landed anyway.
+	 */
+	onDeferredReminder?: (message: string) => void;
 }
 
 export interface MemoryPromptedStepInput {
@@ -95,6 +105,12 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 	signalLoop(): void;
 	/** Most recent completed memory-policy outcome for read-only operator surfaces. */
 	lastDecision(): TaskMemoryPolicyResult["decision"] | null;
+	/** Bounded newest-first memory-step history for read-only operator surfaces. */
+	recentActivity(): ReadonlyArray<TaskMemoryActivityEvent>;
+	/** True while a detached background memory step is still running. */
+	stepInFlight(): boolean;
+	/** Resolves once no detached memory step is outstanding. Used by teardown and tests. */
+	whenIdle(): Promise<void>;
 }
 
 /**
@@ -116,7 +132,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let lastInjectedMessage: string | null = null;
 	let lastDecision: TaskMemoryPolicyResult["decision"] | null = null;
 	const pendingTriggers = new Set<MemoryInterventionTriggerReason>();
+	const activity: TaskMemoryActivityEvent[] = [];
+	const annotatedThisTurn = new Set<string>();
 	let telemetryBankSnapshot = deps.bank.snapshot();
+	let promptedStepInFlight = false;
+	let outstandingStep: Promise<void> = Promise.resolve();
+	let rulesInjectedSincePromptedStep = false;
+	let annotatedSinceTurnEnd = false;
 
 	return {
 		id: MEMORY_INTERVENTION_REGISTRATION_ID,
@@ -130,15 +152,19 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						observeBeforeTool(input);
 						return NO_EFFECTS;
 					case "after_tool":
-						observeAfterTool(input);
-						return NO_EFFECTS;
+						return observeAfterTool(input);
 					case "turn_end": {
 						// Middleware continuations can evaluate turn_end again without any
 						// completed tools. They are not new memory boundaries and must not
 						// replace the prior operator-visible outcome or emit telemetry.
 						if (toolStep <= lastTurnEndStep) return NO_EFFECTS;
+						// A mid-turn annotation already reported this boundary's rules-tier
+						// outcome. Reporting silence again would double-count one decision.
+						const alreadyReported = annotatedSinceTurnEnd;
+						annotatedSinceTurnEnd = false;
 						const started = process.hrtime.bigint();
 						const effects = decideRepeatedFailure();
+						if (alreadyReported && effects.length === 0) return effects;
 						emitTelemetry(
 							[effects.length > 0 ? "repeated_failure" : "turn_end"],
 							"rules",
@@ -155,6 +181,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						return NO_EFFECTS;
 					case "turn_start": {
 						if (input.text?.trim()) currentTask = shortText(input.text, 2_000);
+						// Mid-turn annotations are spent per turn, not per session: the same
+						// command failing again in a later turn is news again.
+						annotatedThisTurn.clear();
 						const shouldReactivate = reactivateAfterCompaction;
 						const started = process.hrtime.bigint();
 						const effects = reactivateKnowledge();
@@ -176,35 +205,69 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				return NO_EFFECTS;
 			}
 		},
+		/**
+		 * Kicks off the background memory step and returns immediately. The pi
+		 * agent does not go idle until every `agent_end` listener settles, so
+		 * awaiting a local memory model here would stall the visible turn for its
+		 * full latency. Small local models measure in tens of seconds, which is far
+		 * past any tolerable end-of-turn pause and past the policy timeout itself.
+		 * The reminder is delivered through `onDeferredReminder` instead, landing
+		 * in the next submitted turn, which is where an awaited turn_end reminder
+		 * would have been buffered anyway.
+		 */
 		async evaluateAsync(input, context): Promise<ReadonlyArray<MiddlewareEffect>> {
 			if (!settings().enabled || input.hook !== "turn_end" || pendingTriggers.size === 0) return NO_EFFECTS;
 			const boundary = input.turnId ?? input.metadata?.userTurnId?.toString() ?? `tool-step:${toolStep}`;
 			if (boundary === lastPromptedBoundary) return NO_EFFECTS;
+			// A step slower than the turns that trigger it must not queue: dropping
+			// this boundary keeps at most one background call alive per session.
+			if (promptedStepInFlight) return NO_EFFECTS;
 			lastPromptedBoundary = boundary;
 			const triggers = [...pendingTriggers];
 			pendingTriggers.clear();
 			toolsSinceMemoryStep = 0;
 			consecutiveErrors = 0;
-			const synchronousMemoryReminder =
-				context?.priorEffects.some((effect) => effect.kind === "inject_reminder" && effect.message.startsWith("Memory:")) ??
-				false;
-			const result = await runPromptedStep({
+			// The rules tier may already have spoken for this boundary, either as a
+			// turn_end reminder in prior effects or as a mid-turn tool annotation.
+			const rulesAlreadySpoke =
+				rulesInjectedSincePromptedStep ||
+				(context?.priorEffects.some(
+					(effect) => effect.kind === "inject_reminder" && effect.message.startsWith("Memory:"),
+				) ??
+					false);
+			rulesInjectedSincePromptedStep = false;
+			promptedStepInFlight = true;
+			outstandingStep = runPromptedStep({
 				deterministicTrigger: triggers.some((trigger) => trigger !== "interval"),
-				suppressIntervention: synchronousMemoryReminder,
+				suppressIntervention: rulesAlreadySpoke,
 				triggerReasons: triggers,
-			});
-			// A rules-only reminder can win the visible boundary while the optional
-			// background route resolves to null. Preserve the operator-visible
-			// injected outcome instead of overwriting it with that no-client silence.
-			if (synchronousMemoryReminder && result.decision === "silent") lastDecision = "injected";
-			if (result.reminder !== null) lastInjectedMessage = result.reminder;
-			return result.effects;
+			})
+				.then((result) => {
+					// A rules-only reminder can win the visible boundary while the optional
+					// background route resolves to null. Preserve the operator-visible
+					// injected outcome instead of overwriting it with that no-client silence.
+					if (rulesAlreadySpoke && result.decision === "silent") lastDecision = "injected";
+					if (result.reminder === null) return;
+					lastInjectedMessage = result.reminder;
+					deps.onDeferredReminder?.(result.reminder);
+				})
+				.catch(() => {
+					// runPromptedStep already resolves failures to silence; this only
+					// covers a throwing delivery sink, which must not surface anywhere.
+				})
+				.finally(() => {
+					promptedStepInFlight = false;
+				});
+			return NO_EFFECTS;
 		},
 		runPromptedStep,
 		signalLoop(): void {
 			if (settings().enabled) pendingTriggers.add("loop_signal");
 		},
 		lastDecision: () => lastDecision,
+		recentActivity: () => [...activity],
+		stepInFlight: () => promptedStepInFlight,
+		whenIdle: () => outstandingStep,
 	};
 
 	function settings(): MemoryInterventionSettings {
@@ -290,6 +353,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const next = deps.bank.snapshot();
 		const bankDelta = taskMemoryBankDelta(telemetryBankSnapshot, next);
 		telemetryBankSnapshot = next;
+		const latencyMs = Number(process.hrtime.bigint() - started) / 1_000_000;
 		try {
 			deps.telemetry?.record({
 				triggerReasons,
@@ -299,11 +363,22 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				citedEntries,
 				inputTokens,
 				outputTokens,
-				latencyMs: Number(process.hrtime.bigint() - started) / 1_000_000,
+				latencyMs,
 			});
 		} catch {
 			// Observability must never steer or block the memory policy.
 		}
+		const event: TaskMemoryActivityEvent = {
+			at: new Date().toISOString(),
+			triggerReasons: [...new Set(triggerReasons)],
+			tier,
+			decision,
+			citedEntries,
+			bankWrites: countBankWrites(bankDelta),
+			latencyMs,
+		};
+		activity.unshift(event);
+		if (activity.length > MEMORY_INTERVENTION_ACTIVITY_LIMIT) activity.length = MEMORY_INTERVENTION_ACTIVITY_LIMIT;
 	}
 
 	function citedEntryCount(message: string | null): number {
@@ -318,9 +393,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		setBounded(pending, pendingKey(input, prepared.fingerprint), prepared, settings().windowSteps);
 	}
 
-	function observeAfterTool(input: MiddlewareHookInput): void {
+	function observeAfterTool(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 		const fallback = prepareToolStep(input);
-		if (fallback === null) return;
+		if (fallback === null) return NO_EFFECTS;
 		const key = pendingKey(input, fallback.fingerprint);
 		const prepared = pending.get(key) ?? fallback;
 		pending.delete(key);
@@ -343,7 +418,38 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		};
 		trajectory.push(step);
 		if (trajectory.length > live.windowSteps) trajectory.splice(0, trajectory.length - live.windowSteps);
-		if (outcome === "error") rememberFailure(step);
+		if (outcome !== "error") return NO_EFFECTS;
+		rememberFailure(step);
+		return annotateRepeatedFailure(step);
+	}
+
+	/**
+	 * The turn-end reminder channel cannot reach a model that is still mid-turn,
+	 * and a long agentic turn is exactly where a repeated failure burns its
+	 * budget. A second identical failure therefore rides back on the tool result
+	 * itself, which the model reads on its very next round.
+	 */
+	function annotateRepeatedFailure(step: TrajectoryStep): ReadonlyArray<MiddlewareEffect> {
+		if (annotatedThisTurn.has(step.fingerprint)) return NO_EFFECTS;
+		const occurrences = trajectory.filter(
+			(candidate) => candidate.outcome === "error" && candidate.fingerprint === step.fingerprint,
+		).length;
+		const failure = failures.get(step.fingerprint);
+		if (occurrences < 2 || failure === undefined) return NO_EFFECTS;
+		const message = boundedReminder(
+			`Memory: [${failure.entryId}] you already tried ${failure.callDescription} at step ${failure.firstStep} and it failed with ${failure.errorDigest}. Change the approach rather than repeating it.`,
+			settings().maxTokens,
+		);
+		if (message.length === 0) return NO_EFFECTS;
+		annotatedThisTurn.add(step.fingerprint);
+		// Claim the turn-end channel too, so one repeated failure is surfaced once.
+		lastInjectedFingerprint = step.fingerprint;
+		lastDecision = "injected";
+		rulesInjectedSincePromptedStep = true;
+		annotatedSinceTurnEnd = true;
+		deps.bank.recordInjection([failure.entryId]);
+		emitTelemetry(["repeated_failure"], "rules", "injected", 1, 0, 0, process.hrtime.bigint());
+		return [{ kind: "annotate_tool_result", message, severity: "warn" }];
 	}
 
 	function rememberFailure(step: TrajectoryStep): void {
@@ -400,6 +506,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				lastInjectedFingerprint = step.fingerprint;
 				lastInjectedMessage = message;
 				lastDecision = "injected";
+				rulesInjectedSincePromptedStep = true;
 				deps.bank.recordInjection([failure.entryId]);
 				return [{ kind: "inject_reminder", message, severity: "advisory" }];
 			}
@@ -483,6 +590,13 @@ function shortText(value: string, maxChars: number): string {
 
 function positiveInteger(value: number | undefined, fallback: number): number {
 	return value !== undefined && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function countBankWrites(delta: TaskMemoryBankDelta): number {
+	return [delta.status, delta.knowledge, delta.procedural].reduce(
+		(total, entry) => total + entry.added + entry.updated + entry.deleted,
+		0,
+	);
 }
 
 function setBounded<K, V>(map: Map<K, V>, key: K, value: V, capacity: number): void {

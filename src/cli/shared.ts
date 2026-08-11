@@ -8,9 +8,7 @@ import { authStoragePath } from "../domains/providers/auth/index.js";
 // import sites unchanged.
 export {
 	columnWidths,
-	extractApiKeyFlag,
-	extractNoContextFilesFlag,
-	extractSkillsFlags,
+	extractGlobalFlags,
 	formatColumnRow,
 	formatColumns,
 	parseFlags,

@@ -76,11 +76,27 @@ When a visible reminder cites an existing bank entry, the second line uses:
 
 Knowledge and procedural saves use `{"op":"save_knowledge","content":"..."}` or
 `{"op":"save_procedural","content":"..."}`; an `id` is only valid when updating
-an existing entry. The response parsing regex enforces this exact shape after trimming
-outer whitespace:
-`/^\<operations\>(\[[^\r\n]*\])\<\/operations\>\r?\n(\<no_intervention\/>|\<context_for_action\>([^\<\>]*)\<\/context_for_action\>)$/u`
+an existing entry.
 
-Operations are validated atomically, so a malformed operation list changes nothing. Phase 1 writes remain valid when Phase 2 is gated or yields to a deterministic reminder. A timeout, provider failure, malformed response, or telemetry failure is silent and never blocks a tool.
+The parser locates that envelope rather than matching the response byte for byte,
+because a small local model routinely delivers a correct decision inside
+imperfect packaging. A markdown fence, a `<think>` block, a leading "Here is my
+step:", a closing pleasantry, and a pretty-printed multi-line operations array
+are all accepted. Two shapes are read conservatively rather than generously:
+
+- A response with no phase-two line at all is silence, since silence is the
+  prompt's documented default. Its phase-one writes still apply. An envelope
+  truncated mid-reasoning yields nothing at all.
+- Tag shapes are stripped from the reminder before it is emitted, so the memory
+  model cannot close the `<system-reminder>` block it rides inside. Ordinary
+  comparisons and arrows survive.
+
+Operations are validated atomically, so a malformed operation list changes
+nothing. Phase 1 writes remain valid when Phase 2 is gated or yields to a
+deterministic reminder; an over-budget reminder is recorded as `gated` and
+suppressed rather than discarding the writes that came with it. A timeout,
+provider failure, malformed response, or telemetry failure is silent and never
+blocks a tool.
 
 ### Intervention Defaults & Cadence Knobs
 - `memory.intervention.enabled` (default `true`): Enables observation, task bank writes, and reminder injection.
@@ -99,8 +115,52 @@ an awaited turn-end boundary; at most one prompted step runs for that boundary.
 | Interval | After `memory.intervention.everyNTools` completed tools since the last prompted step; default 10. This is the nondeterministic/citation-gated path. |
 | Tool-error streak | Two consecutive error outcomes. A successful tool resets the streak. |
 | Loop signal | Reuses the orchestrator loop guard's verdict; it does not infer a second competing loop detector. |
-| Repeated failure | The rules tier records failed tool fingerprints and, at turn end, emits one cited reminder after the same failure appears twice in the bounded trajectory. |
+| Repeated failure | The rules tier records failed tool fingerprints and annotates the failing tool result once the same failure appears twice in the bounded trajectory. |
 | Post-compaction | The first turn start after compaction reactivates knowledge once, without a model call, because compaction is precisely where execution facts leave the active window. |
+
+### Two delivery channels
+
+A turn boundary is the wrong place to warn about a failure that happened forty
+tool calls earlier in the same turn, because the reminder cannot reach the model
+until the operator submits again. Memory therefore has two channels, and each
+repeated failure uses exactly one of them:
+
+- **Mid-turn annotation.** The second identical failure appends one cited
+  `Memory:` advisory to that tool's own result, through the existing
+  `annotate_tool_result` effect the loop guard already uses. The model reads it
+  on its very next round. This is spent once per fingerprint per turn and
+  re-earned in a later turn, because the same command failing again after an
+  operator turn is news again.
+- **Next-turn reminder.** Post-compaction reactivation and any background-model
+  reminder ride the `inject_reminder` buffer into the next submitted turn, inside
+  the visible `<system-reminder>` block, and persist in the session ledger.
+
+A boundary that already spoke through the annotation stays silent at turn end and
+records one telemetry row, not two.
+
+## Background steps never hold a turn open
+
+The pi agent does not become idle until every `agent_end` listener settles, so a
+memory step awaited at that boundary would add its full latency to the visible
+end of every triggered turn. Measured on the reference route below, one step
+takes 37-46 seconds, which is both intolerable as a pause and longer than the
+policy timeout that would then discard the work.
+
+The prompted step is therefore detached. `evaluateAsync` starts it and returns
+immediately; the turn ends on schedule. When the step resolves, its reminder is
+delivered through the deferred-reminder path into the next submitted turn, which
+is exactly where an awaited turn_end reminder would have been buffered anyway.
+Two consequences follow, both deliberate:
+
+- At most one background step is alive per session. A boundary that arrives while
+  a step is still running is dropped rather than queued, so a model slower than
+  the turns that trigger it can never build a backlog.
+- A reminder can arrive one turn later than the trajectory that earned it. The
+  rules tier is unaffected and stays synchronous, so deterministic protection
+  keeps its original timing.
+
+`/memory` shows whether a step is in flight, and the footer's memory row shows
+`working` while one is running.
 
 The error-streak, loop, repeated-failure, and post-compaction paths are
 deterministic. A prompted reminder from one of those paths may be uncited. An
@@ -140,21 +200,32 @@ memory:
 
 With `background.target` and `background.model` unset, Clio stays in the
 zero-cost rules tier. `/memory` shows the current tier, last decision, approved
-durable lessons, and live bank. `/settings` exposes every key above. In
+durable lessons, the live bank, and a bounded history of the last twenty memory
+steps with their trigger, decision, write count, cited-entry count, tier, and
+latency. That history is the only place a capture, a gate, or a timeout becomes
+visible, since those outcomes produce no transcript entry by design; only an
+actual injection reaches the transcript. It carries counts and outcomes only,
+never bank or trajectory text. `/settings` exposes every key above. In
 `/targets`, select an eligible local target and press `b` to make it the saved
 background-memory default; this is independent of `u` for chat and `f` for the
 fleet default. A running session owns its routing snapshot, while the saved
 selection becomes the default for new sessions.
 
-The reference live configuration for this sprint is the configured `dynamo`
-target with the wire model `qwopus3.6-35b-a3b-coder-mtp`:
+The reference live configuration is an LM Studio server on the `zbook` node with
+the wire model `qwopus3.5-9b-v3`:
 
 ```yaml
 background:
-  target: dynamo
-  model: qwopus3.6-35b-a3b-coder-mtp
+  target: zbook
+  model: qwopus3.5-9b-v3
   thinkingLevel: off
 ```
+
+A small model is the intended shape for this role. On that route one memory step
+measures 37-46 seconds end to end and returns the exact two-line envelope, so
+capability is not the constraint; latency is, and the detached step above is what
+makes the tier usable anyway. Raise `timeoutMs` above the observed step time or
+every step records `timeout` and writes nothing.
 
 The target ID is not hard-coded. Any configured orchestrator-eligible local
 target and wire model can fill the background role. Before enabling it, use the
@@ -162,7 +233,7 @@ real target surfaces to verify the route:
 
 ```bash
 clio targets --probe
-clio models --target dynamo
+clio models --target zbook
 clio
 ```
 
@@ -237,8 +308,8 @@ npm run test:file -- tests/contracts/proactive-memory-eval.test.ts
 ```
 
 For a live local comparison, an adapter should route only the `llm` variant
-through the request's target/model (the reference is `dynamo` /
-`qwopus3.6-35b-a3b-coder-mtp`), keep baseline memory telemetry empty, and run all
+through the request's target/model (the reference is `zbook` /
+`qwopus3.5-9b-v3`), keep baseline memory telemetry empty, and run all
 nine trials in equivalent isolated workspaces. Do not promote the LLM tier from
 one anecdotal task. The evidence bar is a pass-rate gain from a small number of
 specific, usually cited reminders at acceptable added token and latency cost.

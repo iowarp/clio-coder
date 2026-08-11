@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
+import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { AcpProcessError, AcpProtocolError, AcpTimeoutError } from "./errors.js";
 import type { AcpJsonRpcFailure, AcpJsonRpcMessage, AcpJsonRpcSuccess } from "./types.js";
 
@@ -100,6 +101,20 @@ function boundedMilliseconds(value: number | undefined, fallback: number): numbe
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
+/**
+ * An omitted low-level timeout remains available for lifecycle calls whose
+ * owner supplies another bound. An explicit timeout, however, must be a real
+ * bound; accepting zero here previously turned valid application settings
+ * into requests that could wait forever.
+ */
+function validateRequestTimeout(method: string, timeoutMs: number | undefined): number | undefined {
+	if (timeoutMs === undefined) return undefined;
+	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_DELAY_MS) {
+		throw new AcpTimeoutError(`ACP request timeout must be between 1 and ${MAX_TIMER_DELAY_MS} ms: ${method}`);
+	}
+	return timeoutMs;
+}
+
 function jsonRpcError(id: string | number | null, code: number, message: string, data?: unknown): AcpJsonRpcFailure {
 	return {
 		jsonrpc: "2.0",
@@ -182,6 +197,7 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 
 	request<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
 		if (this.closed) throw new AcpProcessError(`ACP process is closed; cannot request ${method}`);
+		const requestTimeoutMs = validateRequestTimeout(method, timeoutMs);
 		const id = this.nextId++;
 		const message = { jsonrpc: "2.0" as const, id, method, params };
 		const promise = new Promise<T>((resolve, reject) => {
@@ -190,14 +206,14 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 				resolve: (value) => resolve(value as T),
 				reject,
 			};
-			if (timeoutMs !== undefined && timeoutMs > 0) {
+			if (requestTimeoutMs !== undefined) {
 				// The timer must hold the event loop: its firing is the only
 				// thing that resolves a request the peer never answers. It is
 				// cleared on response and by failAll on close.
 				pending.timer = setTimeout(() => {
 					this.pending.delete(id);
-					reject(new AcpTimeoutError(`ACP request timed out after ${timeoutMs}ms: ${method}`));
-				}, timeoutMs);
+					reject(new AcpTimeoutError(`ACP request timed out after ${requestTimeoutMs}ms: ${method}`));
+				}, requestTimeoutMs);
 			}
 			this.pending.set(id, pending);
 		});
@@ -479,6 +495,7 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 
 	request<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
 		if (this.closed) throw new AcpProcessError(`ACP transport is closed; cannot request ${method}`);
+		const requestTimeoutMs = validateRequestTimeout(method, timeoutMs);
 		const id = this.nextId++;
 		const message = { jsonrpc: "2.0" as const, id, method, params };
 		const promise = new Promise<T>((resolve, reject) => {
@@ -487,14 +504,14 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 				resolve: (value) => resolve(value as T),
 				reject,
 			};
-			if (timeoutMs !== undefined && timeoutMs > 0) {
+			if (requestTimeoutMs !== undefined) {
 				// The timer must hold the event loop: its firing is the only
 				// thing that resolves a request the peer never answers. It is
 				// cleared on response and by failAll on close.
 				pending.timer = setTimeout(() => {
 					this.pending.delete(id);
-					reject(new AcpTimeoutError(`ACP request timed out after ${timeoutMs}ms: ${method}`));
-				}, timeoutMs);
+					reject(new AcpTimeoutError(`ACP request timed out after ${requestTimeoutMs}ms: ${method}`));
+				}, requestTimeoutMs);
 			}
 			this.pending.set(id, pending);
 		});

@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readClioVersion, resolvePackageRoot } from "../core/package-root.js";
+import { EXPERIMENTAL_RELEASE_WARNING } from "../core/release.js";
 import {
 	listWikiPages,
 	readCodewiki,
@@ -83,10 +84,6 @@ function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	if (typeof caps.contextWindow === "number" && caps.contextWindow > 0)
 		out.push(`${Math.round(caps.contextWindow / 1000)}k ctx`);
 	return out.slice(0, 5);
-}
-
-function _contextCapability(labels: ReadonlyArray<string>): string {
-	return labels.find((label) => label.endsWith(" ctx")) ?? "ctx unknown";
 }
 
 function selectedModelCapabilities(
@@ -299,6 +296,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	// The whole styled title (logotype, bold name, dim version) is handed to
 	// the canonical island frame, which places it with one space on each side.
 	const title = `${brandMark(theme)} ${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${readClioVersion()}`)}`;
+	const experimentalLine = `  ${theme.style("warning", EXPERIMENTAL_RELEASE_WARNING, { bold: true })}`;
 
 	const targetVal = `${theme.fg("accent", stats.targetLabel)}/${abbreviateModelId(stats.modelLabel)}`;
 	const thinkVal = `think ${theme.fg("reason", stats.thinkingLevel)}`;
@@ -371,6 +369,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			theme,
 			title,
 			[
+				experimentalLine,
 				targetLine,
 				contextLine,
 				...(stats.hasCodewiki ? [wikiLine] : []),
@@ -392,6 +391,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			theme,
 			title,
 			[
+				experimentalLine,
 				targetLine,
 				contextLine,
 				...(stats.hasCodewiki ? [wikiLine] : []),
@@ -404,6 +404,8 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	} else {
 		return [
 			title,
+			`  ${theme.style("warning", "EXPERIMENTAL", { bold: true })}`,
+			`  ${theme.fg("warning", "May break or change.")}`,
 			`  ${targetVal} · ${thinkVal}`,
 			`  ${clioMdStr} · ${codewikiStr}`,
 			...(stats.hasCodewiki ? [`  wiki ${stats.wikiStatus}`] : []),

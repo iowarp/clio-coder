@@ -34,6 +34,21 @@ function worker(exitCode: number, text?: string): SpawnedWorker {
 	};
 }
 
+function failedMutatingWorker(): SpawnedWorker {
+	return {
+		pid: 8099,
+		promise: Promise.resolve({ exitCode: 1, signal: null }),
+		events: (async function* () {
+			yield {
+				type: "clio_tool_finish",
+				payload: { tool: "edit", durationMs: 1, outcome: "error", decision: "allowed" },
+			};
+		})(),
+		abort: () => {},
+		heartbeatAt: { current: Date.now() },
+	};
+}
+
 describe("dispatch assignments", () => {
 	beforeEach(() => isolateDispatchState());
 	after(() => restoreDispatchState());
@@ -94,6 +109,35 @@ describe("dispatch assignments", () => {
 			strictEqual(assignment?.attempts.length, 2);
 			ok(assignment?.attempts.every((attempt) => attempt.receiptDigest.length === 64));
 			ok(assignment?.attempts.every((attempt) => bundle.contract.getRun(attempt.runId) !== null));
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("does not retry a failed mutating tool that may have partially changed the workspace", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 1;
+		let spawns = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resilienceCooldownMs: 0,
+			spawnWorker: () => {
+				spawns += 1;
+				return failedMutatingWorker();
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "fail after editing",
+			});
+			const terminal = await handle.finalPromise;
+			strictEqual(terminal.outcome, "failed");
+			deepStrictEqual(terminal.toolStats, [{ tool: "edit", count: 1, ok: 0, errors: 1, blocked: 0, totalDurationMs: 1 }]);
+			strictEqual(spawns, 1);
+			strictEqual(bundle.contract.snapshot().retrying.length, 0);
+			ok(bundle.contract.assignments?.get(handle.runId)?.outcomeDetail?.includes("retry suppressed"));
 		} finally {
 			await bundle.extension.stop?.();
 		}

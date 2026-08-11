@@ -153,6 +153,13 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		match(result.stdout, /clio run \[flags\] <task>/);
 	});
 
+	it("shows the experimental warning in the bare CLI startup banner", async () => {
+		const result = await runCli([], { env: scratch.env });
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		match(result.stdout, /EXPERIMENTAL/);
+		match(result.stdout, /may break or change/i);
+	});
+
 	/**
 	 * Demoting a command must not remove it. An agent driving Clio over bash
 	 * reaches a wider surface than a person reading a help screen can hold, so
