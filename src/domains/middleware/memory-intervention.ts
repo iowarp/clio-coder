@@ -86,6 +86,14 @@ export interface MemoryInterventionDeps {
 	 * is where a synchronous turn_end reminder would have landed anyway.
 	 */
 	onDeferredReminder?: (message: string) => void;
+	/**
+	 * False when no further turn will be submitted in this process. A background
+	 * step is detached from the boundary that triggered it and a local route
+	 * measures in tens of seconds, so a headless run exits long before the step
+	 * lands: its reminder has no turn to ride into and its bank is discarded with
+	 * the process. Starting one only spends a model call to throw the result away.
+	 */
+	deliversDeferredReminders?: boolean;
 }
 
 export interface MemoryPromptedStepInput {
@@ -117,7 +125,12 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 	recentActivity(): ReadonlyArray<TaskMemoryActivityEvent>;
 	/** True while a detached background memory step is still running. */
 	stepInFlight(): boolean;
-	/** Resolves once no detached memory step is outstanding. Used by teardown and tests. */
+	/**
+	 * Resolves once no detached memory step is outstanding. Teardown does not
+	 * await it: a step runs tens of seconds on a local route and shutdown cannot
+	 * wait that long, which is why a surface with no next turn declines to start
+	 * one at all rather than starting one it will abandon.
+	 */
 	whenIdle(): Promise<void>;
 }
 
@@ -232,6 +245,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			if (!settings().enabled || input.hook !== "turn_end" || pendingTriggers.size === 0) return NO_EFFECTS;
 			const boundary = input.turnId ?? input.metadata?.userTurnId?.toString() ?? `tool-step:${toolStep}`;
 			if (boundary === lastPromptedBoundary) return NO_EFFECTS;
+			// One row rather than none, so a headless operator reading the log sees
+			// why the tier never ran instead of finding nothing and guessing.
+			if (deps.deliversDeferredReminders === false) {
+				emitTelemetry([...pendingTriggers], "rules", "silent", "no_consumer", 0, 0, 0, process.hrtime.bigint());
+				pendingTriggers.clear();
+				return NO_EFFECTS;
+			}
 			// A step slower than the turns that trigger it must not queue: dropping
 			// this boundary keeps at most one background call alive per session. The
 			// drop is recorded, because a starved cadence and a quiet one are

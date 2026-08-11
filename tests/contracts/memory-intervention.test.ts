@@ -553,4 +553,47 @@ describe("contracts/memory intervention rules tier", () => {
 		strictEqual(row3.tier, "rules");
 		strictEqual(row3.decision, "silent");
 	});
+
+	it("declines a background step when nothing in the process can consume its reminder", async () => {
+		// A headless run submits no further turn, and the step is detached from the
+		// boundary that triggered it, so the process exits before a route measured
+		// in tens of seconds answers. Starting one spends a model call to discard
+		// the result.
+		const records: Array<{ decision: string; reason: string; tier: string }> = [];
+		let clientResolutions = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank: new TaskMemoryBank(),
+			everyNTools: 2,
+			deliversDeferredReminders: false,
+			telemetry: { record: (record) => records.push(record as unknown as (typeof records)[number]) },
+			getModelClient: () => {
+				clientResolutions += 1;
+				return {
+					async complete() {
+						return { text: "<operations>[]</operations>\n<no_intervention/>" };
+					},
+				};
+			},
+		});
+		for (let call = 1; call <= 2; call += 1) {
+			registration.evaluate({ hook: "before_tool", toolCallId: `${call}`, toolName: "bash", toolArgs: { call } });
+			registration.evaluate({
+				hook: "after_tool",
+				toolCallId: `${call}`,
+				toolName: "bash",
+				toolArgs: { call },
+				metadata: { resultKind: "ok" },
+			});
+		}
+		registration.evaluate({ hook: "turn_end", turnId: "turn-1" });
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "turn-1" });
+		await registration.whenIdle();
+
+		strictEqual(clientResolutions, 0, "no model call is worth making for a result nobody reads");
+		strictEqual(registration.stepInFlight(), false);
+		const declined = records.filter((record) => record.reason === "no_consumer");
+		strictEqual(declined.length, 1, "the skip is recorded, so an operator is not left guessing again");
+		strictEqual(declined[0]?.decision, "silent");
+		strictEqual(declined[0]?.tier, "rules");
+	});
 });

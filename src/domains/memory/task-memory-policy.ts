@@ -77,6 +77,12 @@ export type TaskMemoryPolicyReason =
 	| "client_error"
 	/** No background role is configured, so the llm tier never ran. */
 	| "no_client"
+	/**
+	 * Nothing in this process can consume a reminder, so no step was started. A
+	 * headless run submits no further turn, and the step is detached from the
+	 * boundary that triggered it, so the process exits before it can land.
+	 */
+	| "no_consumer"
 	/** A step was already in flight, so this boundary's triggers stayed pending. */
 	| "step_in_flight"
 	/** Rules tier: the turn ended with no repeated failure worth reporting. */

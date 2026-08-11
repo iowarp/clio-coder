@@ -1007,6 +1007,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bank: taskMemoryBank,
 		telemetry: createTaskMemoryTelemetrySink(),
 		...(memoryTrace === null ? {} : { onEnvelope: (envelope) => memoryTrace.record(envelope) }),
+		// A headless run submits no further turn, so a detached step could only
+		// finish after the process that would have read it has exited.
+		deliversDeferredReminders: options.headless === undefined,
 		onDeferredReminder: (message) => deferredMemoryReminderSink?.(message),
 		getSettings: () => {
 			ensureTaskMemorySession();
