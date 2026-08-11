@@ -11,7 +11,7 @@
 /view verify <runId>
 ```
 
-`/view` opens a full-screen split viewer. The left pane groups artifacts by category and supports type-to-filter. The right pane renders the selected artifact with pager controls. `Tab` switches panes. `v` verifies a selected receipt. `o` shows the absolute backing path through the notice channel when the selected artifact has one; pathless artifacts produce a warning notice instead.
+`/view` opens a full-screen split viewer. The left pane groups artifacts by category and supports type-to-filter. The right pane renders the selected artifact with pager controls. `Tab` or `Shift+Tab` switches between the artifact list and details. `Left` and `Right` jump to the previous or next non-empty category from either pane; `Up` and `Down` select artifacts in the list or scroll details in the content pane. Category jumps honor the active filter and wrap at the ends. `v` verifies a selected receipt. `o` shows the absolute backing path through the notice channel when the selected artifact has one; pathless artifacts produce a warning notice instead. In the list pane, `Esc` clears a non-empty filter before a second `Esc` closes the viewer.
 
 ---
 
@@ -64,11 +64,15 @@ Clio resolves directories under platform-specific XDG defaults (on Linux, these 
 | Category | Description | Backing Path |
 | --- | --- | --- |
 | **Accountability** | Rolling first-pass-success rate and failure-cause histogram. | `<stateDir>/evidence-index.json` |
+| **Evidence bundles** | Deterministic run or session overviews, findings, totals, and linked files. | `<dataDir>/evidence/<evidenceId>/` |
 | **Receipts** | Durable run receipts verified by SHA-256 integrity digests. | `<stateDir>/receipts/<runId>.json` |
 | **Dispatch outputs** | Logs and ledger records detailing worker execution. | `<stateDir>/runs.json` and `<stateDir>/receipts/<runId>.json` |
+| **Task ledgers** | Per-turn task-board goals, active runs, and required validation evidence. | `<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl` |
 | **Tool outputs** | Offloaded large outputs or execution logs. | `<stateDir>/scratch/<sessionId>/<toolCallId>.txt` |
+| **Protected artifacts** | Validation-protected artifact metadata and its absolute artifact path when available. | Session ledger record plus the protected workspace path |
 | **Compaction** | Summaries of compacted history sessions. | `<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl` |
-| **Prompt manifest** | One record per prompt compile: `systemPromptHash`, previous hash, token estimate, thinking dial at compile time, per-section token estimates, and per-fragment content hashes. States exactly what prompt the model received and diffs across sessions without recompiling; the prompt text itself is never stored. | `<stateDir>/sessions/<cwdHash>/<sessionId>/prompt-manifest.jsonl` |
+| **Prompt manifests** | One validated record per prompt compile: `systemPromptHash`, previous hash, token estimate, thinking dial at compile time, per-section token estimates, and per-fragment content hashes. Identifies the exact compiled prompt and supports hash diffs without storing prompt text. Malformed records appear as an explicit read-error artifact. | `<stateDir>/sessions/<cwdHash>/<sessionId>/prompt-manifest.jsonl` |
+| **Safety audit rows** | Current-session safety and permission decisions, with malformed ledger lines surfaced separately. | `<stateDir>/audit/<date>.jsonl` |
 
 ---
 
