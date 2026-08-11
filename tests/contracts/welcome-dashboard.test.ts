@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,7 +17,13 @@ import { emptyWorkspaceSnapshot } from "../../src/domains/session/workspace/inde
 import { visibleWidth } from "../../src/engine/tui.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { abbreviateModelId, clioTheme } from "../../src/interactive/theme/index.js";
-import { buildWelcomeDashboardLines, deriveWelcomeDashboardStats } from "../../src/interactive/welcome-dashboard.js";
+import {
+	buildWelcomeDashboardLines,
+	deriveWelcomeDashboardStats,
+	readWelcomeRepositoryFacts,
+	WELCOME_REPOSITORY_FACTS_TTL_MS,
+	WelcomeDashboard,
+} from "../../src/interactive/welcome-dashboard.js";
 
 const SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 const stripAnsi = (text: string): string => text.replace(SGR, "");
@@ -404,5 +410,42 @@ describe("welcome-dashboard and footer integration tests", () => {
 		// Target should be formatted inside the Session facts
 		ok(joined.includes("mock-target"));
 		match(narrowJoined, /memory\s+on · tier rules · bank 2/u);
+	});
+
+	it("reads the repository once for a burst of frames instead of once per frame", async () => {
+		// Measured on a live streaming turn: the banner re-derived wiki staleness on
+		// every frame, which is three synchronous `git` subprocesses plus a full
+		// codewiki parse plus a workspace walk. At a 16ms render timer that was 38%
+		// of the process's CPU, on the same event loop the model stream is decoded on.
+		const cwd = scratchDashboardProject();
+		await writeDashboardCodewiki(cwd);
+		let probes = 0;
+		let clock = 1_000;
+		const dashboard = new WelcomeDashboard(
+			{
+				providers: mockProviders,
+				observability: mockObservability,
+				getSettings: () => mockSettings,
+				getWorkspaceSnapshot: () => emptyWorkspaceSnapshot(cwd),
+				readRepositoryFacts: (probedCwd) => {
+					probes += 1;
+					return readWelcomeRepositoryFacts(probedCwd);
+				},
+			},
+			() => clock,
+		);
+
+		const first = dashboard.render(100);
+		for (let frame = 0; frame < 60; frame += 1) dashboard.render(100);
+		strictEqual(probes, 1, "61 frames inside the TTL must cost one repository probe");
+		deepStrictEqual(dashboard.render(100), first, "a cached probe must not change what the banner says");
+
+		clock += WELCOME_REPOSITORY_FACTS_TTL_MS;
+		dashboard.render(100);
+		strictEqual(probes, 2, "the probe refreshes once the TTL expires");
+
+		dashboard.invalidate();
+		dashboard.render(100);
+		strictEqual(probes, 3, "invalidate drops the cache so a context command shows up immediately");
 	});
 });
