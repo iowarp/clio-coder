@@ -5221,6 +5221,47 @@ rl.once("line", (line) => {
 		}
 	});
 
+	it("rejects permission escalation for claude-sdk instead of silently denying it", async () => {
+		const target: TargetDescriptor = {
+			id: "claude-sdk-escalation",
+			runtime: "claude-sdk",
+			defaultModel: "claude-sonnet",
+		};
+		const runtime: RuntimeDescriptor = {
+			id: "claude-sdk",
+			displayName: "Claude Agent SDK",
+			kind: "sdk",
+			apiFamily: "claude-agent-sdk",
+			auth: "claude-cli",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			synthesizeModel: () => ({ id: "claude-sonnet", provider: "claude-sdk" }) as never,
+		};
+		const context = stubContext({ target, runtime });
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) configContract.get().workers.onPermission = "escalate";
+		let spawned = false;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("must not spawn");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({
+					agentId: "coder",
+					executionRole: "builder",
+					task: "request SDK permission escalation",
+				}),
+				/claude-sdk.*cannot enforce workers\.onPermission='escalate'.*cannot park/u,
+			);
+			strictEqual(spawned, false);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("ignores outcome-code assertions from black-box subprocess runtimes", async () => {
 		const target: TargetDescriptor = {
 			id: "subprocess-outcome-spoof",
