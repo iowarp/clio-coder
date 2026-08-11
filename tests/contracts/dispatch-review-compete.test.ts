@@ -2,7 +2,7 @@ import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:as
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -13,9 +13,11 @@ import {
 	preferIndependentRoute,
 } from "../../src/domains/dispatch/execution-role.js";
 import {
+	materializePendingGateDecision,
 	parseCompeteGateResult,
 	readGateDecisionArtifacts,
 	readPendingGateDecisions,
+	stagePendingGateDecision,
 	stagePendingGateOutput,
 	verifyGateDecisionArtifact,
 } from "../../src/domains/dispatch/gate-decisions.js";
@@ -917,6 +919,110 @@ describe("compete dispatch", () => {
 			deepStrictEqual(readPendingGateDecisions(), { records: [], errors: [] });
 
 			if (recovered !== null) cleanupCompeteGroup(markCompeteGroupCleanupReady(recovered));
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
+
+	it("preflights a conflicting final artifact before settling recovered compete worktrees", async () => {
+		const validGroup = "aaa-restart-valid-final";
+		const conflictingGroup = "zzz-restart-conflicting-final";
+		const script = `
+			import {
+				claimCompeteGroup,
+				createCandidateWorktree,
+			} from "./src/tools/compete-worktrees.ts";
+			const root = process.env.CLIO_TEST_COMPETE_ROOT;
+			if (!root) throw new Error("missing recovery root");
+			function stage(group) {
+				const ownership = claimCompeteGroup(root, group);
+				createCandidateWorktree(ownership, 1, "HEAD");
+				createCandidateWorktree(ownership, 2, "HEAD");
+				return ownership.group;
+			}
+			process.stdout.write(JSON.stringify({
+				validGroup: stage(${JSON.stringify(validGroup)}),
+				conflictingGroup: stage(${JSON.stringify(conflictingGroup)}),
+			}));
+		`;
+		const claimed = JSON.parse(
+			execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+				cwd: process.cwd(),
+				encoding: "utf8",
+				env: { ...process.env, CLIO_TEST_COMPETE_ROOT: repo },
+				timeout: 15_000,
+			}),
+		) as { validGroup: string; conflictingGroup: string };
+		const candidateOne = { runId: "recovered-candidate-1", digest: "a".repeat(64) };
+		const candidateTwo = { runId: "recovered-candidate-2", digest: "b".repeat(64) };
+		const stageWinner = (group: string) =>
+			stagePendingGateDecision(
+				{
+					group,
+					topology: "compete",
+					cycle: 1,
+					outcome: "winner",
+					subjects: [candidateOne, candidateTwo],
+					winner: {
+						index: 1,
+						subject: candidateOne,
+						branch: `clio/compete/${group}/1`,
+					},
+				},
+				{ resourceRoot: repo },
+			);
+		const validPending = stageWinner(claimed.validGroup);
+		const conflictingPending = stageWinner(claimed.conflictingGroup);
+		const unrelated = materializePendingGateDecision(
+			stagePendingGateDecision({
+				group: "unrelated-valid-final",
+				topology: "compete",
+				cycle: 1,
+				outcome: "no-winner",
+				subjects: [candidateOne, candidateTwo],
+			}),
+		);
+		const conflictingPath = join(dirname(dirname(conflictingPending.path)), `${conflictingPending.record.id}.json`);
+		writeFileSync(conflictingPath, readFileSync(unrelated.path, "utf8"));
+
+		const fabric = scriptedGateFabric({});
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
+			const result = (await tool.run({ tasks: [{ task: "must not start", cwd: repo }] }, {})) as ToolRunResult;
+			strictEqual(result.kind, "error");
+			if (result.kind === "error") match(result.message, /failed closed.*artifact conflicts with pending record/);
+			strictEqual(fabric.spawns.length, 0);
+			const validPreserved = loadCompeteGroup(repo, claimed.validGroup);
+			const conflictingPreserved = loadCompeteGroup(repo, claimed.conflictingGroup);
+			for (const preserved of [validPreserved, conflictingPreserved]) {
+				strictEqual(preserved?.state, "active");
+				strictEqual(existsSync(join(preserved?.directory ?? "", "candidate-1")), true);
+				strictEqual(existsSync(join(preserved?.directory ?? "", "candidate-2")), true);
+			}
+			deepStrictEqual(
+				branches().filter(
+					(branch) =>
+						branch.startsWith(`clio/compete/${claimed.validGroup}/`) ||
+						branch.startsWith(`clio/compete/${claimed.conflictingGroup}/`),
+				),
+				[
+					`clio/compete/${claimed.validGroup}/1`,
+					`clio/compete/${claimed.validGroup}/2`,
+					`clio/compete/${claimed.conflictingGroup}/1`,
+					`clio/compete/${claimed.conflictingGroup}/2`,
+				],
+			);
+			strictEqual(existsSync(validPending.path), true, "the earlier valid decision remains pending");
+			strictEqual(existsSync(conflictingPending.path), true, "the conflicting decision remains pending");
+			if (validPreserved !== null) cleanupCompeteGroup(markCompeteGroupCleanupReady(validPreserved));
+			if (conflictingPreserved !== null) cleanupCompeteGroup(markCompeteGroupCleanupReady(conflictingPreserved));
 		} finally {
 			await bundle.extension.stop?.();
 			rmSync(repo, { recursive: true, force: true });

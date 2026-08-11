@@ -30,8 +30,9 @@ import {
 	materializePendingGateDecision,
 	type PendingGateDecisionHandle,
 	parseCompeteGateResult,
+	preflightPendingGateDecisionMaterialization,
+	preparePendingGateDecisionRecovery,
 	readGateDecisionArtifacts,
-	readPendingGateDecisions,
 	resolvePendingGateDecision,
 	stagePendingGateDecision,
 	stagePendingGateOutput,
@@ -1018,26 +1019,13 @@ function settlePendingCompeteResource(handle: PendingGateDecisionHandle, draft: 
 /**
  * Rebuild decisions whose reviewer/judge output crossed the WAL boundary but
  * whose coordinator died before parsing or materialization. Receipt integrity
- * is verified before the output protocol is trusted. Compete worktrees move
- * to their recovered winner/no-winner state before the WAL is cleared.
+ * is verified before the output protocol is trusted. Every resolved record is
+ * collision-checked before compete worktrees move to their recovered state.
  */
 function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
-	const pending = readPendingGateDecisions();
-	if (pending.errors.length > 0) {
-		throw new Error(
-			`pending gate decision journal is untrustworthy: ${pending.errors
-				.map((entry) => `${entry.path}: ${entry.message}`)
-				.join("; ")}`,
-		);
-	}
-
-	for (const handle of pending.records.filter((entry) => entry.record.kind === "decision")) {
-		if (handle.record.kind !== "decision") continue;
-		settlePendingCompeteResource(handle, handle.record.decision);
-		materializePendingGateDecision(handle);
-	}
-
-	for (const handle of pending.records.filter((entry) => entry.record.kind === "output")) {
+	const recovery = preparePendingGateDecisionRecovery();
+	const resolved: PendingGateDecisionHandle[] = [];
+	for (const handle of recovery.unresolved) {
 		if (handle.record.kind !== "output") continue;
 		const record = handle.record;
 		const deciderReceipt = readVerifiedGateReceipt(deps, record.deciderRunId);
@@ -1071,7 +1059,7 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 					output: record.finalOutput,
 				}).draft;
 			}
-			finalizePendingGateDecision(handle, draft);
+			resolved.push(resolvePendingGateDecision(handle, draft));
 			continue;
 		}
 
@@ -1135,9 +1123,15 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 							: `judge picked failed or missing candidate ${pick}`,
 			};
 		}
-		const ready = resolvePendingGateDecision(handle, draft);
-		settlePendingCompeteResource(ready, draft);
-		materializePendingGateDecision(ready);
+		resolved.push(resolvePendingGateDecision(handle, draft));
+	}
+
+	const ready = [...recovery.ready, ...resolved];
+	preflightPendingGateDecisionMaterialization(ready);
+	for (const handle of ready) {
+		if (handle.record.kind !== "decision") continue;
+		settlePendingCompeteResource(handle, handle.record.decision);
+		materializePendingGateDecision(handle);
 	}
 
 	// A process may have died after the final winner artifact was written but

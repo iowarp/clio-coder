@@ -6,10 +6,10 @@ import type { GateDecisionDraft, GateDecisionOutcome } from "../../src/domains/d
 import {
 	type GateDecisionArtifact,
 	materializePendingGateDecision,
+	preparePendingGateDecisionRecovery,
 	readGateDecisionArtifacts,
 	readGateDecisionArtifactsForRunIds,
 	readPendingGateDecisions,
-	recoverPendingGateDecisions,
 	resolvePendingGateDecision,
 	stagePendingGateDecision,
 	stagePendingGateOutput,
@@ -194,9 +194,10 @@ describe("gate decision artifacts", () => {
 				strictEqual(existsSync(join(isolated.dir, "state", "gate-decisions", `${staged.record.id}.json`)), false);
 			}
 
-			const recovered = recoverPendingGateDecisions();
-			deepStrictEqual(recovered.unresolved, []);
-			deepStrictEqual(recovered.materialized.map((entry) => entry.artifact.outcome).sort(), [
+			const recovery = preparePendingGateDecisionRecovery();
+			deepStrictEqual(recovery.unresolved, []);
+			const materialized = recovery.ready.map((handle) => materializePendingGateDecision(handle));
+			deepStrictEqual(materialized.map((entry) => entry.artifact.outcome).sort(), [
 				"exhausted",
 				"fail",
 				"no-winner",
@@ -257,8 +258,9 @@ describe("gate decision artifacts", () => {
 			];
 			for (const draft of drafts) stagePendingGateDecision(draft);
 
-			const recovered = recoverPendingGateDecisions();
-			deepStrictEqual(recovered.materialized.map((entry) => entry.artifact.outcome).sort(), [
+			const recovery = preparePendingGateDecisionRecovery();
+			const materialized = recovery.ready.map((handle) => materializePendingGateDecision(handle));
+			deepStrictEqual(materialized.map((entry) => entry.artifact.outcome).sort(), [
 				"exhausted",
 				"full-auto-applied",
 				"no-winner",
@@ -285,8 +287,12 @@ describe("gate decision artifacts", () => {
 			if (alreadyWritten.record.kind !== "decision") throw new Error("expected resolved pending fixture");
 			const finalPath = join(isolated.dir, "state", "gate-decisions", `${alreadyWritten.record.id}.json`);
 			writeFileSync(finalPath, JSON.stringify(alreadyWritten.record.decision, null, 2));
-			const replayed = recoverPendingGateDecisions();
-			strictEqual(replayed.materialized[0]?.path, finalPath);
+			const replay = preparePendingGateDecisionRecovery();
+			strictEqual(replay.ready.length, 1);
+			const ready = replay.ready[0];
+			ok(ready);
+			const replayed = materializePendingGateDecision(ready);
+			strictEqual(replayed.path, finalPath);
 			strictEqual(existsSync(alreadyWritten.path), false);
 
 			const corrupted = stagePendingGateOutput({
@@ -301,7 +307,7 @@ describe("gate decision artifacts", () => {
 			raw.finalOutput = "VERDICT: fail";
 			writeFileSync(corrupted.path, JSON.stringify(raw, null, 2));
 			strictEqual(readPendingGateDecisions().errors.length, 1);
-			throws(() => recoverPendingGateDecisions(), /journal is untrustworthy.*integrity mismatch/);
+			throws(() => preparePendingGateDecisionRecovery(), /journal is untrustworthy.*integrity mismatch/);
 			strictEqual(existsSync(corrupted.path), true, "corrupt pending evidence remains quarantined for inspection");
 			strictEqual(readGateDecisionArtifacts("tampered-output").length, 0);
 		} finally {
