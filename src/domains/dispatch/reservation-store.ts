@@ -2,8 +2,10 @@ import { randomBytes } from "node:crypto";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import {
 	acquireCapacityLease,
+	activeCapacityDrainUnsafe,
 	type CapacityLease,
 	type CapacityLimits,
+	type CapacityStateFile,
 	capacityStateLockPath,
 	readCapacityStateUnsafe,
 	writeCapacityStateUnsafe,
@@ -113,9 +115,13 @@ function readStore(): DispatchReservationRecord[] {
 	return parseReservations(readCapacityStateUnsafe().reservations);
 }
 
+function replaceReservations(state: CapacityStateFile, records: ReadonlyArray<DispatchReservationRecord>): void {
+	state.reservations = records.slice(0, MAX_RESERVATION_RECORDS).map(copyRecord);
+}
+
 function writeStore(records: ReadonlyArray<DispatchReservationRecord>): void {
 	const state = readCapacityStateUnsafe();
-	state.reservations = records.slice(0, MAX_RESERVATION_RECORDS).map(copyRecord);
+	replaceReservations(state, records);
 	writeCapacityStateUnsafe(state);
 }
 
@@ -205,10 +211,20 @@ export function createDispatchReservation(input: {
 }): DispatchReservationRecord {
 	return withStateFileLockSync(capacityStateLockPath(), () => {
 		const nowMs = input.nowMs ?? Date.now();
-		const records = expireRecords(readStore(), nowMs, false);
+		const state = readCapacityStateUnsafe();
+		const records = expireRecords(parseReservations(state.reservations), nowMs, false);
+		const drain = activeCapacityDrainUnsafe(state, nowMs);
+		if (drain !== null) {
+			replaceReservations(state, records);
+			writeCapacityStateUnsafe(state);
+			throw new Error(
+				`dispatch: reservation denied: capacity is draining (requested by pid ${drain.requestedByPid} at ${drain.requestedAt})`,
+			);
+		}
 		const planned = allocateReservation(input.tasks, records, input.capacity);
 		if (!planned.ok) {
-			writeStore(records);
+			replaceReservations(state, records);
+			writeCapacityStateUnsafe(state);
 			throw new Error(`dispatch: reservation denied: ${planned.reason}`);
 		}
 		const createdAt = new Date(nowMs).toISOString();
@@ -222,7 +238,8 @@ export function createDispatchReservation(input: {
 			settledAt: null,
 			members: input.tasks.map((task) => ({ ...task, status: "held", consumedAt: null, releasedAt: null })),
 		};
-		writeStore([record, ...records]);
+		replaceReservations(state, [record, ...records]);
+		writeCapacityStateUnsafe(state);
 		return copyRecord(record);
 	});
 }

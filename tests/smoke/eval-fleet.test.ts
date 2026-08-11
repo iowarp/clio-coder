@@ -134,10 +134,12 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 		const result = await runCli(["fleet", "status", "--json"], { env: scratch.env });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 		const parsed = JSON.parse(result.stdout) as {
+			admission: { state: string };
 			running: unknown[];
 			retrying: unknown[];
 			totals: { inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number };
 		};
+		strictEqual(parsed.admission.state, "open");
 		strictEqual(Array.isArray(parsed.running), true);
 		strictEqual(Array.isArray(parsed.retrying), true);
 		strictEqual(parsed.running.length, 0);
@@ -146,5 +148,30 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 		strictEqual(parsed.totals.outputTokens, 0);
 		strictEqual(parsed.totals.totalTokens, 0);
 		strictEqual(parsed.totals.costUsd, 0);
+	});
+
+	it("fleet drain and resume durably control admission across CLI processes", async () => {
+		const drained = await runCli(["fleet", "drain", "--json"], { env: scratch.env });
+		strictEqual(drained.code, 0, `stderr=${drained.stderr}`);
+		const drainResult = JSON.parse(drained.stdout) as {
+			admission: { state: string; requestedByPid?: number; requestedAt?: string; expiresAt?: string };
+		};
+		strictEqual(drainResult.admission.state, "draining");
+		strictEqual(typeof drainResult.admission.requestedByPid, "number");
+		strictEqual(typeof drainResult.admission.requestedAt, "string");
+		strictEqual(typeof drainResult.admission.expiresAt, "string");
+
+		const status = await runCli(["fleet", "status", "--json"], { env: scratch.env });
+		strictEqual(status.code, 0, `stderr=${status.stderr}`);
+		const statusResult = JSON.parse(status.stdout) as { admission: { state: string; expiresAt?: string } };
+		strictEqual(statusResult.admission.state, "draining");
+		strictEqual(statusResult.admission.expiresAt, drainResult.admission.expiresAt);
+
+		const resumed = await runCli(["fleet", "resume", "--json"], { env: scratch.env });
+		strictEqual(resumed.code, 0, `stderr=${resumed.stderr}`);
+		strictEqual((JSON.parse(resumed.stdout) as { admission: { state: string } }).admission.state, "open");
+		const reopened = await runCli(["fleet", "status", "--json"], { env: scratch.env });
+		strictEqual(reopened.code, 0, `stderr=${reopened.stderr}`);
+		strictEqual((JSON.parse(reopened.stdout) as { admission: { state: string } }).admission.state, "open");
 	});
 });

@@ -144,6 +144,14 @@ Placement and admission are separate, deterministic authorities:
 
 The durable capacity state file (`dispatch-admission.json`) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (`DEFAULT_CAPACITY_DRAIN_TTL_MS` = 3,600,000 ms). A lease acts as durable expiring authority (`DEFAULT_CAPACITY_LEASE_TTL_MS` = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself.
 
+Use `clio fleet drain [--json]` before maintenance to close that shared
+admission authority. Existing workers continue, but new plans and every new
+execution start—including a retry or a previously reserved member—fail closed.
+The drain expires after one hour so an abandoned operator process cannot wedge
+future dispatch; repeating the command renews the deadline. `clio fleet
+status [--json]` reports the active deadline, requesting PID, and request time.
+Use `clio fleet resume [--json]` to reopen admission early.
+
 With no fleet configured and nothing requested, placement resolves to the
 implicit local path and optional fleet-node provenance may remain absent.
 Every new receipt uses strict integrity v15; older receipt formats are not

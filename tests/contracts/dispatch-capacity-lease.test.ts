@@ -15,6 +15,7 @@ import {
 import {
 	createDispatchReservation,
 	getDispatchReservation,
+	listDispatchReservations,
 	transferDispatchReservationToLease,
 } from "../../src/domains/dispatch/reservation-store.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -155,6 +156,67 @@ describe("durable dispatch capacity leases", () => {
 		ok(error instanceof Error);
 		match(error.message, /draining/);
 	});
+	it("draining rejects plan reservations before they hold capacity", () => {
+		home();
+		setCapacityDraining(true, { nowMs: 1_000, ttlMs: 10_000 });
+		throws(
+			() =>
+				createDispatchReservation({
+					topology: "parallel",
+					tasks: [{ memberId: "step", wave: 0, nodeId: "local", costUpperBoundUsd: 1 }],
+					capacity: {
+						global: { active: 0, limit: 1 },
+						nodes: { local: { active: 0, limit: 1 } },
+						budget: { currentUsd: 0, ceilingUsd: 10 },
+					},
+					nowMs: 1_001,
+				}),
+			/capacity is draining/,
+		);
+		strictEqual(listDispatchReservations().length, 0);
+		setCapacityDraining(false, { nowMs: 1_002 });
+		strictEqual(
+			createDispatchReservation({
+				topology: "parallel",
+				tasks: [{ memberId: "step", wave: 0, nodeId: "local", costUpperBoundUsd: 1 }],
+				capacity: {
+					global: { active: 0, limit: 1 },
+					nodes: { local: { active: 0, limit: 1 } },
+					budget: { currentUsd: 0, ceilingUsd: 10 },
+				},
+				nowMs: 1_003,
+			}).status,
+			"active",
+		);
+	});
+	it("draining blocks a previously reserved member before lease transfer", () => {
+		home();
+		const reservation = createDispatchReservation({
+			topology: "parallel",
+			tasks: [{ memberId: "step", wave: 0, nodeId: "local", costUpperBoundUsd: 1 }],
+			capacity: {
+				global: { active: 0, limit: 1 },
+				nodes: { local: { active: 0, limit: 1 } },
+				budget: { currentUsd: 0, ceilingUsd: 10 },
+			},
+			nowMs: 1_000,
+		});
+		setCapacityDraining(true, { nowMs: 1_001, ttlMs: 10_000 });
+		throws(
+			() =>
+				transferDispatchReservationToLease({
+					ownerId: reservation.ownerId,
+					memberId: "step",
+					assignmentId: "assignment",
+					nodeId: "local",
+					limits,
+					nowMs: 1_002,
+				}),
+			/capacity is draining/,
+		);
+		strictEqual(getDispatchReservation(reservation.ownerId)?.members[0]?.status, "held");
+		strictEqual(listCapacityLeases({ nowMs: 1_002 }).length, 0);
+	});
 	it("an abandoned operator drain expires instead of wedging the machine", () => {
 		home();
 		const drain = setCapacityDraining(true, { nowMs: 1_000, ttlMs: 10 });
@@ -163,6 +225,20 @@ describe("durable dispatch capacity leases", () => {
 		strictEqual(capacityDrain(1_011), null);
 		const lease = acquireCapacityLease({ assignmentId: "a", nodeId: "local", limits, nowMs: 1_011 });
 		strictEqual(lease.assignmentId, "a");
+	});
+	it("rejects a malformed durable drain instead of treating it as permanent", () => {
+		home();
+		writeCapacityStateUnsafe({
+			version: 2,
+			draining: {
+				requestedByPid: process.pid,
+				requestedAt: new Date(1_000).toISOString(),
+				expiresAt: "not-a-timestamp",
+			},
+			leases: [],
+			reservations: [],
+		});
+		throws(() => capacityDrain(), /invalid schema/);
 	});
 	it("an unsupported birth-token source falls back to owner liveness", () => {
 		home();
