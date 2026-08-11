@@ -135,12 +135,6 @@ export interface InteractiveDeps {
 	/** XDG cache dir (clioCacheDir()). The Skills Hub marketplace cache lives here. */
 	cacheDir: string;
 	/**
-	 * Resolver for the current `workers.default` block. `/run` uses this to
-	 * short-circuit with an actionable error when no provider is configured
-	 * instead of letting the dispatch throw with no config context.
-	 */
-	getWorkerDefault?: () => { target?: string; model?: string } | undefined;
-	/**
 	 * Resolver for current settings. Footer reads the orchestrator target
 	 * (what chat actually dispatches to) rather than the providers catalog's
 	 * first-available entry.
@@ -473,7 +467,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.extensions ? { extensions: deps.extensions } : {}),
 		...(deps.agents ? { agents: deps.agents } : {}),
 		...(deps.share ? { share: deps.share } : {}),
-		...(deps.getWorkerDefault ? { getWorkerDefault: deps.getWorkerDefault } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.writeSettings ? { writeSettings: deps.writeSettings } : {}),
 		...(deps.onSelectModel ? { onSelectModel: deps.onSelectModel } : {}),

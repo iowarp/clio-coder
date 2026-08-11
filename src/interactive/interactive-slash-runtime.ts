@@ -64,7 +64,6 @@ export interface InteractiveSlashRuntimeDeps {
 	extensions?: SlashExtensions;
 	agents?: SlashAgents;
 	share?: SlashShare;
-	getWorkerDefault?: () => { target?: string; model?: string } | undefined;
 	getSettings?: () => Readonly<ClioSettings>;
 	writeSettings?: (next: ClioSettings) => void;
 	onSelectModel?: (ref: { target: string; model: string }) => void;
@@ -137,7 +136,6 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		...(deps.agents
 			? { getAgentRoleFacts: agentRoleFactsResolver((agentId: string) => deps.agents?.getSpec(agentId) ?? null) }
 			: {}),
-		workerDefault: () => deps.getWorkerDefault?.(),
 		shutdown: () => {
 			void deps.shutdown();
 		},

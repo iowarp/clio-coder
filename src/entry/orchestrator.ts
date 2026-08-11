@@ -1571,13 +1571,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getSettings: getCurrentSettings,
 		getFleetNodes: () => result.getContract<SchedulingContract>("scheduling")?.fleet?.list() ?? [],
-		getWorkerDefault: () => {
-			const workerDefault = getCurrentSettings().workers.default;
-			const result: { target?: string; model?: string } = {};
-			if (workerDefault.target) result.target = workerDefault.target;
-			if (workerDefault.model) result.model = workerDefault.model;
-			return result;
-		},
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		...(contextDomain
 			? {
