@@ -103,7 +103,6 @@ export interface HandleRunDeps {
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	io: RunIo;
 	notice: (level: NoticeLevel, text: string) => void;
-	workerDefault?: { target?: string; model?: string } | undefined;
 	/**
 	 * Optional bus for forwarding per-event worker output. When supplied,
 	 * every non-heartbeat event is re-emitted on `BusChannels.DispatchProgress`
@@ -215,8 +214,6 @@ export interface SlashCommandContext {
 	bus: SafeEventBus;
 	/** Strict recipe facts used to keep interactive /run role-equivalent with the CLI. */
 	getAgentRoleFacts?: AgentRoleFactsResolver;
-	/** Returns the current `workers.default` block, resolved fresh on every /run. */
-	workerDefault: () => { target?: string; model?: string } | undefined;
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
 	runInit: (options: InitCommandOptions) => void;
@@ -562,7 +559,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						...(ctx.getAgentRoleFacts ? { getAgentRoleFacts: ctx.getAgentRoleFacts } : {}),
 						io: ctx.io,
 						notice: ctx.notice,
-						workerDefault: ctx.workerDefault(),
 						bus: ctx.bus,
 					},
 					options,
@@ -601,7 +597,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					dispatch: ctx.dispatch,
 					io: ctx.io,
 					notice: ctx.notice,
-					workerDefault: ctx.workerDefault(),
 					bus: ctx.bus,
 				});
 				ctx.render();

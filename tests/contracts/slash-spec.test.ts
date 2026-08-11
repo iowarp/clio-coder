@@ -76,7 +76,6 @@ describe("contracts/slash-spec", () => {
 			notice: (_level, text) => notices.push(text),
 			dispatch: {} as DispatchContract,
 			bus: createSafeEventBus(),
-			workerDefault: () => undefined,
 			shutdown: () => undefined,
 			runInit: () => undefined,
 			runContextClear: () => undefined,
