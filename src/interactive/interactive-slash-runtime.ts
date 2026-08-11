@@ -8,7 +8,7 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
-import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
+import { type ProvidersContract, type ThinkingLevel, thinkingLevelChoiceLabel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import type { SessionEntry } from "../domains/session/index.js";
@@ -20,6 +20,7 @@ import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
+import { resolveThinkingCapability } from "./overlays/thinking-selector.js";
 import {
 	type ContextClearCommandOptions,
 	dispatchSlashCommand,
@@ -180,6 +181,25 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		},
 		openView: deps.openView,
 		openThinking: deps.openThinking,
+		setThinkingLevel: (level) => {
+			const settings = deps.getSettings?.();
+			if (!settings || !deps.onSetThinkingLevel) return { status: "unavailable" };
+			const thinking = resolveThinkingCapability(deps.providers, settings);
+			// The target's own supported set is the authority, and its labels are
+			// what the selector and footer already show, so `/thinking on` works on
+			// an on-off model exactly as picking `on` from the list does.
+			const supported = thinking?.supportedLevels ?? (["off"] as ReadonlyArray<ThinkingLevel>);
+			const labelFor = (candidate: ThinkingLevel): string =>
+				thinkingLevelChoiceLabel(thinking?.mechanism ?? null, candidate);
+			const requested = level.trim().toLowerCase();
+			const match = supported.find((candidate) => candidate === requested || labelFor(candidate) === requested);
+			if (!match) {
+				return { status: "unsupported", level, supported: supported.map(labelFor) };
+			}
+			deps.onSetThinkingLevel(match);
+			deps.refreshFooter();
+			return { status: "applied", level: match, display: labelFor(match) };
+		},
 		setOutputVerbosity: (verbosity) => {
 			if (!verbosity || !deps.getSettings || !deps.writeSettings) {
 				appendCommandNotice("info", "usage: /output minimal|default|verbose");

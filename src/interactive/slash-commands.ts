@@ -56,6 +56,7 @@ type SlashCommandVariant =
 	| { kind: "view-verify"; runId: string }
 	| { kind: "view-usage" }
 	| { kind: "thinking" }
+	| { kind: "thinking-set"; level: string }
 	| { kind: "output"; verbosity?: "minimal" | "default" | "verbose" }
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
@@ -68,6 +69,7 @@ type SlashCommandVariant =
 	| { kind: "compact"; instructions: string | undefined }
 	| { kind: "export"; path: string | undefined }
 	| { kind: "unknown"; text: string }
+	| { kind: "usage-error"; command: string; reason: string }
 	| { kind: "empty" };
 
 export type SlashCommand = SlashCommandVariant;
@@ -78,6 +80,11 @@ export interface RunIo {
 	stdout: (s: string) => void;
 	stderr: (s: string) => void;
 }
+
+export type SetThinkingLevelResult =
+	| { status: "applied"; level: string; display: string }
+	| { status: "unsupported"; level: string; supported: ReadonlyArray<string> }
+	| { status: "unavailable" };
 
 export type TaskMemorySeedCommandResult =
 	| { status: "seeded"; seeded: number; skipped: number; source: string }
@@ -258,6 +265,12 @@ export interface SlashCommandContext {
 	/** Open `/view`, the full observability artifact viewer. */
 	openView: (filter?: string) => void;
 	openThinking: () => void;
+	/**
+	 * Apply a thinking level named on the command line. Returns why it was
+	 * refused so the caller can say so, because the level the operator typed may
+	 * not be one the active target supports.
+	 */
+	setThinkingLevel?: (level: string) => SetThinkingLevelResult;
 	setOutputVerbosity?: (verbosity?: "minimal" | "default" | "verbose") => void;
 	openModel: () => void;
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
@@ -336,8 +349,16 @@ const COMPACT_POSITIONALS: ReadonlyArray<CommandPositionalSpec> = [
 	{ name: "instructions", required: false, rest: true },
 ];
 
-function fromArgsOrUnknown(command: SlashCommand): (parsed: ParsedArgs, trimmed: string) => SlashCommand {
-	return (parsed, trimmed) => (parsed.error ? { kind: "unknown", text: trimmed } : command);
+/**
+ * A registered command whose arguments do not parse is a mistake to report,
+ * not a chat message to send. Falling through to `unknown` submitted the raw
+ * text to the model, which then answered it conversationally while the
+ * operator believed a setting had changed and nothing had. `unknown` stays
+ * reserved for input that matched no command at all, so pasted text beginning
+ * with a slash still reaches the model.
+ */
+function fromArgsOrUsage(name: string, command: SlashCommand): (parsed: ParsedArgs) => SlashCommand {
+	return (parsed) => (parsed.error ? { kind: "usage-error", command: name, reason: parsed.error } : command);
 }
 
 function usageNotice(entry: BuiltinSlashCommand, subcommand?: string): string {
@@ -350,7 +371,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Exit Clio Coder",
 		kinds: ["quit"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "quit" }),
+		fromArgs: fromArgsOrUsage("quit", { kind: "quit" }),
 		handle(_command, ctx) {
 			ctx.shutdown();
 		},
@@ -403,7 +424,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "List prompt templates",
 		kinds: ["prompts"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "prompts" }),
+		fromArgs: fromArgsOrUsage("prompts", { kind: "prompts" }),
 		handle(_command, ctx) {
 			ctx.openPrompts();
 		},
@@ -413,7 +434,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "List installed extensions",
 		kinds: ["extensions"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "extensions" }),
+		fromArgs: fromArgsOrUsage("extensions", { kind: "extensions" }),
 		handle(_command, ctx) {
 			ctx.openExtensions?.();
 		},
@@ -620,7 +641,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "List Clio agents and ACP delegation agents",
 		kinds: ["agents"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "agents" }),
+		fromArgs: fromArgsOrUsage("agents", { kind: "agents" }),
 		handle(_command, ctx) {
 			ctx.openAgents();
 		},
@@ -630,7 +651,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Show target hub for health, auth, models, and actions",
 		kinds: ["providers"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "providers" }),
+		fromArgs: fromArgsOrUsage("targets", { kind: "providers" }),
 		handle(_command, ctx) {
 			ctx.openProviders();
 		},
@@ -640,7 +661,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Show session token and cost totals",
 		kinds: ["cost"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "cost" }),
+		fromArgs: fromArgsOrUsage("cost", { kind: "cost" }),
 		handle(_command, ctx) {
 			ctx.openCost();
 		},
@@ -664,8 +685,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				reset: {},
 			},
 		},
-		fromArgs(parsed, trimmed) {
-			if (parsed.error) return { kind: "unknown", text: trimmed };
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "context", reason: parsed.error };
 			switch (parsed.subcommand) {
 				case "compact":
 					return { kind: "compact", instructions: parsed.rest };
@@ -710,7 +731,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Show in-process dispatch running/retry status",
 		kinds: ["fleet"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "fleet" }),
+		fromArgs: fromArgsOrUsage("fleet", { kind: "fleet" }),
 		handle(_command, ctx) {
 			ctx.openFleet();
 		},
@@ -720,7 +741,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Show the session task board the agent tracks with the tasks tool",
 		kinds: ["tasks"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "tasks" }),
+		fromArgs: fromArgsOrUsage("tasks", { kind: "tasks" }),
 		handle(_command, ctx) {
 			ctx.openTasks();
 		},
@@ -731,8 +752,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		kinds: ["memory", "memory-seed"],
 		subcommandDescriptions: { seed: "Seed the task bank from the newest handoff" },
 		args: { subcommands: { seed: {} } },
-		fromArgs(parsed, trimmed) {
-			if (parsed.error) return { kind: "unknown", text: trimmed };
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "memory", reason: parsed.error };
 			return parsed.subcommand === "seed" ? { kind: "memory-seed" } : { kind: "memory" };
 		},
 		handle(command, ctx) {
@@ -799,12 +820,29 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "thinking",
-		description: "Open thinking-level selector",
-		kinds: ["thinking"],
-		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "thinking" }),
-		handle(_command, ctx) {
-			ctx.openThinking();
+		description: "Open thinking-level selector, or set a level directly",
+		kinds: ["thinking", "thinking-set"],
+		args: { positionals: [{ name: "level", required: false }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "thinking", reason: parsed.error };
+			const level = parsed.positionals[0];
+			return level ? { kind: "thinking-set", level } : { kind: "thinking" };
+		},
+		handle(command, ctx) {
+			if (command.kind === "thinking") {
+				ctx.openThinking();
+				return;
+			}
+			if (command.kind !== "thinking-set") return;
+			const result = ctx.setThinkingLevel?.(command.level) ?? { status: "unavailable" as const };
+			if (result.status === "applied") {
+				ctx.notice("success", `thinking: ${result.display}`);
+			} else if (result.status === "unsupported") {
+				ctx.notice("error", `thinking level "${result.level}" is not available here; try ${result.supported.join(", ")}`);
+			} else {
+				ctx.notice("error", "thinking level cannot be set right now");
+			}
+			ctx.render();
 		},
 	},
 	{
@@ -868,7 +906,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Edit the Alt+J / Alt+K model cycle set",
 		kinds: ["scoped-models"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "scoped-models" }),
+		fromArgs: fromArgsOrUsage("scoped-models", { kind: "scoped-models" }),
 		handle(_command, ctx) {
 			ctx.openScopedModels();
 		},
@@ -878,7 +916,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Open interactive settings",
 		kinds: ["settings"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "settings" }),
+		fromArgs: fromArgsOrUsage("settings", { kind: "settings" }),
 		handle(_command, ctx) {
 			ctx.openSettings();
 		},
@@ -888,7 +926,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Resume a past session",
 		kinds: ["resume"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "resume" }),
+		fromArgs: fromArgsOrUsage("resume", { kind: "resume" }),
 		handle(_command, ctx) {
 			ctx.openResume();
 		},
@@ -898,7 +936,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Start a fresh session",
 		kinds: ["new"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "new" }),
+		fromArgs: fromArgsOrUsage("new", { kind: "new" }),
 		handle(_command, ctx) {
 			ctx.startNewSession();
 		},
@@ -908,7 +946,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Open session tree navigator",
 		kinds: ["tree"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "tree" }),
+		fromArgs: fromArgsOrUsage("tree", { kind: "tree" }),
 		handle(_command, ctx) {
 			ctx.openTree();
 		},
@@ -918,7 +956,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Fork from an assistant turn",
 		kinds: ["fork"],
 		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "fork" }),
+		fromArgs: fromArgsOrUsage("fork", { kind: "fork" }),
 		handle(_command, ctx) {
 			ctx.openMessagePicker();
 		},
@@ -978,6 +1016,13 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 	if (command.kind === "empty") return;
 	if (command.kind === "unknown") {
 		ctx.submitChat(command.text);
+		return;
+	}
+	if (command.kind === "usage-error") {
+		const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === command.command);
+		const usage = entry ? ` ${usageNotice(entry)}` : "";
+		ctx.notice("error", `${command.reason}.${usage}`);
+		ctx.render();
 		return;
 	}
 	const entry = HANDLER_BY_KIND.get(command.kind);

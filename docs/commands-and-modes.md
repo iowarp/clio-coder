@@ -149,7 +149,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
 | `/memory` | - | `/memory seed` | Inspect task memory or seed it from the newest handoff |
 | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
-| `/thinking` | - | `/thinking` | Open thinking-level selector |
+| `/thinking` | - | `/thinking [level]` | Open thinking-level selector, or set a level directly |
 | `/output` | - | `/output [verbosity]` | Set transcript detail: minimal, default, or verbose |
 | `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
 | `/scoped-models` | - | `/scoped-models` | Edit the Alt+J / Alt+K model cycle set |
