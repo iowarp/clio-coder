@@ -74,6 +74,12 @@ interface ParsedMemoryStep {
 	context: string | null;
 }
 
+interface ReadOperationsResult {
+	operations: TaskMemoryOperation[];
+	/** Entries named an op the bank has no verb for; kept only to detect a total loss. */
+	dropped: number;
+}
+
 const TASK_PROMPT_MAX_CHARS = 2_000;
 const TRAJECTORY_PROMPT_MAX_CHARS = 4_000;
 
@@ -199,9 +205,13 @@ export function parseTaskMemoryPolicyResponse(response: string): ParsedMemorySte
 	} catch {
 		return null;
 	}
-	const operations = readOperations(rawOperations);
-	if (operations === null) return null;
-	return { operations, context: readContext(text.slice(closesAt + OPERATIONS_CLOSE.length)) };
+	const read = readOperations(rawOperations);
+	if (read === null) return null;
+	// Recovering nothing is not silence. A step whose every operation was invented
+	// stays malformed so the operator can see the model answered in a shape the
+	// bank could not use.
+	if (read.operations.length === 0 && read.dropped > 0) return null;
+	return { operations: read.operations, context: readContext(text.slice(closesAt + OPERATIONS_CLOSE.length)) };
 }
 
 /**
@@ -223,9 +233,18 @@ function readContext(tail: string): string | null {
 	return context.length === 0 ? null : context;
 }
 
-function readOperations(value: unknown): TaskMemoryOperation[] | null {
+/**
+ * Structural violations still reject the batch, because they say the model did
+ * not produce an operation list at all. An unrecognized `op` says only that one
+ * entry named a verb the bank does not have, and a small model handed a tool
+ * trajectory routinely borrows that trajectory's shape for exactly one entry.
+ * Dropping it costs one operation, which is the same trade `resolveOperations`
+ * already makes for an invented entry id.
+ */
+function readOperations(value: unknown): ReadOperationsResult | null {
 	if (!Array.isArray(value) || value.length > TASK_MEMORY_POLICY_MAX_OPERATIONS) return null;
 	const operations: TaskMemoryOperation[] = [];
+	let dropped = 0;
 	for (const raw of value) {
 		if (!isRecord(raw) || typeof raw.op !== "string") return null;
 		switch (raw.op) {
@@ -252,10 +271,11 @@ function readOperations(value: unknown): TaskMemoryOperation[] | null {
 				operations.push({ op: raw.op, id: raw.id });
 				break;
 			default:
-				return null;
+				dropped += 1;
+				break;
 		}
 	}
-	return operations;
+	return { operations, dropped };
 }
 
 /**

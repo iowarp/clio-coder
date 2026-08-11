@@ -174,6 +174,51 @@ describe("contracts/task memory prompted policy", () => {
 		}
 	});
 
+	it("drops an unknown op without discarding the valid writes beside it", async () => {
+		// A small local model handed a tool trajectory routinely answers with the
+		// trajectory's own shape. Losing the notes it got right alongside that one
+		// invented op costs the whole step, which is the same trade the parser
+		// already refuses to make for an invented entry id.
+		const bank = new TaskMemoryBank();
+		const result = await runTaskMemoryPolicy(
+			bank,
+			clientReturning(
+				response([
+					{ op: "save_knowledge", content: "Target selection runs through placement.ts." },
+					{ op: "read", path: "src/domains/dispatch/index.ts" },
+					{ op: "save_procedural", content: "npm run build failed twice with the same TS2345." },
+				]),
+			),
+			BASE_INPUT,
+		);
+
+		strictEqual(result.decision, "silent");
+		strictEqual(result.bankOperations, 2, "the invented op costs one operation, not the step");
+		const snapshot = bank.snapshot();
+		strictEqual(snapshot.knowledge[0]?.content, "Target selection runs through placement.ts.");
+		strictEqual(snapshot.procedural[0]?.content, "npm run build failed twice with the same TS2345.");
+	});
+
+	it("still reports malformed when every operation was invented", async () => {
+		// Recovering nothing is not silence. An operator reading the step log needs
+		// to see that the model answered in a shape the bank could not use.
+		const bank = new TaskMemoryBank();
+		const before = bank.snapshot();
+		const result = await runTaskMemoryPolicy(
+			bank,
+			clientReturning(
+				response([
+					{ op: "read", path: "src/domains/dispatch/index.ts" },
+					{ op: "read", path: "src/domains/dispatch/placement.ts" },
+				]),
+			),
+			BASE_INPUT,
+		);
+
+		strictEqual(result.decision, "malformed");
+		deepStrictEqual(bank.snapshot(), before);
+	});
+
 	it("turns client failures and hard timeouts into silence without mutation", async () => {
 		const throwingBank = new TaskMemoryBank();
 		const throwing = await runTaskMemoryPolicy(
