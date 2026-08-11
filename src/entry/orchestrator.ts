@@ -84,6 +84,7 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
+	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	applyModelCapabilityPatch,
 	firstRuntimeResolutionError,
 	isOrchestratorEligibleRuntime,
@@ -92,6 +93,7 @@ import {
 	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
 	resolveRuntimeTarget,
+	supportsAgentRoleTools,
 	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
@@ -342,6 +344,39 @@ function createBackgroundMemoryModelClient(
 			});
 		},
 	};
+}
+
+/**
+ * Warn about a configured agent-role model the provider reports cannot call
+ * tools. Selection already refuses these, so reaching here means the config
+ * predates the check or was hand-edited; a run would otherwise fail later at
+ * dispatch admission with a message that names a missing tool rather than the
+ * model that cannot use any.
+ */
+function agentRoleToolWarnings(providers: ProvidersContract, settings: Readonly<ClioSettings>): string[] {
+	const roles: ReadonlyArray<{ label: string; target: string | null; model: string | null }> = [
+		{ label: "orchestrator", target: settings.orchestrator.target, model: settings.orchestrator.model },
+		{ label: "workers.default", target: settings.workers.default.target, model: settings.workers.default.model },
+	];
+	const warnings: string[] = [];
+	for (const role of roles) {
+		const targetId = role.target?.trim();
+		const wireModelId = role.model?.trim();
+		if (!targetId || !wireModelId) continue;
+		try {
+			const status = providers.list().find((entry) => entry.target.id === targetId);
+			if (!status) continue;
+			const capabilities = resolveModelCapabilities(status, wireModelId, providers.knowledgeBase);
+			if (supportsAgentRoleTools(capabilities)) continue;
+			warnings.push(
+				`${role.label} model '${wireModelId}' on target '${targetId}' ${AGENT_ROLE_TOOLS_REQUIRED_REASON}. ` +
+					`Pick another model, or state the correction in a model-catalog.d entry if the provider's flag is wrong.`,
+			);
+		} catch {
+			// An unresolvable capability is not evidence of a missing one.
+		}
+	}
+	return warnings;
 }
 
 /**
@@ -1177,6 +1212,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				`task memory: ${offer.count} handoff entr${offer.count === 1 ? "y" : "ies"} available from ${offer.source}; run /memory seed to import`,
 			);
 		}
+	}
+	for (const warning of agentRoleToolWarnings(providers, getCurrentSettings())) {
+		if (interactive) initialNotices.push(warning);
+		else process.stderr.write(`${warning}\n`);
 	}
 	// Residency protection follows the live effective settings: the models the
 	// operator's config references (orchestrator, worker default/profiles,
