@@ -8,7 +8,7 @@
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { ToolNames } from "../../src/core/tool-names.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
@@ -25,17 +25,23 @@ import { agentRecipeFixture } from "./agent-recipe.js";
 export interface DispatchStubOptions {
 	settings?: typeof DEFAULT_SETTINGS;
 	scheduling?: Partial<SchedulingContract>;
+	runtime?: RuntimeDescriptor;
+	agentTools?: ReadonlyArray<ToolName>;
 }
 
 export function dispatchStubContext(options: DispatchStubOptions = {}): DomainContext {
 	const settings = options.settings ?? structuredClone(DEFAULT_SETTINGS);
+	const agentTools = [...(options.agentTools ?? [])];
+	const agentCapabilityClass = agentTools.some((tool) => tool === ToolNames.Write || tool === ToolNames.Edit)
+		? "workspace-edit"
+		: "read-only";
 	const target: TargetDescriptor = settings.targets[0] ?? { id: "default", runtime: "openai", defaultModel: "gpt-4o" };
 	if (settings.targets.length === 0) {
 		settings.targets = [target];
 		settings.workers.default.target = target.id;
 		settings.workers.default.model = target.defaultModel ?? "gpt-4o";
 	}
-	const runtime: RuntimeDescriptor = {
+	const runtime: RuntimeDescriptor = options.runtime ?? {
 		id: target.runtime,
 		displayName: "OpenAI",
 		kind: "http",
@@ -104,7 +110,9 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 	const recipes: ReadonlyArray<AgentRecipe> = [
 		{
 			...agentRecipeFixture(),
-			toolRequirements: { required: [], optional: [] },
+			tools: agentTools,
+			toolRequirements: { required: agentCapabilityClass === "workspace-edit" ? agentTools : [], optional: [] },
+			capabilityClass: agentCapabilityClass,
 			id: "coder",
 			name: "coder",
 			description: "test recipe",

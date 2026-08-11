@@ -193,8 +193,11 @@ import { type Ledger, openLedger } from "./state.js";
 import {
 	countToolCalls,
 	hasPotentiallyMutatingAttempt,
+	recordToolCompletion,
 	recordToolFinish,
+	recordToolStart,
 	snapshotToolStats,
+	snapshotUnfinishedTools,
 	summarizeToolActivity,
 	zeroSuccessfulToolNote,
 } from "./tool-stats.js";
@@ -542,15 +545,15 @@ function appendDispatchFinishContractEntry(
  */
 const DISPATCH_DRAIN_GRACE_MS = 2000;
 
-async function awaitEventDrain(drained: Promise<void>, graceMs = DISPATCH_DRAIN_GRACE_MS): Promise<void> {
+async function awaitEventDrain(drained: Promise<void>, graceMs = DISPATCH_DRAIN_GRACE_MS): Promise<boolean> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
-	const grace = new Promise<void>((resolve) => {
+	const grace = new Promise<false>((resolve) => {
 		// The timer must hold the event loop: it bounds the drain wait, and
 		// the finally below clears it.
-		timer = setTimeout(resolve, graceMs);
+		timer = setTimeout(() => resolve(false), graceMs);
 	});
 	try {
-		await Promise.race([drained, grace]);
+		return await Promise.race([drained.then(() => true), grace]);
 	} finally {
 		if (timer !== undefined) clearTimeout(timer);
 	}
@@ -628,16 +631,19 @@ function truncateDiagnosticText(value: string, maxChars: number): string {
 	return `...${value.slice(value.length - maxChars + 3)}`;
 }
 
+function malformedWorkerStdoutLineCount(result: SpawnedWorkerResult): number {
+	return typeof result.malformedStdoutLines === "number" && Number.isFinite(result.malformedStdoutLines)
+		? Math.max(0, Math.floor(result.malformedStdoutLines))
+		: 0;
+}
+
 function workerDiagnosticsText(result: SpawnedWorkerResult, maxChars: number): string | null {
 	const parts: string[] = [];
 	const stderr = typeof result.stderrTail === "string" ? compactDiagnosticText(result.stderrTail) : "";
 	if (stderr.length > 0) {
 		parts.push(`stderr: ${truncateDiagnosticText(stderr, maxChars)}`);
 	}
-	const malformedStdoutLines =
-		typeof result.malformedStdoutLines === "number" && Number.isFinite(result.malformedStdoutLines)
-			? Math.max(0, Math.floor(result.malformedStdoutLines))
-			: 0;
+	const malformedStdoutLines = malformedWorkerStdoutLineCount(result);
 	if (malformedStdoutLines > 0) {
 		parts.push(`malformed stdout lines: ${malformedStdoutLines}`);
 	}
@@ -2324,6 +2330,24 @@ export function createDispatchBundle(
 					"automatic retry suppressed because the failed attempt executed a potentially state-changing tool call and retries do not yet have isolated workspaces",
 			};
 		}
+		const telemetry = receipt.safety?.toolTelemetry;
+		const unfinishedMutation =
+			telemetry?.unfinished.some(({ tool, count }) => count > 0 && classifyAction({ tool }).actionClass !== "read") ===
+			true;
+		const mutationNotRuledOut =
+			telemetry === undefined
+				? run.runtimeKind === "subprocess" || run.runtimeKind === "acp-delegation"
+				: (telemetry.coverage === "unavailable" && (telemetry.workspaceMutationPossible || unfinishedMutation)) ||
+					(telemetry.coverage === "partial" &&
+						(unfinishedMutation || (telemetry.ingestionErrors > 0 && telemetry.workspaceMutationPossible)));
+		if (mutationNotRuledOut) {
+			retryBackoff.delete(rootRunId);
+			return {
+				scheduled: false,
+				settlementDetail:
+					"automatic retry suppressed because incomplete tool telemetry cannot prove the failed attempt left the shared workspace unchanged",
+			};
+		}
 		const backoff = retryBackoff.get(rootRunId) ?? createBackoff();
 		const { state: nextBackoff, delayMs: backoffDelayMs } = nextDelay(backoff);
 		retryBackoff.set(rootRunId, nextBackoff);
@@ -3074,6 +3098,8 @@ export function createDispatchBundle(
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const toolStats = new Map<string, ToolCallStat>();
+		const inFlightTools = new Map<string, number>();
+		let toolTelemetryIngestionErrors = 0;
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
 		const finishContractEntries: unknown[] = [];
 		let finishContractAssistantText = "";
@@ -3126,6 +3152,9 @@ export function createDispatchBundle(
 			if (isRecord(event)) {
 				if (eventContainsFirstModelToken(event)) markObservedPhase("firstModelTokenAt");
 				if (eventStartsTool(event)) markObservedPhase("firstToolAt");
+			}
+			if (event.type === "clio_tool_start" && event.payload && typeof event.payload.tool === "string") {
+				recordToolStart(inFlightTools, event.payload);
 			}
 			// ACP is an external protocol peer, never an authority for Clio's
 			// deterministic terminal taxonomy. Ignore even syntactically valid
@@ -3186,6 +3215,7 @@ export function createDispatchBundle(
 				});
 			}
 			if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
+				recordToolCompletion(inFlightTools, event.payload);
 				recordToolFinish(toolStats, event.payload);
 				if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
 				else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
@@ -3305,7 +3335,10 @@ export function createDispatchBundle(
 					event,
 				});
 			},
-			onError: (error) => reportDispatchDiagnostic(`ingest events for run ${envelope.id}`, error),
+			onError: (error) => {
+				toolTelemetryIngestionErrors += 1;
+				reportDispatchDiagnostic(`ingest events for run ${envelope.id}`, error);
+			},
 		});
 
 		const startedAt = envelope.startedAt;
@@ -3371,6 +3404,8 @@ export function createDispatchBundle(
 			const agentInfo = init?.agentInfo;
 			const finalFailureMessage = result.failureMessage ?? failureMessage;
 			const finalToolStats = snapshotToolStats(toolStats);
+			const unfinished = snapshotUnfinishedTools(inFlightTools);
+			const toolGovernance = lifecycle.agentConfig.toolGovernance ?? "clio-policy";
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -3439,6 +3474,12 @@ export function createDispatchBundle(
 					blockedAttempts,
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
+					toolTelemetry: {
+						coverage: "unavailable",
+						ingestionErrors: toolTelemetryIngestionErrors,
+						unfinished,
+						workspaceMutationPossible: toolGovernance !== "deny-all",
+					},
 					runtimeLimitations: lifecycle.runtimeLimitations,
 				},
 				reproducibility: collectReproducibility(lifecycle.cwd, safetyMetadata),
@@ -3534,7 +3575,13 @@ export function createDispatchBundle(
 				// always waits (bounded by the drain grace) for the pump to finish
 				// the source stream, whether or not an external consumer ever
 				// subscribed, so a fast peer cannot seal a zero-token receipt.
-				await awaitEventDrain(eventPump.done);
+				if (!(await awaitEventDrain(eventPump.done))) {
+					toolTelemetryIngestionErrors += 1;
+					reportDispatchDiagnostic(
+						`run ${envelope.id}`,
+						new Error("event stream did not drain before receipt finalization"),
+					);
+				}
 				if (eventPump.droppedEvents() > 0) {
 					reportDispatchDiagnostic(
 						`run ${envelope.id}`,
@@ -3891,6 +3938,8 @@ export function createDispatchBundle(
 		const workerDone = worker.promise;
 
 		const toolStats = new Map<string, ToolCallStat>();
+		const inFlightTools = new Map<string, number>();
+		let toolTelemetryIngestionErrors = 0;
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
 		const finishContractEntries: unknown[] = [];
@@ -3956,6 +4005,9 @@ export function createDispatchBundle(
 			if (isRecord(event)) {
 				if (eventContainsFirstModelToken(event)) markObservedPhase("firstModelTokenAt");
 				if (eventStartsTool(event)) markObservedPhase("firstToolAt");
+			}
+			if (event.type === "clio_tool_start" && event.payload && typeof event.payload.tool === "string") {
+				recordToolStart(inFlightTools, event.payload);
 			}
 			if (event.type === "clio_steer_received") acknowledgeOldestSteer();
 			if (
@@ -4080,6 +4132,7 @@ export function createDispatchBundle(
 				});
 			}
 			if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
+				recordToolCompletion(inFlightTools, event.payload);
 				recordToolFinish(toolStats, event.payload);
 				if (isSkillActivation(event.payload.skillActivation)) {
 					skillActivations.push(event.payload.skillActivation);
@@ -4233,7 +4286,10 @@ export function createDispatchBundle(
 					event,
 				});
 			},
-			onError: (error) => reportDispatchDiagnostic(`ingest events for run ${envelope.id}`, error),
+			onError: (error) => {
+				toolTelemetryIngestionErrors += 1;
+				reportDispatchDiagnostic(`ingest events for run ${envelope.id}`, error);
+			},
 		});
 
 		const startedAt = envelope.startedAt;
@@ -4307,6 +4363,18 @@ export function createDispatchBundle(
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
 			const finalToolStats = snapshotToolStats(toolStats);
+			const unfinished = snapshotUnfinishedTools(inFlightTools);
+			const telemetryIngestionErrors = toolTelemetryIngestionErrors + malformedWorkerStdoutLineCount(result);
+			const workspaceMutationPossible =
+				lifecycle.runtimeKind === "subprocess"
+					? lifecycle.target.runtime.id !== "claude-code" || lifecycle.effectiveAutonomy !== "read-only"
+					: lifecycle.admission.allowedTools.some((tool) => classifyAction({ tool }).actionClass !== "read");
+			const toolTelemetryCoverage =
+				lifecycle.runtimeKind === "subprocess"
+					? "unavailable"
+					: telemetryIngestionErrors > 0 || unfinished.length > 0
+						? "partial"
+						: "complete";
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -4399,6 +4467,12 @@ export function createDispatchBundle(
 					blockedAttempts,
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
+					toolTelemetry: {
+						coverage: toolTelemetryCoverage,
+						ingestionErrors: telemetryIngestionErrors,
+						unfinished,
+						workspaceMutationPossible,
+					},
 					...(protectedArtifacts !== undefined ? { protectedArtifacts } : {}),
 					runtimeLimitations: lifecycle.runtimeLimitations,
 				},
@@ -4482,7 +4556,13 @@ export function createDispatchBundle(
 				// always waits (bounded by the drain grace) for the pump to finish
 				// the source stream, whether or not an external consumer ever
 				// subscribed, so a fast worker cannot seal a zero-token receipt.
-				await awaitEventDrain(eventPump.done);
+				if (!(await awaitEventDrain(eventPump.done))) {
+					toolTelemetryIngestionErrors += 1;
+					reportDispatchDiagnostic(
+						`run ${envelope.id}`,
+						new Error("event stream did not drain before receipt finalization"),
+					);
+				}
 				if (eventPump.droppedEvents() > 0) {
 					reportDispatchDiagnostic(
 						`run ${envelope.id}`,
