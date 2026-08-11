@@ -315,11 +315,14 @@ fleet:
 ```
 
 Then `clio doctor` runs a per-node preflight, `clio fleet list|run|status`
-drives contracts, and the `/fleet` overlay shows nodes, profiles, bindings,
-and live runs. Nodes must share the project filesystem at the same absolute
-path; hosts that do not fail admission with a clear reason. Target URLs
-resolve on the node the worker runs on, so `localhost` means that node's own
-inference server and there is no central proxy.
+drives and observes contracts, and `clio fleet drain|resume` closes or reopens
+durable dispatch admission. A drain preserves running work, rejects every new
+execution start, and expires after one hour unless renewed. The `/fleet`
+overlay shows nodes, profiles, bindings, and live runs. Nodes must share the
+project filesystem at the same absolute path; hosts that do not fail admission
+with a clear reason. Target URLs resolve on the node the worker runs on, so
+`localhost` means that node's own inference server and there is no central
+proxy.
 
 Everything you need to reproduce it end to end, including a recorded
 multi-node demo script, is in [docs/fleet-dispatch.md](docs/fleet-dispatch.md)
@@ -512,6 +515,8 @@ clio run "<task>" --json                 # one headless turn, JSONL events
 clio run "<task>" --agent coder          # one explicit fleet agent, writes a receipt
 clio acp                                 # serve ACP v1 over stdio for ACP frontends
 clio fleet run <contract>                # run a fleet DAG contract
+clio fleet drain                         # pause new execution starts for up to one hour
+clio fleet resume                        # reopen durable dispatch admission
 clio evidence build|inspect|list         # deterministic evidence artifacts
 clio eval validate|run|report|compare|gate
 ```

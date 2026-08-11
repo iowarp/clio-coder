@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { statusSnapshot } from "../../src/cli/fleet.js";
+import { setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.js";
 import type { RunEnvelope } from "../../src/domains/dispatch/types.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
@@ -88,6 +89,19 @@ describe("contracts/fleet-status", () => {
 			strictEqual(snapshot.totals.inputTokens, 0);
 			strictEqual(snapshot.totals.outputTokens, 0);
 			strictEqual(snapshot.totals.totalTokens, 100);
+		});
+	});
+
+	it("surfaces the durable admission drain as a valid discriminated state", async () => {
+		await withIsolatedClioHome(async () => {
+			const nowMs = Date.now();
+			const drain = setCapacityDraining(true, { nowMs, ttlMs: 60_000 });
+			const snapshot = statusSnapshot();
+			strictEqual(snapshot.admission.state, "draining");
+			if (snapshot.admission.state !== "draining") return;
+			strictEqual(snapshot.admission.requestedByPid, process.pid);
+			strictEqual(snapshot.admission.requestedAt, drain?.requestedAt);
+			strictEqual(snapshot.admission.expiresAt, drain?.expiresAt);
 		});
 	});
 });

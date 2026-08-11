@@ -4,6 +4,7 @@
  *   clio fleet list                      enumerate .clio/fleets/*.md with validity
  *   clio fleet run <name> --var k=v ...  preflight + execute a fleet contract
  *   clio fleet status [--json]           runtime snapshot from the durable ledger
+ *   clio fleet drain|resume [--json]      close or reopen durable dispatch admission
  *
  * Fleet contracts are repo-owned policy (.clio/fleets/<name>.md). Preflight
  * fails with zero side effects: nothing is dispatched until the contract
@@ -30,6 +31,7 @@ import {
 } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/index.js";
+import { type CapacityDrain, capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
 import { runCodeStep } from "../domains/dispatch/code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "../domains/dispatch/code-step-store.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
@@ -79,11 +81,15 @@ Subcommands:
   run <name> [--var k=v ...]    preflight and execute a fleet contract
        [--json]                 emit step receipts as JSON
   status [--json]               show running, retrying, and total dispatch state
+  drain [--json]                deny new execution starts for up to one hour
+  resume [--json]               reopen dispatch admission immediately
 
 Notes:
   status reads the durable run ledger. Rows started by another process show
   heartbeat liveness from the recorded worker pid; per-token live meters are
   only available inside the process that owns the run.
+  drain preserves running work. Repeat it to renew the one-hour expiry; resume
+  clears it early. The expiry prevents an abandoned drain from wedging Clio.
 `;
 
 function fail(message: string): number {
@@ -642,8 +648,18 @@ function rowTokenSplit(row: RunEnvelope): { input: number; output: number } {
 	return { input: 0, output: 0 };
 }
 
+export type FleetAdmissionStatus =
+	| { state: "open" }
+	| { state: "draining"; requestedByPid: number; requestedAt: string; expiresAt: string };
+
+function admissionStatus(drain: CapacityDrain | null): FleetAdmissionStatus {
+	if (drain === null) return { state: "open" };
+	return { state: "draining", ...drain };
+}
+
 export function statusSnapshot(): {
 	generatedAt: string;
+	admission: FleetAdmissionStatus;
 	running: Array<Record<string, unknown>>;
 	retrying: Array<Record<string, unknown>>;
 	totals: { inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number; runtimeSeconds: number };
@@ -684,7 +700,13 @@ export function statusSnapshot(): {
 	}
 	// The retry queue is in-memory orchestrator state and intentionally not
 	// durable (Symphony §14.3); cross-process it is always empty here.
-	return { generatedAt: new Date(nowMs).toISOString(), running, retrying: [], totals };
+	return {
+		generatedAt: new Date(nowMs).toISOString(),
+		admission: admissionStatus(capacityDrain(nowMs)),
+		running,
+		retrying: [],
+		totals,
+	};
 }
 
 function runStatus(args: ReadonlyArray<string>): number {
@@ -696,6 +718,11 @@ function runStatus(args: ReadonlyArray<string>): number {
 		return 0;
 	}
 	process.stdout.write(`dispatch status @ ${snapshot.generatedAt} (ledger: ${clioStateDir()})\n`);
+	process.stdout.write(
+		snapshot.admission.state === "draining"
+			? `admission: draining until ${snapshot.admission.expiresAt} (requested by pid ${snapshot.admission.requestedByPid} at ${snapshot.admission.requestedAt})\n`
+			: "admission: open\n",
+	);
 	if (snapshot.running.length === 0) {
 		process.stdout.write("running: none\n");
 	} else {
@@ -722,6 +749,25 @@ function runStatus(args: ReadonlyArray<string>): number {
 	return 0;
 }
 
+function runAdmissionControl(command: "drain" | "resume", args: ReadonlyArray<string>): number {
+	const unknown = args.find((arg) => arg !== "--json");
+	if (unknown) return fail(`${command}: unknown flag: ${unknown}`);
+	ensureClioState();
+	const admission = admissionStatus(setCapacityDraining(command === "drain"));
+	if (args.includes("--json")) {
+		process.stdout.write(`${JSON.stringify({ admission }, null, 2)}\n`);
+		return 0;
+	}
+	if (admission.state === "draining") {
+		process.stdout.write(
+			`dispatch admission is draining until ${admission.expiresAt}; running work continues (requested by pid ${admission.requestedByPid})\n`,
+		);
+	} else {
+		process.stdout.write("dispatch admission is open\n");
+	}
+	return 0;
+}
+
 export async function runFleetCommand(args: ReadonlyArray<string>): Promise<number> {
 	const sub = args[0];
 	if (sub === "--help" || sub === "-h" || sub === "help") {
@@ -739,6 +785,10 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return runFleet(args.slice(1));
 		case "status":
 			return runStatus(args.slice(1));
+		case "drain":
+			return runAdmissionControl("drain", args.slice(1));
+		case "resume":
+			return runAdmissionControl("resume", args.slice(1));
 		default:
 			process.stderr.write(`clio fleet: unknown subcommand '${sub}'\n`);
 			process.stderr.write(HELP);

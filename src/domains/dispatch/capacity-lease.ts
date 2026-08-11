@@ -77,11 +77,19 @@ function valid(value: unknown): value is CapacityLease {
 		(lease.reservationMemberId === null || typeof lease.reservationMemberId === "string")
 	);
 }
+function validTimestamp(value: unknown): value is string {
+	if (typeof value !== "string") return false;
+	const timestamp = Date.parse(value);
+	return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+}
 function validDrain(value: unknown): value is CapacityDrain {
 	if (typeof value !== "object" || value === null) return false;
 	const drain = value as Partial<CapacityDrain>;
 	return (
-		Number.isInteger(drain.requestedByPid) && typeof drain.requestedAt === "string" && typeof drain.expiresAt === "string"
+		Number.isInteger(drain.requestedByPid) &&
+		(drain.requestedByPid ?? 0) > 0 &&
+		validTimestamp(drain.requestedAt) &&
+		validTimestamp(drain.expiresAt)
 	);
 }
 export function readCapacityStateUnsafe(): CapacityStateFile {
@@ -163,8 +171,8 @@ function ownerHoldsLease(lease: CapacityLease, probe: LeaseOwnerProbe): boolean 
 function reclaim(file: CapacityStateFile, nowMs: number, probe: LeaseOwnerProbe): void {
 	file.leases = file.leases.filter((lease) => ownerHoldsLease(lease, probe) && Date.parse(lease.expiresAt) > nowMs);
 }
-/** An expired drain is no drain; the next writer clears it from the file. */
-function activeDrain(file: CapacityStateFile, nowMs: number): CapacityDrain | null {
+/** Inspect/expire the drain inside an admission-state transaction. The caller persists the mutated state. */
+export function activeCapacityDrainUnsafe(file: CapacityStateFile, nowMs: number): CapacityDrain | null {
 	if (file.draining === null) return null;
 	if (Date.parse(file.draining.expiresAt) <= nowMs) {
 		file.draining = null;
@@ -251,7 +259,7 @@ export function acquireCapacityLease(input: {
 		const nowMs = input.nowMs ?? Date.now();
 		const file = readCapacityStateUnsafe();
 		reclaim(file, nowMs, input.probe ?? defaultProbe);
-		const drain = activeDrain(file, nowMs);
+		const drain = activeCapacityDrainUnsafe(file, nowMs);
 		if (drain !== null)
 			throw new Error(
 				`dispatch: admission denied: capacity is draining (requested by pid ${drain.requestedByPid} at ${drain.requestedAt})`,
@@ -352,7 +360,13 @@ export function setCapacityDraining(
 	});
 }
 export function capacityDrain(nowMs = Date.now()): CapacityDrain | null {
-	return withStateFileLockSync(capacityStateLockPath(), () => activeDrain(readCapacityStateUnsafe(), nowMs));
+	return withStateFileLockSync(capacityStateLockPath(), () => {
+		const file = readCapacityStateUnsafe();
+		const hadDrain = file.draining !== null;
+		const drain = activeCapacityDrainUnsafe(file, nowMs);
+		if (hadDrain && drain === null) writeCapacityStateUnsafe(file);
+		return drain;
+	});
 }
 export function capacityLeaseUsage(options?: { nowMs?: number; probe?: LeaseOwnerProbe }): {
 	global: number;
