@@ -155,7 +155,7 @@ memory:
     everyNTools: 10
     windowSteps: 8
     maxTokens: 400
-    timeoutMs: 20000
+    timeoutMs: 180000        # shipped operator default in src/core/defaults.ts; library fallback in task-memory-policy.ts is 20000 ms
 
 workers:
   default:

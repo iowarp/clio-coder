@@ -53,15 +53,17 @@ User-facing agents visible in `clio agents` and `/agents`.
 | `documenter` | read, write, edit, grep, find, ls, git, verify, code_nav, context | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
 | `tester` | read, write, edit, grep, find, ls, git, verify, code_nav | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
 | `verifier` | read, grep, find, ls, git, verify, code_nav | Independently runs and reports test, lint, build, review, and release gates. | `verification` | `fast` |
+| `wiki-writer` | read, write, edit, grep, find, ls, code_nav, context | Plans one repository wiki, or researches and writes one wiki page. | `workspace-edit` | `balanced` |
 
-### Shipped Shadow Agents
-Internal orchestration helpers. They are hidden from default displays (but visible via `clio agents --all` and in a separate section of the prompt catalog).
+### Shipped Shadow and Internal Agents
+Internal orchestration helpers and internal process agents. They are hidden from default displays (but visible via `clio agents --all` and in a separate section of the prompt catalog).
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
 | `scout` | read, grep, find, ls, context, code_nav, git | Broad repository reconnaissance, codebase orientation, structure and entry-point mapping, and multi-file symbol hunting. | `read-only` | `fast` |
 | `researcher` | read, web_fetch, context | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
 | `provenance` | read, grep, find, ls, git | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
+| `context-bootstrap` | read, grep, find, ls, context, code_nav | Internal agent behind `clio context init` that parses repository and returns CLIO.md payload. | `read-only` | `balanced` |
 
 `scout` is bound by a live-grounding contract: its whole final response is one `scout-report` object whose every finding carries the `claim` it observed and the `path:line` that grounds it, a lead it could not confirm live is simply left out, and wiki or index content is orientation only, never citable as evidence. It has an 18-call exploration phase followed by a tool-free synthesis phase; wide parallel batches cannot consume the synthesis backstop as separate violations. Dispatch labels its answer `reconnaissance output (advisory leads, not validation evidence):`.
 
@@ -113,7 +115,7 @@ Skills are knowledge attachments declared under `skills: [...]` in the YAML fron
 *   **Visibility**: Normal `clio agents` lists user-visible (base/custom) agents. The `/agents` slash command shows both Clio fleet agents and ACP delegation agents. The command `clio agents --all` includes shadow/internal specs reserved for Clio orchestration.
 *   **Invocation limits**: User-origin `/run` and `clio run --agent` **cannot** invoke shadow/internal agents.
 *   **Orchestrator dispatch**: Internal main-agent dispatch can invoke shadow agents through the `dispatch` tool. The operating contract and Scout's catalog description steer the model to dispatch Scout for broad repository reconnaissance, while narrow file or symbol inspection remains local to the main agent. If a turn reaches 9 or more manual read-only exploration calls without completing Scout dispatch, a threshold nudge advises delegation on the continuation.
-*   **TUI rendering and control**: Shadow dispatch rows are marked with an `sh:` prefix. The Fleet Runs island and board show the bounded task, run ID, live tools, tokens, priced cost, retry state, and terminal outcome. Select a native run to steer it or cancel an active worker/retry timer.
+*   **TUI rendering and control**: Shadow dispatch rows are marked with an `sh:` prefix. The Fleet Runs island and board show the bounded task, run ID, live tools, tokens, priced cost, retry state, and terminal outcome. Select an HTTP/SDK run to steer it or cancel any active worker/retry timer.
 *   **ACP Delegation**: The `/delegate` command is reserved for ACP delegation only, which is separate from Clio fleet subagents.
 
 ### Measured agent automation

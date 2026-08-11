@@ -432,7 +432,7 @@ monitor(run_id="run-01H...", mode="receipt")
 
 ## steer: guide or cancel a running worker
 
-Controls a running dispatched worker whose id is already available. Parent-model mid-run control requires detached dispatch because dispatch and steer are sequential; the interactive operator/TUI can steer an active synchronous native run through the dispatch contract. Source: `src/tools/steer.ts`. Dispatch class; sequential.
+Controls a running dispatched worker whose id is already available. Parent-model mid-run control requires detached dispatch because dispatch and steer are sequential; the interactive operator/TUI can steer an active synchronous HTTP or SDK worker through the dispatch contract. Source: `src/tools/steer.ts`. Dispatch class; sequential.
 
 Arguments:
 
@@ -440,7 +440,7 @@ Arguments:
 - `action` (required). `guide` or `cancel`.
 - `message` (required for `guide`). The steering text.
 
-`action="guide"` injects the message through the dispatch contract's stdin steer channel; the worker sees it as a user message at its next turn boundary, so delivery is acknowledged immediately but takes effect on the worker's next turn. Guide reaches native workers only; other runtimes return the contract's structured "no input channel" error verbatim.
+`action="guide"` injects the message through the dispatch contract's stdin steer channel; an HTTP or SDK worker sees it as a user message at its next turn boundary. The worker acknowledges only after its runtime accepts the guidance. Single-shot subprocess runtimes (Claude CLI and Antigravity) and ACP delegation do not expose live input and return the contract's structured unsupported-steering error.
 
 `action="cancel"` aborts a non-terminal run; the run finalizes with `outcome=canceled` and its receipt records the cancellation. A run that already finished (completed, failed, interrupted, stale, or dead) errors with its state, since there is nothing to cancel.
 
