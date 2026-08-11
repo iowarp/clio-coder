@@ -572,16 +572,35 @@ function resultDigest(input: MiddlewareHookInput, outcome: ToolOutcome): string 
 	if (outcome === "error") {
 		const metadataMessage = input.metadata?.errorMessage;
 		if (typeof metadataMessage === "string" && metadataMessage.trim().length > 0) {
-			return shortText(metadataMessage, RESULT_DIGEST_MAX_CHARS);
+			return shortText(diagnosticLine(metadataMessage), RESULT_DIGEST_MAX_CHARS);
 		}
 		for (const key of ["error", "message"] as const) {
 			const value = input.toolResultDetails?.[key];
-			if (typeof value === "string" && value.trim().length > 0) return shortText(value, RESULT_DIGEST_MAX_CHARS);
+			if (typeof value === "string" && value.trim().length > 0) {
+				return shortText(diagnosticLine(value), RESULT_DIGEST_MAX_CHARS);
+			}
 		}
 		return "an unknown tool error";
 	}
 	const resultFingerprint = input.metadata?.resultFingerprint;
 	return typeof resultFingerprint === "string" ? `ok result ${resultFingerprint.slice(0, 16)}` : "ok";
+}
+
+const DIAGNOSTIC_HINT =
+	/\b(error|failed|failure|cannot|unable|expected|refused|denied|missing|not found|timed out|timeout|fatal)\b/iu;
+
+/**
+ * A runtime opens its output with its own frame pointer, not with the diagnosis,
+ * and closes it with paths that repeat the command. The bounded digest is the
+ * whole advisory a model reads, so it spends that budget on the first line that
+ * names a problem and falls back to the first line when none does.
+ */
+function diagnosticLine(value: string): string {
+	const lines = value
+		.split(/\r?\n/u)
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0);
+	return lines.find((line) => DIAGNOSTIC_HINT.test(line)) ?? lines[0] ?? "";
 }
 
 function proceduralContent(call: string, attempts: number, firstStep: number, error: string): string {

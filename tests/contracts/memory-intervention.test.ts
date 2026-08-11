@@ -71,6 +71,46 @@ describe("contracts/memory intervention rules tier", () => {
 		);
 	});
 
+	it("spends the advisory's budget on the diagnosis rather than the runtime's own frame", () => {
+		const bank = new TaskMemoryBank();
+		const registration = createMemoryInterventionRegistration({ bank });
+		const args = { command: "node broken.js" };
+		// A Node stack opens with three lines of loader bookkeeping before it says
+		// anything about what went wrong, and closes with an absolute path that
+		// repeats the command. Head-truncating that buries the diagnosis.
+		const stack = [
+			"node:internal/modules/cjs/loader:1423",
+			"  throw err;",
+			"  ^",
+			"Error: Cannot find module './definitely-not-here.js'",
+			"Require stack:",
+			"- /a/very/long/absolute/path/that/eats/the/whole/budget/broken.js",
+		].join("\n");
+
+		execute(registration, 1, args, "error", stack);
+		const effects = execute(registration, 2, args, "error", stack);
+		const effect = effects[0];
+
+		ok(effect?.kind === "annotate_tool_result");
+		match(effect.message, /failed with Error: Cannot find module '\.\/definitely-not-here\.js'/u);
+		ok(!effect.message.includes("cjs/loader:1423"), "the runtime's own frame is not the diagnosis");
+		ok(!effect.message.includes("Require stack"), "one line is enough");
+	});
+
+	it("falls back to the first line when no line names a problem", () => {
+		const bank = new TaskMemoryBank();
+		const registration = createMemoryInterventionRegistration({ bank });
+		const args = { command: "tsc -p ." };
+		const message = "TS2345: Argument of type A is not assignable to B\n  at line 12";
+
+		execute(registration, 1, args, "error", message);
+		const effect = execute(registration, 2, args, "error", message)[0];
+
+		ok(effect?.kind === "annotate_tool_result");
+		match(effect.message, /failed with TS2345: Argument of type A is not assignable to B/u);
+		ok(!effect.message.includes("at line 12"));
+	});
+
 	it("annotates a repeated failure again in a later turn", () => {
 		const bank = new TaskMemoryBank();
 		const registration = createMemoryInterventionRegistration({ bank });
