@@ -1,7 +1,9 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SafeEventBus } from "../../src/core/event-bus.js";
-import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
+import type { AgentSpec } from "../../src/domains/agents/spec.js";
+import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import {
 	createInteractiveSlashRuntime,
@@ -92,6 +94,42 @@ describe("contracts/interactive slash runtime", () => {
 		runtime.dispatchCommand("/tasks");
 
 		deepStrictEqual(harness.events, ["help:model", "tasks"]);
+	});
+
+	it("derives interactive /run roles from the named agent recipe", async () => {
+		const harness = createHarness();
+		const requests: DispatchRequest[] = [];
+		const specs = new Map<string, Pick<AgentSpec, "capabilityClass" | "resultContract">>([
+			["scout", { capabilityClass: "read-only", resultContract: { kind: "scout-report" } }],
+			["verifier", { capabilityClass: "verification", resultContract: { kind: "verifier-report" } }],
+		]);
+		harness.deps.agents = {
+			listSpecs: () => [],
+			getSpec: (agentId) => (specs.get(agentId) as AgentSpec | undefined) ?? null,
+		};
+		harness.deps.dispatch = {
+			dispatch: async (request: DispatchRequest) => {
+				requests.push(request);
+				return {
+					runId: `run-${requests.length}`,
+					events: (async function* () {})(),
+					finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
+				};
+			},
+		} as unknown as DispatchContract;
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+
+		runtime.dispatchCommand("/run scout inspect the repository");
+		runtime.dispatchCommand("/run verifier validate the change");
+		await flushAsync();
+
+		deepStrictEqual(
+			requests.map(({ agentId, executionRole }) => ({ agentId, executionRole })),
+			[
+				{ agentId: "scout", executionRole: "researcher" },
+				{ agentId: "verifier", executionRole: "verifier" },
+			],
+		);
 	});
 
 	it("rejects a second context bootstrap until the first one settles", async () => {

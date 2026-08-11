@@ -6,6 +6,7 @@ import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { clioConfigDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
@@ -49,7 +50,7 @@ type SlashChat = Pick<ChatLoop, "getSessionId" | "submit">;
 type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser">;
 type SlashResources = Pick<ResourcesContract, "prompts" | "reload">;
 type SlashExtensions = Pick<ExtensionsContract, "list">;
-type SlashAgents = Pick<AgentsContract, "listSpecs">;
+type SlashAgents = Pick<AgentsContract, "getSpec" | "listSpecs">;
 type SlashShare = Pick<ShareContract, "writeArchive" | "planImport" | "importArchive">;
 
 export interface InteractiveSlashRuntimeDeps {
@@ -133,6 +134,9 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		notice: appendCommandNotice,
 		dispatch: deps.dispatch,
 		bus: deps.bus,
+		...(deps.agents
+			? { getAgentRoleFacts: agentRoleFactsResolver((agentId: string) => deps.agents?.getSpec(agentId) ?? null) }
+			: {}),
 		workerDefault: () => deps.getWorkerDefault?.(),
 		shutdown: () => {
 			void deps.shutdown();

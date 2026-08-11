@@ -213,6 +213,8 @@ export interface SlashCommandContext {
 	notice: (level: NoticeLevel, text: string) => void;
 	dispatch: DispatchContract;
 	bus: SafeEventBus;
+	/** Strict recipe facts used to keep interactive /run role-equivalent with the CLI. */
+	getAgentRoleFacts?: AgentRoleFactsResolver;
 	/** Returns the current `workers.default` block, resolved fresh on every /run. */
 	workerDefault: () => { target?: string; model?: string } | undefined;
 	/** Fire-and-forget shutdown. Handler must not await. */
@@ -557,6 +559,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					task,
 					{
 						dispatch: ctx.dispatch,
+						...(ctx.getAgentRoleFacts ? { getAgentRoleFacts: ctx.getAgentRoleFacts } : {}),
 						io: ctx.io,
 						notice: ctx.notice,
 						workerDefault: ctx.workerDefault(),
