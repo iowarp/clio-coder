@@ -183,7 +183,7 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"orchestrator.target": "Active chat target id.",
 	"orchestrator.model": "Active chat wire model id.",
 	"background.target": "Optional target for LLM memory steps; unset keeps rules-only memory.",
-	"background.model": "Small non-reasoning model for task memory; reuses the chat model only if that model does not reason.",
+	"background.model": "Small non-reasoning model used only for task memory steps.",
 	"background.thinkingLevel": "Unused: memory steps always request thinking off.",
 	"memory.intervention.enabled": "Master switch for rules-only and model-backed task memory.",
 	"memory.intervention.everyNTools": "Maximum tool executions between prompted memory steps.",

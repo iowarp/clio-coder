@@ -255,7 +255,11 @@ export const DEFAULT_SETTINGS = {
 			everyNTools: 10,
 			windowSteps: 8,
 			maxTokens: 400,
-			timeoutMs: 20_000,
+			// A memory step runs detached from the turn that triggered it, so a
+			// generous deadline costs no interactive latency. Measured steps on a
+			// small local route ranged past two minutes, and a deadline shorter than
+			// the model discards finished work as a timeout.
+			timeoutMs: 180_000,
 		},
 	},
 	workers: {
@@ -418,7 +422,7 @@ memory:
     everyNTools: 10
     windowSteps: 8
     maxTokens: 400
-    timeoutMs: 20000
+    timeoutMs: 180000
 
 # Worker targets for dispatch. \`default\` preserves the legacy behavior when a
 # recipe or request does not specify an override. \`profiles\` are named
