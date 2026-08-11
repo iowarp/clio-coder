@@ -149,6 +149,16 @@ applied to retries of an in-flight assignment, whose retry budget already
 bounds it. A retry refused at admission settles the assignment failed and
 records the denial reason in the assignment's `outcomeDetail`.
 
+Retry also requires evidence that reusing the same checkout is safe. Each
+receipt seals `safety.toolTelemetry`: coverage is `complete`, `partial`, or
+`unavailable`, with ingestion errors and unmatched tool starts preserved.
+Dispatch suppresses automatic retry after an executed state-changing call,
+after an unfinished state-changing call, or when an opaque mutation-capable
+runtime cannot prove that the failed attempt left the workspace unchanged.
+Claude CLI runs technically constrained to read-only tools retain retries;
+mutation-capable subprocess and ACP runs fail closed until isolated retry
+workspaces exist.
+
 Failover modes are:
 
 - `none`: exact pins remain fail-closed; retries can only repeat the same tuple.

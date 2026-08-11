@@ -525,6 +525,17 @@ export interface RunReceiptSafetySummary {
 	blockedAttempts: SafetyBlockedAttempt[];
 	requestedActions: ReadonlyArray<string>;
 	toolProfile?: ToolProfileName;
+	/**
+	 * Whether Clio observed a complete start/finish stream for this runtime's
+	 * tool activity. Retry admission consumes this sealed fact before reusing
+	 * the same checkout after a failed attempt.
+	 */
+	toolTelemetry?: {
+		coverage: "complete" | "partial" | "unavailable";
+		ingestionErrors: number;
+		unfinished: ReadonlyArray<{ tool: string; count: number }>;
+		workspaceMutationPossible: boolean;
+	};
 	/** Frozen parent-session hard blocks enforced by this worker specification. */
 	protectedArtifacts?: {
 		version: 1;

@@ -1,12 +1,15 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
+import { EMPTY_CAPABILITIES, type RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -48,6 +51,53 @@ function failedMutatingWorker(): SpawnedWorker {
 		heartbeatAt: { current: Date.now() },
 	};
 }
+
+function failedWithUnfinishedEdit(): SpawnedWorker {
+	return {
+		pid: 8100,
+		promise: Promise.resolve({ exitCode: 1, signal: null }),
+		events: (async function* () {
+			yield { type: "clio_tool_start", payload: { tool: "edit", posture: "operating", startedAt: Date.now() } };
+		})(),
+		abort: () => {},
+		heartbeatAt: { current: Date.now() },
+	};
+}
+
+function failedWithUndrainedEvents(): SpawnedWorker {
+	return {
+		pid: 8101,
+		promise: Promise.resolve({ exitCode: 1, signal: null }),
+		events: (async function* () {
+			await new Promise<never>(() => {
+				// Model a worker event source that remains open after process exit.
+			});
+			yield undefined;
+		})(),
+		abort: () => {},
+		heartbeatAt: { current: Date.now() },
+	};
+}
+
+function failedWithMalformedTelemetry(): SpawnedWorker {
+	return {
+		pid: 8102,
+		promise: Promise.resolve({ exitCode: 1, signal: null, malformedStdoutLines: 1 }),
+		events: (async function* () {})(),
+		abort: () => {},
+		heartbeatAt: { current: Date.now() },
+	};
+}
+
+const CLAUDE_CODE_RUNTIME: RuntimeDescriptor = {
+	id: "claude-code",
+	displayName: "Claude Code",
+	kind: "subprocess",
+	apiFamily: "claude-code-subprocess",
+	auth: "claude-cli",
+	defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+	synthesizeModel: () => ({ id: "claude-sonnet", provider: "claude-code" }) as never,
+};
 
 describe("dispatch assignments", () => {
 	beforeEach(() => isolateDispatchState());
@@ -138,6 +188,162 @@ describe("dispatch assignments", () => {
 			strictEqual(spawns, 1);
 			strictEqual(bundle.contract.snapshot().retrying.length, 0);
 			ok(bundle.contract.assignments?.get(handle.runId)?.outcomeDetail?.includes("retry suppressed"));
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("does not retry a mutation-capable subprocess whose tool telemetry is unavailable", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 1;
+		settings.targets = [{ id: "claude-cli", runtime: "claude-code", defaultModel: "claude-sonnet" }];
+		settings.workers.default = { target: "claude-cli", model: "claude-sonnet", thinkingLevel: "off" };
+		const workspace = mkdtempSync(join(tmpdir(), "clio-opaque-retry-"));
+		let spawns = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: CLAUDE_CODE_RUNTIME }), {
+			resilienceCooldownMs: 0,
+			spawnWorker: () => {
+				spawns += 1;
+				writeFileSync(join(workspace, "partial-edit.txt"), "changed before failure");
+				return worker(1);
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "fail after opaque editing",
+				cwd: workspace,
+			});
+			const terminal = await handle.finalPromise;
+			strictEqual(terminal.outcome, "failed");
+			deepStrictEqual(terminal.safety?.toolTelemetry, {
+				coverage: "unavailable",
+				ingestionErrors: 0,
+				unfinished: [],
+				workspaceMutationPossible: true,
+			});
+			strictEqual(readFileSync(join(workspace, "partial-edit.txt"), "utf8"), "changed before failure");
+			strictEqual(spawns, 1);
+			ok(bundle.contract.assignments?.get(handle.runId)?.outcomeDetail?.includes("incomplete tool telemetry"));
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
+	it("retains retries for a Claude subprocess constrained to read-only tools", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.autonomy = "read-only";
+		settings.workers.maxRetries = 1;
+		settings.targets = [{ id: "claude-cli", runtime: "claude-code", defaultModel: "claude-sonnet" }];
+		settings.workers.default = { target: "claude-cli", model: "claude-sonnet", thinkingLevel: "off" };
+		let spawns = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: CLAUDE_CODE_RUNTIME }), {
+			resilienceCooldownMs: 0,
+			spawnWorker: () => (++spawns === 1 ? worker(1) : worker(0, "read-only recovery")),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "retry read-only reconnaissance",
+			});
+			const terminal = await handle.finalPromise;
+			strictEqual(terminal.outcome, "succeeded");
+			strictEqual(terminal.lineage?.attempt, 1);
+			strictEqual(terminal.safety?.toolTelemetry?.coverage, "unavailable");
+			strictEqual(terminal.safety?.toolTelemetry?.workspaceMutationPossible, false);
+			strictEqual(spawns, 2);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("does not retry a mediated worker that crashes with a mutating call in flight", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 1;
+		let spawns = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resilienceCooldownMs: 0,
+			spawnWorker: () => {
+				spawns += 1;
+				return failedWithUnfinishedEdit();
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "crash while editing",
+			});
+			const terminal = await handle.finalPromise;
+			strictEqual(terminal.outcome, "failed");
+			deepStrictEqual(terminal.safety?.toolTelemetry, {
+				coverage: "partial",
+				ingestionErrors: 0,
+				unfinished: [{ tool: "edit", count: 1 }],
+				workspaceMutationPossible: false,
+			});
+			strictEqual(spawns, 1);
+			ok(bundle.contract.assignments?.get(handle.runId)?.outcomeDetail?.includes("incomplete tool telemetry"));
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("marks telemetry partial when the worker event stream misses the finalization deadline", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			spawnWorker: failedWithUndrainedEvents,
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "fail with an event source that never closes",
+			});
+			const terminal = await handle.finalPromise;
+			strictEqual(terminal.outcome, "failed");
+			strictEqual(terminal.safety?.toolTelemetry?.coverage, "partial");
+			strictEqual(terminal.safety?.toolTelemetry?.ingestionErrors, 1);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("does not retry when malformed worker frames could conceal a workspace mutation", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 1;
+		let spawns = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings, agentTools: [ToolNames.Read, ToolNames.Edit] }), {
+			spawnWorker: () => {
+				spawns += 1;
+				return failedWithMalformedTelemetry();
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "fail after emitting unusable tool telemetry",
+			});
+			const terminal = await handle.finalPromise;
+			strictEqual(terminal.outcome, "failed");
+			deepStrictEqual(terminal.safety?.toolTelemetry, {
+				coverage: "partial",
+				ingestionErrors: 1,
+				unfinished: [],
+				workspaceMutationPossible: true,
+			});
+			strictEqual(spawns, 1);
+			ok(bundle.contract.assignments?.get(handle.runId)?.outcomeDetail?.includes("incomplete tool telemetry"));
 		} finally {
 			await bundle.extension.stop?.();
 		}

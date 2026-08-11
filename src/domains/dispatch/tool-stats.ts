@@ -27,6 +27,31 @@ export interface ToolFinishPayload {
 	outcome?: "ok" | "error" | "blocked";
 }
 
+export interface ToolStartPayload {
+	tool?: string;
+}
+
+/** Count starts independently from finishes so a worker crash cannot disappear an in-flight call. */
+export function recordToolStart(inFlight: Map<string, number>, payload: ToolStartPayload): void {
+	if (typeof payload.tool !== "string") return;
+	inFlight.set(payload.tool, (inFlight.get(payload.tool) ?? 0) + 1);
+}
+
+/** Match one finish to its start without inventing a start for legacy or opaque streams. */
+export function recordToolCompletion(inFlight: Map<string, number>, payload: ToolFinishPayload): void {
+	if (typeof payload.tool !== "string") return;
+	const count = inFlight.get(payload.tool) ?? 0;
+	if (count <= 1) inFlight.delete(payload.tool);
+	else inFlight.set(payload.tool, count - 1);
+}
+
+export function snapshotUnfinishedTools(inFlight: ReadonlyMap<string, number>): Array<{ tool: string; count: number }> {
+	return [...inFlight.entries()]
+		.filter(([, count]) => count > 0)
+		.map(([tool, count]) => ({ tool, count }))
+		.sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
+}
+
 function blankStat(tool: string): ToolCallStat {
 	return { tool, count: 0, ok: 0, errors: 0, blocked: 0, totalDurationMs: 0 };
 }
