@@ -16,6 +16,7 @@ import {
 	EvidenceArtifactProvider,
 	listViewArtifacts,
 	loadJsonFileLines,
+	PromptManifestArtifactProvider,
 	ProtectedArtifactProvider,
 	ReceiptArtifactProvider,
 	receiptFilePath,
@@ -253,6 +254,7 @@ describe("contracts/view-artifacts", () => {
 			"tool-output",
 			"protected-artifact",
 			"compaction",
+			"prompt-manifest",
 			"audit",
 		]);
 
@@ -582,6 +584,65 @@ describe("contracts/view-artifacts", () => {
 		ok(loaded?.lines.join("\n").includes("Important prior context."));
 		ok(loaded?.lines.join("\n").includes("- tokens before: 1k"));
 		ok(loaded?.lines.join("\n").includes("- tokens after: 300"));
+	});
+
+	it("lists prompt compile provenance while isolating malformed manifest lines", async () => {
+		const stateDir = await scratchDir();
+		const meta = sessionMeta();
+		const path = join(stateDir, "sessions", meta.cwdHash, meta.id, "prompt-manifest.jsonl");
+		await mkdir(join(stateDir, "sessions", meta.cwdHash, meta.id), { recursive: true });
+		const record = {
+			at: "2026-06-11T12:04:30.000Z",
+			previousHash: null,
+			systemPromptHash: "a".repeat(64),
+			tokenEstimate: 1530,
+			thinkingLevel: "low",
+			projectPreload: {
+				mode: "full" as const,
+				chars: 4000,
+				lines: 100,
+				reason: null,
+				nearLimit: false,
+				label: "full (4.0kB, 100 lines)",
+			},
+			sections: [{ id: "identity", tokenEstimate: 200 }],
+			fragments: [
+				{
+					id: "identity.clio",
+					relPath: "identity/clio.md",
+					contentHash: "b".repeat(64),
+					dynamic: false,
+				},
+			],
+		};
+		await writeFile(
+			path,
+			[JSON.stringify(record), JSON.stringify({ ...record, at: "1" }), JSON.stringify({ at: record.at }), '{"torn'].join(
+				"\n",
+			),
+		);
+
+		const artifacts = await new PromptManifestArtifactProvider({ stateDir, sessionMeta: meta }).list();
+		const compile = artifacts.find((artifact) => artifact.id.startsWith("prompt-manifest:1:"));
+		ok(compile, "valid compile is listed despite later malformed lines");
+		strictEqual(compile.category, "prompt-manifest");
+		strictEqual(compile.sessionId, meta.id);
+		strictEqual(compile.path, path);
+		ok(compile.title.includes("1.5k"), compile.title);
+		ok(compile.searchText?.includes("identity/clio.md"));
+
+		const loaded = await compile.load();
+		const text = loaded.lines.join("\n");
+		strictEqual(loaded.format, "json");
+		ok(text.includes(`"systemPromptHash": "${"a".repeat(64)}"`), text);
+		ok(text.includes('"thinkingLevel": "low"'), text);
+
+		const errors = artifacts.find((artifact) => artifact.id === "prompt-manifest:read-errors");
+		ok(errors, "invalid records are visible as provenance gaps");
+		const errorText = (await errors.load()).lines.join("\n");
+		ok(errorText.includes("line 2: invalid prompt manifest record"), errorText);
+		ok(errorText.includes("line 3: invalid prompt manifest record"), errorText);
+		ok(errorText.includes("line 4: invalid JSON"), errorText);
 	});
 
 	it("lists and loads task ledger snapshots as markdown artifacts", async () => {

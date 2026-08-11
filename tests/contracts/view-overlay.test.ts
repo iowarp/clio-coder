@@ -10,10 +10,12 @@ import {
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { sortViewArtifacts, type ViewArtifact } from "../../src/interactive/view/artifacts.js";
 import {
+	artifactsInCategoryOrder,
 	buildArtifactHeader,
 	filterViewArtifacts,
 	groupedViewRows,
 	initialViewSelection,
+	nextCategorySelection,
 	nextContentScrollOffset,
 	openViewOverlay,
 	parseViewFilterQuery,
@@ -101,6 +103,7 @@ describe("contracts/view-overlay", () => {
 				"tool-output",
 				"protected-artifact",
 				"compaction",
+				"prompt-manifest",
 				"audit",
 			],
 		);
@@ -109,6 +112,19 @@ describe("contracts/view-overlay", () => {
 			["new", "old"],
 		);
 		ok(rows.some((row) => row.type === "empty" && row.category === "tool-output"));
+	});
+
+	it("uses the rendered category order for selection without losing the newest initial artifact", () => {
+		const artifacts = [
+			artifact({ id: "prompt-newest", category: "prompt-manifest", title: "prompt", timestamp: 3 }),
+			artifact({ id: "receipt-middle", category: "receipt", title: "receipt", timestamp: 2 }),
+			artifact({ id: "accountability-oldest", category: "accountability", title: "accountability", timestamp: 1 }),
+		];
+		deepStrictEqual(
+			artifactsInCategoryOrder(artifacts).map((item) => item.id),
+			["accountability-oldest", "receipt-middle", "prompt-newest"],
+		);
+		strictEqual(initialViewSelection(artifacts), 2, "newest artifact is mapped into the rendered order");
 	});
 
 	it("filters and auto-selects exact run id matches", () => {
@@ -128,6 +144,11 @@ describe("contracts/view-overlay", () => {
 
 	it("parses category-aware view filter query strings", () => {
 		deepStrictEqual(parseViewFilterQuery("audit"), { kind: "category", category: "audit", value: "" });
+		deepStrictEqual(parseViewFilterQuery("prompt-manifest"), {
+			kind: "category",
+			category: "prompt-manifest",
+			value: "",
+		});
 		deepStrictEqual(parseViewFilterQuery("audit:session-1"), {
 			kind: "category",
 			category: "audit",
@@ -317,6 +338,21 @@ describe("contracts/view-overlay", () => {
 		strictEqual(nextContentScrollOffset(0, 3, 10, "line-down"), 0);
 	});
 
+	it("jumps across non-empty artifact categories in either direction", () => {
+		const artifacts = [
+			artifact({ id: "receipt-1", category: "receipt", title: "receipt one", timestamp: 4 }),
+			artifact({ id: "receipt-2", category: "receipt", title: "receipt two", timestamp: 3 }),
+			artifact({ id: "prompt-1", category: "prompt-manifest", title: "prompt", timestamp: 2 }),
+			artifact({ id: "audit-1", category: "audit", title: "audit", timestamp: 1 }),
+		];
+
+		strictEqual(nextCategorySelection(artifacts, 0, 1), 2, "next skips empty categories and sibling receipts");
+		strictEqual(nextCategorySelection(artifacts, 2, 1), 3);
+		strictEqual(nextCategorySelection(artifacts, 3, 1), 0, "next wraps to the first non-empty category");
+		strictEqual(nextCategorySelection(artifacts, 0, -1), 3, "previous wraps to the last non-empty category");
+		strictEqual(nextCategorySelection(artifacts.slice(0, 2), 1, 1), 1, "one-category filters keep their selection");
+	});
+
 	it("paints verification state into artifact headers", () => {
 		const item = artifact({
 			id: "run-ok",
@@ -368,15 +404,63 @@ describe("contracts/view-overlay", () => {
 
 	it("switches footer hints by pane focus", () => {
 		const listHint = viewFooterHint("list", true);
+		ok(listHint.includes("[←→] category"));
 		ok(listHint.includes("[type] filter"));
 		ok(listHint.includes("[Tab] content"));
 		ok(listHint.includes("[v] verify"));
 
 		const contentHint = viewFooterHint("content", false);
+		ok(contentHint.includes("[←→] category"));
 		ok(contentHint.includes("[PgUp/PgDn] page"));
 		ok(contentHint.includes("[g/G] top/bottom"));
 		ok(contentHint.includes("[Tab] list"));
 		ok(!contentHint.includes("[v] verify"));
+	});
+
+	it("uses Tab for panes and category arrows from the detail pane", async () => {
+		const accountability = artifact({
+			id: "accountability-1",
+			category: "accountability",
+			title: "accountability details",
+			timestamp: 3,
+		});
+		const receipt = artifact({
+			id: "receipt-1",
+			category: "receipt",
+			title: "receipt details",
+			timestamp: 1,
+		});
+		const prompt = artifact({
+			id: "prompt-1",
+			category: "prompt-manifest",
+			title: "prompt details",
+			timestamp: 2,
+		});
+		const view = new ViewOverlayView({
+			providers: [
+				{ category: "accountability", list: async () => [accountability] },
+				{ category: "receipt", list: async () => [receipt] },
+				{ category: "prompt-manifest", list: async () => [prompt] },
+			],
+			getBodyHeight: () => 24,
+			onClose() {},
+			requestRender() {},
+		});
+
+		view.refresh();
+		await new Promise((resolve) => setImmediate(resolve));
+		view.handleInput("\x1b[B");
+		let body = stripAnsi(view.render(100).join("\n"));
+		ok(body.includes(`${GLYPH.cursor} receipt details`), body);
+		ok(view.getHint().includes("[Tab] content"));
+		view.handleInput("\t");
+		ok(view.getHint().includes("[Tab] list"));
+		view.handleInput("\x1b[C");
+		body = stripAnsi(view.render(100).join("\n"));
+		ok(body.includes(`${GLYPH.cursor} prompt details`), body);
+
+		view.handleInput("\x1b[Z");
+		ok(view.getHint().includes("[Tab] content"), "Shift+Tab returns to the artifact list");
 	});
 
 	it("mounts as a full-screen opaque frame so dashboard rows cannot bleed through", () => {

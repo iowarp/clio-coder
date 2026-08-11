@@ -104,6 +104,8 @@ function categoryLabel(category: ViewArtifactCategory): string {
 			return "Protected artifacts";
 		case "compaction":
 			return "Compaction summaries";
+		case "prompt-manifest":
+			return "Prompt manifests";
 		case "audit":
 			return "Safety audit rows";
 	}
@@ -114,6 +116,7 @@ const BARE_CATEGORY_FILTERS = new Set<ViewArtifactCategory>([
 	"task-ledger",
 	"protected-artifact",
 	"compaction",
+	"prompt-manifest",
 	"audit",
 ]);
 
@@ -210,24 +213,49 @@ export function filterViewArtifacts(artifacts: ReadonlyArray<ViewArtifact>, quer
 	return fuzzyFilter([...artifacts], parsed.text, broadFilterText);
 }
 
+export function artifactsInCategoryOrder(artifacts: ReadonlyArray<ViewArtifact>): ViewArtifact[] {
+	return VIEW_ARTIFACT_CATEGORIES.flatMap((category) => artifacts.filter((artifact) => artifact.category === category));
+}
+
 export function initialViewSelection(artifacts: ReadonlyArray<ViewArtifact>, initialFilter = ""): number {
 	const filtered = filterViewArtifacts(artifacts, initialFilter);
-	if (filtered.length === 0) return 0;
+	const first = filtered[0];
+	if (!first) return 0;
+	let selected = first;
 	const parsed = parseViewFilterQuery(initialFilter);
 	if (parsed.kind === "category" && parsed.value.length > 0) {
 		const exactIndexes = filtered.flatMap((artifact, index) =>
 			matchesExactArtifactValue(artifact, parsed.value) ? [index] : [],
 		);
-		if (exactIndexes.length === 1) return exactIndexes[0] ?? 0;
+		if (exactIndexes.length === 1) selected = filtered[exactIndexes[0] ?? 0] ?? selected;
 	}
 	const exact = initialFilter.trim();
 	if (exact.length > 0) {
-		const exactIndex = filtered.findIndex(
+		const exactArtifact = filtered.find(
 			(artifact) => artifact.id === exact || `${artifact.category}:${artifact.id}` === exact,
 		);
-		if (exactIndex >= 0) return exactIndex;
+		if (exactArtifact) selected = exactArtifact;
 	}
-	return 0;
+	return Math.max(0, artifactsInCategoryOrder(filtered).indexOf(selected));
+}
+
+export function nextCategorySelection(
+	artifacts: ReadonlyArray<ViewArtifact>,
+	currentIndex: number,
+	direction: -1 | 1,
+): number {
+	if (artifacts.length === 0) return 0;
+	const safeCurrent = Math.max(0, Math.min(currentIndex, artifacts.length - 1));
+	const currentCategory = artifacts[safeCurrent]?.category;
+	const categoryIndex = currentCategory === undefined ? -1 : VIEW_ARTIFACT_CATEGORIES.indexOf(currentCategory);
+	for (let offset = 1; offset < VIEW_ARTIFACT_CATEGORIES.length; offset += 1) {
+		const nextCategoryIndex =
+			(categoryIndex + direction * offset + VIEW_ARTIFACT_CATEGORIES.length) % VIEW_ARTIFACT_CATEGORIES.length;
+		const nextCategory = VIEW_ARTIFACT_CATEGORIES[nextCategoryIndex];
+		const artifactIndex = artifacts.findIndex((artifact) => artifact.category === nextCategory);
+		if (artifactIndex >= 0) return artifactIndex;
+	}
+	return safeCurrent;
 }
 
 export function groupedViewRows(artifacts: ReadonlyArray<ViewArtifact>): RenderedViewRow[] {
@@ -315,6 +343,7 @@ export function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean): string
 	if (focus === "list") {
 		return buildHint("browse", [
 			{ key: "↑↓", verb: "select" },
+			{ key: "←→", verb: "category" },
 			{ key: "type", verb: "filter" },
 			{ key: "Tab", verb: "content" },
 			...(canVerify ? [{ key: "v", verb: "verify" }] : []),
@@ -323,6 +352,7 @@ export function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean): string
 	}
 	return buildHint("browse", [
 		{ key: "↑↓", verb: "scroll" },
+		{ key: "←→", verb: "category" },
 		{ key: "PgUp/PgDn", verb: "page" },
 		{ key: "g/G", verb: "top/bottom" },
 		{ key: "Tab", verb: "list" },
@@ -375,7 +405,7 @@ export class ViewOverlayView implements Component {
 	}
 
 	private filteredArtifacts(): ViewArtifact[] {
-		return filterViewArtifacts(this.artifacts, this.filterText);
+		return artifactsInCategoryOrder(filterViewArtifacts(this.artifacts, this.filterText));
 	}
 
 	private selectedArtifact(): ViewArtifact | undefined {
@@ -395,6 +425,16 @@ export class ViewOverlayView implements Component {
 		this.contentScrollOffset = 0;
 		this.content = null;
 		this.options.requestRender?.();
+	}
+
+	private selectCategory(direction: -1 | 1): void {
+		const filtered = this.filteredArtifacts();
+		if (filtered.length === 0) return;
+		this.selectIndex(nextCategorySelection(filtered, this.selectedIndex, direction));
+	}
+
+	private selectInitialFilterMatch(): void {
+		this.selectIndex(initialViewSelection(this.artifacts, this.filterText));
 	}
 
 	private ensureContentLoaded(artifact: ViewArtifact | undefined): void {
@@ -528,9 +568,17 @@ export class ViewOverlayView implements Component {
 	}
 
 	handleInput(data: string): void {
-		if (matchesKey(data, "tab")) {
+		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
 			this.focus = this.focus === "list" ? "content" : "list";
 			this.options.requestRender?.();
+			return;
+		}
+		if (matchesKey(data, "left")) {
+			this.selectCategory(-1);
+			return;
+		}
+		if (matchesKey(data, "right")) {
+			this.selectCategory(1);
 			return;
 		}
 		if (data === "v") {
@@ -544,8 +592,7 @@ export class ViewOverlayView implements Component {
 		if (matchesKey(data, "esc")) {
 			if (this.focus === "list" && this.filterText.length > 0) {
 				this.filterText = "";
-				this.selectIndex(0);
-				this.options.requestRender?.();
+				this.selectInitialFilterMatch();
 				return;
 			}
 			this.options.onClose();
@@ -573,13 +620,13 @@ export class ViewOverlayView implements Component {
 		if (matchesKey(data, "backspace")) {
 			if (this.filterText.length > 0) {
 				this.filterText = this.filterText.slice(0, -1);
-				this.selectIndex(0);
+				this.selectInitialFilterMatch();
 			}
 			return true;
 		}
 		if (data.length === 1 && data >= " " && data !== "\x7f") {
 			this.filterText += data;
-			this.selectIndex(0);
+			this.selectInitialFilterMatch();
 			return true;
 		}
 		return false;

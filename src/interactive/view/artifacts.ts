@@ -26,6 +26,11 @@ import {
 	readAuditRows,
 	type SessionMeta,
 } from "../../domains/session/index.js";
+import {
+	getPromptManifestFilePath,
+	readPromptCompileManifest,
+	type SessionPromptCompileRecord,
+} from "../../domains/session/prompt-manifest.js";
 import { formatUsd } from "../footer/widgets.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { abbreviateModelId } from "../theme/index.js";
@@ -39,6 +44,7 @@ export type ViewArtifactCategory =
 	| "tool-output"
 	| "protected-artifact"
 	| "compaction"
+	| "prompt-manifest"
 	| "audit";
 export type ViewArtifactFormat = "markdown" | "text" | "json";
 
@@ -87,6 +93,7 @@ export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"tool-output",
 	"protected-artifact",
 	"compaction",
+	"prompt-manifest",
 	"audit",
 ] as const;
 
@@ -1054,6 +1061,71 @@ export class CompactionArtifactProvider implements ArtifactProvider {
 	}
 }
 
+function promptManifestSearchText(record: SessionPromptCompileRecord): string[] {
+	return [
+		record.systemPromptHash,
+		record.previousHash ?? "",
+		record.thinkingLevel ?? "",
+		record.projectPreload?.mode ?? "",
+		record.projectPreload?.reason ?? "",
+		record.projectPreload?.label ?? "",
+		...record.sections.map((section) => section.id),
+		...record.fragments.flatMap((fragment) => [fragment.id, fragment.relPath, fragment.contentHash]),
+	].filter(isNonEmptyString);
+}
+
+export class PromptManifestArtifactProvider implements ArtifactProvider {
+	readonly category = "prompt-manifest" as const;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {}
+
+	async list(): Promise<ViewArtifact[]> {
+		const meta = this.deps.sessionMeta;
+		if (!meta) return [];
+		const path = getPromptManifestFilePath(meta, this.deps.stateDir);
+		const read = readPromptCompileManifest(meta, this.deps.stateDir);
+		const artifacts = read.records.map(
+			(record, index): ViewArtifact => ({
+				id: `prompt-manifest:${index + 1}:${shortValue(record.systemPromptHash)}`,
+				category: this.category,
+				title: `Prompt compile · ${shortValue(record.systemPromptHash)} · ${formatFooterTokens(record.tokenEstimate)}`,
+				timestamp: parseTime(record.at),
+				sizeBytes: Buffer.byteLength(JSON.stringify(record), "utf8"),
+				path,
+				sessionId: meta.id,
+				description: `thinking ${record.thinkingLevel ?? "off"} · ${record.sections.length} sections · ${record.fragments.length} fragments`,
+				searchText: promptManifestSearchText(record),
+				load: async () => ({
+					format: "json" as const,
+					lines: splitLinesCapped(JSON.stringify(record, null, 2), path),
+				}),
+			}),
+		);
+		if (read.errors.length === 0) return artifacts;
+		return [
+			...artifacts,
+			{
+				id: "prompt-manifest:read-errors",
+				category: this.category,
+				title: `Prompt manifest · ${read.errors.length} read error${read.errors.length === 1 ? "" : "s"}`,
+				timestamp: Date.now(),
+				path,
+				sessionId: meta.id,
+				load: async () => ({
+					format: "markdown" as const,
+					lines: [
+						"# Prompt Manifest Read Errors",
+						"",
+						...read.errors.map((error) =>
+							error.line === null ? `- ${error.message}` : `- line ${error.line}: ${error.message}`,
+						),
+					],
+				}),
+			},
+		];
+	}
+}
+
 function renderAccountabilitySummary(summary: AccountabilitySummary): string[] {
 	const pct = Math.round(summary.firstPassRate * 100);
 	const lines = [
@@ -1244,6 +1316,7 @@ export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): Arti
 		new ToolOutputArtifactProvider(deps),
 		new ProtectedArtifactProvider(deps),
 		new CompactionArtifactProvider(deps),
+		new PromptManifestArtifactProvider(deps),
 		new SafetyAuditArtifactProvider(deps),
 	];
 }
