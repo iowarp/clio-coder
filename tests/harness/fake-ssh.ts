@@ -99,7 +99,10 @@ function announce(spec) {
 		targetId: scenario === "target-drift" ? "some-other-target" : spec.target.id,
 		endpointIdentityHash: endpointIdentityHash(spec.target.url),
 		wireModelId: spec.wireModelId,
-		toolSignature: sha256("clio.tools:" + [...(spec.allowedTools || [])].sort().join(",")),
+		toolSignature:
+			scenario === "tool-drift"
+				? sha256("clio.tools:a-different-tool-surface")
+				: sha256("clio.tools:" + [...(spec.allowedTools || [])].sort().join(",")),
 		resources: {
 			labels: (process.env.CLIO_WORKER_LABELS || "").split(",").filter((l) => l.length > 0),
 			cpuCount: { known: true, value: 8 },
@@ -151,6 +154,7 @@ rl.on("line", (line) => {
 			scenario === "settings-drift" ||
 			scenario === "spec-drift" ||
 			scenario === "target-drift" ||
+			scenario === "tool-drift" ||
 			scenario === "oversized-control"
 		) {
 			setTimeout(() => assistant("must not execute"), 50);

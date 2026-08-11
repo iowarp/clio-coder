@@ -15,6 +15,7 @@ import {
 	canonicalJson,
 	endpointIdentityHash,
 	isReceiptBearingFrame,
+	toolSignatureOf,
 	WORKER_EVENT_QUEUE_MAX_FRAMES,
 	WORKER_PROTOCOL_VERSION,
 	type WorkerAttestation,
@@ -68,6 +69,8 @@ export interface ApprovedWorkerIdentity {
 	targetId: string;
 	endpointIdentityHash: string;
 	wireModelId: string;
+	/** Fingerprint of the exact tool names the admitted WorkerSpec permits. */
+	toolSignature: string;
 }
 
 export type AttestationVerdict = { ok: true } | { ok: false; reason: string };
@@ -96,6 +99,7 @@ export function verifyWorkerAttestation(
 		["target", approved.targetId, attestation.targetId],
 		["endpoint identity", approved.endpointIdentityHash, attestation.endpointIdentityHash],
 		["wire model", approved.wireModelId, attestation.wireModelId],
+		["tool surface", approved.toolSignature, attestation.toolSignature],
 	];
 	for (const [label, expected, announced] of fields) {
 		if (!Object.is(expected, announced)) {
@@ -115,6 +119,7 @@ export function approvedIdentityForSpec(spec: {
 	runtimeId: string;
 	wireModelId: string;
 	target: { id: string; url?: string };
+	allowedTools: ReadonlyArray<string>;
 }): ApprovedWorkerIdentity {
 	return {
 		specVersion: spec.specVersion,
@@ -124,6 +129,10 @@ export function approvedIdentityForSpec(spec: {
 		targetId: spec.target.id,
 		endpointIdentityHash: endpointIdentityHash(spec.target.url),
 		wireModelId: spec.wireModelId,
+		// The spec carries the final runtime-narrowed admission surface. The
+		// worker fingerprints its independently resolved registry intersection,
+		// so a missing, added, or differently filtered tool fails admission.
+		toolSignature: toolSignatureOf(spec.allowedTools),
 	};
 }
 
