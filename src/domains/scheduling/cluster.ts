@@ -2,16 +2,16 @@
  * Fleet node registry: N machines become one addressable, pinnable capacity
  * pool. Node configuration comes from `fleet.nodes` in settings (read fresh
  * on every call so settings edits apply next dispatch); runtime state
- * (channel health, capacity accounting, operator draining) lives here.
+ * (channel health and last-seen observations) lives here. Durable capacity
+ * and admission draining are owned by the dispatch admission store.
  *
  * State semantics:
  *   - online   channel healthy as far as this registry knows. Nodes start
  *              online; dispatch eligibility additionally requires a passing
  *              doctor preflight (durable, checked at placement).
- *   - offline  classified dead after consecutive channel failures, or marked
- *              by the operator/preflight. Placement skips it; its in-flight
- *              runs are reaped for reroute by the dispatch domain.
- *   - draining operator intent: finish in-flight work, accept nothing new.
+ *   - offline  classified dead after consecutive channel failures. Placement
+ *              skips it; its in-flight runs are reaped for reroute by the
+ *              dispatch domain. A later channel success restores it.
  *
  * Staleness is advisory: `lastSeenAt` records the last probe or worker
  * heartbeat, but an idle node is never auto-offlined for silence, because no
@@ -20,14 +20,7 @@
 
 import type { FleetNodeSettings } from "../../core/defaults.js";
 
-export interface ClusterNode {
-	id: string;
-	host: string;
-	available: boolean;
-	lastSeenAt: string | null;
-}
-
-export type FleetNodeState = "online" | "offline" | "draining";
+export type FleetNodeState = "online" | "offline";
 
 export interface FleetNodeSnapshot {
 	id: string;
@@ -51,9 +44,6 @@ export interface FleetRegistry {
 	config(id: string): FleetNodeSettings | null;
 	/** Record a probe or worker heartbeat for staleness display. */
 	seen(id: string): void;
-	markOnline(id: string): void;
-	markOffline(id: string, reason: string): void;
-	markDraining(id: string): void;
 	/**
 	 * Channel failure accounting. Consecutive failures at or beyond the death
 	 * threshold classify the node offline. Returns the resulting state.
@@ -158,22 +148,6 @@ export function createFleetRegistry(
 		},
 		seen(id) {
 			stateFor(id).lastSeenMs = now();
-		},
-		markOnline(id) {
-			const state = stateFor(id);
-			state.state = "online";
-			state.stateReason = null;
-			state.consecutiveFailures = 0;
-		},
-		markOffline(id, reason) {
-			const state = stateFor(id);
-			state.state = "offline";
-			state.stateReason = reason;
-		},
-		markDraining(id) {
-			const state = stateFor(id);
-			state.state = "draining";
-			state.stateReason = "operator draining";
 		},
 		recordChannelFailure(id, reason) {
 			const state = stateFor(id);

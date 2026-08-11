@@ -8,6 +8,5 @@ export const SchedulingDomainModule: DomainModule = {
 };
 
 export type { BudgetVerdict } from "./budget.js";
-export type { ClusterNode } from "./cluster.js";
 export type { SchedulingContract } from "./contract.js";
 export { SchedulingManifest } from "./manifest.js";

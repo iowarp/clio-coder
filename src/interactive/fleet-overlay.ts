@@ -294,7 +294,6 @@ function nextMode(mode: FleetMode): FleetMode {
 
 function nodeStateToken(state: FleetNodeSnapshot["state"]): ClioToken {
 	if (state === "offline") return "error";
-	if (state === "draining") return "warning";
 	return "success";
 }
 

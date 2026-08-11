@@ -152,16 +152,6 @@ describe("fleet registry", () => {
 		registry.recordChannelSuccess("blade");
 		strictEqual(registry.get("blade")?.state, "online");
 	});
-
-	it("supports operator draining and explicit offline marks", () => {
-		const registry = createFleetRegistry(() => [NODE_BLADE]);
-		registry.markDraining("blade");
-		strictEqual(registry.get("blade")?.state, "draining");
-		registry.markOffline("blade", "preflight failed");
-		strictEqual(registry.get("blade")?.stateReason, "preflight failed");
-		registry.markOnline("blade");
-		strictEqual(registry.get("blade")?.state, "online");
-	});
 });
 
 describe("fleet placement resolution order", () => {
@@ -277,7 +267,8 @@ describe("fleet placement resolution order", () => {
 			/unknown fleet node 'ghost'/,
 		);
 
-		base.registry.markOffline("blade", "classified dead");
+		base.registry.recordChannelFailure("blade", "classified dead");
+		base.registry.recordChannelFailure("blade", "classified dead");
 		throws(
 			() => base.resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "blade" }),
 			/offline.*classified dead/,
@@ -294,7 +285,8 @@ describe("fleet placement resolution order", () => {
 
 	it("skips ineligible nodes on the least-loaded path instead of failing", () => {
 		const { resolve, registry } = resolver();
-		registry.markOffline("blade", "dead");
+		registry.recordChannelFailure("blade", "dead");
+		registry.recordChannelFailure("blade", "dead");
 		const placement = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
 		strictEqual(placement?.node.id, "mini");
 	});

@@ -169,8 +169,10 @@ accepted by the current reader.
 - Every failover hop is recorded as a reroute (`fromNode`, `toNode`, reason)
   on the ledger row and the receipt, so the placement lineage of a run is
   reconstructable from evidence alone.
-- An idle node is never auto-offlined by staleness; death comes from channel
-  failures, operator marks, or a failed preflight.
+- An idle node is never auto-offlined by staleness; only consecutive channel
+  failures change the process-local registry health to `offline`. Doctor
+  preflight is a separate durable eligibility gate: a failed or stale record
+  blocks placement without pretending it changed channel health.
 
 ## Topologies
 
