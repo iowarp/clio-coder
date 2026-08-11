@@ -24,7 +24,7 @@ export {
 	resolveRuntimeAuthTarget,
 	targetRequiresAuth,
 } from "./auth/index.js";
-export { mergeCapabilities } from "./capabilities.js";
+export { AGENT_ROLE_TOOLS_REQUIRED_REASON, mergeCapabilities, supportsAgentRoleTools } from "./capabilities.js";
 export type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
 export { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 export { ProvidersManifest } from "./manifest.js";

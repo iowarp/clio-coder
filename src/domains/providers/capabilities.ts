@@ -1,5 +1,14 @@
 import type { CapabilityFlags } from "./types/capability-flags.js";
 
+/**
+ * Layer capability sources onto a runtime's defaults, weakest first.
+ *
+ * A probe is what the server currently reports; a knowledge-base entry is what
+ * an operator wrote down about a specific model. The written entry wins, because
+ * a hand-authored `model-catalog.d` file exists precisely to correct metadata a
+ * server gets wrong, and losing to the probe would leave no per-model escape
+ * hatch at all. A target-level override still outranks both.
+ */
 export function mergeCapabilities(
 	base: CapabilityFlags,
 	kb: Partial<CapabilityFlags> | null,
@@ -7,11 +16,30 @@ export function mergeCapabilities(
 	userOverride: Partial<CapabilityFlags> | null,
 ): CapabilityFlags {
 	const merged: Record<string, unknown> = { ...base };
-	applyLayer(merged, kb);
 	applyLayer(merged, probe);
+	applyLayer(merged, kb);
 	applyLayer(merged, userOverride);
 	return merged as unknown as CapabilityFlags;
 }
+
+/**
+ * Whether a model may drive an agent role (orchestrator, dispatched worker).
+ *
+ * Clio's whole surface is typed tools. A chat model that reports no tool support
+ * cannot read a file or run a command, so pointing an agent role at one produces
+ * a run that burns budget and returns nothing usable. Roles that only need text
+ * back, such as the background memory policy, do not consult this.
+ *
+ * The flag is metadata, not a measurement, and servers do get it wrong. An
+ * operator who disagrees states so in a `model-catalog.d` entry or a target-level
+ * capability override, both of which outrank the probe.
+ */
+export function supportsAgentRoleTools(capabilities: Pick<CapabilityFlags, "tools">): boolean {
+	return capabilities.tools === true;
+}
+
+export const AGENT_ROLE_TOOLS_REQUIRED_REASON =
+	"reports no tool support; Clio drives every agent role through typed tools";
 
 function applyLayer(target: Record<string, unknown>, layer: Partial<CapabilityFlags> | null): void {
 	if (!layer) return;

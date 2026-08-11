@@ -12,11 +12,13 @@ import type {
 	ThinkingLevel,
 } from "../../domains/providers/index.js";
 import {
+	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	isOrchestratorEligibleRuntime,
 	modelCandidatesForStatus,
 	modelIdsForStatus,
 	type ProviderModelSource,
 	resolveRuntimeTarget,
+	supportsAgentRoleTools,
 } from "../../domains/providers/index.js";
 import {
 	type Component,
@@ -505,7 +507,9 @@ export function buildModelItems(deps: {
 				defaultModel,
 				focusPinned,
 				visibleByDefault: active || favorite || recent || defaultModel || targetScopedFocus || focusPinned,
-				selectable: true,
+				// A model that cannot call tools stays listed so the operator can see it
+				// exists and why it is refused, but it cannot be chosen for the chat role.
+				selectable: supportsAgentRoleTools(decisions),
 			};
 			items.push({
 				value: rowRef,
@@ -983,7 +987,11 @@ export class ModelOverlayView implements Component {
 				this.onClose();
 				return;
 			}
-			this.selectionError = row ? `target ${row.target} has no selectable model id` : "no model is selected";
+			this.selectionError = row
+				? row.model && row.capabilityDecisions && !supportsAgentRoleTools(row.capabilityDecisions)
+					? `${row.model} ${AGENT_ROLE_TOOLS_REQUIRED_REASON}`
+					: `target ${row.target} has no selectable model id`
+				: "no model is selected";
 			this.refreshActions.requestRender?.();
 			return;
 		}
