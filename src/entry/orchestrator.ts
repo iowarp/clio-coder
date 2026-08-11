@@ -5,10 +5,12 @@ import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
+import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { configureGuardrails } from "../core/guardrails.js";
 import { rememberRecentModel } from "../core/recent-models.js";
+import { EXPERIMENTAL_RELEASE_WARNING } from "../core/release.js";
 import { protectedResidencyModelIds } from "../core/residency-protection.js";
 import {
 	applyOverrides,
@@ -217,6 +219,7 @@ function buildBanner(): string {
 	return `
   ${chalk.cyan("Clio Coder")}
   ${chalk.dim(`v${clio} · CLIO: Context Layer for I/O · HPC & scientific software · ready`)}
+  ${chalk.yellow.bold(EXPERIMENTAL_RELEASE_WARNING)}
 `;
 }
 
@@ -294,10 +297,19 @@ function createBackgroundMemoryModelClient(
 	const targetId = settings.background.target?.trim();
 	const wireModelId = settings.background.model?.trim();
 	if (!targetId || !wireModelId) return null;
+	// One model cannot both drive the action agent and think its way through a
+	// memory step: the memory call would contend with the agent's own decoding on
+	// the same server, and a reasoning model spends most of a memory step
+	// deliberating over a task it is not executing. Memory falls back to its free
+	// deterministic tier rather than degrading the work the operator asked for.
+	if (backgroundSharesReasoningModelWithOrchestrator(providers, settings)) return null;
 	const resolved = resolveRuntimeTarget(providers, {
 		targetId,
 		wireModelId,
-		requestedThinkingLevel: settings.background.thinkingLevel,
+		// Memory reads a trajectory and writes a fixed envelope. Reasoning adds
+		// latency and, on a small local model, routinely consumes the entire
+		// output budget before the envelope is ever written.
+		requestedThinkingLevel: "off",
 		use: "orchestrator",
 		requireTools: false,
 		requireOutputBudget: true,
@@ -320,13 +332,40 @@ function createBackgroundMemoryModelClient(
 				systemPrompt: request.systemPrompt,
 				userPrompt: request.userPrompt,
 				maxTokens: request.maxTokens,
-				thinkingLevel: refined.effectiveThinkingLevel,
+				// Always off, never the operator's chat thinking level. A model that
+				// reasons anyway still works: `completeEngineText` keeps only text
+				// blocks, and the memory output budget leaves room for the preamble.
+				thinkingLevel: "off",
 				signal: request.signal,
 				timeoutMs,
 				...(apiKey === undefined ? {} : { apiKey }),
 			});
 		},
 	};
+}
+
+/**
+ * True when the background role names the same model the orchestrator runs and
+ * that model reasons. Distinct models, or a non-reasoning shared model, are both
+ * fine; this only catches the one-model-does-everything configuration.
+ */
+function backgroundSharesReasoningModelWithOrchestrator(
+	providers: ProvidersContract,
+	settings: Readonly<ClioSettings>,
+): boolean {
+	const backgroundModel = settings.background.model?.trim();
+	const orchestratorModel = settings.orchestrator.model?.trim();
+	if (!backgroundModel || backgroundModel !== orchestratorModel) return false;
+	if (settings.background.target?.trim() !== settings.orchestrator.target?.trim()) return false;
+	try {
+		const status = providers.list().find((entry) => entry.target.id === settings.background.target?.trim());
+		if (!status) return false;
+		return resolveModelCapabilities(status, backgroundModel, providers.knowledgeBase).reasoning === true;
+	} catch {
+		// An unresolvable capability is not evidence of a reasoning model; the
+		// operator's explicit configuration stands.
+		return false;
+	}
 }
 
 function synthesizeOrchestratorModel(
@@ -491,7 +530,8 @@ async function runCompactionFlow(
 	// would persist abandoned content back into the active context. The full
 	// file read stays in place for the task board, protected artifacts, and
 	// the masking rewrite, which are session-global.
-	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id));
+	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
+	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
 	if (entries.length === 0) return null;
 
 	const result = await compact({
@@ -919,9 +959,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		taskMemorySessionId = currentSessionId;
 	};
 	const memorySettings = (config?.get() ?? readSettings()).memory.intervention;
+	// Bound late: the registration is built here, but the buffer a deferred
+	// reminder lands in belongs to the chat loop that has not been composed yet.
+	let deferredMemoryReminderSink: ((message: string) => void) | null = null;
 	const memoryIntervention = createMemoryInterventionRegistration({
 		bank: taskMemoryBank,
 		telemetry: createTaskMemoryTelemetrySink(),
+		onDeferredReminder: (message) => deferredMemoryReminderSink?.(message),
 		getSettings: () => {
 			ensureTaskMemorySession();
 			return effectiveSettingsForDispatch?.().memory.intervention ?? memorySettings;
@@ -1311,6 +1355,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			ensureTaskMemorySession();
 			return renderTaskMemoryHandoffSource(taskMemoryBank.snapshot());
 		},
+		registerDeferredReminderSink: (sink) => {
+			deferredMemoryReminderSink = sink;
+		},
 		...(session
 			? {
 					readSessionEntries: readCurrentSessionEntries,
@@ -1409,7 +1456,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				},
 				cwd: process.cwd(),
 				version: getVersionInfo().clio,
-				permissionTimeoutMs: config?.get().delegation.defaults.permissionTimeoutMs ?? 120_000,
+				permissionTimeoutMs:
+					config?.get().delegation.defaults.permissionTimeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 			});
 			chat.dispose();
 			await dispatch.drain();
@@ -1506,6 +1554,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				size: taskMemoryBankSize(bank),
 				lastDecision: memoryIntervention.lastDecision(),
 				bank,
+				activity: memoryIntervention.recentActivity(),
+				stepInFlight: memoryIntervention.stepInFlight(),
 			};
 		},
 		getTaskMemorySeedOffer,

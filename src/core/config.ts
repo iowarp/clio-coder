@@ -22,6 +22,7 @@ import {
 	DEFAULT_SETTINGS,
 } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
+import { MAX_TIMER_DELAY_MS } from "./timers.js";
 import { clioConfigDir, resolveClioDirs } from "./xdg.js";
 
 export type ClioSettings = typeof DEFAULT_SETTINGS;
@@ -115,13 +116,22 @@ function expectNumber(
 	return value;
 }
 
-function expectInteger(issues: Issues, path: string, value: unknown, opts?: { min?: number }): number | undefined {
+function expectInteger(
+	issues: Issues,
+	path: string,
+	value: unknown,
+	opts?: { min?: number; max?: number },
+): number | undefined {
 	if (typeof value !== "number" || !Number.isInteger(value)) {
 		issues.add(path, `expected an integer, got ${describe(value)}`);
 		return undefined;
 	}
 	if (opts?.min !== undefined && value < opts.min) {
 		issues.add(path, `expected an integer >= ${opts.min}, got ${value}`);
+		return undefined;
+	}
+	if (opts?.max !== undefined && value > opts.max) {
+		issues.add(path, `expected an integer <= ${opts.max}, got ${value}`);
 		return undefined;
 	}
 	return value;
@@ -494,7 +504,7 @@ function validateDelegationAgent(
 	}
 	for (const key of ["connectTimeoutMs", "turnTimeoutMs", "permissionTimeoutMs"] as const) {
 		if (key in value) {
-			const v = expectInteger(issues, `${path}.${key}`, value[key], { min: 0 });
+			const v = expectInteger(issues, `${path}.${key}`, value[key], { min: 1, max: MAX_TIMER_DELAY_MS });
 			if (v !== undefined) agent[key] = v;
 		}
 	}
@@ -544,7 +554,10 @@ function validateDelegation(issues: Issues, value: unknown): ClioSettings["deleg
 			]);
 			for (const key of ["connectTimeoutMs", "turnTimeoutMs", "permissionTimeoutMs"] as const) {
 				if (key in value.defaults) {
-					const v = expectInteger(issues, `delegation.defaults.${key}`, value.defaults[key], { min: 0 });
+					const v = expectInteger(issues, `delegation.defaults.${key}`, value.defaults[key], {
+						min: 1,
+						max: MAX_TIMER_DELAY_MS,
+					});
 					if (v !== undefined) out.defaults[key] = v;
 				}
 			}

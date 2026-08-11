@@ -60,111 +60,88 @@ export function parseFlags(argv: string[]): { flags: Set<string>; positional: st
 	return { flags, positional };
 }
 
-/**
- * Pull the optional top-level `--api-key <value>` startup flag out of argv.
- * Only flags before the first subcommand are global; after the first
- * positional token, `--api-key` belongs to that subcommand (for example
- * `clio auth login openai --api-key ...` or `clio configure --api-key ...`).
- *
- * A top-level `--api-key` requires a value. A missing value (end of argv or a
- * following `-`-prefixed flag) and a following token that is itself a recognized
- * subcommand both return an `error`; the flag must not silently disappear nor
- * swallow the intended subcommand as its value. `isSubcommand` lets the caller
- * (which owns the dispatch table) supply that recognition without this
- * dependency-light module importing the command graph.
- */
-export function extractApiKeyFlag(
-	argv: ReadonlyArray<string>,
-	isSubcommand: (token: string) => boolean = () => false,
-): { apiKey?: string; rest: string[]; error?: string } {
-	const rest: string[] = [];
-	let apiKey: string | undefined;
-	let sawSubcommand = false;
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
-		if (sawSubcommand || arg !== "--api-key") {
-			if (arg !== undefined) rest.push(arg);
-			if (arg !== undefined && !arg.startsWith("-")) sawSubcommand = true;
-			continue;
-		}
-		const value = argv[i + 1];
-		if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
-			return { rest, error: "--api-key requires a value" };
-		}
-		apiKey = value;
-		i += 1;
-	}
-	return apiKey === undefined ? { rest } : { apiKey, rest };
-}
-
-/**
- * Pre-extract the top-level `--no-context-files` (alias `-nc`) flag from argv
- * before subcommand parsing. Like `extractApiKeyFlag`, only flags before the
- * first positional token are global; later occurrences pass through in `rest`
- * so the subcommand can decide what to do with them. Unlike `extractApiKeyFlag`
- * (which returns an optional string), this returns `noContextFiles: boolean`
- * always (default `false`) because the flag is a binary toggle without an
- * associated value. Consumed in `bootOrchestrator` to suppress the prompts
- * domain `context.files` dynamic fragment.
- */
-export function extractNoContextFilesFlag(argv: ReadonlyArray<string>): { noContextFiles: boolean; rest: string[] } {
-	const rest: string[] = [];
-	let noContextFiles = false;
-	let sawSubcommand = false;
-	for (const arg of argv) {
-		if (arg === undefined) continue;
-		if (!sawSubcommand && (arg === "--no-context-files" || arg === "-nc")) {
-			noContextFiles = true;
-			continue;
-		}
-		rest.push(arg);
-		if (!arg.startsWith("-")) sawSubcommand = true;
-	}
-	return { noContextFiles, rest };
-}
-
-/**
- * Pre-extract the top-level --no-skills and --skill flags from argv.
- * This ensures that both interactive and headless run modes share identical command line flag support.
- *
- * A top-level `--skill` requires a value, with the same contract as
- * `extractApiKeyFlag`: a missing value or a following recognized subcommand
- * returns an `error` rather than dropping the flag or consuming the subcommand
- * as a skill path.
- */
-export function extractSkillsFlags(
-	argv: ReadonlyArray<string>,
-	isSubcommand: (token: string) => boolean = () => false,
-): {
+export interface GlobalCliFlags {
+	apiKey?: string;
+	noContextFiles: boolean;
 	noSkills: boolean;
 	skillPaths: string[];
 	rest: string[];
 	error?: string;
-} {
+}
+
+const ROOT_FLAG_TOKENS = new Set(["--help", "-h", "--all", "--version", "-v"]);
+
+/**
+ * Extract every global startup flag in one order-independent pass. Only flags
+ * before the first positional command are global; later occurrences belong to
+ * the subcommand. Keeping the value-taking flags in the same state machine is
+ * important: three sequential extractors used to mistake one another's values
+ * for the command boundary, so `--skill path --api-key SECRET paths` treated
+ * SECRET as a subcommand and printed it in an error.
+ */
+export function extractGlobalFlags(
+	argv: ReadonlyArray<string>,
+	isSubcommand: (token: string) => boolean = () => false,
+): GlobalCliFlags {
 	const rest: string[] = [];
+	let apiKey: string | undefined;
+	let noContextFiles = false;
 	let noSkills = false;
 	const skillPaths: string[] = [];
-	let sawSubcommand = false;
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		if (arg === undefined) continue;
-		if (!sawSubcommand) {
-			if (arg === "--no-skills") {
-				noSkills = true;
-				continue;
-			}
-			if (arg === "--skill") {
-				const value = argv[i + 1];
-				if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
-					return { noSkills, skillPaths, rest, error: "--skill requires a value" };
-				}
-				skillPaths.push(value);
-				i += 1;
-				continue;
-			}
+		if (arg === "--") {
+			rest.push(...argv.slice(i + 1));
+			break;
 		}
-		rest.push(arg);
-		if (!arg.startsWith("-")) sawSubcommand = true;
+		if (!arg.startsWith("-")) {
+			rest.push(...argv.slice(i));
+			break;
+		}
+		if (ROOT_FLAG_TOKENS.has(arg)) {
+			rest.push(arg);
+			continue;
+		}
+		if (arg === "--no-context-files" || arg === "-nc") {
+			noContextFiles = true;
+			continue;
+		}
+		if (arg === "--no-skills") {
+			noSkills = true;
+			continue;
+		}
+		if (arg === "--api-key" || arg === "--skill") {
+			const value = argv[i + 1];
+			if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
+				return {
+					noContextFiles,
+					noSkills,
+					skillPaths,
+					rest,
+					error: `${arg} requires a value`,
+					...(apiKey === undefined ? {} : { apiKey }),
+				};
+			}
+			if (arg === "--api-key") apiKey = value;
+			else skillPaths.push(value);
+			i += 1;
+			continue;
+		}
+		return {
+			noContextFiles,
+			noSkills,
+			skillPaths,
+			rest,
+			error: `unknown global option: ${arg}`,
+			...(apiKey === undefined ? {} : { apiKey }),
+		};
 	}
-	return { noSkills, skillPaths, rest };
+	return {
+		noContextFiles,
+		noSkills,
+		skillPaths,
+		rest,
+		...(apiKey === undefined ? {} : { apiKey }),
+	};
 }

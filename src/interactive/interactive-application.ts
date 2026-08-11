@@ -371,33 +371,6 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 	return false;
 }
 
-/**
- * Pure cancel logic for the cwd-fallback overlay. Restores the prior session
- * when one existed and differs from the just-resumed session id; otherwise
- * reopens the /resume overlay so the user can pick again. Lifted out of the
- * openCwdFallbackOverlayState closure so both Esc-via-SelectList and
- * Cancel-row-via-Enter exercise the same code path under test.
- */
-export interface CwdFallbackCancelDeps {
-	session: SessionContract;
-	openResumeOverlay: () => void;
-	onWarning: (msg: string) => void;
-}
-
-function _handleCwdFallbackCancel(preResumeSessionId: string | null, deps: CwdFallbackCancelDeps): void {
-	const currentId = deps.session.current()?.id ?? null;
-	if (preResumeSessionId && preResumeSessionId !== currentId) {
-		try {
-			deps.session.switchBranch(preResumeSessionId);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			deps.onWarning(`[cwd-fallback] could not restore prior session: ${msg}\n`);
-		}
-		return;
-	}
-	deps.openResumeOverlay();
-}
-
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
 	const shell = createProcessInteractiveShell();
 	const { terminal, tui } = shell;

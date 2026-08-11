@@ -19,6 +19,7 @@ import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // --- Minimal chat-loop harness (mirrors tests/contracts/chat-loop.test.ts). ---
@@ -182,6 +183,7 @@ interface FakeAgent {
 function createFakeAgentFactory(
 	promptImpl: (agent: FakeAgent, input: AgentMessage | AgentMessage[]) => Promise<void>,
 	seedMessages?: () => AgentMessage[],
+	onCreate?: (agent: FakeAgent) => void,
 ) {
 	return ((options: { initialState?: { messages?: AgentMessage[] } } = {}) => {
 		const listeners: Array<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void> = [];
@@ -216,6 +218,7 @@ function createFakeAgentFactory(
 			clearFollowUpQueue() {},
 			clearSteeringQueue() {},
 		};
+		onCreate?.(agent);
 		return { agent, state: () => state };
 	}) as never;
 }
@@ -615,6 +618,90 @@ describe("contracts/production compaction failure wiring", () => {
 				"the production wrapper keeps an empty session as a completed no-op",
 			);
 			ok(JSON.stringify(events).includes("nothing to compact"));
+		} finally {
+			await session.close();
+			faux.unregister();
+			isolated.restore();
+		}
+	});
+
+	it("compacts and replays the selected branch immediately after a tree switch", async () => {
+		const isolated = isolateClioEnv("clio-compaction-active-branch-");
+		const bus = createSafeEventBus();
+		const faux = registerFauxProvider({
+			provider: "production-compaction-active-branch",
+			models: [{ id: "model" }],
+			tokensPerSecond: 0,
+		});
+		const session = persistentSession(bus);
+
+		try {
+			session.create({ cwd: isolated.dir, model: "model", target: "test-target" });
+			const rootUser = session.append({ parentId: null, kind: "user", payload: { text: "shared root request" } });
+			const rootAssistant = session.append({
+				parentId: rootUser.id,
+				kind: "assistant",
+				payload: { text: "shared root response" },
+			});
+			const selectedUser = session.append({
+				parentId: rootAssistant.id,
+				kind: "user",
+				payload: { text: "selected branch request" },
+			});
+			const selectedAssistant = session.append({
+				parentId: selectedUser.id,
+				kind: "assistant",
+				payload: { text: "selected branch response" },
+			});
+			session.switchTurn(rootAssistant.id);
+			const abandonedUser = session.append({
+				parentId: rootAssistant.id,
+				kind: "user",
+				payload: { text: "abandoned branch request" },
+			});
+			session.append({
+				parentId: abandonedUser.id,
+				kind: "assistant",
+				payload: { text: "abandoned branch response" },
+			});
+			session.switchTurn(selectedAssistant.id);
+
+			faux.setResponses([fauxAssistantMessage("## Goal\nPreserve the selected branch only.")]);
+			const model = faux.getModel("model") as EngineModel;
+			const productionProviders = providers(model);
+			const currentSettings = settings();
+			let liveAgent: FakeAgent | undefined;
+			const loop = createChatLoop({
+				getSettings: () => currentSettings,
+				providers: productionProviders,
+				knownTargets: () => new Set(["test-target"]),
+				session,
+				readSessionEntries: () => persistedEntries(session),
+				autoCompact: createProductionAutoCompact(session, () => currentSettings, productionProviders),
+				bus,
+				createAgent: createFakeAgentFactory(
+					async () => {},
+					undefined,
+					(agent) => {
+						liveAgent = agent;
+					},
+				),
+			} as never);
+			loop.resetForSession(
+				selectedAssistant.id,
+				buildReplayAgentMessagesFromTurns(persistedEntries(session), { uptoTurnId: selectedAssistant.id }),
+			);
+
+			await loop.compact();
+
+			const summary = persistedEntries(session).find(
+				(entry): entry is Extract<SessionEntry, { kind: "compactionSummary" }> => entry.kind === "compactionSummary",
+			);
+			strictEqual(summary?.firstKeptTurnId, selectedUser.id);
+			const replayText = JSON.stringify(liveAgent?.state.messages ?? []);
+			ok(replayText.includes("Preserve the selected branch only"), replayText);
+			ok(replayText.includes("selected branch request"), replayText);
+			ok(!replayText.includes("abandoned branch"), replayText);
 		} finally {
 			await session.close();
 			faux.unregister();

@@ -129,6 +129,40 @@ describe("contracts/interactive session transcript", () => {
 		strictEqual(resetMessageCount, 1);
 	});
 
+	it("keeps the selected branch when an editor bash sidecar refreshes provider context", () => {
+		const entries: SessionEntry[] = [
+			messageEntry("root", null, "shared root"),
+			messageEntry("selected", "root", "selected branch"),
+			messageEntry("abandoned", "root", "abandoned branch"),
+			{
+				kind: "bashExecution",
+				turnId: "bash-sidecar",
+				parentTurnId: "selected",
+				timestamp: "2026-08-09T00:00:01.000Z",
+				command: "echo selected",
+				output: "selected command output",
+				exitCode: 0,
+				cancelled: false,
+				truncated: false,
+			},
+		];
+		let replay = "";
+		const transcript = createSessionTranscript({
+			readSessionEntries: () => entries,
+			chat: {
+				resetForSession: (_leafTurnId, messages) => {
+					replay = JSON.stringify(messages ?? []);
+				},
+			},
+			refreshStatus: () => {},
+		});
+
+		transcript.refreshChatContextFromSession("selected");
+		strictEqual(replay.includes("selected branch"), true);
+		strictEqual(replay.includes("selected command output"), true);
+		strictEqual(replay.includes("abandoned branch"), false);
+	});
+
 	it("does nothing when no current-entry reader is wired", () => {
 		let resets = 0;
 		let refreshes = 0;

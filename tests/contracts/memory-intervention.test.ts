@@ -6,7 +6,7 @@ import {
 	createMemoryInterventionRegistration,
 	MEMORY_INTERVENTION_REGISTRATION_ID,
 } from "../../src/domains/middleware/memory-intervention.js";
-import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
+import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 
 function toolInput(
 	hook: "before_tool" | "after_tool",
@@ -32,23 +32,22 @@ function execute(
 	args: Readonly<Record<string, unknown>>,
 	resultKind: "ok" | "error" = "ok",
 	errorMessage?: string,
-): void {
+): ReadonlyArray<MiddlewareEffect> {
 	registration.evaluate(toolInput("before_tool", call, args));
-	registration.evaluate(toolInput("after_tool", call, args, resultKind, errorMessage));
+	return registration.evaluate(toolInput("after_tool", call, args, resultKind, errorMessage));
 }
 
 const SILENT_MODEL_RESPONSE = "<operations>[]</operations>\n<no_intervention/>";
 
 describe("contracts/memory intervention rules tier", () => {
-	it("writes one idempotent procedural record and emits one cited advisory for a repeated failure", () => {
+	it("writes one idempotent procedural record and annotates the repeated failure mid-turn", () => {
 		const bank = new TaskMemoryBank();
 		const registration = createMemoryInterventionRegistration({ bank });
 		const args = { command: "npm run test:file -- failing.test.ts" };
 
-		execute(registration, 1, args, "error", "fixture was missing");
+		deepStrictEqual(execute(registration, 1, args, "error", "fixture was missing"), [], "one failure is not news");
 		deepStrictEqual(registration.evaluate({ hook: "turn_end" }), []);
-		execute(registration, 2, args, "error", "fixture was missing");
-		const effects = registration.evaluate({ hook: "turn_end" });
+		const effects = execute(registration, 2, args, "error", "fixture was missing");
 		const snapshot = bank.snapshot();
 
 		strictEqual(registration.id, MEMORY_INTERVENTION_REGISTRATION_ID);
@@ -57,12 +56,33 @@ describe("contracts/memory intervention rules tier", () => {
 		strictEqual(snapshot.procedural[0]?.injectionCount, 1);
 		strictEqual(effects.length, 1);
 		const effect = effects[0];
-		ok(effect?.kind === "inject_reminder");
-		strictEqual(effect.severity, "advisory");
+		// The advisory rides the failing tool result so the model reads it on its
+		// next round, rather than waiting for a turn boundary that may be far off.
+		ok(effect?.kind === "annotate_tool_result");
+		strictEqual(effect.severity, "warn");
 		strictEqual(registration.lastDecision(), "injected");
 		ok(effect.message.startsWith(`Memory: [${snapshot.procedural[0]?.id}]`));
 		match(effect.message, /already tried .* at step 1 and it failed with fixture was missing/u);
-		deepStrictEqual(registration.evaluate({ hook: "turn_end" }), [], "the same reminder is not emitted twice");
+		deepStrictEqual(registration.evaluate({ hook: "turn_end" }), [], "turn end does not repeat the annotation");
+		deepStrictEqual(
+			execute(registration, 3, args, "error", "fixture was missing"),
+			[],
+			"the same failure is annotated once per turn",
+		);
+	});
+
+	it("annotates a repeated failure again in a later turn", () => {
+		const bank = new TaskMemoryBank();
+		const registration = createMemoryInterventionRegistration({ bank });
+		const args = { command: "make build" };
+
+		execute(registration, 1, args, "error", "linker error");
+		ok(execute(registration, 2, args, "error", "linker error")[0]?.kind === "annotate_tool_result");
+		registration.evaluate({ hook: "turn_start", text: "try again" });
+		ok(
+			execute(registration, 3, args, "error", "linker error")[0]?.kind === "annotate_tool_result",
+			"a new turn re-earns the advisory",
+		);
 	});
 
 	it("keeps healthy trajectories silent and writes nothing", () => {
@@ -124,18 +144,22 @@ describe("contracts/memory intervention rules tier", () => {
 		const registration = createMemoryInterventionRegistration({ bank, windowSteps: 2, maxTokens: 28 });
 		const repeated = { command: `failing ${"x".repeat(400)}` };
 		execute(registration, 1, repeated, "error", `long ${"y".repeat(400)}`);
-		execute(registration, 2, repeated, "error", `long ${"y".repeat(400)}`);
-		const effect = registration.evaluate({ hook: "turn_end" })[0];
-		ok(effect?.kind === "inject_reminder");
+		const effect = execute(registration, 2, repeated, "error", `long ${"y".repeat(400)}`)[0];
+		ok(effect?.kind === "annotate_tool_result");
 		ok(Math.ceil(effect.message.length / 4) <= 28);
 		ok(effect.message.includes(bank.snapshot().procedural[0]?.id ?? "missing id"));
 
 		const boundedBank = new TaskMemoryBank();
 		const bounded = createMemoryInterventionRegistration({ bank: boundedBank, windowSteps: 2 });
 		execute(bounded, 1, { command: "old failure" }, "error", "failed");
-		execute(bounded, 2, { command: "old failure" }, "error", "failed");
-		execute(bounded, 3, { command: "healthy one" });
-		execute(bounded, 4, { command: "healthy two" });
+		bounded.evaluate({ hook: "turn_start", text: "next" });
+		execute(bounded, 2, { command: "healthy one" });
+		execute(bounded, 3, { command: "healthy two" });
+		deepStrictEqual(
+			execute(bounded, 4, { command: "old failure" }, "error", "failed"),
+			[],
+			"a failure aged out of the window is not a repeat",
+		);
 		deepStrictEqual(bounded.evaluate({ hook: "turn_end" }), []);
 	});
 
@@ -169,15 +193,12 @@ describe("contracts/memory intervention rules tier", () => {
 		const registration = createMemoryInterventionRegistration({ bank, getModelClient: () => null });
 		const args = { command: "same failing command" };
 		execute(registration, 1, args, "error", "failed");
-		execute(registration, 2, args, "error", "failed");
-		const effects = registration.evaluate({ hook: "turn_end", turnId: "rules-turn" });
+		strictEqual(execute(registration, 2, args, "error", "failed")[0]?.kind, "annotate_tool_result");
 
-		strictEqual(effects[0]?.kind, "inject_reminder");
-		deepStrictEqual(
-			await registration.evaluateAsync({ hook: "turn_end", turnId: "rules-turn" }, { priorEffects: effects }),
-			[],
-		);
-		strictEqual(registration.lastDecision(), "injected");
+		registration.evaluate({ hook: "turn_end", turnId: "rules-turn" });
+		deepStrictEqual(await registration.evaluateAsync({ hook: "turn_end", turnId: "rules-turn" }), []);
+		await registration.whenIdle();
+		strictEqual(registration.lastDecision(), "injected", "a route that never ran does not report silence");
 	});
 
 	it("fires the interval floor only after N completed tools and resets the cadence", async () => {
@@ -228,11 +249,13 @@ describe("contracts/memory intervention rules tier", () => {
 		strictEqual(calls, 1);
 	});
 
-	it("consumes a loop verdict as a deterministic trigger and permits one uncited advisory", async () => {
+	it("consumes a loop verdict as a deterministic trigger and defers one uncited advisory", async () => {
 		const bank = new TaskMemoryBank();
+		const deferred: string[] = [];
 		let calls = 0;
 		const registration = createMemoryInterventionRegistration({
 			bank,
+			onDeferredReminder: (message) => deferred.push(message),
 			getModelClient: () => ({
 				async complete() {
 					calls += 1;
@@ -244,13 +267,45 @@ describe("contracts/memory intervention rules tier", () => {
 		});
 
 		registration.signalLoop();
-		const effects = await registration.evaluateAsync({ hook: "turn_end", turnId: "turn-loop" });
+		// The turn boundary is never held open for the background model.
+		deepStrictEqual(await registration.evaluateAsync({ hook: "turn_end", turnId: "turn-loop" }), []);
+		await registration.whenIdle();
+
 		strictEqual(calls, 1);
-		strictEqual(effects.length, 1);
-		const effect = effects[0];
-		ok(effect?.kind === "inject_reminder");
-		strictEqual(effect.severity, "advisory");
-		strictEqual(effect.message, "Memory: Do not repeat the looped call.");
+		deepStrictEqual(deferred, ["Memory: Do not repeat the looped call."]);
+		strictEqual(registration.lastDecision(), "injected");
+		strictEqual(registration.stepInFlight(), false);
+	});
+
+	it("never holds a turn boundary open for a slow background model", async () => {
+		const bank = new TaskMemoryBank();
+		let release = (): void => undefined;
+		const blocked = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			getModelClient: () => ({
+				async complete() {
+					await blocked;
+					return { text: SILENT_MODEL_RESPONSE };
+				},
+			}),
+		});
+
+		registration.signalLoop();
+		deepStrictEqual(await registration.evaluateAsync({ hook: "turn_end", turnId: "slow" }), []);
+		strictEqual(registration.stepInFlight(), true, "the step outlives the boundary that started it");
+
+		// A second boundary arriving while the first is still running is dropped
+		// rather than queued behind it.
+		registration.signalLoop();
+		deepStrictEqual(await registration.evaluateAsync({ hook: "turn_end", turnId: "slow-2" }), []);
+
+		release();
+		await registration.whenIdle();
+		strictEqual(registration.stepInFlight(), false);
+		strictEqual(registration.recentActivity().length, 1, "the dropped boundary ran no second step");
 	});
 
 	it("coalesces simultaneous triggers and runs at most once for one turn boundary", async () => {
@@ -342,16 +397,16 @@ describe("contracts/memory intervention rules tier", () => {
 			},
 		});
 
-		// 1. Execute same failing tool call twice.
+		// 1. Execute same failing tool call twice; the repeat is annotated mid-turn.
 		const args = { command: "same failing command" };
 		execute(registration, 1, args, "error", "failed");
-		execute(registration, 2, args, "error", "failed");
+		const midTurn = execute(registration, 2, args, "error", "failed");
+		strictEqual(midTurn.length, 1);
+		ok(midTurn[0]?.kind === "annotate_tool_result");
+		strictEqual(registration.lastDecision(), "injected", "after the mid-turn annotation");
 
-		// 2. Synchronous turn_end: should emit one cited inject_reminder.
-		const syncEffects = registration.evaluate({ hook: "turn_end" });
-		strictEqual(syncEffects.length, 1);
-		ok(syncEffects[0]?.kind === "inject_reminder");
-		strictEqual(registration.lastDecision(), "injected", "after synchronous injection");
+		// 2. Synchronous turn_end has nothing left to say about that failure.
+		deepStrictEqual(registration.evaluate({ hook: "turn_end" }), []);
 
 		// Verify telemetry row for repeated_failure with rules tier.
 		strictEqual(telemetryRows.length, 1);
@@ -364,13 +419,11 @@ describe("contracts/memory intervention rules tier", () => {
 		strictEqual(row1.inputTokens, 0);
 		strictEqual(row1.outputTokens, 0);
 
-		// 3. Asynchronous turn_end with priorEffects: should preserve injected outcome.
-		const asyncEffects = await registration.evaluateAsync(
-			{ hook: "turn_end", turnId: "async-1" },
-			{ priorEffects: syncEffects },
-		);
-		strictEqual(asyncEffects.length, 0, "no new effect from async with priorEffects");
-		strictEqual(registration.lastDecision(), "injected", "after async with priorEffects");
+		// 3. The detached step runs but must not overwrite the visible outcome.
+		const asyncEffects = await registration.evaluateAsync({ hook: "turn_end", turnId: "async-1" });
+		strictEqual(asyncEffects.length, 0, "the boundary is never held open");
+		await registration.whenIdle();
+		strictEqual(registration.lastDecision(), "injected", "after the detached step settles");
 		strictEqual(modelCalls, 1, "model was called for the first async");
 
 		strictEqual(telemetryRows.length, 2, "prompted evaluation records its result");
@@ -383,6 +436,7 @@ describe("contracts/memory intervention rules tier", () => {
 		strictEqual(syncContinuationEffects.length, 0, "no synchronous effect from continuation");
 		const continuationEffects = await registration.evaluateAsync({ hook: "turn_end", turnId: "continuation" });
 		strictEqual(continuationEffects.length, 0, "no new effect from continuation");
+		await registration.whenIdle();
 		strictEqual(registration.lastDecision(), "injected", "after continuation");
 		strictEqual(modelCalls, 1, "no model call during continuation");
 		strictEqual(telemetryRows.length, telemetryBeforeContinuation, "no telemetry row after continuation");

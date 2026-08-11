@@ -286,7 +286,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	const refreshAgentMessagesFromSession = (agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry> => {
 		const refreshedEntries = deps.readSessionEntries?.() ?? [];
-		agentRuntime.agent.state.messages = buildReplayAgentMessagesFromTurns(refreshedEntries);
+		agentRuntime.agent.state.messages = buildReplayAgentMessagesFromTurns(refreshedEntries, {
+			...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+		});
 		state.replayedContextMessages = [];
 		return refreshedEntries;
 	};

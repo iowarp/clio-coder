@@ -7,6 +7,8 @@
 		"strict": true,
 		"noUncheckedIndexedAccess": true,
 		"noImplicitOverride": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
 		"exactOptionalPropertyTypes": true,
 		"resolveJsonModule": true,
 		"esModuleInterop": true,

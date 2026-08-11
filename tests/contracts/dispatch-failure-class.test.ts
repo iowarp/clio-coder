@@ -290,7 +290,7 @@ describe("dispatch failure classification", () => {
 		}
 	});
 
-	it("integrates model-quality model failover and target-auth target failover", async () => {
+	it("suppresses unsafe model-quality failover after mutation but retains target-auth failover", async () => {
 		const qualitySettings = structuredClone(DEFAULT_SETTINGS);
 		qualitySettings.workers.maxRetries = 1;
 		qualitySettings.targets[0] = {
@@ -331,6 +331,10 @@ describe("dispatch failure classification", () => {
 							isError: false,
 							result: { details: { kind: "ok" } },
 						};
+						yield {
+							type: "clio_tool_finish",
+							payload: { tool: "edit", durationMs: 1, outcome: "ok", decision: "allowed" },
+						};
 						yield { type: "message_end", message: { role: "assistant", content: "Done." } };
 					})(),
 				};
@@ -347,11 +351,9 @@ describe("dispatch failure classification", () => {
 				model: "rejected-model",
 			});
 			const terminal = await handle.finalPromise;
-			strictEqual(terminal.outcome, "succeeded");
-			deepStrictEqual(qualityRoutes, [
-				{ targetId: "quality-target", model: "rejected-model" },
-				{ targetId: "quality-target", model: "fallback-model" },
-			]);
+			strictEqual(terminal.outcome, "failed");
+			deepStrictEqual(qualityRoutes, [{ targetId: "quality-target", model: "rejected-model" }]);
+			ok(qualityBundle.contract.assignments?.get(handle.runId)?.outcomeDetail?.includes("retry suppressed"));
 		} finally {
 			if (originalRigor === undefined) delete process.env.CLIO_RIGOR;
 			else process.env.CLIO_RIGOR = originalRigor;

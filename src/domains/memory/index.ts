@@ -80,6 +80,8 @@ export {
 	type TaskMemoryTrajectoryStep,
 } from "./task-memory-policy.js";
 export {
+	describeTaskMemoryActivity,
+	type TaskMemoryActivityEvent,
 	type TaskMemoryOperatorStatus,
 	type TaskMemoryTier,
 	taskMemoryBankSize,

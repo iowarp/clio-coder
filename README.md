@@ -18,6 +18,11 @@
   <a href="https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318"><img alt="NSF #2411318" src="https://img.shields.io/badge/NSF-%232411318-241131?style=flat-square" /></a>
 </p>
 
+> [!WARNING]
+> **Experimental v0.3.0 release.** Clio Coder's behavior and interfaces may
+> break or change without notice. Use version control, review proposed changes,
+> and keep backups when operating on important repositories.
+
 ---
 
 Clio Coder is a terminal coding agent for people who work on real scientific

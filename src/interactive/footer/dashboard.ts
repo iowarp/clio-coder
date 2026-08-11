@@ -427,7 +427,13 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				toolProfile,
 				outputVerbosity: settings?.terminal.outputVerbosity ?? "default",
 				memoryIntervention: taskMemory
-					? { enabled: taskMemory.enabled, tier: taskMemory.tier, size: taskMemory.size }
+					? {
+							enabled: taskMemory.enabled,
+							tier: taskMemory.tier,
+							size: taskMemory.size,
+							stepInFlight: taskMemory.stepInFlight,
+							lastDecision: taskMemory.lastDecision,
+						}
 					: null,
 			},
 			context: {

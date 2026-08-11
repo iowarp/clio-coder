@@ -47,4 +47,21 @@ describe("contracts/cli-args-contract", () => {
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 		match(result.stdout, /"config"/);
 	});
+
+	it("parses interleaved global flags without exposing the API key as a subcommand", async () => {
+		const secret = "TOP_SECRET_MUST_NOT_APPEAR";
+		const result = await runCli(["--skill", "README.md", "--api-key", secret, "--no-context-files", "paths", "--json"], {
+			env: scratch.env,
+		});
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		match(result.stdout, /"config"/);
+		strictEqual(`${result.stdout}${result.stderr}`.includes(secret), false);
+	});
+
+	it("rejects an unknown option before the command instead of failing open", async () => {
+		const result = await runCli(["--definitely-not-a-global-flag", "paths", "--json"], { env: scratch.env });
+		strictEqual(result.code, 2);
+		match(result.stderr, /unknown global option: --definitely-not-a-global-flag/);
+		strictEqual(result.stdout.includes('"config"'), false);
+	});
 });

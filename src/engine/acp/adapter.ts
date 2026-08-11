@@ -1,4 +1,8 @@
-import type { DelegationAgentConfig } from "../../core/defaults.js";
+import {
+	DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS,
+	DEFAULT_DELEGATION_TURN_TIMEOUT_MS,
+	type DelegationAgentConfig,
+} from "../../core/defaults.js";
 import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import type { AgentEvent } from "../types.js";
@@ -167,6 +171,11 @@ function errorEvents(messageText: string): AgentEvent[] {
 }
 
 export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegationRunHandle {
+	// Validated settings always populate these values. Keep the public runtime
+	// boundary safe for direct callers too: omission must not turn a silent ACP
+	// peer into an unbounded request.
+	const connectTimeoutMs = input.agent.connectTimeoutMs ?? DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS;
+	const turnTimeoutMs = input.agent.turnTimeoutMs ?? DEFAULT_DELEGATION_TURN_TIMEOUT_MS;
 	const heartbeatAt = { current: Date.now() };
 	const queue = new AsyncEventQueue<AcpRunEvent>();
 	const usage = emptyUsage();
@@ -259,7 +268,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 						version: input.clientVersion ?? "0.0.0-dev",
 					},
 				},
-				input.agent.connectTimeoutMs,
+				connectTimeoutMs,
 			);
 			if (initialized.protocolVersion !== undefined && initialized.protocolVersion !== 1) {
 				throw new Error(`ACP protocol version ${initialized.protocolVersion} is not supported`);
@@ -267,7 +276,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			const session = await transport.request<unknown>(
 				"session/new",
 				{ cwd: input.cwd, mcpServers: [] },
-				input.agent.connectTimeoutMs,
+				connectTimeoutMs,
 			);
 			sessionId = sessionIdFrom(session);
 			if (!sessionId) throw new Error("ACP session/new response did not include sessionId");
@@ -280,7 +289,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					sessionId,
 					prompt: [{ type: "text", text: flattenPrompt(input) }],
 				},
-				input.agent.turnTimeoutMs,
+				turnTimeoutMs,
 			);
 			// ACP v1 has no usage field on PromptResponse. Clio servers report it in
 			// _meta; other agents (Copilot/Codex/OpenCode) report nothing here, so usage

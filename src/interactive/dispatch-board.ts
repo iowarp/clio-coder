@@ -145,7 +145,6 @@ interface AssistantMessageShape {
 }
 
 export const TASK_ISLAND_WIDTH = 44;
-const _EMPTY_MESSAGE = "No dispatch runs yet.";
 
 const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 	running: 0,

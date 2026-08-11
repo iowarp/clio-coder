@@ -48,6 +48,13 @@ export interface TurnMiddleware {
 	): void;
 	flushPendingReminders(): string;
 	clearPendingReminders(): void;
+	/**
+	 * Deliver a reminder produced after its own turn boundary already closed.
+	 * Background observers that outlive a turn use this instead of a hook return
+	 * value; the reminder joins the same buffer, ledger, and transcript path a
+	 * turn_end reminder takes.
+	 */
+	injectDeferredReminder(message: string, severity?: MiddlewareReminderSeverity): void;
 }
 
 export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
@@ -254,6 +261,18 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 
 		clearPendingReminders(): void {
 			pendingReminders.length = 0;
+		},
+
+		injectDeferredReminder(message, severity = "advisory"): void {
+			const text = message.trim();
+			if (text.length === 0) return;
+			// A deferred reminder never carries hard-block authority: the turn it
+			// could have interrupted is already over.
+			const level: MiddlewareReminderSeverity = severity === "hard-block" ? "advisory" : severity;
+			if (pendingReminders.some((entry) => entry.message === text)) return;
+			bufferReminder(text, level);
+			appendMiddlewareReminderEntry(text, level);
+			deps.emitNotice(text);
 		},
 	};
 }

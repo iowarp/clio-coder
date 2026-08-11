@@ -14,7 +14,6 @@ describe("contracts/list-overlay", () => {
 			{ id: "3", label: "Carrot", group: "Veggie" },
 		];
 
-		let _renderCalled = false;
 		const view = new ListOverlayView(
 			{
 				title: "Test",
@@ -23,9 +22,7 @@ describe("contracts/list-overlay", () => {
 				filterable: false,
 				onClose: () => {},
 			},
-			() => {
-				_renderCalled = true;
-			},
+			() => {},
 		);
 
 		const lines = view.render(80);

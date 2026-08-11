@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { clampTimerDelayMs } from "./timers.js";
+
+export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
 
 // Hard memory-safety ceiling for a single command's captured output. This is
 // deliberately far above any display cap (see BASH_DISPLAY_MAX_BYTES in
@@ -7,16 +10,6 @@ import { spawn } from "node:child_process";
 // killed. Never truncate merely because the *display* cap was hit — the tail
 // (failing assertion, compiler error, exit summary) must survive.
 export const BASH_HARD_CAP_BYTES = 16 * 1024 * 1024;
-
-// setTimeout silently clamps delays above 2^31-1 (or non-finite) down to 1ms,
-// which would turn a large caller-supplied timeout into a near-instant kill.
-// Clamp to a valid timer range: <=0/NaN disables the timeout, huge/Infinity caps
-// at the longest schedulable delay.
-const TIMEOUT_MAX_MS = 2_147_483_647;
-export function clampTimeoutMs(ms: number): number {
-	if (Number.isNaN(ms) || ms <= 0) return 0;
-	return ms >= TIMEOUT_MAX_MS ? TIMEOUT_MAX_MS : Math.floor(ms);
-}
 
 const CLIO_CONTROL_ENV_KEYS = ["CLIO_INTERACTIVE", "CLIO_RESUME_SESSION_ID"] as const;
 
@@ -123,7 +116,7 @@ export function combineBashOutput(result: Pick<BashCommandResult, "stdout" | "st
 export async function runBashCommand(command: string, options: RunBashCommandOptions = {}): Promise<BashCommandResult> {
 	const plan = await bashSpawnPlan();
 	return new Promise((resolve) => {
-		const timeout = clampTimeoutMs(options.timeoutMs ?? 300_000);
+		const timeout = clampTimerDelayMs(options.timeoutMs ?? 300_000);
 		let aborted = false;
 		let timedOut = false;
 		let settled = false;

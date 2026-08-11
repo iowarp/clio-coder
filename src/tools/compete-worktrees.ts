@@ -46,7 +46,6 @@ export type CompeteGroupState = "active" | "cleanup-ready" | "winner-preserved";
 
 /** Proof that this exact directory was claimed as one compete transaction. */
 export interface CompeteGroupOwnership {
-	namespace: WorktreeNamespace;
 	root: string;
 	group: string;
 	directory: string;
@@ -101,44 +100,10 @@ export interface CompeteRunAdmission {
 	runtimeKind: RunKind;
 }
 
-/**
- * The namespace one worktree transaction lives in. Compete candidates and
- * dispatch attempt isolation are the same transaction shape over different
- * directories and branch prefixes, so claiming, leasing, restart recovery, and
- * cleanup are written once here and bound per namespace rather than copied.
- */
-export interface WorktreeNamespace {
-	/** Branch segment: `clio/<segment>/<group>/<n>`. */
-	branchSegment: string;
-	/** Directory under the project root holding every group in this namespace. */
-	parentSegments: ReadonlyArray<string>;
-	/** Durable claim filename inside a group directory. */
-	manifestFile: string;
-	/** Discriminant sealed in the manifest so one namespace cannot claim another's. */
-	manifestKind: string;
-	/** Git author identity for commits this namespace creates. */
-	commitIdentity: string;
-	/** Human label used in ownership and cleanup errors. */
-	label: string;
-}
-
-export const COMPETE_NAMESPACE: WorktreeNamespace = {
-	branchSegment: "compete",
-	parentSegments: [".clio", "worktrees"],
-	manifestFile: ".clio-compete-owner.json",
-	manifestKind: "clio-compete-group",
-	commitIdentity: "clio-compete",
-	label: "compete group",
-};
-
-export const ATTEMPT_NAMESPACE: WorktreeNamespace = {
-	branchSegment: "attempt",
-	parentSegments: [".clio", "attempts"],
-	manifestFile: ".clio-attempt-owner.json",
-	manifestKind: "clio-workspace-transaction",
-	commitIdentity: "clio-attempt",
-	label: "workspace transaction",
-};
+const COMPETE_PARENT_SEGMENTS = [".clio", "worktrees"] as const;
+const COMPETE_MANIFEST_FILE = ".clio-compete-owner.json";
+const COMPETE_MANIFEST_KIND = "clio-compete-group";
+const COMPETE_COMMIT_IDENTITY = "clio-compete";
 
 const SAFE_GROUP = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const PROCESS_EXIT_GRACE_MS = 750;
@@ -298,17 +263,17 @@ function canonicalRoot(root: string): string {
 	return realpathSync(root);
 }
 
-function namespaceParent(namespace: WorktreeNamespace, root: string): string {
-	return join(root, ...namespace.parentSegments);
+function competeParent(root: string): string {
+	return join(root, ...COMPETE_PARENT_SEGMENTS);
 }
 
-function groupDirectory(namespace: WorktreeNamespace, root: string, group: string): string {
+function groupDirectory(root: string, group: string): string {
 	validateGroup(group);
-	return join(namespaceParent(namespace, root), group);
+	return join(competeParent(root), group);
 }
 
-function manifestPath(namespace: WorktreeNamespace, directory: string): string {
-	return join(directory, namespace.manifestFile);
+function manifestPath(directory: string): string {
+	return join(directory, COMPETE_MANIFEST_FILE);
 }
 
 function isPlainDirectory(path: string): boolean {
@@ -351,12 +316,12 @@ export function isCanonicalPathInside(parent: string, candidate: string): boolea
 	return rel.length > 0 && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
-function manifestFromUnknown(namespace: WorktreeNamespace, value: unknown): CompeteGroupManifest | null {
+function manifestFromUnknown(value: unknown): CompeteGroupManifest | null {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
 	const manifest = value as Record<string, unknown>;
 	if (
 		manifest.version !== 2 ||
-		manifest.kind !== namespace.manifestKind ||
+		manifest.kind !== COMPETE_MANIFEST_KIND ||
 		typeof manifest.root !== "string" ||
 		typeof manifest.group !== "string" ||
 		typeof manifest.token !== "string" ||
@@ -384,13 +349,13 @@ function manifestFromUnknown(namespace: WorktreeNamespace, value: unknown): Comp
 	return manifest as unknown as CompeteGroupManifest;
 }
 
-function readManifest(namespace: WorktreeNamespace, root: string, group: string): CompeteGroupManifest | null {
+function readManifest(root: string, group: string): CompeteGroupManifest | null {
 	const canonical = canonicalRoot(root);
-	const directory = groupDirectory(namespace, canonical, group);
+	const directory = groupDirectory(canonical, group);
 	if (!isCanonicalDirectoryAt(directory)) return null;
 	try {
-		const parsed = JSON.parse(readFileSync(manifestPath(namespace, directory), "utf8")) as unknown;
-		const manifest = manifestFromUnknown(namespace, parsed);
+		const parsed = JSON.parse(readFileSync(manifestPath(directory), "utf8")) as unknown;
+		const manifest = manifestFromUnknown(parsed);
 		if (manifest === null || manifest.root !== canonical || manifest.group !== group) return null;
 		return manifest;
 	} catch {
@@ -398,12 +363,11 @@ function readManifest(namespace: WorktreeNamespace, root: string, group: string)
 	}
 }
 
-function ownershipFromManifest(namespace: WorktreeNamespace, manifest: CompeteGroupManifest): CompeteGroupOwnership {
+function ownershipFromManifest(manifest: CompeteGroupManifest): CompeteGroupOwnership {
 	return {
-		namespace,
 		root: manifest.root,
 		group: manifest.group,
-		directory: groupDirectory(namespace, manifest.root, manifest.group),
+		directory: groupDirectory(manifest.root, manifest.group),
 		token: manifest.token,
 		state: manifest.state,
 		...(manifest.winnerIndex !== undefined ? { winnerIndex: manifest.winnerIndex } : {}),
@@ -411,20 +375,19 @@ function ownershipFromManifest(namespace: WorktreeNamespace, manifest: CompeteGr
 }
 
 function assertOwnership(ownership: CompeteGroupOwnership): CompeteGroupManifest {
-	const namespace = ownership.namespace;
-	const manifest = readManifest(namespace, ownership.root, ownership.group);
+	const manifest = readManifest(ownership.root, ownership.group);
 	if (manifest === null || manifest.token !== ownership.token) {
-		throw new Error(`${namespace.label} ${ownership.group} has no matching ownership manifest; refusing cleanup`);
+		throw new Error(`compete group ${ownership.group} has no matching ownership manifest; refusing cleanup`);
 	}
-	if (resolve(ownership.directory) !== resolve(groupDirectory(namespace, manifest.root, manifest.group))) {
-		throw new Error(`${namespace.label} ${ownership.group} ownership path changed; refusing cleanup`);
+	if (resolve(ownership.directory) !== resolve(groupDirectory(manifest.root, manifest.group))) {
+		throw new Error(`compete group ${ownership.group} ownership path changed; refusing cleanup`);
 	}
 	return manifest;
 }
 
 function replaceManifest(ownership: CompeteGroupOwnership, manifest: CompeteGroupManifest): void {
 	assertOwnership(ownership);
-	const destination = manifestPath(ownership.namespace, ownership.directory);
+	const destination = manifestPath(ownership.directory);
 	const temporary = `${destination}.${randomBytes(6).toString("hex")}.tmp`;
 	try {
 		writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
@@ -442,33 +405,29 @@ export function isGitRepository(root: string): boolean {
 	}
 }
 
-function worktreeBranch(namespace: WorktreeNamespace, group: string, index: number): string {
-	validateGroup(group);
-	if (!Number.isInteger(index) || index < 1) throw new Error(`invalid ${namespace.label} index ${index}`);
-	return `clio/${namespace.branchSegment}/${group}/${index}`;
-}
-
 function competeBranch(group: string, index: number): string {
-	return worktreeBranch(COMPETE_NAMESPACE, group, index);
+	validateGroup(group);
+	if (!Number.isInteger(index) || index < 1) throw new Error(`invalid compete candidate index ${index}`);
+	return `clio/compete/${group}/${index}`;
 }
 
 /** Claim the group before creating a branch or candidate worktree. */
-export function claimWorktreeGroup(namespace: WorktreeNamespace, root: string, group: string): CompeteGroupOwnership {
+export function claimCompeteGroup(root: string, group: string): CompeteGroupOwnership {
 	const canonical = canonicalRoot(root);
-	const directory = groupDirectory(namespace, canonical, group);
-	const parent = namespaceParent(namespace, canonical);
+	const directory = groupDirectory(canonical, group);
+	const parent = competeParent(canonical);
 	mkdirSync(parent, { recursive: true });
 	if (!isCanonicalDirectoryAt(parent)) {
-		throw new Error(`${namespace.label} parent ${parent} is not a canonical local directory`);
+		throw new Error(`compete parent ${parent} is not a canonical local directory`);
 	}
 	mkdirSync(directory);
 	if (!isCanonicalDirectoryAt(directory)) {
-		throw new Error(`${namespace.label} directory ${directory} is not canonical`);
+		throw new Error(`compete group directory ${directory} is not canonical`);
 	}
 	const now = new Date().toISOString();
 	const manifest: CompeteGroupManifest = {
 		version: 2,
-		kind: namespace.manifestKind,
+		kind: COMPETE_MANIFEST_KIND,
 		root: canonical,
 		group,
 		token: randomBytes(16).toString("hex"),
@@ -479,7 +438,7 @@ export function claimWorktreeGroup(namespace: WorktreeNamespace, root: string, g
 		runs: [],
 	};
 	try {
-		writeFileSync(manifestPath(namespace, directory), `${JSON.stringify(manifest, null, 2)}\n`, {
+		writeFileSync(manifestPath(directory), `${JSON.stringify(manifest, null, 2)}\n`, {
 			encoding: "utf8",
 			flag: "wx",
 		});
@@ -493,22 +452,14 @@ export function claimWorktreeGroup(namespace: WorktreeNamespace, root: string, g
 		}
 		throw err;
 	}
-	return ownershipFromManifest(namespace, manifest);
-}
-
-export function claimCompeteGroup(root: string, group: string): CompeteGroupOwnership {
-	return claimWorktreeGroup(COMPETE_NAMESPACE, root, group);
+	return ownershipFromManifest(manifest);
 }
 
 /** Load an exact durable claim, or null when ownership cannot be proven. */
-function loadWorktreeGroup(namespace: WorktreeNamespace, root: string, group: string): CompeteGroupOwnership | null {
-	validateGroup(group);
-	const manifest = readManifest(namespace, root, group);
-	return manifest === null ? null : ownershipFromManifest(namespace, manifest);
-}
-
 export function loadCompeteGroup(root: string, group: string): CompeteGroupOwnership | null {
-	return loadWorktreeGroup(COMPETE_NAMESPACE, root, group);
+	validateGroup(group);
+	const manifest = readManifest(root, group);
+	return manifest === null ? null : ownershipFromManifest(manifest);
 }
 
 /**
@@ -520,9 +471,7 @@ export function loadCompeteGroup(root: string, group: string): CompeteGroupOwner
 export function registerCompeteGroupRun(ownership: CompeteGroupOwnership, admission: CompeteRunAdmission): void {
 	const current = assertOwnership(ownership);
 	if (current.state !== "active") {
-		throw new Error(
-			`${ownership.namespace.label} ${ownership.group} is ${current.state}; refusing new run ${admission.runId}`,
-		);
+		throw new Error(`compete group ${ownership.group} is ${current.state}; refusing new run ${admission.runId}`);
 	}
 	if (admission.runId.length === 0) throw new Error("worktree transaction run id cannot be empty");
 	if (admission.pid !== null && (!Number.isSafeInteger(admission.pid) || admission.pid <= 0)) {
@@ -564,14 +513,14 @@ export function markCompeteGroupCleanupReady(ownership: CompeteGroupOwnership): 
 	};
 	Reflect.deleteProperty(next, "winnerIndex");
 	replaceManifest(ownership, next);
-	return ownershipFromManifest(ownership.namespace, next);
+	return ownershipFromManifest(next);
 }
 
 export function markCompeteGroupWinnerPreserved(
 	ownership: CompeteGroupOwnership,
 	winnerIndex: number,
 ): CompeteGroupOwnership {
-	worktreeBranch(ownership.namespace, ownership.group, winnerIndex);
+	competeBranch(ownership.group, winnerIndex);
 	const current = assertOwnership(ownership);
 	const next: CompeteGroupManifest = {
 		...current,
@@ -580,14 +529,13 @@ export function markCompeteGroupWinnerPreserved(
 		updatedAt: new Date().toISOString(),
 	};
 	replaceManifest(ownership, next);
-	return ownershipFromManifest(ownership.namespace, next);
+	return ownershipFromManifest(next);
 }
 
 /**
  * Create one worktree for `index` from an explicit baseline commit. The
- * baseline is a parameter rather than HEAD so every attempt in a transaction
- * starts from the same approved state: a fallback that branched from a later
- * HEAD would silently inherit whatever a failed predecessor left behind.
+ * baseline is a parameter rather than HEAD so every candidate in a compete
+ * transaction starts from the same approved state.
  */
 export function createCandidateWorktree(
 	ownership: CompeteGroupOwnership,
@@ -595,10 +543,10 @@ export function createCandidateWorktree(
 	baseline: string,
 ): CandidateWorktree {
 	assertOwnership(ownership);
-	const branch = worktreeBranch(ownership.namespace, ownership.group, index);
+	const branch = competeBranch(ownership.group, index);
 	const path = join(ownership.directory, `candidate-${index}`);
 	if (!isCanonicalPathInside(ownership.directory, path)) {
-		throw new Error(`candidate ${index} path escapes ${ownership.namespace.label} ${ownership.group}`);
+		throw new Error(`candidate ${index} path escapes compete group ${ownership.group}`);
 	}
 	git(ownership.root, ["worktree", "add", "-b", branch, path, baseline]);
 	return { index, branch, path };
@@ -608,19 +556,15 @@ export function createCandidateWorktree(
  * Seal a candidate's work as one commit on its branch. Returns false when the
  * builder changed nothing (an empty candidate is a legitimate ranking fact).
  */
-export function commitCandidateWork(
-	worktree: CandidateWorktree,
-	message: string,
-	identity = COMPETE_NAMESPACE.commitIdentity,
-): boolean {
+export function commitCandidateWork(worktree: CandidateWorktree, message: string): boolean {
 	git(worktree.path, ["add", "-A"]);
 	const staged = git(worktree.path, ["status", "--porcelain"]);
 	if (staged.length === 0) return false;
 	git(worktree.path, [
 		"-c",
-		`user.name=${identity}`,
+		`user.name=${COMPETE_COMMIT_IDENTITY}`,
 		"-c",
-		`user.email=${identity}@local`,
+		`user.email=${COMPETE_COMMIT_IDENTITY}@local`,
 		"commit",
 		"-m",
 		message,
@@ -643,11 +587,10 @@ export function candidateDiffStat(root: string, branch: string): string {
  * diff disables rename detection so both sides of a rename are considered;
  * path ownership is decided by canonical path segments, never text prefixes.
  */
-export function protectedPathsChangedByBranch(
+export function protectedPathsChangedByCompeteBranch(
 	root: string,
 	branch: string,
 	protectedPaths: ReadonlyArray<string>,
-	base = "HEAD",
 ): string[] {
 	const canonical = canonicalRoot(root);
 	const protectedInside = protectedPaths
@@ -657,7 +600,7 @@ export function protectedPathsChangedByBranch(
 			return rel.length > 0 && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 		});
 	if (protectedInside.length === 0) return [];
-	const changed = git(canonical, ["diff", "--name-only", "-z", "--no-renames", `${base}...${branch}`])
+	const changed = git(canonical, ["diff", "--name-only", "-z", "--no-renames", `HEAD...${branch}`])
 		.split("\0")
 		.filter((path) => path.length > 0)
 		.map((path) => resolve(canonical, path));
@@ -676,14 +619,6 @@ export function protectedPathsChangedByBranch(
 	return [...blocked].sort();
 }
 
-export function protectedPathsChangedByCompeteBranch(
-	root: string,
-	branch: string,
-	protectedPaths: ReadonlyArray<string>,
-): string[] {
-	return protectedPathsChangedByBranch(root, branch, protectedPaths);
-}
-
 function registeredWorktreePaths(root: string): string[] {
 	const listing = git(root, ["worktree", "list", "--porcelain", "-z"]);
 	return listing
@@ -693,7 +628,7 @@ function registeredWorktreePaths(root: string): string[] {
 		.filter((path): path is string => path !== undefined && path.length > 0);
 }
 
-function exactGroupBranches(namespace: WorktreeNamespace, root: string, group: string): string[] {
+function exactGroupBranches(root: string, group: string): string[] {
 	return git(root, ["branch", "--list", "--format=%(refname:short)"])
 		.split("\n")
 		.filter((branch) => {
@@ -701,7 +636,7 @@ function exactGroupBranches(namespace: WorktreeNamespace, root: string, group: s
 			return (
 				parts.length === 4 &&
 				parts[0] === "clio" &&
-				parts[1] === namespace.branchSegment &&
+				parts[1] === "compete" &&
 				parts[2] === group &&
 				/^\d+$/.test(parts[3] ?? "")
 			);
@@ -724,28 +659,24 @@ export function removeCandidateWorktree(
 ): void {
 	assertOwnership(ownership);
 	const expectedPath = join(ownership.directory, `candidate-${worktree.index}`);
-	const expectedBranch = worktreeBranch(ownership.namespace, ownership.group, worktree.index);
+	const expectedBranch = competeBranch(ownership.group, worktree.index);
 	if (
 		resolve(worktree.path) !== resolve(expectedPath) ||
 		worktree.branch !== expectedBranch ||
 		!isCanonicalPathInside(ownership.directory, worktree.path)
 	) {
-		throw new Error(`candidate ${worktree.index} does not belong to ${ownership.namespace.label} ${ownership.group}`);
+		throw new Error(`candidate ${worktree.index} does not belong to compete group ${ownership.group}`);
 	}
 	removeRegisteredWorktree(ownership.root, worktree.path);
-	if (
-		deleteBranch &&
-		exactGroupBranches(ownership.namespace, ownership.root, ownership.group).includes(worktree.branch)
-	) {
+	if (deleteBranch && exactGroupBranches(ownership.root, ownership.group).includes(worktree.branch)) {
 		git(ownership.root, ["branch", "-D", worktree.branch]);
 	}
 	const stillRegistered = registeredWorktreePaths(ownership.root).some(
 		(path) => resolve(path) === resolve(worktree.path),
 	);
-	const branchRemains =
-		deleteBranch && exactGroupBranches(ownership.namespace, ownership.root, ownership.group).includes(worktree.branch);
+	const branchRemains = deleteBranch && exactGroupBranches(ownership.root, ownership.group).includes(worktree.branch);
 	if (stillRegistered || existsSync(worktree.path) || branchRemains) {
-		throw new Error(`failed to remove candidate ${worktree.index} from ${ownership.namespace.label} ${ownership.group}`);
+		throw new Error(`failed to remove candidate ${worktree.index} from compete group ${ownership.group}`);
 	}
 }
 
@@ -755,17 +686,13 @@ export function removeCandidateWorktree(
  * may have moved), so a regular merge commit is created; a conflict aborts
  * the merge and reports failure so the operator decides.
  */
-export function mergeWinnerBranch(
-	root: string,
-	branch: string,
-	identity = COMPETE_NAMESPACE.commitIdentity,
-): { ok: true } | { ok: false; reason: string } {
+export function mergeWinnerBranch(root: string, branch: string): { ok: true } | { ok: false; reason: string } {
 	try {
 		git(root, [
 			"-c",
-			`user.name=${identity}`,
+			`user.name=${COMPETE_COMMIT_IDENTITY}`,
 			"-c",
-			`user.email=${identity}@local`,
+			`user.email=${COMPETE_COMMIT_IDENTITY}@local`,
 			"merge",
 			"--no-edit",
 			"--no-verify",
@@ -789,8 +716,7 @@ export function mergeWinnerBranch(
  * The owner manifest is removed last so an interrupted cleanup remains
  * recoverable.
  */
-export function cleanupWorktreeGroup(ownership: CompeteGroupOwnership): void {
-	const namespace = ownership.namespace;
+function cleanupWorktreeGroup(ownership: CompeteGroupOwnership): void {
 	assertOwnership(ownership);
 	for (const path of registeredWorktreePaths(ownership.root)) {
 		if (!isCanonicalPathInside(ownership.directory, path)) continue;
@@ -803,16 +729,16 @@ export function cleanupWorktreeGroup(ownership: CompeteGroupOwnership): void {
 	);
 	if (registeredRemain.length > 0) {
 		throw new Error(
-			`failed to remove ${registeredRemain.length} registered worktree(s) for ${namespace.label} ${ownership.group}`,
+			`failed to remove ${registeredRemain.length} registered worktree(s) for compete group ${ownership.group}`,
 		);
 	}
 
-	for (const branch of exactGroupBranches(namespace, ownership.root, ownership.group)) {
+	for (const branch of exactGroupBranches(ownership.root, ownership.group)) {
 		git(ownership.root, ["branch", "-D", branch]);
 	}
-	const branchesRemain = exactGroupBranches(namespace, ownership.root, ownership.group);
+	const branchesRemain = exactGroupBranches(ownership.root, ownership.group);
 	if (branchesRemain.length > 0) {
-		throw new Error(`failed to remove ${branchesRemain.length} branch(es) for ${namespace.label} ${ownership.group}`);
+		throw new Error(`failed to remove ${branchesRemain.length} branch(es) for compete group ${ownership.group}`);
 	}
 
 	// Re-verify the manifest immediately before deleting the exact directory.
@@ -820,20 +746,20 @@ export function cleanupWorktreeGroup(ownership: CompeteGroupOwnership): void {
 	// crash during recursive content removal therefore leaves recovery proof.
 	assertOwnership(ownership);
 	for (const entry of readdirSync(ownership.directory)) {
-		if (entry === namespace.manifestFile) continue;
+		if (entry === COMPETE_MANIFEST_FILE) continue;
 		rmSync(join(ownership.directory, entry), { recursive: true, force: true });
 	}
 	assertOwnership(ownership);
-	const unexpected = readdirSync(ownership.directory).filter((entry) => entry !== namespace.manifestFile);
+	const unexpected = readdirSync(ownership.directory).filter((entry) => entry !== COMPETE_MANIFEST_FILE);
 	if (unexpected.length > 0) {
-		throw new Error(`${namespace.label} ${ownership.group} changed during cleanup; ownership is preserved`);
+		throw new Error(`compete group ${ownership.group} changed during cleanup; ownership is preserved`);
 	}
-	unlinkSync(manifestPath(namespace, ownership.directory));
+	unlinkSync(manifestPath(ownership.directory));
 	rmdirSync(ownership.directory);
 	// Never recursively delete the shared parent: another process may claim a
 	// new group between an emptiness check and removal.
 	try {
-		rmdirSync(namespaceParent(namespace, ownership.root));
+		rmdirSync(competeParent(ownership.root));
 	} catch {
 		// Non-empty (another group) or already absent.
 	}
@@ -854,7 +780,7 @@ export function settleRecoveredCompeteDecision(
 	group: string,
 	winnerIndex: number | null,
 ): CompeteGroupOwnership | null {
-	let ownership = loadWorktreeGroup(COMPETE_NAMESPACE, root, group);
+	let ownership = loadCompeteGroup(root, group);
 	if (ownership === null) return null;
 	if (ownership.state === "cleanup-ready") {
 		cleanupWorktreeGroup(ownership);
@@ -879,7 +805,7 @@ export function settleRecoveredCompeteDecision(
 		return null;
 	}
 	const winnerBranch = competeBranch(group, winnerIndex);
-	const branches = exactGroupBranches(COMPETE_NAMESPACE, ownership.root, group);
+	const branches = exactGroupBranches(ownership.root, group);
 	const winnerPath = join(ownership.directory, `candidate-${winnerIndex}`);
 	if (
 		!branches.includes(winnerBranch) ||
@@ -908,13 +834,12 @@ export function settleRecoveredCompeteDecision(
  * This function is safe at orchestrator startup and before every compete
  * operation. A failed termination keeps the ownership proof and worktrees.
  */
-function recoverCleanupReadyWorktreeGroups(
-	namespace: WorktreeNamespace,
+export function recoverCleanupReadyCompeteGroups(
 	root: string,
 	options: CompeteRecoveryOptions = {},
 ): CompeteRecoveryResult {
 	const canonical = canonicalRoot(root);
-	const parent = namespaceParent(namespace, canonical);
+	const parent = competeParent(canonical);
 	const result: CompeteRecoveryResult = { cleaned: [], preserved: [], failed: [] };
 	if (!isPlainDirectory(parent)) return result;
 	for (const entry of readdirSync(parent, { withFileTypes: true })) {
@@ -925,8 +850,8 @@ function recoverCleanupReadyWorktreeGroups(
 		let ownership: CompeteGroupOwnership | null = null;
 		let manifest: CompeteGroupManifest | null = null;
 		try {
-			manifest = readManifest(namespace, canonical, entry.name);
-			ownership = manifest === null ? null : ownershipFromManifest(namespace, manifest);
+			manifest = readManifest(canonical, entry.name);
+			ownership = manifest === null ? null : ownershipFromManifest(manifest);
 		} catch {
 			// Invalid directory names and malformed claims are unproven.
 		}
@@ -970,11 +895,4 @@ function recoverCleanupReadyWorktreeGroups(
 		}
 	}
 	return result;
-}
-
-export function recoverCleanupReadyCompeteGroups(
-	root: string,
-	options: CompeteRecoveryOptions = {},
-): CompeteRecoveryResult {
-	return recoverCleanupReadyWorktreeGroups(COMPETE_NAMESPACE, root, options);
 }

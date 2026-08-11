@@ -30,8 +30,10 @@ export function filterEntriesToActivePath(entries: ReadonlyArray<SessionEntry>, 
 	}
 	if (!hasBranch(messages)) return [...entries];
 
-	// The leaf defaults to the most recent append (file order), which is the
-	// turn the session would parent the next append onto after a switch.
+	// Without a live-session pointer, offline readers fall back to the most
+	// recent message in file order. Current-session runtime paths must pass the
+	// explicit leaf because switchTurn() changes the next append point without
+	// appending a message to the ledger.
 	const leaf = resolveLeafMessage(entries, messagesById, leafTurnId) ?? messages[messages.length - 1];
 	if (!leaf) return [...entries];
 

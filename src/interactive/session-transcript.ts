@@ -85,7 +85,12 @@ export function createSessionTranscript(deps: SessionTranscriptDeps): SessionTra
 	const refreshChatContextFromSession = (leafTurnId: string | null): void => {
 		if (!deps.readSessionEntries) return;
 		const turns = deps.readSessionEntries();
-		deps.chat.resetForSession(leafTurnId, buildReplayAgentMessagesFromTurns(turns));
+		deps.chat.resetForSession(
+			leafTurnId,
+			buildReplayAgentMessagesFromTurns(turns, {
+				...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
+			}),
+		);
 		deps.refreshStatus();
 	};
 

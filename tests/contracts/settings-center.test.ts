@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { MAX_TIMER_DELAY_MS } from "../../src/core/timers.js";
 import type { Component, OverlayHandle, TUI } from "../../src/engine/tui.js";
 import {
 	applySettingChange,
@@ -318,6 +319,22 @@ describe("contracts/settings center", () => {
 			const settings = settingsWithTargets();
 			applySettingChange(settings, testCase.id, testCase.value);
 			testCase.assert(settings);
+		}
+	});
+
+	it("does not let the settings UI store unschedulable ACP request bounds", () => {
+		for (const id of [
+			"delegation.defaults.connectTimeoutMs",
+			"delegation.defaults.turnTimeoutMs",
+			"delegation.defaults.permissionTimeoutMs",
+		] as const) {
+			for (const invalid of ["0", String(MAX_TIMER_DELAY_MS + 1)]) {
+				const settings = settingsWithTargets();
+				const key = id.slice("delegation.defaults.".length) as keyof typeof settings.delegation.defaults;
+				const before = settings.delegation.defaults[key];
+				applySettingChange(settings, id, invalid);
+				strictEqual(settings.delegation.defaults[key], before, `${id}=${invalid}`);
+			}
 		}
 	});
 
