@@ -24,6 +24,11 @@ import { matchFromSpec, usageLine } from "./slash-spec.js";
  * rather than extending two parallel switches.
  */
 
+type ShareCommandVariant =
+	| { kind: "share"; action: "export"; path: string }
+	| { kind: "share"; action: "import"; path: string; dryRun: boolean; force: boolean }
+	| { kind: "share"; action: "usage"; subcommand?: "export" | "import"; error?: string };
+
 type SlashCommandVariant =
 	| { kind: "quit" }
 	| { kind: "help"; query?: string }
@@ -34,7 +39,7 @@ type SlashCommandVariant =
 	| { kind: "skill-invocation"; text: string }
 	| { kind: "prompts" }
 	| { kind: "extensions" }
-	| { kind: "share"; args: string }
+	| ShareCommandVariant
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions }
 	| { kind: "run-usage" }
 	| { kind: "delegate"; agentId: string; task: string }
@@ -428,44 +433,53 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				},
 			},
 		},
-		fromArgs(_parsed, trimmed) {
-			const prefix = "/share";
-			const args = trimmed === prefix ? "" : trimmed.slice(prefix.length).trim();
-			return { kind: "share", args };
+		fromArgs(parsed) {
+			const subcommand = parsed.subcommand === "export" || parsed.subcommand === "import" ? parsed.subcommand : undefined;
+			if (parsed.error) {
+				return {
+					kind: "share",
+					action: "usage",
+					...(subcommand !== undefined ? { subcommand } : {}),
+					error: parsed.error,
+				};
+			}
+			const path = parsed.positionals[0];
+			if (subcommand === "export" && path !== undefined) return { kind: "share", action: "export", path };
+			if (subcommand === "import" && path !== undefined) {
+				return {
+					kind: "share",
+					action: "import",
+					path,
+					dryRun: parsed.flags.has("--dry-run"),
+					force: parsed.flags.has("--force"),
+				};
+			}
+			return { kind: "share", action: "usage", ...(subcommand !== undefined ? { subcommand } : {}) };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "share") return;
-			const parts = command.args.split(/\s+/).filter(Boolean);
-			const sub = parts.shift();
-			const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "share");
-			if (!entry) return;
-			if (sub === "export") {
-				const out = parts[0];
-				if (!out || parts.length !== 1) {
-					ctx.notice("info", usageNotice(entry, "export"));
-					return;
-				}
+			if (command.action === "usage") {
+				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "share");
+				if (!entry) return;
+				const usage = usageNotice(entry, command.subcommand);
+				ctx.notice("info", command.error ? `${command.error}\n${usage}` : usage);
+				return;
+			}
+			if (command.action === "export") {
 				if (!ctx.exportShareArchive) {
 					ctx.notice("error", "share export is not wired");
 					return;
 				}
-				const result = ctx.exportShareArchive(out);
+				const result = ctx.exportShareArchive(command.path);
 				ctx.notice("success", `exported ${result.fileCount} item(s) to ${result.path}`);
 				return;
 			}
-			if (sub === "import") {
-				const dryRun = parts.includes("--dry-run");
-				const force = parts.includes("--force");
-				const archivePath = parts.find((part) => !part.startsWith("--"));
-				if (!archivePath) {
-					ctx.notice("info", usageNotice(entry, "import"));
-					return;
-				}
+			if (command.action === "import") {
 				if (!ctx.importShareArchive) {
 					ctx.notice("error", "share import is not wired");
 					return;
 				}
-				const plan = ctx.importShareArchive(archivePath, { dryRun, force });
+				const plan = ctx.importShareArchive(command.path, { dryRun: command.dryRun, force: command.force });
 				for (const diag of plan.diagnostics) {
 					const detail = diag.path ? `${diag.message}: ${diag.path}` : diag.message;
 					ctx.notice("warn", `${diag.type}: ${detail}`);
@@ -474,12 +488,10 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				const overwrite = plan.actions.filter((action) => action.action === "overwrite").length;
 				const skip = plan.actions.filter((action) => action.action === "skip").length;
 				ctx.notice(
-					dryRun ? "info" : "success",
-					`${dryRun ? "dry-run" : "import"} write=${write} overwrite=${overwrite} skip=${skip} settings=${plan.actions.filter((action) => action.action === "settings").length}`,
+					command.dryRun ? "info" : "success",
+					`${command.dryRun ? "dry-run" : "import"} write=${write} overwrite=${overwrite} skip=${skip} settings=${plan.actions.filter((action) => action.action === "settings").length}`,
 				);
-				return;
 			}
-			ctx.notice("info", usageNotice(entry));
 		},
 	},
 	{

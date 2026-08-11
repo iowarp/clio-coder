@@ -132,6 +132,43 @@ describe("contracts/interactive slash runtime", () => {
 		);
 	});
 
+	it("routes only grammar-valid share imports and keeps dry-run on the planning path", () => {
+		const harness = createHarness();
+		const planned: Array<{ path: string; options: unknown }> = [];
+		const imported: Array<{ path: string; options: unknown }> = [];
+		const result = { archive: null, actions: [], diagnostics: [] };
+		harness.deps.share = {
+			writeArchive: () => ({ files: [] }) as never,
+			planImport: (path, options) => {
+				planned.push({ path, options });
+				return result;
+			},
+			importArchive: (path, options) => {
+				imported.push({ path, options });
+				return result;
+			},
+		};
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+
+		runtime.dispatchCommand("/share import --dry-run /tmp/preview.clio-share.json");
+		runtime.dispatchCommand("/share import --dry-rnu /tmp/typo.clio-share.json");
+		runtime.dispatchCommand("/share import /tmp/extra.clio-share.json unexpected");
+		runtime.dispatchCommand("/share import --force /tmp/apply.clio-share.json");
+
+		deepStrictEqual(planned, [
+			{
+				path: "/tmp/preview.clio-share.json",
+				options: { dryRun: true },
+			},
+		]);
+		deepStrictEqual(imported, [
+			{
+				path: "/tmp/apply.clio-share.json",
+				options: { force: true },
+			},
+		]);
+	});
+
 	it("rejects a second context bootstrap until the first one settles", async () => {
 		const harness = createHarness();
 		let resolveInit: (() => void) | undefined;
