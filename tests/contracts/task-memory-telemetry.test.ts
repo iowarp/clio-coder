@@ -30,6 +30,9 @@ describe("contracts/task memory telemetry", () => {
 				tier: "llm",
 				bankDelta: taskMemoryBankDelta(before, bank.snapshot()),
 				decision: "injected",
+				reason: "intervened",
+				bankOperations: 3,
+				droppedOperations: 1,
 				citedEntries: 1,
 				inputTokens: 17,
 				outputTokens: 9,
@@ -42,7 +45,7 @@ describe("contracts/task memory telemetry", () => {
 			const parsed = parseTaskMemoryTelemetryRecord(JSON.parse(line) as unknown);
 			ok(parsed);
 			deepStrictEqual(parsed, {
-				version: 1,
+				version: 2,
 				at: "2026-07-13T12:00:00.000Z",
 				triggerReasons: ["interval", "tool_error_streak"],
 				tier: "llm",
@@ -52,6 +55,9 @@ describe("contracts/task memory telemetry", () => {
 					procedural: { added: 0, updated: 0, deleted: 0 },
 				},
 				decision: "injected",
+				reason: "intervened",
+				bankOperations: 3,
+				droppedOperations: 1,
 				citedEntries: 1,
 				tokenCost: { input: 17, output: 9, total: 26 },
 				latencyMs: 12.5,
@@ -75,6 +81,9 @@ describe("contracts/task memory telemetry", () => {
 					procedural: { added: 0, updated: 0, deleted: 0 },
 				},
 				decision: "silent",
+				reason: "no_repeated_failure",
+				bankOperations: 0,
+				droppedOperations: 0,
 				citedEntries: 0,
 				inputTokens: 0,
 				outputTokens: 0,
@@ -89,7 +98,7 @@ describe("contracts/task memory telemetry", () => {
 
 	it("rejects malformed, unbounded, and internally inconsistent records", () => {
 		const valid = {
-			version: 1,
+			version: 2,
 			at: "2026-07-13T12:00:00.000Z",
 			triggerReasons: ["manual"],
 			tier: "rules",
@@ -99,6 +108,9 @@ describe("contracts/task memory telemetry", () => {
 				procedural: { added: 0, updated: 0, deleted: 0 },
 			},
 			decision: "silent",
+			reason: "model_silent",
+			bankOperations: 0,
+			droppedOperations: 0,
 			citedEntries: 0,
 			tokenCost: { input: 0, output: 0, total: 0 },
 			latencyMs: 0,
@@ -110,6 +122,9 @@ describe("contracts/task memory telemetry", () => {
 			{ ...valid, triggerReasons: ["interval", "interval"] },
 			{ ...valid, triggerReasons: ["interval", "tool_error_streak", "loop_signal", "manual"] },
 			{ ...valid, decision: "unknown" },
+			{ ...valid, reason: "unknown" },
+			{ ...valid, version: 1 },
+			{ ...valid, droppedOperations: -1 },
 			{ ...valid, tokenCost: { input: 1, output: 2, total: 4 } },
 			{ ...valid, latencyMs: -1 },
 		]) {
@@ -156,6 +171,9 @@ describe("contracts/task memory telemetry", () => {
 		deepStrictEqual((records[1] as { triggerReasons: string[] }).triggerReasons, ["interval"]);
 		strictEqual((records[1] as { tier: string }).tier, "llm");
 		strictEqual((records[1] as { decision: string }).decision, "silent");
+		strictEqual((records[0] as { reason: string }).reason, "no_repeated_failure");
+		strictEqual((records[1] as { reason: string }).reason, "model_silent");
+		strictEqual((records[1] as { bankOperations: number }).bankOperations, 1);
 		deepStrictEqual((records[1] as { bankDelta: { knowledge: unknown } }).bankDelta.knowledge, {
 			added: 1,
 			updated: 0,

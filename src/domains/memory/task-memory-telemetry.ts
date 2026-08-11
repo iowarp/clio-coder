@@ -7,9 +7,16 @@ import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import type { TaskMemoryEntry, TaskMemorySnapshot } from "./task-bank.js";
-import type { TaskMemoryPolicyDecision } from "./task-memory-policy.js";
+import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason } from "./task-memory-policy.js";
 
-export const TASK_MEMORY_TELEMETRY_VERSION = 1;
+/**
+ * Version 2 adds `reason`, `bankOperations`, and `droppedOperations`. Version 1
+ * rows recorded a decision and a bank delta and nothing that explained either,
+ * so a session of `silent` steps with an empty bank could not be diagnosed at
+ * all. The parser rejects v1 rows rather than defaulting the new fields, because
+ * a defaulted reason would assert something about a step nobody measured.
+ */
+export const TASK_MEMORY_TELEMETRY_VERSION = 2;
 export const TASK_MEMORY_TELEMETRY_MAX_BYTES = 1024 * 1024;
 export const TASK_MEMORY_TELEMETRY_FILE = "steps.jsonl";
 
@@ -52,12 +59,18 @@ export interface TaskMemoryTokenCost {
 }
 
 export interface TaskMemoryTelemetryRecord {
-	version: 1;
+	version: 2;
 	at: string;
 	triggerReasons: TaskMemoryTelemetryTrigger[];
 	tier: TaskMemoryTelemetryTier;
 	bankDelta: TaskMemoryBankDelta;
 	decision: TaskMemoryTelemetryDecision;
+	/** What produced the decision. The field that makes a `silent` row actionable. */
+	reason: TaskMemoryPolicyReason;
+	/** Operations the bank accepted from the model. */
+	bankOperations: number;
+	/** Operations the bank refused. Nonzero beside a zero `bankOperations` is a total loss. */
+	droppedOperations: number;
 	citedEntries: number;
 	tokenCost: TaskMemoryTokenCost;
 	latencyMs: number;
@@ -68,6 +81,9 @@ export interface TaskMemoryTelemetryStep {
 	tier: TaskMemoryTelemetryTier;
 	bankDelta: TaskMemoryBankDelta;
 	decision: TaskMemoryTelemetryDecision;
+	reason: TaskMemoryPolicyReason;
+	bankOperations: number;
+	droppedOperations: number;
 	citedEntries: number;
 	inputTokens: number;
 	outputTokens: number;
@@ -118,6 +134,9 @@ export function taskMemoryTelemetryRecord(step: TaskMemoryTelemetryStep, at: Dat
 		tier: step.tier,
 		bankDelta: step.bankDelta,
 		decision: step.decision,
+		reason: step.reason,
+		bankOperations: nonNegativeInteger(step.bankOperations),
+		droppedOperations: nonNegativeInteger(step.droppedOperations),
 		citedEntries: nonNegativeInteger(step.citedEntries),
 		tokenCost: { input, output, total: input + output },
 		latencyMs: nonNegativeFinite(step.latencyMs),
@@ -136,7 +155,8 @@ export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTeleme
 	if (!isRecord(value) || !hasExactKeys(value, TELEMETRY_KEYS)) return null;
 	if (value.version !== TASK_MEMORY_TELEMETRY_VERSION || !validIsoTimestamp(value.at)) return null;
 	if (!validTriggerReasons(value.triggerReasons) || !isTier(value.tier) || !isDecision(value.decision)) return null;
-	if (!isNonNegativeInteger(value.citedEntries)) return null;
+	if (!isReason(value.reason) || !isNonNegativeInteger(value.citedEntries)) return null;
+	if (!isNonNegativeInteger(value.bankOperations) || !isNonNegativeInteger(value.droppedOperations)) return null;
 	const bankDelta = parseBankDelta(value.bankDelta);
 	const tokenCost = parseTokenCost(value.tokenCost);
 	if (bankDelta === null || tokenCost === null || !isNonNegativeFinite(value.latencyMs)) return null;
@@ -147,6 +167,9 @@ export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTeleme
 		tier: value.tier,
 		bankDelta,
 		decision: value.decision,
+		reason: value.reason,
+		bankOperations: value.bankOperations,
+		droppedOperations: value.droppedOperations,
 		citedEntries: value.citedEntries,
 		tokenCost,
 		latencyMs: value.latencyMs,
@@ -160,6 +183,9 @@ const TELEMETRY_KEYS = [
 	"tier",
 	"bankDelta",
 	"decision",
+	"reason",
+	"bankOperations",
+	"droppedOperations",
 	"citedEntries",
 	"tokenCost",
 	"latencyMs",
@@ -183,6 +209,22 @@ const DECISIONS = new Set<TaskMemoryTelemetryDecision>([
 	"timeout",
 	"malformed",
 	"dropped",
+]);
+const REASONS = new Set<TaskMemoryPolicyReason>([
+	"intervened",
+	"model_silent",
+	"duplicate_reminder",
+	"suppressed",
+	"uncited",
+	"over_budget",
+	"unparseable",
+	"all_operations_invalid",
+	"deadline",
+	"client_error",
+	"no_client",
+	"step_in_flight",
+	"no_repeated_failure",
+	"bank_empty",
 ]);
 
 function entryDelta(
@@ -253,6 +295,10 @@ function isTier(value: unknown): value is TaskMemoryTelemetryTier {
 
 function isDecision(value: unknown): value is TaskMemoryTelemetryDecision {
 	return typeof value === "string" && DECISIONS.has(value as TaskMemoryTelemetryDecision);
+}
+
+function isReason(value: unknown): value is TaskMemoryPolicyReason {
+	return typeof value === "string" && REASONS.has(value as TaskMemoryPolicyReason);
 }
 
 function validIsoTimestamp(value: unknown): value is string {

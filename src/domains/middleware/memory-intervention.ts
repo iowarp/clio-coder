@@ -3,7 +3,9 @@ import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank } from "../memo
 import {
 	runTaskMemoryPolicy,
 	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
+	type TaskMemoryEnvelope,
 	type TaskMemoryModelClient,
+	type TaskMemoryPolicyReason,
 	type TaskMemoryPolicyResult,
 	type TaskMemoryTrajectoryStep,
 } from "../memory/task-memory-policy.js";
@@ -73,6 +75,11 @@ export interface MemoryInterventionDeps {
 	getSettings?: () => Readonly<MemoryInterventionSettings>;
 	/** Best-effort content-free telemetry; sink failures never affect intervention. */
 	telemetry?: TaskMemoryTelemetrySink;
+	/**
+	 * Opt-in raw-envelope observer. Content-bearing, so the composition root only
+	 * supplies it when the operator named a trace file.
+	 */
+	onEnvelope?: (envelope: TaskMemoryEnvelope) => void;
 	/**
 	 * Delivery channel for a reminder produced after its turn boundary already
 	 * closed. The composition root buffers it into the next submitted turn, which
@@ -173,6 +180,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							[effects.length > 0 ? "repeated_failure" : "turn_end"],
 							"rules",
 							effects.length > 0 ? "injected" : "silent",
+							effects.length > 0 ? "intervened" : "no_repeated_failure",
 							citedEntryCount(effects[0]?.kind === "inject_reminder" ? effects[0].message : null),
 							0,
 							0,
@@ -196,6 +204,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 								["post_compaction"],
 								"rules",
 								effects.length > 0 ? "injected" : "silent",
+								effects.length > 0 ? "intervened" : "bank_empty",
 								citedEntryCount(effects[0]?.kind === "inject_reminder" ? effects[0].message : null),
 								0,
 								0,
@@ -229,7 +238,16 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			// otherwise indistinguishable in the telemetry log. Triggers stay pending
 			// so the next free boundary still runs for them.
 			if (promptedStepInFlight) {
-				emitTelemetry([...pendingTriggers], promptedStepTier, "dropped", 0, 0, 0, process.hrtime.bigint());
+				emitTelemetry(
+					[...pendingTriggers],
+					promptedStepTier,
+					"dropped",
+					"step_in_flight",
+					0,
+					0,
+					0,
+					process.hrtime.bigint(),
+				);
 				return NO_EFFECTS;
 			}
 			lastPromptedBoundary = boundary;
@@ -295,9 +313,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	async function runPromptedStep(input: MemoryPromptedStepInput): Promise<MemoryPromptedStepResult> {
-		const silent = (): MemoryPromptedStepResult => ({
+		const silent = (reason: TaskMemoryPolicyReason): MemoryPromptedStepResult => ({
 			decision: "silent",
+			reason,
 			bankOperations: 0,
+			droppedOperations: 0,
 			reminder: null,
 			inputTokens: 0,
 			outputTokens: 0,
@@ -305,7 +325,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		});
 		const live = settings();
 		if (!live.enabled) {
-			const result = silent();
+			const result = silent("no_client");
 			lastDecision = result.decision;
 			return result;
 		}
@@ -317,7 +337,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		try {
 			const client = deps.getModelClient?.() ?? null;
 			if (client === null) {
-				promptedResult = silent();
+				promptedResult = silent("no_client");
 			} else {
 				tier = "llm";
 				promptedStepTier = tier;
@@ -329,20 +349,36 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					...(input.suppressIntervention === undefined ? {} : { suppressIntervention: input.suppressIntervention }),
 					previousReminder: lastInjectedMessage,
 					timeoutMs: live.timeoutMs,
+					...(deps.onEnvelope === undefined ? {} : { onEnvelope: deps.onEnvelope }),
 				});
 			}
-		} catch {
-			promptedResult = silent();
+		} catch (error) {
+			// runTaskMemoryPolicy resolves its own failures, so reaching here means
+			// resolving the client itself threw. That is still a broken route.
+			promptedResult = silent("client_error");
+			deps.onEnvelope?.({
+				systemPrompt: "",
+				userPrompt: "",
+				response: "",
+				decision: "silent",
+				reason: "client_error",
+				bankOperations: 0,
+				droppedOperations: 0,
+				reminder: null,
+				error: error instanceof Error ? error.message : "resolving the background model client failed",
+			});
 		}
 		lastDecision = promptedResult.decision;
 		emitTelemetry(
 			triggers,
 			tier,
 			promptedResult.decision,
+			promptedResult.reason,
 			citedEntryCount(promptedResult.reminder),
 			promptedResult.inputTokens,
 			promptedResult.outputTokens,
 			started,
+			{ bankOperations: promptedResult.bankOperations, droppedOperations: promptedResult.droppedOperations },
 		);
 		return {
 			...promptedResult,
@@ -357,10 +393,12 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		triggerReasons: ReadonlyArray<TaskMemoryTelemetryTrigger>,
 		tier: TaskMemoryTelemetryTier,
 		decision: TaskMemoryTelemetryDecision,
+		reason: TaskMemoryPolicyReason,
 		citedEntries: number,
 		inputTokens: number,
 		outputTokens: number,
 		started: bigint,
+		operations: { bankOperations: number; droppedOperations: number } = { bankOperations: 0, droppedOperations: 0 },
 	): void {
 		const next = deps.bank.snapshot();
 		const bankDelta = taskMemoryBankDelta(telemetryBankSnapshot, next);
@@ -372,6 +410,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				tier,
 				bankDelta,
 				decision,
+				reason,
+				bankOperations: operations.bankOperations,
+				droppedOperations: operations.droppedOperations,
 				citedEntries,
 				inputTokens,
 				outputTokens,
@@ -385,6 +426,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			triggerReasons: [...new Set(triggerReasons)],
 			tier,
 			decision,
+			reason,
 			citedEntries,
 			bankWrites: countBankWrites(bankDelta),
 			latencyMs,
@@ -460,7 +502,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		rulesInjectedSincePromptedStep = true;
 		annotatedSinceTurnEnd = true;
 		deps.bank.recordInjection([failure.entryId]);
-		emitTelemetry(["repeated_failure"], "rules", "injected", 1, 0, 0, process.hrtime.bigint());
+		emitTelemetry(["repeated_failure"], "rules", "injected", "intervened", 1, 0, 0, process.hrtime.bigint());
 		return [{ kind: "annotate_tool_result", message, severity: "warn" }];
 	}
 

@@ -71,11 +71,13 @@ export {
 	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
 	TASK_MEMORY_POLICY_MAX_OPERATIONS,
 	TASK_MEMORY_POLICY_MODEL_MAX_OUTPUT_TOKENS,
+	type TaskMemoryEnvelope,
 	type TaskMemoryModelClient,
 	type TaskMemoryModelRequest,
 	type TaskMemoryModelResponse,
 	type TaskMemoryPolicyDecision,
 	type TaskMemoryPolicyInput,
+	type TaskMemoryPolicyReason,
 	type TaskMemoryPolicyResult,
 	type TaskMemoryTrajectoryStep,
 } from "./task-memory-policy.js";
@@ -105,6 +107,12 @@ export {
 	taskMemoryBankDelta,
 	taskMemoryTelemetryRecord,
 } from "./task-memory-telemetry.js";
+export {
+	createTaskMemoryTrace,
+	type TaskMemoryTrace,
+	type TaskMemoryTraceRow,
+	taskMemoryTracePath,
+} from "./task-memory-trace.js";
 export type {
 	MemoryProposalResult,
 	MemoryPruneResult,
