@@ -569,7 +569,10 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 				Type.String({ description: "Run id from dispatch output or monitor list; omit with mode=list." }),
 			),
 			mode: Type.Optional(
-				stringEnum(["status", "peek", "receipt", "list", "wait", "collect"], "What to return (default status)."),
+				stringEnum(
+					["status", "peek", "receipt", "list", "wait", "collect"],
+					"What to return. Defaults to status when run_id is present and list when it is absent. status, peek, receipt, and wait each observe one run and require a run_id; list takes none.",
+				),
 			),
 			batch_id: Type.Optional(Type.String({ description: "Detached batch id from dispatch detach:true (mode=collect)." })),
 			run_ids: Type.Optional(
@@ -625,7 +628,10 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 						message: `monitor: mode=${mode} observes one run; got run_ids with ${rawRunIds.length} ${entryLabel} — pass run_id=<one id>, or use mode=collect run_ids=[...] for a batch`,
 					};
 				}
-				return { kind: "error", message: `monitor: mode=${mode} requires run_id` };
+				return {
+					kind: "error",
+					message: `monitor: mode=${mode} observes one run and needs run_id; call monitor(mode="list") first to see the run ids this session knows about`,
+				};
 			}
 			if (mode === "wait") {
 				const rawTimeout = typeof args.timeout_ms === "number" && Number.isFinite(args.timeout_ms) ? args.timeout_ms : NaN;

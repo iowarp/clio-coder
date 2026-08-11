@@ -6,6 +6,7 @@ import {
 	acquireCapacityLease,
 	type CapacityLease,
 	type CapacityLimits,
+	capacityLeaseUsage,
 	heartbeatCapacityLease,
 	releaseCapacityLease,
 	renameCapacityLeaseAssignment,
@@ -94,8 +95,40 @@ export function createLeaseSlotGuard(
 const PUMP_MIN_MS = 10;
 const PUMP_MAX_MS = 500;
 
+/**
+ * Say what the request waited on and what would let the next one through. The
+ * bare outcome state ("admission timed_out") was 39 bytes of nothing: a model
+ * that reads it learns neither that the wall it hit was concurrency nor that
+ * waiting or dispatching fewer runs is the way past it, so it retries the same
+ * shape and burns the deadline again.
+ */
+function describeAdmissionFailure(input: {
+	state: "canceled" | "timed_out";
+	nodeId: string;
+	waitedMs: number;
+	queueDepth: number;
+	limits: CapacityLimits;
+	usage: { global: number; nodes: Readonly<Record<string, number>> };
+}): string {
+	if (input.state === "canceled") return "dispatch: admission canceled before a capacity slot opened";
+	const nodeLimit = input.limits.nodes[input.nodeId];
+	const nodeActive = input.usage.nodes[input.nodeId] ?? 0;
+	const where =
+		nodeLimit === undefined
+			? `${input.usage.global}/${input.limits.global} worker slots in use`
+			: `${nodeActive}/${nodeLimit} worker slots in use on '${input.nodeId}', ${input.usage.global}/${input.limits.global} globally`;
+	const queued = input.queueDepth > 0 ? `, ${input.queueDepth} more queued` : "";
+	return [
+		`dispatch: admission timed out after ${Math.round(input.waitedMs)}ms waiting for a worker slot`,
+		` (${where}${queued}).`,
+		" Wait for running work to settle, dispatch fewer runs at once, or raise budget.concurrency.",
+	].join("");
+}
+
 export function createCapacityAdmissionController(options: {
 	limits: () => CapacityLimits;
+	/** Live lease counts for the timeout message; defaults to the durable state file. */
+	usage?: () => { global: number; nodes: Readonly<Record<string, number>> };
 	now?: () => number;
 	maxQueueSize?: number;
 	queueCeilingMs?: number;
@@ -194,7 +227,18 @@ export function createCapacityAdmissionController(options: {
 				});
 				pumpNow();
 				const outcome = await outcomePromise;
-				if (outcome.state !== "admitted") throw new Error(`dispatch: admission ${outcome.state}`);
+				if (outcome.state !== "admitted") {
+					throw new Error(
+						describeAdmissionFailure({
+							state: outcome.state,
+							nodeId: input.nodeId,
+							waitedMs: now() - queuedAt,
+							queueDepth: queue.size(),
+							limits: options.limits(),
+							usage: options.usage?.() ?? capacityLeaseUsage({ nowMs: now() }),
+						}),
+					);
+				}
 				const lease = acquired.get(input.assignmentId);
 				if (!lease) throw new Error("dispatch: admitted request has no capacity lease");
 				acquired.delete(input.assignmentId);

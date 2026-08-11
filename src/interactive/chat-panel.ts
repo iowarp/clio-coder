@@ -65,6 +65,8 @@ export interface ChatPanelTurnUsage {
 	cacheWriteTokens: number;
 	reasoningTokens?: number;
 	reasoningTokenProvenance?: ReasoningTokenProvenance;
+	/** Model calls the totals were summed over; absent when the count is unknown. */
+	modelCalls?: number;
 }
 
 export interface ChatPanelRenderMetrics {
@@ -272,7 +274,7 @@ function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 	) {
 		return undefined;
 	}
-	const turnUsage: ChatPanelTurnUsage = { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens };
+	const turnUsage: ChatPanelTurnUsage = { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, modelCalls: 1 };
 	if (reportedReasoning !== null) {
 		turnUsage.reasoningTokens = reportedReasoning;
 		turnUsage.reasoningTokenProvenance = "provider";
@@ -293,6 +295,7 @@ function aggregateAssistantUsage(messages: unknown): ChatPanelTurnUsage | undefi
 		const usage = assistantUsage(message);
 		if (!usage) continue;
 		found = true;
+		total.modelCalls = (total.modelCalls ?? 0) + (usage.modelCalls ?? 1);
 		total.inputTokens += usage.inputTokens;
 		total.outputTokens += usage.outputTokens;
 		total.cacheReadTokens += usage.cacheReadTokens;
@@ -491,7 +494,16 @@ function renderThinkingLines(
 	return out;
 }
 
+/**
+ * `in` is the sum of every model call the turn made, not the size of one
+ * prompt. A long agentic turn makes dozens of calls that each resend a growing
+ * context, so the total runs far past the model's context window and reads as
+ * one impossible request unless the call count is beside it. One live turn
+ * reported 717676 input tokens against a 500k window; it was 65 calls of about
+ * 11k, which the preceding one-call turns had already shown.
+ */
 function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number): string[] {
+	const calls = usage.modelCalls !== undefined && usage.modelCalls > 1 ? ` over ${usage.modelCalls} calls` : "";
 	const reason =
 		usage.reasoningTokens !== undefined
 			? ` reason${usage.reasoningTokenProvenance === "provider" ? "" : "≈"}${usage.reasoningTokens}${usage.reasoningTokenProvenance === "provider" ? " provider" : " estimated"}`
@@ -501,7 +513,7 @@ function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number): string[]
 			? ` cache ${usage.cacheReadTokens}/${usage.cacheWriteTokens}`
 			: "";
 	return wrapTextWithAnsi(
-		`${DIM}  turn · in ${usage.inputTokens} · out ${usage.outputTokens}${cache}${reason} · reasoning text is a UI excerpt, not a verification${RESET}`,
+		`${DIM}  turn · in ${usage.inputTokens}${calls} · out ${usage.outputTokens}${cache}${reason} · reasoning text is a UI excerpt, not a verification${RESET}`,
 		width,
 	);
 }

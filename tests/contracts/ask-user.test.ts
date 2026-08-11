@@ -120,7 +120,13 @@ describe("contracts/ask_user", () => {
 		strictEqual(single.error, undefined);
 		strictEqual(single.call?.mode, "single_question");
 		strictEqual(single.call?.max_rounds, 12);
-		strictEqual(batched.error, "mode=single_question requires exactly 1 question");
+		// The rejection names the count received and both ways forward; the bare
+		// "requires exactly 1 question" left a competent model guessing on first
+		// contact and retrying the same shape.
+		strictEqual(
+			batched.error,
+			"mode=single_question carries exactly 1 question and this call carried 2; send them one call at a time, or use mode=round to ask up to 4 together",
+		);
 		strictEqual(tooManyRounds.error, "max_rounds must be an integer from 1 to 24");
 	});
 

@@ -174,7 +174,10 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	const canDispatch = names.includes("dispatch") || hintedTools.has("dispatch");
 	const canListSkills = names.includes("context") || hintedTools.has("context");
 	const inventoryGuidance = [
-		"When answering capability-inventory questions, list direct tools without calls",
+		// Asked twice in one session which tools it had, a live model gave two
+		// different answers and invented `web_find`. The authoritative list is one
+		// line above; pointing at it beats letting the model recall the schemas.
+		"When answering capability-inventory questions, copy the Direct tools line above verbatim rather than recalling the attached schemas, and make no calls",
 		...(canDispatch ? ["add dispatch(list:true) only if agents or the fleet are requested"] : []),
 		...(canListSkills ? ['add context(scope="skills") only if skills are requested'] : []),
 	].join("; ");

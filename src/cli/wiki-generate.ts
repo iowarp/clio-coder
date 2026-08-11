@@ -121,12 +121,25 @@ interface DispatchSummary {
 }
 
 /**
- * Drain a dispatch's event stream, summarizing rather than narrating. One
- * dispatch is now one page, so per-call progress lines would scroll the
- * operator's terminal without telling them anything; the per-page line printed
- * on completion carries the same facts.
+ * Longest an in-flight phase may go without saying anything. The planner is
+ * allowed eight minutes and a page six, and the operator who reported this saw
+ * two lines in five minutes, concluded the command had deadlocked, and killed
+ * it. Narrating every tool call would scroll the terminal for nothing, so the
+ * heartbeat is throttled to this and carries only elapsed time and tool count.
  */
-async function drainDispatchEvents(events: AsyncIterable<unknown>): Promise<DispatchSummary> {
+const HEARTBEAT_MS = 30_000;
+
+/**
+ * Drain a dispatch's event stream, summarizing rather than narrating. One
+ * dispatch is one page, so a line per tool call would tell the operator
+ * nothing; the per-page line printed on completion carries the same facts.
+ * `onActivity` fires on every tool finish and its consumer decides how often
+ * that is worth a line.
+ */
+async function drainDispatchEvents(
+	events: AsyncIterable<unknown>,
+	onActivity?: (completed: number) => void,
+): Promise<DispatchSummary> {
 	const tools = new Map<string, number>();
 	let completed = 0;
 	let errors = 0;
@@ -145,6 +158,7 @@ async function drainDispatchEvents(events: AsyncIterable<unknown>): Promise<Disp
 			blocked += 1;
 			firstBlockReason ??= eventPayloadString(event, "reason");
 		}
+		onActivity?.(completed);
 	}
 	const mix = [...tools.entries()]
 		.sort(([left], [right]) => left.localeCompare(right))
@@ -182,6 +196,8 @@ export async function runWikiDispatch(input: {
 	route: WikiModelRoute;
 	deadlineMs: number;
 	label: string;
+	/** Liveness signal while the dispatch runs, already throttled by the caller. */
+	onHeartbeat?: (info: { elapsedMs: number; tools: number }) => void;
 }): Promise<WikiDispatchOutcome> {
 	const startedAt = Date.now();
 	let handle: Awaited<ReturnType<DispatchContract["dispatch"]>>;
@@ -216,8 +232,14 @@ export async function runWikiDispatch(input: {
 		return { ok: false, detail: err instanceof Error ? err.message : String(err) };
 	}
 	const deadline = armInternalDispatchDeadline(input.dispatch, handle.runId, input.label, process.env, input.deadlineMs);
+	let lastHeartbeatAt = startedAt;
 	try {
-		const summary = await drainDispatchEvents(handle.events);
+		const summary = await drainDispatchEvents(handle.events, (tools) => {
+			const nowMs = Date.now();
+			if (!input.onHeartbeat || nowMs - lastHeartbeatAt < HEARTBEAT_MS) return;
+			lastHeartbeatAt = nowMs;
+			input.onHeartbeat({ elapsedMs: nowMs - startedAt, tools });
+		});
 		const receipt = await handle.finalPromise;
 		if (deadline.timedOut()) return { ok: false, detail: `timed out; ${summaryDetail(summary, startedAt)}` };
 		if (receipt.exitCode !== 0) {
@@ -268,6 +290,13 @@ async function runPlanPhase(
 		route,
 		deadlineMs: PLAN_DEADLINE_MS,
 		label: "wiki planner",
+		onHeartbeat: ({ elapsedMs, tools }) =>
+			input.progress?.({
+				phase: "generate",
+				status: "running",
+				message: `still planning (${formatElapsed(elapsedMs)}, ${tools} tool calls)`,
+				detail: `planner deadline ${Math.round(PLAN_DEADLINE_MS / 60000)}m`,
+			}),
 	});
 	const revised = readAuthoredWikiPlan(input.outputDir, input.plan);
 	const plan = revised ?? input.plan;
@@ -308,6 +337,13 @@ async function runPagePhase(
 		route,
 		deadlineMs: PAGE_DEADLINE_MS,
 		label: `wiki page ${page.path}`,
+		onHeartbeat: ({ elapsedMs, tools }) =>
+			input.progress?.({
+				phase: "generate",
+				status: "running",
+				message: `still writing ${page.path} (${position.index}/${position.total}, ${formatElapsed(elapsedMs)}, ${tools} tool calls)`,
+				detail: `page deadline ${Math.round(PAGE_DEADLINE_MS / 60000)}m`,
+			}),
 	});
 	// The file on disk is the postcondition, not what the writer reported. A run
 	// that ended on its budget after writing the page still wrote the page.
@@ -358,6 +394,18 @@ export async function generateWikiWithDocumenter(
 	if (queue.length === 0) {
 		input.progress?.({ phase: "generate", status: "running", message: "every planned page is already current" });
 		return;
+	}
+	// Say the shape of the wait before starting it. A 20-page wiki is 20 model
+	// runs and can legitimately take most of an hour, which is longer than any
+	// default command timeout an operator is likely to have wrapped around it.
+	{
+		const worstCaseMs = Math.min(runBudgetMs, queue.length * PAGE_DEADLINE_MS);
+		input.progress?.({
+			phase: "generate",
+			status: "running",
+			message: `${queue.length} page${queue.length === 1 ? "" : "s"} to write, one model run each`,
+			detail: `up to ${Math.round(worstCaseMs / 60000)}m; progress is reported at least every ${Math.round(HEARTBEAT_MS / 1000)}s and finished pages are kept if the run stops early`,
+		});
 	}
 	for (const [index, page] of queue.entries()) {
 		if (Date.now() - startedAt >= runBudgetMs) {

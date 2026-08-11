@@ -82,7 +82,7 @@ export const askUserParameters = Type.Object({
 	mode: Type.Optional(
 		stringEnum(
 			["round", "single_question"],
-			"single_question: exactly one question per round (interviews); round: up to four tightly related confirmations.",
+			"Caps how many questions this call may carry. single_question accepts exactly 1 and rejects the call otherwise (interviews); round accepts 1 to 4 tightly related confirmations. Default is round.",
 		),
 	),
 	questions: Type.Optional(
@@ -101,7 +101,7 @@ export const askUserParameters = Type.Object({
 				),
 				multi_select: Type.Optional(Type.Boolean({ description: "Allow multiple selections." })),
 			}),
-			{ description: "For action=ask: one to four questions." },
+			{ description: "For action=ask: 1 to 4 questions, or exactly 1 when mode=single_question." },
 		),
 	),
 	max_rounds: Type.Optional(Type.Integer({ description: "Round limit for this turn (default 6, max 24)." })),
@@ -247,7 +247,9 @@ export function normalizeAskUserCall(args: Record<string, unknown>): { call?: As
 	const questions = normalizeAskUserQuestions(args);
 	if (!questions.questions) return { error: questions.error ?? "invalid questions" };
 	if (mode.mode === "single_question" && questions.questions.length !== 1) {
-		return { error: "mode=single_question requires exactly 1 question" };
+		return {
+			error: `mode=single_question carries exactly 1 question and this call carried ${questions.questions.length}; send them one call at a time, or use mode=round to ask up to 4 together`,
+		};
 	}
 	return {
 		call: {
