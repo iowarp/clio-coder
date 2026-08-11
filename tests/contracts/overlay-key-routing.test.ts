@@ -32,6 +32,8 @@ const KITTY_ENTER_RELEASE = "\x1b[13;1:3u";
  * including Esc is forwarded to the focused ListOverlay (return false). The
  * kit owns Esc so a first Esc can clear a nonempty filter before a second
  * Esc closes (bt-06 finding 2); router-level Esc interception bypassed that.
+ * The router now exhausts OverlayState, so adding a state without an explicit
+ * route fails typecheck instead of recreating the dispatch-board fallthrough.
  */
 
 const LIST_OVERLAY_STATES: ReadonlyArray<OverlayState> = ["help", "agents", "prompts", "extensions", "skills-hub"];
@@ -192,6 +194,14 @@ describe("list-overlay key routing", () => {
 		// Before the fix this returned true (input swallowed, hub dead).
 		strictEqual(routeOverlayKey("t", "skills-hub", deps, neverMatches), false);
 		strictEqual(closed(), 0);
+	});
+
+	it("fails a corrupted runtime overlay state closed without dispatch-board actions", () => {
+		const overlay = makeDeps();
+		strictEqual(routeOverlayKey("x", "corrupted" as OverlayState, overlay.deps, neverMatches), true);
+		strictEqual(overlay.cancelledDispatches(), 0);
+		strictEqual(overlay.steeredDispatches(), 0);
+		strictEqual(overlay.closed(), 0);
 	});
 
 	it("forwards the full /context reset chooser keymap to its SelectList", () => {

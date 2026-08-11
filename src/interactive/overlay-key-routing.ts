@@ -42,43 +42,7 @@ export interface DispatchBoardOverlayKeyDeps {
 	cancelSelectedDispatch: () => void;
 }
 
-export interface StatusOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface ProvidersOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface AuthOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface CostOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface FleetOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface ThinkingOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface ModelOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface ScopedModelsOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface SettingsOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface MessagePickerOverlayKeyDeps {
+interface CloseOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
@@ -86,19 +50,7 @@ export interface AskUserOverlayKeyDeps {
 	cancelAskUser: () => void;
 }
 
-export interface OverlayKeyDeps
-	extends PermissionOverlayKeyDeps,
-		DispatchBoardOverlayKeyDeps,
-		ProvidersOverlayKeyDeps,
-		AuthOverlayKeyDeps,
-		CostOverlayKeyDeps,
-		FleetOverlayKeyDeps,
-		ThinkingOverlayKeyDeps,
-		ModelOverlayKeyDeps,
-		ScopedModelsOverlayKeyDeps,
-		SettingsOverlayKeyDeps,
-		MessagePickerOverlayKeyDeps,
-		AskUserOverlayKeyDeps {}
+export interface OverlayKeyDeps extends PermissionOverlayKeyDeps, DispatchBoardOverlayKeyDeps, AskUserOverlayKeyDeps {}
 
 export function isEscapeKey(data: string): boolean {
 	return matchesKey(data, "escape") && !isKeyRelease(data);
@@ -144,7 +96,7 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 }
 
 /** Pure overlay key router for the target hub. Esc closes; hub keys fall through to the focused view. */
-function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKeyDeps): boolean {
+function routeProvidersOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
@@ -153,7 +105,7 @@ function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKeyDeps): 
 }
 
 /** Pure overlay key router for auth overlays. Esc closes; input handles Enter itself. */
-function routeAuthOverlayKey(data: string, deps: AuthOverlayKeyDeps): boolean {
+function routeAuthOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
@@ -162,7 +114,7 @@ function routeAuthOverlayKey(data: string, deps: AuthOverlayKeyDeps): boolean {
 }
 
 /** Pure overlay key router for the /cost overlay. Esc closes; everything else is swallowed. */
-function routeCostOverlayKey(data: string, deps: CostOverlayKeyDeps): boolean {
+function routeCostOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
@@ -171,7 +123,7 @@ function routeCostOverlayKey(data: string, deps: CostOverlayKeyDeps): boolean {
 }
 
 /** Pure overlay key router for the /thinking overlay. Esc closes; arrows and Enter fall through. */
-function routeThinkingOverlayKey(data: string, deps: ThinkingOverlayKeyDeps): boolean {
+function routeThinkingOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
@@ -180,7 +132,7 @@ function routeThinkingOverlayKey(data: string, deps: ThinkingOverlayKeyDeps): bo
 }
 
 /** Pure overlay key router for the /model overlay. Esc closes; arrows and Enter fall through. */
-function routeModelOverlayKey(data: string, deps: ModelOverlayKeyDeps): boolean {
+function routeModelOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
@@ -189,7 +141,7 @@ function routeModelOverlayKey(data: string, deps: ModelOverlayKeyDeps): boolean 
 }
 
 /** Pure overlay key router for the /scoped-models overlay. */
-function routeScopedModelsOverlayKey(data: string, deps: ScopedModelsOverlayKeyDeps): boolean {
+function routeScopedModelsOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
@@ -198,7 +150,7 @@ function routeScopedModelsOverlayKey(data: string, deps: ScopedModelsOverlayKeyD
 }
 
 /** Pure overlay key router for the /settings overlay. */
-function routeSettingsOverlayKey(data: string, deps: SettingsOverlayKeyDeps): boolean {
+function routeSettingsOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
@@ -207,7 +159,7 @@ function routeSettingsOverlayKey(data: string, deps: SettingsOverlayKeyDeps): bo
 }
 
 /** Pure overlay key router for the /fork message-picker. */
-function routeMessagePickerOverlayKey(data: string, deps: MessagePickerOverlayKeyDeps): boolean {
+function routeMessagePickerOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
@@ -281,6 +233,12 @@ export function routeOverlayKey(
 	) {
 		return false;
 	}
-	routeDispatchBoardOverlayKey(data, deps);
+	if (overlayState === "dispatch-board") {
+		routeDispatchBoardOverlayKey(data, deps);
+		return true;
+	}
+	// Adding an OverlayState without an explicit route is a compile error. At
+	// runtime an invalid cast still fails closed by swallowing the modal input.
+	overlayState satisfies never;
 	return true;
 }
