@@ -60,8 +60,12 @@ The worker streams structural events as single-line JSON objects to `stdout`. Ma
 ### 2.2 Worker Input (`stdin`)
 The worker entry mounts a custom stdin demultiplexer (`createWorkerStdinDemux`) that parses lines arriving after the initial `WorkerSpec`. It processes two types of JSON messages:
 1. **Steering Commands:**
-   `{"type": "steer", "text": "guidance message"}`
-   Instructs the running worker to alter course. This message is queued and injected into the worker's chat loop at the next turn boundary.
+   `{"type": "steer", "text": "guidance message", "sequence": 1}`
+   Instructs a live-input HTTP or SDK worker to alter course. Its runtime emits
+   the receipt-bearing `clio_steer_received` event only after accepting the
+   message for the next turn boundary. Single-shot subprocess runtimes install
+   no steering handler, drop unexpected guidance without claiming receipt, and
+   are not offered steering by the dispatch contract or TUI.
 2. **Permission Decisions:**
    `{"type": "permission_decision", "requestId": "req-xxx", "decision": "approve"|"deny"}`
    Resolves a parked tool call that was escalated to the operator.

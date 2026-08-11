@@ -535,27 +535,31 @@
           <li><code>findings.json</code>: Compiled findings and diagnostics list.</li>
         </ul>
 
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Memory Injection Rules</h3>
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Durable Memory Injection Rules</h3>
         <p>The TUI chat loop compiles approved memory constraints synchronously before a turn starts:</p>
         <table class="ref-table">
           <thead>
             <tr>
-              <th>Constraint</th>
-              <th>Default Limit Value</th>
+              <th>Constraint / Parameter</th>
+              <th>Source / Default Value</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td>Allowed Scopes</td>
-              <td><code>global</code>, <code>repo</code></td>
+              <td><code>global</code>, <code>repo</code> (<code>prompt-section.ts</code>)</td>
             </tr>
             <tr>
               <td>Token Budget</td>
-              <td>Max <code>400</code> estimated tokens</td>
+              <td>Max <code>400</code> estimated tokens (<code>prompt-section.ts</code>)</td>
             </tr>
             <tr>
-              <td>Max Record count</td>
-              <td>Max <code>5</code> records</td>
+              <td>Max Record Count</td>
+              <td>Max <code>5</code> records (<code>prompt-section.ts</code>)</td>
+            </tr>
+            <tr>
+              <td>Store Capacity Limit</td>
+              <td>Max <code>500</code> records (<code>store.ts</code>)</td>
             </tr>
             <tr>
               <td>Required Status</td>
@@ -564,6 +568,64 @@
             <tr>
               <td>Required Citation</td>
               <td>At least 1 linked Evidence Ref</td>
+            </tr>
+            <tr>
+              <td>Stale Pruning Thresholds</td>
+              <td>Unapproved: <code>30</code> days; Approved: <code>180</code> days (<code>store.ts</code>)</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Proactive Task Memory &amp; Telemetry</h3>
+        <p>Background proactive task memory policy maintains session state in <code>TaskMemoryBank</code> and records content-free telemetry to <code>&lt;stateDir&gt;/memory/steps.jsonl</code>:</p>
+        <table class="ref-table">
+          <thead>
+            <tr>
+              <th>Knob / Concept</th>
+              <th>Config Key / Location</th>
+              <th>Value &amp; Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Intervention Switch</td>
+              <td><code>memory.intervention.enabled</code></td>
+              <td>Default <code>true</code> (<code>defaults.ts</code>)</td>
+            </tr>
+            <tr>
+              <td>Interval Floor</td>
+              <td><code>memory.intervention.everyNTools</code></td>
+              <td>Default <code>10</code> completed tools (<code>defaults.ts</code>)</td>
+            </tr>
+            <tr>
+              <td>Window Steps</td>
+              <td><code>memory.intervention.windowSteps</code></td>
+              <td>Default <code>8</code> steps (<code>defaults.ts</code>)</td>
+            </tr>
+            <tr>
+              <td>Render Token Limit</td>
+              <td><code>memory.intervention.maxTokens</code></td>
+              <td>Default <code>400</code> tokens (<code>defaults.ts</code>)</td>
+            </tr>
+            <tr>
+              <td>Policy Output Cap</td>
+              <td><code>TASK_MEMORY_POLICY_MODEL_MAX_OUTPUT_TOKENS</code></td>
+              <td>Fixed <code>4000</code> output tokens (library contract in <code>task-memory-policy.ts</code>)</td>
+            </tr>
+            <tr>
+              <td>Policy Timeout (Operator)</td>
+              <td><code>memory.intervention.timeoutMs</code></td>
+              <td>Default <code>180000</code> ms (shipped operator default in <code>defaults.ts</code>)</td>
+            </tr>
+            <tr>
+              <td>Policy Timeout (Library)</td>
+              <td><code>TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS</code></td>
+              <td>Fallback <code>20000</code> ms (library fallback in <code>task-memory-policy.ts</code>)</td>
+            </tr>
+            <tr>
+              <td>Telemetry Decisions</td>
+              <td><code>TaskMemoryTelemetryDecision</code></td>
+              <td><code>silent</code>, <code>injected</code>, <code>gated</code>, <code>timeout</code>, <code>malformed</code>, <code>dropped</code> (<code>task-memory-telemetry.ts</code>)</td>
             </tr>
           </tbody>
         </table>

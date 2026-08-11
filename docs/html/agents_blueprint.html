@@ -634,10 +634,17 @@
               <td><code>verification</code></td>
               <td>fast</td>
             </tr>
+            <tr>
+              <td><code>wiki-writer</code></td>
+              <td>read, write, edit, grep, find, ls, code_nav, context</td>
+              <td>Plans one repository wiki, or researches and writes one wiki page.</td>
+              <td><code>workspace-edit</code></td>
+              <td>balanced</td>
+            </tr>
           </tbody>
         </table>
 
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Shipped Shadow Helpers (Reserved/Hidden)</h3>
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Shipped Shadow and Internal Helpers (Reserved/Hidden)</h3>
         <table class="ref-table">
           <thead>
             <tr>
@@ -667,6 +674,13 @@
               <td><code>provenance</code></td>
               <td>read, grep, find, ls, git</td>
               <td>Shadow evidence, receipt, diff, and telemetry reader for handoffs.</td>
+              <td><code>read-only</code></td>
+              <td>balanced</td>
+            </tr>
+            <tr class="shadow-agent">
+              <td><code>context-bootstrap</code></td>
+              <td>read, grep, find, ls, context, code_nav</td>
+              <td>Internal agent behind `clio context init` that parses repository and returns CLIO.md payload.</td>
               <td><code>read-only</code></td>
               <td>balanced</td>
             </tr>

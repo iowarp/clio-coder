@@ -91,24 +91,42 @@ are all accepted. Two shapes are read conservatively rather than generously:
   model cannot close the `<system-reminder>` block it rides inside. Ordinary
   comparisons and arrows survive.
 
-Operations are validated atomically, so a malformed operation list changes
-nothing. Phase 1 writes remain valid when Phase 2 is gated or yields to a
-deterministic reminder; an over-budget reminder is recorded as `gated` and
-suppressed rather than discarding the writes that came with it. A timeout,
-provider failure, malformed response, or telemetry failure is silent and never
-blocks a tool.
+Operations are validated structurally as a batch: a malformed entry or more than
+eight operations rejects the whole list and changes nothing, because both say
+the model did not produce an operation list at all. Two narrower mistakes cost
+one operation instead of the step, because a small model makes both routinely
+and the notes beside them are the point of the step.
+
+Identity is repaired rather than rejected, because a small model invents a
+descriptive id for content it is recording for the first time. A
+`save_knowledge` or `save_procedural` whose id names no entry of that class
+becomes a new entry, and a `delete` of an unknown id is dropped.
+
+An unrecognized `op` is dropped the same way. Handed a JSON tool trajectory, a
+small model borrows that trajectory's shape for an entry or two and answers
+`{"op":"read","path":"..."}` beside otherwise valid saves; on the reference
+route that happened in a third of sampled steps, and three of four such batches
+carried a valid operation that the old whole-batch rejection discarded. A step
+whose every operation was invented still records `malformed` rather than
+passing as silence, since recovering nothing is not a decision to stay quiet.
+
+Phase 1 writes remain valid when Phase 2 is gated or yields to a deterministic
+reminder; an over-budget reminder is recorded as `gated` and suppressed rather
+than discarding the writes that came with it. A timeout, provider failure,
+malformed response, or telemetry failure is silent and never blocks a tool.
 
 ### Intervention Defaults & Cadence Knobs
 - `memory.intervention.enabled` (default `true`): Enables observation, task bank writes, and reminder injection.
 - `memory.intervention.everyNTools` (default `10`): Minimum completed-tool interval between background interventions.
 - `memory.intervention.windowSteps` (default `8`): Completed tool-trajectory window analyzed during background evaluation.
-- `memory.intervention.maxTokens` (default `400`): Bounds the rendered memory-bank and reminder context budget; the policy model output cap is a separate fixed `1,200`-token contract in `task-memory-policy.ts`.
-- `memory.intervention.timeoutMs` (default `20000`): Wall-clock limit for a background memory-policy request.
+- `memory.intervention.maxTokens` (default `400`): Bounds the rendered memory-bank and reminder context budget; the policy model output cap is a separate fixed `4,000`-token contract in `task-memory-policy.ts`, sized so that a model which reasons anyway still reaches its envelope.
+- `memory.intervention.timeoutMs` (default `180000`): Wall-clock limit for one background memory-policy request. The step is detached, so this deadline never delays a turn; set it above the observed step time for your route or finished work is discarded as a timeout. Step latency on a small local route is long-tailed rather than tightly clustered, so size this off a high percentile and not off a median.
 
 ## Trigger semantics
 
 Memory does not call a model after every tool. Signals accumulate and coalesce at
-an awaited turn-end boundary; at most one prompted step runs for that boundary.
+a turn-end boundary; at most one prompted step is started for that boundary, and
+it runs detached from it.
 
 | Trigger | Behavior |
 | --- | --- |
@@ -127,10 +145,11 @@ repeated failure uses exactly one of them:
 
 - **Mid-turn annotation.** The second identical failure appends one cited
   `Memory:` advisory to that tool's own result, through the existing
-  `annotate_tool_result` effect the loop guard already uses. The model reads it
-  on its very next round. This is spent once per fingerprint per turn and
-  re-earned in a later turn, because the same command failing again after an
-  operator turn is news again.
+  `annotate_tool_result` effect the loop guard already uses. The advisory digest
+  takes the first line of the tool error that names a problem, falling back to
+  the first line when no line names one. The model reads it on its very next round.
+  This is spent once per fingerprint per turn and re-earned in a later turn, because
+  the same command failing again after an operator turn is news again.
 - **Next-turn reminder.** Post-compaction reactivation and any background-model
   reminder ride the `inject_reminder` buffer into the next submitted turn, inside
   the visible `<system-reminder>` block, and persist in the session ledger.
@@ -142,9 +161,9 @@ records one telemetry row, not two.
 
 The pi agent does not become idle until every `agent_end` listener settles, so a
 memory step awaited at that boundary would add its full latency to the visible
-end of every triggered turn. Measured on the reference route below, one step
-takes 37-46 seconds, which is both intolerable as a pause and longer than the
-policy timeout that would then discard the work.
+end of every triggered turn. Measured on the reference route below, step latency
+has a median of 18.6 seconds and ranges up to 220.8 seconds. This makes an awaited
+step intolerable as an end-of-turn pause.
 
 The prompted step is therefore detached. `evaluateAsync` starts it and returns
 immediately; the turn ends on schedule. When the step resolves, its reminder is
@@ -154,7 +173,10 @@ Two consequences follow, both deliberate:
 
 - At most one background step is alive per session. A boundary that arrives while
   a step is still running is dropped rather than queued, so a model slower than
-  the turns that trigger it can never build a backlog.
+  the turns that trigger it can never build a backlog. The drop is recorded as
+  its own telemetry row, because a cadence starved by a slow route and one that
+  simply never triggered are otherwise identical in the step log. Its triggers
+  stay pending, so the next free boundary still runs for them.
 - A reminder can arrive one turn later than the trajectory that earned it. The
   rules tier is unaffected and stays synchronous, so deterministic protection
   keeps its original timing.
@@ -173,11 +195,42 @@ The `/memory` overlay displays `last <decision>` where `<decision>` is the
 combined outcome of the most recent actual memory boundary. A **memory boundary**
 is a turn-end evaluation that includes newly completed tools or an explicit
 deterministic trigger (interval, error-streak, loop signal). A no-tool
-middleware continuation—another turn-end with no new tools since the previous
-boundary—is not a new memory boundary and does not replace the prior outcome.
+middleware continuation is another turn-end with no new tools since the previous
+boundary. It is not a new memory boundary and does not replace the prior outcome.
 Thus `last` remains `injected` across such continuations until a later
 tool-bearing or explicitly triggered memory step produces a new outcome (e.g.,
 a healthy tool leading to `silent`).
+
+## Choosing a background model
+
+Memory reads a trajectory and writes a fixed envelope. It does not plan, and it
+does not need to be clever. A small non-reasoning model is the right choice, and
+Clio always requests the background route with thinking off regardless of
+`background.thinkingLevel`.
+
+A model that reasons anyway still works. Reasoning blocks are discarded and only
+the envelope is kept, and the output budget is sized to let a reasoning preamble
+run its course first. The cost is latency, which the detached step absorbs.
+
+One configuration is refused rather than degraded. If the background role names
+the same target and model as the orchestrator, and that model reasons, the LLM
+memory tier stays off and memory runs on its free deterministic tier. A single
+reasoning model already driving chat, workers, and shadow agents cannot also
+deliberate over memory steps without contending with the work the operator
+actually asked for.
+
+This is a mix-and-match plane, not a local-only one. The background role resolves
+through the same target machinery as every other role, so the useful shapes are:
+
+- A frontier model for chat and a small efficient model for memory, whether that
+  small model is co-hosted, on another node, or a cheap cloud tier.
+- A local workhorse for chat and a co-resident small local model for memory, with
+  the co-residency caveat below.
+- Everything cloud: pick the provider's small fast model for memory and spend the
+  budget on the agent and the fleet.
+
+Local co-residency still matters. The background model, the action model, their
+KV caches, and parallel slots must all fit the target's available memory.
 
 ## Operator setup
 
@@ -195,7 +248,7 @@ memory:
     everyNTools: 10
     windowSteps: 8
     maxTokens: 400
-    timeoutMs: 20000
+    timeoutMs: 180000
 ```
 
 With `background.target` and `background.model` unset, Clio stays in the
@@ -221,11 +274,18 @@ background:
   thinkingLevel: off
 ```
 
-A small model is the intended shape for this role. On that route one memory step
-measures 37-46 seconds end to end and returns the exact two-line envelope, so
-capability is not the constraint; latency is, and the detached step above is what
-makes the tier usable anyway. Raise `timeoutMs` above the observed step time or
-every step records `timeout` and writes nothing.
+A small model is the intended shape for this role. Across 60 measured steps on
+that route, latency ran 4.4 to 220.8 seconds with a median of 18.6, a 90th
+percentile of 79.9, and a 95th of 131.6. Capability is not the constraint;
+latency is, its spread is wide, and the detached step above is what makes the
+tier usable anyway.
+
+Size `timeoutMs` off that tail rather than off the median. The shipped 180000
+captures roughly the whole distribution on this route. A 20000 setting looks
+generous against an 18.6-second median and in practice discarded about half of
+all steps, since the step still runs to completion and only its result is thrown
+away. A route whose steps mostly record `timeout` is a misconfigured deadline
+before it is a slow model.
 
 The target ID is not hard-coded. Any configured orchestrator-eligible local
 target and wire model can fill the background role. Before enabling it, use the
@@ -276,10 +336,16 @@ keeps one previous generation as `steps.jsonl.1`. Every exact-schema record has:
 - one to three coalesced trigger reasons;
 - `rules` or `llm` tier;
 - per-class added, updated, and deleted entry counts;
-- `silent`, `injected`, `gated`, `timeout`, or `malformed` decision;
+- `silent`, `injected`, `gated`, `timeout`, `malformed`, or `dropped` decision;
 - count of cited entries, input/output/total memory-model tokens, and latency.
 
-It contains no task, trajectory, bank, error, or reminder text. File creation,
+`dropped` is the one outcome that ran no step: the boundary triggered while an
+earlier step still held the single in-flight slot. It costs no tokens and no
+latency, its triggers survive to the next free boundary, and it does not replace
+the operator-visible last decision. Counting `dropped` rows against `llm` rows
+over a session is how a starved cadence becomes visible.
+
+The log contains no task, trajectory, bank, error, or reminder text. File creation,
 rotation, serialization, and injected sinks are all best effort; a read-only
 state directory or full disk cannot alter intervention behavior.
 

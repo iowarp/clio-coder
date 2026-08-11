@@ -238,7 +238,7 @@ For running dispatches, the editor also accepts:
 ```
 
 Clio resolves the token to an exact agent id first, then to a run-id prefix,
-and forwards the text to the native worker's steering channel. File-looking
+and forwards the text to an HTTP or SDK worker's steering channel. File-looking
 tokens such as `@package.json` are rejected so ordinary repository references
 do not accidentally become steering requests.
 
@@ -246,8 +246,9 @@ The `Alt+W` Fleet Runs board makes this control path discoverable: use
 Up/Down or `j`/`k` to select a run, `s` to close the board and prefill its
 exact `@<runId> ` steering prefix, and `x` to cancel a live worker or queued
 retry. A steer first reports `queued`; only the worker's
-`clio_steer_received` acknowledgement reports `received`. ACP delegation
-runs do not expose a native steering channel and are labeled accordingly.
+`clio_steer_received` acknowledgement reports `received`. Single-shot
+subprocess runtimes and ACP delegation do not expose a live steering channel
+and are labeled accordingly.
 
 ## Operating Posture and Autonomy
 
@@ -511,4 +512,3 @@ actual behavior. Redact secrets and private repository content.
 > name still resolves without the prefix, so scripts and agents driving Clio over
 > bash keep working unchanged. The prefix exists so `clio --help` stays the set of
 > commands a person needs to read; `clio --help --all` prints both lists.
-
