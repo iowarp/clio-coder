@@ -166,6 +166,43 @@ describe("contracts/slash-spec", () => {
 		);
 	});
 
+	/**
+	 * The same defect one layer out. `/compact` is a documented retired spelling,
+	 * so it matched nothing, fell through to `unknown`, and was submitted to the
+	 * model, which answered "/compact (completed)" in six output tokens. Context
+	 * was unchanged, no compaction summary was written, and no hook fired, but
+	 * the transcript read like it had worked. A spelling the docs name as retired
+	 * is a mistyped command, not prose.
+	 */
+	it("names the replacement for a retired spelling instead of sending it to the model", () => {
+		const submitted: string[] = [];
+		const notices: string[] = [];
+		const ctx = {
+			notice: (_level: string, text: string) => notices.push(text),
+			submitChat: (text: string) => submitted.push(text),
+			render: () => undefined,
+		} as unknown as SlashCommandContext;
+
+		for (const retired of ["/compact", "/context-init", "/context-clear", "/context-view"]) {
+			dispatchSlashCommand(parseSlashCommand(retired), ctx);
+		}
+		// Arguments the retired spelling used to take must not resurrect it either.
+		dispatchSlashCommand(parseSlashCommand("/compact focus on the build failure"), ctx);
+		// Prose that merely begins with a slash still belongs to the model.
+		dispatchSlashCommand(parseSlashCommand("/not/a/command at all"), ctx);
+
+		deepStrictEqual(submitted, ["/not/a/command at all"], "only unregistered input reaches the model");
+		ok(
+			notices.some((notice) => notice.includes("/compact") && notice.includes("/context compact")),
+			notices.join(" | "),
+		);
+		ok(
+			notices.some((notice) => notice.includes("/context-init") && notice.includes("/context init")),
+			notices.join(" | "),
+		);
+		strictEqual(notices.length, 5, "every retired spelling reports, including the one carrying arguments");
+	});
+
 	it("parses all slash commands according to the v0.2.3 registry contract", () => {
 		const testCases: Array<[string, unknown]> = [
 			// Empty and whitespace inputs
@@ -195,8 +232,14 @@ describe("contracts/slash-spec", () => {
 			],
 			["/context init --no-generate", { kind: "usage-error", command: "context", reason: "Unknown flag: --no-generate" }],
 			["/context init extra", { kind: "usage-error", command: "context", reason: "Unexpected argument: extra" }],
-			["/context-init", { kind: "unknown", text: "/context-init" }],
-			["/context-init --preview", { kind: "unknown", text: "/context-init --preview" }],
+			[
+				"/context-init",
+				{ kind: "usage-error", command: "context", reason: "/context-init was retired; use /context init" },
+			],
+			[
+				"/context-init --preview",
+				{ kind: "usage-error", command: "context", reason: "/context-init was retired; use /context init" },
+			],
 
 			// context reset is zero-argument; confirmation happens in its chooser
 			["/context reset", { kind: "context-clear", options: {} }],
@@ -206,8 +249,14 @@ describe("contracts/slash-spec", () => {
 			["/context reset --confirm-all", { kind: "usage-error", command: "context", reason: "Unknown flag: --confirm-all" }],
 			["/context reset --invalid", { kind: "usage-error", command: "context", reason: "Unknown flag: --invalid" }],
 			["/context reset extra", { kind: "usage-error", command: "context", reason: "Unexpected argument: extra" }],
-			["/context-clear", { kind: "unknown", text: "/context-clear" }],
-			["/context-clear --all", { kind: "unknown", text: "/context-clear --all" }],
+			[
+				"/context-clear",
+				{ kind: "usage-error", command: "context", reason: "/context-clear was retired; use /context reset" },
+			],
+			[
+				"/context-clear --all",
+				{ kind: "usage-error", command: "context", reason: "/context-clear was retired; use /context reset" },
+			],
 
 			// context refresh (hub)
 			["/context refresh", { kind: "context-refresh" }],
@@ -395,13 +444,16 @@ describe("contracts/slash-spec", () => {
 			["/context compact", { kind: "compact", instructions: undefined }],
 			["/context compact   ", { kind: "compact", instructions: undefined }],
 			["/context compact my instructions", { kind: "compact", instructions: "my instructions" }],
-			["/compact", { kind: "unknown", text: "/compact" }],
-			["/compact my instructions", { kind: "unknown", text: "/compact my instructions" }],
+			["/compact", { kind: "usage-error", command: "context", reason: "/compact was retired; use /context compact" }],
+			[
+				"/compact my instructions",
+				{ kind: "usage-error", command: "context", reason: "/compact was retired; use /context compact" },
+			],
 
 			// context overlay (hub, no args); the retired spelling no longer parses
 			["/context", { kind: "context-view" }],
 			["/ctx", { kind: "context-view" }],
-			["/context-view", { kind: "unknown", text: "/context-view" }],
+			["/context-view", { kind: "usage-error", command: "context", reason: "/context-view was retired; use /context" }],
 
 			// status (deleted) -> falls through to unknown
 			["/status", { kind: "unknown", text: "/status" }],
@@ -523,35 +575,51 @@ describe("contracts/slash-spec", () => {
 			commandReference().map((entry) => entry.name),
 			visible,
 		);
-		for (const deleted of [
-			"status",
-			"hotkeys",
-			"skills",
-			"connect",
-			"disconnect",
-			"receipts",
-			"compact",
-			"context-init",
-			"context-clear",
-			"context-view",
-		]) {
+		// Deleted outright: nothing replaced them, so they stay ordinary chat input.
+		for (const deleted of ["status", "hotkeys", "skills", "connect", "disconnect", "receipts"]) {
 			deepStrictEqual(parseSlashCommand(`/${deleted}`), { kind: "unknown", text: `/${deleted}` });
+		}
+		// Renamed: the registry no longer owns the spelling, and the parser says so
+		// rather than letting the model answer a command that no longer exists.
+		for (const [retired, replacement] of [
+			["compact", "/context compact"],
+			["context-init", "/context init"],
+			["context-clear", "/context reset"],
+			["context-view", "/context"],
+		]) {
+			deepStrictEqual(parseSlashCommand(`/${retired}`), {
+				kind: "usage-error",
+				command: "context",
+				reason: `/${retired} was retired; use ${replacement}`,
+			});
 		}
 	});
 
-	it("routes retired context spellings as ordinary unknown chat input", () => {
+	it("never runs the command a retired context spelling used to name", () => {
 		const routed: string[] = [];
 		const ctx = {
 			openContextView: () => routed.push("context-view"),
 			runCompact: () => routed.push("compact"),
 			submitChat: (text: string) => routed.push(`chat:${text}`),
+			notice: (_level: string, text: string) => routed.push(`notice:${text}`),
+			render: () => undefined,
 		} as unknown as SlashCommandContext;
 
 		dispatchSlashCommand(parseSlashCommand("/context-view"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/compact tidy up"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/context"), ctx);
 
-		deepStrictEqual(routed, ["chat:/context-view", "chat:/compact tidy up", "context-view"]);
+		ok(!routed.includes("compact"), "a retired spelling must not reach the handler it once named");
+		ok(!routed.some((entry) => entry.startsWith("chat:")), "and must not be answered by the model either");
+		ok(
+			routed.some((entry) => entry.includes("/context-view was retired")),
+			routed.join(" | "),
+		);
+		ok(
+			routed.some((entry) => entry.includes("/compact was retired")),
+			routed.join(" | "),
+		);
+		strictEqual(routed.at(-1), "context-view", "the surviving spelling still works");
 	});
 
 	it("builds slash autocomplete commands with hints that fit the suggestion row", () => {
