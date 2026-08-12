@@ -230,6 +230,29 @@ describe("contracts/model knowledge base", () => {
 		strictEqual(ornithQuirks?.thinking?.mechanism, "always-on");
 	});
 
+	/**
+	 * A family that pins a sampler for the thinking role must pin one for the
+	 * instruct role too, because a role that runs with thinking off resolves
+	 * `sampling.instruct` and nothing else. When it is missing the request goes
+	 * out carrying no temperature, top_p, or top_k at all and the server's own
+	 * preset decides, which is the one sampler nobody in this repo chose.
+	 *
+	 * The background memory role runs every step at thinking off, so it took the
+	 * empty profile on `gemma4-26b-a4b` and `qwen3.6-35b-a3b` and inherited LM
+	 * Studio's preset on every call.
+	 */
+	it("pins an instruct sampler wherever a family pins a thinking sampler", () => {
+		const bundled = join(dirname(fileURLToPath(import.meta.url)), "../../src/domains/providers/models");
+		const kb = new FileKnowledgeBase([{ dir: bundled, label: "bundled" }]);
+		const missing: string[] = [];
+		for (const entry of kb.entries()) {
+			const sampling = (entry.quirks as LocalModelQuirks | undefined)?.sampling;
+			if (!sampling?.thinking) continue;
+			if (sampling.instruct?.temperature === undefined) missing.push(entry.family);
+		}
+		deepStrictEqual(missing, [], "families pinning a thinking sampler but no instruct sampler");
+	});
+
 	it("keeps catalog reasoning class authoritative over noisy live reasoning detection", () => {
 		const bundled = join(dirname(fileURLToPath(import.meta.url)), "../../src/domains/providers/models");
 		const kb = new FileKnowledgeBase([{ dir: bundled, label: "bundled" }]);
