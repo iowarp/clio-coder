@@ -31,7 +31,7 @@ import {
 } from "../footer-panel.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
-import { abbreviateModelId, barSep, brandMark, clioTheme, collapseHomePath, rule } from "../theme/index.js";
+import { barSep, brandMark, clioTheme, collapseHomePath, formatTargetLabel, rule } from "../theme/index.js";
 import {
 	formatNotificationBadge,
 	formatNotificationPanel,
@@ -383,9 +383,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			? (statuses.find((s) => s.target.id === settings.orchestrator?.target) ?? null)
 			: null;
 
-		const targetLabel = settings?.orchestrator?.target ?? "none";
-		const modelLabel = settings?.orchestrator?.model ?? "none";
-		const target = `${targetLabel} · ${abbreviateModelId(modelLabel)}`;
+		const target = formatTargetLabel(settings?.orchestrator?.target, settings?.orchestrator?.model);
 
 		const resolution = resolveModelRuntimeCapabilitiesForProviders(
 			deps.providers,

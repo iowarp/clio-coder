@@ -354,6 +354,119 @@ Label to config path mapping:
 
 ---
 
+## Settings inventory
+
+Every key `settings.yaml` accepts, with its shipped default, what validation admits, and when a change takes effect. `DEFAULT_SETTINGS` in `src/core/defaults.ts` is the one place a default is written; validation lives in `src/core/config.ts`. A key absent from this table is an unknown-key error, not a silently ignored typo.
+
+"When it applies" has four values. **Immediately** means a running session picks the change up from the config watcher. **Next turn** means the running turn finishes on the old value. **Next session** means `settings.yaml` is a saved default that a launched session copies and then owns, so writing it never redirects a session already running. **Restart** means the process reads it once at boot.
+
+### Routing defaults
+
+These are saved defaults, not a live control surface. See [Live routing vs saved defaults](#live-routing-vs-saved-defaults).
+
+| Key | Default | Validation | When it applies |
+| --- | --- | --- | --- |
+| `orchestrator.target` | `null` | a target id present in `targets` | next session |
+| `orchestrator.model` | `null` | string | next session |
+| `orchestrator.thinkingLevel` | `off` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; further narrowed to what the resolved model supports | next session |
+| `background.target` | `null` | a target id present in `targets` | next session |
+| `background.model` | `null` | string | next session |
+| `background.thinkingLevel` | `off` | as above | next session |
+| `workers.default.target` | `null` | a target id present in `targets` | next session |
+| `workers.default.model` | `null` | string | next session |
+| `workers.default.thinkingLevel` | `off` | as above | next session |
+| `scope` | `[]` | list of strings | next session |
+
+### Safety and worker policy
+
+| Key | Default | Validation | When it applies |
+| --- | --- | --- | --- |
+| `autonomy` | `auto-edit` | `read-only`, `suggest`, `auto-edit`, `full-auto` | immediately |
+| `workers.onPermission` | `deny` | `deny`, `escalate` | next dispatch |
+| `workers.escalation.timeoutMs` | `120000` | integer ≥ 1 | next dispatch |
+| `workers.escalation.fallback` | `deny` | `deny`, `fail` | next dispatch |
+| `workers.maxRetries` | `2` | integer ≥ 0 | next dispatch |
+| `workers.resilienceCooldownMs` | `15000` | integer ≥ 0 | next dispatch |
+| `workers.profiles` | `{}` | map of profile name to a target/model/thinking choice | next dispatch |
+| `workers.agentBindings` | `{}` | map of agent id to a key present in `workers.profiles` | next dispatch |
+| `skills.trustProjectCompatRoots` | `false` | boolean | restart |
+
+### Guardrails
+
+Every one of these has an environment override for a single process; see [environment-variables.md](environment-variables.md). Resolution is env, then settings, then the built-in default.
+
+| Key | Default | Validation | When it applies |
+| --- | --- | --- | --- |
+| `guardrails.turnToolCallBudget` | `60` | integer ≥ 1 | next turn |
+| `guardrails.workerToolCallCap` | `150` | integer ≥ 1 | next dispatch |
+| `guardrails.maxDispatchRuns` | `1000` | integer ≥ 1 | next dispatch |
+| `guardrails.readMaxBytes` | `51200` | integer ≥ 1, floored at 1024 by the tool | next turn |
+| `guardrails.observationTurnBudgetBytes` | `196608` | integer ≥ 1 | next turn |
+| `guardrails.internalDispatchTimeoutMs` | `900000` | integer ≥ 1 | next dispatch |
+
+### Context and cost
+
+| Key | Default | Validation | When it applies |
+| --- | --- | --- | --- |
+| `compaction.auto` | `true` | boolean | next turn |
+| `compaction.threshold` | `0.8` | number in 0 to 1 | next turn |
+| `compaction.excludeLastTurns` | `6` | integer ≥ 1 | next turn |
+| `defaults.maxTokens` | `32768` | integer ≥ 1 | next turn |
+| `budget.sessionCeilingUsd` | `5` | number ≥ 0 | immediately |
+| `budget.concurrency` | `auto` | `auto` or integer ≥ 1 | next dispatch |
+| `retry.enabled` | `true` | boolean | next turn |
+| `retry.maxRetries` | `3` | integer ≥ 0 | next turn |
+| `retry.baseDelayMs` | `2000` | integer ≥ 0 | next turn |
+| `retry.maxDelayMs` | `60000` | integer ≥ 0 | next turn |
+
+### Proactive memory
+
+| Key | Default | Validation | When it applies |
+| --- | --- | --- | --- |
+| `memory.intervention.enabled` | `true` | boolean | next turn |
+| `memory.intervention.everyNTools` | `10` | integer ≥ 2 | next turn |
+| `memory.intervention.windowSteps` | `8` | integer ≥ 1 | next turn |
+| `memory.intervention.maxTokens` | `400` | integer ≥ 1 | next turn |
+| `memory.intervention.timeoutMs` | `180000` | integer ≥ 1 | next turn |
+
+### Delegation
+
+| Key | Default | Validation | When it applies |
+| --- | --- | --- | --- |
+| `delegation.agents` | `[]` | list of agent definitions | next dispatch |
+| `delegation.defaults.connectTimeoutMs` | `30000` | integer ≥ 1 | next dispatch |
+| `delegation.defaults.turnTimeoutMs` | `300000` | integer ≥ 1 | next dispatch |
+| `delegation.defaults.permissionTimeoutMs` | `120000` | integer ≥ 1 | next dispatch |
+| `delegation.defaults.toolGovernance` | `clio-policy` | `clio-policy`, `runtime-native` | next dispatch |
+
+### Interface
+
+| Key | Default | Validation | When it applies |
+| --- | --- | --- | --- |
+| `theme` | `default` | string naming a registered theme | immediately |
+| `terminal.showTerminalProgress` | `false` | boolean | immediately |
+| `terminal.outputVerbosity` | `default` | `minimal`, `default`, `verbose` | immediately |
+| `modelSelector.favorites` | `[]` | list of strings | immediately |
+| `modelSelector.recentLimit` | `12` | integer ≥ 1 | immediately |
+| `keybindings` | `{}` | map of binding id to a key string or list of them | restart |
+
+Recently selected models are runtime state and live in `recent-models.json` under the state directory, not here. A `state.recentModels` key in `settings.yaml` is an unknown-key error.
+
+### Structural and catalog keys
+
+| Key | Default | Validation | When it applies |
+| --- | --- | --- | --- |
+| `version` | `1` | integer, currently `1` only | restart |
+| `identity` | `clio` | string | restart |
+| `targets` | `[]` | list of target descriptors, each with a unique id and a registered runtime | immediately for the catalog, next session for routing |
+| `runtimePlugins` | `[]` | list of plugin descriptors | restart |
+| `fleet.nodes` | `[]` | list of node descriptors | next dispatch |
+| `routing.activeRoles` | `[]` | list of strings; empty keeps measured routing shadow-only | next dispatch |
+| `routing.activePostures` | `[]` | list of strings | next dispatch |
+| `routing.agentAutomation.activeAgentRoles` | `[]` | list of strings | next dispatch |
+
+---
+
 ## Configure targets
 
 Interactive wizard:

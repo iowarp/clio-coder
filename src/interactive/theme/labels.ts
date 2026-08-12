@@ -20,6 +20,42 @@ export function abbreviateModelId(modelId: string | null | undefined): string {
 	return joined.length > 18 ? joined.slice(0, 18) : joined;
 }
 
+export interface TargetLabelOptions {
+	/** Separator between the target id and the model. The narrow rail omits the spaces. */
+	separator?: string;
+	/** Off for surfaces with room for the whole wire id. */
+	abbreviate?: boolean;
+}
+
+/**
+ * The chat target as one label, with one spelling for the state where there
+ * isn't one.
+ *
+ * Five surfaces answered the same question five different ways: the banner read
+ * `not configured/not configured`, the editor rail `no model`, the footer
+ * `none · none`, the settings overlay `(unset)`, and the providers overlay
+ * `(no model)`. A user comparing them is checking whether Clio knows what it is
+ * talking to, and four spellings read as four states.
+ *
+ * A target with no model and a model with no target are distinct from having
+ * neither, so each says which half is missing rather than collapsing to the
+ * same phrase. The settings overlay keeps `(unset)`, which labels an empty
+ * editable field rather than reporting status.
+ */
+export function formatTargetLabel(
+	targetId: string | null | undefined,
+	modelId: string | null | undefined,
+	options: TargetLabelOptions = {},
+): string {
+	const target = (targetId ?? "").trim();
+	const model = (modelId ?? "").trim();
+	if (target.length === 0 && model.length === 0) return "not configured";
+	const shown = options.abbreviate === false ? model : abbreviateModelId(model);
+	if (target.length === 0) return `no target · ${shown}`;
+	if (model.length === 0) return `${target} · no model`;
+	return `${target}${options.separator ?? " · "}${shown}`;
+}
+
 /**
  * Compact duration used everywhere the TUI shows elapsed time (footer chips,
  * dispatch cards, task island rows): sub-second in ms, sub-minute in seconds
