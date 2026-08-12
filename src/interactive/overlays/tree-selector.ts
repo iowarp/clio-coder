@@ -16,7 +16,7 @@ const VISIBLE_ROWS = 16;
 
 /**
  * /tree navigator overlay. Phase 12 slice 12b-2 behaviors only:
- *   - One row per node, children indented under parents by 2 spaces per depth
+ *   - One row per node, indented two spaces per branch level (not per message)
  *   - Shift+T toggles ISO timestamps on/off
  *   - `e` enters label edit submode (Enter commits, Esc cancels)
  *   - Enter on a row switches the active append point to that turn id
@@ -94,7 +94,16 @@ function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 		const node = snapshot.nodesById[id];
 		if (!node) return;
 		rows.push({ depth, node, sessionId: snapshot.sessionId });
-		for (const childId of node.children) walk(childId, depth + 1);
+		// Indentation marks a fork, not a step. Every message is a child of the
+		// one before it, so indenting per child made depth equal message count:
+		// a seventeen-message session rendered as a seventeen-level staircase
+		// that took a column off the preview every row and walked off the right
+		// edge. A node with a single child continues the same line of the
+		// conversation and keeps its parent's depth; only a branch point pushes
+		// its children right, which is the thing the operator opened this view
+		// to see.
+		const childDepth = node.children.length > 1 ? depth + 1 : depth;
+		for (const childId of node.children) walk(childId, childDepth);
 	};
 	for (const rootId of snapshot.rootIds) walk(rootId, 0);
 	return rows;
