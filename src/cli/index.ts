@@ -5,6 +5,7 @@
 // else — this is the highest-value cut of the cold module-load tax. Code
 // splitting (tsup.config.ts) keeps each command's transitive heavy externals in
 // its own chunk.
+import { fileURLToPath } from "node:url";
 import { traceBoot } from "../core/boot-trace.js";
 import { extractGlobalFlags, parseFlags, printError } from "./argv.js";
 
@@ -237,12 +238,53 @@ function isCommandToken(token: string): boolean {
 }
 
 /**
+ * Turn a missing command chunk into a repair instruction.
+ *
+ * Every subcommand is a dynamic import of a code-split chunk beside this
+ * entry, so an install that was interrupted between unpacking the entry and
+ * unpacking the rest produces a `clio` that starts, parses flags, prints
+ * `--version`, and then dies on `Cannot find module` the moment it is asked to
+ * do anything. That message names an internal build artifact nobody outside
+ * this repository can act on. The filter on our own output directory keeps a
+ * module error raised by a user's extension or hook reporting itself normally.
+ */
+function incompleteInstallationAdvice(err: unknown): string | null {
+	if ((err as NodeJS.ErrnoException | undefined)?.code !== "ERR_MODULE_NOT_FOUND") return null;
+	const message = err instanceof Error ? err.message : String(err);
+	let outputDir: string;
+	try {
+		outputDir = fileURLToPath(new URL("../", import.meta.url));
+	} catch {
+		return null;
+	}
+	if (!message.includes(outputDir)) return null;
+	return [
+		`${message}`,
+		"",
+		"This Clio Coder installation is incomplete: the command's own module is missing from",
+		`${outputDir}`,
+		"Reinstall to restore it, using the line that matches how you installed:",
+		"  npm install -g @iowarp/clio-coder    # npm install",
+		"  npm run install:local                # source checkout",
+	].join("\n");
+}
+
+/**
  * Route a subcommand to its registered handler, importing only that command's
  * module. Unknown names fail before loading any command graph.
  */
 async function dispatch(subcommand: string, subArgs: string[], bootOptions: CliBootOptions): Promise<number> {
 	const handler = COMMAND_HANDLERS.get(subcommand);
-	if (handler) return handler(subArgs, bootOptions);
+	if (handler) {
+		try {
+			return await handler(subArgs, bootOptions);
+		} catch (err) {
+			const advice = incompleteInstallationAdvice(err);
+			if (advice === null) throw err;
+			printError(advice);
+			return 1;
+		}
+	}
 	printError(`unknown subcommand: ${subcommand}`);
 	process.stdout.write(helpText(false));
 	return 2;

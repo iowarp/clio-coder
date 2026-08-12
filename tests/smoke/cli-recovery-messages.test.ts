@@ -1,0 +1,163 @@
+/**
+ * The messages Clio prints when its own state is broken, held against whether
+ * the command each one names can actually change the outcome.
+ *
+ * Every case here was reachable only from a machine already in trouble, which
+ * is how each one shipped with an instruction that reads well and does
+ * nothing: an invalid settings.yaml told the operator to run a repair that
+ * deliberately never touches settings, a YAML parse error folded its source
+ * excerpt into the middle of an aligned report and pushed the rows after it
+ * out of view, and an installation missing one of its own chunks named a
+ * build artifact instead of a reinstall.
+ */
+import { match, ok, strictEqual } from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { makeScratchHome, runCli } from "../harness/spawn.js";
+
+const REPO_ROOT = new URL("../..", import.meta.url).pathname;
+
+/** Run an arbitrary node entry, which the shared runCli helper pins to this checkout's. */
+function runNode(args: ReadonlyArray<string>): Promise<{ code: number | null; stdout: string; stderr: string }> {
+	return new Promise((resolve, reject) => {
+		const child = spawn(process.execPath, [...args], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+		let stdout = "";
+		let stderr = "";
+		child.stdout.on("data", (chunk: Buffer) => {
+			stdout += chunk.toString("utf8");
+		});
+		child.stderr.on("data", (chunk: Buffer) => {
+			stderr += chunk.toString("utf8");
+		});
+		child.on("error", reject);
+		child.on("close", (code) => resolve({ code, stdout, stderr }));
+	});
+}
+
+describe("clio broken-state recovery messages", { concurrency: false }, () => {
+	let scratch: ReturnType<typeof makeScratchHome>;
+
+	beforeEach(() => {
+		scratch = makeScratchHome("clio-recovery-");
+	});
+
+	afterEach(() => {
+		scratch.cleanup();
+	});
+
+	it("names the file and the two commands that repair an invalid settings.yaml", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const settings = join(scratch.dir, "config", "settings.yaml");
+		writeFileSync(settings, "version: 1\nidentity: clio\ntypoKey: 3\n", "utf8");
+
+		const report = await runCli(["doctor"], { env: scratch.env });
+		strictEqual(report.code, 1);
+		match(report.stdout, /typoKey: unknown key/);
+		match(report.stdout, /clio reset --config --force/);
+		ok(
+			!/remove unrecognized keys or update them to current settings key names/.test(report.stdout),
+			"the one-size remedy that did not fit range errors is gone",
+		);
+
+		// `doctor --fix` deliberately never rewrites settings, so nothing may
+		// tell the operator that it will.
+		const loader = await runCli(["targets"], { env: scratch.env });
+		strictEqual(loader.code, 1);
+		match(loader.stderr, /Fix the keys above in .*settings\.yaml/);
+		match(loader.stderr, /never rewrites settings/);
+		match(loader.stderr, /clio reset --config --force/);
+
+		const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
+		strictEqual(fixed.code, 1, "--fix cannot repair settings content and must keep saying so");
+
+		const discarded = await runCli(["reset", "--config", "--force"], { env: scratch.env });
+		strictEqual(discarded.code, 0, `stderr=${discarded.stderr}`);
+		const recovered = await runCli(["doctor"], { env: scratch.env });
+		strictEqual(recovered.code, 0, `the documented remedy actually recovers; stdout=${recovered.stdout}`);
+	});
+
+	it("folds a multi-line YAML parse error into one doctor row", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		writeFileSync(join(scratch.dir, "config", "settings.yaml"), "version: 1\n  bad: [unclosed\n", "utf8");
+
+		const result = await runCli(["doctor"], { env: scratch.env });
+
+		strictEqual(result.code, 1);
+		const rows = result.stdout.trimEnd().split("\n");
+		ok(
+			rows.every((row) => /^(OK|WARN|!!)/.test(row)),
+			`every report line must start a finding; got:\n${result.stdout}`,
+		);
+		const settingsRow = rows.find((row) => row.includes("settings.yaml"));
+		ok(settingsRow?.includes("unreadable:"), `expected an unreadable row, got ${settingsRow}`);
+		ok(settingsRow?.includes("clio reset --config --force"), "the parse-error row carries a remedy too");
+	});
+
+	it("turns a missing command chunk into a reinstall instruction", async () => {
+		// An install interrupted between unpacking the entry and unpacking the
+		// rest: the launcher starts, parses flags, and then cannot import the
+		// command it was asked for. Reproduced against a real copied dist so the
+		// dispatcher's own error path runs, not a hand-written stand-in.
+		const brokenRoot = join(scratch.dir, "broken-install");
+		mkdirSync(brokenRoot, { recursive: true });
+		cpSync(join(REPO_ROOT, "dist"), join(brokenRoot, "dist"), { recursive: true });
+		cpSync(join(REPO_ROOT, "package.json"), join(brokenRoot, "package.json"));
+		symlinkSync(join(REPO_ROOT, "node_modules"), join(brokenRoot, "node_modules"));
+		const chunk = readdirSync(join(brokenRoot, "dist")).find((name) => /^reset-.*\.js$/.test(name));
+		ok(chunk, "the reset command is code-split into its own chunk");
+		rmSync(join(brokenRoot, "dist", chunk), { force: true });
+
+		const result = await runNode([join(brokenRoot, "dist", "cli", "index.js"), "reset", "--dry-run"]);
+
+		strictEqual(result.code, 1, `stdout=${result.stdout} stderr=${result.stderr}`);
+		match(result.stderr, /installation is incomplete/);
+		match(result.stderr, /npm install -g @iowarp\/clio-coder/);
+		match(result.stderr, /npm run install:local/);
+		match(result.stderr, new RegExp(chunk.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+	});
+
+	it("says what the bannered boot is actually configured for", async () => {
+		// The whole of what a piped or CI invocation of bare `clio` shows. It
+		// used to end in a hardcoded `ready` that a machine with no target at
+		// all printed just as happily.
+		const fresh = await runCli([], { env: scratch.env });
+		strictEqual(fresh.code, 0, `stderr=${fresh.stderr}`);
+		match(fresh.stdout, /EXPERIMENTAL/);
+		match(fresh.stdout, /no model target configured/);
+		match(fresh.stdout, /clio configure/);
+		ok(!/· ready/.test(fresh.stdout), "an unconfigured install may not describe itself as ready");
+
+		// Written directly rather than through `clio configure`, which probes the
+		// endpoint; the banner is what is under test, not target registration.
+		const settings = readFileSync(join(scratch.dir, "config", "settings.yaml"), "utf8");
+		writeFileSync(
+			join(scratch.dir, "config", "settings.yaml"),
+			settings
+				.replace(
+					"targets: []",
+					"targets:\n  - id: probe\n    runtime: ollama-native\n    url: http://127.0.0.1:11434\n    defaultModel: probe-model",
+				)
+				.replace("orchestrator:\n  target: null\n  model: null", "orchestrator:\n  target: probe\n  model: probe-model"),
+			"utf8",
+		);
+
+		const configured = await runCli([], { env: scratch.env });
+		strictEqual(configured.code, 0, `stderr=${configured.stderr}`);
+		match(configured.stdout, /target probe · model probe-model/);
+	});
+
+	it("lets a module error from outside the installation report itself", async () => {
+		// The advice is filtered to this installation's own output directory, so
+		// a user's extension or hook failing to resolve still surfaces normally.
+		const script = join(scratch.dir, "outside.mjs");
+		writeFileSync(script, "await import('/nonexistent-user-module.mjs');\n", "utf8");
+
+		const result = await runNode([script]);
+
+		strictEqual(result.code, 1);
+		match(result.stderr, /Cannot find module/);
+		ok(!result.stderr.includes("installation is incomplete"), "no clio repair advice for a foreign module error");
+	});
+});

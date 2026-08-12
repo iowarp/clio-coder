@@ -40,11 +40,22 @@ export interface SettingsIssue {
 export class SettingsValidationError extends Error {
 	readonly issues: ReadonlyArray<SettingsIssue>;
 
+	/**
+	 * The remedy names the file and the two commands that actually change this
+	 * outcome. It used to name `clio doctor --fix`, which cannot help here by
+	 * design: `--fix` creates missing structure and repairs credential
+	 * permissions, and initialization deliberately never reads or rewrites an
+	 * existing settings.yaml. Every invalid file therefore came with an
+	 * instruction that left it exactly as invalid as before.
+	 */
 	constructor(issues: ReadonlyArray<SettingsIssue>) {
 		const lines = issues.map((issue) => `  ${issue.path}: ${issue.message}`);
+		const path = join(resolveClioDirs().config, "settings.yaml");
 		super(
-			`settings.yaml failed validation:\n${lines.join("\n")}\n` +
-				"Run `clio doctor --fix` to repair settings written by older Clio versions, then retry.",
+			`settings.yaml failed validation:\n${lines.join("\n")}\n\n` +
+				`Fix the keys above in ${path}, then run \`clio doctor\` to re-check.\n` +
+				"`clio doctor --fix` repairs directories and credential permissions; it never rewrites settings.\n" +
+				"To discard these settings and start from defaults instead, run `clio reset --config --force`.",
 		);
 		this.name = "SettingsValidationError";
 		this.issues = issues;
