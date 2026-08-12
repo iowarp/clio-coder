@@ -996,6 +996,26 @@ for (const entry of BUILTIN_SLASH_COMMANDS) {
 	}
 }
 
+/**
+ * Spellings that once named a command and no longer do, mapped to what replaced
+ * them.
+ *
+ * Retiring a spelling removed it from the registry, which left it matching
+ * nothing and falling through to the model as prose. Measured: `/compact` was
+ * answered "/compact (completed)" in six output tokens while context stayed at
+ * 9%, no compaction summary was written, and no hook fired. The operator reads
+ * a completion that never happened, which is the same failure `/thinking off`
+ * had. A word the documentation names as retired is a mistyped command, so it
+ * reports the rename instead. Prose that merely begins with a slash is
+ * unaffected and still reaches the model.
+ */
+const RETIRED_SLASH_SPELLINGS: ReadonlyMap<string, string> = new Map([
+	["compact", "/context compact"],
+	["context-init", "/context init"],
+	["context-clear", "/context reset"],
+	["context-view", "/context"],
+]);
+
 /** Pure slash-command parser: no I/O, no side effects. Walks the registry in order. */
 export function parseSlashCommand(input: string): SlashCommand {
 	const trimmed = input.trim();
@@ -1003,6 +1023,15 @@ export function parseSlashCommand(input: string): SlashCommand {
 	for (const entry of BUILTIN_SLASH_COMMANDS) {
 		const match = entry.match ? entry.match(trimmed) : matchFromSpec(entry, trimmed);
 		if (match) return match;
+	}
+	const retiredToken = trimmed.slice(1).split(/\s+/u)[0] ?? "";
+	const replacement = RETIRED_SLASH_SPELLINGS.get(retiredToken);
+	if (trimmed.startsWith("/") && replacement !== undefined) {
+		return {
+			kind: "usage-error",
+			command: "context",
+			reason: `/${retiredToken} was retired; use ${replacement}`,
+		};
 	}
 	return { kind: "unknown", text: trimmed };
 }

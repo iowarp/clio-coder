@@ -169,7 +169,10 @@ context artifacts (`.clio/codewiki.json`, `.clio/state.json`,
 `.clio/handoffs/`, `.clio/proposals/`). Its interactive choice preserves or
 deletes `CLIO.md`; cancellation makes no changes. Session reset stays `/new`;
 there is deliberately no `/context clear`. The retired spellings `/compact`,
-`/context-init`, `/context-clear`, and `/context-view` are no longer parsed.
+`/context-init`, `/context-clear`, and `/context-view` no longer run anything.
+Typing one reports the spelling that replaced it rather than reaching the model,
+which used to answer a retired command conversationally and leave the operator
+believing it had run.
 
 
 The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `f` to set the selected target as the fleet default, `c` to connect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.
