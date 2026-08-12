@@ -23,9 +23,18 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
+import {
+	type ConfigureCategory,
+	formatCategoryMenu,
+	formatRuntimeList,
+	formatRuntimeMenu,
+	matchCategoryChoice,
+	type RuntimeListRow,
+} from "./configure-layout.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import { printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
+import { terminalColumns } from "./text-layout.js";
 import { validateModelChoice } from "./validate-model.js";
 
 const HELP = `clio configure
@@ -267,15 +276,9 @@ function defaultUrlFor(runtimeId: string): string {
 function printRuntimeList(includeHidden: boolean): void {
 	const settings = readSettings();
 	const auth = openAuthStorage();
-	let lastGroup: ProviderSupportEntry["group"] | null = null;
+	const rows: RuntimeListRow[] = [];
 	for (const entry of listProviderSupportEntries(getRuntimeRegistry().list(), { includeHidden })) {
-		if (entry.group !== lastGroup) {
-			if (lastGroup !== null) process.stdout.write("\n");
-			lastGroup = entry.group;
-			process.stdout.write(`${supportGroupLabel(entry.group)}:\n`);
-		}
 		const runtime = getRuntimeRegistry().get(entry.runtimeId);
-		const targetCount = configuredTargetsForRuntime(settings, entry.runtimeId).length;
 		const status =
 			runtime && entry.connectable
 				? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false })
@@ -290,13 +293,20 @@ function printRuntimeList(includeHidden: boolean): void {
 						? "credential"
 						: "needs-key"
 					: (runtime?.auth ?? "none");
-		const modelLabel =
-			entry.modelHints.length > 0
-				? entry.modelHints.slice(0, 2).join(", ")
-				: (defaultModelForRuntime(entry.runtimeId) ?? "-");
-		process.stdout.write(
-			`  ${entry.runtimeId.padEnd(22)} ${entry.label.padEnd(20)} ${authLabel.padEnd(11)} targets=${String(targetCount).padEnd(3)} models=${modelLabel}\n`,
-		);
+		rows.push({
+			group: supportGroupLabel(entry.group),
+			runtimeId: entry.runtimeId,
+			label: entry.label,
+			auth: authLabel,
+			targets: configuredTargetsForRuntime(settings, entry.runtimeId).length,
+			models:
+				entry.modelHints.length > 0
+					? entry.modelHints.slice(0, 2).join(", ")
+					: (defaultModelForRuntime(entry.runtimeId) ?? "-"),
+		});
+	}
+	for (const line of formatRuntimeList(rows, terminalColumns())) {
+		process.stdout.write(`${line}\n`);
 	}
 }
 
@@ -828,14 +838,15 @@ async function pickRuntimeFromEntries(
 		return null;
 	}
 	process.stdout.write(`${heading}\n`);
-	let lastGroup: ProviderSupportEntry["group"] | null = null;
-	for (const [index, entry] of entries.entries()) {
-		if (entry.group !== lastGroup) {
-			lastGroup = entry.group;
-			process.stdout.write(`  ${supportGroupLabel(entry.group)}:\n`);
-		}
-		process.stdout.write(`    ${String(index + 1).padStart(2)}. ${entry.runtimeId.padEnd(22)} ${entry.summary}\n`);
-	}
+	const menu = formatRuntimeMenu(
+		entries.map((entry) => ({
+			group: supportGroupLabel(entry.group),
+			runtimeId: entry.runtimeId,
+			summary: entry.summary,
+		})),
+		terminalColumns(),
+	);
+	for (const line of menu) process.stdout.write(`${line}\n`);
 	const allowedIds = new Set(entries.map((entry) => entry.runtimeId));
 	for (;;) {
 		const answer = await ask(rl, "\nSelection (number or runtime id)", entries[0]?.runtimeId ?? "");
@@ -856,8 +867,6 @@ async function pickRuntimeFromEntries(
 		process.stderr.write(`unknown runtime id for this category: ${answer}\n`);
 	}
 }
-
-export type ConfigureCategory = "local-app" | "local-http" | "chatgpt" | "cloud-api" | "all";
 
 const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama-native", "lmstudio-native"]);
 
@@ -900,24 +909,13 @@ function runtimesForCategory(
 
 async function pickCategory(rl: ReturnType<typeof createInterface>): Promise<ConfigureCategory | null> {
 	process.stdout.write("\nHow will you connect Clio to a model?\n\n");
-	process.stdout.write("  1. Local app          Ollama or LM Studio (recommended for new users)\n");
-	process.stdout.write("  2. Local HTTP server  llama.cpp / vLLM / SGLang / OpenAI/Anthropic-compatible\n");
-	process.stdout.write("  3. ChatGPT plan       Plus or Pro via Codex OAuth\n");
-	process.stdout.write(
-		"  4. Cloud API key      Anthropic, OpenAI, OpenRouter, Groq, Google, DeepSeek, Mistral,\n" +
-			"                        Bedrock, or any OpenAI/Anthropic-compatible endpoint (e.g. Inception)\n\n",
-	);
-	process.stdout.write("  5. All runtimes       advanced (full list)\n");
+	for (const line of formatCategoryMenu(terminalColumns())) process.stdout.write(`${line}\n`);
 	for (;;) {
 		const answer = await ask(rl, "\nSelection", "1");
 		if (answer === null) return null;
 		if (answer.length === 0) continue;
-		const lc = answer.toLowerCase();
-		if (lc === "1" || lc === "local-app" || lc === "local") return "local-app";
-		if (lc === "2" || lc === "local-http" || lc === "http") return "local-http";
-		if (lc === "3" || lc === "chatgpt" || lc === "codex") return "chatgpt";
-		if (lc === "4" || lc === "cloud-api" || lc === "cloud") return "cloud-api";
-		if (lc === "5" || lc === "a" || lc === "all") return "all";
+		const category = matchCategoryChoice(answer);
+		if (category) return category;
 		process.stderr.write(`invalid choice: ${answer}\n`);
 	}
 }
