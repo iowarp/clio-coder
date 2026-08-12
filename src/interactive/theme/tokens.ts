@@ -60,6 +60,21 @@ export interface ClioTheme {
 	fgSequence(token: ClioToken): string;
 }
 
+/**
+ * The NO_COLOR convention: set and non-empty means emit no color, whatever the
+ * value is. Clio was ignoring it entirely. A session launched with NO_COLOR=1
+ * still wrote 961 non-reset SGR sequences in its first three seconds, most of
+ * them 24-bit foregrounds, which is exactly what the variable exists to stop.
+ *
+ * Only color is dropped. Bold, dim, italic, and underline carry structure
+ * rather than color and are what a monochrome terminal has left to read the
+ * interface with, so they stay.
+ */
+function colorDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+	const raw = env.NO_COLOR;
+	return typeof raw === "string" && raw.length > 0;
+}
+
 function detectTruecolor(env: NodeJS.ProcessEnv = process.env): boolean {
 	const colorTerm = (env.COLORTERM ?? "").toLowerCase();
 	if (colorTerm.includes("truecolor") || colorTerm.includes("24bit")) return true;
@@ -76,19 +91,21 @@ function bgCode(color: TokenColor, truecolor: boolean): string {
 }
 
 export function fgSequence(token: ClioToken, truecolor: boolean = detectTruecolor()): string {
+	if (colorDisabled()) return "";
 	return `\u001b[${fgCode(TOKENS[token], truecolor)}m`;
 }
 
-export function createClioTheme(options: { truecolor?: boolean } = {}): ClioTheme {
+export function createClioTheme(options: { truecolor?: boolean; color?: boolean } = {}): ClioTheme {
 	const truecolor = options.truecolor ?? detectTruecolor();
+	const color = options.color ?? !colorDisabled();
 	const paint = (text: string, mods: PaintMods): string => {
 		const codes: string[] = [];
 		if (mods.bold) codes.push("1");
 		if (mods.dim) codes.push("2");
 		if (mods.italic) codes.push("3");
 		if (mods.underline) codes.push("4");
-		if (mods.fg) codes.push(fgCode(TOKENS[mods.fg], truecolor));
-		if (mods.bg) codes.push(bgCode(TOKENS[mods.bg], truecolor));
+		if (color && mods.fg) codes.push(fgCode(TOKENS[mods.fg], truecolor));
+		if (color && mods.bg) codes.push(bgCode(TOKENS[mods.bg], truecolor));
 		if (codes.length === 0) return text;
 		return `\u001b[${codes.join(";")}m${text}${SGR_RESET}`;
 	};
@@ -98,6 +115,6 @@ export function createClioTheme(options: { truecolor?: boolean } = {}): ClioThem
 		fg: (token, text) => paint(text, { fg: token }),
 		bg: (token, text) => paint(text, { bg: token }),
 		style: (token, text, mods = {}) => paint(text, { ...mods, fg: token }),
-		fgSequence: (token) => fgSequence(token, truecolor),
+		fgSequence: (token) => (color ? fgSequence(token, truecolor) : ""),
 	};
 }

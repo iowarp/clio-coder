@@ -22,6 +22,7 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 
 | Variable | Default | Controls |
 | --- | --- | --- |
+| `NO_COLOR` | unset | Set to any non-empty value to drop every foreground and background color. Bold, dim, italic, and underline stay, because they are what is left to read the interface by (`src/interactive/theme/tokens.ts`). |
 | `CLIO_RIGOR` | repo-derived | Finish-contract evidence bar, `normal` or `high`, layered over the repo-derived default (`src/domains/safety/rigor.ts`). |
 | `CLIO_RESIDENCY` | managed | `observe`/`off` stops Clio managing model residency on every local runtime path, llama.cpp routers included; per-target opt-out via `lifecycle: user-managed` (`src/engine/apis/residency.ts`). |
 | `CLIO_TRUST_PROJECT_SKILLS` | off | `1` trusts project-local skills for execution (`src/domains/resources/skills/loader.ts`). |
