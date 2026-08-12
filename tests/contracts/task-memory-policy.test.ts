@@ -1,9 +1,11 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import {
 	parseTaskMemoryPolicyResponse,
 	runTaskMemoryPolicy,
+	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
 	type TaskMemoryModelClient,
 	type TaskMemoryModelRequest,
 } from "../../src/domains/memory/task-memory-policy.js";
@@ -30,6 +32,14 @@ function clientReturning(text: string, calls: TaskMemoryModelRequest[] = []): Ta
 }
 
 describe("contracts/task memory prompted policy", () => {
+	it("keeps one default deadline for the one timeout setting", () => {
+		strictEqual(
+			TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
+			DEFAULT_SETTINGS.memory.intervention.timeoutMs,
+			"the policy fallback and the settings default are the same setting and must not drift",
+		);
+	});
+
 	/**
 	 * The trajectory is the one thing the model has to reason over, and it is
 	 * handed across as JSON. Bounding the rendered form by slicing the serialized

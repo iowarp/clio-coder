@@ -5,7 +5,19 @@ import {
 import { TASK_MEMORY_CONTENT_MAX_CHARS, type TaskMemoryBank, type TaskMemoryRenderableClass } from "./task-bank.js";
 
 export const TASK_MEMORY_POLICY_MAX_OPERATIONS = 8;
-export const TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS = 20_000;
+/**
+ * Fallback deadline for a caller that supplies no timeout, which is the
+ * middleware constructed without settings and `runTaskMemoryPolicy` called
+ * directly.
+ *
+ * This must equal the settings default in `src/core/defaults.ts`; a contract
+ * test pins the pair. It read 20000 while the shipped default was 180000, and
+ * 20000 is the value measured to have produced 256 timeouts against a route
+ * whose completions have a 15s median and an 81s tail. Two numbers for one
+ * setting means any path that misses the settings object silently gets the one
+ * known to be wrong.
+ */
+export const TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS = 180_000;
 /**
  * The envelope itself needs a few hundred tokens. The rest is headroom for a
  * model that reasons despite thinking being requested off: measured preambles on
