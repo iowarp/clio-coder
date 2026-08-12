@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readlinkSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
@@ -149,13 +149,10 @@ function removeLauncher(dryRun: boolean): RemovalFailure | null {
 		return null;
 	}
 	process.stdout.write(`  binary   remove ${linkPath} ${verdict.detail}\n`);
-	if (dryRun) return null;
-	try {
-		rmSync(linkPath, { force: true });
-		return null;
-	} catch (error) {
-		return { label: "binary", path: linkPath, reason: error instanceof Error ? error.message : String(error) };
-	}
+	// Shares removePath so the launcher gets the same unlink-the-link handling
+	// every other removed path gets. Removing the link with `rmSync` left a
+	// dangling one in place while reporting that it had gone.
+	return removePath("binary", linkPath, dryRun);
 }
 
 function findClioOnPath(): string | null {
