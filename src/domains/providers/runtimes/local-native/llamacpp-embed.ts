@@ -6,7 +6,7 @@ import type { EmbedResult } from "../../types/inference.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
-import { stripTrailingSlash, synthLocalModel, withV1 } from "../common/local-synth.js";
+import { synthLocalModel, targetRootUrl, withV1 } from "../common/local-synth.js";
 import { probeLlamaCppProps, probeOpenAIModels } from "../common/probe-helpers.js";
 
 const defaultCapabilities: CapabilityFlags = {
@@ -23,7 +23,7 @@ const defaultCapabilities: CapabilityFlags = {
 };
 
 function targetUrl(target: TargetDescriptor): string | null {
-	return target.url ? stripTrailingSlash(target.url) : null;
+	return targetRootUrl(target);
 }
 
 interface NativeEmbeddingItem {
