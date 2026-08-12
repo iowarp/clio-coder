@@ -1,7 +1,7 @@
 import type { RunAbortSource } from "../../core/bus-events.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ChatLoopEvent, RetryStatusPhase } from "../chat-loop.js";
-import { buildSummary, emptySummary } from "./summary.js";
+import { buildSummary, emptyRunTally, foldMessageIntoRunTally, summaryFromRunTally } from "./summary.js";
 import {
 	type AgentStatus,
 	INITIAL_STATUS,
@@ -237,7 +237,10 @@ function cancelledSummary(
 ) {
 	const start = prev.since > 0 ? prev.since : ctx.now;
 	const model = targetModel(ctx);
-	return emptySummary({
+	// The engine hands the cancel path a message window it has already replaced
+	// with one synthetic zero-usage failure message, so a summary rebuilt from
+	// it reports nothing. The live tally is what this run actually settled.
+	return summaryFromRunTally(prev.runTally ?? emptyRunTally(), {
 		startedAt: start,
 		endedAt: ctx.now,
 		modelId: model.modelId,
@@ -314,8 +317,14 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			return next;
 		}
 		case "tool_execution_update":
-		case "message_end":
 			return refreshMeaningful(prev, ctx);
+		case "message_end":
+			// Fold every settled message as it lands. This is the only record of
+			// the run's usage that survives a cancel.
+			return {
+				...refreshMeaningful(prev, ctx),
+				runTally: foldMessageIntoRunTally(prev.runTally ?? emptyRunTally(), event.message),
+			};
 		case "tool_execution_end": {
 			const next = refreshMeaningful(prev, ctx);
 			if (prev.phase === "tool_running") return { ...next, phase: "preparing", tool: undefined, toolStartedAt: undefined };
@@ -393,7 +402,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			const truncated = prev.phase === "idle";
 			const start = prev.since > 0 ? prev.since : ctx.now;
 			const model = targetModel(ctx);
-			const summary = buildSummary({
+			const rebuilt = buildSummary({
 				startedAt: start,
 				endedAt: ctx.now,
 				modelId: model.modelId,
@@ -403,6 +412,26 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 				cancelled: false,
 				truncated,
 			});
+			// On the abort path the engine has already replaced the run's window
+			// with one synthetic zero-usage failure message, so this rebuild
+			// reports nothing and would undo the summary run_aborted just wrote
+			// from the live tally. Whichever record saw more tokens is the one
+			// that saw the run; on a normal turn the two agree exactly, because
+			// both fold the same messages through the same function.
+			const tally = prev.runTally;
+			const summary =
+				tally && tally.inputTokens + tally.outputTokens > rebuilt.inputTokens + rebuilt.outputTokens
+					? summaryFromRunTally(tally, {
+							startedAt: start,
+							endedAt: ctx.now,
+							modelId: model.modelId,
+							targetId: model.targetId,
+							watchdogPeak: prev.watchdogPeak,
+							stopReason: rebuilt.stopReason,
+							truncated,
+							...(rebuilt.stopDetail !== undefined ? { stopDetail: rebuilt.stopDetail } : {}),
+						})
+					: rebuilt;
 			// run_aborted may already have stamped this run's abort provenance
 			// (loop guard, dispatch drain, user cancel). The rebuild from the
 			// settled message window keeps that detail instead of dropping it.
