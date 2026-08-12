@@ -599,8 +599,8 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		providerPanel.applyEvent({ type: "message_end", message: providerMessage } as unknown as ChatLoopEvent);
 		providerPanel.applyEvent({ type: "agent_end", messages: [providerMessage] } as unknown as ChatLoopEvent);
 		const providerText = strip(providerPanel.render(120).join("\\n"));
-		ok(providerText.includes("reason42 provider"), providerText);
-		ok(!providerText.includes("reason≈42"), providerText);
+		ok(providerText.includes("reasoning 42 provider"), providerText);
+		ok(!providerText.includes("reasoning ≈42"), providerText);
 		ok(providerText.includes("cache 3/1"), providerText);
 		ok(providerText.includes("not a verification"), providerText);
 
@@ -615,7 +615,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		} as ChatLoopEvent);
 		estimatedPanel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 		const estimatedText = strip(estimatedPanel.render(120).join("\\n"));
-		ok(estimatedText.includes("reason≈"), estimatedText);
+		ok(estimatedText.includes("reasoning ≈"), estimatedText);
 		ok(estimatedText.includes("estimated"), estimatedText);
 	});
 
