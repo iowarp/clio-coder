@@ -11,6 +11,7 @@ import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtim
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { CompactResult } from "../../src/domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
+import { resolveApiKeyForTarget } from "../../src/entry/orchestrator.js";
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
@@ -706,5 +707,62 @@ describe("contracts/production compaction failure wiring", () => {
 			faux.unregister();
 			isolated.restore();
 		}
+	});
+});
+
+/**
+ * pi-ai's openai-completions provider refuses to stream without an apiKey even
+ * when the target is a local server that ignores the Authorization header. The
+ * chat loop, the dispatch workers, and the background memory model all send a
+ * placeholder for that reason. Compaction did not, so `/context compact` and
+ * every automatic compaction at the window threshold failed with
+ * `No API key for provider: llamacpp` on precisely the local runtimes Clio is
+ * built for, while ordinary turns against the same target worked.
+ */
+describe("contracts/compaction credentials", () => {
+	function noAuthRuntime(): RuntimeDescriptor {
+		return {
+			id: "local-runtime",
+			displayName: "Local",
+			kind: "http",
+			tier: "local-native",
+			apiFamily: "openai-completions",
+			auth: "api-key",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true },
+			synthesizeModel: () => ({ id: "model", provider: "local-runtime" }) as never,
+		} as RuntimeDescriptor;
+	}
+
+	function providersFor(runtime: RuntimeDescriptor, apiKey: string | undefined): ProvidersContract {
+		return {
+			getRuntime: (id: string) => (id === runtime.id ? runtime : null),
+			auth: {
+				resolveForTarget: async () => ({ apiKey, source: apiKey ? "stored" : "none" }) as never,
+			} as never,
+		} as never;
+	}
+
+	it("sends the local placeholder for a target that needs no credential", async () => {
+		const runtime = noAuthRuntime();
+		const target: TargetDescriptor = { id: "local", runtime: runtime.id, url: "http://127.0.0.1:9" };
+		const resolved = await resolveApiKeyForTarget(target, providersFor(runtime, undefined));
+		strictEqual(
+			resolved,
+			"clio-local-target",
+			"a no-auth target still needs a placeholder, or the engine refuses to stream",
+		);
+	});
+
+	it("sends the real credential for a target that needs one", async () => {
+		const runtime = { ...noAuthRuntime(), tier: "cloud" } as RuntimeDescriptor;
+		const target: TargetDescriptor = { id: "cloud", runtime: runtime.id, url: "https://api.invalid" };
+		const resolved = await resolveApiKeyForTarget(target, providersFor(runtime, "real-key"));
+		strictEqual(resolved, "real-key", "a target that requires auth is unaffected");
+	});
+
+	it("sends nothing when the runtime is not registered at all", async () => {
+		const target: TargetDescriptor = { id: "ghost", runtime: "missing-runtime" };
+		const resolved = await resolveApiKeyForTarget(target, providersFor(noAuthRuntime(), "real-key"));
+		strictEqual(resolved, undefined, "an unresolvable runtime has no key to send");
 	});
 });

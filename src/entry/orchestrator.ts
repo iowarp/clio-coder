@@ -311,18 +311,30 @@ function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<T
 	return levels[(idx + 1) % levels.length] ?? "off";
 }
 
-async function resolveApiKeyForTarget(
+/**
+ * pi-ai's openai-completions provider refuses to stream without an apiKey even
+ * when the target is a local server that ignores the Authorization header
+ * entirely. The chat loop, the dispatch workers, and the background memory
+ * model all send this placeholder so a local llama.cpp or LM Studio endpoint
+ * works without the user inventing a credential.
+ */
+const LOCAL_API_KEY_FALLBACK = "clio-local-target";
+
+export async function resolveApiKeyForTarget(
 	target: TargetDescriptor,
 	providers: ProvidersContract,
 ): Promise<string | undefined> {
 	const runtime = providers.getRuntime(target.runtime);
 	if (!runtime) return undefined;
-	if (!targetRequiresAuth(target, runtime)) return undefined;
+	// A target that needs no credential still needs the placeholder. Returning
+	// nothing here left compaction as the one path that did not send it, so
+	// `/context compact` and every automatic compaction at the window threshold
+	// failed on exactly the local runtimes Clio is built for, while ordinary
+	// turns against the same target succeeded.
+	if (!targetRequiresAuth(target, runtime)) return LOCAL_API_KEY_FALLBACK;
 	const resolved = await providers.auth.resolveForTarget(target, runtime);
 	return resolved.apiKey;
 }
-
-const LOCAL_BACKGROUND_API_KEY_FALLBACK = "clio-local-target";
 
 function createBackgroundMemoryModelClient(
 	providers: ProvidersContract,
@@ -361,7 +373,7 @@ function createBackgroundMemoryModelClient(
 		async complete(request) {
 			const apiKey = targetRequiresAuth(refined.target, refined.runtime)
 				? (await providers.auth.resolveForTarget(refined.target, refined.runtime)).apiKey
-				: LOCAL_BACKGROUND_API_KEY_FALLBACK;
+				: LOCAL_API_KEY_FALLBACK;
 			return completeEngineText({
 				model,
 				systemPrompt: request.systemPrompt,
