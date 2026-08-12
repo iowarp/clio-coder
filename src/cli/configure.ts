@@ -598,7 +598,10 @@ function buildDescriptor(
 
 function describeAuthStatus(runtime: RuntimeDescriptor): string {
 	const status = openAuthStorage().statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
-	if (!status.available) return "not connected";
+	// This describes a credential, not a network state. It is printed before the
+	// wizard has asked for a URL, so `not connected` read as a connection that
+	// had already been tried and failed.
+	if (!status.available) return "none stored";
 	if (status.source === "environment") return `environment${status.detail ? ` (${status.detail})` : ""}`;
 	if (status.source === "stored-api-key") return "stored api key";
 	if (status.source === "stored-oauth") return "stored oauth";
@@ -883,10 +886,20 @@ async function pickRuntimeFromEntries(
 	);
 	for (const line of menu) process.stdout.write(`${line}\n`);
 	const allowedIds = new Set(entries.map((entry) => entry.runtimeId));
+	// A default here reads as a recommendation, and the only basis this list has
+	// for one is the featured flag. Falling back to the first entry made the
+	// default whatever sorted first by label, so the bucket that advertises
+	// llama.cpp, vLLM, and SGLang offered Antigravity CLI to anyone who pressed
+	// Enter. With no featured entry there is no recommendation to make, and Enter
+	// asks again rather than choosing on the user's behalf.
+	const defaultRuntimeId = entries.find((entry) => entry.featured)?.runtimeId ?? "";
 	for (;;) {
-		const answer = await ask(rl, "\nSelection (number or runtime id)", entries[0]?.runtimeId ?? "");
+		const answer = await ask(rl, "\nSelection (number or runtime id)", defaultRuntimeId);
 		if (answer === null) return null;
-		if (answer.length === 0) continue;
+		if (answer.length === 0) {
+			process.stderr.write(`pick a number from 1 to ${entries.length}, or type a runtime id\n`);
+			continue;
+		}
 		const numeric = Number(answer);
 		if (Number.isInteger(numeric) && numeric >= 1 && numeric <= entries.length) {
 			const picked = entries[numeric - 1];
@@ -1037,7 +1050,7 @@ async function runInteractive(
 		}
 	}
 	process.stdout.write(`\nSelected runtime: ${runtime.id} (${support.summary})\n`);
-	process.stdout.write(`Connection: ${describeAuthStatus(runtime)}\n`);
+	process.stdout.write(`Credentials: ${describeAuthStatus(runtime)}\n`);
 	if (support.modelHints.length > 0) {
 		process.stdout.write(`Known models: ${support.modelHints.slice(0, 4).join(", ")}\n`);
 	}
@@ -1078,14 +1091,21 @@ async function runInteractive(
 		runtime.auth === "oauth" ? (existing?.auth?.oauthProfile ?? runtime.oauthProviderId ?? runtime.id) : undefined;
 	const authStatus = auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
 	if (runtime.auth === "api-key") {
-		// Default to the env-var path: it keeps the key off disk. "stored" remains
-		// available but is no longer the suggested choice.
+		// Default to the env-var path, which keeps the key off disk. A target that
+		// needs no key at all defaults to skip instead: a local llama.cpp server
+		// wants no credential, and offering `env` sent the user to an unexplained
+		// `Env var name:` with nothing correct to type into it.
+		const needsCredential = targetRequiresAuth({ id: targetId, runtime: runtime.id }, runtime);
 		const defaultSource =
 			authStatus.source === "stored-api-key"
 				? "keep"
-				: authStatus.source === "environment" || existing?.auth?.apiKeyEnvVar
+				: authStatus.source === "environment" || existing?.auth?.apiKeyEnvVar || needsCredential
 					? "env"
-					: "env";
+					: "skip";
+		process.stdout.write(
+			"\nCredential source: env reads a key from an environment variable, stored writes one to\n" +
+				"credentials.yaml, keep leaves the current one alone, skip uses no key at all.\n",
+		);
 		const choice = await ask(rl, "Credential source [env|stored|keep|skip]", defaultSource);
 		if (choice === null) return 0;
 		const normalized = choice.trim().toLowerCase();
@@ -1097,7 +1117,7 @@ async function runInteractive(
 			}
 		} else if (normalized === "env") {
 			const envDefault = defaults.apiKeyEnv ?? existing?.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar ?? "";
-			const envAnswer = await ask(rl, "Env var name", envDefault);
+			const envAnswer = await ask(rl, "Env var name (blank for no key)", envDefault);
 			if (envAnswer === null) return 0;
 			if (envAnswer.length > 0) apiKeyEnv = envAnswer;
 			apiKeyRef = undefined;

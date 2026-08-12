@@ -374,7 +374,12 @@ testCase(5, "empty-state interactive onboarding, cancel, and completion", async 
 		env: isolatedEnv(cancelHome),
 		timeoutMs: 30_000,
 		readyWhen: /Selection \[/,
-		input: [{ afterMs: 300, data: String.fromCharCode(3) }],
+		// Pick the local-HTTP bucket before cancelling, so the runtime list this
+		// case asserts on is actually on screen.
+		input: [
+			{ afterMs: 300, data: "2\r" },
+			{ afterMs: 900, data: String.fromCharCode(3) },
+		],
 	});
 	const cancelledText = stripAnsi(cancelled.output);
 	const cancelledSettings = join(cancelHome, ".config", "clio", "settings.yaml");
@@ -415,6 +420,18 @@ testCase(5, "empty-state interactive onboarding, cancel, and completion", async 
 		checks: [
 			["the wizard offers a numbered menu", /1\. Local app/.test(cancelledText)],
 			["the menu fits 80 columns", cancelledText.split("\n").every((line) => line.length <= 80)],
+			["the local-HTTP bucket lists llama.cpp", /llamacpp/.test(cancelledText)],
+			// The default was whatever sorted first by label, so the bucket that
+			// advertises llama.cpp, vLLM, and SGLang offered Antigravity CLI to
+			// anyone who pressed Enter.
+			[
+				"the runtime list offers no alphabetical default",
+				!/Selection \(number or runtime id\) \[/.test(cancelledText),
+			],
+			[
+				"the runtime list prints one heading, not two",
+				!cancelledText.split("\n").some((line) => line.trim() === "Local HTTP:"),
+			],
 			["cancel is reported, not swallowed", /cancel/i.test(cancelledText)],
 			["cancel writes no target", !cancelledWroteTarget],
 			["completion exits 0", completed.exitCode === 0],

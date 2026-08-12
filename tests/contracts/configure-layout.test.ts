@@ -159,6 +159,35 @@ describe("contracts/configure layout", () => {
 		}
 	});
 
+	it("drops the group heading when every runtime is in one group", () => {
+		// A group heading divides one group from the next. The wizard's category
+		// screens list a single group under a heading the caller already printed,
+		// so emitting it again put `Local HTTP:` directly under `Local HTTP
+		// servers:` and spent a line of a short terminal saying it twice.
+		const oneGroup = [
+			{ group: "Local HTTP", runtimeId: "llamacpp", summary: "llama.cpp server" },
+			{ group: "Local HTTP", runtimeId: "vllm", summary: "vLLM" },
+		];
+		const lines = formatRuntimeMenu(oneGroup, 80);
+		ok(
+			!lines.some((line) => line.trim() === "Local HTTP:"),
+			`a single-group menu has no divider to draw: ${JSON.stringify(lines)}`,
+		);
+		ok(lines.some((line) => line.includes("llamacpp")), "the entries are still listed");
+
+		// Two groups still need the divider that tells them apart.
+		const twoGroups = [...oneGroup, { group: "Cloud APIs", runtimeId: "anthropic", summary: "Anthropic" }];
+		const dividedLines = formatRuntimeMenu(twoGroups, 80);
+		ok(
+			dividedLines.some((line) => line.trim() === "Local HTTP:"),
+			"a menu spanning groups keeps its headings",
+		);
+		ok(
+			dividedLines.some((line) => line.trim() === "Cloud APIs:"),
+			"both headings, not just the first",
+		);
+	});
+
 	it("gives every wrapped line the full column, not the column minus its indent", () => {
 		// The hanging indent is added when a line is emitted. Counting it against
 		// the budget the next word is measured against made each continuation
