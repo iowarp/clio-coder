@@ -115,6 +115,28 @@ export function terminalFailureFromAssistantMessage(
 	return { stopReason, errorMessage, message };
 }
 
+/**
+ * An interrupted turn Clio wrote itself: aborted, carrying its own explanation
+ * as text, with no provider error attached. `noticeMessage` produces exactly
+ * this, and both the loop guard and an operator cancel persist it.
+ *
+ * Such a turn is aborted because that is what happened, and because the context
+ * estimator skips usage on aborted turns. It is not a failure to render,
+ * though. Both render paths synthesize a stand-in string when an aborted turn
+ * carries no `errorMessage`, which put a red "[aborted] request aborted" line
+ * under the cancellation notice on every resume, reintroducing on replay the
+ * noise the live path suppresses.
+ *
+ * A genuine mid-stream abort keeps its line. pi-agent-core attaches
+ * `errorMessage: "Request was aborted."` to those, and an aborted turn with no
+ * text of its own still gets the synthesized stand-in.
+ */
+export function isSelfExplainingAbort(view: { stopReason: unknown; errorMessage: unknown; text: string }): boolean {
+	if (view.stopReason !== "aborted") return false;
+	if (typeof view.errorMessage === "string" && view.errorMessage.length > 0) return false;
+	return view.text.trim().length > 0;
+}
+
 export function isLengthStopAssistantMessage(message: AgentMessage | undefined): boolean {
 	return (
 		!!message &&
@@ -440,7 +462,7 @@ export function assistantSessionPayload(
 	for (const key of ["usage", "api", "provider", "model", "responseModel", "responseId", "diagnostics"]) {
 		if (raw[key] !== undefined) payload[key] = raw[key];
 	}
-	if (failure) {
+	if (failure && !isSelfExplainingAbort({ stopReason: raw.stopReason, errorMessage: raw.errorMessage, text })) {
 		payload.stopReason = failure.stopReason;
 		payload.errorMessage = failure.errorMessage;
 	} else {

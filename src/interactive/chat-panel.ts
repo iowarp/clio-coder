@@ -2,7 +2,9 @@ import { performance } from "node:perf_hooks";
 import type { OutputVerbosity } from "../core/defaults.js";
 import { estimateReasoningTextTokens, extractReasoningTokens } from "../domains/session/context-accounting.js";
 import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
+import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
 import { codeInk } from "./renderers/code-ink.js";
 import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
@@ -320,6 +322,7 @@ function extractAssistantTerminalError(message: unknown): string {
 		return "[stopped: length] Model target hit its generation/output limit before a complete response. This is not a safety denial. Continue with a shorter answer or lower thinking; use /context compact if the context meter is also near full.";
 	}
 	const raw = (message as { errorMessage?: unknown }).errorMessage;
+	if (isSelfExplainingAbort({ stopReason, errorMessage: raw, text: extractText(message as AgentMessage) })) return "";
 	const reason = typeof raw === "string" && raw.length > 0 ? raw : "unknown error";
 	return stopReason === "aborted" ? `[aborted] ${reason}` : `[error] ${reason}`;
 }

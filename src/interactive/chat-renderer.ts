@@ -28,6 +28,7 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
+import { isSelfExplainingAbort } from "./chat-loop-messages.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
@@ -338,6 +339,7 @@ function messageFailure(entry: MessageEntry): { stopReason: "error" | "aborted";
 	const stopReason = obj?.stopReason;
 	if (stopReason !== "error" && stopReason !== "aborted") return null;
 	const raw = obj.errorMessage;
+	if (isSelfExplainingAbort({ stopReason, errorMessage: raw, text: extractTurnText(entry.payload) })) return null;
 	const errorMessage =
 		typeof raw === "string" && raw.length > 0
 			? raw
