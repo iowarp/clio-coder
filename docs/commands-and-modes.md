@@ -182,7 +182,14 @@ the operator believing a command had run when nothing had.
 Command-shaped means one word of letters, digits, and hyphens after the slash, so
 paths such as `/home/user/notes.md` still reach the model unchanged. One word
 followed by prose is treated as a command, because `/compact tidy up` and `/tmp is
-full` are indistinguishable; start such a line with a space to send it as text.
+full` are indistinguishable. To send such a line as text, escape the slash:
+`\/tmp is full` reaches the model as `/tmp is full`. The escape claims a single
+backslash and only in front of a slash, so `\\server\share` is unchanged, and it
+works on a real command too, so `\/help` is a question about `/help` rather than
+the help overlay.
+
+A rejected command stays in the input line. The error names the spelling and the
+text is still there to correct, rather than having to be retyped.
 
 
 The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `f` to set the selected target as the fleet default, `c` to connect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.

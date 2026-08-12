@@ -1016,21 +1016,36 @@ for (const entry of BUILTIN_SLASH_COMMANDS) {
  *
  * One word followed by prose stays ambiguous: `/compact tidy up` is the defect
  * and `/tmp is full` is a sentence, and nothing in the text separates them. It
- * resolves as a command, so the escape hatch is a leading space. The registry
- * still matches on trimmed input, which keeps ` /help` working, but a raw input
- * that does not open with the slash is never treated as a mistyped command.
+ * resolves as a command, so a sentence that has to open this way needs
+ * COMMAND_ESCAPE.
  */
 const COMMAND_SHAPED_TOKEN = /^[A-Za-z][A-Za-z0-9-]*$/u;
+
+/**
+ * Prefix that sends a command-shaped line to the model as text.
+ *
+ * This used to be a leading space, guarded by testing the raw input rather than
+ * the trimmed one. No operator could ever reach it: the terminal engine trims
+ * the submitted line inside its own submit path, so the parser only ever sees
+ * text with the whitespace already gone. Typing ` /tmp is full` in the TUI
+ * failed with "/tmp is not a command" exactly like the unescaped spelling, and
+ * a contract test asserted the unreachable branch.
+ *
+ * A backslash survives the trim. It claims one character and only in front of a
+ * slash, so `\\server\share` and `\note to self` are still ordinary text.
+ */
+const COMMAND_ESCAPE = "\\/";
 
 /** Pure slash-command parser: no I/O, no side effects. Walks the registry in order. */
 export function parseSlashCommand(input: string): SlashCommand {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return { kind: "empty" };
+	if (trimmed.startsWith(COMMAND_ESCAPE)) return { kind: "unknown", text: trimmed.slice(1) };
 	for (const entry of BUILTIN_SLASH_COMMANDS) {
 		const match = entry.match ? entry.match(trimmed) : matchFromSpec(entry, trimmed);
 		if (match) return match;
 	}
-	if (input.startsWith("/")) {
+	if (trimmed.startsWith("/")) {
 		const token = trimmed.slice(1).split(/\s+/u)[0] ?? "";
 		if (COMMAND_SHAPED_TOKEN.test(token)) return { kind: "unknown-command", token };
 	}

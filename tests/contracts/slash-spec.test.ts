@@ -217,9 +217,25 @@ describe("contracts/slash-spec", () => {
 		// The accepted cost of the rule. One command-shaped word followed by prose is
 		// indistinguishable from a mistyped command carrying arguments, which is the
 		// shape of the defect this exists to catch, so it resolves as a command and
-		// fails. A sentence that has to start this way needs a leading space.
+		// fails. A sentence that has to start this way needs the backslash escape.
 		deepStrictEqual(parseSlashCommand("/tmp is full"), { kind: "unknown-command", token: "tmp" });
-		deepStrictEqual(parseSlashCommand(" /tmp is full"), { kind: "unknown", text: "/tmp is full" });
+
+		// The escape has to survive the editor, which trims the submitted line
+		// before the parser ever sees it. A leading space does not survive, so it
+		// buys nothing; a backslash does.
+		deepStrictEqual(parseSlashCommand(" /tmp is full"), { kind: "unknown-command", token: "tmp" });
+		deepStrictEqual(parseSlashCommand("\\/tmp is full"), { kind: "unknown", text: "/tmp is full" });
+		deepStrictEqual(parseSlashCommand("  \\/tmp is full  "), { kind: "unknown", text: "/tmp is full" });
+
+		// The escape claims exactly one backslash, and only the one before a
+		// slash. A Windows share path is not an escaped command.
+		deepStrictEqual(parseSlashCommand("\\\\server\\share"), { kind: "unknown", text: "\\\\server\\share" });
+		deepStrictEqual(parseSlashCommand("\\note to self"), { kind: "unknown", text: "\\note to self" });
+
+		// An escaped real command reaches the model as text instead of running.
+		deepStrictEqual(parseSlashCommand("\\/help"), { kind: "unknown", text: "/help" });
+		dispatchSlashCommand(parseSlashCommand("\\/tmp is full"), ctx);
+		strictEqual(submitted[submitted.length - 1], "/tmp is full");
 	});
 
 	it("parses all slash commands according to the v0.2.3 registry contract", () => {
