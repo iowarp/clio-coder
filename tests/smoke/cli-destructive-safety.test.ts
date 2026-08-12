@@ -8,13 +8,28 @@
  * kept unlinking other installations' launchers.
  */
 import { match, ok, strictEqual } from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const CLI_ENTRY = join(REPO_ROOT, "dist", "cli", "index.js");
+
+/**
+ * Whether the path itself is there, which `existsSync` does not answer: it
+ * follows the link and calls a dangling one absent. Asserting removal with
+ * `existsSync` passes whether or not the link was removed, which is how a
+ * dangling launcher survived an uninstall that reported removing it.
+ */
+function linkPresent(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 describe("clio destructive-transition safety", { concurrency: false }, () => {
 	let scratch: ReturnType<typeof makeScratchHome>;
@@ -113,7 +128,10 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 		match(result.stdout, /binary\s+remove/);
 		match(result.stdout, /dangling/);
-		strictEqual(existsSync(join(binDir, "clio")), false, "a broken clio launcher does not survive uninstall");
+		// lstat, not exists: `rmSync` with `force: true` stats through the link,
+		// sees ENOENT, and returns as though the path were already gone, so the
+		// link stayed on PATH while the command reported removing it.
+		strictEqual(linkPresent(join(binDir, "clio")), false, "a broken clio launcher does not survive uninstall");
 	});
 
 	it("removes the launcher symlink that points at this installation", async () => {

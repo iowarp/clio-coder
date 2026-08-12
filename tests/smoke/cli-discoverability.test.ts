@@ -62,6 +62,23 @@ describe("clio discoverability messages", { concurrency: false }, () => {
 		}
 	});
 
+	it("answers --help on stdout with status 0 for every subcommand", async () => {
+		const scratch = makeScratchHome("clio-discover-help-");
+		try {
+			// `clio trace --help` reported `unknown trace flag: --help` on stderr
+			// and exited 2, so the one thing a lost user reliably types was the one
+			// thing that looked broken.
+			for (const topic of ["configure", "targets", "doctor", "reset", "uninstall", "trace", "models"]) {
+				const result = await runCli([topic, "--help"], { env: scratch.env });
+				strictEqual(result.code, 0, `clio ${topic} --help exited ${result.code}: ${result.stderr}`);
+				ok(result.stdout.includes(`clio ${topic}`), `clio ${topic} --help names itself on stdout`);
+				strictEqual(result.stderr.trim(), "", `clio ${topic} --help writes nothing to stderr`);
+			}
+		} finally {
+			scratch.cleanup();
+		}
+	});
+
 	it("says at discovery that the trace viewer needs a source checkout", async () => {
 		const scratch = makeScratchHome("clio-discover-trace-");
 		try {

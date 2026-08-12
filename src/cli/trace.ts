@@ -58,6 +58,14 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 }
 
 export async function runTraceCommand(args: string[]): Promise<number> {
+	// Asking for help is not a usage error. Every other subcommand answers
+	// `--help` on stdout with status 0; this one reported `unknown trace flag:
+	// --help` on stderr and exited 2, so the one thing a lost user reliably
+	// types was the one thing that looked broken.
+	if (args.includes("--help") || args.includes("-h")) {
+		process.stdout.write(HELP);
+		return 0;
+	}
 	let parsed: ParsedTraceArgs;
 	try {
 		parsed = parseTraceArgs(args);

@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { lstatSync, rmSync, unlinkSync } from "node:fs";
 
 /**
  * Shared deletion accounting for `clio reset` and `clio uninstall`.
@@ -29,11 +29,26 @@ export interface RemovalFailure {
  * Delete one path, returning the failure rather than throwing it. An absent
  * path and a dry run are both no-ops, which keeps `--dry-run` free of any
  * filesystem write while still walking the same list the real run walks.
+ *
+ * Presence is asked with `lstat` and a symlink is removed with `unlink`,
+ * because both of the obvious calls answer about the link's target instead of
+ * the link. `existsSync` reports a dangling symlink as absent, and `rmSync`
+ * with `force: true` stats through it, sees ENOENT, and returns as though the
+ * path were already gone. A launcher left pointing at a removed installation
+ * is exactly that shape, so `clio uninstall --remove-binary` printed `remove`,
+ * exited 0, and left a broken `clio` on PATH.
  */
 export function removePath(label: string, path: string, dryRun: boolean): RemovalFailure | null {
-	if (!existsSync(path) || dryRun) return null;
+	if (dryRun) return null;
+	let stat: ReturnType<typeof lstatSync>;
 	try {
-		rmSync(path, { recursive: true, force: true });
+		stat = lstatSync(path);
+	} catch {
+		return null;
+	}
+	try {
+		if (stat.isSymbolicLink()) unlinkSync(path);
+		else rmSync(path, { recursive: true, force: true });
 		return null;
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
