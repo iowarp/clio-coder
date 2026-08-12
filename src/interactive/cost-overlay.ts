@@ -98,9 +98,20 @@ function sumRows(rows: ReadonlyArray<CostRow>): Omit<CostRow, "providerId" | "mo
 // after it.
 function cacheReadValue(cacheRead: number, apiCalls: number): readonly [value: string, annotation?: string] {
 	if (apiCalls > 1 && cacheRead > 0) {
-		return [formatTokens(cacheRead), `(avg/request ${formatTokens(Math.round(cacheRead / apiCalls))})`];
+		return [formatTokens(cacheRead), `(avg/call ${formatTokens(Math.round(cacheRead / apiCalls))})`];
 	}
 	return [formatTokens(cacheRead)];
+}
+
+/**
+ * This tally sums what providers reported and never estimates, while the chat
+ * panel falls back to estimating from the reasoning text a turn displayed. On a
+ * model that reports nothing the two disagree by construction, so the row says
+ * which of the two it is rather than leaving a footer reading `r≈900` beside an
+ * overlay reading `reasoning 0`.
+ */
+function reasoningValue(reasoningTokens: number): readonly [value: string, annotation?: string] {
+	return [formatTokens(reasoningTokens), "provider-reported only"];
 }
 
 // A block of key-value rows in the design-system grammar: a dim padded key and
@@ -123,11 +134,11 @@ function summaryBlock(totalCost: CostAggregate, totalTokens: number, rows: Reado
 	const resolvedTotal = totalTokens > 0 ? totalTokens : totals.tokens;
 	return kvBlock([
 		["turns", formatTokens(totals.runs)],
-		["requests", formatTokens(totals.apiCalls)],
+		["model calls", formatTokens(totals.apiCalls)],
 		["cost", formatCostAggregate(totalCost)],
 		["input", formatTokens(totals.input)],
 		["output", formatTokens(totals.output)],
-		["reasoning", formatTokens(totals.reasoningTokens)],
+		["reasoning", ...reasoningValue(totals.reasoningTokens)],
 		["cache read", ...cacheReadValue(totals.cacheRead, totals.apiCalls)],
 		["cache write", formatTokens(totals.cacheWrite)],
 		["processed", `${formatTokens(resolvedTotal)} tokens`],
@@ -137,11 +148,11 @@ function summaryBlock(totalCost: CostAggregate, totalTokens: number, rows: Reado
 function modelBlock(row: CostRow): string[] {
 	return kvBlock([
 		["turns", formatTokens(row.runs)],
-		["requests", formatTokens(row.apiCalls)],
+		["model calls", formatTokens(row.apiCalls)],
 		["cost", formatCostAggregate(row.cost)],
 		["input", formatTokens(row.input)],
 		["output", formatTokens(row.output)],
-		["reasoning", formatTokens(row.reasoningTokens)],
+		["reasoning", ...reasoningValue(row.reasoningTokens)],
 		["cache read", ...cacheReadValue(row.cacheRead, row.apiCalls)],
 		["cache write", formatTokens(row.cacheWrite)],
 		["processed", `${formatTokens(row.tokens)} tokens`],
