@@ -248,13 +248,17 @@ function entryDelta(
 	return { added, updated, deleted };
 }
 
+/**
+ * Only durable content decides whether an entry changed. `lastTouchedAt` and
+ * `injectionCount` also move when the bank records that an entry contributed to
+ * a visible reminder, and attribution is not a write: counting it made every
+ * intervening step report one bank write per cited entry, which is why the
+ * intervened steps in the shipped telemetry disagree with `bankOperations`.
+ * `createdAt` stays in the comparison because `clear()` restarts id allocation,
+ * so one window can straddle a session switch that reuses an id.
+ */
 function sameEntry(left: TaskMemoryEntry, right: TaskMemoryEntry): boolean {
-	return (
-		left.content === right.content &&
-		left.createdAt === right.createdAt &&
-		left.lastTouchedAt === right.lastTouchedAt &&
-		left.injectionCount === right.injectionCount
-	);
+	return left.content === right.content && left.createdAt === right.createdAt;
 }
 
 function parseBankDelta(value: unknown): TaskMemoryBankDelta | null {

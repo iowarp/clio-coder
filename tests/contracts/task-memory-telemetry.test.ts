@@ -67,6 +67,30 @@ describe("contracts/task memory telemetry", () => {
 		}
 	});
 
+	it("counts a bank delta by durable content, not by injection attribution", () => {
+		const bank = new TaskMemoryBank();
+		const knowledge = bank.saveKnowledge("target selection runs through placement.ts");
+		const procedural = bank.saveProcedural("npm run build failed twice with the same TS2345");
+		bank.updateStatus("mapping the routing call chain");
+
+		const before = bank.snapshot();
+		bank.recordInjection([knowledge.id, procedural.id]);
+		const cited = taskMemoryBankDelta(before, bank.snapshot());
+		deepStrictEqual(cited, {
+			status: { added: 0, updated: 0, deleted: 0 },
+			knowledge: { added: 0, updated: 0, deleted: 0 },
+			procedural: { added: 0, updated: 0, deleted: 0 },
+		});
+
+		const beforeRewrite = bank.snapshot();
+		bank.saveKnowledge("target selection runs through runtime-resolution.ts", { id: knowledge.id });
+		deepStrictEqual(taskMemoryBankDelta(beforeRewrite, bank.snapshot()).knowledge, {
+			added: 0,
+			updated: 1,
+			deleted: 0,
+		});
+	});
+
 	it("rotates the bounded log before appending the next record", () => {
 		const logDir = mkdtempSync(join(tmpdir(), "clio-memory-telemetry-rotate-"));
 		try {
