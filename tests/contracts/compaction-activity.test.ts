@@ -11,14 +11,13 @@ import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtim
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { CompactResult } from "../../src/domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
-import { resolveApiKeyForTarget } from "../../src/entry/orchestrator.js";
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { fauxAssistantMessage, registerFauxProvider } from "../../src/engine/ai.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "../../src/engine/types.js";
-import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
+import { createProductionAutoCompact, resolveApiKeyForTarget } from "../../src/entry/orchestrator.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
