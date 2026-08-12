@@ -203,3 +203,30 @@ All other code elements (identifiers, types, function names, punctuation) remain
 ### 7.2 Cost Provenance & Evidence Rendering
 - **Session vs Run Provenance**: The Activity footer renders session token/cost totals, while the dispatch board and `/fleet` overlay render per-run worker tokens and cost with `known`, `estimated`, or `unknown` provenance markers. The current surfaces do not present a separate orchestrator-versus-worker algebra.
 - **Proof Markers**: Dispatch cards and `/fleet` rows render evidence readiness as `proof` markers (`pending`, `ready`, or `failed`) from the observability projection. Model-facing dispatch and monitor output use `receipt_integrity=verified/v15/sha256` and a separate `evidence_verification` label; the TUI does not emit a `[VERIFIED_RECEIPT_OK]` badge.
+
+---
+
+## 8. Shared Vocabulary
+
+One quantity gets one word, and every surface that shows it uses that word. A user comparing the transcript, the footer, and an overlay is checking whether Clio is telling a consistent story; a synonym reads as a discrepancy. `tests/contracts/usage-vocabulary.test.ts` holds the pairs that had drifted.
+
+| Concept | Word | Surfaces |
+| --- | --- | --- |
+| One model API call | `call` | Chat panel `turn · in N over M calls`, `/cost` `model calls`, `/cost` `(avg/call …)` |
+| One user-to-assistant exchange | `turn` | Chat panel `turn · …`, `/cost` `turns` |
+| Provider-reported reasoning tokens | `reasoning N provider` | Chat panel |
+| Reasoning tokens estimated from displayed text | `reasoning ≈N estimated` | Chat panel; the footer carries the same `≈` on `r≈N` |
+| Reasoning tokens in the cost tally | `reasoning N provider-reported only` | `/cost`. This tally never estimates, so it disagrees with the panel on a model that reports nothing, and the row says which one it is. |
+| Thinking level a model cannot turn off | `forced` | Editor rail, model overlay, thinking cycle (`thinkingLevelDisplayWord`) |
+| Thinking level on a model with only on and off | `on` / `off` | Same surfaces |
+
+### 8.1 Slash-Command Failures
+
+Two shapes, both ending at something the user can act on.
+
+- A command that exists but was called wrongly prints the reason and then that command's usage line: `<reason>. usage: /<name> …`.
+- A command-shaped token that is not a command prints `/<token> is not a command. Type /help for the list.` and is never sent to the model as chat. The escape for a line that starts with a slash is a leading backslash, so `\/tmp is full` reaches the model as `/tmp is full`. A leading space does not work and never did, because the editor trims the submitted line before the parser sees it.
+
+### 8.2 Memory Step Rows
+
+`/memory` activity rows read `<trigger> <decision> <reason>`, followed by `<N>w` when the step wrote to the bank and `<N> cited` when it cited entries, then the tier and latency. `describeTaskMemoryActivity` is the one place that builds this string.

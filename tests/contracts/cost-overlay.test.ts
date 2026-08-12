@@ -31,7 +31,7 @@ describe("cost overlay", () => {
 		const body = strip(lines.join("\n"));
 		for (const key of [
 			"turns",
-			"requests",
+			"model calls",
 			"cost",
 			"input",
 			"output",
@@ -136,9 +136,9 @@ describe("cost overlay", () => {
 		strictEqual(endOf("turns", "3"), cacheReadEnd, "every primary value shares the tight column");
 		const costLine = body.find((candidate) => candidate.startsWith("cost")) ?? "";
 		strictEqual(costLine.length, cacheReadEnd, "no row is dragged right to make room for the annotation");
-		const cacheReadLine = lines.find((line) => strip(line).includes("avg/request")) ?? "";
+		const cacheReadLine = lines.find((line) => strip(line).includes("avg/call")) ?? "";
 		ok(
-			cacheReadLine.includes(theme.fg("dim", "(avg/request 2,857)")),
+			cacheReadLine.includes(theme.fg("dim", "(avg/call 2,857)")),
 			`the annotation reads dim after the number, got: ${cacheReadLine}`,
 		);
 	});
