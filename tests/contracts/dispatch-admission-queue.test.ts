@@ -1,4 +1,4 @@
-import { deepStrictEqual, rejects, strictEqual } from "node:assert";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert";
 import { describe, it } from "node:test";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import {
@@ -138,6 +138,37 @@ describe("bounded dispatch admission queue", () => {
 				},
 			);
 			controller.release(held.lease.leaseId);
+		} finally {
+			controller.stop();
+			isolated.restore();
+		}
+	});
+	/**
+	 * The second half of the same defect. A dispatch whose deadline was already
+	 * spent before it reached the queue reported "admission timed out after 1ms
+	 * waiting for a worker slot (0/4 worker slots in use on 'local', 0/4
+	 * globally)" for a tool call that had run for 76 seconds. The fleet was
+	 * idle, so waiting for work to settle, dispatching fewer runs, and raising
+	 * concurrency were all wrong, and the real cost sat before admission.
+	 */
+	it("an already-expired deadline says so instead of blaming capacity", async () => {
+		const isolated = isolateClioEnv("clio-admit-");
+		const controller = createCapacityAdmissionController({
+			limits: () => ({ global: 4, nodes: { local: 4 } }),
+			usage: () => ({ global: 0, nodes: { local: 0 } }),
+		});
+		try {
+			await rejects(
+				controller.admit({ assignmentId: "late", nodeId: "local", deadlineAt: Date.now() - 16_000 }),
+				(error: Error) => {
+					ok(error.message.includes("admission deadline had already passed"), error.message);
+					ok(error.message.includes("never waited on capacity"), error.message);
+					ok(error.message.includes("0/4 worker slots in use on 'local'"), error.message);
+					ok(!error.message.includes("Wait for running work to settle"), error.message);
+					ok(!error.message.includes("raise budget.concurrency"), error.message);
+					return true;
+				},
+			);
 		} finally {
 			controller.stop();
 			isolated.restore();

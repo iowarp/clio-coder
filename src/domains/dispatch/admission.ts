@@ -106,6 +106,7 @@ function describeAdmissionFailure(input: {
 	state: "canceled" | "timed_out";
 	nodeId: string;
 	waitedMs: number;
+	overdueAtQueueMs: number;
 	queueDepth: number;
 	limits: CapacityLimits;
 	usage: { global: number; nodes: Readonly<Record<string, number>> };
@@ -118,6 +119,19 @@ function describeAdmissionFailure(input: {
 			? `${input.usage.global}/${input.limits.global} worker slots in use`
 			: `${nodeActive}/${nodeLimit} worker slots in use on '${input.nodeId}', ${input.usage.global}/${input.limits.global} globally`;
 	const queued = input.queueDepth > 0 ? `, ${input.queueDepth} more queued` : "";
+	// A request whose deadline expired before it was queued never waited on
+	// capacity, and saying it did sends the reader to the wrong place. A live
+	// dispatch reported "timed out after 1ms waiting for a worker slot (0/4
+	// worker slots in use)" for a tool call that had already run 76 seconds:
+	// the fleet was idle, and all three remedies below were wrong.
+	if (input.overdueAtQueueMs >= 0) {
+		return [
+			`dispatch: the admission deadline had already passed ${Math.round(input.overdueAtQueueMs)}ms`,
+			" before this request reached the queue, so it never waited on capacity",
+			` (${where}${queued}).`,
+			" The budget went to work before admission, not to a busy fleet.",
+		].join("");
+	}
 	return [
 		`dispatch: admission timed out after ${Math.round(input.waitedMs)}ms waiting for a worker slot`,
 		` (${where}${queued}).`,
@@ -233,6 +247,7 @@ export function createCapacityAdmissionController(options: {
 							state: outcome.state,
 							nodeId: input.nodeId,
 							waitedMs: now() - queuedAt,
+							overdueAtQueueMs: queuedAt - input.deadlineAt,
 							queueDepth: queue.size(),
 							limits: options.limits(),
 							usage: options.usage?.() ?? capacityLeaseUsage({ nowMs: now() }),
