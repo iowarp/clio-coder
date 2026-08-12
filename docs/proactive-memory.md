@@ -54,7 +54,7 @@ and persists its attribution in the session ledger; there is no hidden
 | Paper mechanism | Clio implementation |
 | --- | --- |
 | Separate memory agent | One stateful middleware registration beside the unmodified action agent |
-| Status, knowledge, and procedural bank | Bounded in-memory `TaskMemoryBank`; status remains private |
+| Status, knowledge, and procedural bank | Bounded in-memory `TaskMemoryBank`; status stays out of every reminder except the post-compaction restore |
 | Phase 1 bank maintenance | Strict `update_status`, `save_knowledge`, `save_procedural`, and `delete` operations |
 | Phase 2 intervene or stay silent | One advisory `inject_reminder` effect or explicit silence |
 | Fixed memory cadence | Deterministic decay signals plus a coarse interval floor |
@@ -134,7 +134,7 @@ it runs detached from it.
 | Tool-error streak | Two consecutive error outcomes. A successful tool resets the streak. |
 | Loop signal | Reuses the orchestrator loop guard's verdict; it does not infer a second competing loop detector. |
 | Repeated failure | The rules tier records failed tool fingerprints and annotates the failing tool result once the same failure appears twice in the bounded trajectory. |
-| Post-compaction | The first turn start after compaction reactivates knowledge once, without a model call, because compaction is precisely where execution facts leave the active window. |
+| Post-compaction | The first turn start after compaction restores status and knowledge once, without a model call, because compaction is precisely where execution facts leave the active window. |
 
 ### Two delivery channels
 
@@ -313,6 +313,42 @@ change the background model's strict output grammar.
 For an immediate kill switch, set `memory.intervention.enabled` to `false` in
 `/settings`. Removing the background target instead returns to rules-only
 operation while leaving deterministic protection active.
+
+## What the LLM tier actually writes
+
+Measured on the shipped prompt against `google/gemma-4-26b-a4b-qat`, across ten
+live steps and forty controlled runs on the same route.
+
+The tier writes `update_status` reliably and `save_knowledge` rarely, and that is
+correct rather than broken. A trajectory step carries the tool name, a bounded
+call description, an outcome, and a result digest. On success the digest is an
+opaque result fingerprint, so a window of successful reads tells the model which
+files were touched and nothing about what is in them. There is no durable fact in
+that input, and a status line is the only faithful thing to write about it.
+
+Three candidate causes were ruled out by controlled runs that changed one
+variable at a time:
+
+- rewriting the prompt's second worked example to carry a `save_knowledge` moved
+  nothing, and made the model emit no operations at all in four of five runs;
+- seeding the bank with existing knowledge entries so the model could learn the
+  shape by example moved nothing;
+- giving successful steps a content-bearing digest moved nothing on its own.
+
+What does elicit knowledge is a durable fact in the input. With a task stating two
+explicit constraints the model wrote both as knowledge; with that same task plus
+content-bearing digests it wrote six. Error digests already carry a real
+diagnostic line, which is why `save_procedural` fires on failing windows.
+
+The consequence for reactivation is why the post-compaction block restores status.
+Restoring knowledge alone restored nothing in the common case, because the one
+class it read was usually the one class the model had not written.
+
+Two further numbers from the same route. Roughly a quarter of live steps returned a
+malformed envelope, usually `<operations>` with no list followed by
+`<no_intervention/>`, which is recorded as `malformed`/`unparseable` and is
+model behavior rather than a route fault. The boundary drop rate remains 0% at
+shipped settings.
 
 ## Handoff continuity
 
