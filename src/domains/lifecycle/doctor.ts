@@ -58,6 +58,11 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	// so anything readSettings would refuse to start on shows up here with the
 	// exact key paths, read-only.
 	const settings = join(config, "settings.yaml");
+	// Both failure branches carry the same remedy because it is the only one
+	// that works. `--fix` never rewrites settings content, so pointing at it
+	// here would describe a repair that cannot happen; editing the named keys
+	// or discarding the file are the two real moves.
+	const settingsRemedy = `(edit ${settings}, or \`clio reset --config --force\` to start from defaults)`;
 	if (!existsSync(settings)) {
 		findings.push({
 			ok: false,
@@ -72,12 +77,11 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				findings.push({ ok: true, name: "settings.yaml", detail: settings });
 			} else {
 				const detail = validation.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
-				const hint = " (remove unrecognized keys or update them to current settings key names)";
-				findings.push({ ok: false, name: "settings.yaml", detail: `invalid: ${detail}${hint}` });
+				findings.push({ ok: false, name: "settings.yaml", detail: `invalid: ${detail} ${settingsRemedy}` });
 			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			findings.push({ ok: false, name: "settings.yaml", detail: `unreadable: ${msg}` });
+			findings.push({ ok: false, name: "settings.yaml", detail: `unreadable: ${msg} ${settingsRemedy}` });
 		}
 	}
 
@@ -120,11 +124,22 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	return findings;
 }
 
+/**
+ * One finding is one row, so a detail carrying newlines has to be folded
+ * before it reaches the column layout. A YAML parse error is the case that
+ * forced this: its message embeds the offending source line and a caret,
+ * which pushed the rows below it out of alignment and buried them under a
+ * blank stretch that read as the end of the report.
+ */
+function foldDetail(detail: string): string {
+	return detail.replace(/\s*\n\s*/g, " ").trim();
+}
+
 export function formatDoctorReport(findings: DoctorFinding[]): string {
 	const lines = findings.map((f) => {
 		const level = f.level ?? (f.ok ? "ok" : "error");
 		const badge = level === "ok" ? "OK" : level === "warn" ? "WARN" : "!! ";
-		return `${badge.padEnd(4)} ${f.name.padEnd(22)} ${f.detail}`;
+		return `${badge.padEnd(4)} ${f.name.padEnd(22)} ${foldDetail(f.detail)}`;
 	});
 	return lines.join("\n");
 }

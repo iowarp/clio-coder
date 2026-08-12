@@ -218,12 +218,43 @@ export interface BootOptions {
 	};
 }
 
+/**
+ * The bannered boot is the whole of what a piped or CI invocation of bare
+ * `clio` shows, so it is the entire first impression for a stranger who is not
+ * on a TTY. It used to end in a hardcoded `ready`, a word with no relationship
+ * to anything: a machine with no target configured at all printed it and
+ * exited 0, which is the one state where the installation can do nothing.
+ *
+ * What the line reports now is the orchestrator target the settings actually
+ * declare, and when none is declared it says so and names the command that
+ * fixes it. The exit status stays 0 either way, because this path answers
+ * "did Clio boot", which it did, and CI scripts already depend on that
+ * answer; the readiness of the configuration is reported in words instead.
+ */
+function bannerConfigurationLine(): string {
+	let settings: ClioSettings;
+	try {
+		settings = readSettings();
+	} catch {
+		return chalk.yellow("settings.yaml is not valid. Run `clio doctor` for the exact keys.");
+	}
+	// A dangling chat target normalizes to null in the schema, so a deleted
+	// target arrives here as no target at all rather than as a name to report.
+	const targetId = settings.orchestrator?.target;
+	if (!targetId) {
+		return chalk.yellow("no model target configured. Run `clio configure` to add one.");
+	}
+	const model = settings.orchestrator?.model;
+	return chalk.dim(`target ${targetId}${model ? ` · model ${model}` : " · no default model"}`);
+}
+
 function buildBanner(): string {
 	const { clio } = getVersionInfo();
 	return `
   ${chalk.cyan("Clio Coder")}
-  ${chalk.dim(`v${clio} · CLIO: Context Layer for I/O · HPC & scientific software · ready`)}
+  ${chalk.dim(`v${clio} · CLIO: Context Layer for I/O · HPC & scientific software`)}
   ${chalk.yellow.bold(EXPERIMENTAL_RELEASE_WARNING)}
+  ${bannerConfigurationLine()}
 `;
 }
 
