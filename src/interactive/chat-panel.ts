@@ -504,9 +504,14 @@ function renderThinkingLines(
  */
 function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number): string[] {
 	const calls = usage.modelCalls !== undefined && usage.modelCalls > 1 ? ` over ${usage.modelCalls} calls` : "";
+	// The label stays separated from the count in both provenances. Deriving the
+	// separator from the `≈` marker glued them together whenever the provider
+	// reported a total, which is the common case, and rendered `reason0 provider`.
+	// The field is named for reasoning tokens rather than `reason`, which the
+	// memory step rows already use for a fixed decision vocabulary.
 	const reason =
 		usage.reasoningTokens !== undefined
-			? ` reason${usage.reasoningTokenProvenance === "provider" ? "" : "≈"}${usage.reasoningTokens}${usage.reasoningTokenProvenance === "provider" ? " provider" : " estimated"}`
+			? ` reasoning ${usage.reasoningTokenProvenance === "provider" ? `${usage.reasoningTokens} provider` : `≈${usage.reasoningTokens} estimated`}`
 			: "";
 	const cache =
 		usage.cacheReadTokens > 0 || usage.cacheWriteTokens > 0
