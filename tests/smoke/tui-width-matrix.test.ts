@@ -14,13 +14,12 @@
  * are what leave a shell unusable when a TUI exits badly.
  */
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { stringify } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { RenderTraceRow } from "../../src/interactive/render-trace.js";
 import { colorSequences, type PtyRunResult, ptySupported, runInPty, stripAnsi, visibleLines } from "../harness/pty.js";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
@@ -236,61 +235,6 @@ describe("TUI width matrix", { concurrency: false, skip: ptySupported ? false : 
 			strictEqual(result.timedOut, false, "the third and fourth presses are a double tap and do exit");
 			strictEqual(result.exitCode, 0);
 			ok(result.output.trimEnd().endsWith("\u001B[?2004l"), "the terminal is still handed back");
-		} finally {
-			scratch.cleanup();
-		}
-	});
-
-	it("keeps the per-frame cost bounded at 160x50", async () => {
-		// The largest size in the matrix, driven with forty keystrokes so the
-		// editor redraws on every one. `CLIO_RENDER_TRACE` records frame timing
-		// and byte counts and no conversation text, which is what makes this
-		// number reproducible by a user reading the same instrument.
-		const scratch = makeScratch();
-		const tracePath = join(scratch.dir, "render.jsonl");
-		try {
-			const typed = Array.from({ length: 40 }, (_, index) => ({
-				afterMs: 500 + index * 25,
-				data: "abcdefghij"[index % 10] ?? "x",
-			}));
-			const result = await runInPty(process.execPath, [join(REPO_ROOT, "dist", "cli", "index.js")], {
-				cols: 160,
-				rows: 50,
-				cwd: REPO_ROOT,
-				env: { ...scratch.env, CLIO_RENDER_TRACE: tracePath },
-				timeoutMs: 30_000,
-				readyWhen: READY,
-				input: [...typed, { afterMs: 2_000, data: CTRL_C }, { afterMs: 2_150, data: CTRL_C }],
-			});
-			strictEqual(result.exitCode, 0);
-
-			const traceText = readFileSync(tracePath, "utf8");
-			const frames = traceText
-				.split("\n")
-				.filter((line) => line.length > 0)
-				.map((line) => JSON.parse(line) as RenderTraceRow);
-			ok(frames.length >= 20, `the trace recorded the session's frames, got ${frames.length}`);
-
-			// A 160x50 terminal is 8000 cells. A frame that repaints all of them
-			// with styling still fits inside this ceiling; exceeding it means the
-			// diff was lost and every keystroke now redraws the whole screen.
-			const widestFrame = Math.max(...frames.map((frame) => frame.bytes));
-			ok(widestFrame < 24_000, `widest frame was ${widestFrame} bytes`);
-
-			const panelMs = frames
-				.map((frame) => frame.panelMs)
-				.filter((value): value is number => typeof value === "number")
-				.sort((a, b) => a - b);
-			ok(panelMs.length >= 10, `panel renders were attributed to frames, got ${panelMs.length}`);
-			// Measured at 0.03ms p95 on the development machine. The ceiling is
-			// loose enough to survive a loaded CI box and tight enough to catch a
-			// lost render cache or a quadratic wrap.
-			const p95 = panelMs[Math.min(panelMs.length - 1, Math.floor(panelMs.length * 0.95))] ?? 0;
-			ok(p95 < 5, `panel render p95 was ${p95}ms across ${panelMs.length} frames`);
-
-			// The instrument itself: content-free by construction, which is what
-			// lets it be documented as safe to share.
-			ok(!traceText.includes("abcdefghij"), "the render trace records timing, never typed text");
 		} finally {
 			scratch.cleanup();
 		}

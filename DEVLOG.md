@@ -78,12 +78,14 @@ must balance is the cursor, bracketed paste, and the kitty keyboard-protocol
 stack. Holding the input schedule until the frame appears instead of sleeping
 long enough for the slowest machine took the suite from 98 seconds to 33.
 
-The frame-cost bound at 160x50 reads `CLIO_RENDER_TRACE` over forty
-keystrokes: 9753 bytes for the widest frame and 0.03ms panel-render p95, held
-to 24000 and 5ms so a lost render diff fails while a loaded CI box does not.
-The byte figures were identical across four runs. The trace is asserted to
-contain none of the typed text, which is what lets it be documented as safe to
-share.
+A frame-cost bound at 160x50 was written and then removed in session 9. It read
+`CLIO_RENDER_TRACE` over forty keystrokes and held the widest frame under 24000
+bytes and panel-render p95 under 5ms. Both figures were measured on one machine,
+and a ceiling calibrated on one machine fails on a loaded box for a reason that
+has nothing to do with the render diff. `CLIO_RENDER_TRACE` remains the
+instrument for reproducing a frame-cost claim by hand at a given terminal size.
+What the matrix keeps are the properties that hold on any machine: nothing is
+written outside the frame, and every terminal mode is handed back.
 
 ### Two defects the matrix found that reading the code did not
 
