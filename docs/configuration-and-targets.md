@@ -605,7 +605,7 @@ Useful flags:
 | --- | --- |
 | `--id <targetId>` | Stable target id. |
 | `--runtime <runtimeId>` | Runtime descriptor id. |
-| `--url <host>` | Base URL for HTTP runtimes. Missing schemes default to `http://`; some runtimes get default ports. |
+| `--url <host>` | Base URL for HTTP runtimes. Missing schemes default to `http://`; some runtimes get default ports. Give the server root or its `/v1` mount point; both name the same target, because runtimes whose request paths already carry `/v1` reduce the URL to the root before using it. |
 | `--model <wireModelId>` | Target default wire model id. |
 | `--orchestrator-model <id>` | Model to save for chat default. |
 | `--fleet-model <id>` | Model to save for fleet default. |

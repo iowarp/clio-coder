@@ -5,6 +5,95 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
+## 0.3.0 - hardening session 10: driving it instead of reading it
+
+Session 9 hardened the lifecycle by reading code and writing harnesses. The
+judgment on it was that too much went into `tests/` and not enough into using
+the product. This session inverted the order: drive Clio until something is
+wrong, establish it with a transcript, fix it, and only then add the narrowest
+regression that would have caught it. Every defect below was found by a person
+configuring a target and taking a turn, not by a test.
+
+### The first turn 404'd on a URL that configure had just blessed
+
+A target URL of `http://host:8080/v1` made Clio request
+`/v1/v1/chat/completions`. Every OpenAI-compatible client documents its base
+URL as the `/v1` mount point, so that is the shape users type and the shape
+`clio configure` accepts, while Clio's own request paths already carry `/v1`.
+
+What kept it hidden is one route alias. Measured against a live llama.cpp
+server: `/v1/health` answers 200, `/v1/props` and `/v1/v1/models` both 404. The
+probe gates on the health check, which is the single path that survives the
+doubling, so it reported `probe ok` while the props read, the catalog read, and
+every completion failed. The context window fell back to a guess, and the empty
+catalog then produced a warning telling the user their model was missing from a
+catalog that had never been read, with two suggested fixes that were both in
+the wrong place.
+
+The same `withV1` default sits on the generic `openai-compat` runtime, where
+`https://api.example.com/v1` is what the whole ecosystem documents.
+
+URLs are now reduced to the server root for the runtimes whose paths carry
+`/v1`. A gateway mounted at a path ending in `/v1` is unharmed, because
+stripping the suffix and appending it again is the identity. The existing
+contract asserted `http://localhost:1234/v1/v1` as expected output, so it
+passed for exactly as long as the code produced it. That is the second time in
+two sessions a test has been found asking the same wrong question as the code.
+
+Verified end to end against dynamo through the packaged tarball: the `/v1`
+form now probes 24 models, a build id, and capabilities, and case 9 of the
+lifecycle matrix takes a real turn through it.
+
+### Two words for a probe that learned nothing, and none for why one failed
+
+`probe failed: fetch failed` is undici's wrapper for every transport error and
+names neither the address nor the reason. The part a user can act on is on the
+error's `cause`, where ECONNREFUSED and ENOTFOUND arrive. A wrong port and a
+wrong hostname produced identical text.
+
+`probe ok` was printed for a probe that connected and read nothing, identical
+to one that read a full catalog. The probe demonstrably knew the difference,
+because the correct URL yielded a build id and the doubled one yielded neither
+that nor a context window, and both were called ok. A degraded probe now says
+it was reachable, says which reads came back empty, and names the reprobe.
+
+### The gesture for cancelling a turn quit the application
+
+Two Ctrl+C presses in quick succession during a stream exited Clio. The last
+frame stayed on screen still reading `writing`, with no `[aborted]`, no session
+id, and nothing about `/resume`. Spacing the same presses two seconds apart
+cancelled correctly, so the gesture that failed was the fast one, which is the
+one a user reaches for when the first press looks like it did nothing.
+
+The first press did two things: it cancelled the run, and it set the double-tap
+clock, so the second press resolved to shutdown before the check for an active
+stream could see one. Closing an overlay already cleared that clock for exactly
+this reason. Cancelling a run did not.
+
+### The wizard recommended whatever sorted first
+
+Choosing "Local HTTP server", the bucket advertising llama.cpp, vLLM, and
+SGLang, offered a default of `antigravity-code`. The list sorts by group, then
+by a featured flag, then by label; nothing in that bucket is featured, and only
+`openai-codex` is featured anywhere, so in every category but one the default
+was an alphabetical accident that Enter accepted silently. A default reads as
+advice, so where there is none to give, Enter now asks again.
+
+Three more lines described a moment other than the one they appeared in. The
+group heading printed twice, `Connection: not connected` described a credential
+before a URL had been asked for, and the credential source defaulted to `env`
+for local servers that need no key, sending the user to an unexplained
+`Env var name:`.
+
+### Measured
+
+`npm run ci` green under both Node majors. The lifecycle matrix runs 20 of 20
+cases and 129 checks against the packaged tarball, case 5 having gone from 7
+checks to 10 by driving one screen deeper before it cancels. Case 9's live turn
+ran on dynamo against `Nemo-3.5-Lightning`, the only model resident there, sent
+deliberately through the previously broken `/v1` URL. The loaded set was
+recorded before and after every live turn in the session and never changed.
+
 ## 0.3.0 - hardening session 9: the lifecycle a stranger walks
 
 Sessions 1 through 8 hardened what Clio does. This one covers obtaining it,
