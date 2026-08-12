@@ -445,6 +445,39 @@ describe("contracts/interactive application controller", () => {
 		deepStrictEqual(journal, ["core:shutdown"]);
 	});
 
+	// SIGTERM never reaches this controller. It goes to the termination
+	// coordinator, which runs its hooks and calls process.exit with the TUI
+	// still owning the screen. Measured on a pty: `kill -TERM` ended with `?25l`
+	// last on the wire, so the cursor stayed hidden, where `/quit` on the same
+	// build ended with `?25h`.
+	it("registers a terminal teardown for shutdown paths that never reach it", async () => {
+		const teardowns: Array<() => void> = [];
+		const harness = createHarness({ registerTerminalTeardown: (teardown) => teardowns.push(teardown) });
+		createApplicationController(harness.deps);
+
+		strictEqual(teardowns.length, 1, "exactly one teardown is registered");
+		strictEqual(harness.events.includes("ui:stop"), false, "registering does not stop the terminal");
+
+		teardowns[0]?.();
+		strictEqual(harness.events.filter((event) => event === "ui:stop").length, 1);
+	});
+
+	it("survives a terminal teardown that throws and reports it once", async () => {
+		const teardowns: Array<() => void> = [];
+		const harness = createHarness({
+			registerTerminalTeardown: (teardown) => teardowns.push(teardown),
+			stopUi: () => {
+				throw new Error("terminal already closed");
+			},
+		});
+		createApplicationController(harness.deps);
+
+		teardowns[0]?.();
+		deepStrictEqual(harness.diagnostics, ["terminal stop: terminal already closed"]);
+		teardowns[0]?.();
+		strictEqual(harness.diagnostics.length, 2, "a second teardown reports its own failure, not the first again");
+	});
+
 	it("leaves a SIGINT listener it did not install in place", async () => {
 		// The production coordinator binds to process.removeAllListeners, so a
 		// controller that clears the signal wholesale silently disarms an

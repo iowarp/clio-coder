@@ -105,6 +105,18 @@ export interface ApplicationControllerDeps {
 	 * runs, so a notice raised here would have nowhere to land.
 	 */
 	reportShutdownFailure: (step: string, error: unknown) => void;
+	/**
+	 * Register a terminal teardown to run on shutdown paths that never reach
+	 * this controller.
+	 *
+	 * `/quit` and Ctrl+C both come through here and stop the terminal on the
+	 * way out. A signal does not: SIGTERM goes straight to the termination
+	 * coordinator, which runs its hooks and calls process.exit with the TUI
+	 * still owning the screen. Measured on a pty, `kill -TERM` left the cursor
+	 * hidden, the last private-mode sequence on the wire being `?25l`, where
+	 * `/quit` on the same build ended with `?25h`.
+	 */
+	registerTerminalTeardown?: (teardown: () => void) => void;
 }
 
 export type ApplicationInputResult = { consume: true } | undefined;
@@ -305,6 +317,13 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	// never installed, including an embedder's.
 	const restoreInterruptOwner = deps.signals.takeInterruptOwnership();
 	deps.signals.on("SIGINT", handleCtrlC);
+	// Every exit gives the terminal back, including the ones that never reach
+	// this controller. Stopping an already-stopped terminal is a no-op, so the
+	// ordinary path running both is harmless.
+	deps.registerTerminalTeardown?.(() => {
+		release("terminal stop", () => deps.stopUi());
+		reportFailures();
+	});
 
 	return {
 		run,
