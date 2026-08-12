@@ -94,8 +94,13 @@ export function formatRuntimeMenu(items: ReadonlyArray<RuntimeMenuItem>, width: 
 	const leftWidth = maxLength(items.map((item, index) => `${String(index + 1).padStart(2)}. ${item.runtimeId}`)) + 1;
 	const lines: string[] = [];
 	let lastGroup: string | null = null;
+	// A group heading divides one group from the next, so a list with only one
+	// group has nothing to divide. Emitting it anyway put `Local HTTP:` directly
+	// under the caller's own `Local HTTP servers:` heading and spent a line of a
+	// short terminal saying the same thing twice.
+	const grouped = new Set(items.map((item) => item.group)).size > 1;
 	for (const [index, item] of items.entries()) {
-		if (item.group !== lastGroup) {
+		if (grouped && item.group !== lastGroup) {
 			lastGroup = item.group;
 			lines.push(`  ${item.group}:`);
 		}
