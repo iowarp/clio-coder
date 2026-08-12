@@ -162,6 +162,31 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		strictEqual(reduceRouteQuality({ subject, receipts: [subject] }).label, "unmeasured");
 	});
 
+	// reduceRouteQuality verifies the whole receipt set on every call, which is
+	// fine for one subject and quadratic for a batch. Reconciling route history
+	// is a batch, and on a 1247-receipt ledger with 359 records it measured 70
+	// seconds of CPU on the dispatch decision path, past the 60-second
+	// admission deadline. Dispatch had stopped working entirely, reporting that
+	// no worker slots were free while zero were in use.
+	//
+	// Verification is the only thing that reads a source's envelope, so counting
+	// envelope reads counts verifications exactly.
+	it("verifies each receipt once across a batch of reductions", () => {
+		let envelopeReads = 0;
+		const counted = (source: ReturnType<typeof receipt>): ReturnType<typeof receipt> => ({
+			receipt: source.receipt,
+			get envelope() {
+				envelopeReads += 1;
+				return source.envelope;
+			},
+		});
+		const ledger = Array.from({ length: 12 }, (_, index) => counted(receipt(`ledger-${index}`)));
+
+		for (const subject of ledger) reduceRouteQuality({ subject, receipts: ledger });
+
+		strictEqual(envelopeReads, ledger.length, `12 receipts reduced 12 times must verify 12 times, not ${12 * 13}`);
+	});
+
 	it("typed validation pass and failure produce opposite quality labels", () => {
 		const pass = receipt("pass", { quality: typedQuality(true) });
 		const fail = receipt("fail", { quality: typedQuality(false) });

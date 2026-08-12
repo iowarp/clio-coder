@@ -65,8 +65,33 @@ function compareStrings(left: string, right: string): number {
 	return left < right ? -1 : left > right ? 1 : 0;
 }
 
+/**
+ * Integrity verdicts held against the receipt object that produced them.
+ *
+ * Verification canonically serializes and hashes a receipt and its envelope,
+ * and `reduceRouteQuality` verifies the whole receipt set on every call. That
+ * is fine for one subject and quadratic for a batch. Reconciling route history
+ * is a batch: 359 records against a 1247-receipt ledger is 447,673
+ * verifications of files averaging 23KB, which measured 70 seconds of CPU on
+ * the dispatch decision path and pushed every dispatch on this machine past
+ * its 60-second admission deadline. Dispatch had stopped working, and the
+ * error it reported was that no worker slots were free while zero were in use.
+ *
+ * The key is the receipt object, not its digest. A digest key would let a
+ * forged receipt claiming a known-good digest inherit that receipt's verdict,
+ * which is the thing verification exists to catch. Object identity can only be
+ * shared by a receipt that was already verified in this process, and a durable
+ * re-read produces fresh objects, so a ledger that changed on disk is verified
+ * again.
+ */
+const integrityVerdicts = new WeakMap<object, boolean>();
+
 function authenticated(source: RouteQualityReceiptSource): boolean {
-	return verifyReceiptIntegrity(source.receipt, source.envelope).ok;
+	const cached = integrityVerdicts.get(source.receipt);
+	if (cached !== undefined) return cached;
+	const verdict = verifyReceiptIntegrity(source.receipt, source.envelope).ok;
+	integrityVerdicts.set(source.receipt, verdict);
+	return verdict;
 }
 
 function receiptSourcesByRunId(
