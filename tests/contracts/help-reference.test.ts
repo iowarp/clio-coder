@@ -8,13 +8,13 @@ import type { ListOverlayOptions } from "../../src/interactive/overlays/list-ove
 import { commandReference, parseSlashCommand } from "../../src/interactive/slash-commands.js";
 
 describe("contracts/help-reference", () => {
-	it("ensures /hotkeys slash command no longer parses (returns unknown)", () => {
+	it("ensures /hotkeys is no longer a command and fails rather than reaching the model", () => {
 		const cmd = parseSlashCommand("/hotkeys");
-		strictEqual(cmd.kind, "unknown");
-		if (cmd.kind === "unknown") {
-			strictEqual(cmd.text, "/hotkeys");
+		strictEqual(cmd.kind, "unknown-command");
+		if (cmd.kind === "unknown-command") {
+			strictEqual(cmd.token, "hotkeys");
 		} else {
-			throw new Error("expected unknown command");
+			throw new Error("expected unknown-command");
 		}
 	});
 
