@@ -40,6 +40,33 @@ export interface LockResult<T> {
 export interface AuthStorageBackend {
 	withLock<T>(fn: (current: string | undefined) => LockResult<T>): T;
 	withLockAsync<T>(fn: (current: string | undefined) => Promise<LockResult<T>>): Promise<T>;
+	/** Where the store lives, for error text. Absent for non-file backends. */
+	describe?(): string;
+}
+
+/**
+ * Refusal to rewrite a credentials store that did not fully parse. Thrown
+ * rather than recorded because every caller is a write the operator asked for,
+ * and the alternatives are both wrong: writing destroys credentials, and
+ * silently doing nothing reports success over a store that never changed.
+ */
+export class AuthStorageDamagedError extends Error {
+	constructor(
+		readonly damage: string,
+		readonly path: string | undefined,
+	) {
+		super(
+			[
+				`refusing to write credentials: ${damage}.`,
+				path ? `File: ${path}` : null,
+				"Writing would replace the whole file and lose whatever is stored there.",
+				"Move the file aside once you have recovered anything you need, then log in again.",
+			]
+				.filter((line): line is string => line !== null)
+				.join(" "),
+		);
+		this.name = "AuthStorageDamagedError";
+	}
 }
 
 export interface AuthTarget {
@@ -120,33 +147,66 @@ function toOAuthCredential(raw: unknown): OAuthCredential | null {
 	return null;
 }
 
-function parseStorageData(content: string | undefined): AuthStorageData {
-	if (!content || content.trim().length === 0) return emptyData();
+/**
+ * The result of reading the credentials file, and whether reading it lost
+ * anything.
+ *
+ * `damage` is non-null when the file held bytes this parser could not turn back
+ * into credentials: invalid YAML, a shape that is not ours, or entries whose
+ * fields we do not recognize. It exists because every write to this file is a
+ * whole-file rewrite of the parsed view. Reading a damaged file as "no
+ * credentials" and then persisting that view serializes the emptiness back over
+ * the secrets, and there is no backup. A caller that is about to write must
+ * refuse when `damage` is set.
+ */
+interface StorageRead {
+	data: AuthStorageData;
+	damage: string | null;
+}
+
+function readStorageData(content: string | undefined): StorageRead {
+	if (!content || content.trim().length === 0) return { data: emptyData(), damage: null };
 	let parsed: unknown;
 	try {
 		parsed = parseYaml(content);
-	} catch {
-		return emptyData();
+	} catch (error) {
+		// The YAML error carries a multi-line caret diagram. It is useful text but
+		// it has to survive being embedded in a sentence, so collapse it to one
+		// line rather than letting it break the message apart.
+		const detail = (error instanceof Error ? error.message : String(error)).replace(/\s+/gu, " ").trim();
+		return { data: emptyData(), damage: `it is not valid YAML: ${detail}` };
 	}
-	if (!isRecord(parsed)) return emptyData();
+	// A document of only comments parses to null. Nothing is stored and nothing
+	// is at risk.
+	if (parsed === null || parsed === undefined) return { data: emptyData(), damage: null };
+	if (!isRecord(parsed)) return { data: emptyData(), damage: "its top level is not a mapping" };
+	if (!("entries" in parsed) && !("version" in parsed)) {
+		return { data: emptyData(), damage: "it has neither a version nor an entries mapping" };
+	}
+	// `entries:` written as null, or absent next to a version, is an empty store
+	// rather than a damaged one.
 	const entries = isRecord(parsed.entries) ? parsed.entries : null;
-	if (!entries) return emptyData();
+	if (!entries) return { data: emptyData(), damage: null };
 
 	const data: AuthStorageData = {};
+	const unread: string[] = [];
 	const version = parsed.version;
 	if (
 		version === 1 ||
 		(version === undefined && Object.values(entries).every((value) => isRecord(value) && "key" in value))
 	) {
 		for (const [providerId, value] of Object.entries((entries as AuthStorageShapeV1["entries"]) ?? {})) {
-			if (!value || typeof value.key !== "string" || value.key.trim().length === 0) continue;
+			if (!value || typeof value.key !== "string" || value.key.trim().length === 0) {
+				unread.push(providerId);
+				continue;
+			}
 			data[providerId] = {
 				type: "api_key",
 				key: value.key,
 				updatedAt: typeof value.updatedAt === "string" && value.updatedAt.length > 0 ? value.updatedAt : nowIso(),
 			};
 		}
-		return data;
+		return { data, damage: unreadDamage(unread) };
 	}
 
 	for (const [providerId, value] of Object.entries((entries as AuthStorageShapeV2["entries"]) ?? {})) {
@@ -158,9 +218,16 @@ function parseStorageData(content: string | undefined): AuthStorageData {
 		const oauth = toOAuthCredential(value);
 		if (oauth) {
 			data[providerId] = oauth;
+			continue;
 		}
+		unread.push(providerId);
 	}
-	return data;
+	return { data, damage: unreadDamage(unread) };
+}
+
+function unreadDamage(unread: ReadonlyArray<string>): string | null {
+	if (unread.length === 0) return null;
+	return `these entries are stored in a shape this version cannot read: ${[...unread].sort().join(", ")}`;
 }
 
 function serializeStorageData(data: AuthStorageData): string {
@@ -211,6 +278,7 @@ export function authNotRequiredStatus(providerId: string): AuthStatus {
 
 export class AuthStorage {
 	private data: AuthStorageData = {};
+	private damage: string | null = null;
 	private runtimeOverrides = new Map<string, string>();
 	private fallbackResolver?: (providerId: string) => string | undefined;
 	private errors: Error[] = [];
@@ -226,11 +294,24 @@ export class AuthStorage {
 				content = current;
 				return { result: undefined };
 			});
-			this.data = parseStorageData(content);
+			const read = readStorageData(content);
+			this.data = read.data;
+			this.damage = read.damage;
 		} catch (error) {
 			this.recordError(error);
 			this.data = emptyData();
+			this.damage = error instanceof Error ? `it could not be read: ${error.message}` : "it could not be read";
 		}
+	}
+
+	/**
+	 * Why the store on disk could not be fully read, or null when it was clean.
+	 * Callers that report connection state must consult this, because a damaged
+	 * store reads as zero credentials and is otherwise indistinguishable from
+	 * having never logged in.
+	 */
+	damageReason(): string | null {
+		return this.damage;
 	}
 
 	private recordError(error: unknown): void {
@@ -240,13 +321,20 @@ export class AuthStorage {
 	private persist(providerId: string, credential: AuthCredential | undefined): void {
 		try {
 			this.backend.withLock((current) => {
-				const merged = parseStorageData(current);
+				const read = readStorageData(current);
+				if (read.damage !== null) {
+					this.damage = read.damage;
+					throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
+				}
+				const merged = read.data;
 				if (credential) merged[providerId] = credential;
 				else delete merged[providerId];
 				this.data = merged;
+				this.damage = null;
 				return { result: undefined, next: serializeStorageData(merged) };
 			});
 		} catch (error) {
+			if (error instanceof AuthStorageDamagedError) throw error;
 			this.recordError(error);
 		}
 	}
@@ -255,9 +343,12 @@ export class AuthStorage {
 		return this.data[providerId];
 	}
 
+	// persist() adopts the merged view on success, so it runs first: assigning
+	// in-memory ahead of it would leave a credential that reads back as stored
+	// while the disk write was refused.
 	set(providerId: string, credential: AuthCredential): void {
-		this.data[providerId] = credential;
 		this.persist(providerId, credential);
+		this.data[providerId] = credential;
 	}
 
 	setApiKey(providerId: string, key: string): void {
@@ -267,8 +358,8 @@ export class AuthStorage {
 	}
 
 	remove(providerId: string): void {
-		delete this.data[providerId];
 		this.persist(providerId, undefined);
+		delete this.data[providerId];
 	}
 
 	listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }> {
@@ -394,8 +485,14 @@ export class AuthStorage {
 		providerId: string,
 	): Promise<{ apiKey: string; credential: OAuthCredential } | null> {
 		return this.backend.withLockAsync(async (current) => {
-			const currentData = parseStorageData(current);
+			const read = readStorageData(current);
+			if (read.damage !== null) {
+				this.damage = read.damage;
+				throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
+			}
+			const currentData = read.data;
 			this.data = currentData;
+			this.damage = null;
 			const stored = currentData[providerId];
 			if (stored?.type !== "oauth") {
 				return { result: null };

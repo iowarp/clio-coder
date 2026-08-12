@@ -29,6 +29,7 @@ export type {
 } from "./storage.js";
 export {
 	AuthStorage,
+	AuthStorageDamagedError,
 	authNotRequiredStatus,
 	resolveAuthTarget,
 	resolveRuntimeAuthTarget,
