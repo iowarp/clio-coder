@@ -69,6 +69,7 @@ type SlashCommandVariant =
 	| { kind: "compact"; instructions: string | undefined }
 	| { kind: "export"; path: string | undefined }
 	| { kind: "unknown"; text: string }
+	| { kind: "unknown-command"; token: string }
 	| { kind: "usage-error"; command: string; reason: string }
 	| { kind: "empty" };
 
@@ -997,24 +998,29 @@ for (const entry of BUILTIN_SLASH_COMMANDS) {
 }
 
 /**
- * Spellings that once named a command and no longer do, mapped to what replaced
- * them.
+ * A token that could only have been meant as a command: one word of letters,
+ * digits, and hyphens after the leading slash.
  *
- * Retiring a spelling removed it from the registry, which left it matching
- * nothing and falling through to the model as prose. Measured: `/compact` was
- * answered "/compact (completed)" in six output tokens while context stayed at
- * 9%, no compaction summary was written, and no hook fired. The operator reads
- * a completion that never happened, which is the same failure `/thinking off`
- * had. A word the documentation names as retired is a mistyped command, so it
- * reports the rename instead. Prose that merely begins with a slash is
- * unaffected and still reaches the model.
+ * A spelling that names no command used to match nothing and fall through to
+ * the model as prose. Measured: `/compact` was answered "/compact (completed)"
+ * in six output tokens while context stayed at 9%, no compaction summary was
+ * written, and no hook fired. The operator read a completion that never
+ * happened, which is the same failure `/thinking off` had. Only active commands
+ * run, so anything command-shaped that the registry does not claim fails here
+ * rather than being answered by a model that will invent a result.
+ *
+ * The shape test is what keeps that from swallowing ordinary text, because a
+ * leading slash is also how an absolute path starts. `/home/akougkas/notes` and
+ * `/not/a/command` carry a separator, so they are not one word and still reach
+ * the model unchanged.
+ *
+ * One word followed by prose stays ambiguous: `/compact tidy up` is the defect
+ * and `/tmp is full` is a sentence, and nothing in the text separates them. It
+ * resolves as a command, so the escape hatch is a leading space. The registry
+ * still matches on trimmed input, which keeps ` /help` working, but a raw input
+ * that does not open with the slash is never treated as a mistyped command.
  */
-const RETIRED_SLASH_SPELLINGS: ReadonlyMap<string, string> = new Map([
-	["compact", "/context compact"],
-	["context-init", "/context init"],
-	["context-clear", "/context reset"],
-	["context-view", "/context"],
-]);
+const COMMAND_SHAPED_TOKEN = /^[A-Za-z][A-Za-z0-9-]*$/u;
 
 /** Pure slash-command parser: no I/O, no side effects. Walks the registry in order. */
 export function parseSlashCommand(input: string): SlashCommand {
@@ -1024,14 +1030,9 @@ export function parseSlashCommand(input: string): SlashCommand {
 		const match = entry.match ? entry.match(trimmed) : matchFromSpec(entry, trimmed);
 		if (match) return match;
 	}
-	const retiredToken = trimmed.slice(1).split(/\s+/u)[0] ?? "";
-	const replacement = RETIRED_SLASH_SPELLINGS.get(retiredToken);
-	if (trimmed.startsWith("/") && replacement !== undefined) {
-		return {
-			kind: "usage-error",
-			command: "context",
-			reason: `/${retiredToken} was retired; use ${replacement}`,
-		};
+	if (input.startsWith("/")) {
+		const token = trimmed.slice(1).split(/\s+/u)[0] ?? "";
+		if (COMMAND_SHAPED_TOKEN.test(token)) return { kind: "unknown-command", token };
 	}
 	return { kind: "unknown", text: trimmed };
 }
@@ -1045,6 +1046,11 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 	if (command.kind === "empty") return;
 	if (command.kind === "unknown") {
 		ctx.submitChat(command.text);
+		return;
+	}
+	if (command.kind === "unknown-command") {
+		ctx.notice("error", `/${command.token} is not a command. Type /help for the list.`);
+		ctx.render();
 		return;
 	}
 	if (command.kind === "usage-error") {

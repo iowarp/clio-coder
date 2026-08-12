@@ -168,11 +168,21 @@ without touching `CLIO.md`, and `reset` deletes accumulated
 context artifacts (`.clio/codewiki.json`, `.clio/state.json`,
 `.clio/handoffs/`, `.clio/proposals/`). Its interactive choice preserves or
 deletes `CLIO.md`; cancellation makes no changes. Session reset stays `/new`;
-there is deliberately no `/context clear`. The retired spellings `/compact`,
-`/context-init`, `/context-clear`, and `/context-view` no longer run anything.
-Typing one reports the spelling that replaced it rather than reaching the model,
-which used to answer a retired command conversationally and leave the operator
-believing it had run.
+there is deliberately no `/context clear`. The spellings `/compact`,
+`/context-init`, `/context-clear`, and `/context-view` are gone and are not
+aliased to anything.
+
+Only active commands run. Typing anything command-shaped that the registry does
+not own reports `is not a command` and points at `/help`; it is never sent to the
+model. That covers spellings removed outright, such as `/status` and `/receipts`,
+as well as ordinary typos. It replaces the earlier behavior where an unrecognized
+spelling reached the model as prose and was answered conversationally, which left
+the operator believing a command had run when nothing had.
+
+Command-shaped means one word of letters, digits, and hyphens after the slash, so
+paths such as `/home/user/notes.md` still reach the model unchanged. One word
+followed by prose is treated as a command, because `/compact tidy up` and `/tmp is
+full` are indistinguishable; start such a line with a space to send it as text.
 
 
 The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `f` to set the selected target as the fleet default, `c` to connect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.
