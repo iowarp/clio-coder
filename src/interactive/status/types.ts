@@ -51,6 +51,27 @@ export interface TurnSummary {
 	truncated: boolean;
 }
 
+/**
+ * Usage folded in as the run's messages settle, so a run that never reaches
+ * `agent_end` can still report what it spent.
+ *
+ * The engine replaces an aborted run's message window with one synthetic
+ * zero-usage failure message, and the cancel path built its summary from
+ * nothing at all. A cancelled turn therefore reported no tokens and no tool
+ * calls even when the session total moved by 64k in the same footer line.
+ */
+export interface RunTally {
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	reasoningTokens: number;
+	hadProviderReasoning: boolean;
+	hadEstimatedReasoning: boolean;
+	toolCount: number;
+	toolErrorCount: number;
+}
+
 export interface OverlayFrame {
 	phase: OverlayPhase;
 	resumePhase: StatusPhase;
@@ -81,6 +102,8 @@ export interface AgentStatus {
 	retry?: RetryOverlay | undefined;
 	dispatch?: DispatchOverlay | undefined;
 	summary?: TurnSummary | undefined;
+	/** Usage settled so far in the active run. Reset by `agent_start`. */
+	runTally?: RunTally | undefined;
 }
 
 export interface AgentStatusEvent {

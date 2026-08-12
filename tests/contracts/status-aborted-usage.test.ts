@@ -94,6 +94,58 @@ describe("contracts/status aborted runs keep usage and abort provenance", () => 
 		ok(status.summary?.stopDetail?.includes("loop guard"), "abort provenance survives the rebuild");
 	});
 
+	// The test above passes because it hands agent_end a real message window.
+	// Live, the engine replaces an aborted run's window with one synthetic
+	// zero-usage failure message before agent_end is emitted, so the rebuild had
+	// nothing to rebuild from. Measured on dynamo: Escape during a bash tool call
+	// produced "⊘ 971ms · ↑0 ↓0 · Σ464.3k" on one footer line while the session
+	// transcript for that same turn held usage input 64162, output 27. The live
+	// tally folded from message_end is the record that survives.
+	it("reports the run's usage when the engine hands agent_end a synthetic empty window", () => {
+		let status = { ...INITIAL_STATUS };
+		status = reduceStatus(status, { type: "agent_start", messages: [] } as unknown as StatusInputEvent, ctx(0));
+
+		const settled = [
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "" }],
+				stopReason: "toolUse",
+				usage: { input: 64_162, output: 27, cacheRead: 0, cacheWrite: 0 },
+			},
+			{ role: "toolResult", isError: false, content: [] },
+		];
+		for (const message of settled) {
+			status = reduceStatus(status, { type: "message_end", message } as unknown as StatusInputEvent, ctx(1_000));
+		}
+
+		status = reduceStatus(
+			status,
+			{ type: "run_aborted", source: "stream_cancel", reason: "user cancelled stream" } as StatusInputEvent,
+			ctx(3_400),
+		);
+		strictEqual(status.phase, "ended");
+		strictEqual(status.summary?.inputTokens, 64_162, "the cancel reports what the run settled, not zero");
+		strictEqual(status.summary?.outputTokens, 27);
+		strictEqual(status.summary?.toolCount, 1);
+		strictEqual(status.summary?.stopReason, "cancelled");
+
+		// The engine's post-abort window: one synthetic zero-usage message.
+		status = reduceStatus(
+			status,
+			{
+				type: "agent_end",
+				messages: [
+					{ role: "assistant", content: [], stopReason: "aborted", errorMessage: "Request was aborted", usage: {} },
+				],
+			} as unknown as StatusInputEvent,
+			ctx(3_500),
+		);
+		strictEqual(status.summary?.inputTokens, 64_162, "agent_end must not zero what the tally already saw");
+		strictEqual(status.summary?.outputTokens, 27);
+		strictEqual(status.summary?.toolCount, 1);
+		ok(status.summary?.stopDetail?.includes("stream cancel"), "abort provenance survives");
+	});
+
 	it("a later notice message_end does not rebuild or wipe the ended usage summary", () => {
 		let status = { ...INITIAL_STATUS };
 		status = reduceStatus(status, { type: "agent_start", messages: [] } as unknown as StatusInputEvent, ctx(0));
