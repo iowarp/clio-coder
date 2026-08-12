@@ -213,15 +213,42 @@ clio uninstall --remove-binary --force
 hash -r
 ```
 
-`--dry-run` prints the roots and optional launcher action without changing
-anything. `--remove-binary` also removes the launcher symlink when it resolves
-into a clio dist, which is exactly the shape `npm run install:local` creates;
-anything else (a real file, a foreign symlink) is left in place. It prints
-binary-removal guidance for the active launcher, npm-global installs, npm
-links, and the local source symlink. To wipe state selectively while keeping
-settings or credentials, use `clio reset` instead of uninstalling. If the
-launcher is already gone but state remains, run the built CLI directly from
-the checkout: `node dist/cli/index.js uninstall --force`.
+`--dry-run` prints the roots and the optional launcher action without changing
+anything, and enumerates the same resolved absolute paths the real run would
+remove. It prints binary-removal guidance for the active launcher, npm-global
+installs, npm links, and the local source symlink. To wipe state selectively
+while keeping settings or credentials, use `clio reset` instead of
+uninstalling. If the launcher is already gone but state remains, run the built
+CLI directly from the checkout: `node dist/cli/index.js uninstall --force`.
+
+#### What `--remove-binary` will and will not remove
+
+Ownership is identity, not shape. The launcher is removed only when it resolves
+to *this* installation's own `dist/cli/index.js`. A path test on the target's
+spelling was three ways too broad: it matched a live symlink into a different
+clio checkout, and it matched a target that is not even a file, so an uninstall
+from one installation could unlink another one's launcher and leave that
+installation on disk with no way to start it.
+
+| At `$CLIO_BIN_DIR/clio` | Outcome |
+| --- | --- |
+| A symlink resolving to this installation's entry | Removed |
+| A symlink resolving to a different clio installation | Kept, with the path it points at and the exact `rm` that removes it |
+| A symlink to a directory named `index.js` | Kept, because a directory is not an entry |
+| A real file | Kept, with a note to remove it through the package manager that put it there |
+| A dangling symlink naming a clio entry | Removed, and reported as dangling. Leaving it would put a broken `clio` on PATH after an uninstall that claimed to finish |
+| A dangling symlink naming anything else | Kept, with the exact `rm` |
+
+#### Partial failure
+
+A recursive delete can stop halfway: an unwritable parent leaves some children
+removed and some in place. `reset` and `uninstall` collect per-path failures
+instead of throwing the first one. Every selected root still gets its attempt,
+the skeleton is rebuilt, each surviving path is named with the reason it
+resisted, and the command exits 1 with the exact invocation to rerun. Both
+commands are idempotent, so the recovery is always the same: fix the permission
+or release the handle, then run the identical command again and it resumes from
+whatever is left. A partial delete never reports global success.
 
 ---
 

@@ -5,6 +5,146 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
+## 0.3.0 - hardening session 9: the lifecycle a stranger walks
+
+Sessions 1 through 8 hardened what Clio does. This one covers obtaining it,
+configuring it, learning it, operating it, repairing it, and removing it. The
+bar was that a stranger should be able to install Clio, understand it, trust
+it, recover it, and remove it without the person who wrote the code in the
+room, and the method was to run the packaged tarball rather than the checkout
+and to write down what actually happened.
+
+### The first screen was the one that handled width worst
+
+`clio configure --list` and the first-run runtime menu wrote fixed-width rows
+sized for roughly 88 columns. At 80, which is the oldest default there is, the
+model hints ran to 141 columns and the terminal wrapped them into fragments
+that lined up with no header; a label longer than its 20-wide column pushed
+every later column right. The surface a new user meets first was the one that
+degraded worst.
+
+The rows now measure the terminal. `--list` keeps one aligned row per runtime
+while every column fits and restacks into a two-line form below that, carrying
+identity and auth state on the first line and the display name and hints
+indented on the second. Narrowing costs vertical space, never information: 51
+lines at 80 columns against 30 at 100, and nothing dropped in either. The
+category menu and the answers its parser accepts now come from one list, so a
+printed choice can no longer advertise a spelling the parser rejects.
+
+Wiring that up exposed a bug in the wrapper itself. `wrapPlain` counted the
+hanging indent against the budget the next word was measured against, so every
+continuation line came out shorter than the one before it and a four-word tail
+wrapped four times. Visible at 100 columns as an "Inception)" alone on a line
+with 60 columns of room beside it.
+
+### One quantity, one word
+
+The chat panel and the `/cost` overlay report the same numbers about the same
+session and named them differently. The panel says `turn · in 9650 over 65
+calls`; the overlay called that count `requests`. Worse, the panel marks an
+estimated reasoning total `≈900 estimated` and the overlay printed a bare
+number, and the mismatch is not cosmetic: the cost tally sums only what
+providers report and never estimates, while the panel falls back to estimating
+from the reasoning text it displayed. On a model that reports nothing, a footer
+reading `r≈900` sat beside an overlay reading `reasoning 0` with nothing to say
+why. Teaching the cost path to estimate was the other option and was rejected,
+because those numbers reach receipts and the trace store. The overlay row says
+`provider-reported only`, which is true of that tally and is the difference the
+user is looking at.
+
+Five surfaces answered "what is Clio talking to" five ways when the answer was
+nothing: `not configured/not configured` in the banner, because it substituted
+the same phrase into both halves and joined them with a slash; `no model` in
+the editor rail; `none · none` in the footer; `(unset)` and `(no model)` in two
+overlays. `formatTargetLabel` owns that now for the three status surfaces. A
+target with no model and a model with no target stay distinct, because
+collapsing them loses which half to fix.
+
+### Terminal behavior had never been tested on a terminal
+
+Piping stdout reports no width, so every width-sensitive path collapsed to the
+80-column fallback and the interesting sizes were never exercised. The TUI
+additionally refuses to start without a TTY, which left raw mode, the cursor,
+bracketed paste, and SIGINT covered by hand and nothing else. `node-pty` had
+been a devDependency used by nothing.
+
+`tests/smoke/tui-width-matrix.test.ts` runs the built entry through a real
+pseudo-terminal at 40x12, 60x20, 80x24, 100x30, 120x40, 160x50, and 400
+columns. Degradation at 40 is intentional and now observed: the box frame
+drops, the experimental warning shortens to "May break or change.", and the
+footer collapses to two fields. Teardown is checked as a balance rather than a
+smoke test. Clio renders inline and never takes the alternate screen, so what
+must balance is the cursor, bracketed paste, and the kitty keyboard-protocol
+stack. Holding the input schedule until the frame appears instead of sleeping
+long enough for the slowest machine took the suite from 98 seconds to 33.
+
+The frame-cost bound at 160x50 reads `CLIO_RENDER_TRACE` over forty
+keystrokes: 9753 bytes for the widest frame and 0.03ms panel-render p95, held
+to 24000 and 5ms so a lost render diff fails while a loaded CI box does not.
+The byte figures were identical across four runs. The trace is asserted to
+contain none of the typed text, which is what lets it be documented as safe to
+share.
+
+### Two defects the matrix found that reading the code did not
+
+`scripts/lifecycle-matrix.mjs` runs the twenty required cases against a real
+`npm pack` installed into a throwaway prefix. Nineteen passed on the second
+run. The two that did not were real.
+
+`clio uninstall --remove-binary --force` printed `binary remove <path>
+(dangling; that installation is already gone)`, exited 0, and left the link on
+PATH. `rmSync(path, { force: true })` stats through a symlink; on a dangling
+one it gets ENOENT and `force: true` treats that as already-gone. The
+regression that was supposed to cover this asserted `existsSync(link) ===
+false`, which is true of a dangling link whether or not it was removed. The
+test asked the same wrong question the code did, which is how a defect ships
+under a passing suite.
+
+`clio trace --help` wrote `unknown trace flag: --help` to stderr and exited 2
+while every other subcommand answered on stdout with 0. The one thing a lost
+user reliably types was the one thing that looked broken.
+
+Three of the harness's own checks were wrong before the code was, and saying so
+is the point: the tar listing went through the output clip and measured a
+198-file package as 118; the settings-loader assertion required the message not
+to mention `doctor --fix`, which it mentions on purpose to say what that command
+does not do; and a documented example naming a target the reader was told to
+create cannot exit 0 on a fresh install, so what is held is that it parses.
+
+### Claims that rot are now claims that fail
+
+Three documents assert completeness, and completeness maintained by review does
+not survive contact with a second contributor.
+`docs/environment-variables.md` claimed to list every variable `src/` reads and
+omitted five, one of which writes conversation text to disk.
+`docs/configuration-and-targets.md` had no per-key inventory at all; writing one
+turned up two keys with no row. Both now have a contract test that reads the
+source of truth and fails naming what is missing. Against the previous revision
+of the environment page, the check names exactly the five that were absent.
+
+`CLIO_MEMORY_TRACE` records up to 8000 characters of the text each memory step
+saw. It is content-bearing by construction, and its row says so rather than
+leaving the reader to find out from the file. Both trace variables name a path
+rather than taking `1`, and they sat beside seven toggles that do take `1`, so
+they have their own table stating the exception.
+
+### The divergence sweep found nothing, which is worth recording
+
+Session 8 fixed `memory.intervention.timeoutMs`, where a settings default of
+180000 sat beside a policy fallback of 20000 and survived by being unreachable
+in normal runs. Scanning every settings access paired with a literal fallback
+across `src/` found no second instance. The hits it did produce were all
+null-to-display substitutions, which is how the five spellings of "not
+configured" surfaced.
+
+### Measured
+
+`npm run ci` green under Node 22.22.3 and Node 24.9.0. The lifecycle matrix
+runs 20 of 20 cases, 121 checks, against the packaged tarball. Case 9's live
+turn ran on `dynamo` against `Nemo-3.5-Lightning`, the only model resident
+there; `/v1/models` was recorded before and after and the loaded set is
+identical, so nothing was loaded or unloaded to make a test pass.
+
 ## 0.3.0 - hardening session 8: the loop's cost, three proofs, and the release cut
 
 The gap session 7 reported rather than hid, the proof tasks it deferred, and
