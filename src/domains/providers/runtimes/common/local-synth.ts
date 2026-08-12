@@ -126,9 +126,40 @@ export function stripTrailingSlash(url: string): string {
 	return url.endsWith("/") ? url.slice(0, -1) : url;
 }
 
-export const withV1 = (url: string): string => `${stripTrailingSlash(url)}/v1`;
+/**
+ * Drop a redundant trailing `/v1` from a target URL.
+ *
+ * Every OpenAI-compatible client documents its base URL as the `/v1` mount
+ * point, so `http://host:8080/v1` is what users type and what `clio configure`
+ * accepts. Clio's own request paths already carry `/v1`, so the two compose
+ * into `/v1/v1/chat/completions` and the server answers 404. Reducing the URL
+ * to the server root here makes `http://host:8080` and `http://host:8080/v1`
+ * the same target.
+ *
+ * A gateway mounted at a path that ends in `/v1`, such as
+ * `https://gateway.example.com/openai/v1`, is unharmed: stripping the suffix
+ * and appending it again is the identity on that path.
+ */
+function stripRedundantV1(url: string): string {
+	return url.endsWith("/v1") ? url.slice(0, -"/v1".length) : url;
+}
+
+export const withV1 = (url: string): string => `${stripRedundantV1(stripTrailingSlash(url))}/v1`;
 export const withAsIs = (url: string): string => stripTrailingSlash(url);
 
 export function targetBaseUrl(target: TargetDescriptor): string | null {
 	return target.url ? stripTrailingSlash(target.url) : null;
+}
+
+/**
+ * The server root, for runtimes whose own request paths carry `/v1`.
+ *
+ * Their probes ask for `/health`, `/props`, and `/v1/models` relative to this
+ * value, so a target naming the `/v1` mount point has to be reduced to the root
+ * or each of those lands one segment too deep. llama.cpp aliases `/v1/health`
+ * and nothing else, which is why the health check passed and every other read
+ * silently returned nothing.
+ */
+export function targetRootUrl(target: TargetDescriptor): string | null {
+	return target.url ? stripRedundantV1(stripTrailingSlash(target.url)) : null;
 }

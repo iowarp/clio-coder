@@ -13,7 +13,7 @@ import type {
 	RuntimeTier,
 } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
-import { synthLocalModel, targetBaseUrl, withAsIs, withV1 } from "../common/local-synth.js";
+import { synthLocalModel, targetBaseUrl, targetRootUrl, withAsIs, withV1 } from "../common/local-synth.js";
 import { probeOpenAIModelCatalog, probeOpenAIModels, probeUrl } from "../common/probe-helpers.js";
 
 export interface OpenAICompatSpec {
@@ -53,9 +53,14 @@ export function synthesizeOpenAICompatModel(input: OpenAICompatSynthesisInput): 
 
 export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescriptor {
 	const apiFamily = spec.apiFamily ?? "openai-completions";
-	const baseUrlForTarget = spec.baseUrlStyle === "asIs" ? withAsIs : withV1;
+	const asIs = spec.baseUrlStyle === "asIs";
+	const baseUrlForTarget = asIs ? withAsIs : withV1;
 	const healthPath = spec.healthPath ?? "/v1/models";
 	const modelsPath = spec.modelsPath ?? "/v1/models";
+	// The default paths carry their own `/v1`, so they are relative to the server
+	// root and a target naming the `/v1` mount point has to be reduced to it. An
+	// `asIs` spec sends the URL verbatim, so it keeps whatever the user typed.
+	const probeBase = asIs ? targetBaseUrl : targetRootUrl;
 	return {
 		id: spec.id,
 		displayName: spec.displayName,
@@ -65,7 +70,7 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 		auth: spec.auth,
 		defaultCapabilities: spec.defaultCapabilities,
 		async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
-			const base = targetBaseUrl(target);
+			const base = probeBase(target);
 			if (!base) return { ok: false, error: "target has no url" };
 			const health = await probeUrl(`${base}${healthPath}`, ctx);
 			if (!health.ok) return health;
@@ -85,12 +90,12 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 			return result;
 		},
 		async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
-			const base = targetBaseUrl(target);
+			const base = probeBase(target);
 			if (!base) return [];
 			return probeOpenAIModels(base, ctx, modelsPath);
 		},
 		async probeReasoning(target: TargetDescriptor, modelId: string, ctx: ProbeContext): Promise<ReasoningProbeResult> {
-			const base = targetBaseUrl(target);
+			const base = probeBase(target);
 			if (!base) return { reasoning: false, latencyMs: 0, error: "target has no url" };
 			const apiKeyEnv = target.auth?.apiKeyEnvVar;
 			const apiKey = apiKeyEnv && ctx.credentialsPresent.has(apiKeyEnv) ? process.env[apiKeyEnv] : undefined;

@@ -470,7 +470,10 @@ describe("contracts/providers", () => {
 
 		strictEqual(model.id, "qwen-2.5");
 		strictEqual(model.api, "openai-completions");
-		strictEqual(model.baseUrl, "http://localhost:1234/v1/v1");
+		// The target names the `/v1` mount point, which is the shape every
+		// OpenAI-compatible client documents. This asserted the doubled
+		// `/v1/v1` for as long as the code produced it.
+		strictEqual(model.baseUrl, "http://localhost:1234/v1");
 		strictEqual(model.reasoning, true);
 		deepStrictEqual(model.headers, { "X-Test": "Clio" });
 		strictEqual(model.cost.input, 0.15);
@@ -1047,5 +1050,70 @@ describe("contracts/providers/runtime-cleanup", () => {
 			const text = readFileSync(join(process.cwd(), rel), "utf8");
 			ok(!forbidden.test(text), `${rel} must not advertise removed runtime support`);
 		}
+	});
+});
+
+/**
+ * Every OpenAI-compatible client documents its base URL as the `/v1` mount
+ * point, so `http://host:8080/v1` is what users type and what `clio configure`
+ * accepts. Runtimes whose own request paths already carry `/v1` composed the
+ * two into `/v1/v1/chat/completions`, and llama.cpp aliases `/v1/health` and
+ * nothing else, so the probe passed while every other read silently returned
+ * nothing and configure reported `probe ok` on a target that could not serve a
+ * single completion.
+ *
+ * This holds at the boundary that produces the URL the engine actually
+ * requests, which is the runtime's own `synthesizeModel`.
+ */
+describe("target URL joining", () => {
+	const HOST = "http://host.invalid:8080";
+
+	function synthesizedBaseUrl(runtime: RuntimeDescriptor, url: string): string | null {
+		const target: TargetDescriptor = { id: "t", runtime: runtime.id, url, defaultModel: "m" };
+		try {
+			const model = runtime.synthesizeModel(target, "m", null) as { baseUrl?: unknown };
+			return typeof model.baseUrl === "string" && model.baseUrl.includes("host.invalid") ? model.baseUrl : null;
+		} catch {
+			// A runtime that will not synthesize from a bare url target has nothing
+			// to say about url joining.
+			return null;
+		}
+	}
+
+	const httpRuntimes = BUILTIN_RUNTIMES.filter((runtime) => runtime.kind === "http");
+
+	it("never doubles the /v1 mount point", () => {
+		ok(httpRuntimes.length > 0, "there are http runtimes to check");
+		for (const runtime of httpRuntimes) {
+			const joined = synthesizedBaseUrl(runtime, `${HOST}/v1`);
+			if (joined === null) continue;
+			ok(!joined.includes("/v1/v1"), `${runtime.id} doubled the mount point: ${joined}`);
+		}
+	});
+
+	it("reads the server root and its /v1 mount point as the same target", () => {
+		let compared = 0;
+		for (const runtime of httpRuntimes) {
+			const fromRoot = synthesizedBaseUrl(runtime, HOST);
+			const fromMount = synthesizedBaseUrl(runtime, `${HOST}/v1`);
+			if (fromRoot === null || fromMount === null) continue;
+			// Only runtimes that append the mount point themselves. One that sends
+			// the url verbatim is entitled to treat the two as different targets.
+			if (fromRoot !== `${HOST}/v1`) continue;
+			strictEqual(fromMount, fromRoot, `${runtime.id} resolved the two url shapes differently`);
+			compared += 1;
+		}
+		ok(compared > 0, "at least one runtime appends the mount point itself");
+	});
+
+	it("leaves a trailing slash and a gateway mount point alone", () => {
+		const model = synthesizeOpenAICompatModel({
+			target: { id: "t", runtime: "openai-compat", url: "https://gateway.invalid/openai/v1/", defaultModel: "m" },
+			wireModelId: "m",
+			kb: null,
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true },
+			provider: "openai-compat",
+		}) as { baseUrl?: unknown };
+		strictEqual(model.baseUrl, "https://gateway.invalid/openai/v1");
 	});
 });
