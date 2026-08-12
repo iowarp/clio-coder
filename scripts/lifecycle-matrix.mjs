@@ -424,10 +424,7 @@ testCase(5, "empty-state interactive onboarding, cancel, and completion", async 
 			// The default was whatever sorted first by label, so the bucket that
 			// advertises llama.cpp, vLLM, and SGLang offered Antigravity CLI to
 			// anyone who pressed Enter.
-			[
-				"the runtime list offers no alphabetical default",
-				!/Selection \(number or runtime id\) \[/.test(cancelledText),
-			],
+			["the runtime list offers no alphabetical default", !/Selection \(number or runtime id\) \[/.test(cancelledText)],
 			[
 				"the runtime list prints one heading, not two",
 				!cancelledText.split("\n").some((line) => line.trim() === "Local HTTP:"),

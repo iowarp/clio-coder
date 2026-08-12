@@ -173,7 +173,10 @@ describe("contracts/configure layout", () => {
 			!lines.some((line) => line.trim() === "Local HTTP:"),
 			`a single-group menu has no divider to draw: ${JSON.stringify(lines)}`,
 		);
-		ok(lines.some((line) => line.includes("llamacpp")), "the entries are still listed");
+		ok(
+			lines.some((line) => line.includes("llamacpp")),
+			"the entries are still listed",
+		);
 
 		// Two groups still need the divider that tells them apart.
 		const twoGroups = [...oneGroup, { group: "Cloud APIs", runtimeId: "anthropic", summary: "Anthropic" }];
