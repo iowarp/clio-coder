@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readlinkSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, sep } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
+import { resolvePackageRoot } from "../core/package-root.js";
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
+import { type RemovalFailure, removePath, reportRemovalFailures } from "./removal.js";
 import { printError, printHeader, printOk } from "./shared.js";
 
 const HELP = `clio uninstall [--remove-binary] [--dry-run] [--force]
@@ -11,7 +13,9 @@ const HELP = `clio uninstall [--remove-binary] [--dry-run] [--force]
 Remove all Clio Coder state: the config, data, state, and cache roots.
 
 Flags:
-  --remove-binary  also remove the launcher symlink when it resolves into a clio dist
+  --remove-binary  also remove the launcher symlink when it points at this
+                   installation. A real file, or a link into a different clio
+                   installation, is kept and reported.
   --dry-run        print what would be removed without changing anything
   --force          required for destructive execution
 `;
@@ -57,47 +61,101 @@ function report(label: string, path: string): void {
 	process.stdout.write(`  ${label.padEnd(8)} remove ${path}${existsSync(path) ? "" : "  (absent)"}\n`);
 }
 
-function removePath(path: string, dryRun: boolean): void {
-	if (!existsSync(path) || dryRun) return;
-	rmSync(path, { recursive: true, force: true });
-}
-
 function launcherLinkPath(): string {
 	const binDir = process.env.CLIO_BIN_DIR?.trim() || join(homedir(), ".local", "bin");
 	return join(binDir, "clio");
 }
 
+/** The CLI entry of the installation running this command. */
+function ownedCliEntry(): string {
+	const entry = join(resolvePackageRoot(), "dist", "cli", "index.js");
+	try {
+		return realpathSync(entry);
+	} catch {
+		// A source checkout with no build yet, or a dist this process was not
+		// launched from. The unresolved path is still the right identity.
+		return entry;
+	}
+}
+
+type LauncherVerdict = { kind: "absent" } | { kind: "keep"; detail: string } | { kind: "remove"; detail: string };
+
 /**
- * The launcher is removable only when it is a symlink whose target is the
- * built CLI entry inside a clio dist (the shape install-local.sh creates).
- * Anything else (a real file, a foreign symlink) is left in place. A dangling
- * link to a removed dist still qualifies via its raw readlink target.
+ * Decide whether the launcher at `linkPath` belongs to this installation.
+ *
+ * Ownership is identity, not shape. The previous rule accepted any symlink
+ * whose target path ended in `dist/cli/index.js`, which is a string test three
+ * ways too broad: it matched a live symlink into a *different* clio checkout,
+ * and it matched a target that is not even a file, so `clio uninstall
+ * --remove-binary` from one installation would silently unlink another one's
+ * launcher and leave that installation on disk with no way to start it.
+ *
+ * A link that resolves to this installation's own entry is ours and goes. A
+ * link that resolves anywhere else is somebody's, so it stays with the path it
+ * points at and the command that removes it deliberately. A dangling link is
+ * the one case with no owner to defer to: the installation it named is gone,
+ * unlinking it cannot touch a target that does not exist, and leaving it puts
+ * a broken `clio` on PATH after an uninstall that claimed to finish. Those are
+ * removed when the name they carry is a clio entry, and reported as dangling.
  */
-function removeLauncher(dryRun: boolean): void {
-	const linkPath = launcherLinkPath();
+function classifyLauncher(linkPath: string): LauncherVerdict {
 	let isSymlink: boolean;
 	try {
 		isSymlink = lstatSync(linkPath).isSymbolicLink();
 	} catch {
-		process.stdout.write(`  binary   absent ${linkPath}\n`);
-		return;
+		return { kind: "absent" };
 	}
 	if (!isSymlink) {
-		process.stdout.write(`  binary   keep   ${linkPath} (not a symlink; remove it via your package manager)\n`);
-		return;
+		return { kind: "keep", detail: "not a symlink; remove it via your package manager" };
 	}
-	let target: string;
+
+	const owned = ownedCliEntry();
+	let resolved: string | null = null;
 	try {
-		target = realpathSync(linkPath);
+		resolved = realpathSync(linkPath);
 	} catch {
-		target = readlinkSync(linkPath);
+		resolved = null;
 	}
-	if (!target.endsWith(join(sep, "dist", "cli", "index.js"))) {
-		process.stdout.write(`  binary   keep   ${linkPath} (does not resolve into a clio dist: ${target})\n`);
-		return;
+
+	if (resolved !== null) {
+		if (resolved === owned) return { kind: "remove", detail: `-> ${resolved}` };
+		return {
+			kind: "keep",
+			detail: `points at ${resolved}, not this installation (${owned}); remove it with \`rm ${linkPath}\``,
+		};
 	}
-	process.stdout.write(`  binary   remove ${linkPath} -> ${target}\n`);
-	if (!dryRun) rmSync(linkPath, { force: true });
+
+	const raw = readlinkSync(linkPath);
+	const danglingTarget = isAbsolute(raw) ? raw : resolve(dirname(linkPath), raw);
+	if (danglingTarget.endsWith(join(sep, "dist", "cli", "index.js"))) {
+		return { kind: "remove", detail: `-> ${danglingTarget} (dangling; that installation is already gone)` };
+	}
+	return {
+		kind: "keep",
+		detail: `dangling link to ${danglingTarget}, which is not a clio entry; remove it with \`rm ${linkPath}\``,
+	};
+}
+
+/** Returns the failure when the owned launcher existed but could not be unlinked. */
+function removeLauncher(dryRun: boolean): RemovalFailure | null {
+	const linkPath = launcherLinkPath();
+	const verdict = classifyLauncher(linkPath);
+	if (verdict.kind === "absent") {
+		process.stdout.write(`  binary   absent ${linkPath}\n`);
+		return null;
+	}
+	if (verdict.kind === "keep") {
+		process.stdout.write(`  binary   keep   ${linkPath} (${verdict.detail})\n`);
+		return null;
+	}
+	process.stdout.write(`  binary   remove ${linkPath} ${verdict.detail}\n`);
+	if (dryRun) return null;
+	try {
+		rmSync(linkPath, { force: true });
+		return null;
+	} catch (error) {
+		return { label: "binary", path: linkPath, reason: error instanceof Error ? error.message : String(error) };
+	}
 }
 
 function findClioOnPath(): string | null {
@@ -127,7 +185,7 @@ function readNpmPrefix(): string | null {
 	}
 }
 
-function printRemovalGuidance(): void {
+function printRemovalGuidance(removeBinaryRequested: boolean): void {
 	const pathClio = findClioOnPath();
 	const npmPrefix = readNpmPrefix();
 	const localLink = launcherLinkPath();
@@ -139,7 +197,11 @@ function printRemovalGuidance(): void {
 	if (npmPrefix) process.stdout.write(`  npm prefix bin:   ${join(npmPrefix, "bin")}\n`);
 	process.stdout.write(`  local source bin: ${localLink}${existsSync(localLink) ? "" : "  (absent)"}\n`);
 	process.stdout.write("\nUse the removal path that matches how you installed Clio Coder:\n");
-	process.stdout.write("  source symlink:  clio uninstall --remove-binary --force\n");
+	// Re-suggesting the flag the operator just passed reads as though it had not
+	// run, so the source-symlink line only appears when it is still an option.
+	if (!removeBinaryRequested) {
+		process.stdout.write("  source symlink:  clio uninstall --remove-binary --force\n");
+	}
 	process.stdout.write("  npm global:      npm uninstall -g @iowarp/clio-coder\n");
 	process.stdout.write("  npm link:        npm unlink -g @iowarp/clio-coder\n");
 	process.stdout.write("\nAfter removing or replacing a clio link, clear shell command caches:\n");
@@ -168,19 +230,34 @@ export function runUninstallCommand(argv: ReadonlyArray<string>): number {
 
 	const dirs = resolveClioDirs();
 	printHeader("Clio Coder uninstall");
-	report("config", dirs.config);
-	report("data", dirs.data);
-	report("state", dirs.state);
-	report("cache", dirs.cache);
+	const roots = [
+		["config", dirs.config],
+		["data", dirs.data],
+		["state", dirs.state],
+		["cache", dirs.cache],
+	] as const;
+	for (const [label, path] of roots) report(label, path);
 
-	removePath(dirs.config, args.dryRun);
-	removePath(dirs.data, args.dryRun);
-	removePath(dirs.state, args.dryRun);
-	removePath(dirs.cache, args.dryRun);
-	if (args.removeBinary) removeLauncher(args.dryRun);
+	// Every root is attempted even after one fails, so a single unwritable
+	// subtree cannot leave the other three behind unreported.
+	const failures: RemovalFailure[] = [];
+	for (const [label, path] of roots) {
+		const failure = removePath(label, path, args.dryRun);
+		if (failure) failures.push(failure);
+	}
+	if (args.removeBinary) {
+		const failure = removeLauncher(args.dryRun);
+		if (failure) failures.push(failure);
+	}
 	resetXdgCache();
 
+	if (failures.length > 0) {
+		printError("uninstall did not remove everything");
+		reportRemovalFailures(`clio uninstall${args.removeBinary ? " --remove-binary" : ""} --force`, failures);
+		return 1;
+	}
+
 	printOk(args.dryRun ? "uninstall preview complete" : "removed Clio Coder state");
-	printRemovalGuidance();
+	printRemovalGuidance(args.removeBinary);
 	return 0;
 }

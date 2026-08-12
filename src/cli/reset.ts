@@ -1,8 +1,9 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { initializeClioHome } from "../core/init.js";
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
+import { type RemovalFailure, removePath, reportRemovalFailures } from "./removal.js";
 import { printError, printHeader, printOk } from "./shared.js";
 
 const HELP = `clio reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]
@@ -96,9 +97,21 @@ function report(label: string, path: string): void {
 	process.stdout.write(`  ${label.padEnd(12)} ${path}${existsSync(path) ? "" : "  (absent)"}\n`);
 }
 
-function removePath(path: string, dryRun: boolean): void {
-	if (!existsSync(path) || dryRun) return;
-	rmSync(path, { recursive: true, force: true });
+/** Reconstruct the invocation to rerun after a partial failure. */
+function resetInvocation(args: ParsedResetArgs): string {
+	const levels = (
+		[
+			["all", args.all],
+			["config", args.config],
+			["auth", args.auth],
+			["data", args.data],
+			["state", args.state],
+			["cache", args.cache],
+		] as const
+	)
+		.filter(([, on]) => on)
+		.map(([name]) => `--${name}`);
+	return `clio reset ${levels.join(" ")} --force`;
 }
 
 export function runResetCommand(argv: ReadonlyArray<string>): number {
@@ -125,45 +138,60 @@ export function runResetCommand(argv: ReadonlyArray<string>): number {
 	const credentialsPath = join(dirs.config, "credentials.yaml");
 
 	printHeader("Clio Coder reset");
-	if (args.all) {
-		report("config", dirs.config);
-		report("data", dirs.data);
-		report("state", dirs.state);
-		report("cache", dirs.cache);
-		removePath(dirs.config, args.dryRun);
-		removePath(dirs.data, args.dryRun);
-		removePath(dirs.state, args.dryRun);
-		removePath(dirs.cache, args.dryRun);
-		resetXdgCache();
-		if (!args.dryRun) initializeClioHome();
-		printOk(args.dryRun ? "reset --all preview complete" : "reset config, data, state, and cache");
-		return 0;
+
+	// Announce every selected path first, then delete. A failure partway
+	// through therefore never leaves the operator guessing which paths the
+	// command had reached, and the dry run prints the identical list.
+	const selected: Array<{ label: string; path: string; note?: string }> = args.all
+		? [
+				{ label: "config", path: dirs.config },
+				{ label: "data", path: dirs.data },
+				{ label: "state", path: dirs.state },
+				{ label: "cache", path: dirs.cache },
+			]
+		: [
+				...(args.config ? [{ label: "settings", path: settingsPath }] : []),
+				...(args.auth ? [{ label: "credentials", path: credentialsPath }] : []),
+				...(args.data
+					? [
+							{
+								label: "data",
+								path: dirs.data,
+								note: "  note: the data root holds durable products (memory, evidence, evals)\n",
+							},
+						]
+					: []),
+				...(args.state ? [{ label: "state", path: dirs.state }] : []),
+				...(args.cache ? [{ label: "cache", path: dirs.cache }] : []),
+			];
+
+	for (const entry of selected) {
+		report(entry.label, entry.path);
+		if (entry.note) process.stdout.write(entry.note);
 	}
 
-	if (args.config) {
-		report("settings", settingsPath);
-		removePath(settingsPath, args.dryRun);
-	}
-	if (args.auth) {
-		report("credentials", credentialsPath);
-		removePath(credentialsPath, args.dryRun);
-	}
-	if (args.data) {
-		report("data", dirs.data);
-		process.stdout.write("  note: the data root holds durable products (memory, evidence, evals)\n");
-		removePath(dirs.data, args.dryRun);
-	}
-	if (args.state) {
-		report("state", dirs.state);
-		removePath(dirs.state, args.dryRun);
-	}
-	if (args.cache) {
-		report("cache", dirs.cache);
-		removePath(dirs.cache, args.dryRun);
+	const failures: RemovalFailure[] = [];
+	for (const entry of selected) {
+		const failure = removePath(entry.label, entry.path, args.dryRun);
+		if (failure) failures.push(failure);
 	}
 
 	resetXdgCache();
+	// Bootstrapping runs even after a partial failure: the roots that were
+	// removed still need their skeleton back, and it is idempotent for the ones
+	// that survived.
 	if (!args.dryRun) initializeClioHome();
-	printOk(args.dryRun ? "reset preview complete" : "reset complete");
+
+	if (failures.length > 0) {
+		printError("reset did not remove everything");
+		reportRemovalFailures(resetInvocation(args), failures);
+		return 1;
+	}
+
+	if (args.dryRun) {
+		printOk(args.all ? "reset --all preview complete" : "reset preview complete");
+	} else {
+		printOk(args.all ? "reset config, data, state, and cache" : "reset complete");
+	}
 	return 0;
 }
