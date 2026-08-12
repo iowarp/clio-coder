@@ -18,7 +18,10 @@ const HELP = `Usage:
   clio trace tail <runId> [--follow] [--db PATH]
   clio trace procs <runId> [--db PATH]
   clio trace sql <SELECT query> [--db PATH]
-  clio trace ui [--db PATH] [--port N]
+  clio trace ui [--db PATH] [--port N]        source checkout only
+
+The viewer ships with the repository, not the npm package, so from an installed
+clio the subcommands above are the way in. They read the same database.
 `;
 
 interface ParsedTraceArgs {
@@ -172,7 +175,10 @@ async function runTraceUi(db: string, port: number): Promise<number> {
 	const entry = await firstExisting(candidates);
 	if (entry === null) {
 		process.stderr.write(
-			"trace viewer is available only from a source checkout; apps/trace-viewer/server.mjs was not found\n",
+			"trace viewer is available only from a source checkout; apps/trace-viewer/server.mjs was not found\n" +
+				"  the npm package does not carry the viewer, so an installed clio cannot start it\n" +
+				`  the same run is readable here: clio trace runs --db ${db}\n` +
+				"  from a checkout of the repository: npm run trace:ui\n",
 		);
 		return 1;
 	}

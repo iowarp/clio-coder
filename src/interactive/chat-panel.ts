@@ -517,8 +517,15 @@ function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number): string[]
 		usage.cacheReadTokens > 0 || usage.cacheWriteTokens > 0
 			? ` cache ${usage.cacheReadTokens}/${usage.cacheWriteTokens}`
 			: "";
+	// The caveat is about reasoning text the panel displayed. A turn that spent
+	// no reasoning tokens displayed none, so appending it there warned about
+	// something absent and cost a wrapped line per turn at narrow widths.
+	const caveat =
+		usage.reasoningTokens !== undefined && usage.reasoningTokens > 0
+			? " · reasoning text is a UI excerpt, not a verification"
+			: "";
 	return wrapTextWithAnsi(
-		`${DIM}  turn · in ${usage.inputTokens}${calls} · out ${usage.outputTokens}${cache}${reason} · reasoning text is a UI excerpt, not a verification${RESET}`,
+		`${DIM}  turn · in ${usage.inputTokens}${calls} · out ${usage.outputTokens}${cache}${reason}${caveat}${RESET}`,
 		width,
 	);
 }

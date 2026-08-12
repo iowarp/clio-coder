@@ -619,6 +619,25 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		ok(estimatedText.includes("estimated"), estimatedText);
 	});
 
+	it("keeps the excerpt caveat off a turn that produced no reasoning", () => {
+		// Live, every turn carried `reasoning 0 provider · reasoning text is a UI
+		// excerpt, not a verification`. The caveat is about reasoning text the
+		// panel displayed, so on a turn that displayed none it warned about
+		// something absent and cost a wrapped line per turn at 70 columns.
+		const panel = createChatPanel();
+		const message = {
+			role: "assistant",
+			content: [{ type: "text", text: "no thinking here" }],
+			usage: { input: 9650, output: 7, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0 },
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+		const text = strip(panel.render(70).join("\n"));
+		ok(text.includes("turn · in 9650"), text);
+		ok(!text.includes("not a verification"), text);
+	});
+
 	it("pauses and resumes cumulative live tool output without changing execution state", () => {
 		const panel = createChatPanel({ getOutputVerbosity: () => "verbose" });
 		panel.applyEvent({
