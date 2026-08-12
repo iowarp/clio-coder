@@ -154,6 +154,34 @@ interface ReadOperationsResult {
 const TASK_PROMPT_MAX_CHARS = 2_000;
 const TRAJECTORY_PROMPT_MAX_CHARS = 4_000;
 
+/**
+ * Render the trajectory as JSON that parses, dropping whole steps to fit.
+ *
+ * Slicing the serialized string cut it mid-token, so a window at the documented
+ * per-field maxima reached the model as JSON ending in an unterminated string.
+ * That corrupts the only input the model reasons over, and it does so precisely
+ * on the busiest windows. The oldest steps go first: the newest are the ones a
+ * memory step is being asked about.
+ */
+function renderTrajectory(trajectory: TaskMemoryPolicyInput["trajectory"]): string {
+	let steps = [...trajectory];
+	let rendered = JSON.stringify(steps);
+	while (rendered.length > TRAJECTORY_PROMPT_MAX_CHARS && steps.length > 1) {
+		steps = steps.slice(1);
+		rendered = JSON.stringify(steps);
+	}
+	// A single step can still exceed the budget on its own. Truncating its fields
+	// keeps the envelope parseable where truncating the JSON would not.
+	if (rendered.length > TRAJECTORY_PROMPT_MAX_CHARS && steps.length === 1) {
+		const only = steps[0];
+		if (only !== undefined) {
+			const room = Math.max(0, TRAJECTORY_PROMPT_MAX_CHARS - JSON.stringify([{ ...only, resultDigest: "" }]).length);
+			rendered = JSON.stringify([{ ...only, resultDigest: only.resultDigest.slice(0, room) }]);
+		}
+	}
+	return rendered;
+}
+
 export async function runTaskMemoryPolicy(
 	bank: TaskMemoryBank,
 	client: TaskMemoryModelClient,
@@ -203,7 +231,7 @@ export async function runTaskMemoryPolicy(
 		userPrompt = buildMemoryInterventionUserPrompt({
 			task: input.task.slice(0, TASK_PROMPT_MAX_CHARS),
 			bank: bank.render(input.maxTokens),
-			trajectory: JSON.stringify(input.trajectory).slice(0, TRAJECTORY_PROMPT_MAX_CHARS),
+			trajectory: renderTrajectory(input.trajectory),
 		});
 		const completion = client.complete({
 			systemPrompt: MEMORY_INTERVENTION_SYSTEM_PROMPT,
