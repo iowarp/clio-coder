@@ -286,6 +286,35 @@ describe("contracts/interactive application controller", () => {
 		]);
 	});
 
+	it("does not quit when a second Ctrl+C lands inside the window during a stream", async () => {
+		// Found by cancelling a live turn. The first press cancels the stream and
+		// used to arm the shutdown clock anyway, so pressing again because the
+		// first looked like it did nothing killed the application mid-turn, with
+		// the last frame still reading `writing`.
+		const harness = createHarness();
+		const controller = createApplicationController(harness.deps);
+		harness.events.length = 0;
+
+		harness.setStreaming(true);
+		harness.setNow(30_000);
+		controller.handleCtrlC();
+		harness.setNow(30_100);
+		controller.handleCtrlC();
+		deepStrictEqual(harness.events, ["run:cancel", "run:cancel"], "both presses cancel and neither shuts down");
+
+		// Quitting still works. Once the run is cancelled, the documented double
+		// tap does what it has always done.
+		harness.events.length = 0;
+		harness.setStreaming(false);
+		harness.setNow(30_200);
+		controller.handleCtrlC();
+		deepStrictEqual(harness.events, [], "the first press after the cancel only arms");
+		harness.setNow(30_400);
+		controller.handleCtrlC();
+		await controller.run;
+		strictEqual(harness.events.at(-1), "app:shutdown");
+	});
+
 	it("runs shutdown once in exact interval, disposer, UI, parked-call, and application order", async () => {
 		const firstInterval: ApplicationIntervalHandle = {};
 		const secondInterval: ApplicationIntervalHandle = {};

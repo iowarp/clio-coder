@@ -234,6 +234,14 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		// both, while tests can expose ordering at millisecond boundaries.
 		lastCtrlCAt = deps.clock.now();
 		if (action === "cancel-stream") {
+			// A press that cancelled a run is not intent to quit, so it must not
+			// arm the shutdown clock. Leaving it armed meant the natural gesture
+			// of pressing again when the first press looked like it did nothing
+			// killed the application mid-turn, with the last frame still reading
+			// `writing` and no word about the session being saved. Quitting still
+			// works: once the run is cancelled, two presses inside the window do
+			// what they have always done.
+			lastCtrlCAt = 0;
 			deps.cancelActiveRun();
 			return;
 		}
