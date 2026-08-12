@@ -50,6 +50,10 @@ export function authStoragePath(): string {
 export class FileAuthStorageBackend implements AuthStorageBackend {
 	constructor(private readonly path: string = authStoragePath()) {}
 
+	describe(): string {
+		return this.path;
+	}
+
 	private get lockPath(): string {
 		return `${this.path}.lock`;
 	}

@@ -54,6 +54,20 @@ function printStatusLine(id: string, label: string, type: string | null, present
 	process.stdout.write(formatColumns([[id, label, type ?? "-", present ? "present" : "absent", source]]));
 }
 
+/**
+ * A store that failed to parse reads back as zero credentials, which renders
+ * identically to having never logged in. Saying so is the difference between
+ * "you are not connected" and "your credentials are still on disk and this
+ * version cannot read them", and it is the warning that stops someone from
+ * treating a damaged file as a fresh start.
+ */
+function warnIfCredentialsDamaged(auth: ReturnType<typeof openAuthStorage>): void {
+	const damage = auth.damageReason();
+	if (damage === null) return;
+	process.stderr.write(`warning: the credentials file could not be fully read: ${damage}\n`);
+	process.stderr.write("warning: entries below may be understated. Nothing will be written until it is repaired.\n");
+}
+
 function renderStatusRows(rows: ReadonlyArray<ConnectableProviderRow>): string {
 	return formatColumns(
 		rows.map((row) => {
@@ -270,7 +284,12 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 			printError("empty API key");
 			return 1;
 		}
-		auth.setApiKey(resolved.authTarget.providerId, apiKey);
+		try {
+			auth.setApiKey(resolved.authTarget.providerId, apiKey);
+		} catch (error) {
+			printError(error instanceof Error ? error.message : String(error));
+			return 1;
+		}
 		printOk(`authenticated ${resolved.authTarget.providerId}`);
 		printPlaintextCredentialWarning();
 		return 0;
@@ -296,6 +315,7 @@ async function runStatus(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	const auth = openAuthStorage();
+	warnIfCredentialsDamaged(auth);
 	const target = args[0];
 	if (target) {
 		const resolved = resolveCliProviderReference(target);
@@ -366,7 +386,12 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 		printError(`cannot remove credential for ${resolved.authTarget.providerId} from source ${status.source}`);
 		return 1;
 	}
-	auth.logout(resolved.authTarget.providerId);
+	try {
+		auth.logout(resolved.authTarget.providerId);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 1;
+	}
 	printOk(`removed credential for ${resolved.authTarget.providerId}`);
 	return 0;
 }
@@ -384,6 +409,7 @@ export async function runAuthCommand(args: ReadonlyArray<string>): Promise<numbe
 			process.stderr.write(USAGE);
 			return 2;
 		}
+		warnIfCredentialsDamaged(openAuthStorage());
 		process.stdout.write(renderConnectableProviderRows(listConnectableProviderRows()));
 		return 0;
 	}
