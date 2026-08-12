@@ -115,6 +115,61 @@ describe("contracts/tree-selector", () => {
 		ok(stripAnsi(line).trimEnd().endsWith("2026-06-11 00:00:01"), stripAnsi(line));
 	});
 
+	// A session is a chain: every message is a child of the one before it. The
+	// walk indented per child, so depth equalled message count and a seventeen
+	// message session rendered as a seventeen-level staircase, taking two
+	// columns off the preview every row. Measured live on a real session where
+	// the deepest rows had lost 34 columns of label.
+	it("keeps a linear conversation flat and indents only at a fork", () => {
+		const chain = (count: number): TreeSnapshot =>
+			({
+				sessionId: "s",
+				meta: snapshot.meta,
+				leafId: `n-${count - 1}`,
+				rootIds: ["n-0"],
+				nodesById: Object.fromEntries(
+					Array.from({ length: count }, (_, index) => [
+						`n-${index}`,
+						{
+							id: `n-${index}`,
+							parentId: index === 0 ? null : `n-${index - 1}`,
+							at: "2026-06-11T00:00:00.000Z",
+							kind: index % 2 === 0 ? "user" : "assistant",
+							preview: `row ${index}`,
+							label: null,
+							children: index === count - 1 ? [] : [`n-${index + 1}`],
+						},
+					]),
+				),
+			}) as unknown as TreeSnapshot;
+
+		const view = new TreeOverlayView({ session: session(), onSwitchTurn: () => {}, onClose: () => {} }, chain(17));
+		const lines = stripAnsi(view.render(88).join("\n")).split("\n");
+		const rows = lines.filter((line) => line.includes("row "));
+		ok(rows.length > 8, `expected most of the chain to render, got ${rows.length}`);
+		// The glyph column is where the staircase showed. Every row in a chain
+		// starts at the same one.
+		const kindColumn = (row: string): number => row.search(/\b(?:user|assistant)\b/u);
+		const columns = new Set(rows.map(kindColumn));
+		deepStrictEqual([...columns], [kindColumn(rows[0] ?? "")], "a chain has one column, not one per message");
+
+		// A fork is what indentation is for, so it still steps right.
+		const forked = chain(4) as unknown as { nodesById: Record<string, { children: string[] }> };
+		const branchPoint = forked.nodesById["n-1"];
+		const branchLeaf = forked.nodesById["n-3"];
+		if (branchPoint) branchPoint.children = ["n-2", "n-3"];
+		if (branchLeaf) branchLeaf.children = [];
+		const forkView = new TreeOverlayView(
+			{ session: session(), onSwitchTurn: () => {}, onClose: () => {} },
+			forked as unknown as TreeSnapshot,
+		);
+		const forkRows = stripAnsi(forkView.render(88).join("\n"))
+			.split("\n")
+			.filter((line) => line.includes("row "));
+		const forkColumns = forkRows.map(kindColumn);
+		strictEqual(new Set(forkColumns).size, 2, `a fork adds exactly one level, got ${forkColumns.join(",")}`);
+	});
+
 	it("footer advertises only working /tree actions", () => {
 		const view = new TreeOverlayView(
 			{
