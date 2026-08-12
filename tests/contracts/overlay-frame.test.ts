@@ -79,6 +79,62 @@ describe("contracts/overlay-frame row ownership", () => {
 		strictEqual(visibleWidth(component?.render(100)[0] ?? ""), 100);
 	});
 
+	// The engine takes the top of an overlay and drops the rest, so a box taller
+	// than the terminal lost its bottom border and with it the "[Esc] close"
+	// hint. Measured at 40x12, where the memory overlay is nineteen rows: the
+	// operator was left inside a modal with no visible way out.
+	it("keeps the border and hint when the body is taller than the terminal", () => {
+		const body = Array.from({ length: 17 }, (_, index) => `row ${index}`);
+		const frame = new ClioOverlayFrame(bodyOf(body), "Memory", "[Esc] close", 40, "center");
+		frame.setRowBudget(12);
+		const lines = frame.render(40).map(stripAnsi);
+
+		strictEqual(lines.length, 12, "the box fits the rows it was given");
+		ok(lines[0]?.startsWith("┌─ Memory"), lines[0]);
+		ok(lines[11]?.includes("[Esc] close"), lines[11]);
+		ok(lines[10]?.includes("more rows"), `dropped rows are counted, got: ${lines[10]}`);
+		ok(lines[1]?.includes("row 0"), "the body starts at its first row");
+	});
+
+	it("does not trim a body that already fits, and does not trim without a budget", () => {
+		const body = ["a", "b", "c"];
+		const fits = new ClioOverlayFrame(bodyOf(body), "T", "[Esc] close", 30, "center");
+		fits.setRowBudget(12);
+		strictEqual(fits.render(30).length, 5);
+
+		const unknown = new ClioOverlayFrame(bodyOf(Array.from({ length: 40 }, () => "x")), "T", undefined, 30, "center");
+		strictEqual(unknown.render(30).length, 42, "no budget means no clamp");
+	});
+
+	it("takes its row budget from the engine's visibility probe, honoring margins and maxHeight", () => {
+		let probe: ((w: number, h: number) => boolean) | undefined;
+		let component: ClioOverlayFrame | undefined;
+		const tui = {
+			showOverlay: (child: Component, options?: OverlayOptions): OverlayHandle => {
+				component = child as ClioOverlayFrame;
+				probe = options?.visible;
+				return {} as OverlayHandle;
+			},
+		} as unknown as TUI;
+		const body = Array.from({ length: 30 }, (_, index) => `r${index}`);
+
+		showClioOverlayFrame(tui, bodyOf(body), {
+			anchor: "center",
+			width: 40,
+			maxHeight: "50%",
+			margin: 1,
+			title: "Settings",
+			footerHint: "[Esc] close",
+		});
+
+		// 24 rows, margin 1 top and bottom leaves 22; maxHeight 50% asks for 12.
+		probe?.(80, 24);
+		strictEqual(component?.render(40).length, 12);
+		// A short terminal wins over the caller's request.
+		probe?.(80, 8);
+		strictEqual(component?.render(40).length, 4);
+	});
+
 	it("maps every anchor to the horizontal half it names", () => {
 		deepStrictEqual((["top-left", "left-center", "bottom-left"] as const).map(frameAlignForAnchor), [
 			"left",
