@@ -1,9 +1,11 @@
 # Environment Variables
 
-> [!TIP]
-> **Interactive Spec Available:** An interactive searchable env var matrix and effective path resolver is located at [docs/html/environment_blueprint.html](html/environment_blueprint.html) (Version: 0.3.0).
-
 Every environment variable the shipped `src/` tree reads, grouped by role. Settings.yaml is the durable home for operator policy; env vars exist for per-process overrides (CI, one-off experiments), directory layout, debugging, and internal plumbing. When prose and source disagree, prefer the source; the table cites the read site.
+
+This page is the complete inventory, and `tests/contracts/environment-variable-inventory.test.ts` fails if `src/` reads a variable that has no row here.
+
+> [!TIP]
+> [docs/html/environment_blueprint.html](html/environment_blueprint.html) is a browsable walkthrough of the most commonly set variables with an effective-path resolver. It covers a curated subset, so use the tables below when you need the full list.
 
 ## Guardrail overrides
 
@@ -35,6 +37,7 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | `CLIO_HOOK_BUDGET_WARMUP_CALLS` | 1 | Hook calls exempted from budget accounting at startup. |
 | `CLIO_HOOK_BUDGET_WINDOW` | 5 | Sliding-window size for steady-state hook-budget warnings. |
 | `CLIO_HOOK_BUDGET_THRESHOLD` | 3 | Overruns within the window before a steady-state warning. |
+| `CLIO_LMSTUDIO_SDK_PREDICT` | off | `1` sends LM Studio predictions over the SDK again instead of its OpenAI-compatible port. Predictions moved to HTTP because the SDK surface ignores the thinking control, so this is an escape hatch back to the older transport and not a debug toggle. Listing, loading, and unloading always use the SDK (`src/engine/apis/lmstudio-native.ts`). |
 | `CLIO_SKILL_CATALOG_DIR` | unset | Local skill-catalog directory override (`src/domains/resources/skills/marketplace.ts`). |
 | `CLIO_SKILL_MARKETPLACE_INDEX` | unset | Skill-marketplace index path override (`src/domains/resources/skills/marketplace.ts`). |
 | `CLIO_MODEL_CATALOG_DIRS` | unset | Extra model-catalog directories (`src/domains/providers/knowledge-base-path.ts`). |
@@ -62,6 +65,21 @@ All default off; enable with `1`.
 | `CLIO_RUNTIME_VERBOSE` | Verbose runtime logging (`src/engine/apis/lmstudio-native.ts`). |
 | `CLIO_HOOK_BUDGET_DEBUG` | Per-overrun hook-budget diagnostics (`src/domains/middleware/runtime.ts`). |
 
+### File-writing traces
+
+These two take a path, not `1`. Setting either to `1` writes a file named `1` in the working directory. Both are off when unset or empty, and both create parent directories.
+
+| Variable | Contents | Controls |
+| --- | --- | --- |
+| `CLIO_RENDER_TRACE` | timing only | Per-frame render timing for the interactive TUI, truncated on open so one file is one session. Records frame durations and counts and no conversation text, which makes it the instrument for reproducing a frame-cost claim at a given terminal size (`src/interactive/render-trace.ts`). |
+| `CLIO_MEMORY_TRACE` | conversation text | Proactive task-memory step envelopes, including up to 8000 characters of the text each step saw. This is content-bearing by construction, so the file carries whatever the session carried. Do not enable it on work you would not paste, and do not attach the file to a bug report without reading it first (`src/domains/memory/task-memory-trace.ts`). |
+
+Example:
+
+```bash
+CLIO_RENDER_TRACE=/tmp/clio-render.jsonl clio
+```
+
 ## Internal plumbing
 
 Set by Clio for its own processes; not operator knobs.
@@ -72,6 +90,8 @@ Set by Clio for its own processes; not operator knobs.
 | `CLIO_RUN_OVERRIDES` | JSON envelope for run-scoped CLI options (`--max-context-tokens`, `--kv-cache-mode`, sampling flags). One typed variable instead of one env var per option; worker subprocesses inherit it (`src/core/run-overrides.ts`). |
 | `CLIO_RESUME_SESSION_ID` | Session id handed across a self-restart; consumed and deleted at boot (`src/entry/orchestrator.ts`). |
 | `CLIO_BOOTSTRAP_GENERATE_CHILD` | Marks the CLIO.md-generation child so it skips recursion (`src/domains/context/extension.ts`). |
+| `CLIO_WORKER_LABELS` | Comma-separated labels a dispatched worker reports as its own (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
+| `CLIO_WORKER_PGID` | Process-group id the transport assigns a worker so its whole tree can be signalled (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
 
 ## Test-only
 
