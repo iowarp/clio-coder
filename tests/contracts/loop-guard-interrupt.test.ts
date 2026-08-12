@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { BusChannels, type LoopBlockedPayload, type ToolBudgetExceededPayload } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { ChatCancelOptions } from "../../src/interactive/chat-loop.js";
+import { noticeMessage } from "../../src/interactive/chat-loop-messages.js";
 import { subscribeLoopGuardStop } from "../../src/interactive/loop-guard-interrupt.js";
 
 function captureChat(): { calls: ChatCancelOptions[]; cancel(options?: ChatCancelOptions): void } {
@@ -96,5 +97,51 @@ describe("contracts/loop-guard-interrupt operatorless stop", () => {
 		bus.emit(BusChannels.LoopBlocked, loopBlocked(true));
 		bus.emit(BusChannels.ToolBudgetExceeded, budgetExceeded(true));
 		strictEqual(chat.calls.length, 0, "no cancels after unsubscribe");
+	});
+});
+
+/**
+ * The durable record a cancelled run leaves behind.
+ *
+ * Both the operator cancel and the loop guard persist one closing assistant
+ * turn through `noticeMessage`. It carries no `usage`, because no model call
+ * completed, and it was written with `stopReason: "stop"`.
+ *
+ * The engine's context estimator, `getLastAssistantUsageInfo` in
+ * `@earendil-works/pi-ai/dist/utils/estimate.js`, skips assistant messages
+ * marked `aborted` or `error` and then dereferences `usage.totalTokens` on
+ * every other one. That guard encodes the contract: an assistant turn either
+ * carries usage or is marked as one of those two. Labelling a cancelled turn
+ * `stop` broke both halves at once.
+ *
+ * The process that cancelled never saw it, because it does not re-read the
+ * record it just wrote. Reconstruction from disk did, and the estimate runs
+ * inside `clampMaxTokensToContext` before any network call, so every turn in
+ * the resumed session died in tens of milliseconds with a raw TypeError and
+ * went on doing so until the session was abandoned.
+ */
+describe("contracts/cancelled turn persistence", () => {
+	it("marks the closing turn aborted, so a later read does not have to guess", () => {
+		const message = noticeMessage("[Clio Coder] active response cancelled.") as {
+			role: string;
+			stopReason?: string;
+			usage?: unknown;
+		};
+		strictEqual(message.role, "assistant");
+		strictEqual(message.usage, undefined, "no model call completed, so there is no usage to record");
+		// The estimator dereferences usage on anything that is not one of these.
+		ok(
+			message.stopReason === "aborted" || message.stopReason === "error",
+			`an assistant turn with no usage must not claim it stopped normally, got ${String(message.stopReason)}`,
+		);
+	});
+
+	it("says the same thing to the reader as it does to the estimator", () => {
+		// `/tree` renders this node as the cancellation text while the persisted
+		// stopReason said the turn stopped normally. One event, two accounts.
+		const text = "[Clio Coder] active response cancelled.";
+		const message = noticeMessage(text) as { content?: Array<{ text?: string }>; stopReason?: string };
+		strictEqual(message.content?.[0]?.text, text);
+		strictEqual(message.stopReason, "aborted", "the display and the record agree that it was cancelled");
 	});
 });

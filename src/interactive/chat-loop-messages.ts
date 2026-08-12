@@ -204,11 +204,28 @@ export function toolNamesFromAgentState(tools: ReadonlyArray<unknown>): string[]
 	return names;
 }
 
+/**
+ * The durable closing turn for an interrupted run, operator cancel and loop
+ * guard alike.
+ *
+ * `stopReason` is `aborted` because that is what happened, and because the
+ * engine's context estimator depends on it. `getLastAssistantUsageInfo` skips
+ * assistant messages marked `aborted` or `error` before it dereferences
+ * `usage`, which encodes the contract that an assistant turn either carries
+ * usage or is marked as one of those two. This message carries no usage, so
+ * labelling it `stop` walked it straight past that guard and
+ * `calculateContextTokens` threw on `usage.totalTokens`.
+ *
+ * The process that did the cancelling never noticed, because it does not
+ * re-read the record it just wrote. Any later reconstruction from disk did:
+ * every turn in the resumed session failed in tens of milliseconds, before a
+ * single network call, and went on failing until the session was abandoned.
+ */
 export function noticeMessage(text: string): AgentMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		stopReason: "stop",
+		stopReason: "aborted",
 		timestamp: Date.now(),
 	} as AgentMessage;
 }
