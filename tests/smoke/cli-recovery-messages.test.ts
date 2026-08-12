@@ -12,7 +12,7 @@
  */
 import { match, ok, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
@@ -266,5 +266,40 @@ describe("clio configure probe reporting", { concurrency: false }, () => {
 		} finally {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
+	});
+});
+
+/**
+ * Every failing row in `clio doctor` names the command that repairs it, which
+ * is the whole reason the report is worth reading from a broken machine.
+ * `state metadata` was the one row that said only what was wrong.
+ */
+describe("clio doctor remedies", { concurrency: false }, () => {
+	let scratch: ReturnType<typeof makeScratchHome>;
+
+	beforeEach(() => {
+		scratch = makeScratchHome("clio-doctor-");
+	});
+
+	afterEach(() => {
+		scratch.cleanup();
+	});
+
+	it("names doctor --fix on the state-metadata row it repairs", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const stateFile = join(scratch.dir, "state", "install.json");
+		ok(existsSync(stateFile), "doctor --fix wrote the state metadata");
+		rmSync(stateFile);
+
+		const broken = await runCli(["doctor"], { env: scratch.env });
+		const row = broken.stdout.split("\n").find((line) => line.includes("state metadata")) ?? "";
+		match(row, /missing/, "the row still says what is wrong");
+		match(row, /clio doctor --fix/, "and now says what repairs it");
+
+		// The named command has to actually repair it.
+		const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
+		strictEqual(fixed.code, 0);
+		const fixedRow = fixed.stdout.split("\n").find((line) => line.includes("state metadata")) ?? "";
+		ok(!/missing/.test(fixedRow), `state metadata is repaired: ${JSON.stringify(fixedRow)}`);
 	});
 });

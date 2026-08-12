@@ -118,7 +118,9 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			? stateCurrent
 				? `${state.version} (${stateStamp})`
 				: `stale ${state.version} (${stateStamp}); current ${version.clio} (run \`clio doctor --fix\`)`
-			: "missing",
+			: // Every other failing row names the command that repairs it. This one
+				// said only "missing", and `clio doctor --fix` does write it.
+				"missing (run `clio doctor --fix`)",
 	});
 
 	return findings;
