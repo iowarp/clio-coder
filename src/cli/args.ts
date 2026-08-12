@@ -1,5 +1,6 @@
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { AUTONOMY_LEVELS, type AutonomyLevel } from "../domains/safety/autonomy.js";
+import { globalFlagPositionHint } from "./argv.js";
 
 export interface CliArgDiagnostic {
 	type: "warning" | "error";
@@ -231,7 +232,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			continue;
 		}
 		if (arg?.startsWith("-")) {
-			parsed.diagnostics.push({ type: "error", message: `unknown clio run option: ${arg}` });
+			parsed.diagnostics.push({
+				type: "error",
+				message: globalFlagPositionHint(arg, "run") ?? `unknown clio run option: ${arg}`,
+			});
 			continue;
 		}
 		if (arg !== undefined) {
