@@ -22,7 +22,7 @@ import {
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
 import { type Component, getCapabilities, Image, type ImageTheme, truncateToWidth } from "../engine/tui.js";
-import { abbreviateModelId, brandMark, type ClioTheme, clioTheme, fitUnits, frame } from "./theme/index.js";
+import { brandMark, type ClioTheme, clioTheme, fitUnits, formatTargetLabel, frame } from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
 	providers: ProvidersContract;
@@ -57,8 +57,9 @@ export interface WelcomeRepositoryFacts {
 export interface WelcomeDashboardStats {
 	activeTargets: number;
 	totalTargets: number;
-	targetLabel: string;
-	modelLabel: string;
+	/** Null when unset. `formatTargetLabel` owns the one spelling for that. */
+	targetLabel: string | null;
+	modelLabel: string | null;
 	thinkingLevel: string;
 	cwd: string;
 	workspace: WorkspaceSnapshot | null;
@@ -242,8 +243,9 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	const settings = deps.getSettings?.();
 	const statuses = deps.providers.list();
 	const current = findCurrentStatus(statuses, settings);
-	const targetLabel = current?.target.id ?? settings?.orchestrator?.target ?? "not configured";
-	const modelLabel = settings?.orchestrator?.model ?? current?.target.defaultModel ?? "not configured";
+	// Left null when unset; formatTargetLabel owns the one spelling for that.
+	const targetLabel = current?.target.id ?? settings?.orchestrator?.target ?? null;
+	const modelLabel = settings?.orchestrator?.model ?? current?.target.defaultModel ?? null;
 	const workspace = deps.getWorkspaceSnapshot?.() ?? null;
 	const cwd = workspace?.cwd ?? process.cwd();
 	const currentAvailable = current ? activeStatus(current) : false;
@@ -342,7 +344,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	const title = `${brandMark(theme)} ${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${readClioVersion()}`)}`;
 	const experimentalLine = `  ${theme.style("warning", EXPERIMENTAL_RELEASE_WARNING, { bold: true })}`;
 
-	const targetVal = `${theme.fg("accent", stats.targetLabel)}/${abbreviateModelId(stats.modelLabel)}`;
+	const targetVal = theme.fg("accent", formatTargetLabel(stats.targetLabel, stats.modelLabel));
 	const thinkVal = `think ${theme.fg("reason", stats.thinkingLevel)}`;
 
 	let clioMdStr = `CLIO.md ${stats.clioMdStatus}`;

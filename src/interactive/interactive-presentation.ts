@@ -27,7 +27,7 @@ import type { SessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import type { RunIo } from "./slash-commands.js";
 import { createStatusController, type StatusController, type TurnSummary } from "./status/index.js";
-import { abbreviateModelId } from "./theme/index.js";
+import { formatTargetLabel } from "./theme/index.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
 
@@ -273,11 +273,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const editor = factories.createEditor(deps.tui, {
 		getModelLabel: () => {
 			const current = deps.getSettings?.();
-			const model = current?.orchestrator?.model?.trim();
-			if (!model) return "no model";
-			const target = current?.orchestrator?.target?.trim();
-			const abbreviated = abbreviateModelId(model);
-			return target ? `${target}·${abbreviated}` : abbreviated;
+			// The rail is the narrowest of the three, so it drops the spaces.
+			return formatTargetLabel(current?.orchestrator?.target, current?.orchestrator?.model, { separator: "·" });
 		},
 		getThinkingLabel: () => {
 			const current = deps.getSettings?.();
