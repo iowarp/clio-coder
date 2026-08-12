@@ -136,12 +136,12 @@ describe("contracts/memory intervention rules tier", () => {
 		deepStrictEqual(bank.snapshot().procedural, []);
 	});
 
-	it("reactivates only knowledge once on the first turn after compaction", () => {
+	it("reactivates status and knowledge, but not procedural, once on the first turn after compaction", () => {
 		const bank = new TaskMemoryBank();
 		bank.updateStatus("private progress");
 		const knowledge = bank.saveKnowledge("The requested branch is feat/fleet-dispatch.");
 		bank.saveProcedural("An earlier command failed.");
-		const registration = createMemoryInterventionRegistration({ bank, maxTokens: 80 });
+		const registration = createMemoryInterventionRegistration({ bank, maxTokens: 200 });
 
 		deepStrictEqual(registration.evaluate({ hook: "on_compaction" }), []);
 		const effects = registration.evaluate({ hook: "turn_start" });
@@ -150,10 +150,37 @@ describe("contracts/memory intervention rules tier", () => {
 		ok(effect?.kind === "inject_reminder");
 		strictEqual(effect.severity, "advisory");
 		ok(effect.message.includes(knowledge.id));
-		ok(!effect.message.includes("private progress"));
+		ok(effect.message.includes("private progress"), effect.message);
 		ok(!effect.message.includes("An earlier command failed"));
-		ok(Math.ceil(effect.message.length / 4) <= 80);
+		ok(Math.ceil(effect.message.length / 4) <= 200);
 		strictEqual(bank.snapshot().knowledge[0]?.injectionCount, 1);
+		deepStrictEqual(registration.evaluate({ hook: "turn_start" }), []);
+	});
+
+	/**
+	 * Measured across ten live LLM steps on the background route: the model wrote
+	 * update_status in every step and save_knowledge in two. Restoring knowledge
+	 * alone therefore restored nothing in the common case and logged bank_empty.
+	 */
+	it("reactivates after compaction when the model wrote only status", () => {
+		const bank = new TaskMemoryBank();
+		bank.updateStatus("Mapping the routing call chain; the build is still failing.");
+		const registration = createMemoryInterventionRegistration({ bank, maxTokens: 200 });
+
+		deepStrictEqual(registration.evaluate({ hook: "on_compaction" }), []);
+		const effects = registration.evaluate({ hook: "turn_start" });
+		strictEqual(effects.length, 1);
+		const effect = effects[0];
+		ok(effect?.kind === "inject_reminder");
+		ok(effect.message.includes("Mapping the routing call chain"), effect.message);
+	});
+
+	it("stays silent after compaction when the bank holds nothing at all", () => {
+		const bank = new TaskMemoryBank();
+		bank.saveProcedural("An earlier command failed.");
+		const registration = createMemoryInterventionRegistration({ bank, maxTokens: 200 });
+
+		deepStrictEqual(registration.evaluate({ hook: "on_compaction" }), []);
 		deepStrictEqual(registration.evaluate({ hook: "turn_start" }), []);
 	});
 
