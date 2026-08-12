@@ -81,8 +81,11 @@ export function colorSequences(output: string): string[] {
 
 /** Visible lines with trailing whitespace dropped, which is what width assertions want. */
 export function visibleLines(output: string): string[] {
+	// Split on a bare carriage return as well as a newline. The TUI uses `\r`
+	// to return to column 0 without advancing, so two lines that each fit the
+	// terminal read as one line twice as wide unless it counts as a break.
 	return stripAnsi(output)
-		.split(/\r?\n/)
+		.split(/\r\n|\n|\r/)
 		.map((line) => line.replace(/\s+$/, ""));
 }
 
