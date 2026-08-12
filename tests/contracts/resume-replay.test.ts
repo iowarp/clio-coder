@@ -1,6 +1,11 @@
-import { ok } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import {
+	assistantSessionPayload,
+	noticeMessage,
+	terminalFailureFromAssistantMessage,
+} from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
@@ -115,5 +120,43 @@ describe("contracts/resume replay transcript notices", () => {
 		ok(strip(rendered).includes("[retry] attempt 2/5 in 3s"), "the retry line replays its content");
 		ok(rendered.includes(theme.fg("warning", "[retry]")), "the [retry] tag renders warning, not dim");
 		ok(rendered.includes(theme.fg("muted", " attempt 2/5 in 3s")), "the retry body renders muted");
+	});
+
+	// A cancelled turn is persisted `aborted` so the context estimator skips it
+	// when looking for the last usage anchor. Marking it that way used to also
+	// stamp a synthesized "request aborted" on it, so a resumed session showed a
+	// red error line under the cancellation notice: the exact noise the live
+	// cancel path suppresses. Built from the real persistence shaping rather than
+	// a hand-written payload, so the round trip is what is under test.
+	it("replays a cancelled turn as the notice alone, with no aborted error line", () => {
+		const notice = noticeMessage("[Clio Coder] active response cancelled.");
+		const payload = assistantSessionPayload(notice, terminalFailureFromAssistantMessage(notice));
+		strictEqual(payload.stopReason, "aborted", "the cancelled turn stays aborted for context accounting");
+
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, [
+			{ kind: "message", role: "user", turnId: "u1", parentTurnId: null, timestamp: ts, payload: { text: "hi" } },
+			{ kind: "message", role: "assistant", turnId: "a1", parentTurnId: "u1", timestamp: ts, payload },
+		]);
+		const rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("[Clio Coder] active response cancelled."), "the notice replays");
+		ok(!rendered.includes("[aborted]"), "the notice explains itself and carries no error line");
+	});
+
+	it("keeps the aborted line on a mid-stream abort the provider reported", () => {
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, [
+			{ kind: "message", role: "user", turnId: "u1", parentTurnId: null, timestamp: ts, payload: { text: "hi" } },
+			{
+				kind: "message",
+				role: "assistant",
+				turnId: "a1",
+				parentTurnId: "u1",
+				timestamp: ts,
+				payload: { text: "partial answ", stopReason: "aborted", errorMessage: "Request was aborted." },
+			},
+		]);
+		const rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("[aborted] Request was aborted."), "a reported abort still says it was aborted");
 	});
 });

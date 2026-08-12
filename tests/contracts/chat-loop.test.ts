@@ -514,9 +514,15 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 
 		const assistantEntries = entries.filter(isAssistantMessageEntry);
 		strictEqual(assistantEntries.length, 1, "exactly one assistant turn: the durable closing message");
-		const payload = assistantEntries[0]?.payload as { text?: string; stopReason?: string };
+		const payload = assistantEntries[0]?.payload as { text?: string; stopReason?: string; errorMessage?: string };
 		strictEqual(payload.text, REASON, "the closing turn carries the loop-stop reason");
-		ok(payload.stopReason !== "aborted", "the closing turn is not the empty aborted message");
+		// What distinguishes the durable closing turn from the empty aborted
+		// message is its text and the absence of an errorMessage, not its
+		// stopReason. Both are aborted, and the closing turn has to be: it carries
+		// no usage, and the engine's context estimator dereferences usage on any
+		// assistant turn not marked aborted or error.
+		strictEqual(payload.errorMessage, undefined, "the closing turn is not the empty aborted message");
+		strictEqual(payload.stopReason, "aborted", "a turn the loop guard stopped is recorded as stopped");
 		const looped = aborts.find((evt) => evt.source === "loop_guard");
 		ok(looped, "a loop_guard RunAborted is audited, distinct from a user stream_cancel");
 		strictEqual(looped?.reason, "loop: context repeated 3x");
@@ -638,9 +644,14 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 
 		const assistantEntries = entries.filter(isAssistantMessageEntry);
 		strictEqual(assistantEntries.length, 1, "exactly one assistant turn: the durable cancellation notice");
-		const payload = assistantEntries[0]?.payload as { text?: string; stopReason?: string };
+		const payload = assistantEntries[0]?.payload as { text?: string; stopReason?: string; errorMessage?: string };
 		strictEqual(payload.text, "[Clio Coder] active response cancelled.");
-		ok(payload.stopReason !== "aborted", "the empty aborted turn stays out of the ledger");
+		// The empty aborted turn is the one with an errorMessage and no text. Both
+		// it and the durable notice are aborted, and the notice has to be, or a
+		// resume of this session throws reading usage that a cancelled turn never
+		// had.
+		strictEqual(payload.errorMessage, undefined, "the empty aborted turn stays out of the ledger");
+		strictEqual(payload.stopReason, "aborted", "a turn the operator cancelled is recorded as cancelled");
 		const abortedEnds = seen.filter(
 			(event) =>
 				event.type === "message_end" && (event as { message?: { stopReason?: string } }).message?.stopReason === "aborted",
