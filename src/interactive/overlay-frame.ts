@@ -176,24 +176,49 @@ function fitDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: numbe
 	return padAnsi(formatRuntimeResolutionDiagnostic(diagnostic), Math.max(1, width));
 }
 
+export type FrameAlign = "left" | "center" | "right";
+
+/**
+ * Horizontal half of an overlay anchor. The terminal engine composites an
+ * overlay only across the columns it declares, so the frame claims the whole
+ * row and places the box itself; this is what the box would have been anchored
+ * to if the engine were still doing the placing.
+ */
+export function frameAlignForAnchor(anchor: OverlayOptions["anchor"]): FrameAlign {
+	if (anchor === undefined) return "center";
+	if (anchor === "left-center" || anchor.endsWith("-left")) return "left";
+	if (anchor === "right-center" || anchor.endsWith("-right")) return "right";
+	return "center";
+}
+
 export class ClioOverlayFrame implements Component {
 	constructor(
 		private readonly child: Component,
 		private readonly title: string | (() => string),
 		private readonly footerHint?: string | (() => string | undefined),
+		/** Box width in columns. Zero fills the row it is given. */
+		private readonly boxWidth = 0,
+		private readonly align: FrameAlign = "center",
 	) {}
 
 	render(width: number): string[] {
-		const contentWidth = Math.max(1, width - 4);
+		const boxWidth = Math.max(5, Math.min(this.boxWidth > 0 ? this.boxWidth : width, width));
+		const contentWidth = Math.max(1, boxWidth - 4);
 		const childLines = this.child.render(contentWidth);
 		const titleText = typeof this.title === "function" ? this.title() : this.title;
 		const label = titleText.length > 0 ? `─ ${titleText} ` : "─ ";
 		const hint = typeof this.footerHint === "function" ? this.footerHint() : this.footerHint;
-		return [
+		const boxLines = [
 			brandedTopBorder(label, contentWidth + 2),
 			...childLines.map((line) => `${clioFrame("│")} ${padAnsi(line, contentWidth)} ${clioFrame("│")}`),
 			brandedBottomBorder(contentWidth + 2, hint),
 		];
+		const slack = Math.max(0, width - boxWidth);
+		if (slack === 0) return boxLines;
+		const leading = this.align === "left" ? 0 : this.align === "right" ? slack : Math.floor(slack / 2);
+		const lead = " ".repeat(leading);
+		const trail = " ".repeat(slack - leading);
+		return boxLines.map((line) => `${lead}${line}${trail}`);
 	}
 
 	handleInput(data: string): void {
@@ -205,11 +230,29 @@ export class ClioOverlayFrame implements Component {
 	}
 }
 
+/**
+ * Show a framed overlay that owns every row it covers.
+ *
+ * The overlay used to declare only the box's own width, and the terminal engine
+ * composites an overlay across exactly the columns it declares, so the
+ * transcript stayed on both sides of the border. On a 193-column terminal a
+ * write-approval modal landed inside a sentence and the row read "None of these
+ * skills directly match the task \"escape works" on the left of the box and
+ * "test message, possibly checking that the escape sequence or" on the right,
+ * which is a sentence the model never wrote.
+ *
+ * The frame now claims the full row and blanks the columns beside the box, so
+ * a modal reads as a modal. The caller's width becomes the box width and the
+ * anchor's horizontal half becomes the box's alignment inside the row; margins,
+ * vertical anchoring, and maxHeight are still the engine's.
+ */
 export function showClioOverlayFrame(
 	tui: TUI,
 	child: Component,
 	options: OverlayOptions & { title: string | (() => string); footerHint?: string | (() => string | undefined) },
 ): OverlayHandle {
-	const { title, footerHint, ...overlayOptions } = options;
-	return tui.showOverlay(new ClioOverlayFrame(child, title, footerHint), overlayOptions);
+	const { title, footerHint, width, ...overlayOptions } = options;
+	const boxWidth = typeof width === "number" ? width : 0;
+	const frame = new ClioOverlayFrame(child, title, footerHint, boxWidth, frameAlignForAnchor(options.anchor));
+	return tui.showOverlay(frame, { ...overlayOptions, width: "100%" });
 }
