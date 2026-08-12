@@ -191,7 +191,36 @@ export function frameAlignForAnchor(anchor: OverlayOptions["anchor"]): FrameAlig
 	return "center";
 }
 
+/**
+ * Trim a body to the rows the box has, keeping the count of what was dropped.
+ *
+ * A box taller than the terminal used to be cut off at the bottom by the
+ * engine, which takes the top of an overlay and discards the rest. At 40x12 the
+ * memory overlay is nineteen rows, so what went missing was the bottom border
+ * and the `[Esc] close` hint: the one row that tells an operator how to get out
+ * of a modal that has taken their keyboard. Losing body rows instead keeps the
+ * way out on screen.
+ */
+function fitBody(lines: ReadonlyArray<string>, rowBudget: number, contentWidth: number): ReadonlyArray<string> {
+	if (rowBudget <= 0) return lines;
+	const bodyBudget = Math.max(1, rowBudget - 2);
+	if (lines.length <= bodyBudget) return lines;
+	const kept = lines.slice(0, bodyBudget - 1);
+	const hidden = lines.length - kept.length;
+	return [...kept, clioTheme().fg("dim", truncateToWidth(`… ${hidden} more rows`, contentWidth, "", true))];
+}
+
 export class ClioOverlayFrame implements Component {
+	/**
+	 * Rows the box may occupy, or zero while unknown.
+	 *
+	 * `Component.render` is handed a width and nothing else, so the frame learns
+	 * its height budget from the engine's `visible` predicate, which is called
+	 * with the live terminal size immediately before the render pass that
+	 * composites this overlay.
+	 */
+	private rowBudget = 0;
+
 	constructor(
 		private readonly child: Component,
 		private readonly title: string | (() => string),
@@ -200,6 +229,10 @@ export class ClioOverlayFrame implements Component {
 		private readonly boxWidth = 0,
 		private readonly align: FrameAlign = "center",
 	) {}
+
+	setRowBudget(rows: number): void {
+		this.rowBudget = Math.max(0, Math.floor(rows));
+	}
 
 	render(width: number): string[] {
 		const boxWidth = Math.max(5, Math.min(this.boxWidth > 0 ? this.boxWidth : width, width));
@@ -210,7 +243,9 @@ export class ClioOverlayFrame implements Component {
 		const hint = typeof this.footerHint === "function" ? this.footerHint() : this.footerHint;
 		const boxLines = [
 			brandedTopBorder(label, contentWidth + 2),
-			...childLines.map((line) => `${clioFrame("│")} ${padAnsi(line, contentWidth)} ${clioFrame("│")}`),
+			...fitBody(childLines, this.rowBudget, contentWidth).map(
+				(line) => `${clioFrame("│")} ${padAnsi(line, contentWidth)} ${clioFrame("│")}`,
+			),
 			brandedBottomBorder(contentWidth + 2, hint),
 		];
 		const slack = Math.max(0, width - boxWidth);
@@ -243,16 +278,42 @@ export class ClioOverlayFrame implements Component {
  *
  * The frame now claims the full row and blanks the columns beside the box, so
  * a modal reads as a modal. The caller's width becomes the box width and the
- * anchor's horizontal half becomes the box's alignment inside the row; margins,
- * vertical anchoring, and maxHeight are still the engine's.
+ * anchor's horizontal half becomes the box's alignment inside the row; margins
+ * and vertical anchoring are still the engine's.
+ *
+ * The frame also fits itself to the rows available rather than letting the
+ * engine cut its bottom off, which is what kept the `[Esc] close` hint on
+ * screen at 40x12. It learns the terminal height through the `visible`
+ * predicate, which the engine evaluates with the live dimensions in the same
+ * pass that renders the overlay.
  */
 export function showClioOverlayFrame(
 	tui: TUI,
 	child: Component,
 	options: OverlayOptions & { title: string | (() => string); footerHint?: string | (() => string | undefined) },
 ): OverlayHandle {
-	const { title, footerHint, width, ...overlayOptions } = options;
+	const { title, footerHint, width, visible, maxHeight, margin, ...overlayOptions } = options;
 	const boxWidth = typeof width === "number" ? width : 0;
 	const frame = new ClioOverlayFrame(child, title, footerHint, boxWidth, frameAlignForAnchor(options.anchor));
-	return tui.showOverlay(frame, { ...overlayOptions, width: "100%" });
+	const marginRows = typeof margin === "number" ? margin * 2 : (margin?.top ?? 0) + (margin?.bottom ?? 0);
+	return tui.showOverlay(frame, {
+		...overlayOptions,
+		...(margin !== undefined ? { margin } : {}),
+		width: "100%",
+		visible: (termWidth, termHeight) => {
+			const available = Math.max(1, termHeight - marginRows);
+			const requested = resolveRowSize(maxHeight, termHeight);
+			frame.setRowBudget(requested === null ? available : Math.min(requested, available));
+			return visible ? visible(termWidth, termHeight) : true;
+		},
+	});
+}
+
+/** Rows from an overlay size value, matching how the engine reads one. */
+function resolveRowSize(value: OverlayOptions["maxHeight"], termHeight: number): number | null {
+	if (typeof value === "number") return Math.max(1, Math.floor(value));
+	if (typeof value !== "string") return null;
+	const percent = /^(\d+(?:\.\d+)?)%$/u.exec(value.trim());
+	if (!percent?.[1]) return null;
+	return Math.max(1, Math.floor((termHeight * Number.parseFloat(percent[1])) / 100));
 }

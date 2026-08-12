@@ -468,12 +468,16 @@ describe("contracts/view-overlay", () => {
 		const handle = openViewOverlay(harness.tui, { providers: [], onClose() {} });
 
 		strictEqual(harness.options()?.width, "100%");
-		strictEqual(harness.options()?.maxHeight, "100%");
 		deepStrictEqual(harness.options()?.margin, VIEW_OVERLAY_MARGIN);
 		deepStrictEqual(VIEW_OVERLAY_MARGIN, { top: 0, right: 0, bottom: 0, left: 0 });
 
 		const lines = harness.component().render(132);
 		for (const line of lines) strictEqual(visibleWidth(line), 132);
+
+		// The frame enforces its own height rather than handing maxHeight to the
+		// engine, which would cut the bottom border off instead of the body.
+		harness.options()?.visible?.(132, 40);
+		strictEqual(harness.component().render(132).length, 40);
 		handle.hide();
 	});
 });
