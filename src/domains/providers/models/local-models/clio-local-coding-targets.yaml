@@ -216,6 +216,11 @@
         topK: 20
         maxTokens: 16384
         reasoningBudget: 4096
+      instruct:
+        temperature: 0.7
+        topP: 0.80
+        topK: 20
+        minP: 0.0
     gpuTiers:
       "32gb": "Main-agent candidate on 32GB targets when Nemotron Omni is unavailable or tool behavior is better for text-only work."
     runtimePreference:
@@ -799,6 +804,11 @@
         topK: 20
         maxTokens: 8192
         reasoningBudget: 4096
+      instruct:
+        temperature: 0.7  # 0.7 keeps tool-call JSON parseable; gemma card's 1.0 is for chat
+        topP: 0.95
+        topK: 64
+        minP: 0.0
     gpuTiers:
       "32gb": "Main-agent candidate for 32 GB and larger local systems when Gemma behavior is preferred."
     runtimePreference:
