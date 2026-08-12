@@ -30,6 +30,37 @@ function clientReturning(text: string, calls: TaskMemoryModelRequest[] = []): Ta
 }
 
 describe("contracts/task memory prompted policy", () => {
+	/**
+	 * The trajectory is the one thing the model has to reason over, and it is
+	 * handed across as JSON. Bounding the rendered form by slicing the serialized
+	 * string cut it mid-token, so a full window arrived as JSON that does not
+	 * parse. A window of eight steps carrying the documented per-field maxima
+	 * exceeds the budget, so this is reachable at shipped settings.
+	 */
+	it("keeps the rendered trajectory parseable when the window exceeds the prompt budget", async () => {
+		const calls: TaskMemoryModelRequest[] = [];
+		const trajectory = Array.from({ length: 8 }, (_, index) => ({
+			toolName: "bash",
+			fingerprint: `${index}`.repeat(16),
+			callDescription: `bash{"command":"${"x".repeat(160)}"}`,
+			step: index + 1,
+			outcome: "error" as const,
+			resultDigest: `error ${"y".repeat(230)}`,
+		}));
+		await runTaskMemoryPolicy(new TaskMemoryBank(), clientReturning(response([]), calls), {
+			...BASE_INPUT,
+			trajectory,
+		});
+
+		const prompt = calls[0]?.userPrompt ?? "";
+		const rendered = prompt.slice(prompt.indexOf("Recent completed tool trajectory:") + 33).trim();
+		ok(rendered.length > 0, prompt);
+		const parsed = JSON.parse(rendered) as unknown[];
+		ok(Array.isArray(parsed), rendered);
+		ok(parsed.length > 0, "at least one whole step survives the budget");
+		ok(parsed.length < trajectory.length, "and the budget still drops steps rather than keeping everything");
+	});
+
 	it("applies a valid operation list in source order before explicit silence", async () => {
 		const bank = new TaskMemoryBank();
 		const oldKnowledge = bank.saveKnowledge("Old fact");
