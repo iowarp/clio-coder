@@ -108,6 +108,42 @@ describe("contracts/interactive editor submit", () => {
 		deepStrictEqual(harness.events, ["set:", "dispatch:/help topic", "render"]);
 	});
 
+	// pi-tui's submitValue() empties the editor before onSubmit is called, so a
+	// spelling the registry does not claim used to cost the operator the whole
+	// line. Putting the text back is what makes the notice actionable.
+	it("returns a mistyped command to the editor so it can be corrected in place", () => {
+		const harness = createHarness();
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.submitEditorText("/thnking off");
+
+		strictEqual(harness.getText(), "/thnking off");
+		deepStrictEqual(harness.events, ["set:/thnking off", "dispatch:/thnking off", "render"]);
+	});
+
+	it("returns input a command rejected on its arguments", () => {
+		const harness = createHarness();
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.submitEditorText("/context init --no-generate");
+
+		strictEqual(harness.getText(), "/context init --no-generate");
+	});
+
+	// Only the shapes that never reached a handler come back. A command that ran
+	// and a message that went to the model both leave the line empty.
+	it("clears the editor for commands that run and for chat text", () => {
+		const harness = createHarness();
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.submitEditorText("/help");
+		strictEqual(harness.getText(), "");
+
+		harness.setText("explain this repository");
+		controller.submitEditorText("explain this repository");
+		strictEqual(harness.getText(), "");
+	});
+
 	it("consumes a matching steer mention before slash or chat dispatch", () => {
 		const harness = createHarness({ running: [{ runId: "run-123", agentId: "scout" }] });
 		const controller = createEditorSubmitController(harness.deps);

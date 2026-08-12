@@ -12,9 +12,25 @@ import {
 	resolveSteerTarget,
 } from "./editor-steer.js";
 import { type ExternalEditResult, editTextExternally, resolveExternalEditor } from "./external-editor.js";
-import type { RunIo } from "./slash-commands.js";
+import { parseSlashCommand, type RunIo, type SlashCommand } from "./slash-commands.js";
 
 const EDITOR_BASH_TIMEOUT_MS = 300_000;
+
+/**
+ * Command shapes that are rejected by the parser and never reach a handler.
+ *
+ * The terminal engine empties the editor inside its own submit path before
+ * `onSubmit` runs, so the text is already gone by the time the notice is
+ * written. An operator who mistyped one character of a long command got an
+ * error naming a spelling they could no longer see and had to retype the whole
+ * line. Putting the text back leaves the correction one keystroke away.
+ *
+ * Only parse-time rejections qualify. A command that ran and failed has done
+ * work, and chat text belongs to the transcript, so both leave the line empty.
+ */
+function isRejectedCommand(command: SlashCommand): boolean {
+	return command.kind === "unknown-command" || command.kind === "usage-error";
+}
 
 export interface EditorSubmitExpansion {
 	text: string;
@@ -213,7 +229,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.ui.requestRender();
 			return;
 		}
-		deps.editor.setText("");
+		deps.editor.setText(isRejectedCommand(parseSlashCommand(trimmed)) ? text : "");
 		deps.dispatchCommand(trimmed);
 		deps.ui.requestRender();
 	};
