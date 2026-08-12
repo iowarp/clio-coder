@@ -21,6 +21,12 @@ type Hook = () => void | Promise<void>;
 /** Wall-clock budget per hook and per domain.stop() call. */
 export const DEFAULT_SHUTDOWN_HOOK_MS = 500;
 
+const SIGNAL_EXIT_CODES: Partial<Record<NodeJS.Signals, number>> = {
+	SIGHUP: 129,
+	SIGINT: 130,
+	SIGTERM: 143,
+};
+
 export function resolveShutdownHookBudgetMs(): number {
 	const raw = process.env.CLIO_SHUTDOWN_HOOK_MS;
 	if (raw === undefined) return DEFAULT_SHUTDOWN_HOOK_MS;
@@ -148,15 +154,22 @@ class TerminationCoordinator {
 		}
 	}
 
+	/**
+	 * SIGHUP is here for the same reason as SIGTERM. Without a listener Node
+	 * takes its default action and the process dies with no shutdown at all,
+	 * which on a TUI session means the terminal is never given back. Exit codes
+	 * follow the 128+signal convention.
+	 */
 	installSignalHandlers(): void {
 		if (this.signalHandler) return;
 		const handler = (signal: NodeJS.Signals): void => {
 			process.stderr.write(`\nClio Coder: received ${signal}, shutting down...\n`);
-			void this.shutdown(signal === "SIGINT" ? 130 : 143);
+			void this.shutdown(SIGNAL_EXIT_CODES[signal] ?? 143);
 		};
 		this.signalHandler = handler;
 		process.once("SIGINT", handler);
 		process.once("SIGTERM", handler);
+		process.once("SIGHUP", handler);
 	}
 
 	/**
