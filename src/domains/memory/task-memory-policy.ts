@@ -329,6 +329,55 @@ function stripTagShapes(value: string): string {
 	return value.replace(/<\/?[a-zA-Z][^>]*>/gu, " ");
 }
 
+/**
+ * Find where the operation list ends, by reading the JSON array rather than by
+ * searching for the close tag.
+ *
+ * An operation's content is free text, and a session working on the memory tier
+ * writes this envelope's own grammar into it. `indexOf` then finds a close tag
+ * that sits inside a JSON string and hands `JSON.parse` a truncated document, so
+ * a correct answer is discarded as unparseable. `lastIndexOf` fails the mirror
+ * case, where a reminder quotes the tag again after the list has closed. The
+ * array's own bracket depth is the only boundary that both cases agree on.
+ *
+ * Returns the index just past the array's closing bracket, or -1 when the text
+ * holds no balanced array.
+ */
+function operationsEndIndex(text: string, from: number): number {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	let started = false;
+	for (let index = from; index < text.length; index += 1) {
+		const char = text[index];
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (char === "\\") escaped = true;
+			else if (char === '"') inString = false;
+			continue;
+		}
+		if (char === '"') {
+			inString = true;
+			continue;
+		}
+		if (char === "[" || char === "{") {
+			depth += 1;
+			started = true;
+			continue;
+		}
+		if (char === "]" || char === "}") {
+			depth -= 1;
+			if (depth < 0) return -1;
+			if (depth === 0 && started) return index + 1;
+			continue;
+		}
+		// Anything before the array opens that is not whitespace means the model
+		// wrote something other than an operation list.
+		if (!started && char !== undefined && char.trim().length > 0) return -1;
+	}
+	return -1;
+}
+
 type ReadPolicyStepResult =
 	| { ok: true; step: ParsedMemoryStep; dropped: number }
 	| { ok: false; reason: "unparseable" | "all_operations_invalid"; dropped: number };
@@ -345,11 +394,17 @@ function readPolicyStep(response: string): ReadPolicyStepResult {
 	const text = cleanPolicyResponse(response);
 	const opensAt = text.indexOf(OPERATIONS_OPEN);
 	if (opensAt === -1) return unparseable;
-	const closesAt = text.indexOf(OPERATIONS_CLOSE, opensAt);
+	const listAt = opensAt + OPERATIONS_OPEN.length;
+	const listEndsAt = operationsEndIndex(text, listAt);
+	if (listEndsAt === -1) return unparseable;
+	// The close tag is still required. A model that wrote no list at all never
+	// reaches here, and one that wrote a list but no close tag did not produce
+	// the envelope the prompt asks for.
+	const closesAt = text.indexOf(OPERATIONS_CLOSE, listEndsAt);
 	if (closesAt === -1) return unparseable;
 	let rawOperations: unknown;
 	try {
-		rawOperations = JSON.parse(text.slice(opensAt + OPERATIONS_OPEN.length, closesAt)) as unknown;
+		rawOperations = JSON.parse(text.slice(listAt, listEndsAt)) as unknown;
 	} catch {
 		return unparseable;
 	}

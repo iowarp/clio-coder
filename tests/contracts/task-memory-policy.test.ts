@@ -71,6 +71,56 @@ describe("contracts/task memory prompted policy", () => {
 		ok(parsed.length < trajectory.length, "and the budget still drops steps rather than keeping everything");
 	});
 
+	/**
+	 * An operation's content is free text, and a session working on the memory
+	 * tier itself writes the envelope's own tags into it. Locating the close tag
+	 * with the first match then ends the list inside a JSON string, so the slice
+	 * hands `JSON.parse` a truncated document and a correct answer is recorded as
+	 * `unparseable` with its writes discarded.
+	 *
+	 * Measured on the reference route with a window whose trajectory quoted the
+	 * envelope grammar: 9 of 24 steps were unparseable and 8 of those 9 carried
+	 * operations. The same route with a tag-free window was 0 of 24. The last
+	 * match is not the answer either, because `<context_for_action>` quotes the
+	 * tag again after the list has legitimately closed.
+	 */
+	it("ends the operation list at its own close tag when an operation quotes the envelope grammar", async () => {
+		const bank = new TaskMemoryBank();
+		const result = await runTaskMemoryPolicy(
+			bank,
+			clientReturning(
+				response([
+					{ op: "save_knowledge", content: "The contract requires <operations>[]</operations> then <no_intervention/>." },
+				]),
+			),
+			BASE_INPUT,
+		);
+
+		strictEqual(result.reason, "model_silent");
+		strictEqual(result.bankOperations, 1);
+		deepStrictEqual(
+			bank.snapshot().knowledge.map(({ content }) => content),
+			["The contract requires <operations>[]</operations> then <no_intervention/>."],
+		);
+	});
+
+	it("keeps the close tag inside a reminder from ending the operation list early", async () => {
+		const bank = new TaskMemoryBank();
+		const result = await runTaskMemoryPolicy(
+			bank,
+			clientReturning(
+				response(
+					[{ op: "save_knowledge", content: "The parser looks for </operations> to end the block." }],
+					"<context_for_action>Check why the model omits </operations> before <no_intervention/>.</context_for_action>",
+				),
+			),
+			{ ...BASE_INPUT, deterministicTrigger: true },
+		);
+
+		strictEqual(result.bankOperations, 1);
+		match(result.reminder ?? "", /Check why the model omits/u);
+	});
+
 	it("applies a valid operation list in source order before explicit silence", async () => {
 		const bank = new TaskMemoryBank();
 		const oldKnowledge = bank.saveKnowledge("Old fact");
