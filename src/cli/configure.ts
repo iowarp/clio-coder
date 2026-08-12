@@ -496,6 +496,44 @@ function warnUndiscoveredContextWindow(descriptor: TargetDescriptor, probe: Prob
 	);
 }
 
+/**
+ * What the probe read, as opposed to whether it connected.
+ *
+ * A health check can pass while every enrichment read behind it returns
+ * nothing, and reporting that as `probe ok` makes it indistinguishable from a
+ * full read. That is how a target gets blessed at configure time and then
+ * fails on the first turn. Naming the gap is the difference between a user who
+ * knows to look now and one who finds out from a raw 404 later.
+ */
+function probeReadings(probe: ProbeResult): string[] {
+	const readings: string[] = [];
+	if (probe.models && probe.models.length > 0) readings.push(`${probe.models.length} models`);
+	if (probe.serverVersion) readings.push(probe.serverVersion);
+	if (probe.discoveredCapabilities && Object.keys(probe.discoveredCapabilities).length > 0) {
+		readings.push("capabilities");
+	}
+	return readings;
+}
+
+/** The probe result as the lines a user reads, cause and next step included. */
+function probeLines(descriptor: TargetDescriptor, probe: ProbeResult): string[] {
+	const latency = probe.latencyMs !== undefined ? ` (${probe.latencyMs}ms)` : "";
+	if (!probe.ok) {
+		const where = descriptor.url ? ` ${descriptor.url}` : "";
+		return [
+			`probe failed${latency}:${where} ${probe.error ?? "unknown"}`,
+			`  check the server is running and reachable, then re-run: clio configure --id ${descriptor.id} --url <url>`,
+		];
+	}
+	const readings = probeReadings(probe);
+	if (readings.length > 0) return [`probe ok${latency} ${readings.join(", ")}`];
+	return [
+		`probe reachable${latency}, but the target answered no model list and no version`,
+		"  Clio cannot verify the model id or the context window from here and will send both as written.",
+		"  re-read them once the server serves them with: clio targets --probe",
+	];
+}
+
 function printSummary(settings: ClioSettings, descriptor: TargetDescriptor, probe: ProbeResult | null): void {
 	process.stdout.write(`\nsaved target ${descriptor.id} (runtime=${descriptor.runtime})\n`);
 	if (descriptor.url) process.stdout.write(`  url        ${descriptor.url}\n`);
@@ -504,10 +542,7 @@ function printSummary(settings: ClioSettings, descriptor: TargetDescriptor, prob
 	if (descriptor.gateway) process.stdout.write("  gateway    true\n");
 	if (descriptor.lifecycle) process.stdout.write(`  lifecycle  ${descriptor.lifecycle}\n`);
 	if (probe) {
-		const line = probe.ok
-			? `probe ok${probe.latencyMs !== undefined ? ` (${probe.latencyMs}ms)` : ""}${probe.serverVersion ? ` ${probe.serverVersion}` : ""}`
-			: `probe failed: ${probe.error ?? "unknown"}`;
-		process.stdout.write(`  ${line}\n`);
+		for (const line of probeLines(descriptor, probe)) process.stdout.write(`  ${line}\n`);
 	}
 	warnUndiscoveredContextWindow(descriptor, probe);
 	if (settings.orchestrator.target === descriptor.id) process.stdout.write("  orchestrator target\n");
@@ -1190,12 +1225,10 @@ async function runInteractive(
 
 	const probe = await runtimeProbe(runtime, descriptor);
 	if (probe) {
-		const line = probe.ok
-			? `probe ok${probe.latencyMs !== undefined ? ` (${probe.latencyMs}ms)` : ""}${probe.serverVersion ? ` ${probe.serverVersion}` : ""}`
-			: `probe failed: ${probe.error ?? "unknown"}`;
-		process.stdout.write(`\n${line}\n`);
+		process.stdout.write("\n");
+		for (const line of probeLines(descriptor, probe)) process.stdout.write(`${line}\n`);
 		if (!probe.ok) {
-			const keepAnyway = await askYesNo(rl, "save target anyway?", true);
+			const keepAnyway = await askYesNo(rl, "save this target anyway, without a reply from it?", true);
 			if (!keepAnyway) {
 				printError("aborted; settings not changed");
 				return 0;

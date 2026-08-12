@@ -278,17 +278,29 @@ function unknownModelDiagnostic(
 	wireModelId: string,
 ): RuntimeResolutionDiagnostic | null {
 	const configured = (target.wireModels ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
-	const live = hasLiveModelCatalog(status) ? status.discoveredModels : null;
+	const probed = hasLiveModelCatalog(status);
+	const live = probed ? status.discoveredModels : null;
 	if (configured.length === 0 && live === null) return null;
 	if (configured.includes(wireModelId) || (live?.includes(wireModelId) ?? false)) return null;
 	const sources = [
 		...(configured.length > 0 ? ["configured wireModels"] : []),
-		...(live !== null ? ["live model catalog"] : []),
-	].join(" or ");
+		...(live !== null && live.length > 0 ? ["live model catalog"] : []),
+	];
+	// A catalog that came back empty is a read that failed, not a server that
+	// serves nothing. Reporting it as a catalog the model is missing from sends
+	// the user to fix the settings entry or add the model to the server, and
+	// both of those are the wrong place to look.
+	if (sources.length === 0) {
+		return diagnostic(
+			"warning",
+			"model-catalog-unreadable",
+			`target '${target.id}' returned no model list, so Clio could not check whether '${wireModelId}' is served there; requests will send the id as-is. Re-read the catalog with: clio targets --probe`,
+		);
+	}
 	return diagnostic(
 		"warning",
 		"model-not-in-catalog",
-		`model '${wireModelId}' is not in target '${target.id}' ${sources}; requests will send the id as-is. Fix the settings entry or add the model to the server if this is unintended.`,
+		`model '${wireModelId}' is not in target '${target.id}' ${sources.join(" or ")}; requests will send the id as-is. Fix the settings entry or add the model to the server if this is unintended.`,
 	);
 }
 

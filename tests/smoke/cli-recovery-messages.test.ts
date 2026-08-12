@@ -161,3 +161,110 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 		ok(!result.stderr.includes("installation is incomplete"), "no clio repair advice for a foreign module error");
 	});
 });
+
+/**
+ * What `clio configure` says about a target it could not reach, and about one
+ * it reached without learning anything.
+ *
+ * Both were found by configuring a target by hand and then trying to take a
+ * turn against it. A closed port produced `probe failed: fetch failed`, which
+ * is undici's wrapper for every transport error and names neither the address
+ * nor the reason. A server answering only its health check produced an
+ * unqualified `probe ok`, indistinguishable from a full read, so a target that
+ * could not serve a completion was blessed at configure time and the user
+ * found out from a raw 404 on their first turn.
+ */
+describe("clio configure probe reporting", { concurrency: false }, () => {
+	let scratch: ReturnType<typeof makeScratchHome>;
+
+	beforeEach(() => {
+		scratch = makeScratchHome("clio-probe-");
+	});
+
+	afterEach(() => {
+		scratch.cleanup();
+	});
+
+	/** A port nothing listens on, obtained by binding one and giving it back. */
+	async function closedPort(): Promise<number> {
+		const { createServer } = await import("node:net");
+		const server = createServer();
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const address = server.address();
+		const port = typeof address === "object" && address !== null ? address.port : 0;
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		return port;
+	}
+
+	it("names the address and the reason a target could not be reached", async () => {
+		const port = await closedPort();
+		const result = await runCli(
+			["configure", "--id", "down", "--runtime", "llamacpp", "--url", `http://127.0.0.1:${port}`, "--model", "m"],
+			{ env: scratch.env },
+		);
+		match(result.stdout, /probe failed/);
+		match(result.stdout, new RegExp(`http://127\\.0\\.0\\.1:${port}`), "the address it tried is named");
+		match(result.stdout, /ECONNREFUSED/, "the reason is the errno, not undici's wrapper");
+		ok(!/probe failed[^\n]*fetch failed/.test(result.stdout), "the bare wrapper is not the whole message");
+		match(result.stdout, /clio configure --id down --url/, "and it names the command that changes the outcome");
+	});
+
+	it("does not report a probe that read nothing as an unqualified probe ok", async () => {
+		const { createServer } = await import("node:http");
+		// llama.cpp aliases /v1/health and serves /props and /v1/models. A server
+		// that answers only the health check is the shape that used to pass.
+		const server = createServer((req, res) => {
+			if (req.url === "/health") {
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end('{"status":"ok"}');
+				return;
+			}
+			res.writeHead(404);
+			res.end("not found");
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const address = server.address();
+		const port = typeof address === "object" && address !== null ? address.port : 0;
+		try {
+			const result = await runCli(
+				["configure", "--id", "stub", "--runtime", "llamacpp", "--url", `http://127.0.0.1:${port}`, "--model", "m"],
+				{ env: scratch.env },
+			);
+			match(result.stdout, /probe reachable/, "reachable is not the same claim as ok");
+			ok(!/probe ok/.test(result.stdout), "a probe that read nothing must not read as a full one");
+			match(result.stdout, /no model list and no version/, "it says which reads came back empty");
+			match(result.stdout, /clio targets --probe/, "and names the command that retries them");
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	});
+
+	it("reports a full read as probe ok and says what it read", async () => {
+		const { createServer } = await import("node:http");
+		const server = createServer((req, res) => {
+			const send = (body: string): void => {
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end(body);
+			};
+			if (req.url === "/health") return send('{"status":"ok"}');
+			if (req.url === "/props") return send('{"build_info":"b1-testing","default_generation_settings":{"n_ctx":4096}}');
+			if (req.url === "/v1/models") return send('{"data":[{"id":"m"}]}');
+			res.writeHead(404);
+			res.end("not found");
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const address = server.address();
+		const port = typeof address === "object" && address !== null ? address.port : 0;
+		try {
+			const result = await runCli(
+				["configure", "--id", "full", "--runtime", "llamacpp", "--url", `http://127.0.0.1:${port}`, "--model", "m"],
+				{ env: scratch.env },
+			);
+			match(result.stdout, /probe ok/, "a probe that read the catalog still says ok");
+			match(result.stdout, /1 models/, "and says what it read");
+			ok(!/probe reachable/.test(result.stdout), "the degraded wording is not used for a full read");
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	});
+});

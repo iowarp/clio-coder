@@ -94,7 +94,21 @@ async function runFetch(opts: HttpProbeOptions): Promise<FetchOutcome> {
 	}
 }
 
+/**
+ * The actionable half of a transport failure.
+ *
+ * undici reports every one of them as the same two words, `fetch failed`, and
+ * puts the part a user can act on onto `cause`: ECONNREFUSED, ENOTFOUND,
+ * ECONNRESET, and the TLS errors all arrive that way. Surfacing only the
+ * wrapper tells someone that something failed and nothing whatsoever about
+ * what, which is the difference between a wrong port and a wrong hostname.
+ */
 function describeError(err: unknown): string {
-	if (err instanceof Error) return err.message;
-	return String(err);
+	if (!(err instanceof Error)) return String(err);
+	const cause = (err as { cause?: unknown }).cause;
+	if (cause instanceof Error && cause.message.length > 0) {
+		const code = (cause as { code?: unknown }).code;
+		return typeof code === "string" && !cause.message.includes(code) ? `${cause.message} (${code})` : cause.message;
+	}
+	return err.message;
 }
