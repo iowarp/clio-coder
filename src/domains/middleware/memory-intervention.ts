@@ -597,7 +597,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const prefix = "Memory: execution state restored after compaction:\n";
 		const maxTokens = settings().maxTokens;
 		const prefixTokens = ceilChars(prefix.length);
-		const rendered = deps.bank.render(Math.max(0, maxTokens - prefixTokens), ["knowledge"]);
+		const rendered = deps.bank.renderRestoredState(Math.max(0, maxTokens - prefixTokens));
 		if (rendered.length === 0) {
 			lastDecision = "silent";
 			return NO_EFFECTS;

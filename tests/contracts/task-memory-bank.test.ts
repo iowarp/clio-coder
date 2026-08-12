@@ -62,6 +62,28 @@ describe("contracts/task memory bank", () => {
 		strictEqual(bank.render(0), "");
 	});
 
+	it("renders status only for a restored-state block, and knowledge with it", () => {
+		const bank = new TaskMemoryBank({ now: tickingClock() });
+		const status = bank.updateStatus("PRIVATE STATUS SENTINEL");
+		const knowledge = bank.saveKnowledge("The project uses node:test.");
+		const procedural = bank.saveProcedural("The broad command failed; use the targeted contract test.");
+
+		const restored = bank.renderRestoredState(200);
+		ok(restored.includes(status.id), restored);
+		ok(restored.includes("PRIVATE STATUS SENTINEL"), restored);
+		ok(restored.includes(knowledge.id), restored);
+		ok(!restored.includes(procedural.id), restored);
+		ok(Math.ceil(restored.length / 4) <= 200);
+
+		// The status entry leads, because it is the progress model compaction destroyed.
+		ok(restored.indexOf(status.id) < restored.indexOf(knowledge.id), restored);
+
+		// The general render path is unchanged and still refuses status.
+		ok(!bank.render(200).includes("PRIVATE STATUS SENTINEL"));
+		strictEqual(bank.renderRestoredState(0), "");
+		strictEqual(new TaskMemoryBank().renderRestoredState(200), "");
+	});
+
 	it("normalizes content to one bounded paragraph and counts attributed injections", () => {
 		const bank = new TaskMemoryBank({ now: tickingClock() });
 		const entry = bank.saveKnowledge(`  first line\n\n${"x".repeat(TASK_MEMORY_CONTENT_MAX_CHARS)}  `);

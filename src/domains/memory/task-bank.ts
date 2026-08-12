@@ -120,6 +120,30 @@ export class TaskMemoryBank {
 		return rendered;
 	}
 
+	/**
+	 * Render the block handed back to the action agent after compaction, which is
+	 * the one place status is visible.
+	 *
+	 * `render` refuses status because a mid-turn reminder must never expose the
+	 * policy's private progress model as if the action agent had said it. That
+	 * boundary is different: compaction destroyed the agent's own working state
+	 * and this hands it back. Restoring knowledge alone restored nothing in the
+	 * common case, because across ten live LLM steps the model wrote status in all
+	 * ten and knowledge in two. Status leads for the same reason, and knowledge
+	 * takes the remaining budget. Procedural stays out, unchanged.
+	 */
+	renderRestoredState(budgetTokens: number): string {
+		if (!Number.isFinite(budgetTokens) || budgetTokens <= 0) return "";
+		const status = this.#status;
+		const statusLine = status === null ? "" : `- [${status.id}] status: ${status.content}`;
+		if (statusLine.length > 0 && ceilChars(statusLine.length) > budgetTokens)
+			return this.render(budgetTokens, ["knowledge"]);
+		const remaining = statusLine.length === 0 ? budgetTokens : budgetTokens - ceilChars(statusLine.length);
+		const knowledge = this.render(remaining, ["knowledge"]);
+		if (statusLine.length === 0) return knowledge;
+		return knowledge.length === 0 ? statusLine : `${statusLine}\n${knowledge}`;
+	}
+
 	snapshot(): TaskMemorySnapshot {
 		return {
 			version: TASK_MEMORY_VERSION,
