@@ -317,6 +317,12 @@ export interface BuiltinSlashCommand {
 	name: string;
 	description: string;
 	aliases?: ReadonlyArray<string>;
+	/**
+	 * Argument text an alias stands in for, prepended to whatever the operator
+	 * typed after it. `/compact` names a subcommand of `/context`, not the
+	 * command itself, so it cannot be spelled as a bare alias.
+	 */
+	aliasArgs?: Readonly<Record<string, string>>;
 	/** Excluded from /help, autocomplete, and the docs command table. */
 	hidden?: boolean;
 	args?: CommandArgsSpec;
@@ -370,6 +376,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "quit",
 		description: "Exit Clio Coder",
+		aliases: ["exit"],
 		kinds: ["quit"],
 		args: {},
 		fromArgs: fromArgsOrUsage("quit", { kind: "quit" }),
@@ -670,7 +677,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "context",
 		description: "Context hub: window overlay plus compact, init, refresh, and reset",
-		aliases: ["ctx"],
+		aliases: ["ctx", "compact"],
+		aliasArgs: { compact: "compact" },
 		kinds: ["context-view", "compact", "init", "context-clear", "context-refresh"],
 		subcommandDescriptions: {
 			compact: "Compact session context",
@@ -915,6 +923,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "settings",
 		description: "Open interactive settings",
+		aliases: ["config"],
 		kinds: ["settings"],
 		args: {},
 		fromArgs: fromArgsOrUsage("settings", { kind: "settings" }),
@@ -1083,6 +1092,8 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 export interface CommandReferenceEntry {
 	name: string;
 	aliases: ReadonlyArray<string>;
+	/** Argument text each alias in `aliases` stands in for, when it stands for any. */
+	aliasArgs?: Readonly<Record<string, string>>;
 	usage: string;
 	description: string;
 	/** The command's args grammar, carried through for argument autocomplete. */
@@ -1099,6 +1110,7 @@ export function commandReference(): ReadonlyArray<CommandReferenceEntry> {
 		return {
 			name: entry.name,
 			aliases: entry.aliases ?? [],
+			...(entry.aliasArgs ? { aliasArgs: entry.aliasArgs } : {}),
 			usage,
 			description: entry.description,
 			...(entry.args ? { args: entry.args } : {}),

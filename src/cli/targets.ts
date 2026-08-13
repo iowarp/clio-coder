@@ -15,9 +15,9 @@ import type { CapabilityFlags } from "../domains/providers/types/capability-flag
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
 import { runConfigureCommand, runTargetRemove, runTargetRename } from "./configure.js";
 import { printError, printOk } from "./shared.js";
+import { column, terminalColumns, truncate } from "./text-layout.js";
 
 const HEADER: ReadonlyArray<string> = ["id", "tier", "runtime", "auth", "url", "model", "health", "caps", "notes"];
-const WIDTHS: ReadonlyArray<number> = [14, 14, 18, 18, 28, 26, 10, 8, 28];
 type ProviderOutputTier = RuntimeTier | "unknown";
 
 const HELP = `clio targets
@@ -611,10 +611,12 @@ function runProfileBindings(args: ReadonlyArray<string>): number {
 		);
 		return 0;
 	}
-	process.stdout.write(`${pad("agent", 18)}${pad("profile", 20)}${pad("target", 16)}${pad("model", 30)}warning\n`);
+	process.stdout.write(
+		`${column("agent", 18)}${column("profile", 20)}${column("target", 16)}${column("model", 30)}warning\n`,
+	);
 	for (const row of rows) {
 		process.stdout.write(
-			`${pad(row.agentId, 18)}${pad(row.profile, 20)}${pad(row.target ?? "-", 16)}${pad(row.model ?? "-", 30)}${row.warning ?? "-"}\n`,
+			`${column(row.agentId, 18)}${column(row.profile, 20)}${column(row.target ?? "-", 16)}${column(row.model ?? "-", 30)}${row.warning ?? "-"}\n`,
 		);
 	}
 	return 0;
@@ -680,10 +682,12 @@ function runFleet(args: ReadonlyArray<string>, usage = "clio targets fleet [--js
 		process.stdout.write("no fleet profiles configured. run `clio targets profile <name> <id>` to add one.\n");
 		return 0;
 	}
-	process.stdout.write(`${pad("profile", 18)}${pad("target", 16)}${pad("runtime", 20)}${pad("model", 30)}thinking\n`);
+	process.stdout.write(
+		`${column("profile", 18)}${column("target", 16)}${column("runtime", 20)}${column("model", 30)}thinking\n`,
+	);
 	for (const row of rows) {
 		process.stdout.write(
-			`${pad(row.name, 18)}${pad(row.target ?? "-", 16)}${pad(row.runtime ?? "-", 20)}${pad(row.model ?? "-", 30)}${row.thinkingLevel}\n`,
+			`${column(row.name, 18)}${column(row.target ?? "-", 16)}${column(row.runtime ?? "-", 20)}${column(row.model ?? "-", 30)}${row.thinkingLevel}\n`,
 		);
 	}
 	return 0;
@@ -768,64 +772,154 @@ function runConvert(args: ReadonlyArray<string>): number {
 	return 0;
 }
 
-function pad(value: string, width: number): string {
-	if (value.length >= width) return `${value.slice(0, Math.max(0, width - 1))} `;
-	return value.padEnd(width);
+/** One row's cells as plain text, before any width has been applied. */
+export interface TargetTableRow {
+	id: string;
+	tier: string;
+	runtime: string;
+	auth: string;
+	url: string;
+	model: string;
+	health: string;
+	caps: string;
+	notes: string;
+}
+
+type TargetTableColumn = keyof TargetTableRow;
+type TargetTableWidths = Record<TargetTableColumn, number>;
+
+const TABLE_COLUMNS: ReadonlyArray<TargetTableColumn> = [
+	"id",
+	"tier",
+	"runtime",
+	"auth",
+	"url",
+	"model",
+	"health",
+	"caps",
+	"notes",
+];
+const TABLE_GAP = 1;
+
+/**
+ * The order the columns give room back in, each down to the floor beside it.
+ *
+ * `id` and `caps` are absent on purpose. A cut id is not an id: it cannot be
+ * passed back to `clio targets use`, so shortening it turns the column into
+ * something that reads like an identifier and is not one. The badges are one
+ * letter per capability and mean nothing partially printed.
+ *
+ * `notes` appears twice. It is free-form and the widest column, so it gives up
+ * everything above a readable remainder before url and model are touched at
+ * all, and gives up the rest only once both of those are at their floors.
+ */
+const TABLE_SHRINK_ORDER: ReadonlyArray<readonly [TargetTableColumn, number]> = [
+	["notes", 16],
+	["url", 12],
+	["model", 12],
+	["notes", 0],
+	["auth", 6],
+	["runtime", 6],
+	["tier", 4],
+];
+
+function tableWidths(rows: ReadonlyArray<TargetTableRow>, width: number): TargetTableWidths {
+	const widths = {} as TargetTableWidths;
+	for (const [index, key] of TABLE_COLUMNS.entries()) {
+		widths[key] = rows.reduce((widest, row) => Math.max(widest, row[key].length), (HEADER[index] ?? key).length);
+	}
+	let over =
+		TABLE_COLUMNS.reduce((total, key) => total + widths[key], 0) + TABLE_GAP * (TABLE_COLUMNS.length - 1) - width;
+	for (const [key, floor] of TABLE_SHRINK_ORDER) {
+		if (over <= 0) break;
+		const give = Math.min(over, Math.max(0, widths[key] - floor));
+		widths[key] -= give;
+		over -= give;
+	}
+	return widths;
+}
+
+/**
+ * The probe table sized to the terminal it is being written to.
+ *
+ * Every column was a fixed width summing to 164, so the table wrote 141 to 195
+ * column rows into whatever terminal it was given and the shell wrapped them
+ * into fragments. Worse, the fixed widths cut each cell with a bare `slice`, so
+ * a 20-character target id printed as 13 characters and a space: a string that
+ * reads like an id, is not one, and cannot be pasted back into any command that
+ * takes one.
+ *
+ * `--json` is the interface for the full values and is left untouched. Only the
+ * human table is sized, ids are never cut, and every cell that is cut ends in an
+ * ellipsis so a shortened url or model can never be mistaken for a whole one.
+ *
+ * A terminal too narrow to hold the id beside every floor takes the whole row
+ * cut to its width, marked the same way. Colour is dropped on those rows because
+ * the ansi bytes would sit inside the cut; a wrapped row costs more than colour.
+ */
+export function formatTargetTable(
+	rows: ReadonlyArray<TargetTableRow>,
+	width: number,
+	paintHealth: (cell: string, row: TargetTableRow) => string = (cell) => cell,
+): { header: string; rows: ReadonlyArray<string> } {
+	const widths = tableWidths(rows, width);
+	const line = (cells: ReadonlyArray<string>): string => cells.join(" ".repeat(TABLE_GAP)).trimEnd();
+	return {
+		header: truncate(line(TABLE_COLUMNS.map((key, index) => column(HEADER[index] ?? key, widths[key]))), width),
+		rows: rows.map((row) => {
+			const cells = TABLE_COLUMNS.map((key) => column(row[key], widths[key]));
+			const plain = line(cells);
+			if (plain.length > width) return truncate(plain, width);
+			return line(cells.map((cell, index) => (TABLE_COLUMNS[index] === "health" ? paintHealth(cell, row) : cell)));
+		}),
+	};
 }
 
 function renderTable(providers: ProvidersContract, entries: ReadonlyArray<TargetStatus>): void {
-	const headerLine = HEADER.map((h, i) => pad(h, WIDTHS[i] ?? 0)).join("");
+	const sorted = [...entries].sort(compareStatusByTier);
+	const table = formatTargetTable(
+		sorted.map((status) => targetTableRow(providers, status)),
+		terminalColumns(),
+		// The cell is padded before it is painted, so the ansi bytes land outside
+		// the width arithmetic instead of having to be guessed at with slack.
+		(cell, row) => healthColor(row.health)(cell),
+	);
 	let currentTier: ProviderOutputTier | null = null;
-	for (const status of [...entries].sort(compareStatusByTier)) {
+	for (const [index, status] of sorted.entries()) {
 		const tier = statusTier(status);
 		if (tier !== currentTier) {
 			currentTier = tier;
 			process.stdout.write(`${chalk.bold(tierLabel(tier))}\n`);
-			process.stdout.write(`${chalk.bold(headerLine.trimEnd())}\n`);
+			process.stdout.write(`${chalk.bold(table.header)}\n`);
 		}
-		process.stdout.write(`${formatRow(providers, status)}\n`);
+		process.stdout.write(`${table.rows[index] ?? ""}\n`);
 	}
 }
 
-function formatRow(providers: ProvidersContract, status: TargetStatus): string {
-	const runtime = status.runtime;
-	const ep = status.target;
-	const w = (i: number): number => WIDTHS[i] ?? 0;
-	const id = pad(ep.id, w(0));
-	const tierCell = pad(statusTier(status), w(1));
-	const runtimeCell = pad(runtime ? runtime.id : ep.runtime, w(2));
-	const authCell = pad(formatAuth(providers, status), w(3));
-	const urlCell = pad(formatUrl(status), w(4));
-	const modelCell = pad(ep.defaultModel ?? "-", w(5));
-	const healthCell = pad(colorHealth(status.health.status), w(6) + healthPadSlack(status.health.status));
-	const capsCell = pad(capabilityBadges(status.capabilities), w(7));
-	const notesCell = formatNotes(status).padEnd(w(8));
-	return `${id}${tierCell}${runtimeCell}${authCell}${urlCell}${modelCell}${healthCell}${capsCell}${notesCell}`.trimEnd();
+function targetTableRow(providers: ProvidersContract, status: TargetStatus): TargetTableRow {
+	return {
+		id: status.target.id,
+		tier: statusTier(status),
+		runtime: status.runtime ? status.runtime.id : status.target.runtime,
+		auth: formatAuth(providers, status),
+		url: formatUrl(status),
+		model: status.target.defaultModel ?? "-",
+		health: status.health.status,
+		caps: capabilityBadges(status.capabilities),
+		notes: formatNotes(status),
+	};
 }
 
-function healthPadSlack(status: TargetStatus["health"]["status"]): number {
-	// chalk adds ansi bytes; pad width should not shrink
+function healthColor(status: string): (text: string) => string {
 	switch (status) {
 		case "healthy":
+			return chalk.green;
 		case "degraded":
+			return chalk.yellow;
 		case "down":
-		case "unknown":
-			return 9;
+			return chalk.red;
 		default:
-			return 0;
-	}
-}
-
-function colorHealth(status: TargetStatus["health"]["status"]): string {
-	switch (status) {
-		case "healthy":
-			return chalk.green("healthy");
-		case "degraded":
-			return chalk.yellow("degraded");
-		case "down":
-			return chalk.red("down");
-		default:
-			return chalk.dim("unknown");
+			return chalk.dim;
 	}
 }
 
