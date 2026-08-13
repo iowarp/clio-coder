@@ -290,7 +290,6 @@ export class AuthStorage {
 	private damage: string | null = null;
 	private runtimeOverrides = new Map<string, string>();
 	private fallbackResolver?: (providerId: string) => string | undefined;
-	private errors: Error[] = [];
 
 	constructor(private readonly backend: AuthStorageBackend) {
 		this.reload();
@@ -307,24 +306,20 @@ export class AuthStorage {
 			this.data = read.data;
 			this.damage = read.damage;
 		} catch (error) {
-			this.recordError(error);
 			this.data = emptyData();
 			this.damage = error instanceof Error ? `it could not be read: ${error.message}` : "it could not be read";
 		}
 	}
 
 	/**
-	 * Why the store on disk could not be fully read, or null when it was clean.
-	 * Callers that report connection state must consult this, because a damaged
-	 * store reads as zero credentials and is otherwise indistinguishable from
-	 * having never logged in.
+	 * Why the store on disk could not be fully read, or why the last write to it
+	 * did not land, or null when it is clean. Callers that report connection
+	 * state must consult this, because a damaged store reads as zero credentials
+	 * and is otherwise indistinguishable from having never logged in, and a
+	 * refused write leaves memory claiming a credential that disk does not hold.
 	 */
 	damageReason(): string | null {
 		return this.damage;
-	}
-
-	private recordError(error: unknown): void {
-		this.errors.push(error instanceof Error ? error : new Error(String(error)));
 	}
 
 	private persist(providerId: string, credential: AuthCredential | undefined): void {
@@ -343,8 +338,13 @@ export class AuthStorage {
 				return { result: undefined, next: serializeStorageData(merged) };
 			});
 		} catch (error) {
+			// A write that failed for a reason the damage refusal does not cover: a
+			// lock that could not be taken, a read-only config dir, a full disk.
+			// This used to go into an errors array with no consumer, so the store
+			// reported itself clean while disk held none of what was just written.
+			// damageReason() is the channel `clio auth` and `clio doctor` read.
 			if (error instanceof AuthStorageDamagedError) throw error;
-			this.recordError(error);
+			this.damage = error instanceof Error ? `it could not be written: ${error.message}` : "it could not be written";
 		}
 	}
 
@@ -407,12 +407,6 @@ export class AuthStorage {
 
 	setFallbackResolver(resolver: (providerId: string) => string | undefined): void {
 		this.fallbackResolver = resolver;
-	}
-
-	drainErrors(): Error[] {
-		const drained = [...this.errors];
-		this.errors = [];
-		return drained;
 	}
 
 	status(
@@ -588,8 +582,9 @@ export class AuthStorage {
 						apiKey: refreshed.apiKey,
 					};
 				}
-			} catch (error) {
-				this.recordError(error);
+			} catch {
+				// A refusal already recorded its reason on this.damage; a refresh that
+				// failed for any other reason is answered by re-reading the store below.
 				this.reload();
 				const updated = this.data[providerId];
 				if (updated?.type === "oauth" && Date.now() < updated.expires) {

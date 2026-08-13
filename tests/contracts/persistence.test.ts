@@ -411,6 +411,39 @@ describe("contracts/persistence", () => {
 		strictEqual((entries[2] as { turnId?: string }).turnId, "t2");
 	});
 
+	/**
+	 * One command reads the same ledger from several callers that do not know
+	 * about each other (resume, the turn tree, history), and the default sink
+	 * reprinted every skipped line on each pass. `clio run --continue` printed
+	 * the identical warning six times, three per session load across two loads,
+	 * and it read as six separate problems. Six reads here for that reason: the
+	 * dedupe has to hold for the whole process, not for one load.
+	 */
+	it("says a skipped line once no matter how many callers read the ledger", () => {
+		const path = join(scratch, "repeated-warning.jsonl");
+		writeFileSync(path, '{"type":"session","version":3}\n{"kind":"mess\n', "utf8");
+
+		const written: string[] = [];
+		const original = process.stderr.write.bind(process.stderr);
+		process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+			written.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+			return true;
+		}) as typeof process.stderr.write;
+		try {
+			for (let load = 0; load < 2; load += 1) {
+				readSessionFileEntries(path);
+				readSessionFileEntries(path);
+				readSessionFileEntries(path);
+			}
+		} finally {
+			process.stderr.write = original;
+		}
+
+		const skipLines = written.filter((line) => line.includes("invalid JSON skipped"));
+		strictEqual(skipLines.length, 1, `one damaged line is one message, got:\n${written.join("")}`);
+		ok(skipLines[0]?.includes(`${path}:2:`), "the message still names the file and line");
+	});
+
 	it("handles atomic JSONL file writes and skips corrupt trailing lines", () => {
 		const path = join(scratch, "session.jsonl");
 		writeJsonlFileAtomic(path, [{ type: "session", version: 2 }]);

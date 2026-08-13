@@ -1,9 +1,21 @@
-import { accessSync, chmodSync, constants, existsSync, readFileSync, type Stats, statSync } from "node:fs";
+import {
+	accessSync,
+	chmodSync,
+	constants,
+	type Dirent,
+	existsSync,
+	readdirSync,
+	readFileSync,
+	type Stats,
+	statSync,
+} from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { readSettings, validateSettings } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { resolveClioDirs } from "../../core/xdg.js";
+import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
+import { openAuthStorage } from "../providers/auth/index.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
 import { readStateInfoResult } from "./state.js";
 import { getVersionInfo } from "./version.js";
@@ -78,6 +90,113 @@ function directoryFinding(name: string, path: string): DoctorFinding {
 		return { ok: false, name, detail: `${path} is not ${missing.join(" or ")} (run \`chmod u+rwx\` on it)` };
 	}
 	return { ok: true, name, detail: path };
+}
+
+/** How many damaged ledgers a single row names before it summarizes the rest. */
+const SESSION_STORE_DAMAGE_DETAIL_LIMIT = 3;
+
+/**
+ * Collect every `*.jsonl` under the session store. The layout is
+ * `sessions/<cwdHash>/<sessionId>/current.jsonl`, but the walk does not assume
+ * a depth: a store carrying an extra ledger shape stays in scope. Symlinks are
+ * not followed (`Dirent.isDirectory()` is false for them), so the walk cannot
+ * loop or wander outside the state root. A directory that cannot be listed is
+ * a reported problem, not a silent zero.
+ */
+function collectSessionLedgers(dir: string, ledgers: string[], unlistable: string[]): void {
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(dir, { withFileTypes: true });
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		unlistable.push(`${dir} could not be listed: ${message}`);
+		return;
+	}
+	for (const entry of entries) {
+		const full = join(dir, entry.name);
+		if (entry.isDirectory()) {
+			collectSessionLedgers(full, ledgers, unlistable);
+			continue;
+		}
+		if (entry.isFile() && entry.name.endsWith(".jsonl")) ledgers.push(full);
+	}
+}
+
+/**
+ * The store holding every recorded session, checked the way the resume path
+ * reads it. Without this row `clio doctor` called a deleted store healthy: the
+ * state metadata row said the install was on record, nothing looked at
+ * `state/sessions`, and `clio resume` then reported no sessions on a machine
+ * that had run hundreds. Damage inside a ledger is the same silence one level
+ * down, so each file is parsed by the reader that resume uses and the lines it
+ * would skip are named here instead of being dropped into a warning stream
+ * nobody is watching.
+ *
+ * Returns null on an install that was never initialized: the state metadata row
+ * above already reports that, and a second failing row about a directory
+ * `initializeClioHome` creates would name no remedy of its own.
+ */
+function sessionStoreFinding(stateDir: string, stateMetadataPresent: boolean): DoctorFinding | null {
+	const store = join(stateDir, "sessions");
+	const usable = directoryFinding("session store", store);
+	if (!usable.ok) {
+		if (!stateMetadataPresent && !existsSync(store)) return null;
+		return usable;
+	}
+
+	const ledgers: string[] = [];
+	const unlistable: string[] = [];
+	collectSessionLedgers(store, ledgers, unlistable);
+
+	// One entry per damaged file, not per damaged line: a ledger truncated mid
+	// rewrite can warn on every line it holds, and the row is one line wide.
+	const damaged: string[] = [];
+	for (const ledger of ledgers) {
+		const first: SessionJsonlWarning[] = [];
+		readSessionFileEntries(ledger, {
+			onWarning: (warning) => {
+				if (first.length === 0) first.push(warning);
+			},
+		});
+		const warning = first[0];
+		if (warning) damaged.push(`${warning.path}:${warning.line}: ${warning.message}`);
+	}
+
+	if (damaged.length === 0 && unlistable.length === 0) {
+		return {
+			ok: true,
+			name: "session store",
+			detail: ledgers.length === 0 ? `${store} (no sessions recorded)` : `${store} (${ledgers.length} readable)`,
+		};
+	}
+
+	const shown = damaged.slice(0, SESSION_STORE_DAMAGE_DETAIL_LIMIT);
+	const remainder = damaged.length - shown.length;
+	const parts: string[] = [];
+	if (damaged.length > 0) {
+		parts.push(
+			`${damaged.length} of ${ledgers.length} ledgers hold lines that cannot be read: ${shown.join("; ")}${
+				remainder > 0 ? `; +${remainder} more` : ""
+			}`,
+		);
+	}
+	parts.push(...unlistable);
+	return { ok: false, name: "session store", detail: parts.join("; ") };
+}
+
+/**
+ * Why the credentials store did not fully parse, read through the same
+ * `openAuthStorage` the auth commands use, or null when it is clean. The row
+ * used to report the file mode and nothing else, so a store this version cannot
+ * parse printed `OK credentials 600` while every provider in it read back as
+ * disconnected.
+ */
+function credentialsDamage(): string | null {
+	try {
+		return openAuthStorage().damageReason();
+	} catch (error) {
+		return error instanceof Error ? error.message : String(error);
+	}
 }
 
 export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
@@ -160,13 +279,22 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			accessSync(creds, constants.R_OK);
 			const st = statSync(creds);
 			const mode = st.mode & 0o777;
+			const damage = credentialsDamage();
 			findings.push({
-				ok: mode === 0o600,
+				ok: mode === 0o600 && damage === null,
 				name: "credentials",
-				detail: mode.toString(8),
+				detail: damage === null ? mode.toString(8) : `${mode.toString(8)}; ${damage}`,
 			});
 		} catch (err) {
-			findings.push({ ok: false, name: "credentials", detail: String(err) });
+			// `String(err)` put a raw `Error: EACCES...` in the row and named no
+			// remedy, the one shape every other failing row avoids. `--fix` chmods
+			// this file to 600, so it is the command that repairs the common case.
+			const message = err instanceof Error ? err.message : String(err);
+			findings.push({
+				ok: false,
+				name: "credentials",
+				detail: foldDetail(`${creds} cannot be read: ${message} (run \`clio doctor --fix\`)`),
+			});
 		}
 	}
 
@@ -192,6 +320,9 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 					// said only "missing", and `clio doctor --fix` does write it.
 					"missing (run `clio doctor --fix`)",
 	});
+
+	const sessionStore = sessionStoreFinding(dirs.state, state !== null);
+	if (sessionStore !== null) findings.push(sessionStore);
 
 	return findings;
 }
