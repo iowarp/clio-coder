@@ -158,7 +158,23 @@ export interface SessionJsonlWriteOptions {
 	beforeRename?: (tmpPath: string, targetPath: string) => void;
 }
 
+/**
+ * One damaged line, one message. A single ledger is read several times per
+ * command by callers that do not know about each other (resume, the turn tree,
+ * history), and each read re-reported every unparseable line, so one torn tail
+ * printed the identical skip line three times and read as three problems. The
+ * key is the exact warning, so a second defect in the same file is still said.
+ */
+const reportedSessionJsonlWarnings = new Set<string>();
+// A long-lived process sweeping a large store must not grow this without
+// bound. Forgetting everything at the cap at worst repeats a warning once.
+const REPORTED_SESSION_JSONL_WARNING_LIMIT = 1000;
+
 function defaultSessionJsonlWarning(warning: SessionJsonlWarning): void {
+	const key = `${warning.path}:${warning.line}:${warning.message}`;
+	if (reportedSessionJsonlWarnings.has(key)) return;
+	if (reportedSessionJsonlWarnings.size >= REPORTED_SESSION_JSONL_WARNING_LIMIT) reportedSessionJsonlWarnings.clear();
+	reportedSessionJsonlWarnings.add(key);
 	process.stderr.write(`[clio:session] ${warning.path}:${warning.line}: ${warning.message}\n`);
 }
 

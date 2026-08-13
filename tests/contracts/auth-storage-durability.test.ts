@@ -14,7 +14,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
-import { AuthStorage, AuthStorageDamagedError } from "../../src/domains/providers/auth/storage.js";
+import {
+	AuthStorage,
+	type AuthStorageBackend,
+	AuthStorageDamagedError,
+} from "../../src/domains/providers/auth/storage.js";
 
 describe("contracts/auth storage durability", () => {
 	let root: string;
@@ -146,6 +150,35 @@ describe("contracts/auth storage durability", () => {
 		strictEqual(reopened.get("mistral")?.type, "api_key");
 		ok(readFileSync(path, "utf8").includes("sk-not-a-real-key-three"), "the replacement key is the one persisted");
 		ok(!readFileSync(path, "utf8").includes("sk-not-a-real-key-two"), "the removed credential is gone");
+	});
+
+	/**
+	 * A write can fail for reasons the damage refusal never sees: a lock that
+	 * cannot be taken, a read-only config dir, a full disk. Those went into an
+	 * errors array with no consumer, so the store reported itself clean and
+	 * `clio auth status` and `clio doctor` both said the credential was there
+	 * while disk held none of it. damageReason() is the channel they read.
+	 */
+	it("reports a write that never reached disk instead of holding the error where nothing reads it", () => {
+		const backend: AuthStorageBackend = {
+			withLock(fn) {
+				const { result, next } = fn(undefined);
+				if (next !== undefined) throw new Error("EROFS: read-only file system, open 'credentials.yaml'");
+				return result;
+			},
+			withLockAsync: async (fn) => (await fn(undefined)).result,
+			describe: () => path,
+		};
+
+		const storage = new AuthStorage(backend);
+		strictEqual(storage.damageReason(), null, "an unwritten store is clean before the failed write");
+
+		storage.setApiKey("mistral", "sk-not-a-real-key");
+
+		ok(
+			storage.damageReason()?.includes("read-only file system"),
+			`the refused write is reported, got: ${storage.damageReason()}`,
+		);
 	});
 
 	it("does not report a stored credential the disk write refused", () => {
