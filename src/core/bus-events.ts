@@ -39,6 +39,7 @@ export const BusChannels = {
 	ConfigHotReload: "config.hotReload",
 	ConfigNextTurn: "config.nextTurn",
 	ConfigRestartRequired: "config.restartRequired",
+	ConfigReloadFailed: "config.reloadFailed",
 	PermissionRequested: "permission.requested",
 	PermissionResolved: "permission.resolved",
 	SafetyClassified: "safety.classified",
@@ -321,6 +322,22 @@ export interface DomainFailedPayload {
 export interface ConfigChangePayload {
 	diff: ConfigDiff;
 	settings: Readonly<ClioSettings>;
+}
+
+/**
+ * Published on {@link BusChannels.ConfigReloadFailed} when a settings file
+ * change is rejected at runtime and the previous good snapshot stays active.
+ * Emitted on transitions only, like {@link ContextWarningPayload}: `message`
+ * carries one already-formatted operator line while the failure stands, and
+ * `null` once a later reload succeeds and the prior failure clears.
+ *
+ * The message is pre-formatted by `formatSettingsFailure` (core/config.ts)
+ * because the config domain must not import TUI code and the renderer must
+ * not learn the settings schema. One line, no stack, no error dump: this
+ * event exists so nothing writes an inspected Error over the live frame.
+ */
+export interface ConfigReloadFailedPayload {
+	message: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -649,6 +666,7 @@ export type BusPayloadMap = {
 	[BusChannels.ConfigHotReload]: ConfigChangePayload;
 	[BusChannels.ConfigNextTurn]: ConfigChangePayload;
 	[BusChannels.ConfigRestartRequired]: ConfigChangePayload;
+	[BusChannels.ConfigReloadFailed]: ConfigReloadFailedPayload;
 	[BusChannels.PermissionRequested]: PermissionRequestedPayload;
 	[BusChannels.PermissionResolved]: PermissionResolvedPayload;
 	[BusChannels.SafetyClassified]: SafetyClassifiedPayload;

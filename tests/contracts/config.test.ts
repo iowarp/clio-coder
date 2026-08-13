@@ -1,14 +1,27 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { chmodSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
-import { validateSettings } from "../../src/core/config.js";
+import { BusChannels, type ConfigReloadFailedPayload } from "../../src/core/bus-events.js";
+import {
+	formatSettingsFailure,
+	readSettings,
+	SettingsValidationError,
+	settingsPath,
+	validateSettings,
+	validateSettingsFile,
+} from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
+import type { DomainContext } from "../../src/core/domain-loader.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { expandConfigPath, expandConfigValue } from "../../src/core/resolve-config-value.js";
 import { MAX_TIMER_DELAY_MS } from "../../src/core/timers.js";
 import { diffSettings } from "../../src/domains/config/classify.js";
+import { createConfigBundle } from "../../src/domains/config/extension.js";
 import { advanceScopedTarget } from "../../src/entry/orchestrator.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("contracts/config", () => {
 	it("keeps first-run default settings YAML generic, parseable, and schema-clean", () => {
@@ -438,3 +451,124 @@ describe("contracts/config", () => {
 		strictEqual(result.settings.workers.resilienceCooldownMs, 8000);
 	});
 });
+
+/**
+ * A settings file that goes bad while a session is live used to reach the
+ * operator as `console.error("reload rejected:", err)`, which inside the TUI
+ * printed a util.inspect dump of the error (visible `\n` escapes, the `issues`
+ * array) plus a stack trace naming a dist chunk, straight over the live frame.
+ * A permission error was also announced as `invalid YAML` with remedies about
+ * fixing keys. The reload now goes through formatSettingsFailure and the bus.
+ */
+describe("contracts/config runtime reload failure", () => {
+	let scratch: ReturnType<typeof isolateClioEnv>;
+
+	beforeEach(() => {
+		scratch = isolateClioEnv("clio-config-reload-");
+		writeFileSync(settingsPath(), DEFAULT_SETTINGS_YAML, "utf8");
+	});
+
+	afterEach(() => {
+		chmodSync(settingsPath(), 0o644);
+		scratch.restore();
+	});
+
+	it("calls an unreadable file unreadable, not invalid YAML, and names a remedy that fits", () => {
+		if (typeof process.getuid === "function" && process.getuid() === 0) return; // root reads mode 000
+		chmodSync(settingsPath(), 0o000);
+
+		const issues = validateSettingsFile().issues;
+		strictEqual(issues.length, 1);
+		strictEqual(issues[0]?.kind, "unreadable");
+		match(issues[0]?.message ?? "", /^unreadable: EACCES/);
+
+		let thrown: unknown;
+		try {
+			readSettings();
+		} catch (err) {
+			thrown = err;
+		}
+		ok(thrown instanceof SettingsValidationError);
+		const line = formatSettingsFailure(thrown);
+		match(line, /EACCES/);
+		match(line, /restore read access to .*settings\.yaml/);
+		ok(!/invalid YAML/.test(line), `a permission error must not be called invalid YAML: ${line}`);
+		ok(!/edit the named keys/.test(line), `no key is at fault: ${line}`);
+
+		// The thrown message is what the cold-start CLI prints, and it used to
+		// tell an EACCES reader to fix keys that were never at fault.
+		match(thrown.message, /settings\.yaml cannot be loaded:/);
+		match(thrown.message, /Restore read access to .*settings\.yaml/);
+		ok(!/Fix the keys above/.test(thrown.message), `no key is at fault: ${thrown.message}`);
+	});
+
+	it("folds a parse failure to one line with no stack and no error dump", () => {
+		writeFileSync(settingsPath(), "\t\t: : :\n", "utf8");
+
+		let thrown: unknown;
+		try {
+			readSettings();
+		} catch (err) {
+			thrown = err;
+		}
+		ok(thrown instanceof SettingsValidationError);
+		strictEqual(thrown.issues[0]?.kind, "syntax");
+		match(thrown.message, /Fix the YAML in .*settings\.yaml/);
+		ok(!/Fix the keys above/.test(thrown.message), `no key is at fault: ${thrown.message}`);
+		const line = formatSettingsFailure(thrown);
+		ok(!line.includes("\n"), `the notice must be one line: ${JSON.stringify(line)}`);
+		ok(!line.includes("\\n"), `no escaped newlines from an inspected error: ${line}`);
+		ok(!/\bat \S+\.js:\d+/.test(line), `no stack frames: ${line}`);
+		ok(!line.includes("issues: ["), `no inspected issues array: ${line}`);
+		match(line, /fix the YAML in .*settings\.yaml/);
+	});
+
+	it("keys a schema failure to the offending path", () => {
+		writeFileSync(settingsPath(), "version: 1\ntypoKey: 3\n", "utf8");
+		let thrown: unknown;
+		try {
+			readSettings();
+		} catch (err) {
+			thrown = err;
+		}
+		ok(thrown instanceof SettingsValidationError);
+		match(thrown.message, /settings\.yaml failed validation:/);
+		match(thrown.message, /Fix the keys above in .*settings\.yaml/);
+		const line = formatSettingsFailure(thrown);
+		match(line, /typoKey: unknown key/);
+		match(line, /edit the named keys in .*settings\.yaml/);
+	});
+
+	it("publishes the rejection on the bus and keeps the previous settings active", async () => {
+		const bus = createSafeEventBus();
+		const context: DomainContext = { bus, getContract: () => undefined };
+		const events: ConfigReloadFailedPayload[] = [];
+		bus.on(BusChannels.ConfigReloadFailed, (payload) => {
+			events.push(payload);
+		});
+		const bundle = createConfigBundle(context);
+		await bundle.extension.start();
+		const before = bundle.contract.get();
+		try {
+			writeFileSync(settingsPath(), "version: 1\ntypoKey: 3\n", "utf8");
+			const failure = await waitForReloadFailure(events);
+
+			match(failure, /typoKey: unknown key/);
+			ok(!failure.includes("\n"), `the notice must be one line: ${JSON.stringify(failure)}`);
+			strictEqual(bundle.contract.get(), before, "the previous good snapshot stays active");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+});
+
+/** Wait for the config watcher (80ms debounce) to publish a rejection. */
+async function waitForReloadFailure(events: ConfigReloadFailedPayload[]): Promise<string> {
+	const deadline = Date.now() + 5_000;
+	while (Date.now() < deadline) {
+		const message = events.find((event) => typeof event.message === "string")?.message;
+		if (typeof message === "string") return message;
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+	throw new Error("no config.reloadFailed event with a message arrived");
+}

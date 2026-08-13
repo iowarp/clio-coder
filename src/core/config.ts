@@ -31,35 +31,116 @@ export function settingsPath(): string {
 	return join(clioConfigDir(), "settings.yaml");
 }
 
+/**
+ * What kind of failure produced a {@link SettingsIssue}. `"schema"` (the
+ * default when the field is absent) means a key violates the one schema, so
+ * the issue path names the key at fault. `"unreadable"` and `"syntax"` are
+ * whole-file failures where no key is at fault and remedies that talk about
+ * keys do not apply; they are kept apart because a permission error announced
+ * as invalid YAML sends the operator after the wrong problem.
+ */
+export type SettingsIssueKind = "unreadable" | "syntax" | "schema";
+
 export interface SettingsIssue {
 	/** Dotted key path, e.g. `orchestrator.target` or `targets[2].runtime`. */
 	path: string;
 	message: string;
+	kind?: SettingsIssueKind;
+}
+
+/**
+ * The failure kind of an issue list. Only the first issue can be a file-level
+ * failure: a read or a parse that fails returns exactly one issue and never
+ * reaches the schema walk, so a mixed list is always schema issues.
+ */
+function issuesKind(issues: ReadonlyArray<SettingsIssue>): SettingsIssueKind {
+	return issues[0]?.kind ?? "schema";
+}
+
+/**
+ * The one action that repairs each failure kind, followed by the two commands
+ * that are true for all of them. `clio doctor --fix` is deliberately not the
+ * first line: `--fix` creates missing structure and repairs credential
+ * permissions, and initialization never reads or rewrites an existing
+ * settings.yaml, so on its own it leaves every one of these failures exactly
+ * as it found them.
+ */
+function settingsRemedy(kind: SettingsIssueKind, path: string): string {
+	if (kind === "unreadable") return `Restore read access to ${path}, then run \`clio doctor\` to re-check.`;
+	if (kind === "syntax") return `Fix the YAML in ${path}, then run \`clio doctor\` to re-check.`;
+	return `Fix the keys above in ${path}, then run \`clio doctor\` to re-check.`;
+}
+
+/** The same repair as {@link settingsRemedy}, phrased to sit inside one line's parentheses. */
+function settingsRemedyInline(kind: SettingsIssueKind, path: string): string {
+	if (kind === "unreadable") return `restore read access to ${path}`;
+	if (kind === "syntax") return `fix the YAML in ${path}`;
+	return `edit the named keys in ${path}`;
 }
 
 export class SettingsValidationError extends Error {
 	readonly issues: ReadonlyArray<SettingsIssue>;
 
 	/**
-	 * The remedy names the file and the two commands that actually change this
-	 * outcome. It used to name `clio doctor --fix`, which cannot help here by
-	 * design: `--fix` creates missing structure and repairs credential
-	 * permissions, and initialization deliberately never reads or rewrites an
-	 * existing settings.yaml. Every invalid file therefore came with an
-	 * instruction that left it exactly as invalid as before.
+	 * The headline and the remedy both follow the failure kind. A file that
+	 * cannot be read has no key at fault, so telling its reader to "fix the keys
+	 * above" named a repair that does not exist for the problem they have.
 	 */
 	constructor(issues: ReadonlyArray<SettingsIssue>) {
-		const lines = issues.map((issue) => `  ${issue.path}: ${issue.message}`);
 		const path = join(resolveClioDirs().config, "settings.yaml");
+		const kind = issuesKind(issues);
+		// File-level issues all carry the same `(root)` path, which says nothing;
+		// their message already names what failed.
+		const lines =
+			kind === "schema"
+				? issues.map((issue) => `  ${issue.path}: ${issue.message}`)
+				: issues.map((issue) => `  ${issue.message}`);
+		const headline = kind === "schema" ? "settings.yaml failed validation:" : "settings.yaml cannot be loaded:";
 		super(
-			`settings.yaml failed validation:\n${lines.join("\n")}\n\n` +
-				`Fix the keys above in ${path}, then run \`clio doctor\` to re-check.\n` +
+			`${headline}\n${lines.join("\n")}\n\n` +
+				`${settingsRemedy(kind, path)}\n` +
 				"`clio doctor --fix` repairs directories and credential permissions; it never rewrites settings.\n" +
 				"To discard these settings and start from defaults instead, run `clio reset --config --force`.",
 		);
 		this.name = "SettingsValidationError";
 		this.issues = issues;
 	}
+}
+
+function foldToOneLine(text: string): string {
+	return text.replace(/\s*\n\s*/g, " ").trim();
+}
+
+/**
+ * One operator-facing line for a settings file that will not load, carrying
+ * the exact key paths for a schema failure and the remedy that fits whatever
+ * actually failed. Doctor renders it as its settings row and the runtime
+ * reload path renders it as a TUI notice, so both speak with one voice.
+ */
+export function formatSettingsIssues(issues: ReadonlyArray<SettingsIssue>): string {
+	if (issues.length === 0) return "";
+	const path = join(resolveClioDirs().config, "settings.yaml");
+	const kind = issuesKind(issues);
+	const detail =
+		kind === "schema"
+			? issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")
+			: issues.map((issue) => issue.message).join("; ");
+	const discard = "`clio reset --config --force` to start from defaults";
+	return foldToOneLine(`${detail} (${settingsRemedyInline(kind, path)}, or ${discard})`);
+}
+
+/**
+ * {@link formatSettingsIssues} for a caught error, for callers that hold the
+ * throw rather than the issue list.
+ *
+ * Live surfaces render this instead of the error object. Handing an error to
+ * `console.error` inside a running TUI prints a `util.inspect` dump: the
+ * `issues` array with its `\n` escapes, a stack trace naming a dist chunk, and
+ * a YAML excerpt whose newlines walk straight over the live frame.
+ */
+export function formatSettingsFailure(error: unknown): string {
+	if (error instanceof SettingsValidationError && error.issues.length > 0) return formatSettingsIssues(error.issues);
+	return foldToOneLine(error instanceof Error ? error.message : String(error));
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -1217,13 +1298,29 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 export function validateSettingsFile(): SettingsValidationResult {
 	const path = join(resolveClioDirs().config, "settings.yaml");
 	if (!existsSync(path)) return { settings: cloneValue(DEFAULT_SETTINGS), issues: [] };
-	let parsed: unknown;
+	// The read and the parse are separate steps because they fail for separate
+	// reasons: folding them into one try reported `chmod 000` as invalid YAML,
+	// which is a false statement about the file and points at the wrong repair.
+	let text: string;
 	try {
-		parsed = parseYaml(readFileSync(path, "utf8"));
+		text = readFileSync(path, "utf8");
 	} catch (err) {
 		return {
 			settings: cloneValue(DEFAULT_SETTINGS),
-			issues: [{ path: "(root)", message: `invalid YAML: ${err instanceof Error ? err.message : String(err)}` }],
+			issues: [
+				{ path: "(root)", message: `unreadable: ${err instanceof Error ? err.message : String(err)}`, kind: "unreadable" },
+			],
+		};
+	}
+	let parsed: unknown;
+	try {
+		parsed = parseYaml(text);
+	} catch (err) {
+		return {
+			settings: cloneValue(DEFAULT_SETTINGS),
+			issues: [
+				{ path: "(root)", message: `invalid YAML: ${err instanceof Error ? err.message : String(err)}`, kind: "syntax" },
+			],
 		};
 	}
 	return validateSettings(parsed);

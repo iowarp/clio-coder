@@ -78,7 +78,7 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 		strictEqual(recovered.code, 0, `the documented remedy actually recovers; stdout=${recovered.stdout}`);
 	});
 
-	it("folds a multi-line YAML parse error into one doctor row", async () => {
+	it("folds a multi-line YAML parse error into one doctor row and calls it a parse error", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		writeFileSync(join(scratch.dir, "config", "settings.yaml"), "version: 1\n  bad: [unclosed\n", "utf8");
 
@@ -91,7 +91,12 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 			`every report line must start a finding; got:\n${result.stdout}`,
 		);
 		const settingsRow = rows.find((row) => row.includes("settings.yaml"));
-		ok(settingsRow?.includes("unreadable:"), `expected an unreadable row, got ${settingsRow}`);
+		// This row used to say `unreadable:` for a file it had just read
+		// successfully. It names the parse failure now, and points at the YAML
+		// rather than at read permissions.
+		ok(settingsRow?.includes("invalid YAML:"), `expected a parse-error row, got ${settingsRow}`);
+		ok(!settingsRow?.includes("unreadable:"), `a readable file must not be called unreadable: ${settingsRow}`);
+		ok(settingsRow?.includes("fix the YAML in"), `the parse-error row names the repair that fits: ${settingsRow}`);
 		ok(settingsRow?.includes("clio reset --config --force"), "the parse-error row carries a remedy too");
 	});
 

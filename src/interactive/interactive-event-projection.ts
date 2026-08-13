@@ -1,5 +1,6 @@
 import {
 	BusChannels,
+	type ConfigReloadFailedPayload,
 	type ContextPrunedPayload,
 	type ContextWarningPayload,
 	type LoopBlockedPayload,
@@ -308,6 +309,19 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		}),
 		deps.bus.on(BusChannels.ConfigHotReload, () => {
 			deps.refreshSettingsOverlay();
+		}),
+		deps.bus.on(BusChannels.ConfigReloadFailed, (payload) => {
+			const event = payload as ConfigReloadFailedPayload | null | undefined;
+			if (!event || typeof event !== "object" || !("message" in event)) return;
+			// The domain already folded this to one line with a remedy; the frame
+			// only ever sees a notice, never an error object or a stack.
+			if (typeof event.message === "string" && event.message.length > 0) {
+				deps.notify("error", `[config] settings reload rejected: ${event.message}`, "config:reload-failed");
+			} else if (event.message === null) {
+				deps.dismissNotification("config:reload-failed");
+			}
+			deps.refreshFooter();
+			deps.requestRender();
 		}),
 		deps.bus.on(BusChannels.ConfigRestartRequired, (payload) => {
 			const text = restartRequiredNotice(payload);
