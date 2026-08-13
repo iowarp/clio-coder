@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { clioStateDir } from "../../core/xdg.js";
+import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { SafetyPolicyDecision } from "./policy-engine.js";
 
 /**
@@ -429,6 +429,13 @@ export function openAuditWriter(opts?: { dateFn?: () => Date }): AuditWriter {
 	function ensureFor(date: string): OpenFile | null {
 		if (current !== null && current.date === date) return current;
 		if (current !== null) closeCurrent();
+		// Opening the day's file mkdirs `<state>/audit`, which rebuilds a state
+		// root that `clio uninstall` has already removed. A tool call in a session
+		// outliving the uninstall must not resurrect it. See core/xdg.ts
+		// stateRootRemoved(). Rows are dropped silently for the same reason
+		// logAuditError is not called: the removal is the operator's instruction,
+		// not a fault.
+		if (stateRootRemoved()) return null;
 		try {
 			const dir = join(clioStateDir(), "audit");
 			mkdirSync(dir, { recursive: true });

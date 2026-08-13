@@ -13,7 +13,13 @@ import {
 	renderConnectableProviderRows,
 	resolveCliProviderReference,
 } from "./provider-target.js";
-import { formatColumns, printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
+import {
+	credentialWriteFailed,
+	formatColumns,
+	printError,
+	printOk,
+	printPlaintextCredentialWarning,
+} from "./shared.js";
 
 const USAGE = `usage: clio auth list
        clio auth status [target-or-runtime]
@@ -258,6 +264,10 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 					process.stderr.write(`${message}\n`);
 				},
 			});
+			// The OAuth handshake succeeding says nothing about the credential
+			// reaching disk; auth.login() writes through the same swallowing
+			// persist() the API-key path uses.
+			if (credentialWriteFailed(auth, `credential for ${resolved.authTarget.providerId} was not stored`)) return 1;
 			printOk(`authenticated ${resolved.authTarget.providerId}`);
 			return 0;
 		} catch (error) {
@@ -290,6 +300,7 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 			printError(error instanceof Error ? error.message : String(error));
 			return 1;
 		}
+		if (credentialWriteFailed(auth, `credential for ${resolved.authTarget.providerId} was not stored`)) return 1;
 		printOk(`authenticated ${resolved.authTarget.providerId}`);
 		printPlaintextCredentialWarning();
 		return 0;
@@ -399,6 +410,7 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
 	}
+	if (credentialWriteFailed(auth, `credential for ${resolved.authTarget.providerId} was not removed`)) return 1;
 	printOk(`removed credential for ${resolved.authTarget.providerId}`);
 	return 0;
 }

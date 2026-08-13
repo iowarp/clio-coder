@@ -23,7 +23,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveGuardrail } from "../../core/guardrails.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
-import { clioStateDir, clioStatePath } from "../../core/xdg.js";
+import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { computeReceiptFindingsSummary } from "./receipt-findings.js";
 import { withReceiptIntegrity } from "./receipt-integrity.js";
@@ -68,22 +68,6 @@ function newRunId(): string {
 
 function runsPath(): string {
 	return join(clioStateDir(), "runs.json");
-}
-
-/**
- * True when the state root this process resolved is no longer on disk.
- *
- * `clio uninstall` removes the whole root while processes that hold a ledger
- * are still running, and every writer below mkdirs its parent back: the state
- * file lock does it before the critical section, `atomicWrite` does it again.
- * A persist landing after the removal therefore recreated `$CLIO_STATE_DIR`
- * with runs.json inside it, so an uninstall that reported success left a state
- * home behind and the next `clio` start read a ledger from a home that was
- * supposed to be gone. Reads `clioStatePath()` rather than `clioStateDir()`
- * because the latter creates the directory it is being asked about.
- */
-function stateRootRemoved(): boolean {
-	return !existsSync(clioStatePath());
 }
 
 function receiptPathFor(runId: string): string {
