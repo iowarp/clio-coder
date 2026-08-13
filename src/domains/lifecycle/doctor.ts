@@ -1,11 +1,11 @@
-import { accessSync, chmodSync, constants, existsSync, readFileSync, statSync } from "node:fs";
+import { accessSync, chmodSync, constants, existsSync, readFileSync, type Stats, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { readSettings, validateSettings } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
-import { readStateInfo } from "./state.js";
+import { readStateInfoResult } from "./state.js";
 import { getVersionInfo } from "./version.js";
 
 export type DoctorLevel = "ok" | "warn" | "error";
@@ -21,15 +21,69 @@ export interface DoctorOptions {
 	fix?: boolean;
 }
 
+function describeNodeType(stats: Stats): string {
+	if (stats.isFile()) return "a regular file";
+	if (stats.isSymbolicLink()) return "a symlink";
+	if (stats.isFIFO()) return "a FIFO";
+	if (stats.isSocket()) return "a socket";
+	if (stats.isBlockDevice() || stats.isCharacterDevice()) return "a device node";
+	return "not a directory";
+}
+
+/**
+ * One of Clio's four roots. `existsSync` alone was reporting OK for anything at
+ * the path, so `touch $CLIO_CACHE_DIR` produced a green report and exit 0 while
+ * `clio doctor --fix` one command later died on "Expected directory". A root
+ * has to be a directory Clio can actually traverse and write, and the remedy
+ * differs by failure: `--fix` creates a missing root but cannot move a file out
+ * of the way or widen a mode, so the row says which one is needed.
+ */
+function directoryFinding(name: string, path: string): DoctorFinding {
+	let stats: Stats;
+	try {
+		stats = statSync(path);
+	} catch (error) {
+		const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+		if (code === "ENOENT") return { ok: false, name, detail: `${path} missing (run \`clio doctor --fix\`)` };
+		const message = error instanceof Error ? error.message : String(error);
+		return { ok: false, name, detail: `${path} cannot be inspected: ${message}` };
+	}
+	if (!stats.isDirectory()) {
+		return {
+			ok: false,
+			name,
+			detail: `${path} is ${describeNodeType(stats)}, not a directory (move it aside, then run \`clio doctor --fix\`)`,
+		};
+	}
+	try {
+		accessSync(path, constants.R_OK | constants.W_OK | constants.X_OK);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return { ok: false, name, detail: `${path} is not readable, writable, and traversable: ${message}` };
+	}
+	return { ok: true, name, detail: path };
+}
+
 export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
+	let repairFailure: string | null = null;
 	if (options.fix) {
-		initializeClioHome();
-		const credentialsPath = join(resolveClioDirs().config, "credentials.yaml");
-		if (existsSync(credentialsPath)) {
-			chmodSync(credentialsPath, 0o600);
+		// A repair that throws used to take the whole report with it, so the one
+		// command that explains the damage printed nothing. Record it and carry on;
+		// the rows below are what say which root is wrong.
+		try {
+			initializeClioHome();
+			const credentialsPath = join(resolveClioDirs().config, "credentials.yaml");
+			if (existsSync(credentialsPath)) {
+				chmodSync(credentialsPath, 0o600);
+			}
+		} catch (error) {
+			repairFailure = error instanceof Error ? error.message : String(error);
 		}
 	}
 	const findings: DoctorFinding[] = [];
+	if (repairFailure !== null) {
+		findings.push({ ok: false, name: "repair", detail: `--fix could not finish: ${repairFailure}` });
+	}
 	const version = getVersionInfo();
 	findings.push({ ok: true, name: "Clio Coder version", detail: version.clio });
 	findings.push({ ok: true, name: "node version", detail: version.node });
@@ -43,16 +97,10 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 
 	const dirs = resolveClioDirs();
 	const config = dirs.config;
-	findings.push({ ok: existsSync(config), name: "config dir", detail: config });
-
-	const data = dirs.data;
-	findings.push({ ok: existsSync(data), name: "data dir", detail: data });
-
-	const stateDir = dirs.state;
-	findings.push({ ok: existsSync(stateDir), name: "state dir", detail: stateDir });
-
-	const cache = dirs.cache;
-	findings.push({ ok: existsSync(cache), name: "cache dir", detail: cache });
+	findings.push(directoryFinding("config dir", config));
+	findings.push(directoryFinding("data dir", dirs.data));
+	findings.push(directoryFinding("state dir", dirs.state));
+	findings.push(directoryFinding("cache dir", dirs.cache));
 
 	// The settings row runs the same strict schema validation as the loader,
 	// so anything readSettings would refuse to start on shows up here with the
@@ -106,7 +154,8 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		}
 	}
 
-	const state = readStateInfo();
+	const stateRead = readStateInfoResult();
+	const state = stateRead.info;
 	const stateCurrent = Boolean(state && state.version === version.clio);
 	const stateStamp = state
 		? `installed ${state.installedAt}${state.upgradedAt ? `, upgraded ${state.upgradedAt}` : ""}`
@@ -118,9 +167,14 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			? stateCurrent
 				? `${state.version} (${stateStamp})`
 				: `stale ${state.version} (${stateStamp}); current ${version.clio} (run \`clio doctor --fix\`)`
-			: // Every other failing row names the command that repairs it. This one
-				// said only "missing", and `clio doctor --fix` does write it.
-				"missing (run `clio doctor --fix`)",
+			: stateRead.problem !== null
+				? // Present but unreadable. `--fix` cannot repair this one: it fails on
+					// the same permissions, so pointing there would send the user in a
+					// circle.
+					stateRead.problem
+				: // Every other failing row names the command that repairs it. This one
+					// said only "missing", and `clio doctor --fix` does write it.
+					"missing (run `clio doctor --fix`)",
 	});
 
 	return findings;
