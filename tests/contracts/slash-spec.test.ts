@@ -178,7 +178,8 @@ describe("contracts/slash-spec", () => {
 	 * worked. Only active commands run: anything command-shaped that names no
 	 * registered command fails and never reaches the model. A leading slash is
 	 * also how a path starts, so path-shaped and prose input still belongs to the
-	 * model.
+	 * model. (`/compact` itself is now an alias of `/context compact`, so it is
+	 * covered by the alias case rather than this one.)
 	 */
 	it("fails a command-shaped spelling that names no command, and never sends it to the model", () => {
 		const submitted: string[] = [];
@@ -189,15 +190,13 @@ describe("contracts/slash-spec", () => {
 			render: () => undefined,
 		} as unknown as SlashCommandContext;
 
-		// Four spellings that were retired, plus two that never existed.
-		for (const absent of ["/compact", "/context-init", "/context-clear", "/context-view", "/skills", "/thnking"]) {
+		// Three spellings that were retired, plus two that never existed.
+		for (const absent of ["/context-init", "/context-clear", "/context-view", "/skills", "/thnking"]) {
 			dispatchSlashCommand(parseSlashCommand(absent), ctx);
 		}
-		// Arguments the retired spelling used to take must not resurrect it either.
-		dispatchSlashCommand(parseSlashCommand("/compact focus on the build failure"), ctx);
 
 		strictEqual(submitted.length, 0, `nothing command-shaped reaches the model, got: ${submitted.join(" | ")}`);
-		strictEqual(notices.length, 7, notices.join(" | "));
+		strictEqual(notices.length, 5, notices.join(" | "));
 		ok(
 			notices.every((notice) => notice.includes("not a command") && notice.includes("/help")),
 			notices.join(" | "),
@@ -467,13 +466,19 @@ describe("contracts/slash-spec", () => {
 			["/context compact", { kind: "compact", instructions: undefined }],
 			["/context compact   ", { kind: "compact", instructions: undefined }],
 			["/context compact my instructions", { kind: "compact", instructions: "my instructions" }],
-			["/compact", { kind: "unknown-command", token: "compact" }],
-			["/compact my instructions", { kind: "unknown-command", token: "compact" }],
+			// /compact is an alias for the subcommand, so it parses to the same
+			// command with the same tail rather than to the /context hub.
+			["/compact", { kind: "compact", instructions: undefined }],
+			["/compact my instructions", { kind: "compact", instructions: "my instructions" }],
 
 			// context overlay (hub, no args); the retired spelling no longer parses
 			["/context", { kind: "context-view" }],
 			["/ctx", { kind: "context-view" }],
 			["/context-view", { kind: "unknown-command", token: "context-view" }],
+
+			// spellings from other tools that name something Clio really has
+			["/exit", { kind: "quit" }],
+			["/config", { kind: "settings" }],
 
 			// status (deleted) -> falls through to unknown
 			["/status", { kind: "unknown-command", token: "status" }],
@@ -605,7 +610,6 @@ describe("contracts/slash-spec", () => {
 			"connect",
 			"disconnect",
 			"receipts",
-			"compact",
 			"context-init",
 			"context-clear",
 			"context-view",
@@ -625,7 +629,6 @@ describe("contracts/slash-spec", () => {
 		} as unknown as SlashCommandContext;
 
 		dispatchSlashCommand(parseSlashCommand("/context-view"), ctx);
-		dispatchSlashCommand(parseSlashCommand("/compact tidy up"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/context"), ctx);
 
 		ok(!routed.includes("compact"), "a retired spelling must not reach the handler it once named");
@@ -634,11 +637,42 @@ describe("contracts/slash-spec", () => {
 			routed.some((entry) => entry.includes("/context-view is not a command")),
 			routed.join(" | "),
 		);
-		ok(
-			routed.some((entry) => entry.includes("/compact is not a command")),
-			routed.join(" | "),
-		);
 		strictEqual(routed.at(-1), "context-view", "the surviving spelling still works");
+	});
+
+	/**
+	 * A spelling every other tool in this class ships was answered with a flat
+	 * "is not a command" while the command it names was one keystroke away and
+	 * the alias mechanism that would have connected them was already carrying
+	 * /models to /model. Aliases are wired only where a real counterpart exists,
+	 * so a spelling that names nothing Clio has still fails, and it fails naming
+	 * /help rather than guessing.
+	 */
+	it("routes the spellings other tools use to the commands Clio really has", () => {
+		const routed: string[] = [];
+		const ctx = {
+			shutdown: () => routed.push("quit"),
+			openSettings: () => routed.push("settings"),
+			runCompact: (instructions?: string) => routed.push(`compact:${instructions ?? ""}`),
+			openContextView: () => routed.push("context-view"),
+			submitChat: (text: string) => routed.push(`chat:${text}`),
+			notice: (_level: string, text: string) => routed.push(`notice:${text}`),
+			render: () => undefined,
+		} as unknown as SlashCommandContext;
+
+		dispatchSlashCommand(parseSlashCommand("/exit"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/config"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/compact"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/compact drop the old turns"), ctx);
+
+		deepStrictEqual(routed, ["quit", "settings", "compact:", "compact:drop the old turns"]);
+
+		// /clear names nothing here: session reset is /new and context reset is
+		// /context reset, and neither is what an operator typing /clear means.
+		// It stays an error, and the error points at the list.
+		routed.length = 0;
+		dispatchSlashCommand(parseSlashCommand("/clear"), ctx);
+		deepStrictEqual(routed, ["notice:/clear is not a command. Type /help for the list."]);
 	});
 
 	it("builds slash autocomplete commands with hints that fit the suggestion row", () => {

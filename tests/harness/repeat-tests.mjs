@@ -140,11 +140,17 @@ function shuffled(files, seed) {
 function runOnce(files, seed, index, total) {
 	const order = shuffled(files, seed);
 	process.stderr.write(`repeat test run ${index}/${total}, seed=${seed}, files=${order.length}\n`);
-	const result = spawnSync(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", ...order], {
-		cwd: REPO_ROOT,
-		stdio: "inherit",
-		env: process.env,
-	});
+	// Same import pair as the package.json test scripts: tsx to load the TypeScript
+	// tests, then the scratch root every mkdtemp in them lands inside.
+	const result = spawnSync(
+		process.execPath,
+		["--import", "tsx", "--import", "./tests/harness/tmp-root.ts", "--test", "--test-concurrency=1", ...order],
+		{
+			cwd: REPO_ROOT,
+			stdio: "inherit",
+			env: process.env,
+		},
+	);
 	return result.status ?? 1;
 }
 

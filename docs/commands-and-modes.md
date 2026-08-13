@@ -133,7 +133,7 @@ The registry table below lists the available interactive slash commands. The "Al
 
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
-| `/quit` | - | `/quit` | Exit Clio Coder |
+| `/quit` | `/exit` | `/quit` | Exit Clio Coder |
 | `/help` | - | `/help [query]` | Open the interactive help center showing commands and keys |
 | `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
 | `/prompts` | - | `/prompts` | List prompt templates |
@@ -144,7 +144,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
 | `/targets` | - | `/targets` | Show target hub for health, auth, models, and actions |
 | `/cost` | - | `/cost` | Show session token and cost totals |
-| `/context` | `/ctx` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
+| `/context` | `/ctx`, `/compact` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
 | `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
 | `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
 | `/memory` | - | `/memory seed` | Inspect task memory or seed it from the newest handoff |
@@ -153,7 +153,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/output` | - | `/output [verbosity]` | Set transcript detail: minimal, default, or verbose |
 | `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
 | `/scoped-models` | - | `/scoped-models` | Edit the Alt+J / Alt+K model cycle set |
-| `/settings` | - | `/settings` | Open interactive settings |
+| `/settings` | `/config` | `/settings` | Open interactive settings |
 | `/resume` | - | `/resume` | Resume a past session |
 | `/new` | - | `/new` | Start a fresh session |
 | `/tree` | - | `/tree` | Open session tree navigator |
@@ -168,9 +168,14 @@ without touching `CLIO.md`, and `reset` deletes accumulated
 context artifacts (`.clio/codewiki.json`, `.clio/state.json`,
 `.clio/handoffs/`, `.clio/proposals/`). Its interactive choice preserves or
 deletes `CLIO.md`; cancellation makes no changes. Session reset stays `/new`;
-there is deliberately no `/context clear`. The spellings `/compact`,
-`/context-init`, `/context-clear`, and `/context-view` are gone and are not
-aliased to anything.
+there is deliberately no `/context clear`. The spellings `/context-init`,
+`/context-clear`, and `/context-view` are gone and are not aliased to anything.
+`/compact` is an alias for `/context compact` and carries the same optional
+instructions, so `/compact drop the old turns` runs the compaction the operator
+asked for instead of reporting that the spelling does not exist. `/exit` and
+`/config` are aliases of `/quit` and `/settings` on the same grounds: the
+command exists and the spelling is the one other tools in this class use.
+`/clear` has no counterpart here, so it stays an error that names `/help`.
 
 Only active commands run. Typing anything command-shaped that the registry does
 not own reports `is not a command` and points at `/help`; it is never sent to the

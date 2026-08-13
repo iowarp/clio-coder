@@ -419,6 +419,7 @@ export function matchFromSpec(
 	entry: {
 		name: string;
 		aliases?: ReadonlyArray<string>;
+		aliasArgs?: Readonly<Record<string, string>>;
 		args?: CommandArgsSpec;
 		fromArgs?: (parsed: ParsedArgs, trimmed: string) => SlashCommand;
 	},
@@ -426,16 +427,22 @@ export function matchFromSpec(
 ): SlashCommand | null {
 	const nameOrAlias = [entry.name, ...(entry.aliases ?? [])];
 	let matchedPrefix: string | null = null;
+	let matchedTerm: string | null = null;
 	for (const term of nameOrAlias) {
 		const prefix = `/${term}`;
 		if (trimmed === prefix || trimmed.startsWith(`${prefix} `)) {
 			matchedPrefix = prefix;
+			matchedTerm = term;
 			break;
 		}
 	}
 	if (!matchedPrefix) return null;
 
-	const argsLine = trimmed.slice(matchedPrefix.length);
+	// An alias that stands for a subcommand supplies that subcommand ahead of
+	// whatever was typed after it, so `/compact tidy up` parses as the line
+	// `/context compact tidy up` and reaches the same handler by the same route.
+	const implied = matchedTerm === null ? undefined : entry.aliasArgs?.[matchedTerm];
+	const argsLine = implied ? ` ${implied}${trimmed.slice(matchedPrefix.length)}` : trimmed.slice(matchedPrefix.length);
 	const parsed = parseArgs(entry.args ?? {}, argsLine);
 
 	if (entry.fromArgs) {

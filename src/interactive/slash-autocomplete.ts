@@ -123,13 +123,17 @@ export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
 /**
  * Alias spellings that parse like their canonical command, e.g. /ctx for
  * /context. The /skill: family stays out: it is routed by the dedicated skill
- * branch and never reaches argument completion.
+ * branch and never reaches argument completion. So does an alias that stands
+ * for a subcommand, e.g. /compact: its arguments are the tail of `/context
+ * compact`, so completing them against `/context` would offer the sibling
+ * subcommands where free-form instructions go.
  */
 function commandAliasMap(): Map<string, string> {
 	const map = new Map<string, string>();
 	for (const ref of commandReference()) {
 		for (const alias of ref.aliases) {
 			if (alias.includes(":")) continue;
+			if (ref.aliasArgs?.[alias] !== undefined) continue;
 			map.set(alias, ref.name);
 		}
 	}

@@ -111,6 +111,7 @@ experiment-protocol guides.
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
+export PATH="$HOME/.local/bin:$PATH"
 hash -r
 clio --version
 ```
@@ -118,9 +119,11 @@ clio --version
 `npm run install:local` verifies dependencies, builds the CLI, installs a
 symlink at `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`, and runs the installed
 CLI's structure repair so a fresh install passes plain `clio doctor` with no
-manual steps. It warns if the bin directory is not on your `PATH`. The symlink
-executes `dist/cli/index.js`, so re-run `npm run build` after editing
-TypeScript sources.
+manual steps. It warns if the bin directory is not on your `PATH` and prints the
+`export` line above; the line is a no-op for the shell that already has it, and
+it is what makes `clio --version` resolve in the shell that does not. Put it in
+your shell profile to keep it across sessions. The symlink executes
+`dist/cli/index.js`, so re-run `npm run build` after editing TypeScript sources.
 
 To remove it, preview first:
 
