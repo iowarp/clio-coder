@@ -40,7 +40,6 @@ function makeLifecycle(events: string[], factories: ResourceFactories): ReturnTy
 	let slashContextSequence = 0;
 	const app = {
 		bus: { on: () => () => {}, emit: () => {} },
-		cacheDir: "/tmp/clio-resource-characterization",
 		resources: { skills: () => ({ items: [], diagnostics: [] }) },
 	} as unknown as OverlayLifecycleApplicationDeps;
 	const runtime = {

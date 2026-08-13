@@ -21,7 +21,6 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	import("./interactive-application.js").InteractiveDeps,
 	| "agents"
 	| "bus"
-	| "cacheDir"
 	| "chat"
 	| "commitSetting"
 	| "dataDir"
@@ -284,7 +283,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		keybindings,
 		editor,
 		getSlashContext: deps.getSlashContext,
-		cacheDir: deps.app.cacheDir,
 		...(deps.app.resources ? { resources: deps.app.resources } : {}),
 		closeOverlay,
 		...(openHelpOverlayFactory ? { openHelpOverlay: openHelpOverlayFactory } : {}),

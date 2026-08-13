@@ -32,7 +32,7 @@ import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
-import { clioCacheDir, clioDataDir, clioStateDir } from "../core/xdg.js";
+import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
@@ -1658,7 +1658,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		seedTaskMemory: seedCurrentTaskMemoryFromHandoff,
 		stateDir: clioStateDir(),
 		dataDir: clioDataDir(),
-		cacheDir: clioCacheDir(),
 		registerAskUserHandler: (handler) => {
 			askUserHandler = handler;
 			return () => {

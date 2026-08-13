@@ -26,6 +26,13 @@ import { loadSkills, type Skill } from "./loader.js";
 
 export type MarketplaceSkillOrigin = "catalog" | "index";
 
+/**
+ * The diagnostic that means "nothing is wrong, nothing is configured". Callers
+ * that render an empty state of their own separate it from real failures (an
+ * unreadable index, a broken package) by identity rather than by string match.
+ */
+export const MARKETPLACE_UNCONFIGURED = "no local skill marketplace catalog or index configured";
+
 export interface MarketplaceSkill {
 	name: string;
 	description: string;
@@ -211,7 +218,7 @@ export function discoverMarketplaceSkills(options: DiscoverMarketplaceOptions = 
 	}
 
 	if (skills.length === 0 && diagnostics.length === 0) {
-		diagnostics.push("no local skill marketplace catalog or index configured");
+		diagnostics.push(MARKETPLACE_UNCONFIGURED);
 	}
 	return { status: skills.length > 0 ? "installable" : "unavailable", skills, diagnostics };
 }

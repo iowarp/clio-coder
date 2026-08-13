@@ -1,11 +1,10 @@
-import type { ResourceList, Skill } from "../../domains/resources/index.js";
-import {
-	fetchRemoteMarketplace,
-	fetchRemoteSkillDetail,
-	getMarketplaceSkills,
-	parseSkillMarkdown,
-	type RemoteSkill,
+import type {
+	MarketplaceDiscoveryResult,
+	MarketplaceSkill,
+	ResourceList,
+	Skill,
 } from "../../domains/resources/index.js";
+import { discoverMarketplaceSkills, MARKETPLACE_UNCONFIGURED } from "../../domains/resources/index.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
@@ -13,9 +12,11 @@ import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 /**
  * The Skills Hub: one multipane surface for every skill Clio can reach.
- * Installed skills group by scope, marketplace skills hydrate in from the
- * GitHub repo without ever blocking first paint, Enter inserts the
- * invocation into the editor, and `i` installs a marketplace skill in place.
+ * Installed skills group by scope, marketplace rows come from the same local
+ * marketplace lookup the installer and `/skill:<name>` resolve through, Enter
+ * inserts the invocation into the editor, and `i` installs in place. The hub
+ * lists nothing the resolver cannot resolve; when the lookup is empty the hub
+ * says so and names the remedy instead of drawing an inventory.
  */
 
 const GROUP_PROJECT = "Project";
@@ -23,17 +24,19 @@ const GROUP_USER = "User";
 const GROUP_MARKETPLACE = "Marketplace";
 const GROUP_DIAGNOSTICS = "Diagnostics";
 
+/** @internal exported for contract tests */
+export const SKILLS_HUB_EMPTY =
+	"no skills installed and no local marketplace configured. install one with `clio skills install <path|github-url>`, or point CLIO_SKILL_CATALOG_DIR at a skills/ catalog.";
+
 export interface SkillsHubDeps {
 	listSkills: () => ResourceList<Skill>;
-	cacheDir: string;
 	setEditorText: (text: string) => void;
 	notice: (level: NoticeLevel, text: string) => void;
 	/** Installs a marketplace skill by name; rejection text reaches the user. */
 	installSkill: (name: string) => Promise<{ name: string; path: string; warnings: string[] }>;
 	onClose: () => void;
-	/** Injectable for tests; defaults to the live remote marketplace. */
-	fetchMarketplace?: (cacheDir: string) => Promise<RemoteSkill[]>;
-	fetchSkillDetail?: (cacheDir: string, name: string) => Promise<{ description?: string; body: string }>;
+	/** Injectable for tests; defaults to the local marketplace the installer uses. */
+	discoverMarketplace?: () => MarketplaceDiscoveryResult;
 }
 
 function groupForScope(scope: string): string {
@@ -45,6 +48,22 @@ function groupForScope(scope: string): string {
 function diagnosticTouchesSkill(diagnosticPath: string | undefined, skill: Skill): boolean {
 	if (!diagnosticPath) return false;
 	return diagnosticPath === skill.filePath || diagnosticPath.startsWith(skill.baseDir);
+}
+
+/**
+ * The SKILL.md body without its frontmatter block. A file with no frontmatter,
+ * or an unterminated one, is all body; the loader has already reported those as
+ * diagnostics, so the detail pane shows the text rather than an error.
+ */
+function skillBody(content: string): string {
+	const lines = content.split(/\r?\n/);
+	if (lines[0]?.trim() !== "---") return content;
+	const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+	if (end === -1) return content;
+	return lines
+		.slice(end + 1)
+		.join("\n")
+		.trim();
 }
 
 /** @internal exported for contract tests */
@@ -61,7 +80,6 @@ export function buildInstalledItems(list: ResourceList<Skill>): ListOverlayItem[
 			meta: metaParts.join(" · "),
 			group: groupForScope(skill.scope),
 			detail: () => {
-				const parsed = parseSkillMarkdown(skill.content);
 				const lines = [
 					`# ${skill.name}`,
 					`**Invoke:** \`/skill:${skill.name} [task]\``,
@@ -74,7 +92,8 @@ export function buildInstalledItems(list: ResourceList<Skill>): ListOverlayItem[
 						.map((diag) => `- ${diag.type}: ${diag.message}`);
 					lines.push("", "**Diagnostics:**", ...messages);
 				}
-				lines.push("", "---", "", parsed.body.length > 0 ? parsed.body : skill.description);
+				const body = skillBody(skill.content);
+				lines.push("", "---", "", body.length > 0 ? body : skill.description);
 				return lines;
 			},
 		};
@@ -82,9 +101,45 @@ export function buildInstalledItems(list: ResourceList<Skill>): ListOverlayItem[
 }
 
 /** @internal exported for contract tests */
-export function buildDiagnosticItems(list: ResourceList<Skill>): ListOverlayItem[] {
+export function buildMarketplaceItems(
+	skills: ReadonlyArray<MarketplaceSkill>,
+	installed: ReadonlySet<string>,
+): ListOverlayItem[] {
+	const items: ListOverlayItem[] = [];
+	const seen = new Set<string>();
+	for (const skill of skills) {
+		if (installed.has(skill.name) || seen.has(skill.name)) continue;
+		seen.add(skill.name);
+		const metaParts: string[] = [skill.origin];
+		if (skill.version) metaParts.push(`v${skill.version}`);
+		items.push({
+			id: `marketplace:${skill.name}`,
+			label: skill.name,
+			meta: metaParts.join(" · "),
+			group: GROUP_MARKETPLACE,
+			detail: () => [
+				`# ${skill.name}`,
+				`**Invoke:** \`/skill:${skill.name} [task]\` (prompts to install first)`,
+				"**Install now:** press `i`",
+				`**Source:** \`${skill.sourceUrl}\``,
+				`**Origin:** ${skill.origin}${skill.category ? ` (${skill.category})` : ""}${skill.audit ? ` · audit ${skill.audit}` : ""}`,
+				"",
+				"---",
+				"",
+				skill.description,
+			],
+		});
+	}
+	return items;
+}
+
+/** @internal exported for contract tests */
+export function buildDiagnosticItems(
+	list: ResourceList<Skill>,
+	marketplaceDiagnostics: ReadonlyArray<string> = [],
+): ListOverlayItem[] {
 	const theme = clioTheme();
-	return list.diagnostics.map((diag, index) => {
+	const items = list.diagnostics.map((diag, index) => {
 		const marker = diag.type === "error" ? theme.fg("error", GLYPH.error) : theme.fg("warning", GLYPH.warnInline);
 		return {
 			id: `diagnostic-${index}`,
@@ -99,104 +154,52 @@ export function buildDiagnosticItems(list: ResourceList<Skill>): ListOverlayItem
 			],
 		};
 	});
+	// An unconfigured marketplace is the empty state, not a diagnostic; anything
+	// else the lookup reports (an unreadable index, a broken catalog package) is
+	// a real failure and gets its own row.
+	for (const message of marketplaceDiagnostics) {
+		if (message === MARKETPLACE_UNCONFIGURED) continue;
+		items.push({
+			id: `marketplace-diagnostic-${items.length}`,
+			label: `${theme.fg("warning", GLYPH.warnInline)} ${message}`,
+			meta: "marketplace",
+			group: GROUP_DIAGNOSTICS,
+			detail: () => ["# Marketplace diagnostic", `**Message:** ${message}`],
+		});
+	}
+	return items;
 }
 
 export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
-	const lifecycle = new AbortController();
-	// Thread the overlay lifecycle signal into the live fetches so closing the
-	// hub aborts in-flight requests; the fetchers also apply their own timeout.
-	const fetchMarketplace =
-		deps.fetchMarketplace ?? ((cacheDir: string) => fetchRemoteMarketplace(cacheDir, { signal: lifecycle.signal }));
-	const fetchDetail =
-		deps.fetchSkillDetail ??
-		((cacheDir: string, name: string) => fetchRemoteSkillDetail(cacheDir, name, { signal: lifecycle.signal }));
+	const discoverMarketplace = deps.discoverMarketplace ?? (() => discoverMarketplaceSkills());
 
-	// The view reads this array by reference on every render, so hydration and
-	// install refreshes mutate it in place and request a render.
+	// The view reads this array by reference on every render, so an install
+	// refresh mutates it in place and requests a render.
 	const items: ListOverlayItem[] = [];
-	const resolvedRemoteDetails = new Map<string, string[]>();
-	const pendingRemoteDetails = new Set<string>();
-	let marketplaceState: "loading" | "live" | "offline" = "loading";
-
-	const marketplaceDetail = (skill: { name: string; description?: string; repoUrl: string }): (() => string[]) => {
-		return () => {
-			const resolved = resolvedRemoteDetails.get(skill.name);
-			const header = [
-				`# ${skill.name}`,
-				`**Invoke:** \`/skill:${skill.name} [task]\` (installs on first use)`,
-				`**Install now:** press \`i\``,
-				`**Repo:** ${skill.repoUrl}`,
-				...(marketplaceState === "offline" ? ["**Marketplace:** offline/cached listing"] : []),
-			];
-			if (resolved) return [...header, "", "---", "", ...resolved];
-			if (!pendingRemoteDetails.has(skill.name) && !lifecycle.signal.aborted) {
-				pendingRemoteDetails.add(skill.name);
-				void (async () => {
-					try {
-						const detail = await fetchDetail(deps.cacheDir, skill.name);
-						const lines: string[] = [];
-						if (detail.description) lines.push(detail.description, "");
-						if (detail.body.length > 0) lines.push(detail.body);
-						resolvedRemoteDetails.set(skill.name, lines.length > 0 ? lines : ["(no description published)"]);
-					} catch {
-						resolvedRemoteDetails.set(skill.name, ["(description unavailable offline)"]);
-					}
-					if (!lifecycle.signal.aborted) tui.requestRender();
-				})();
-			}
-			return [...header, "", skill.description ?? "Loading description..."];
-		};
-	};
-
-	const marketplaceItem = (skill: { name: string; description?: string; repoUrl: string }): ListOverlayItem => ({
-		id: `marketplace:${skill.name}`,
-		label: skill.name,
-		meta: "marketplace",
-		group: GROUP_MARKETPLACE,
-		detail: marketplaceDetail(skill),
-	});
 
 	const rebuildItems = (): void => {
 		const list = deps.listSkills();
+		const discovery = discoverMarketplace();
 		const installedNames = new Set(list.items.map((skill) => skill.name));
-		const next: ListOverlayItem[] = [...buildInstalledItems(list)];
-		const seenMarketplace = new Set<string>();
-		for (const pinned of getMarketplaceSkills()) {
-			if (installedNames.has(pinned.name) || seenMarketplace.has(pinned.name)) continue;
-			seenMarketplace.add(pinned.name);
-			next.push(marketplaceItem({ name: pinned.name, description: pinned.description, repoUrl: pinned.sourceUrl }));
-		}
-		for (const remote of remoteSkills) {
-			if (installedNames.has(remote.name) || seenMarketplace.has(remote.name)) continue;
-			seenMarketplace.add(remote.name);
-			next.push(marketplaceItem(remote));
-		}
-		next.push(...buildDiagnosticItems(list));
-		items.splice(0, items.length, ...next);
+		items.splice(
+			0,
+			items.length,
+			...buildInstalledItems(list),
+			...buildMarketplaceItems(discovery.skills, installedNames),
+			...buildDiagnosticItems(list, discovery.diagnostics),
+		);
 	};
 
-	let remoteSkills: RemoteSkill[] = [];
 	rebuildItems();
 
-	void (async () => {
-		try {
-			remoteSkills = await fetchMarketplace(deps.cacheDir);
-			marketplaceState = "live";
-		} catch {
-			marketplaceState = "offline";
-		}
-		if (lifecycle.signal.aborted) return;
-		rebuildItems();
-		tui.requestRender();
-	})();
-
+	let closed = false;
 	let installInFlight = false;
 	const handle = openListOverlay(tui, {
 		title: "Skills",
 		items,
 		filterable: true,
 		layout: "split",
-		emptyMessage: "No skills found",
+		emptyMessage: SKILLS_HUB_EMPTY,
 		hints: [
 			{ key: "Enter", verb: "invoke" },
 			{ key: "i", verb: "install" },
@@ -221,7 +224,8 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 						deps.notice("error", `skill install failed: ${err instanceof Error ? err.message : String(err)}`);
 					} finally {
 						installInFlight = false;
-						if (!lifecycle.signal.aborted) {
+						// An install that lands after the hub closed has nothing to redraw.
+						if (!closed) {
 							rebuildItems();
 							tui.requestRender();
 						}
@@ -235,7 +239,7 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 	return {
 		...handle,
 		hide(): void {
-			if (!lifecycle.signal.aborted) lifecycle.abort();
+			closed = true;
 			handle.hide();
 		},
 	};
