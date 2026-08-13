@@ -33,7 +33,7 @@ import {
 } from "./configure-layout.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
-import { printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
+import { credentialWriteFailed, printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
 import { terminalColumns } from "./text-layout.js";
 import { validateModelChoice } from "./validate-model.js";
 
@@ -636,6 +636,7 @@ async function loginOAuthRuntime(rl: ReturnType<typeof createInterface>, runtime
 				process.stderr.write(`${message}\n`);
 			},
 		});
+		if (credentialWriteFailed(auth, `credential for ${runtime.id} was not stored`)) return false;
 		printOk(`authenticated ${runtime.id}`);
 		return true;
 	} catch (error) {
@@ -788,6 +789,11 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	}
 	if (args.apiKey) {
 		auth.setApiKey(runtime.id, args.apiKey);
+		// Bailing here leaves nothing half-done: settings are not touched until
+		// applyConfiguration below, so a refused credential write means the whole
+		// command changed nothing, which is what the non-zero exit now claims.
+		if (credentialWriteFailed(auth, `credential for ${runtime.id} was not stored; target '${descriptor.id}' not saved`))
+			return 1;
 		printPlaintextCredentialWarning();
 	}
 	const setWorkerDefault = args.setWorkerDefault || (args.workerProfile === undefined && args.workerModel !== undefined);
@@ -1240,6 +1246,10 @@ async function runInteractive(
 	}
 	if (apiKeyLiteral) {
 		auth.setApiKey(runtime.id, apiKeyLiteral);
+		// As in the non-interactive path: the settings write is still ahead of us,
+		// so refusing here leaves the whole wizard run without an effect.
+		if (credentialWriteFailed(auth, `credential for ${runtime.id} was not stored; target '${descriptor.id}' not saved`))
+			return 1;
 		printPlaintextCredentialWarning();
 	}
 

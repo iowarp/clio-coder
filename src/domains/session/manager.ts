@@ -1,4 +1,5 @@
 import { v7 as uuidv7 } from "uuid";
+import { stateRootRemoved } from "../../core/xdg.js";
 import {
 	atomicWrite,
 	type ClioSessionWriter,
@@ -56,6 +57,10 @@ export function startSession(input: {
 }
 
 export function persistSessionMeta(state: SessionManagerState): void {
+	// The other meta.json writer. `sessionPaths` mkdirs on the way, so a metadata
+	// update landing after `clio uninstall` rebuilds the state root the same way
+	// the shutdown checkpoint did. See core/xdg.ts stateRootRemoved().
+	if (stateRootRemoved()) return;
 	atomicWrite(sessionPaths(state.meta).meta, JSON.stringify(state.meta, null, 2));
 }
 

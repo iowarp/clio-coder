@@ -1,3 +1,4 @@
+import { stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite, sessionPaths } from "../../engine/session.js";
 import type { SessionMeta } from "./contract.js";
 import type { SessionManagerState } from "./manager.js";
@@ -13,9 +14,18 @@ import type { SessionManagerState } from "./manager.js";
  * The engine writer closes over the same meta reference we hold in
  * SessionManagerState.meta. Mutating it here keeps the writer's eventual
  * close() in sync with the checkpoint-enriched fields.
+ *
+ * Nothing is written, and no checkpoint is claimed in memory, once `clio
+ * uninstall` has taken the state root away. The check sits before
+ * `sessionPaths()`, which mkdirs the session directory and so rebuilds the
+ * whole root on its way to a meta.json the operator just deleted. This is the
+ * writer that undid an uninstall roughly two minutes after it reported success,
+ * leaving behind a root holding meta.json and tree.json with
+ * `lastCheckpointReason: shutdown`.
  */
 export async function performCheckpoint(state: SessionManagerState, reason?: string): Promise<void> {
 	await state.writer.persistTree();
+	if (stateRootRemoved()) return;
 	const paths = sessionPaths(state.meta);
 	const at = new Date().toISOString();
 	const enriched: SessionMeta = {

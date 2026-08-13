@@ -42,7 +42,7 @@ import { StringDecoder } from "node:string_decoder";
 import { readClioVersion, readPiMonoVersion } from "../core/package-root.js";
 import { assertSafeId } from "../core/safe-id.js";
 import { fsyncDirectory, safeResourceWrite } from "../core/safe-resource-write.js";
-import { clioStateDir } from "../core/xdg.js";
+import { clioStateDir, stateRootRemoved } from "../core/xdg.js";
 
 export interface ClioSessionMeta {
 	id: string;
@@ -735,6 +735,11 @@ function createWriter(
 		async persistTree(): Promise<void> {
 			// Checkpoint: make appended lines durable alongside the tree.
 			if (appendFd !== null) fsyncSync(appendFd);
+			// `paths` was resolved at construction, but atomicWrite mkdirs the
+			// session directory again, so an uninstall that has already removed the
+			// state root would be undone here. Fsyncing the held fd first is safe
+			// either way: it writes into an unlinked inode and creates nothing.
+			if (stateRootRemoved()) return;
 			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
 		},
 		flushAppends(): void {
@@ -743,11 +748,14 @@ function createWriter(
 		async close(): Promise<void> {
 			if (closed) return;
 			closeAppendFd({ flush: true });
+			// Closed regardless: the writer is done either way, and a removed state
+			// root must not get tree.json and meta.json written back into it.
+			closed = true;
+			if (stateRootRemoved()) return;
 			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
 			const ended: ClioSessionMeta = { ...meta, endedAt: new Date().toISOString() };
 			atomicWrite(paths.meta, JSON.stringify(ended, null, 2));
 			meta.endedAt = ended.endedAt;
-			closed = true;
 		},
 	};
 }
