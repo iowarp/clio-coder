@@ -1,6 +1,6 @@
 import type { ClioSettings } from "../core/config.js";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
-import { UnsupportedResponseSchemaError } from "../core/response-schema.js";
+import { isResponseSchemaRejection, UnsupportedResponseSchemaError } from "../core/response-schema.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -23,7 +23,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
-import { ObservabilityDomainModule } from "../domains/observability/index.js";
+import { createObservabilityDomainModule } from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
@@ -271,9 +271,7 @@ async function collectDispatchAssistantText(
 			}
 		}
 	}
-	const text = (lastAssistantText || streamedText).trim();
-	if (text.length === 0) throw new Error("bootstrap agent did not return an assistant response");
-	return text;
+	return (lastAssistantText || streamedText).trim();
 }
 
 function receiptFailure(receipt: RunReceipt): string {
@@ -281,54 +279,40 @@ function receiptFailure(receipt: RunReceipt): string {
 	return `bootstrap agent failed with exit ${receipt.exitCode}${detail}`;
 }
 
-async function generateBootstrapWithModel(
+/**
+ * The reason to retry this attempt without the native response schema, or
+ * null to let the failure stand.
+ *
+ * Two shapes mean the same thing. Dispatch refuses the schema up front when
+ * the resolved runtime cannot enforce it, and llama-server refuses it one
+ * round trip later when the schema-derived grammar will not compile beside
+ * the tool grammar. Only an attempt that carried the schema can produce
+ * either, so the caller gates on that rather than this predicate widening.
+ */
+function responseSchemaRefusal(err: unknown): string | null {
+	if (err instanceof UnsupportedResponseSchemaError) return err.message;
+	if (err instanceof BootstrapAttemptError && isResponseSchemaRejection(err.message)) return err.message;
+	return null;
+}
+
+async function attemptBootstrapDispatch(
 	dispatch: DispatchContract,
 	input: BootstrapGenerateInput,
-	route?: BootstrapRoute,
+	prompt: string,
+	startedAt: number,
+	structuredOutputMode: BootstrapRunTelemetry["structuredOutputMode"],
+	dispatchBootstrap: (nativeSchema: boolean) => ReturnType<DispatchContract["dispatch"]>,
 ): Promise<BootstrapStructuredOutput> {
-	const prompt = buildBootstrapPrompt(input);
-	const startedAt = Date.now();
-	input.progress?.({
-		phase: "generate",
-		status: "running",
-		message: "dispatching internal context-bootstrap agent",
-		detail: `agent=${CONTEXT_BOOTSTRAP_AGENT_ID}`,
-	});
+	const nativeSchema = structuredOutputMode === "native-schema";
 	let handle: Awaited<ReturnType<DispatchContract["dispatch"]>>;
-	let structuredOutputMode: BootstrapRunTelemetry["structuredOutputMode"] = "native-schema";
-	const dispatchBootstrap = (nativeSchema: boolean) =>
-		dispatch.dispatch({
-			agentId: CONTEXT_BOOTSTRAP_AGENT_ID,
-			executionRole: "researcher",
-			task: prompt,
-			cwd: input.cwd,
-			requestOrigin: "internal",
-			thinkingLevel: route?.thinkingLevel ?? "off",
-			noSkills: true,
-			...(nativeSchema ? { responseSchema: BOOTSTRAP_OUTPUT_JSON_SCHEMA } : {}),
-			...(route ? { target: route.target } : {}),
-			...(route?.model ? { model: route.model } : {}),
-		});
 	try {
-		handle = await dispatchBootstrap(true);
+		handle = await dispatchBootstrap(nativeSchema);
 	} catch (err) {
-		if (!(err instanceof UnsupportedResponseSchemaError)) {
-			const error = err instanceof Error ? err : new Error(String(err));
-			throw new BootstrapAttemptError(error, "not-run", bootstrapTelemetry(prompt, "", startedAt, structuredOutputMode));
-		}
-		structuredOutputMode = "prompt-parser";
-		input.progress?.({
-			phase: "generate",
-			status: "running",
-			message: "native schema unavailable; using bounded output parser",
-			detail: err.message,
-		});
-		try {
-			handle = await dispatchBootstrap(false);
-		} catch (fallbackErr) {
-			const error = fallbackErr instanceof Error ? fallbackErr : new Error(String(fallbackErr));
-			throw new BootstrapAttemptError(error, "not-run", bootstrapTelemetry(prompt, "", startedAt, structuredOutputMode));
-		}
+		// An admission refusal of the schema is the caller's to act on, so it
+		// travels untouched. Everything else is this attempt's failure.
+		if (nativeSchema && err instanceof UnsupportedResponseSchemaError) throw err;
+		const error = err instanceof Error ? err : new Error(String(err));
+		throw new BootstrapAttemptError(error, "not-run", bootstrapTelemetry(prompt, "", startedAt, structuredOutputMode));
 	}
 	// No product cap. The bootstrap agent explores the repository with code_nav, and a
 	// 30s ceiling clamped over the operator's guardrail aborted every real run
@@ -344,7 +328,11 @@ async function generateBootstrapWithModel(
 		text = await collectDispatchAssistantText(handle.events, input);
 		receipt = await handle.finalPromise;
 		if (deadline.timedOut()) throw new Error(deadline.message());
+		// The receipt outranks the empty transcript. A run the server rejected
+		// produces no assistant text by construction, and reporting the silence
+		// instead of the rejection described a healthy target as a mute model.
 		if (receipt.exitCode !== 0) throw new Error(receiptFailure(receipt));
+		if (text.length === 0) throw new Error("bootstrap agent did not return an assistant response");
 		parserAttempted = true;
 		const output = parseBootstrapModelOutput(text);
 		input.progress?.({
@@ -385,6 +373,47 @@ async function generateBootstrapWithModel(
 	}
 }
 
+async function generateBootstrapWithModel(
+	dispatch: DispatchContract,
+	input: BootstrapGenerateInput,
+	route?: BootstrapRoute,
+): Promise<BootstrapStructuredOutput> {
+	const prompt = buildBootstrapPrompt(input);
+	const startedAt = Date.now();
+	input.progress?.({
+		phase: "generate",
+		status: "running",
+		message: "dispatching internal context-bootstrap agent",
+		detail: `agent=${CONTEXT_BOOTSTRAP_AGENT_ID}`,
+	});
+	const dispatchBootstrap = (nativeSchema: boolean) =>
+		dispatch.dispatch({
+			agentId: CONTEXT_BOOTSTRAP_AGENT_ID,
+			executionRole: "researcher",
+			task: prompt,
+			cwd: input.cwd,
+			requestOrigin: "internal",
+			thinkingLevel: route?.thinkingLevel ?? "off",
+			noSkills: true,
+			...(nativeSchema ? { responseSchema: BOOTSTRAP_OUTPUT_JSON_SCHEMA } : {}),
+			...(route ? { target: route.target } : {}),
+			...(route?.model ? { model: route.model } : {}),
+		});
+	try {
+		return await attemptBootstrapDispatch(dispatch, input, prompt, startedAt, "native-schema", dispatchBootstrap);
+	} catch (err) {
+		const refusal = responseSchemaRefusal(err);
+		if (refusal === null) throw err;
+		input.progress?.({
+			phase: "generate",
+			status: "running",
+			message: "native schema unavailable; using bounded output parser",
+			detail: refusal,
+		});
+		return await attemptBootstrapDispatch(dispatch, input, prompt, startedAt, "prompt-parser", dispatchBootstrap);
+	}
+}
+
 async function loadBootstrapDispatch(): Promise<{
 	dispatch: DispatchContract;
 	config: ConfigContract;
@@ -399,7 +428,12 @@ async function loadBootstrapDispatch(): Promise<{
 		AgentsDomainModule,
 		MiddlewareDomainModule,
 		SessionDomainModule,
-		ObservabilityDomainModule,
+		// Same shape as the wiki writer: one internal dispatch in a process that
+		// exits with it. The SQLite mirror opens `node:sqlite` on the first
+		// dispatch event, which costs `clio context init` a module load it never
+		// reads back and prints Node's ExperimentalWarning over the command's own
+		// output. Receipts and the ledger still record the run.
+		createObservabilityDomainModule({ dispatchTrace: false }),
 		SchedulingDomainModule,
 		DispatchDomainModule,
 	]);

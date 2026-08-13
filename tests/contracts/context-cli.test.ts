@@ -14,6 +14,7 @@ function runHandler(
 	cwd: string,
 	handler: HandlerName,
 	args: ReadonlyArray<string>,
+	env: NodeJS.ProcessEnv = {},
 ): { status: number; stdout: string; stderr: string } {
 	const moduleUrl = pathToFileURL(
 		join(REPO_ROOT, handler === "context" ? "src/cli/context.ts" : "src/cli/init.ts"),
@@ -27,7 +28,7 @@ function runHandler(
 	const child = spawnSync(process.execPath, ["--import", TSX_LOADER, "--eval", script], {
 		cwd,
 		encoding: "utf8",
-		env: { ...process.env, CLIO_TEST_ARGS: JSON.stringify(args) },
+		env: { ...process.env, ...env, CLIO_TEST_ARGS: JSON.stringify(args) },
 	});
 	if (child.error) throw child.error;
 	return { status: child.status ?? 0, stdout: child.stdout, stderr: child.stderr };
@@ -109,6 +110,32 @@ describe("contracts/context cli router", () => {
 		strictEqual(refresh.status, 2);
 		match(refresh.stderr, /clio context refresh: unknown flag --bogus/);
 		match(refresh.stdout, /Usage:/);
+	});
+
+	/**
+	 * `--rewrite` asks for a draft that ignores the current CLIO.md. When the
+	 * model pass cannot run, the fallback rebuilds the handbook from that exact
+	 * file and the write is announced as a refresh, so the command used to print
+	 * "refreshed CLIO.md" and exit 0 on a rewrite that never happened. The
+	 * unroutable target here fails admission without touching the network.
+	 */
+	it("refuses to report success for a --rewrite that fell back to the existing handbook", () => {
+		const seeded = runHandler(scratch, "init", ["--heuristic", "--yes"]);
+		strictEqual(seeded.status, 0, seeded.stderr);
+		const isolatedHome = join(scratch, "isolated-home");
+
+		const result = runHandler(scratch, "init", ["--rewrite", "--yes", "--target", "no-such-target"], {
+			HOME: isolatedHome,
+			CLIO_HOME: join(isolatedHome, ".clio"),
+			XDG_CONFIG_HOME: join(isolatedHome, "config"),
+			XDG_DATA_HOME: join(isolatedHome, "data"),
+			XDG_STATE_HOME: join(isolatedHome, "state"),
+			XDG_CACHE_HOME: join(isolatedHome, "cache"),
+		});
+
+		strictEqual(result.status, 1, `${result.stdout}\n${result.stderr}`);
+		match(result.stderr, /--rewrite did not rewrite CLIO\.md/);
+		match(result.stderr, /--rewrite --heuristic/);
 	});
 
 	it("accepts clio context refresh --wiki without a model call when no wiki exists", () => {

@@ -353,6 +353,112 @@ describe("contracts/bootstrap model generation", () => {
 		strictEqual(reports[0]?.run?.structuredOutputMode, "prompt-parser");
 	});
 
+	/**
+	 * llama-server compiles `response_format.schema` into a sampler grammar and
+	 * refuses the request with HTTP 400 when that grammar will not build beside
+	 * the tool grammar, which is every bootstrap run on that runtime. The
+	 * refusal arrives on the receipt rather than at dispatch, so the fallback
+	 * that already existed for the admission-time refusal never armed and the
+	 * flagship onboarding step could not reach the model at all.
+	 */
+	it("retries through the prompt parser when the server rejects the schema-derived grammar", async () => {
+		const input = await bootstrapInput();
+		const response = JSON.stringify({
+			projectName: "Grammar Fixture",
+			identity: "A project whose first bootstrap request the server refused.",
+			conventions: [],
+			invariants: [],
+			sections: [],
+		});
+		const dispatch = fakeDispatch(response);
+		const original = dispatch.contract.dispatch;
+		dispatch.contract.dispatch = async (request) => {
+			if (request.responseSchema === undefined) return original(request);
+			dispatch.requests.push(request);
+			return {
+				runId: "scout-run-rejected",
+				events: eventStream(""),
+				finalPromise: Promise.resolve(
+					receipt({
+						runId: "scout-run-rejected",
+						outcome: "failed",
+						exitCode: 1,
+						failureMessage:
+							'400: {"code":400,"message":"Failed to initialize samplers: failed to parse grammar","type":"invalid_request_error"}',
+					}),
+				),
+			};
+		};
+		const reports: BootstrapGenerationTelemetry[] = [];
+
+		const output = await modelBootstrapGenerate({
+			dispatch: dispatch.contract,
+			route: { target: "mini", model: "Nemo-test", thinkingLevel: "off" },
+		})({ ...input, reportGeneration: (telemetry) => reports.push(telemetry) });
+
+		strictEqual(output.projectName, "Grammar Fixture");
+		strictEqual(dispatch.requests.length, 2);
+		ok(dispatch.requests[0]?.responseSchema);
+		strictEqual(dispatch.requests[1]?.responseSchema, undefined);
+		strictEqual(dispatch.requests[1]?.target, "mini");
+		strictEqual(reports.length, 1);
+		strictEqual(reports[0]?.mode, "model");
+		strictEqual(reports[0]?.parserOutcome, "parsed");
+		strictEqual(reports[0]?.run?.structuredOutputMode, "prompt-parser");
+	});
+
+	/**
+	 * A rejected request returns no assistant text, so the empty-text throw
+	 * fired first and described a healthy target as a model that said nothing.
+	 * The receipt is the authority whenever it records a nonzero exit.
+	 */
+	it("reports the receipt failure rather than the empty transcript it causes", async () => {
+		const input = await bootstrapInput();
+		const dispatch = fakeDispatch("");
+		dispatch.contract.dispatch = async (request) => {
+			dispatch.requests.push(request);
+			return {
+				runId: "scout-run-1",
+				events: eventStream(""),
+				finalPromise: Promise.resolve(
+					receipt({ outcome: "failed", exitCode: 1, failureMessage: "413: request entity too large" }),
+				),
+			};
+		};
+		const reports: BootstrapGenerationTelemetry[] = [];
+
+		const output = await modelBootstrapGenerate({ dispatch: dispatch.contract })({
+			...input,
+			reportGeneration: (telemetry) => reports.push(telemetry),
+		});
+
+		strictEqual(output.projectName, "Telemetry Fixture");
+		strictEqual(reports.length, 1);
+		match(reports[0]?.fallbackReason ?? "", /bootstrap agent failed with exit 1: 413: request entity too large/);
+		strictEqual(
+			/did not return an assistant response/.test(reports[0]?.fallbackReason ?? ""),
+			false,
+			"a nonzero receipt must not be reported as a silent model",
+		);
+		// One attempt only: the failure is not a schema refusal.
+		strictEqual(dispatch.requests.length, 1);
+	});
+
+	it("still names the silent model when the transcript is empty and the receipt is clean", async () => {
+		const input = await bootstrapInput();
+		const dispatch = fakeDispatch("");
+		const reports: BootstrapGenerationTelemetry[] = [];
+
+		const output = await modelBootstrapGenerate({ dispatch: dispatch.contract })({
+			...input,
+			reportGeneration: (telemetry) => reports.push(telemetry),
+		});
+
+		strictEqual(output.projectName, "Telemetry Fixture");
+		match(reports[0]?.fallbackReason ?? "", /did not return an assistant response/);
+		strictEqual(reports[0]?.parserOutcome, "not-run");
+	});
+
 	it("bounds bootstrap output before parsing and discloses the observed bytes", async () => {
 		const input = await bootstrapInput();
 		const oversized = "x".repeat(BOOTSTRAP_MAX_OUTPUT_BYTES + 1);

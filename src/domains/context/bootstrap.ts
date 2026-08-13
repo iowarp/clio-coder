@@ -879,9 +879,12 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 	}
 	const confirmed = input.confirmGitignore ? await input.confirmGitignore() : false;
 	if (!confirmed) {
+		// The remedy is one flag away and the warning used to name neither it
+		// nor the line, leaving the operator to guess the pattern Clio writes.
 		warn(
 			input.io,
-			"clio context init: .gitignore does not ignore .clio/; local context, skills, agents, and handoffs may leak into commits.\n",
+			"clio context init: .gitignore does not ignore .clio/; local context, skills, agents, and handoffs may leak into commits.\n" +
+				`  rerun with --yes to append '${CLIO_GITIGNORE_LINE}' to .gitignore without prompting, or add that line yourself.\n`,
 		);
 		return;
 	}

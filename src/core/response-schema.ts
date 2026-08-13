@@ -37,6 +37,31 @@ export class UnsupportedResponseSchemaError extends Error {
 	}
 }
 
+/**
+ * Whether a run's failure text is the server refusing the request this
+ * dialect produced.
+ *
+ * llama-server compiles `response_format.schema` into a sampler grammar and
+ * rejects the request with HTTP 400 when that grammar cannot be built. The
+ * observed trigger is a request that also carries `tools`: the tool-call
+ * grammar and the schema grammar cannot both constrain one completion, so the
+ * server answers `Failed to initialize samplers: failed to parse grammar`
+ * before generating a token. Nothing in the capability probe predicts it, so
+ * the refusal only arrives mid-run.
+ *
+ * This is the same admission-time judgment `UnsupportedResponseSchemaError`
+ * carries, arriving one round trip later. Callers that treat native
+ * enforcement as an optimization may retry without the schema on either. The
+ * check only means anything on a run that actually carried a schema; callers
+ * must gate it that way rather than let a 400 about anything else match.
+ */
+export function isResponseSchemaRejection(diagnostic: string | null | undefined): boolean {
+	if (!diagnostic) return false;
+	const text = diagnostic.toLowerCase();
+	if (!/\b(?:400|422)\b|invalid_request_error|bad request/.test(text)) return false;
+	return /grammar|json[ _-]?schema|response[ _-]?format/.test(text);
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const prototype = Object.getPrototypeOf(value);

@@ -1,3 +1,4 @@
+import { isResponseSchemaRejection } from "../../core/response-schema.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
 import { isDeterministicOutcomeCode } from "./backoff.js";
 import type { RunTerminationEvidence } from "./outcome.js";
@@ -54,6 +55,12 @@ export function classifyFailure(
 		return "node-channel";
 	}
 	const diagnostic = resultText(result);
+	// A response schema the server will not compile into a grammar is a verdict
+	// on the request Clio sent, not on the target. Retrying the identical bytes
+	// earns the identical 400, and letting it reach the target breaker parks a
+	// healthy endpoint for every other run in the window. Deterministic ends the
+	// attempt here and leaves the caller free to redispatch without the schema.
+	if (isResponseSchemaRejection(diagnostic)) return "deterministic-task";
 	if (/\b(?:401|403)\b|unauthorized|forbidden|invalid api key|authentication/.test(diagnostic)) return "target-auth";
 	if (/\b429\b|rate[ -]?limit|too many requests/.test(diagnostic)) return "target-rate-limit";
 	if (/\bvram\b|\bgpu\b|\bcuda\b|\boom\b|out of memory/.test(diagnostic)) return "node-resource";
