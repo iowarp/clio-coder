@@ -50,7 +50,7 @@ describe("contracts/agents", () => {
 		}
 		const architect = recipes.find((entry) => entry.id === "architect");
 		deepStrictEqual(architect?.resultContract, { kind: "architect-plan", path: "PLAN.md" });
-		strictEqual(architect?.boundSkillPaths[0]?.endsWith("skills/cut-it/SKILL.md"), true);
+		strictEqual(architect?.boundSkillPaths[0]?.endsWith("skills/workflow/cut-it/SKILL.md"), true);
 		const documenter = recipes.find((entry) => entry.id === "documenter");
 		strictEqual(documenter?.audience, "base");
 		deepStrictEqual(documenter?.resultContract, { kind: "mutation-report" });
@@ -74,11 +74,11 @@ describe("contracts/agents", () => {
 		strictEqual(gitMaster?.capabilityClass, "workspace-edit");
 		deepStrictEqual(gitMaster?.resultContract, { kind: "mutation-report" });
 		strictEqual(
-			gitMaster?.boundSkillPaths.some((path) => path.endsWith("skills/piv-commit/SKILL.md")),
+			gitMaster?.boundSkillPaths.some((path) => path.endsWith("skills/git/commit-crafting/SKILL.md")),
 			true,
 		);
 		const coder = recipes.find((entry) => entry.id === "coder");
-		deepStrictEqual(coder?.skills, ["piv-commit", "piv-review-changes"]);
+		deepStrictEqual(coder?.skills, ["commit-crafting", "review-changes"]);
 	});
 
 	it("keeps display metadata visible while policy reads hard semantics", () => {

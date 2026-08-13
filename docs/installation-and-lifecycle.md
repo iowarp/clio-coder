@@ -63,7 +63,7 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 plugins. It is not part of any repository.
 
 None of `.clio/` is published by Clio's own package. The directories Clio ships
-(`src/domains/agents/builtins/`, `src/domains/agents/fleets/`, `skills/cut-it/`,
+(`src/domains/agents/builtins/`, `src/domains/agents/fleets/`, `skills/workflow/cut-it/`, `skills/git/`,
 `src/domains/prompts/fragments/`, `src/domains/providers/models/`) are read from
 the installed package root; the `.clio/` entries above compose with them and never
 replace them on disk.

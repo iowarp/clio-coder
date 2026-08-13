@@ -5,7 +5,7 @@ description: Implements bounded code changes, repairs, and behavior-preserving r
 tools:
   required: [read, {anyOf: [write, edit]}, context]
   optional: [grep, find, ls, web_fetch, git, verify, code_nav, bash]
-skills: [piv-commit, piv-review-changes]
+skills: [commit-crafting, review-changes]
 audience: base
 category: implement
 capabilityClass: workspace-edit

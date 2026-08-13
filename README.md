@@ -383,7 +383,7 @@ clio skills install context-handoff   # copy into .clio/skills
 clio skills list                      # confirm Clio sees it
 ```
 
-The catalog includes [`find-skills`](skills/find-skills/), which routes
+The catalog includes [`find-skills`](skills/meta/find-skills/), which routes
 discovery through `clio skills search` and `clio skills install`. Install it
 with `clio skills install find-skills --user` so it outranks the community
 skill of the same name that other installers drop into compat roots.

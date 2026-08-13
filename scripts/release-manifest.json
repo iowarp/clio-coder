@@ -17,7 +17,8 @@
 		"src/domains/prompts/fragments/",
 		"src/domains/agents/builtins/",
 		"dist/domains/agents/builtins/",
-		"skills/cut-it/",
+		"skills/workflow/cut-it/",
+		"skills/git/",
 		"src/domains/providers/models/",
 		"docs/html/"
 	]
