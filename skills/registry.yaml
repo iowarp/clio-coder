@@ -4,50 +4,50 @@
 # a mismatch surfaces a drift warning.
 skills:
   - name: arxiv-literature
-    version: 0.1.0
-    sha256: aa4a63d465ef5edac22fd13534dbf9650fad6efbd0e2ead58ad17172736910db
+    version: 0.2.0
+    sha256: d4ee3b1cf7251ad000d8a8d612edce335714b9fe5ca84aa5a30fdd7bf2393ddd
   - name: clio-dev
-    version: 0.1.0
-    sha256: 587685747a96168f49c6ebac7f0e425d9bbf48619fda5cd14685788605201ead
+    version: 0.2.0
+    sha256: e990c3de452f6a09f407e2e88cdb205e63a4a2451e2367df233c2260fdd039f8
   - name: clio-test
-    version: 0.1.2
-    sha256: 4c03bf20bb4ce8b476adbb3f82c55075ba3c2be8582c80b2d49f581ee1fffe1d
+    version: 0.1.3
+    sha256: d7fe83a364982d59391d18542ecc95786698aff3413c916ca4016dfecd2cfc5a
   - name: context-handoff
-    version: 0.3.0
-    sha256: c2360f3e1aedbe783811e8cc2bd259c9b40472e7e27df726281be98791b9ec34
-  - name: context-prime
-    version: 0.2.1
-    sha256: fc3595dd4296148d45e34a1471e4eef80b85818c8320d567ac7319f6970b58c1
-  - name: credentials
-    version: 0.1.1
-    sha256: 9958758a95f0ea3fc7dba167371fb43d1a729789ee80bad8b77ce3f58809a570
-  - name: cut-it
-    version: 0.2.0
-    sha256: 5bc7620e478fc7404884c9b4f57d3cceabda5b9413b71a3e6d159a626e772979
-  - name: design-council
-    version: 0.1.1
-    sha256: 0b31ccfd35085f5585a4a5c05be455362afcfb41de04ae929a501cc7aea71d71
-  - name: experiment-protocol
-    version: 0.1.1
-    sha256: 82959ae707139fb9984ea27b5c600d9cefda0c77f901ec05f3e0430e9e125036
-  - name: find-skills
-    version: 0.1.0
-    sha256: 082678c097845f02cf01affd49312c908ee8a75b7ee7ee035c6e8f2d729415a2
-  - name: grill-me
     version: 0.3.1
-    sha256: 77d4c69d5d08d9aace725d372c7d682eb537fd6d5545a8285dbcbef57b083063
-  - name: prd
+    sha256: a40459c7f9d0110dca6c42523139f87ad38dcc6e104b79b674fb5c6fd21c2340
+  - name: context-prime
+    version: 0.2.2
+    sha256: 9bdd24f83b12ddae538643cbc9a8f394b4a4fdc5e57b5326fb13508a5fe9a85b
+  - name: credentials
+    version: 0.1.2
+    sha256: b36d000335f175d83dd65d5f07db8640183db284e2c875b217e7613ed1e86665
+  - name: cut-it
+    version: 0.2.1
+    sha256: d6bea26d781a4c09153cf384fcbc316c9ed2594118300c434f012cac67bb5f24
+  - name: design-council
     version: 0.2.0
-    sha256: 34b825ce494c702aba3b9a5ca36cd56bee5aa8bd50cf2de9ca84aee7476b291c
-  - name: scientific-debugging
+    sha256: 621e2aa85a181059aa669da86b0fdefce87c9b5960b76388b99a66ee6236560e
+  - name: experiment-protocol
+    version: 0.1.2
+    sha256: 292e8b3abb79a00cb0bdf4650f59a31c487f2c86d78b0658e200220e7ad70a16
+  - name: find-skills
     version: 0.1.1
-    sha256: d3e7888dcab6f0264c190a693522a33bfcb3ed3e091505db403852b351f9e255
+    sha256: 519d37ec57f78409d94cf98ee3248f9d4a4dc129653c9ecd55346204be875186
+  - name: grill-me
+    version: 0.3.2
+    sha256: d80ae4e8b2195bef289306863ad4a53299cf872bc980af08672bb1ee96741282
+  - name: prd
+    version: 0.2.1
+    sha256: f4871536a0f1408f817010a435680cc5b39628eb63afe97ddb121a52bd1e2000
+  - name: scientific-debugging
+    version: 0.1.2
+    sha256: e40ba5679070c90dbb2670e44ea83f7caaf86a73fa732d02708f0250f7dfb24f
   - name: scientific-modernization
-    version: 0.1.0
-    sha256: 795ceb6f9c729833a07abdf8bcd5d89cac88dab1bb49143be2a4ca71005e89b9
-  - name: skill-craft
-    version: 0.1.0
-    sha256: 09276e213488d8c08e45251e58b0c062791302460a0def23358f9cc92fe55c9e
-  - name: workflow-distiller
     version: 0.2.0
-    sha256: 3ed85ff0da3f865346e23d87a3f0be85f337479b01e88d3d499406e84cd84f52
+    sha256: 0f86d258ee80a2535cfae97cc7547bd2dc57af39f1f68a80ee6c6efb797e6cd9
+  - name: skill-craft
+    version: 0.1.1
+    sha256: e3a72020e833c95f0e1323ec1f1f57fb35cb378c9d0230e643f065b8f26ff017
+  - name: workflow-distiller
+    version: 0.2.1
+    sha256: 263b22346725129a902410bfcaecca3d1ab4095113dc66ad3ec4e3985f9a7f18

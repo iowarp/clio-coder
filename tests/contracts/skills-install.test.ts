@@ -84,6 +84,79 @@ describe("contracts/skills install containment", () => {
 		ok(existsSync(join(project, ".clio", "skills", "review", "scripts", "check.sh")), "assets install beside SKILL.md");
 	});
 
+	it("writes install lifecycle nested in the clio block and keeps registry identity", () => {
+		const workspace = scratchDir();
+		const skillDir = join(workspace, "review");
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			[
+				"---",
+				"name: review",
+				"description: Reviews things.",
+				"clio:",
+				"  registry-id: iowarp/clio-coder",
+				'  source-url: "https://example.invalid/skills/review"',
+				"  audit: pass",
+				"  provenance: designed",
+				"---",
+				"",
+				"Body.",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		const project = join(workspace, "project");
+		mkdirSync(project, { recursive: true });
+
+		const result = installSkillFromSource({ source: skillDir, scope: "project", cwd: project });
+		const installed = readFileSync(result.path, "utf8");
+		// One clio block: stamps merged into it, not a duplicate key.
+		strictEqual(installed.match(/^clio:/gm)?.length, 1, installed);
+		ok(installed.includes("  registry-id: iowarp/clio-coder"), "registry identity survives the install");
+		ok(installed.includes("  provenance: designed"), "clio content keys survive the install");
+		ok(installed.includes(`  source-url: "${skillDir}"`), "lifecycle source-url is rewritten, nested");
+		ok(installed.includes("  audit: unknown"), "audit resets to unknown, nested");
+		ok(!installed.includes("audit: pass"), "the catalog audit assertion does not survive the install");
+
+		// The installed copy still hash-matches its source: nested lifecycle
+		// stamps are provenance, not content.
+		const skill = loadSkills({ cwd: project }).items.find((entry) => entry.name === "review");
+		ok(skill);
+		strictEqual(skill.normalizedHash, normalizedSkillHash(readFileSync(join(skillDir, "SKILL.md"), "utf8")));
+		// The loader reads the nested block as provenance.
+		strictEqual(skill.provenance?.registryId, "iowarp/clio-coder");
+		strictEqual(skill.provenance?.audit, "unknown");
+		strictEqual(skill.provenance?.installUrl, skillDir);
+	});
+
+	it("still reads flat provenance keys from copies installed before the nested form", () => {
+		const workspace = scratchDir();
+		const project = join(workspace, "project");
+		const dir = join(project, ".clio", "skills", "legacy");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "SKILL.md"),
+			[
+				"---",
+				"name: legacy",
+				"description: Installed before the nested clio block existed.",
+				"registry-id: iowarp/clio-coder",
+				'source-url: "https://example.invalid/skills/legacy"',
+				"audit: unknown",
+				"---",
+				"",
+				"Body.",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		const skill = loadSkills({ cwd: project }).items.find((entry) => entry.name === "legacy");
+		ok(skill);
+		strictEqual(skill.provenance?.registryId, "iowarp/clio-coder");
+		strictEqual(skill.provenance?.audit, "unknown");
+	});
+
 	it("refuses to overwrite an installed skill without force", () => {
 		const workspace = scratchDir();
 		const source = writeSkillSource(workspace, "review", "Reviews things.");
@@ -224,5 +297,30 @@ describe("contracts/skills update lifecycle", () => {
 		ok(!stripped.includes("spanning lines"), `orphan continuation survived:\n${stripped}`);
 		ok(stripped.includes("license: MIT"), "an unrelated key after the block must survive");
 		ok(stripped.includes("description: Reviews things."));
+	});
+
+	it("strips lifecycle keys nested under clio: but keeps clio content keys", () => {
+		const raw = [
+			"---",
+			"name: review",
+			"description: Reviews things.",
+			"clio:",
+			"  registry-id: iowarp/clio-coder",
+			'  source-url: "https://example.invalid/skills/review"',
+			"  audit: pass",
+			"  provenance: designed",
+			"metadata:",
+			"  audit: this one is content, not lifecycle",
+			"---",
+			"",
+			"Body.",
+			"",
+		].join("\n");
+		const stripped = stripProvenanceFrontmatter(raw);
+		ok(!stripped.includes("example.invalid"), "nested source-url is lifecycle");
+		ok(!stripped.includes("audit: pass"), "nested audit is lifecycle");
+		ok(stripped.includes("  registry-id: iowarp/clio-coder"), "nested registry identity is content");
+		ok(stripped.includes("  provenance: designed"), "nested provenance classification is content");
+		ok(stripped.includes("this one is content"), "the same key under another mapping survives");
 	});
 });

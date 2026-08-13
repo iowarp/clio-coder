@@ -1,7 +1,7 @@
 ---
 name: workflow-distiller
 description: Use when a workflow that just happened should become reusable, when the user says "make this a skill", "package what we just did", "turn this into a workflow", or when the same multi-step process has been repeated across sessions. Reconstructs the workflow from the session record, interviews, checks overlap with installed skills, gates on approval, then writes the SKILL.md following skill-craft. Not for authoring a skill from scratch with no prior workflow; write the SKILL.md directly following skill-craft. Not for distilling into an agent recipe; propose that as a follow-up when the workflow is dispatch-shaped.
-version: 0.2.0
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -13,9 +13,13 @@ allowed-tools:
   - ask_user
 requires:
   - skill:skill-craft
-registry-id: iowarp/clio-coder
-source-url: https://github.com/iowarp/clio-coder/tree/main/skills/workflow-distiller
-audit: pass
+clio:
+  registry-id: iowarp/clio-coder
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/workflow-distiller
+  audit: pass
+  provenance: designed
+  eval-status: scenarios-recorded
+  model-size: large
 ---
 
 # Workflow Distiller

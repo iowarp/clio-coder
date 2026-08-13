@@ -21,8 +21,10 @@ import path from "node:path";
 import yaml from "yaml";
 import { normalizedSkillHash } from "../src/domains/resources/skills/content-hash.js";
 
-/** Frontmatter every published catalog skill must carry (skills/README.md). */
-const REQUIRED_CATALOG_KEYS = ["name", "description", "version", "license", "registry-id", "source-url"] as const;
+/** Top-level frontmatter every published catalog skill must carry (skills/README.md). */
+const REQUIRED_CORE_KEYS = ["name", "description", "version", "license"] as const;
+/** Keys required inside the reserved nested `clio:` block (skills/README.md). */
+const REQUIRED_CLIO_KEYS = ["registry-id", "source-url", "provenance", "eval-status"] as const;
 
 const argv = process.argv.slice(2);
 const checkMode = argv.includes("--check");
@@ -70,14 +72,30 @@ function collectEntries(): { entries: PinEntry[]; errors: string[] } {
 		if (typeof fm.name === "string" && fm.name.trim().length > 0) name = fm.name.trim();
 		const fmVersion = fm.version ?? (fm.metadata as Record<string, unknown> | undefined)?.version;
 		if (typeof fmVersion === "string" && fmVersion.trim().length > 0) version = fmVersion.trim();
-		for (const key of REQUIRED_CATALOG_KEYS) {
+		for (const key of REQUIRED_CORE_KEYS) {
 			const value = fm[key];
 			if (typeof value !== "string" || value.trim().length === 0) {
 				errors.push(`${skillPath}: missing required catalog frontmatter "${key}"`);
 			}
 		}
-		if (fm.audit !== "pass") {
-			errors.push(`${skillPath}: catalog skills must carry "audit: pass" (found ${JSON.stringify(fm.audit ?? null)})`);
+		const clio =
+			fm.clio !== null && typeof fm.clio === "object" && !Array.isArray(fm.clio)
+				? (fm.clio as Record<string, unknown>)
+				: null;
+		if (!clio) {
+			errors.push(`${skillPath}: missing the required nested "clio:" frontmatter block`);
+		} else {
+			for (const key of REQUIRED_CLIO_KEYS) {
+				const value = clio[key];
+				if (typeof value !== "string" || value.trim().length === 0) {
+					errors.push(`${skillPath}: missing required catalog frontmatter "clio.${key}"`);
+				}
+			}
+			if (clio.audit !== "pass") {
+				errors.push(
+					`${skillPath}: catalog skills must carry "audit: pass" under clio: (found ${JSON.stringify(clio.audit ?? null)})`,
+				);
+			}
 		}
 		if (!existsSync(path.join(catalogDir, dirent.name, "evals.md"))) {
 			errors.push(`${skillPath}: catalog skills must ship an evals.md beside SKILL.md`);

@@ -505,16 +505,34 @@ function extractMetadata(frontmatter: Record<string, unknown>): Record<string, u
 }
 
 function extractProvenance(frontmatter: Record<string, unknown>): SkillProvenance | undefined {
-	const installUrl =
-		stringField(frontmatter, "source-url") ??
-		stringField(frontmatter, "sourceUrl") ??
-		stringField(frontmatter, "install-url");
-	const registryId = stringField(frontmatter, "registry-id") ?? stringField(frontmatter, "registryId");
-	const registryUrl = stringField(frontmatter, "registry-url") ?? stringField(frontmatter, "registryUrl");
-	const installedAt = stringField(frontmatter, "installed-at") ?? stringField(frontmatter, "installedAt");
-	const updatedAt = stringField(frontmatter, "updated-at") ?? stringField(frontmatter, "updatedAt");
-	const installedHash = stringField(frontmatter, "installed-hash") ?? stringField(frontmatter, "installedHash");
-	const auditRaw = stringField(frontmatter, "audit");
+	// Provenance lives nested under the reserved `clio:` block; the flat
+	// top-level keys remain readable for already-installed copies stamped
+	// before the nested form existed.
+	const clioRaw = frontmatter.clio;
+	const clio =
+		clioRaw !== null && typeof clioRaw === "object" && !Array.isArray(clioRaw)
+			? (clioRaw as Record<string, unknown>)
+			: undefined;
+	const field = (...keys: string[]): string | null => {
+		for (const key of keys) {
+			if (clio) {
+				const nested = stringField(clio, key);
+				if (nested !== null) return nested;
+			}
+		}
+		for (const key of keys) {
+			const flat = stringField(frontmatter, key);
+			if (flat !== null) return flat;
+		}
+		return null;
+	};
+	const installUrl = field("source-url", "sourceUrl", "install-url");
+	const registryId = field("registry-id", "registryId");
+	const registryUrl = field("registry-url", "registryUrl");
+	const installedAt = field("installed-at", "installedAt");
+	const updatedAt = field("updated-at", "updatedAt");
+	const installedHash = field("installed-hash", "installedHash");
+	const auditRaw = field("audit");
 	const audit =
 		auditRaw === "pass" || auditRaw === "warn" || auditRaw === "fail" || auditRaw === "unknown" ? auditRaw : undefined;
 	if (!installUrl && !registryId && !registryUrl && !installedAt && !updatedAt && !installedHash && !audit)

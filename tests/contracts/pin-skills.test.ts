@@ -57,9 +57,12 @@ function catalogFrontmatter(name: string, description: string, version: string):
 		`description: "${description}"`,
 		`version: "${version}"`,
 		"license: Apache-2.0",
-		"registry-id: iowarp/clio-coder",
-		`source-url: https://example.invalid/skills/${name}`,
-		"audit: pass",
+		"clio:",
+		"  registry-id: iowarp/clio-coder",
+		`  source-url: https://example.invalid/skills/${name}`,
+		"  audit: pass",
+		"  provenance: designed",
+		"  eval-status: scenarios-recorded",
 	];
 }
 
@@ -112,10 +115,14 @@ describe("contracts/pin-skills script", () => {
 		const pin = await runPinScript(["--dir", catalog]);
 		strictEqual(pin.code, 0);
 
-		// Stamp lifecycle fields the way `clio skills install` does; the
-		// pinned hash must not change.
+		// Stamp lifecycle fields the way `clio skills install` does (nested in
+		// the clio: block); the pinned hash must not change.
 		const raw = readFileSync(file, "utf8");
-		writeFileSync(file, raw.replace("audit: pass\n", 'audit: pass\ninstalled-at: "2026-07-02T00:00:00.000Z"\n'), "utf8");
+		writeFileSync(
+			file,
+			raw.replace("  audit: pass\n", '  audit: pass\n  installed-at: "2026-07-02T00:00:00.000Z"\n'),
+			"utf8",
+		);
 		const clean = await runPinScript(["--dir", catalog, "--check"]);
 		strictEqual(clean.code, 0, clean.stderr);
 
@@ -127,16 +134,30 @@ describe("contracts/pin-skills script", () => {
 
 	it("rejects catalog skills missing the publishing contract", async () => {
 		const catalog = scratchCatalog();
-		// Missing license/registry-id/source-url, audit not "pass", no evals.md.
+		// Missing license, no clio: block at all, no evals.md.
 		const bare = writeSkill(catalog, "bare", ['name: "bare"', 'description: "Bare skill."', 'version: "0.1.0"'], {
 			evals: false,
 		});
+		// Has a clio: block, but it is missing keys and audit is not "pass".
+		const half = writeSkill(catalog, "half", [
+			'name: "half"',
+			'description: "Half skill."',
+			'version: "0.1.0"',
+			"license: Apache-2.0",
+			"clio:",
+			"  registry-id: iowarp/clio-coder",
+			"  audit: unknown",
+		]);
 		const result = await runPinScript(["--dir", catalog]);
 		strictEqual(result.code, 1);
 		ok(result.stderr.includes(bare));
 		ok(result.stderr.includes('missing required catalog frontmatter "license"'));
-		ok(result.stderr.includes('"audit: pass"'));
+		ok(result.stderr.includes('missing the required nested "clio:" frontmatter block'));
 		ok(result.stderr.includes("evals.md"));
+		ok(result.stderr.includes(half));
+		ok(result.stderr.includes('missing required catalog frontmatter "clio.source-url"'));
+		ok(result.stderr.includes('missing required catalog frontmatter "clio.provenance"'));
+		ok(result.stderr.includes('"audit: pass"'));
 		strictEqual(existsSync(join(catalog, "registry.yaml")), false);
 	});
 });

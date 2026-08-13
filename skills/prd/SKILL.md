@@ -1,7 +1,7 @@
 ---
 name: prd
 description: Use when the user wants to turn an idea into a product requirements document through a phase-gated interview — each phase locks before the next opens — ending in PRD.md plus per-milestone prompt files ready to drive a coding agent. Triggers on "write a PRD", "spec this out", "help me define this feature/product", or a brain dump that needs structure before planning.
-version: 0.2.0
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -14,9 +14,14 @@ allowed-tools:
   - write
   - edit
   - ask_user
-registry-id: iowarp/clio-coder
-source-url: https://github.com/iowarp/clio-coder/tree/main/skills/prd
-audit: pass
+clio:
+  registry-id: iowarp/clio-coder
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/prd
+  audit: pass
+  provenance: adapted
+  origin: buildermethods/bm-prd-creator
+  eval-status: scenarios-recorded
+  model-size: large
 ---
 
 # PRD
@@ -24,10 +29,7 @@ audit: pass
 Guide the user from a raw idea to a locked product spec and executable
 milestone prompts. The discipline is the phase gate: each phase produces a
 small locked artifact that the next phase builds on. No phase reopens without
-the user saying so.
-
-Adapted from the buildermethods `bm-prd-creator` flow, made native to Clio:
-markdown only, no external templates, repo-aware.
+the user saying so. Markdown only, no external templates, repo-aware.
 
 ## Interview mechanics
 

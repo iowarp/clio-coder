@@ -22,11 +22,11 @@ auto-loads. That gap is deliberate.
 |---|---|---|
 | Location | a discovery root above | `skills/<name>/` in this repo |
 | Author | any user or harness | Clio authors, reviewed |
-| Provenance | none required | `registry-id` + `source-url` + `audit: pass` |
+| Provenance | none required | `clio:` block with `registry-id` + `source-url` + `audit: pass` |
 | Auto-loaded | yes | no, as it must be installed |
 
-"Approved" is visible in the frontmatter: a maintainer set `audit: pass` and a
-`version`. A skill a user wrote themselves carries none of those fields.
+"Approved" is visible in the frontmatter: a maintainer set `clio.audit: pass`
+and a `version`. A skill a user wrote themselves carries none of those fields.
 
 ## Catalog
 
@@ -103,6 +103,75 @@ compat roots. Install the catalog copy so it wins:
 clio skills install find-skills --user   # or --project for one repo
 ```
 
+## Frontmatter spec
+
+The frontmatter contract has two layers, and the split is the point:
+
+- **Core keys stay community-standard.** `name`, `description`, `version`,
+  `license`, and `allowed-tools` mean exactly what Claude Code and other agent
+  loaders expect. No Clio-specific key ever lives at the top level.
+- **Everything Clio-specific nests under one reserved `clio:` mapping.**
+  Registry identity, provenance, audit and eval status, agent bindings, model
+  guidance — all of it.
+
+The invariant this buys: a Clio skill dropped into any `.claude/skills`
+directory loads and works in Claude Code, which ignores the `clio:` block as
+an unknown key. Loaded by Clio Coder, the same file carries its full
+marketplace metadata. One file, no forks, no lossy export.
+
+Required shape for every catalog skill:
+
+```yaml
+---
+name: <name>                  # lowercase, hyphens, matches the folder
+description: Use when ...     # triggers only, third person, <=1024 chars
+version: 0.1.0
+license: Apache-2.0
+allowed-tools:                # optional; community-standard tool narrowing
+  - read
+clio:
+  registry-id: iowarp/clio-coder
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/<name>
+  audit: pass                 # pass | warn | fail | unknown; reset to unknown on install
+  provenance: designed        # designed | adapted | imported
+  origin: <url or project>    # required when provenance is not "designed"
+  eval-status: scenarios-recorded  # untested | scenarios-recorded | eval-run
+  model-size: any             # any (runs on ~30B local models) | large
+  agents:                     # optional: shadow agents / recipes the body dispatches
+    - researcher
+---
+```
+
+Field semantics inside `clio:`:
+
+- `registry-id` names the audited catalog a skill claims membership of; it is
+  content, participates in the pinned hash, and survives installs.
+- `source-url` and `audit` are install-lifecycle fields: `clio skills install`
+  rewrites `source-url` to the actual install source and resets `audit` to
+  `unknown` because auditing is a human decision. Both are provenance-stripped
+  before hashing.
+- `provenance` records how the skill came to exist: `designed` here for Clio,
+  `adapted` from an external skill (name it in `origin`), or `imported`
+  near-verbatim.
+- `eval-status` is honest test standing: `untested` (no scenarios),
+  `scenarios-recorded` (evals.md scenarios written, not yet executed via
+  `clio skills eval`), `eval-run` (scenarios executed and passing; record the
+  date in evals.md when setting this).
+- `model-size` is body-quality guidance: `any` means the body is written to
+  the local-model bar (explicit, imperative, short steps, explicit stop
+  conditions) and runs on ~30B-class local models; `large` means the skill
+  leans on judgment or synthesis that degrades on small models.
+- `agents` lists the dispatch recipes the body binds to, so a harness without
+  those agents knows what degrades.
+
+`requires: [skill:<name>, ...]` stays top-level: Clio's loader consumes it for
+dependency warnings, and other harnesses ignore it like any unknown key.
+
+Legacy flat keys (`registry-id`, `source-url`, `audit` at the top level) are
+still read by the loader as a fallback for copies installed before the nested
+form existed; the catalog itself must use the nested form, and `npm run
+skills:check` enforces that.
+
 ## Contributing / approval
 
 A skill is "approved for the marketplace" when a maintainer:
@@ -110,22 +179,8 @@ A skill is "approved for the marketplace" when a maintainer:
 1. Reviews `SKILL.md` against [`skill-craft`](skill-craft/) (trigger-only
    description, checkable completion criteria, progressive disclosure, pruning
    pass, evals present).
-2. Confirms it carries the provenance frontmatter below and sets `audit: pass`.
+2. Confirms it carries the frontmatter spec above with `clio.audit: pass`.
 3. Sets / bumps `version`.
-
-Required frontmatter for every catalog skill:
-
-```yaml
----
-name: <name>                 # lowercase, hyphens, matches the folder
-description: Use when ...     # triggers only, third person, <=1024 chars
-version: 0.1.0
-license: Apache-2.0
-registry-id: iowarp/clio-coder
-source-url: https://github.com/iowarp/clio-coder/tree/main/skills/<name>
-audit: pass
----
-```
 
 Each skill ships an `evals.md` recording the baseline scenarios it was tested
 against (RED-GREEN per [`skill-craft`](skill-craft/)). `clio skills eval <name>`

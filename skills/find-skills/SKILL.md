@@ -1,7 +1,7 @@
 ---
 name: find-skills
 description: Use when the user asks "is there a skill for X", "find a skill", "install a skill", "add a skill", asks whether a capability exists as an installable skill, or wants to extend the agent with functionality that might already be published. Searches with `clio skills search`, browses the ecosystem read-only, and installs only through `clio skills install`. Not for authoring a new skill; use skill-craft.
-version: 0.1.0
+version: 0.1.1
 license: Apache-2.0
 allowed-tools:
   - bash
@@ -9,9 +9,13 @@ allowed-tools:
   - read
   - ls
   - ask_user
-registry-id: iowarp/clio-coder
-source-url: https://github.com/iowarp/clio-coder/tree/main/skills/find-skills
-audit: pass
+clio:
+  registry-id: iowarp/clio-coder
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/find-skills
+  audit: pass
+  provenance: designed
+  eval-status: scenarios-recorded
+  model-size: any
 ---
 
 # Find Skills

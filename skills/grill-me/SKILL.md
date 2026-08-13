@@ -1,7 +1,7 @@
 ---
 name: grill-me
 description: Use when the user wants a plan, design, or idea stress-tested through a phased one-question-at-a-time interview before any code is written, or when intent is too ambiguous to plan from. Scans available context first, reviews known facts, fills missing decisions, respects stop signals, and ends with a compact decision log. Triggers on "grill me", "interview me", "stress-test this plan", "poke holes in this".
-version: 0.3.1
+version: 0.3.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -12,9 +12,13 @@ allowed-tools:
   - context
   - code_nav
   - ask_user
-registry-id: iowarp/clio-coder
-source-url: https://github.com/iowarp/clio-coder/tree/main/skills/grill-me
-audit: pass
+clio:
+  registry-id: iowarp/clio-coder
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/grill-me
+  audit: pass
+  provenance: designed
+  eval-status: scenarios-recorded
+  model-size: large
 ---
 
 # Grill Me

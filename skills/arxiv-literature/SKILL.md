@@ -1,7 +1,7 @@
 ---
 name: arxiv-literature
 description: Use when the user asks to search arXiv, summarize an arXiv paper, compare papers, find recent research, or build a compact literature survey. Prefer the Researcher shadow agent for noisy multi-paper retrieval; return only citation-ready, source-linked paper cards.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - web_fetch
@@ -10,59 +10,60 @@ allowed-tools:
   - grep
   - find
   - ls
-registry-id: iowarp/clio-coder
-source-url: https://github.com/iowarp/clio-coder/tree/main/skills/arxiv-literature
-audit: pass
+clio:
+  registry-id: iowarp/clio-coder
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/arxiv-literature
+  audit: pass
+  provenance: designed
+  eval-status: scenarios-recorded
+  model-size: any
+  agents:
+    - researcher
 ---
 
 # ArXiv Literature
 
-Find, summarize, or compare academic papers while protecting the main context window.
+Find, summarize, or compare academic papers without flooding the main context
+window. Raw search results and paper text stay in a worker or get compressed
+immediately; only paper cards reach the user.
 
-Prefer dispatching the `researcher` shadow agent for searches, comparisons, and multi-paper synthesis. Use direct `web_fetch` for a single known paper URL, for a small arXiv Atom query, or when dispatch is unavailable.
+## Step 1 — Classify the request
 
-## Route
+Pick exactly one:
 
-- **Single paper**: arXiv URL/ID, “summarize this paper”, “explain this paper”
-- **Search**: “find papers about X”, “search arxiv for X”, “latest papers on X”
-- **Compare**: multiple paper URLs/IDs, “compare these papers”
-- **Survey**: “what is the literature on X”, “best papers for X”
+- **Single paper**: one arXiv URL/ID, "summarize this paper", "explain this paper".
+- **Search**: "find papers about X", "search arxiv for X", "latest papers on X".
+- **Compare**: two or more paper URLs/IDs, "compare these papers".
+- **Survey**: "what is the literature on X", "best papers for X".
 
-## Preferred workflow
+## Step 2 — Pick the vehicle
 
-### 1. Delegate noisy retrieval
+- **Search, compare, survey**: dispatch the `researcher` shadow agent. Task
+  prompt:
 
-Ask the `researcher` shadow agent for a compact result:
+  ```text
+  Research arXiv literature for: <user goal>.
+  Return only compact source-linked paper cards, comparison/synthesis,
+  caveats, and read/skim/skip recommendations.
+  ```
 
-```text
-Research arXiv literature for: <user goal>.
-Return only compact source-linked paper cards, comparison/synthesis, caveats, and read/skim/skip recommendations.
-```
+- **Single paper, or dispatch unavailable**: use `web_fetch` directly.
+  - Paper URL/ID: fetch the arXiv page. Clio normalizes it into structured
+    metadata plus AlphaXiv enrichment when available.
+  - Search query: fetch the arXiv Atom API; Clio compacts the XML into paper
+    cards:
 
-### 2. If doing it directly
+  ```text
+  https://export.arxiv.org/api/query?search_query=all:QUERY&sortBy=submittedDate&sortOrder=descending&start=0&max_results=10
+  ```
 
-For paper URLs, call `web_fetch` on the arXiv URL. Clio normalizes arXiv paper pages into structured metadata plus AlphaXiv enrichment when available.
+Useful categories for `search_query`: `cs.AI` (AI), `cs.LG` (ML), `cs.CL`
+(NLP/LLMs), `cs.CR` (security), `cs.SE` (software engineering), `cs.MA`
+(multi-agent), `cs.IR` (retrieval/RAG), `cs.CV` (vision), `cs.RO` (robotics).
 
-For search, use arXiv Atom API through `web_fetch`; Clio compacts the XML into paper cards:
+## Step 3 — Return paper cards only
 
-```text
-https://export.arxiv.org/api/query?search_query=all:QUERY&sortBy=submittedDate&sortOrder=descending&start=0&max_results=10
-```
-
-Useful categories:
-- `cs.AI` artificial intelligence
-- `cs.LG` machine learning
-- `cs.CL` NLP/LLMs
-- `cs.CR` security
-- `cs.SE` software engineering
-- `cs.MA` multi-agent systems
-- `cs.IR` information retrieval/RAG
-- `cs.CV` vision
-- `cs.RO` robotics
-
-### 3. Return compressed output
-
-Do not paste raw Atom XML or entire paper text. Return:
+Never paste raw Atom XML or full paper text into the response. Output format:
 
 ```markdown
 ## Literature Result
@@ -85,9 +86,15 @@ Do not paste raw Atom XML or entire paper text. Return:
 - Skip:
 ```
 
+Done when every returned paper has a card with a working link and the
+recommendation section is filled in. Stop after one search round unless the
+user asks to go deeper; do not keep fetching to "be thorough".
+
 ## Gotchas
 
-- arXiv Atom is XML, not JSON; use `web_fetch` so Clio compacts it.
-- `lastUpdatedDate` can surface old papers with small edits. Use `submittedDate` for newly submitted work.
-- AlphaXiv is AI-generated enrichment; useful for scanning but not authoritative.
-- Fetch/enrich only top candidates. Keep the main context small.
+- arXiv Atom is XML, not JSON; fetch it through `web_fetch` so Clio compacts it.
+- `lastUpdatedDate` surfaces old papers with trivial edits; use `submittedDate`
+  for newly submitted work.
+- AlphaXiv is AI-generated enrichment: useful for scanning, never citable as
+  authoritative.
+- Fetch or enrich only the top candidates, not every result.
