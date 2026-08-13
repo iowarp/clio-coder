@@ -93,13 +93,27 @@ function indexSkills(indexPath: string, diagnostics: string[]): MarketplaceSkill
 	}
 }
 
-/** True when the directory contains at least one immediate <pkg>/SKILL.md. */
+/**
+ * True when the directory contains a <pkg>/SKILL.md either immediately (flat
+ * catalog) or one category folder down (grouped catalog, e.g.
+ * skills/git/create-pr/SKILL.md). The loader itself recurses arbitrarily;
+ * this probe only decides whether a repo-level skills/ folder is a catalog.
+ */
 function looksLikeSkillCatalog(dir: string): boolean {
 	if (!existsSync(dir)) return false;
 	try {
-		return readdirSync(dir, { withFileTypes: true }).some(
-			(entry) => entry.isDirectory() && existsSync(path.join(dir, entry.name, "SKILL.md")),
-		);
+		return readdirSync(dir, { withFileTypes: true }).some((entry) => {
+			if (!entry.isDirectory()) return false;
+			const child = path.join(dir, entry.name);
+			if (existsSync(path.join(child, "SKILL.md"))) return true;
+			try {
+				return readdirSync(child, { withFileTypes: true }).some(
+					(inner) => inner.isDirectory() && existsSync(path.join(child, inner.name, "SKILL.md")),
+				);
+			} catch {
+				return false;
+			}
+		});
 	} catch {
 		return false;
 	}
