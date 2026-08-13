@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { cp, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { combineBashOutput, runBashCommand } from "../core/bash-exec.js";
@@ -23,6 +23,7 @@ import {
 	parseSkillEvals,
 	type SkillEvalScenario,
 } from "../domains/resources/index.js";
+import { NO_NETWORK_TOOLS_ENV } from "../tools/network-policy.js";
 import { formatColumns, printError } from "./shared.js";
 
 /**
@@ -59,13 +60,25 @@ export interface SkillsEvalOptions {
 	 * silently executing third-party shell.
 	 */
 	trustFixtures: boolean;
+	/**
+	 * Let the arm runs keep the network tool plane. Off by default: an eval is
+	 * a measurement of a skill against a fixed workspace, and a run that can
+	 * fetch the open web is measuring something else as well.
+	 */
+	allowNetwork: boolean;
 	scenario?: string;
 	target?: string;
 	timeoutSeconds?: number;
 	workspace?: string;
 }
 
-type BulletVerdict = "pass" | "fail" | "error";
+/**
+ * `unmeasured` is not a verdict on the skill. It is the state of a bullet the
+ * judge never scored, which is a different fact from a bullet the judge scored
+ * negative, and reporting it as `fail` (or as `error`, which the exit code
+ * treats as failure) said the skill broke when what broke was the scoring run.
+ */
+type BulletVerdict = "pass" | "fail" | "error" | "unmeasured";
 
 /** Exported for contracts tests. */
 export interface ScoredBullet {
@@ -150,6 +163,8 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 		return 2;
 	}
 
+	process.stderr.write(`clio skills eval: ${describeNetworkPolicy(options.allowNetwork)}\n`);
+	const childEnv = evalChildEnv(options.allowNetwork);
 	const timeoutMs = options.timeoutSeconds !== undefined ? options.timeoutSeconds * 1000 : DEFAULT_RUN_TIMEOUT_MS;
 	const workspaceOverride = await resolveWorkspaceOverride(options.workspace);
 	if (typeof workspaceOverride !== "string" && workspaceOverride !== null) {
@@ -169,6 +184,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 				timeoutMs,
 				workspaceOverride,
 				options.trustFixtures,
+				childEnv,
 			),
 		);
 	}
@@ -190,7 +206,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 		evidenceDirectory = built.directory;
 		await writeFile(
 			join(built.directory, SKILL_EVAL_SIDECAR),
-			`${JSON.stringify(sidecar(skill.name, artifact.evalId, outcomes), null, 2)}\n`,
+			`${JSON.stringify(sidecar(skill.name, artifact.evalId, outcomes, options.allowNetwork), null, 2)}\n`,
 			"utf8",
 		);
 	} catch (error) {
@@ -214,6 +230,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 						expected: bullet.text,
 						verdict: bullet.verdict,
 						reason: bullet.reason,
+						network: networkPolicyLabel(options.allowNetwork),
 						baselineSessionId: outcome.baseline?.sessionId ?? null,
 						treatmentSessionId: outcome.treatment?.sessionId ?? null,
 						judgeSessionId: outcome.judge?.sessionId ?? null,
@@ -224,14 +241,47 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 			}
 		}
 	} else {
-		printHumanReport(skill.name, outcomes, artifact.evalId, evidenceId, evidenceDirectory);
+		printHumanReport(skill.name, outcomes, artifact.evalId, evidenceId, evidenceDirectory, options.allowNetwork);
 	}
-	const anyFailure = outcomes.some((outcome) => outcome.bullets.some((bullet) => bullet.verdict !== "pass"));
-	// 1 means the skill failed its rubric; 3 means the verdicts stand but the
-	// evidence archive write failed, so infra flakiness is not read as a
-	// regression by callers branching on the code.
+	const anyFailure = outcomes.some((outcome) =>
+		outcome.bullets.some((bullet) => bullet.verdict === "fail" || bullet.verdict === "error"),
+	);
+	const anyUnmeasured = outcomes.some((outcome) => outcome.bullets.some((bullet) => bullet.verdict === "unmeasured"));
+	// 1 means the skill failed its rubric. 3 means no rubric verdict stands to
+	// regress against, either because a scenario went unmeasured or because the
+	// evidence archive write failed; a caller branching on the code must not
+	// read either as a regression, and a run that measured nothing is still not
+	// a pass.
 	if (anyFailure) return 1;
-	return evidenceErrors.length > 0 ? 3 : 0;
+	return anyUnmeasured || evidenceErrors.length > 0 ? 3 : 0;
+}
+
+export type NetworkPolicyLabel = "hermetic" | "allowed";
+
+function networkPolicyLabel(allowNetwork: boolean): NetworkPolicyLabel {
+	return allowNetwork ? "allowed" : "hermetic";
+}
+
+function describeNetworkPolicy(allowNetwork: boolean): string {
+	return allowNetwork
+		? "network: allowed (--allow-network), so arm runs keep the web tools"
+		: "network: hermetic, so the web tools are stripped from every arm run (pass --allow-network to keep them)";
+}
+
+/**
+ * The environment each arm's child `clio run` inherits. Absent
+ * `--allow-network` the hermetic switch is set, which strips the RETRIEVE
+ * plane from every registry the child and its descendants build. With the flag
+ * the variable is removed rather than left alone, so an ambient setting in the
+ * operator's shell cannot make `--allow-network` a claim the run does not keep.
+ *
+ * @internal Exported for contract tests.
+ */
+export function evalChildEnv(allowNetwork: boolean, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const childEnv: NodeJS.ProcessEnv = { ...env };
+	if (allowNetwork) Reflect.deleteProperty(childEnv, NO_NETWORK_TOOLS_ENV);
+	else childEnv[NO_NETWORK_TOOLS_ENV] = "1";
+	return childEnv;
 }
 
 /**
@@ -304,6 +354,7 @@ async function runScenario(
 	timeoutMs: number,
 	workspaceOverride: string | null,
 	trustFixtures: boolean,
+	childEnv: NodeJS.ProcessEnv,
 ): Promise<ScenarioOutcome> {
 	const scenarioStart = Date.now();
 	const workspace = await mkdtemp(join(tmpdir(), "clio-skill-eval-seed-"));
@@ -329,6 +380,7 @@ async function runScenario(
 			["run", "--json", "--json-events", "terminal", "--no-skills", ...targetArgs, scenario.setup],
 			runWorkspaces.baseline,
 			timeoutMs,
+			childEnv,
 		);
 		const treatment = await captureHeadlessRun(
 			[
@@ -344,6 +396,7 @@ async function runScenario(
 			],
 			runWorkspaces.treatment,
 			timeoutMs,
+			childEnv,
 		);
 		const infra = runInfraError("baseline", baseline) ?? runInfraError("treatment", treatment);
 		if (infra !== null) {
@@ -373,6 +426,7 @@ async function runScenario(
 			],
 			runWorkspaces.judge,
 			timeoutMs,
+			childEnv,
 		);
 		const judgeInfra = runInfraError("judge", judge);
 		if (judgeInfra !== null) {
@@ -414,16 +468,39 @@ export interface MaterializedSkillEvalWorkspaces {
 	cleanup(): Promise<void>;
 }
 
+/**
+ * One private root per arm, with the arm's workspace nested inside it.
+ *
+ * The arms used to be three `mkdtemp` directories sitting side by side in the
+ * system temp dir, named `...-baseline-`, `...-treatment-` and `...-judge-`.
+ * A full-auto run in one arm could therefore reach the others in a single
+ * relative step, and the names said which was which, so a treatment run could
+ * read the baseline it is supposed to be measured against. Nesting each
+ * workspace one level down under a neutrally-named private root means `..`
+ * from a workspace shows only that arm.
+ *
+ * This raises the cost of crossing arms; it is not containment. Nothing here
+ * confines a run to its workspace, because the write boundary is a per-run
+ * tool policy and not something the eval harness can impose on a child
+ * process it spawns. An arm that walks the system temp dir can still find the
+ * others. Treat eval results from a full-auto run as evidence about a
+ * cooperative model, not as an isolation guarantee.
+ */
+async function armWorkspace(created: string[]): Promise<string> {
+	const root = await mkdtemp(join(tmpdir(), "clio-skill-eval-"));
+	created.push(root);
+	const workspace = join(root, "workspace");
+	await mkdir(workspace, { recursive: true });
+	return workspace;
+}
+
 /** @internal Exported for contract tests. */
 export async function materializeSkillEvalWorkspaces(seedWorkspace: string): Promise<MaterializedSkillEvalWorkspaces> {
 	const created: string[] = [];
 	try {
-		const baseline = await mkdtemp(join(tmpdir(), "clio-skill-eval-baseline-"));
-		created.push(baseline);
-		const treatment = await mkdtemp(join(tmpdir(), "clio-skill-eval-treatment-"));
-		created.push(treatment);
-		const judge = await mkdtemp(join(tmpdir(), "clio-skill-eval-judge-"));
-		created.push(judge);
+		const baseline = await armWorkspace(created);
+		const treatment = await armWorkspace(created);
+		const judge = await armWorkspace(created);
 		await Promise.all([copyWorkspace(seedWorkspace, baseline), copyWorkspace(seedWorkspace, treatment)]);
 		return {
 			baseline,
@@ -574,7 +651,12 @@ function errorBullets(scenario: SkillEvalScenario, reason: string): ScoredBullet
 	return scenario.expected.map((text, index) => ({ index: index + 1, text, verdict: "error", reason }));
 }
 
-function captureHeadlessRun(args: ReadonlyArray<string>, cwd: string, timeoutMs: number): Promise<CapturedRun> {
+function captureHeadlessRun(
+	args: ReadonlyArray<string>,
+	cwd: string,
+	timeoutMs: number,
+	env: NodeJS.ProcessEnv,
+): Promise<CapturedRun> {
 	const startedMs = Date.now();
 	return new Promise((resolvePromise) => {
 		let stdout = "";
@@ -589,7 +671,7 @@ function captureHeadlessRun(args: ReadonlyArray<string>, cwd: string, timeoutMs:
 		const child = spawn(process.execPath, [process.argv[1] ?? "", ...args], {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
-			env: process.env,
+			env,
 		});
 		child.stdout.setEncoding("utf8");
 		child.stderr.setEncoding("utf8");
@@ -638,11 +720,25 @@ function captureHeadlessRun(args: ReadonlyArray<string>, cwd: string, timeoutMs:
  * tool_execution_*, turn_start, turn_end);
  * text-mode runs emit the final assistant text, which passes through as-is.
  */
-function parseRunStdout(stdout: string): { sessionId: string | null; transcript: string; finalText: string } {
+/**
+ * True for the `context` call that delivers a skill's body:
+ * `context(scope="skills", name=<skill>)`. Without a name the same scope only
+ * lists what is available, which carries no instructions.
+ */
+function loadsSkillBody(tool: string, args: unknown): boolean {
+	if (tool !== "context" || !isRecord(args)) return false;
+	return args.scope === "skills" && typeof args.name === "string" && args.name.trim().length > 0;
+}
+
+/** @internal Exported for contract tests. */
+export function parseRunStdout(stdout: string): { sessionId: string | null; transcript: string; finalText: string } {
 	let sessionId: string | null = null;
 	const lines: string[] = [];
 	let finalText = "";
 	let sawJson = false;
+	// Tool calls whose result is the skill's own SKILL.md. Correlated by
+	// toolCallId, which both the start and end events carry.
+	const skillBodyCallIds = new Set<string>();
 	for (const line of stdout.split("\n")) {
 		if (line.trim().length === 0) continue;
 		let event: unknown;
@@ -660,6 +756,8 @@ function parseRunStdout(stdout: string): { sessionId: string | null; transcript:
 		if (event.type === "tool_execution_start") {
 			const tool = readString(event.toolName) ?? readString(event.tool) ?? "tool";
 			const args = event.args ?? event.arguments ?? event.input;
+			const callId = readString(event.toolCallId);
+			if (callId !== null && loadsSkillBody(tool, args)) skillBodyCallIds.add(callId);
 			lines.push(`TOOL ${tool} args=${preview(args)}`);
 			// Terminating tools end the turn with no assistant text; their content
 			// IS the answer, so keep it whole (the judge verdict may live here).
@@ -671,6 +769,16 @@ function parseRunStdout(stdout: string): { sessionId: string | null; transcript:
 		if (event.type === "tool_execution_end") {
 			const tool = readString(event.toolName) ?? readString(event.tool) ?? "tool";
 			const status = event.isError === true ? "error" : "ok";
+			const callId = readString(event.toolCallId);
+			// The skill body is the instructions, not the behavior. Left in the
+			// transcript it is the easiest thing in the run for a judge to quote,
+			// and a 30B judge scored bullets as passing from SKILL.md prose that
+			// the model had only read, never acted on. The load still shows, so
+			// "did it load the skill" stays checkable.
+			if (callId !== null && skillBodyCallIds.has(callId)) {
+				lines.push(`RESULT ${tool} ${status}: <skill body withheld from the judge>`);
+				continue;
+			}
 			lines.push(`RESULT ${tool} ${status}: ${preview(event.result)}`);
 			continue;
 		}
@@ -720,11 +828,31 @@ function judgePrompt(scenario: SkillEvalScenario, baselineTranscript: string, tr
 	].join("\n");
 }
 
+/**
+ * Why a judge response carried no verdict, named after the thing that failed.
+ * A response that opened a bullets object and never closed it is the observed
+ * truncation on small local models; a response with no bullets key at all
+ * never started one. Neither is evidence about the skill.
+ */
+function judgeVerdictAbsenceReason(judge: CapturedRun): string {
+	const sawBulletsKey = `${judge.finalText}\n${judge.transcript}`.includes('"bullets"');
+	return sawBulletsKey
+		? "judge response truncated mid-verdict (no complete bullets object): bullet not scored"
+		: "judge response carried no parseable verdict object: bullet not scored";
+}
+
 /** Exported for contracts tests. */
 export function parseJudgeVerdicts(scenario: SkillEvalScenario, judge: CapturedRun): ScoredBullet[] {
 	const parsed = extractBulletsObject(judge.finalText) ?? extractBulletsObject(judge.transcript);
+	// No verdict object anywhere in the judge run. The scenario was not scored,
+	// which is a fact about the judge, so every bullet stays unmeasured rather
+	// than collecting a verdict nothing produced.
+	if (parsed === null) {
+		const reason = judgeVerdictAbsenceReason(judge);
+		return scenario.expected.map((text, i) => ({ index: i + 1, text, verdict: "unmeasured" as const, reason }));
+	}
 	const entries = new Map<number, { pass: boolean; reason: string }>();
-	if (parsed !== null && Array.isArray(parsed.bullets)) {
+	if (Array.isArray(parsed.bullets)) {
 		for (const item of parsed.bullets) {
 			if (!isRecord(item)) continue;
 			const index = typeof item.index === "number" ? item.index : Number.parseInt(String(item.index), 10);
@@ -739,7 +867,14 @@ export function parseJudgeVerdicts(scenario: SkillEvalScenario, judge: CapturedR
 		const index = i + 1;
 		const entry = entries.get(index);
 		if (entry === undefined) {
-			return { index, text, verdict: "error" as const, reason: "judge output missing this bullet" };
+			// The judge scored other bullets and skipped this one, so this bullet
+			// has no verdict either. Same state, narrower cause.
+			return {
+				index,
+				text,
+				verdict: "unmeasured" as const,
+				reason: "judge output omitted this bullet: bullet not scored",
+			};
 		}
 		return { index, text, verdict: entry.pass ? ("pass" as const) : ("fail" as const), reason: entry.reason };
 	});
@@ -816,7 +951,9 @@ function synthesizeArtifact(
 	const stamp = startedAt.replace(/[-:.]/g, "");
 	const evalId = `skill-${skillName}-${stamp}-${contentHash.slice(0, 8)}`;
 	const results: EvalRunRecord[] = outcomes.map((outcome) => {
-		const pass = outcome.bullets.length > 0 && outcome.bullets.every((bullet) => bullet.verdict === "pass");
+		const failed = outcome.bullets.some((bullet) => bullet.verdict === "fail" || bullet.verdict === "error");
+		const unmeasured = outcome.bullets.some((bullet) => bullet.verdict === "unmeasured");
+		const pass = outcome.bullets.length > 0 && !failed && !unmeasured;
 		const record: EvalRunRecord = {
 			taskId: outcome.scenario.id,
 			runId: `${evalId}-${outcome.scenario.id}`,
@@ -826,17 +963,22 @@ function synthesizeArtifact(
 			tags: [
 				"skill-eval",
 				`skill:${skillName}`,
+				...(unmeasured ? ["scenario:unmeasured"] : []),
 				...outcome.bullets.map((bullet) => `bullet-${bullet.index}:${bullet.verdict}`),
 			],
 			pass,
-			exitCode: pass ? 0 : 1,
+			// 3, not 1, when the scenario carries an unscored bullet and no failed
+			// one: a reader who sees exitCode 1 with failureClass verifier_failed
+			// reads "this skill failed its rubric", and an unscored bullet is the
+			// judge's silence, not the skill's answer.
+			exitCode: pass ? 0 : failed ? 1 : 3,
 			tokens: outcome.usage.tokens,
 			costUsd: outcome.usage.costUsd,
 			wallTimeMs: outcome.wallTimeMs,
 			harness: outcome.usage.harness,
 			commands: [],
 		};
-		if (!pass) record.failureClass = "verifier_failed";
+		if (failed) record.failureClass = "verifier_failed";
 		return record;
 	});
 	return {
@@ -858,15 +1000,22 @@ function synthesizeArtifact(
 	};
 }
 
-function sidecar(skillName: string, evalId: string, outcomes: ReadonlyArray<ScenarioOutcome>): unknown {
+function sidecar(
+	skillName: string,
+	evalId: string,
+	outcomes: ReadonlyArray<ScenarioOutcome>,
+	allowNetwork: boolean,
+): unknown {
 	return {
 		version: 1,
 		schema: "experimental",
 		kind: "skill-eval",
 		skill: skillName,
 		evalId,
+		network: networkPolicyLabel(allowNetwork),
 		deltas: [
 			"bullet verdicts are judge-scored from run transcripts, not command exit codes; the evals-domain artifact carries scenario-level records with empty command lists",
+			"a bullet the judge never scored is recorded unmeasured, not failed: its scenario record is pass:false with exitCode 3 and no failureClass",
 			"tokens and cost are rolled up from headless main-agent receipts when those receipts are present",
 			"this sidecar is additive and is registered in overview.json files[]",
 		],
@@ -903,6 +1052,7 @@ function printHumanReport(
 	evalId: string,
 	evidenceId: string | null,
 	evidenceDirectory: string | null,
+	allowNetwork: boolean,
 ): void {
 	const rows: string[][] = [["scenario", "bullet", "verdict", "expected"]];
 	for (const outcome of outcomes) {
@@ -916,7 +1066,24 @@ function printHumanReport(
 		(sum, outcome) => sum + outcome.bullets.filter((bullet) => bullet.verdict === "pass").length,
 		0,
 	);
-	process.stdout.write(`\n${skillName}: ${passed}/${total} bullets passed (judge-scored, experimental)\n`);
+	const unmeasured = outcomes.reduce(
+		(sum, outcome) => sum + outcome.bullets.filter((bullet) => bullet.verdict === "unmeasured").length,
+		0,
+	);
+	// The denominator counts bullets the judge never scored, so it says how many
+	// passed out of how many were asked, not out of how many were answered. The
+	// unscored count is stated beside it rather than folded into the failures.
+	const unmeasuredNote = unmeasured > 0 ? `, ${unmeasured} unmeasured` : "";
+	process.stdout.write(
+		`\n${skillName}: ${passed}/${total} bullets passed${unmeasuredNote} (judge-scored, experimental)\n`,
+	);
+	if (unmeasured > 0) {
+		process.stdout.write(
+			unmeasured === total
+				? "no bullet was scored, so this run is not evidence about the skill either way\n"
+				: `${unmeasured} of ${total} bullets were never scored; unmeasured is not a failed bullet\n`,
+		);
+	}
 	for (const outcome of outcomes) {
 		if (outcome.infraError !== null) {
 			process.stdout.write(`${outcome.scenario.id}: infra error: ${outcome.infraError}\n`);
@@ -928,6 +1095,11 @@ function printHumanReport(
 			);
 		}
 	}
+	process.stdout.write(
+		allowNetwork
+			? "network: allowed (--allow-network); arm runs kept the web tools\n"
+			: "network: hermetic; the web tools were stripped from every arm run\n",
+	);
 	process.stdout.write(`eval artifact: ${evalId}\n`);
 	if (evidenceId !== null && evidenceDirectory !== null) {
 		process.stdout.write(`evidence: ${evidenceId} at ${evidenceDirectory} (per-bullet detail in skill-eval.json)\n`);

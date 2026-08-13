@@ -69,11 +69,19 @@ const OBSERVE_ENVELOPE_SELF_CAPS: ReadonlyArray<[BuiltinToolName, () => number]>
 const SESSION_BOUND_TOOLS = new Set<ToolName>([]);
 const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.Monitor, ToolNames.Steer]);
 const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser]);
+/** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
+const NETWORK_BOUND_TOOLS = new Set<ToolName>([ToolNames.WebFetch]);
 
 export interface BuiltinToolPolicyOptions {
 	includeSessionTools?: boolean;
 	includeDispatchTools?: boolean;
 	includeInteractiveTools?: boolean;
+	/**
+	 * Unlike the other three, this defaults to true: every registry registers
+	 * the network plane unless a run explicitly asked to be hermetic, so an
+	 * unset option must keep demanding it.
+	 */
+	includeNetworkTools?: boolean;
 }
 
 function validateBuiltinToolPolicy(specs: ReadonlyArray<ToolSpec>, options: BuiltinToolPolicyOptions = {}): string[] {
@@ -118,11 +126,13 @@ function validateBuiltinToolPolicy(specs: ReadonlyArray<ToolSpec>, options: Buil
 	const includeSessionTools = options.includeSessionTools ?? false;
 	const includeDispatchTools = options.includeDispatchTools ?? false;
 	const includeInteractiveTools = options.includeInteractiveTools ?? false;
+	const includeNetworkTools = options.includeNetworkTools ?? true;
 	const required = new Set<ToolName>(Object.values(ToolNames));
 	for (const tool of [...required]) {
 		if (!includeSessionTools && SESSION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeDispatchTools && DISPATCH_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeInteractiveTools && INTERACTIVE_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (!includeNetworkTools && NETWORK_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {
 		if (!registered.has(tool)) errors.push(`builtin tool ${tool} is not registered`);

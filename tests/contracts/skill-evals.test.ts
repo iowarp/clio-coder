@@ -5,14 +5,22 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { runSkillsCommand } from "../../src/cli/skills.js";
 import {
+	evalChildEnv,
 	extractBulletsObject,
 	materializeSkillEvalWorkspaces,
 	parseJudgeVerdicts,
+	parseRunStdout,
 	resolveSkillBaseDir,
 } from "../../src/cli/skills-eval.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { parseSkillEvals } from "../../src/domains/resources/skills/evals.js";
+import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { registerAllTools } from "../../src/tools/bootstrap.js";
+import { NO_NETWORK_TOOLS_ENV } from "../../src/tools/network-policy.js";
+import { createRegistry } from "../../src/tools/registry.js";
 import {
 	closeServer,
+	seedOpenAICompatFleetDefault,
 	seedOpenAICompatOrchestrator,
 	startOpenAICompatFixture,
 } from "../harness/openai-compat-fixture.js";
@@ -40,6 +48,19 @@ function scratchSkillDir(options: { evals?: string } = {}): string {
 	);
 	if (options.evals !== undefined) writeFileSync(join(dir, "evals.md"), options.evals, "utf8");
 	return dir;
+}
+
+/** Every function-tool name the recorded chat requests advertised, deduped. */
+function toolNamesInRequests(requests: ReadonlyArray<Record<string, unknown>>): string[] {
+	const names = new Set<string>();
+	for (const request of requests) {
+		const tools = Array.isArray(request.tools) ? request.tools : [];
+		for (const tool of tools) {
+			const fn = (tool as { function?: { name?: unknown } }).function;
+			if (typeof fn?.name === "string") names.add(fn.name);
+		}
+	}
+	return [...names];
 }
 
 async function captureStderr<T>(fn: () => Promise<T>): Promise<{ result: T; stderr: string }> {
@@ -229,19 +250,39 @@ describe("contracts/skill-evals judge parsing", () => {
 		);
 	});
 
-	it("marks bullets the judge omitted as error, never silently passing them", () => {
+	it("marks bullets the judge omitted as unmeasured, never silently passing them", () => {
 		const bullets = parseJudgeVerdicts(scenario, judgeRun('{"bullets":[{"index":1,"pass":true,"reason":"ok"}]}'));
 		strictEqual(bullets[0]?.verdict, "pass");
-		strictEqual(bullets[1]?.verdict, "error");
-		ok(bullets[1]?.reason.includes("missing"));
+		strictEqual(bullets[1]?.verdict, "unmeasured");
+		ok(bullets[1]?.reason.includes("omitted this bullet"));
+		ok(bullets[1]?.reason.includes("not scored"));
 	});
 
-	it("marks every bullet error when the judge output has no parseable verdict", () => {
+	// A judge that produced no verdict measured nothing. Scoring that as a
+	// verdict reported the skill as broken when what broke was the judge run.
+	it("marks every bullet unmeasured when the judge output has no parseable verdict", () => {
 		const bullets = parseJudgeVerdicts(scenario, judgeRun("I could not decide.", "ASSISTANT: nothing useful"));
 		deepStrictEqual(
 			bullets.map((bullet) => bullet.verdict),
-			["error", "error"],
+			["unmeasured", "unmeasured"],
 		);
+		for (const bullet of bullets) {
+			ok(bullet.reason.includes("no parseable verdict object"), bullet.reason);
+			ok(bullet.reason.includes("not scored"), bullet.reason);
+			ok(!/\bfail/i.test(bullet.reason), bullet.reason);
+		}
+	});
+
+	it("names truncation as the cause when the verdict object is cut off mid-object", () => {
+		// The observed 30B failure: the response opens the object and the turn
+		// ends before the closing brace.
+		const truncated = '{"bullets":[{"index":1,"pass":true,"reason":"the treatment transcript shows the ski';
+		const bullets = parseJudgeVerdicts(scenario, judgeRun(truncated));
+		deepStrictEqual(
+			bullets.map((bullet) => bullet.verdict),
+			["unmeasured", "unmeasured"],
+		);
+		ok(bullets[0]?.reason.includes("truncated"), bullets[0]?.reason);
 	});
 
 	it("extracts the bullets object from nested and prefixed braces", () => {
@@ -430,6 +471,86 @@ describe("contracts/skill-evals CLI argument contract", () => {
 	});
 });
 
+describe("contracts/skill evals report an unscored scenario as unmeasured", () => {
+	// The observed 30B failure end to end: the judge turn ends mid-object, so no
+	// bullet is scored. Before this, every bullet took verdict "error" and the
+	// scenario record said pass:false, exitCode:1, failureClass verifier_failed,
+	// which is the artifact's way of saying the skill failed its rubric.
+	const TRUNCATED_JUDGE = '{"bullets":[{"index":1,"pass":true,"reason":"the treatment transcript shows the ski';
+
+	it("exits 3, tags the record unmeasured, and never calls the skill failed", async () => {
+		const scratch = makeScratchHome("clio-skill-eval-unmeasured-");
+		const fixture = await startOpenAICompatFixture(TRUNCATED_JUDGE);
+		try {
+			const env = { ...scratch.env, HOME: scratch.dir, CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const doctor = await runCli(["doctor", "--fix"], { cwd: scratch.dir, env, timeoutMs: 30_000 });
+			strictEqual(doctor.code, 0, doctor.stderr);
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const skillDir = join(scratch.dir, "fixture-skill");
+			mkdirSync(skillDir, { recursive: true });
+			writeFileSync(
+				join(skillDir, "SKILL.md"),
+				[
+					"---",
+					'name: "fixture-skill"',
+					'description: "Fixture skill for eval contracts."',
+					"---",
+					"",
+					"Answer directly.",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+			writeFileSync(
+				join(skillDir, "evals.md"),
+				["# Fixture evals", "", "## S1 - unscored", "Setup: answer directly.", "Expected:", "- Answers directly.", ""].join(
+					"\n",
+				),
+				"utf8",
+			);
+
+			const args = ["skills", "eval", skillDir, "--scenario", "1", "--target", "mock-chat"];
+			const json = await runCli([...args, "--json"], { cwd: scratch.dir, env, timeoutMs: 90_000 });
+			// 3, not 1: nothing was measured, so there is no rubric regression to
+			// report, and the run is still not a pass.
+			strictEqual(json.code, 3, json.stderr);
+			const rows = json.stdout
+				.trim()
+				.split("\n")
+				.filter((line) => line.length > 0)
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+			strictEqual(rows.length, 1);
+			strictEqual(rows[0]?.verdict, "unmeasured");
+			ok(String(rows[0]?.reason).includes("truncated"), String(rows[0]?.reason));
+			strictEqual(rows[0]?.network, "hermetic");
+
+			const evalId = rows[0]?.evalId;
+			strictEqual(typeof evalId, "string");
+			const artifact = JSON.parse(readFileSync(join(scratch.dir, "data", "evals", `${evalId}.json`), "utf8")) as {
+				results: Array<{ pass: boolean; exitCode: number; failureClass?: string; tags: string[] }>;
+			};
+			const record = artifact.results[0];
+			ok(record);
+			strictEqual(record.pass, false);
+			strictEqual(record.exitCode, 3);
+			strictEqual(record.failureClass, undefined);
+			ok(record.tags.includes("scenario:unmeasured"), record.tags.join(", "));
+			ok(record.tags.includes("bullet-1:unmeasured"), record.tags.join(", "));
+
+			const human = await runCli(args, { cwd: scratch.dir, env, timeoutMs: 90_000 });
+			strictEqual(human.code, 3, human.stderr);
+			ok(human.stdout.includes("unmeasured"), human.stdout);
+			ok(human.stdout.includes("1 unmeasured"), human.stdout);
+			ok(human.stdout.includes("not evidence about the skill"), human.stdout);
+			ok(human.stdout.includes("network: hermetic"), human.stdout);
+			ok(!/\bfail(ed|s)?\b/i.test(human.stdout), human.stdout);
+		} finally {
+			await closeServer(fixture.server);
+			scratch.cleanup();
+		}
+	});
+});
+
 describe("contracts/skill evals select the copy an activation would select", () => {
 	function writeSkill(dir: string, name: string, marker: string): void {
 		mkdirSync(dir, { recursive: true });
@@ -473,5 +594,134 @@ describe("contracts/skill evals select the copy an activation would select", () 
 		const resolved = resolveSkillBaseDir("authoring", workspace);
 		strictEqual(resolved.origin, "catalog");
 		ok(readFileSync(join(String(resolved.baseDir), "SKILL.md"), "utf8").includes("THE CATALOG COPY"));
+	});
+});
+
+describe("contracts/skill evals run hermetic", () => {
+	function allowReadSafety() {
+		return {
+			classify: () => ({ actionClass: "read" as const, reasons: [] }),
+			evaluate: () => ({ kind: "allow" as const, classification: { actionClass: "read" as const, reasons: [] } }),
+			observeLoop: () => ({ looping: false, key: "test", count: 0 }),
+			scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+			isSubset: () => true,
+			audit: { recordCount: () => 0 },
+		};
+	}
+
+	function registerWithEnv(value: string | undefined): ReturnType<typeof createRegistry> {
+		const previous = process.env[NO_NETWORK_TOOLS_ENV];
+		if (value === undefined) Reflect.deleteProperty(process.env, NO_NETWORK_TOOLS_ENV);
+		else process.env[NO_NETWORK_TOOLS_ENV] = value;
+		try {
+			const registry = createRegistry({ safety: allowReadSafety() });
+			registerAllTools(registry);
+			return registry;
+		} finally {
+			if (previous === undefined) Reflect.deleteProperty(process.env, NO_NETWORK_TOOLS_ENV);
+			else process.env[NO_NETWORK_TOOLS_ENV] = previous;
+		}
+	}
+
+	it("registers no network plane in a hermetic process, and the surface invariants still hold", () => {
+		// Registration is the lever: an unregistered name is not a tool the model
+		// is offered and can be refused, it is a tool that does not exist for
+		// this run.
+		const hermetic = registerWithEnv("1");
+		strictEqual(hermetic.listRegistered().includes(ToolNames.WebFetch), false);
+		ok(hermetic.listRegistered().includes(ToolNames.Read));
+
+		const normal = registerWithEnv(undefined);
+		strictEqual(normal.listRegistered().includes(ToolNames.WebFetch), true);
+	});
+
+	it("sets the hermetic switch on arm child runs and clears it for --allow-network", () => {
+		const hermetic = evalChildEnv(false, { PATH: "/usr/bin" });
+		strictEqual(hermetic[NO_NETWORK_TOOLS_ENV], "1");
+		strictEqual(hermetic.PATH, "/usr/bin");
+
+		// An ambient setting must not survive the explicit flag, or the run would
+		// report network as allowed while the child stripped it anyway.
+		const allowed = evalChildEnv(true, { PATH: "/usr/bin", [NO_NETWORK_TOOLS_ENV]: "1" });
+		strictEqual(Object.hasOwn(allowed, NO_NETWORK_TOOLS_ENV), false);
+
+		// The harness must not mutate its own environment while building a child's.
+		const source = { PATH: "/usr/bin" };
+		evalChildEnv(false, source);
+		strictEqual(Object.hasOwn(source, NO_NETWORK_TOOLS_ENV), false);
+	});
+
+	it("keeps web_fetch out of the tool schemas a hermetic child run sends to the model", async () => {
+		const scratch = makeScratchHome("clio-eval-hermetic-");
+		const fixture = await startOpenAICompatFixture("done");
+		try {
+			const env = { ...scratch.env, HOME: scratch.dir, CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const doctor = await runCli(["doctor", "--fix"], { cwd: scratch.dir, env, timeoutMs: 30_000 });
+			strictEqual(doctor.code, 0, doctor.stderr);
+			const configDir = join(scratch.dir, "config");
+			seedOpenAICompatOrchestrator(configDir, fixture.url);
+			// The orchestrator seeder alone declares no tool capability, so the run
+			// would send no tool schemas at all and prove nothing either way.
+			seedOpenAICompatFleetDefault(configDir);
+
+			const args = ["run", "--target", "mock-chat", "--no-skills", "say hi"];
+			const allowed = await runCli(args, { cwd: scratch.dir, env, timeoutMs: 60_000 });
+			strictEqual(allowed.code, 0, allowed.stderr);
+			const allowedTools = toolNamesInRequests(fixture.requests.splice(0));
+			ok(allowedTools.includes(ToolNames.Read), `tool schemas: ${allowedTools.join(", ")}`);
+			ok(allowedTools.includes(ToolNames.WebFetch), `tool schemas: ${allowedTools.join(", ")}`);
+
+			const hermetic = await runCli(args, {
+				cwd: scratch.dir,
+				env: { ...env, [NO_NETWORK_TOOLS_ENV]: "1" },
+				timeoutMs: 60_000,
+			});
+			strictEqual(hermetic.code, 0, hermetic.stderr);
+			const hermeticTools = toolNamesInRequests(fixture.requests.splice(0));
+			ok(hermeticTools.includes(ToolNames.Read), `tool schemas: ${hermeticTools.join(", ")}`);
+			strictEqual(hermeticTools.includes(ToolNames.WebFetch), false, `tool schemas: ${hermeticTools.join(", ")}`);
+		} finally {
+			await closeServer(fixture.server);
+			scratch.cleanup();
+		}
+	});
+});
+
+describe("contracts/skill evals judge grounding", () => {
+	// The judge scores the treatment transcript. When that transcript carried
+	// the SKILL.md body verbatim (the result of context(scope="skills",
+	// name=...)), a 30B judge passed bullets by quoting the instructions the
+	// model had read rather than the behavior it had produced.
+	function events(lines: ReadonlyArray<Record<string, unknown>>): string {
+		return `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
+	}
+
+	it("withholds the loaded skill body from the transcript while keeping the load visible", () => {
+		const body = "SECRET-SKILL-BODY: always stage explicit paths and never push.";
+		const parsed = parseRunStdout(
+			events([
+				{ type: "tool_execution_start", toolCallId: "c1", toolName: "context", args: { scope: "skills", name: "demo" } },
+				{ type: "tool_execution_end", toolCallId: "c1", toolName: "context", result: body },
+				{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+			]),
+		);
+		ok(!parsed.transcript.includes("SECRET-SKILL-BODY"), `transcript=${parsed.transcript}`);
+		ok(parsed.transcript.includes("skill body withheld"), `transcript=${parsed.transcript}`);
+		// The call itself must survive: "did it load the skill" is a real bullet.
+		ok(parsed.transcript.includes("TOOL context"), `transcript=${parsed.transcript}`);
+	});
+
+	it("keeps every other tool result, including a skills listing that carries no body", () => {
+		const parsed = parseRunStdout(
+			events([
+				{ type: "tool_execution_start", toolCallId: "c1", toolName: "context", args: { scope: "skills" } },
+				{ type: "tool_execution_end", toolCallId: "c1", toolName: "context", result: "demo, other" },
+				{ type: "tool_execution_start", toolCallId: "c2", toolName: "read", args: { path: "a.txt" } },
+				{ type: "tool_execution_end", toolCallId: "c2", toolName: "read", result: "FILE-CONTENT" },
+			]),
+		);
+		ok(parsed.transcript.includes("demo, other"), `transcript=${parsed.transcript}`);
+		ok(parsed.transcript.includes("FILE-CONTENT"), `transcript=${parsed.transcript}`);
+		ok(!parsed.transcript.includes("withheld"), `transcript=${parsed.transcript}`);
 	});
 });

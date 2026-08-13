@@ -20,6 +20,7 @@ import { findTool } from "./find.js";
 import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
 import { createMonitorTool } from "./monitor.js";
+import { networkToolsDisabled } from "./network-policy.js";
 import { OBSERVATION_POLICY_SLACK_BYTES, OBSERVE_SELF_CAPS } from "./observation.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
 import { readMaxBytes, readTool } from "./read.js";
@@ -308,9 +309,13 @@ function builtin<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
 /**
  * Registers every tool on the supplied registry, grouped by plane. The
  * context tool gains its workspace scope only when a session contract is
- * supplied; dispatch/monitor/steer register only with a dispatch contract.
+ * supplied; dispatch/monitor/steer register only with a dispatch contract;
+ * the RETRIEVE plane is omitted when the process asked to be hermetic
+ * (tools/network-policy.ts), which is what makes a run without network a
+ * surface the model never sees rather than a call it can make and have denied.
  */
 export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps = {}): void {
+	const includeNetworkTools = !networkToolsDisabled();
 	registry.register({
 		...builtin(readTool, { path: "src/tools/read.ts", scope: "core" }),
 	});
@@ -332,9 +337,11 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	registry.register({
 		...builtin(lsTool, { path: "src/tools/ls.ts", scope: "core" }),
 	});
-	registry.register({
-		...builtin(webFetchTool, { path: "src/tools/web-fetch.ts", scope: "core" }),
-	});
+	if (includeNetworkTools) {
+		registry.register({
+			...builtin(webFetchTool, { path: "src/tools/web-fetch.ts", scope: "core" }),
+		});
+	}
 	registry.register({
 		...builtin(gitTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 	});
@@ -426,5 +433,6 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		includeSessionTools: Boolean(session),
 		includeDispatchTools: Boolean(deps.dispatch),
 		includeInteractiveTools: Boolean(deps.askUser),
+		includeNetworkTools,
 	});
 }

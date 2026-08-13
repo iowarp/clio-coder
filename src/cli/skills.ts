@@ -21,22 +21,30 @@ Commands:
   clio skills search <query> [--json]
   clio skills inspect <name> [--json]
   clio skills validate [path] [--json]
-  clio skills install <name|path|github-url> [--user|--project] [--name <name>] [--force]
+  clio skills install <name|path|github-url>... [--user|--project] [--name <name>] [--force]
+  clio skills install --category <category> [--user|--project] [--force]
   clio skills update <name> | --all [--force]
   clio skills sync [--force]
-  clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--json]
+  clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
 
 search covers installed skills plus the local marketplace (a repo skills/
 catalog, CLIO_SKILL_CATALOG_DIR, or the skill-marketplace.json index).
 
 install resolves a bare name through that marketplace; a path or GitHub URL
 installs directly, and an existing local path always wins over a same-named
-marketplace entry.
+marketplace entry. Several sources install in one command, and --category
+installs every marketplace skill in one catalog group (git, research, ...).
 
 eval (experimental) executes the skill's evals.md RED-GREEN scenarios: per
 scenario a baseline headless run without the skill, a treatment run with it,
-and a judge run scoring each Expected bullet from the transcripts. Exit is
-nonzero when any treatment bullet fails. --json emits one JSONL row per
+and a judge run scoring each Expected bullet from the transcripts. Exit is 1
+when a treatment bullet fails and 3 when a scenario was never measured (a
+truncated or unparseable judge response scores no bullet, which is not a skill
+failure). Every arm runs hermetic: the network tool plane is stripped from the
+child runs unless you pass --allow-network. --scenario takes a full id as written
+in evals.md, whose prefix is per-skill (S1, but also D2 in clio-dev, T3 in
+clio-test, F1 in find-skills, H2 in context-handoff), or a bare number that
+selects that scenario whatever its prefix. --json emits one JSONL row per
 (scenario, bullet) with schema: "experimental". --workspace copies an existing
 checkout into a throwaway seed; the source checkout is not mutated. Fixture
 commands declared in evals.md are real shell run in that seed; they only execute
@@ -53,16 +61,26 @@ interface Parsed {
 	help: boolean;
 	force: boolean;
 	name?: string;
+	category?: string;
 	scope?: SkillInstallScope;
 	scenario?: string;
 	target?: string;
 	workspace?: string;
 	timeoutSeconds?: number;
 	trustFixtures: boolean;
+	allowNetwork: boolean;
 }
 
 function parse(argv: ReadonlyArray<string>): Parsed {
-	const out: Parsed = { positional: [], json: false, all: false, help: false, force: false, trustFixtures: false };
+	const out: Parsed = {
+		positional: [],
+		json: false,
+		all: false,
+		help: false,
+		force: false,
+		trustFixtures: false,
+		allowNetwork: false,
+	};
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		if (arg === undefined) continue;
@@ -83,10 +101,20 @@ function parse(argv: ReadonlyArray<string>): Parsed {
 			case "--trust-fixtures":
 				out.trustFixtures = true;
 				break;
+			case "--allow-network":
+				out.allowNetwork = true;
+				break;
 			case "--name": {
 				const value = argv[i + 1];
 				if (!value || value.startsWith("-")) throw new Error("--name requires a value");
 				out.name = value;
+				i++;
+				break;
+			}
+			case "--category": {
+				const value = argv[i + 1];
+				if (!value || value.startsWith("-")) throw new Error("--category requires a value");
+				out.category = value;
 				i++;
 				break;
 			}
@@ -326,28 +354,52 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			return ok ? 0 : 1;
 		}
 		case "install": {
-			const source = parsed.positional[0];
-			if (!source || parsed.positional.length !== 1) {
+			let sources = parsed.positional;
+			if (parsed.category !== undefined) {
+				if (sources.length > 0) {
+					process.stderr.write("--category installs a whole catalog group; do not also name skills\n");
+					return 2;
+				}
+				const grouped = discoverMarketplaceSkills().skills.filter((skill) => skill.category === parsed.category);
+				if (grouped.length === 0) {
+					printError(`no marketplace skills in category "${parsed.category}"`);
+					return 1;
+				}
+				sources = grouped.map((skill) => skill.name);
+			}
+			if (sources.length === 0) {
 				process.stderr.write(
-					"usage: clio skills install <name|path|github-url> [--user|--project] [--name <name>] [--force]\n",
+					"usage: clio skills install <name|path|github-url>... [--user|--project] [--name <name>] [--force]\n" +
+						"       clio skills install --category <category> [--user|--project] [--force]\n",
 				);
 				return 2;
 			}
-			try {
-				const result = installSkill({
-					source,
-					scope: parsed.scope ?? "project",
-					force: parsed.force,
-					...(parsed.name ? { name: parsed.name } : {}),
-				});
-				printOk(`installed ${result.scope} skill ${result.name} at ${result.path}`);
-				for (const warning of result.warnings) process.stderr.write(`warning: ${warning}\n`);
-				process.stdout.write("audit is set to unknown; review the skill and set audit: pass yourself\n");
-				return 0;
-			} catch (err) {
-				printError(err instanceof Error ? err.message : String(err));
-				return 1;
+			// --name renames the destination directory, which can only mean one
+			// thing for one source; silently applying it to a list would install
+			// every skill over the same directory.
+			if (parsed.name !== undefined && sources.length !== 1) {
+				process.stderr.write("--name applies to a single skill; install them one at a time to rename\n");
+				return 2;
 			}
+			let failed = 0;
+			for (const source of sources) {
+				try {
+					const result = installSkill({
+						source,
+						scope: parsed.scope ?? "project",
+						force: parsed.force,
+						...(parsed.name ? { name: parsed.name } : {}),
+					});
+					printOk(`installed ${result.scope} skill ${result.name} at ${result.path}`);
+					for (const warning of result.warnings) process.stderr.write(`warning: ${warning}\n`);
+				} catch (err) {
+					failed += 1;
+					printError(err instanceof Error ? err.message : String(err));
+				}
+			}
+			if (failed === sources.length) return 1;
+			process.stdout.write("audit is set to unknown; review the skill and set audit: pass yourself\n");
+			return failed > 0 ? 1 : 0;
 		}
 		case "update": {
 			const name = parsed.positional[0];
@@ -375,7 +427,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			const name = parsed.positional[0];
 			if (!name || parsed.positional.length !== 1) {
 				process.stderr.write(
-					"usage: clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--json]\n",
+					"usage: clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]\n",
 				);
 				return 2;
 			}
@@ -385,6 +437,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			return runSkillsEvalCommand(name, {
 				json: parsed.json,
 				trustFixtures: parsed.trustFixtures,
+				allowNetwork: parsed.allowNetwork,
 				...(parsed.scenario !== undefined ? { scenario: parsed.scenario } : {}),
 				...(parsed.target !== undefined ? { target: parsed.target } : {}),
 				...(parsed.workspace !== undefined ? { workspace: parsed.workspace } : {}),

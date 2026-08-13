@@ -32,6 +32,7 @@ import { claudeSubprocessPermissionConfigForAutonomy } from "../../engine/claude
 import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-tools.js";
 import { toolPromptHintsForNames } from "../../tools/bootstrap.js";
+import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import {
@@ -1226,10 +1227,17 @@ function effectiveToolNames(
 	denied: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<ToolName> {
 	if (!targetToolCapability(target)) return [];
+	// A hermetic process registers no network plane, so the worker's registry
+	// would drop web_fetch whatever the recipe declared. Subtracting it here too
+	// keeps the signature the orchestrator expects equal to the one the worker
+	// attests; otherwise the run is refused for a mismatch instead of simply
+	// running without network.
+	const networkStripped = networkToolsDisabled();
 	const names = allowedTools.filter(
 		(tool): tool is ToolName =>
 			isBuiltinToolName(tool) &&
 			tool !== ToolNames.AskUser &&
+			!(networkStripped && tool === ToolNames.WebFetch) &&
 			!denied.has(tool) &&
 			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&
 			(target.runtime.id !== "claude-sdk" || isClaudeCanonicalTool(tool)),

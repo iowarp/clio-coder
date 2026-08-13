@@ -136,7 +136,7 @@ clio skills validate [path] [--json]
 clio skills install <name|path|github-url> [--user|--project] [--name <name>] [--force]
 clio skills update <name> | --all [--force]
 clio skills sync [--force]
-clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--json]
+clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
 ```
 
 `eval` (experimental) executes a skill's `evals.md` RED-GREEN scenarios with
@@ -144,6 +144,14 @@ baseline, treatment, and judge runs; see
 [skills-marketplace.md](skills-marketplace.md) for the catalog contract it
 verifies. Fixture commands in an `evals.md` are real shell and only run with
 `--trust-fixtures`.
+
+Every arm runs hermetic: the network tool plane is stripped from the child runs
+so a scenario measures the skill against its workspace and not against the open
+web. `--allow-network` keeps the web tools, and the run reports which policy was
+in force. Exit is 1 when a treatment bullet fails and 3 when a scenario went
+unmeasured, which is what a truncated or unparseable judge response produces:
+no bullet is scored, the scenario is not a pass, and nothing about it is a
+verdict on the skill.
 
 Headless runs also accept `--no-skills` to disable discovery and repeatable `--skill <path>` to load one explicit `SKILL.md` file or skill directory for that run. Explicit `--skill` paths are honored even when `--no-skills` is set.
 
