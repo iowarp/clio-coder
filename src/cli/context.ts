@@ -108,6 +108,12 @@ async function printContextStatus(): Promise<number> {
 async function runRefreshCommand(args: string[]): Promise<number> {
 	let updateWiki = false;
 	for (const arg of args) {
+		// The other four context verbs answer --help on stdout with status 0;
+		// refresh alone called it an unknown flag.
+		if (arg === "--help" || arg === "-h") {
+			process.stdout.write(HELP);
+			return 0;
+		}
 		if (arg === "--wiki") {
 			updateWiki = true;
 			continue;

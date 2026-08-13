@@ -195,8 +195,14 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		const result = await runCli(["dev", "definitely-not-a-dev-command"], { env: scratch.env });
 		strictEqual(result.code, 2);
 		match(result.stderr, /unknown dev command/);
+		// A bare `clio dev` is the listing the top-level help tells the user to run
+		// for ("harness instruments; run 'clio dev' for the list"), so printing it
+		// is the command succeeding. It used to print the listing and exit 2,
+		// contradicting the help that sent the user there.
 		const bare = await runCli(["dev"], { env: scratch.env });
-		strictEqual(bare.code, 2, "a bare `clio dev` names no command and is a usage error");
+		strictEqual(bare.code, 0, `stderr=${bare.stderr}`);
+		match(bare.stdout, /clio dev components/);
+		strictEqual(bare.stderr.trim(), "");
 	});
 
 	it("-v routes through the lazily loaded version command", async () => {

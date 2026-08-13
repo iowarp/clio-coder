@@ -189,9 +189,12 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 		"dev",
 		async (subArgs, bootOptions) => {
 			const devSubcommand = subArgs[0];
+			// `clio dev` is what the top-level help tells the user to run for this
+			// listing, so printing the listing is the command succeeding, not a
+			// usage error.
 			if (devSubcommand === undefined || devSubcommand === "--help" || devSubcommand === "-h") {
 				process.stdout.write(DEV_HELP);
-				return devSubcommand === undefined ? 2 : 0;
+				return 0;
 			}
 			if (!DEV_COMMANDS.some((entry) => entry.name === devSubcommand)) {
 				printError(`unknown dev command: ${devSubcommand}`);

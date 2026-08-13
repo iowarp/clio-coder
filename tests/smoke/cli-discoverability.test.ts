@@ -79,6 +79,67 @@ describe("clio discoverability messages", { concurrency: false }, () => {
 		}
 	});
 
+	/**
+	 * The same rule one level down. These surfaces each broke it differently:
+	 * `targets use|remove --help` read the flag as the target id and answered
+	 * `no target with id --help`; `targets rename|profile|convert` and
+	 * `fleet run` answered their usage as an error on stderr; `context refresh`
+	 * was the one verb of five that called `--help` an unknown flag; and
+	 * `fleet status|drain|resume` rejected it outright, on commands that change
+	 * dispatch admission.
+	 */
+	const helpSurfaces: ReadonlyArray<readonly [ReadonlyArray<string>, RegExp]> = [
+		[["targets", "use"], /^usage: clio targets use <id>/m],
+		[["targets", "remove"], /^usage: clio targets remove <id>$/m],
+		[["targets", "rename"], /^usage: clio targets rename <old> <new>$/m],
+		[["targets", "profile"], /^usage: clio targets profile <name> <id>/m],
+		[["targets", "convert"], /^usage: clio targets convert <id> --runtime <runtimeId>$/m],
+		[["context", "refresh"], /clio context refresh \[--wiki\]/],
+		[["fleet", "list"], /^clio fleet <subcommand>$/m],
+		[["fleet", "run"], /^clio fleet <subcommand>$/m],
+		[["fleet", "status"], /^clio fleet <subcommand>$/m],
+		[["fleet", "drain"], /^clio fleet <subcommand>$/m],
+		[["fleet", "resume"], /^clio fleet <subcommand>$/m],
+		[["auth", "login"], /^ {7}clio auth login \[target-or-runtime\]/m],
+	];
+
+	for (const [command, usage] of helpSurfaces) {
+		it(`answers clio ${command.join(" ")} --help with usage on stdout and status 0`, async () => {
+			const scratch = makeScratchHome("clio-discover-sub-help-");
+			try {
+				const result = await runCli([...command, "--help"], { env: scratch.env });
+				strictEqual(result.code, 0, `stderr=${result.stderr}`);
+				match(result.stdout, usage);
+				strictEqual(result.stderr.trim(), "", `clio ${command.join(" ")} --help writes nothing to stderr`);
+			} finally {
+				scratch.cleanup();
+			}
+		});
+	}
+
+	it("executes nothing when a subcommand is asked for help", async () => {
+		const scratch = makeScratchHome("clio-discover-help-noop-");
+		try {
+			// `fleet list` used to ignore the flag and list the contracts; the two
+			// admission commands are the ones where running instead of answering
+			// would change durable state.
+			const list = await runCli(["fleet", "list", "--help"], { env: scratch.env });
+			ok(!/build-review {2}builtin/.test(list.stdout), `fleet list --help listed contracts: ${list.stdout}`);
+
+			const drained = await runCli(["fleet", "drain", "--help"], { env: scratch.env });
+			strictEqual(drained.code, 0, `stderr=${drained.stderr}`);
+			const status = await runCli(["fleet", "status"], { env: scratch.env });
+			match(status.stdout, /^admission: open$/m);
+
+			// `auth login --help` ran the picker's inventory listing first, which
+			// reads as though the interactive flow had already started.
+			const login = await runCli(["auth", "login", "--help"], { env: scratch.env });
+			ok(!/disconnected|targets=/.test(login.stdout), `auth login --help printed the inventory: ${login.stdout}`);
+		} finally {
+			scratch.cleanup();
+		}
+	});
+
 	it("says at discovery that the trace viewer needs a source checkout", async () => {
 		const scratch = makeScratchHome("clio-discover-trace-");
 		try {
