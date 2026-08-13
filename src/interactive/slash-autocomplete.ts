@@ -294,6 +294,15 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 
 		const canonical = this.canonicalizeAlias(lines, cursorLine, cursorCol);
 		const suggestions = await this.provider.getSuggestions(canonical.lines, cursorLine, canonical.cursorCol, options);
+		// Enter accepts the open completion instead of submitting, so a suggestion
+		// the input already equals costs a keystroke that changes no pixel: typing
+		// `/memory seed` and pressing Enter accepted "seed" and submitted nothing,
+		// which reads as a dropped key and concatenates whatever is typed next
+		// onto the unsent line. Nothing left to complete, no popup, and the first
+		// Enter submits. An explicit Tab is left alone: it asked for the list.
+		if (suggestions && options.force !== true && suggestions.items.some((item) => item.value === suggestions.prefix)) {
+			return null;
+		}
 		const commandPrefix = isSlashCommandPrefix(lines, cursorLine, cursorCol);
 		if (!suggestions || commandPrefix === null) return suggestions;
 		const items = suggestions.items.filter((item) => item.value.startsWith(commandPrefix));

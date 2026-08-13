@@ -98,12 +98,15 @@ export {
 	compareProviderSupportEntries,
 	configuredTargetsForRuntime,
 	defaultModelForRuntime,
+	describeRuntimeModels,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
 	type ProviderSupportGroup,
 	type ResolvedProviderReference,
+	type RuntimeModelListSource,
 	resolveProviderReference,
+	runtimeModelListSource,
 	supportGroupLabel,
 } from "./support.js";
 export type {

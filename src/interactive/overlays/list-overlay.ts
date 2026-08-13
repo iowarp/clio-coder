@@ -23,8 +23,13 @@ export interface ListOverlayItem {
 	meta?: string;
 	/** Group header this item renders under, e.g. "project", "marketplace". */
 	group?: string;
-	/** Lines for the detail pane, lazily computed. May contain markdown. */
-	detail?: () => string[];
+	/**
+	 * Lines for the detail pane, lazily computed at the pane's real width. May
+	 * contain markdown. Providers that laid themselves out at a guessed width had
+	 * their own wrapped lines re-wrapped by the pane, which repeated the row
+	 * label on every continuation line.
+	 */
+	detail?: (width: number) => string[];
 }
 
 export interface ListOverlayOptions {
@@ -258,7 +263,7 @@ export class ListOverlayView implements Component {
 		if (!selectedItem?.detail) {
 			return Array.from({ length: height }, () => " ".repeat(width));
 		}
-		const detailLines = selectedItem.detail();
+		const detailLines = selectedItem.detail(width);
 		const detailMarkdown = detailLines.join("\n");
 		const md = new Markdown(detailMarkdown, 0, 0, markdownTheme(clioTheme()));
 		const mdLines = md.render(width);

@@ -60,7 +60,7 @@ export function openHelpOverlay(
 			id: row.id,
 			label,
 			group: "Keys",
-			detail: () => {
+			detail: (width) => {
 				const warnings = manager
 					.platformWarnings()
 					.filter((w) => w.id === row.id)
@@ -72,7 +72,7 @@ export function openHelpOverlay(
 					source: row.source,
 					warnings,
 				};
-				return formatKeybindingDetailBodyLines(detailEntry, 100);
+				return formatKeybindingDetailBodyLines(detailEntry, width);
 			},
 		};
 

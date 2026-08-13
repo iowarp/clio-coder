@@ -1,14 +1,19 @@
 import { appendNotice } from "./command-output.js";
 import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
-import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { showClioOverlayFrame } from "./overlay-frame.js";
 import { createOverlayGeneralOpeners } from "./overlay-general-openers.js";
 import { createOverlayModelSelectors } from "./overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle, type OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
 import { createOverlayResourceOpeners } from "./overlay-resource-openers.js";
 import { createOverlaySessionLifecycle } from "./overlay-session-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
-import { createPermissionOverlayBody, PERMISSION_OVERLAY_WIDTH, permissionOverlayTitle } from "./permission-overlay.js";
+import {
+	createPermissionOverlayBody,
+	PERMISSION_OVERLAY_WIDTH,
+	permissionOverlayHint,
+	permissionOverlayTitle,
+} from "./permission-overlay.js";
 import { openProvidersOverlay } from "./providers-overlay.js";
 
 export * from "./overlay-key-routing.js";
@@ -218,10 +223,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				anchor: "center",
 				width: PERMISSION_OVERLAY_WIDTH,
 				title: permissionOverlayTitle(),
-				footerHint: buildHint([
-					{ key: "Enter", verb: "allow once" },
-					{ key: "s", verb: "stop turn" },
-				]),
+				footerHint: (innerWidth) => permissionOverlayHint(innerWidth),
 			});
 			tui.requestRender();
 			return true;

@@ -83,7 +83,7 @@ describe("contracts/help-reference", () => {
 		ok(fleetTopic);
 		ok(fleetTopic.label.includes("fleet runs & steering"));
 		ok(fleetTopic.detail);
-		const fleetDetail = fleetTopic.detail().join("\n");
+		const fleetDetail = fleetTopic.detail(80).join("\n");
 		ok(fleetDetail.includes("`@<runId> `"));
 		ok(fleetDetail.includes("press `x`"));
 		ok(fleetDetail.includes("ACP delegation runs cannot accept live steering"));
@@ -93,7 +93,7 @@ describe("contracts/help-reference", () => {
 		ok(autonomyTopic);
 		ok(autonomyTopic.label.includes("autonomy & safety net"));
 		ok(autonomyTopic.detail);
-		const detailText = autonomyTopic.detail().join("\n");
+		const detailText = autonomyTopic.detail(80).join("\n");
 		ok(detailText.includes("**Tool surface**"));
 		ok(detailText.includes("Violations are terminal denials, never approvable."));
 		ok(detailText.includes("**Safety net** (always on, level-independent)"));

@@ -3,6 +3,10 @@ import type { SlashCommandContext } from "../slash-commands.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
+/** @internal exported for contract tests */
+export const PROMPTS_EMPTY =
+	"no prompt templates found. add a markdown file to .clio/prompts/ in this project or prompts/ in your clio config dir, and it becomes a slash command named after the file.";
+
 export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
 	const promptsList = ctx.listPrompts();
 	const items: ListOverlayItem[] = promptsList.items.map((template) => {
@@ -52,7 +56,7 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 		title: "Prompt Templates",
 		items: allItems,
 		filterable: true,
-		emptyMessage: "No prompt templates found",
+		emptyMessage: PROMPTS_EMPTY,
 		onSelect: (item) => {
 			if (item.group !== "Diagnostics") {
 				ctx.setEditorText?.(`/${item.id} `);

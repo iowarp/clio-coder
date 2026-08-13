@@ -244,7 +244,13 @@ export class ClioOverlayFrame implements Component {
 	constructor(
 		private readonly child: Component,
 		private readonly title: string | (() => string),
-		private readonly footerHint?: string | (() => string | undefined),
+		/**
+		 * A function hint is given the box's inner width so an overlay whose keys
+		 * matter can shorten its own labels rather than let `elideHint` drop the
+		 * middle entry, which is how the permission overlay lost `[s] stop turn`
+		 * at 40 columns while the key still worked.
+		 */
+		private readonly footerHint?: string | ((innerWidth: number) => string | undefined),
 		/** Box width in columns. Zero fills the row it is given. */
 		private readonly boxWidth = 0,
 		private readonly align: FrameAlign = "center",
@@ -260,7 +266,7 @@ export class ClioOverlayFrame implements Component {
 		const childLines = this.child.render(contentWidth);
 		const titleText = typeof this.title === "function" ? this.title() : this.title;
 		const label = titleText.length > 0 ? `─ ${titleText} ` : "─ ";
-		const hint = typeof this.footerHint === "function" ? this.footerHint() : this.footerHint;
+		const hint = typeof this.footerHint === "function" ? this.footerHint(contentWidth + 2) : this.footerHint;
 		const boxLines = [
 			brandedTopBorder(label, contentWidth + 2),
 			...fitBody(childLines, this.rowBudget, contentWidth).map(
@@ -310,7 +316,10 @@ export class ClioOverlayFrame implements Component {
 export function showClioOverlayFrame(
 	tui: TUI,
 	child: Component,
-	options: OverlayOptions & { title: string | (() => string); footerHint?: string | (() => string | undefined) },
+	options: OverlayOptions & {
+		title: string | (() => string);
+		footerHint?: string | ((innerWidth: number) => string | undefined);
+	},
 ): OverlayHandle {
 	const { title, footerHint, width, visible, maxHeight, margin, ...overlayOptions } = options;
 	const boxWidth = typeof width === "number" ? width : 0;

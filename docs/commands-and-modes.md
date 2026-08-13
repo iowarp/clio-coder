@@ -150,7 +150,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/memory` | - | `/memory seed` | Inspect task memory or seed it from the newest handoff |
 | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | - | `/thinking [level]` | Open thinking-level selector, or set a level directly |
-| `/output` | - | `/output [verbosity]` | Set transcript detail: minimal, default, or verbose |
+| `/output` | - | `/output <verbosity>` | Set transcript detail: minimal, default, or verbose |
 | `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
 | `/scoped-models` | - | `/scoped-models` | Edit the Alt+J / Alt+K model cycle set |
 | `/settings` | `/config` | `/settings` | Open interactive settings |

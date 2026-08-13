@@ -74,7 +74,7 @@ describe("contracts/skills-hub", () => {
 		const items = buildInstalledItems(
 			makeList([skill], [{ type: "warning", message: "stale pin", path: skill.filePath }]),
 		);
-		const detail = items[0]?.detail?.() ?? [];
+		const detail = items[0]?.detail?.(80) ?? [];
 		const joined = detail.join("\n");
 		ok(joined.includes("/skill:clio-test [task]"));
 		ok(joined.includes(skill.filePath));
@@ -91,7 +91,7 @@ describe("contracts/skills-hub", () => {
 		strictEqual(items[0]?.meta, "/repo/broken/SKILL.md");
 		strictEqual(stripAnsi(items[0]?.label ?? ""), `${GLYPH.error} unreadable SKILL.md`);
 		ok(items[0]?.label.includes(clioTheme().fgSequence("error")), "error diagnostics use the error token");
-		ok((items[0]?.detail?.() ?? []).join("\n").includes("unreadable SKILL.md"));
+		ok((items[0]?.detail?.(80) ?? []).join("\n").includes("unreadable SKILL.md"));
 	});
 });
 
@@ -130,7 +130,7 @@ describe("contracts/skills-hub marketplace rows", () => {
 		strictEqual(items[0]?.group, "Marketplace");
 		strictEqual(items[0]?.meta, "catalog · v0.1.0");
 
-		const detail = (items.find((item) => item.label === "beta")?.detail?.() ?? []).join("\n");
+		const detail = (items.find((item) => item.label === "beta")?.detail?.(80) ?? []).join("\n");
 		ok(detail.includes("/skill:beta [task]"), detail);
 		ok(detail.includes(path.join(cwd, "skills", "research", "beta")), detail);
 		ok(detail.includes("beta description"), detail);

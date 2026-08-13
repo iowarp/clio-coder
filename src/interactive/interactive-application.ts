@@ -186,10 +186,14 @@ export interface InteractiveDeps {
 	onContextClear?: (options: ContextClearCommandOptions) => Promise<void>;
 	/** Run /context refresh: re-index codewiki and refresh .clio state without touching CLIO.md. */
 	onContextRefresh?: () => Promise<void>;
-	/** Advance the orchestrator target one step forward through `provider.scope`. */
-	onCycleScopedModelForward?: () => void;
+	/**
+	 * Advance the orchestrator target one step forward through `provider.scope`.
+	 * False means nothing moved, which the UI answers with a notice: the keys are
+	 * documented in the help center and a silent no-op reads as a dropped key.
+	 */
+	onCycleScopedModelForward?: () => boolean;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
-	onCycleScopedModelBackward?: () => void;
+	onCycleScopedModelBackward?: () => boolean;
 	onShutdown: () => Promise<void>;
 }
 
@@ -383,8 +387,14 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		refreshStatus: () => refreshPresentationFooter(),
 	});
 	const { readStructuredEntries, recordSubmittedTurn } = sessionTranscript;
+	/**
+	 * Ctrl+G armed the leader and is waiting for the next key. Owned here because
+	 * the footer reads it and the input runtime that flips it is built later.
+	 */
+	let leaderArmed = false;
 	const presentation = createInteractivePresentation({
 		bus: deps.bus,
+		getLeaderArmed: () => leaderArmed,
 		providers: deps.providers,
 		dispatch: deps.dispatch,
 		observability: deps.observability,
@@ -605,6 +615,18 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		footer.refresh();
 		tui.requestRender();
 	};
+	/**
+	 * Alt+J and Alt+K with nothing to step to. The help center documents both
+	 * keys, so a keypress that changes no pixel reads as a broken binding rather
+	 * than as an empty set; the set itself is chosen in `/scoped-models`.
+	 */
+	const announceEmptyScopedSet = (): void => {
+		notify(
+			"info",
+			"scoped models: nothing to cycle to; run /scoped-models to choose the set Alt+J and Alt+K step through",
+			"scoped-models:empty",
+		);
+	};
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
 		refreshFooter: () => footer.refresh(),
@@ -621,11 +643,18 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			canExit: () => editor.getText().length === 0,
 			availableThinkingLevels: () => availableInteractiveThinkingLevels(deps),
 			onCycleThinking: () => deps.onCycleThinking?.(),
-			cycleScopedModelForward: () => deps.onCycleScopedModelForward?.(),
-			cycleScopedModelBackward: () => deps.onCycleScopedModelBackward?.(),
+			cycleScopedModelForward: () => {
+				if (deps.onCycleScopedModelForward?.() === false) announceEmptyScopedSet();
+			},
+			cycleScopedModelBackward: () => {
+				if (deps.onCycleScopedModelBackward?.() === false) announceEmptyScopedSet();
+			},
 		},
 		overlay: overlayLifecycle,
 		refreshFooter: () => footer.refresh(),
+		onLeaderStateChange: (pending) => {
+			leaderArmed = pending;
+		},
 		dispatchBoard,
 		steerSelectedDispatch,
 		cancelSelectedDispatch,

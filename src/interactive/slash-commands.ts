@@ -858,8 +858,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "output",
 		description: "Set transcript detail: minimal, default, or verbose",
 		kinds: ["output"],
-		args: { positionals: [{ name: "verbosity", required: false }] },
+		// Required, so the help center renders `<verbosity>`. It read `[verbosity]`
+		// while the bare form was rejected, which advertised an optional argument
+		// the command does not have; `/thinking [level]` is the sibling that really
+		// does open a selector when bare.
+		args: { positionals: [{ name: "verbosity", required: true }] },
 		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "output", reason: parsed.error };
 			const value = parsed.positionals[0];
 			return { kind: "output", ...(value ? { verbosity: value as "minimal" | "default" | "verbose" } : {}) };
 		},

@@ -60,6 +60,8 @@ export interface InteractiveInputRuntimeDeps {
 		openTreeOverlayState(): void;
 	};
 	refreshFooter: () => void;
+	/** Armed/disarmed transitions of the Ctrl+G leader, for the footer indicator. */
+	onLeaderStateChange?: (pending: boolean) => void;
 	dispatchBoard: {
 		selectPrevious(): void;
 		selectNext(): void;
@@ -162,6 +164,11 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		leaderTargets: () => deps.keybindings.leaderTargets(),
 		dispatchAction: (id) => deps.dispatchAction(id, keyActionDeps()),
 		isRelease: isKeyRelease,
+		onStateChange: (pending) => {
+			deps.onLeaderStateChange?.(pending);
+			deps.refreshFooter();
+			deps.requestRender();
+		},
 	});
 
 	controller = createApplicationController({

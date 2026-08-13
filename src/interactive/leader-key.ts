@@ -74,6 +74,15 @@ export interface LeaderKeyControllerDeps {
 	timeoutMs?: number;
 	scheduleTimeout?: (callback: () => void, delayMs: number) => LeaderKeyTimeout;
 	clearScheduledTimeout?: (timeout: LeaderKeyTimeout) => void;
+	/**
+	 * Fired when the leader arms or disarms, including on timeout.
+	 *
+	 * Ctrl+G is the fallback for terminals where Alt is broken, and the frame
+	 * between it and the next key was identical to the idle frame: nothing said
+	 * the leader had taken, on the one surface whose users cannot test it with a
+	 * working Alt shortcut.
+	 */
+	onStateChange?: (pending: boolean) => void;
 }
 
 export interface LeaderKeyController {
@@ -92,16 +101,22 @@ export function createLeaderKeyController(deps: LeaderKeyControllerDeps): Leader
 	let timer: LeaderKeyTimeout | null = null;
 
 	const setState = (next: LeaderKeyState): void => {
+		const wasPending = state.status === "pending";
 		state = next;
 		if (timer) {
 			clearScheduledTimeout(timer);
 			timer = null;
 		}
-		if (next.status !== "pending") return;
+		if (next.status !== "pending") {
+			if (wasPending) deps.onStateChange?.(false);
+			return;
+		}
+		if (!wasPending) deps.onStateChange?.(true);
 		timer = scheduleTimeout(
 			() => {
 				state = IDLE_LEADER_STATE;
 				timer = null;
+				deps.onStateChange?.(false);
 			},
 			Math.max(0, next.expiresAt - now()),
 		);

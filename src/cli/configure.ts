@@ -8,7 +8,7 @@ import { credentialsPresent } from "../domains/providers/credentials.js";
 import {
 	buildProviderSupportEntry,
 	configuredTargetsForRuntime,
-	defaultModelForRuntime,
+	describeRuntimeModels,
 	isOrchestratorEligibleRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
@@ -302,10 +302,7 @@ function printRuntimeList(includeHidden: boolean): void {
 			label: entry.label,
 			auth: authLabel,
 			targets: configuredTargetsForRuntime(settings, entry.runtimeId).length,
-			models:
-				entry.modelHints.length > 0
-					? entry.modelHints.slice(0, 2).join(", ")
-					: (defaultModelForRuntime(entry.runtimeId) ?? "-"),
+			models: describeRuntimeModels(entry, 2),
 		});
 	}
 	const width = terminalColumns();
@@ -694,6 +691,20 @@ async function askModelChoice(
 	return resolveModelChoice(answer, wireModels, defaultValue) ?? "";
 }
 
+/**
+ * A catalog-ordered list has no head worth persisting: openai's first of 38 ids
+ * is `gpt-4` because g sorts early, and a target configured without --model
+ * used to carry it as the model the operator chose.
+ */
+function refuseCatalogSeededModel(runtime: RuntimeDescriptor, support: ProviderSupportEntry): void {
+	printError(
+		`--model is required for ${runtime.id}: its ${support.modelHints.length} model ids come from the pi-ai catalog in name order, which recommends none of them`,
+	);
+	process.stderr.write(
+		`  run \`clio configure --runtime ${runtime.id}\` with no other flags to choose from the full list\n`,
+	);
+}
+
 async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): Promise<number> {
 	if (!args.id) {
 		printError("--id is required when passing flags non-interactively");
@@ -764,7 +775,15 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 	});
 	const wireModels = await resolveSupportedWireModels(runtime, seed, existing);
-	const model = args.model ?? existing?.defaultModel ?? support.defaultModel ?? wireModels[0];
+	const model =
+		args.model ??
+		existing?.defaultModel ??
+		support.defaultModel ??
+		(support.modelSource === "catalog" ? undefined : wireModels[0]);
+	if (model === undefined && support.modelSource === "catalog") {
+		refuseCatalogSeededModel(runtime, support);
+		return 2;
+	}
 	if (!validateResolvedModel(runtime.id, model, args.force)) return 2;
 	if (!validateContextWindowOverride(runtime, model, args.contextWindow, args.force)) return 2;
 	const descriptor = buildDescriptor(runtime, args.id, {
@@ -1069,7 +1088,7 @@ async function runInteractive(
 	process.stdout.write(`\nSelected runtime: ${runtime.id} (${support.summary})\n`);
 	process.stdout.write(`Credentials: ${describeAuthStatus(runtime)}\n`);
 	if (support.modelHints.length > 0) {
-		process.stdout.write(`Known models: ${support.modelHints.slice(0, 4).join(", ")}\n`);
+		process.stdout.write(`Known models: ${describeRuntimeModels(support, 4)}\n`);
 	}
 	const suggestedId = defaults.id ?? existing?.id ?? deriveTargetId(runtime.id, settings.targets);
 	const idInput = await ask(rl, "Target id", suggestedId);
@@ -1179,16 +1198,27 @@ async function runInteractive(
 	if (runtime.kind === "http") {
 		wireModels = await resolveSupportedWireModels(runtime, tentative, existing ?? undefined);
 	}
-	model = model ?? existing?.defaultModel ?? support.defaultModel ?? wireModels[0];
+	// The wizard shows the whole list, so a catalog-ordered runtime does not need
+	// --model here the way the non-interactive path does. It does need to stop
+	// offering the alphabetically first id as though it were the recommended one.
+	const catalogOrdered = support.modelSource === "catalog";
+	model = model ?? existing?.defaultModel ?? support.defaultModel ?? (catalogOrdered ? undefined : wireModels[0]);
 	if (wireModels.length > 0) {
 		process.stdout.write("\nSelectable models:\n");
 		for (const [index, wireModel] of wireModels.entries()) {
 			process.stdout.write(`  ${index + 1}. ${wireModel}${wireModel === model ? "  [default]" : ""}\n`);
 		}
+		if (!model && catalogOrdered) {
+			process.stdout.write(`  listed in pi-ai catalog order, which recommends none of them; pick one.\n`);
+		}
 		for (;;) {
 			const pickedModel = await askModelChoice(rl, "Default target model", wireModels, model);
 			if (pickedModel === null) return 0;
 			if (pickedModel.length > 0) model = pickedModel;
+			if (!model) {
+				process.stdout.write("  a model is required: enter a number from the list or a model id.\n");
+				continue;
+			}
 			if (validateResolvedModel(runtime.id, model, defaults.force)) break;
 		}
 	} else {

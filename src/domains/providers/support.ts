@@ -7,13 +7,27 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 export type ProviderSupportGroup = "featured" | "cloud-api" | "subscription" | "local-http";
 
+/**
+ * Where a runtime's model ids come from, which decides whether their order
+ * means anything.
+ *
+ * `catalog` is the pi-ai provider data, keyed in name order: for openai the two
+ * ASCII-first of 38 ids are `gpt-4` and `gpt-4-turbo`, so any prefix of it is
+ * alphabetical accident rather than a recommendation. `runtime` is a
+ * descriptor's own `knownModels`, which this repo curates and orders with
+ * intent, so its head means something.
+ */
+export type RuntimeModelListSource = "runtime" | "catalog" | "none";
+
 export interface ProviderSupportEntry {
 	runtimeId: string;
 	label: string;
 	group: ProviderSupportGroup;
 	summary: string;
+	/** Absent when the ids are catalog-ordered, because then there is no default to recommend. */
 	defaultModel?: string;
 	modelHints: string[];
+	modelSource: RuntimeModelListSource;
 	featured: boolean;
 	connectable: boolean;
 	supportsCustomUrl: boolean;
@@ -83,13 +97,14 @@ function classifyGroup(runtime: RuntimeDescriptor): ProviderSupportGroup {
 	return "local-http";
 }
 
-export function listKnownModelsForRuntime(runtimeId: string): string[] {
+function knownModelsFor(runtimeId: string, runtime: RuntimeDescriptor | null): string[] {
 	const catalogModels = listCatalogModelsForRuntime(runtimeId);
-	if (catalogModels.length === 0) {
-		const runtime = getRuntimeIfRegistered(runtimeId);
-		return runtime?.knownModels ? [...runtime.knownModels] : [];
-	}
+	if (catalogModels.length === 0) return runtime?.knownModels ? [...runtime.knownModels] : [];
 	return catalogModels.map((model) => model.id);
+}
+
+export function listKnownModelsForRuntime(runtimeId: string): string[] {
+	return knownModelsFor(runtimeId, getRuntimeIfRegistered(runtimeId));
 }
 
 function getRuntimeIfRegistered(runtimeId: string): RuntimeDescriptor | null {
@@ -100,13 +115,53 @@ function getRuntimeIfRegistered(runtimeId: string): RuntimeDescriptor | null {
 	}
 }
 
+/**
+ * A descriptor that carries its own `knownModels` answers for its model story
+ * even when the catalog also answers for it. `claude-code` and `claude-sdk` are
+ * both: the catalog wins in `listKnownModelsForRuntime`, and they are left on
+ * that path here rather than having their display and default changed by a
+ * decision about openai. Which of the two lists should win for those runtimes
+ * is a separate question.
+ */
+export function runtimeModelListSource(runtime: RuntimeDescriptor): RuntimeModelListSource {
+	if (runtime.knownModels && runtime.knownModels.length > 0) return "runtime";
+	if (listCatalogModelsForRuntime(runtime.id).length > 0) return "catalog";
+	return "none";
+}
+
+function modelListSourceForRuntimeId(runtimeId: string): RuntimeModelListSource {
+	const runtime = getRuntimeIfRegistered(runtimeId);
+	if (runtime) return runtimeModelListSource(runtime);
+	return listCatalogModelsForRuntime(runtimeId).length > 0 ? "catalog" : "none";
+}
+
+/**
+ * The model id a caller may persist without being told which one to use.
+ * Undefined for catalog-ordered runtimes: the head of that list is the
+ * alphabetically first id, not the one anybody would choose.
+ */
 export function defaultModelForRuntime(runtimeId: string): string | undefined {
+	if (modelListSourceForRuntimeId(runtimeId) === "catalog") return undefined;
 	return listKnownModelsForRuntime(runtimeId)[0];
 }
 
+/**
+ * What a screen may say about a runtime's models. A catalog-ordered list gets
+ * its size and its source instead of a sample, so nothing false is asserted
+ * about which ids matter.
+ */
+export function describeRuntimeModels(entry: ProviderSupportEntry, sample: number): string {
+	if (entry.modelSource === "catalog") return `${entry.modelHints.length} in pi-ai catalog`;
+	if (entry.modelHints.length === 0) return "-";
+	return entry.modelHints.slice(0, sample).join(", ");
+}
+
 export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderSupportEntry {
-	const modelHints = listKnownModelsForRuntime(runtime.id);
-	const defaultModel = defaultModelForRuntime(runtime.id);
+	// The descriptor in hand, not a registry lookup of its id: an entry built for
+	// a runtime that is not in the global registry used to report no models at all.
+	const modelHints = knownModelsFor(runtime.id, runtime);
+	const modelSource = runtimeModelListSource(runtime);
+	const defaultModel = modelSource === "catalog" ? undefined : modelHints[0];
 	return {
 		runtimeId: runtime.id,
 		label: runtime.displayName,
@@ -114,6 +169,7 @@ export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderS
 		summary: SUMMARY_BY_RUNTIME_ID[runtime.id] ?? runtime.displayName,
 		...(defaultModel ? { defaultModel } : {}),
 		modelHints,
+		modelSource,
 		featured: runtime.id === "openai-codex",
 		connectable: runtime.auth === "oauth" || runtime.auth === "api-key",
 		supportsCustomUrl:

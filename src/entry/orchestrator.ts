@@ -9,6 +9,7 @@ import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { configureGuardrails } from "../core/guardrails.js";
+import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { rememberRecentModel } from "../core/recent-models.js";
 import { EXPERIMENTAL_RELEASE_WARNING } from "../core/release.js";
 import { protectedResidencyModelIds } from "../core/residency-protection.js";
@@ -1383,10 +1384,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		persistSavedMutation((saved) => setAtPath(saved, id, value));
 	};
 	/** Alt+J / Alt+K: step this session's orchestrator through the scope list. */
-	const cycleScopedSession = (direction: "forward" | "backward"): void => {
+	const cycleScopedSession = (direction: "forward" | "backward"): boolean => {
 		const next = advanceScopedTarget(getCurrentSettings(), direction);
-		if (!next) return;
+		if (!next) return false;
 		updateSessionRouting({ orchestrator: { target: next.target, model: next.model } });
+		return true;
 	};
 
 	const readCurrentSessionEntries = (): ReadonlyArray<SessionEntry> => {
@@ -1572,8 +1574,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// the shared interrupt->stop subscriber so the run ends with the same
 		// durable closing turn the interactive surface produces.
 		const unsubscribeLoopGuardStop = subscribeLoopGuardStop(bus, chat);
-		const headlessPermissionReason =
-			"clio run cannot confirm permission requests; rerun interactively to approve this action.";
+		const headlessPermissionReason = HEADLESS_PERMISSION_DENIED_REASON;
 		const unsubscribeHeadlessPermission = toolRegistry.onPermissionRequired((call, decision, meta) => {
 			bus.emit(BusChannels.PermissionResolved, {
 				status: "denied",

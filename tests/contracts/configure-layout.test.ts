@@ -22,6 +22,7 @@ import { wrapPlain } from "../../src/cli/text-layout.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
 import {
+	describeRuntimeModels,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
 	supportGroupLabel,
@@ -47,7 +48,7 @@ function realRows(): RuntimeListRow[] {
 		label: entry.label,
 		auth: "needs-key",
 		targets: 0,
-		models: entry.modelHints.slice(0, 2).join(", ") || "-",
+		models: describeRuntimeModels(entry, 2),
 	}));
 }
 
