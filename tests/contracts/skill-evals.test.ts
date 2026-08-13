@@ -5,13 +5,20 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { runSkillsCommand } from "../../src/cli/skills.js";
 import {
+	armRunArgs,
+	type CapturedRun,
 	evalChildEnv,
 	extractBulletsObject,
 	materializeSkillEvalWorkspaces,
 	parseJudgeVerdicts,
 	parseRunStdout,
+	permissionWallReason,
 	resolveSkillBaseDir,
 } from "../../src/cli/skills-eval.js";
+import {
+	HEADLESS_PERMISSION_DENIED_MARKER,
+	HEADLESS_PERMISSION_DENIED_REASON,
+} from "../../src/core/headless-permission.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { parseSkillEvals } from "../../src/domains/resources/skills/evals.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
@@ -543,6 +550,124 @@ describe("contracts/skill evals report an unscored scenario as unmeasured", () =
 			ok(human.stdout.includes("1 unmeasured"), human.stdout);
 			ok(human.stdout.includes("not evidence about the skill"), human.stdout);
 			ok(human.stdout.includes("network: hermetic"), human.stdout);
+			ok(!/\bfail(ed|s)?\b/i.test(human.stdout), human.stdout);
+			// The policy the verdicts were measured under, stated before the first
+			// arm and again in the tail: autonomy beside network, both times.
+			ok(human.stderr.includes("policy: autonomy full-auto"), human.stderr);
+			ok(human.stdout.includes("ran at autonomy full-auto"), human.stdout);
+			strictEqual(rows[0]?.autonomy, "full-auto");
+		} finally {
+			await closeServer(fixture.server);
+			scratch.cleanup();
+		}
+	});
+});
+
+describe("contracts/skill evals run their acting arms unattended", () => {
+	// F3 of the 3b sweep: the arms carried no --autonomy flag, so they ran at the
+	// settings default auto-edit, every git call in both arms came back "clio run
+	// cannot confirm permission requests", and the harness printed 0/4 with exit
+	// 1. The same skill, model and target at full-auto completed the whole
+	// workflow. HARNESS-NOTES.md item 4 carries the operator approval.
+	function capturedRun(transcript: string): CapturedRun {
+		return {
+			sessionId: "s1",
+			transcript,
+			finalText: "",
+			exitCode: 0,
+			timedOut: false,
+			wallTimeMs: 1,
+			stderr: "",
+		};
+	}
+
+	it("passes full-auto to the acting arms and not to the judge", () => {
+		const baseline = armRunArgs("baseline", "do the task", { target: "mini" });
+		deepStrictEqual(baseline, [
+			"run",
+			"--json",
+			"--json-events",
+			"terminal",
+			"--no-skills",
+			"--autonomy",
+			"full-auto",
+			"--target",
+			"mini",
+			"do the task",
+		]);
+
+		const treatment = armRunArgs("treatment", "/skill:demo do the task", {
+			target: "mini",
+			skillBaseDir: "/skills/demo",
+		});
+		ok(treatment.includes("--autonomy"));
+		strictEqual(treatment[treatment.indexOf("--autonomy") + 1], "full-auto");
+		strictEqual(treatment[treatment.indexOf("--skill") + 1], "/skills/demo");
+
+		// The judge scores text and is told to call no tools; unattended write and
+		// exec would buy it nothing.
+		strictEqual(armRunArgs("judge", "score this").includes("--autonomy"), false);
+
+		// No --target flag at all when none was named, rather than an empty id.
+		strictEqual(armRunArgs("baseline", "task").includes("--target"), false);
+	});
+
+	it("recognizes the harness's own permission wall in an arm transcript", () => {
+		// The recognizer matches the clause the orchestrator writes, so the two
+		// cannot drift apart silently.
+		ok(HEADLESS_PERMISSION_DENIED_REASON.startsWith(HEADLESS_PERMISSION_DENIED_MARKER));
+
+		const walled = capturedRun(
+			[
+				'TOOL bash args={"command":"git status"}',
+				`RESULT bash error: ${HEADLESS_PERMISSION_DENIED_REASON}`,
+				'TOOL bash args={"command":"git diff"}',
+				`RESULT bash error: ${HEADLESS_PERMISSION_DENIED_REASON}`,
+			].join("\n"),
+		);
+		const reason = permissionWallReason("treatment", walled);
+		ok(reason !== null);
+		ok(reason.includes("treatment arm"), reason);
+		ok(reason.includes("2 time(s)"), reason);
+		ok(reason.includes("not the skill"), reason);
+
+		strictEqual(permissionWallReason("baseline", capturedRun("RESULT bash ok: nothing to commit")), null);
+	});
+
+	it("reads a walled arm as unmeasured infra, never as a failed bullet", async () => {
+		// End to end: an arm whose transcript shows the wall exits 3 with the
+		// truncated-judge vocabulary, and the judge run is never spent on it.
+		const scratch = makeScratchHome("clio-skill-eval-walled-");
+		const fixture = await startOpenAICompatFixture(HEADLESS_PERMISSION_DENIED_REASON);
+		try {
+			const env = { ...scratch.env, HOME: scratch.dir, CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const doctor = await runCli(["doctor", "--fix"], { cwd: scratch.dir, env, timeoutMs: 30_000 });
+			strictEqual(doctor.code, 0, doctor.stderr);
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const skillDir = join(scratch.dir, "walled-skill");
+			mkdirSync(skillDir, { recursive: true });
+			writeFileSync(
+				join(skillDir, "SKILL.md"),
+				["---", 'name: "walled-skill"', 'description: "Fixture skill for eval contracts."', "---", "", "Act.", ""].join(
+					"\n",
+				),
+				"utf8",
+			);
+			writeFileSync(
+				join(skillDir, "evals.md"),
+				["# Fixture evals", "", "## S1 - walled", "Setup: commit the work.", "Expected:", "- Creates one commit.", ""].join(
+					"\n",
+				),
+				"utf8",
+			);
+
+			const args = ["skills", "eval", skillDir, "--scenario", "1", "--target", "mock-chat"];
+			const human = await runCli(args, { cwd: scratch.dir, env, timeoutMs: 90_000 });
+			strictEqual(human.code, 3, human.stderr);
+			ok(human.stdout.includes("unmeasured"), human.stdout);
+			ok(human.stdout.includes("infra error"), human.stdout);
+			ok(human.stdout.includes("headless permission wall"), human.stdout);
+			ok(human.stdout.includes("not evidence about the skill"), human.stdout);
 			ok(!/\bfail(ed|s)?\b/i.test(human.stdout), human.stdout);
 		} finally {
 			await closeServer(fixture.server);

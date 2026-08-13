@@ -79,6 +79,11 @@ session id is reported on stderr, and as the "session" event under --json.
 There is no operator in a headless run: permission asks are denied, and the
 ask_user interview tool is not registered. Skills that interview fall back to
 their stated defaults; supply decisions in the task prompt instead.
+
+A turn that ends by writing an artifact (plan/review/report) has no assistant
+message after it, because writing the artifact is the answer. Text mode prints
+that tool's result line, naming what was written and where; --json carries the
+artifact content itself in the event stream.
 `;
 
 function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {

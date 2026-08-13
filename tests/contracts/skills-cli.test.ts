@@ -210,4 +210,29 @@ describe("contracts/skills-cli bundle install", () => {
 		ok(result.stderr.includes("--name applies to a single skill"), `stderr=${result.stderr}`);
 		strictEqual(existsSync(join(project, ".clio", "skills", "merged")), false);
 	});
+
+	it("finds a catalog group by its category name, the same word --category takes", async () => {
+		// search matched name and description only, so `search git` answered with
+		// whatever prose mentions git and omitted every member of skills/git/,
+		// while `install --category git` installed exactly those. Two surfaces,
+		// one word, two meanings.
+		const { env, project } = seedGrouped("search-category");
+		const result = await runCli(["skills", "search", "git"], { env, cwd: project });
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		ok(result.stdout.includes("alpha"), `stdout=${result.stdout}`);
+		ok(result.stdout.includes("beta"), `stdout=${result.stdout}`);
+		strictEqual(result.stdout.includes("gamma"), false, `stdout=${result.stdout}`);
+	});
+
+	it("tells an operator a marketplace skill is not installed instead of denying it exists", async () => {
+		const { env, project } = seedGrouped("inspect-uninstalled");
+		const uninstalled = await runCli(["skills", "inspect", "alpha"], { env, cwd: project });
+		strictEqual(uninstalled.code, 1);
+		ok(uninstalled.stderr.includes("skill not installed: alpha"), `stderr=${uninstalled.stderr}`);
+		ok(uninstalled.stderr.includes("clio skills install alpha"), `stderr=${uninstalled.stderr}`);
+
+		const absent = await runCli(["skills", "inspect", "no-such-skill"], { env, cwd: project });
+		strictEqual(absent.code, 1);
+		ok(absent.stderr.includes("unknown skill: no-such-skill"), `stderr=${absent.stderr}`);
+	});
 });
