@@ -21,19 +21,21 @@ describe("contracts/hint-builder", () => {
 		strictEqual(canonicalizeKey("enter/space"), "Enter/Space");
 	});
 
-	it("returns exact strings for browse and commit modes", () => {
+	/**
+	 * Esc used to be worded from whether the overlay committed anything, which
+	 * put `cancel` on half the overlays and `close` on the other half while
+	 * neither word described what the key did. The caller names the action now,
+	 * out of a fixed vocabulary, and `close` is what it defaults to.
+	 */
+	it("appends the caller's Esc verb, defaulting to close", () => {
 		const entries = [
 			{ key: "Enter", verb: "select" },
 			{ key: "tab", verb: "focus" },
 		];
 
-		// Browse mode adds Esc close
-		const browseHint = buildHint(entries);
-		strictEqual(browseHint, "[Enter] select · [Tab] focus · [Esc] close");
-
-		// Commit mode adds Esc cancel
-		const commitHint = buildHint(entries);
-		strictEqual(commitHint, "[Enter] select · [Tab] focus · [Esc] cancel");
+		strictEqual(buildHint(entries), "[Enter] select · [Tab] focus · [Esc] close");
+		strictEqual(buildHint(entries, "clear filter"), "[Enter] select · [Tab] focus · [Esc] clear filter");
+		strictEqual(buildHint(entries, "back"), "[Enter] select · [Tab] focus · [Esc] back");
 	});
 
 	it("performs elision, dropping middle entries first and keeping first and Esc", () => {

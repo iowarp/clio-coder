@@ -127,6 +127,9 @@ describe("contracts/cost provenance algebra", () => {
 			),
 			"$0.42 +?",
 		);
-		strictEqual(formatCostAggregate(aggregateCostAmounts([{ usd: 0, provenance: "unknown" }])), "cost unknown");
+		// Nothing priced any of it, so there is no cost claim to render. Surfaces
+		// that can drop the field drop it; a table cell substitutes
+		// COST_NOT_MEASURED rather than inventing a number for its column.
+		strictEqual(formatCostAggregate(aggregateCostAmounts([{ usd: 0, provenance: "unknown" }])), null);
 	});
 });

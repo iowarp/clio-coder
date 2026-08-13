@@ -11,8 +11,10 @@ import { openMessagePickerOverlay } from "./overlays/message-picker.js";
 import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import type { TargetsHubNoticeLevel } from "./providers-overlay.js";
+import { lastTurnSummaryFromLedger } from "./session-last-turn.js";
 import { reseedSessionUsageFromLedger, type SessionUsageSink } from "./session-usage-reseed.js";
 import type { SlashCommandContext } from "./slash-commands.js";
+import type { TurnSummary } from "./status/index.js";
 
 export interface OverlaySessionLifecycleDeps {
 	tui: TUI;
@@ -31,6 +33,12 @@ export interface OverlaySessionLifecycleDeps {
 	 * under the resumed session's id.
 	 */
 	sessionUsage?: SessionUsageSink;
+	/**
+	 * The footer's last-turn line, rescoped alongside those totals. Without it a
+	 * `/tree` switch left the line describing a turn on the branch the reader had
+	 * just left, beside a Σ total that had already moved.
+	 */
+	setLastTurnSummary?(summary: TurnSummary | null): void;
 	refreshFooter(): void;
 	requestRender(): void;
 	stderr(text: string): void;
@@ -76,6 +84,17 @@ function restorePriorSessionOrReopen(
 }
 
 export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps): OverlaySessionLifecycle {
+	/**
+	 * Point every running number the footer and `/cost` show at one branch. The
+	 * session total and the last-turn line are read off the same lineage in the
+	 * same call, so a switch cannot move one and leave the other behind.
+	 */
+	function rescopeToBranch(session: SessionContract, turns: SessionEntry[], leafTurnId: string | null): void {
+		const defaults = sessionUsageDefaults(session);
+		if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns, defaults, leafTurnId);
+		deps.setLastTurnSummary?.(lastTurnSummaryFromLedger(turns, defaults, leafTurnId));
+	}
+
 	const openResumeOverlay = deps.openSessionOverlay ?? openSessionOverlay;
 	const openTreeSelector = deps.openTreeOverlay ?? openTreeOverlay;
 	const openMessagePicker = deps.openMessagePickerOverlay ?? openMessagePickerOverlay;
@@ -101,8 +120,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
 					const leafTurnId = session.tree(sessionId).leafId;
 					deps.chat.resetForSession(leafTurnId, replayMessages);
-					if (deps.sessionUsage)
-						reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session), leafTurnId);
+					rescopeToBranch(session, turns, leafTurnId);
 				} catch (error) {
 					deps.stderr(`[/resume] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 				}
@@ -151,9 +169,9 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					const replayMessages = buildReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
 					deps.chat.resetForSession(turnId, replayMessages);
 					// The same branch the transcript above was just scoped to. Without the
-					// leaf, /cost and the footer kept reporting the abandoned turns.
-					if (deps.sessionUsage)
-						reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session), turnId);
+					// leaf, /cost, the footer Σ, and the last-turn line kept reporting the
+					// abandoned turns.
+					rescopeToBranch(session, turns, turnId);
 				} catch (error) {
 					deps.notify(
 						"error",
@@ -213,8 +231,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			const replayMessages = buildReplayAgentMessagesFromTurns(turns);
 			const leafTurnId = session.tree(forkedSessionId).leafId ?? parentTurnId;
 			deps.chat.resetForSession(leafTurnId, replayMessages);
-			if (deps.sessionUsage)
-				reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session), leafTurnId);
+			rescopeToBranch(session, turns, leafTurnId);
 		} catch (error) {
 			deps.stderr(`[/fork] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 			deps.chat.resetForSession(null);

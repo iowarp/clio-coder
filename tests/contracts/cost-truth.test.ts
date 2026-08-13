@@ -3,12 +3,14 @@
  *
  * Before any turn the footer read `out default · $0.00` while `/cost` on the
  * same session read `no token usage recorded for this session`. After one real
- * turn `/cost` read `cost unknown` and the footer had dropped its money field
- * entirely, at the exact moment the field acquired a value.
+ * turn against a target that publishes no pricing, `/cost` read `cost cost
+ * unknown` and the footer read `Σ9.7k · cost unknown`, and at 80 columns it
+ * dropped both chips together.
  *
- * One rule covers all of it: never print a number nothing measured. Before any
- * usage there is no cost field on either surface; once there is usage both say
- * the same words, whether that is an amount or `cost unknown`.
+ * Two rules cover all of it. Never print a number nothing measured, so an
+ * unpriced session has no cost field on either surface. And cost and usage are
+ * separate claims: the tokens were counted whatever the pricing did, so Σ stays
+ * on screen at every width it fits and the cost field simply is not there.
  */
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -21,7 +23,12 @@ import {
 	type UsageBreakdown,
 } from "../../src/domains/observability/index.js";
 import { formatCostOverlayBodyLines } from "../../src/interactive/cost-overlay.js";
-import { buildMetricStrip } from "../../src/interactive/footer/widgets.js";
+import {
+	type AgentWorkFacts,
+	buildMetricStrip,
+	type ContextEngineFacts,
+	compactSecondaryLine,
+} from "../../src/interactive/footer/widgets.js";
 import type { AgentStatus, TurnSummary } from "../../src/interactive/status/index.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
 
@@ -62,6 +69,30 @@ const SESSION_TOKENS: UsageBreakdown = {
 	cacheWrite: 0,
 	reasoningTokens: 0,
 };
+
+/** Enough of the footer's left half to make `compactSecondaryLine` render its right half. */
+const CONTEXT: ContextEngineFacts = {
+	label: null,
+	used: 24_675,
+	contextWindow: 262_144,
+	toolSchemaTokens: 0,
+	compactionThreshold: 0.8,
+	compactionAuto: true,
+	clioMd: "ok",
+	memory: null,
+	extensions: null,
+};
+
+const WORK: AgentWorkFacts = {
+	statusText: null,
+	dispatchSummary: null,
+	toolTally: "none",
+	dispatchRows: [],
+	lastTurn: LAST_TURN,
+};
+
+/** A target that made real calls and published no pricing for any of them. */
+const UNPRICED = costAggregateForAmount(0, "unknown");
 
 /** The footer's compact strip, as an 80-column terminal renders it. */
 function footerStrip(cost: Parameters<typeof buildMetricStrip>[5], turn: TurnSummary | null): string {
@@ -108,14 +139,33 @@ describe("contracts/cost truth across the footer and /cost", () => {
 		ok(overlay.includes("no token usage recorded for this session"), `it already says this: "${overlay}"`);
 	});
 
-	it("says cost unknown in the same words on both surfaces once usage exists", () => {
-		const unknown = costAggregateForAmount(0, "unknown");
+	it("shows the measured tokens and no cost field when the target reports no pricing", () => {
+		const unpriced = costAggregateForAmount(0, "unknown");
 
-		const footer = footerStrip(unknown, LAST_TURN);
-		ok(footer.includes("cost unknown"), `the footer says it, and keeps saying it at 80 columns: "${footer}"`);
+		const footer = footerStrip(unpriced, LAST_TURN);
+		ok(!footer.includes("cost"), `the footer makes no cost claim it cannot support: "${footer}"`);
+		ok(footer.includes("Σ24.7k"), `the tokens were measured either way, so they stay: "${footer}"`);
 
-		const overlay = overlayBody(unknown, 1);
-		ok(overlay.includes("cost unknown"), `the overlay says the same thing: "${overlay}"`);
+		const overlay = overlayBody(unpriced, 1);
+		ok(!/^cost\b/mu.test(overlay), `the overlay drops the row rather than printing "cost cost unknown": "${overlay}"`);
+		ok(overlay.includes("24,675 tokens"), `and keeps the usage it did measure: "${overlay}"`);
+	});
+
+	/**
+	 * The chip budget at 80 columns is four, and the per-turn detail used to spend
+	 * all of it. A session holding 24.7k measured tokens showed none of them, on
+	 * the one surface that is always on screen.
+	 */
+	it("keeps the session total at every compact width where it fits", () => {
+		for (const width of [80, 100, 120]) {
+			// `out default` rides at the head of the strip on a real session, and it
+			// was one of the four chips that crowded the total off the line.
+			const line = strip(
+				compactSecondaryLine(CONTEXT, WORK, width, theme, IDLE, null, SESSION_TOKENS, UNPRICED, "default"),
+			);
+			ok(line.includes("Σ24.7k"), `at ${width} columns the total is on screen: "${line}"`);
+			ok(!line.includes("cost"), `and nothing claims a price for it: "${line}"`);
+		}
 	});
 
 	it("shows the number on both surfaces when it is known", () => {

@@ -132,8 +132,18 @@ your shell profile to keep it across sessions. The symlink executes
 The last line runs the launcher by its full path on purpose. A bare `clio` may
 resolve to an older install earlier on your `PATH`, so it verifies whichever one
 that is rather than the one you just installed; the installer warns when it
-finds that shadowing. Once `clio --version` and
-`"$HOME/.local/bin/clio" --version` agree, use the bare name.
+finds that shadowing, and names the other path.
+
+Before you switch to the bare name, ask which file it reaches:
+
+```bash
+command -v clio    # expect $HOME/.local/bin/clio
+```
+
+Comparing `clio --version` against `"$HOME/.local/bin/clio" --version` does not
+answer that. Two installs of the same release print the same version, so the
+versions agree while the name still resolves to the other one. The path is the
+question.
 
 To remove it, preview first:
 

@@ -9,7 +9,10 @@
  * stops matching the documented steps.
  */
 import { ok, strictEqual } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
 /** The default bin dir the installer links into, read from the installer itself. */
@@ -85,5 +88,67 @@ describe("contracts/readme install block", () => {
 		);
 		const binDir = installerBinDir();
 		ok(verify?.includes(binDir), `it must be the path the installer links (${binDir}): ${verify}`);
+	});
+
+	/**
+	 * The README told the reader to keep using the bare name once `clio
+	 * --version` and the launcher's own `--version` agreed. Two installs of the
+	 * same release print the same version, so that check passes while shadowed:
+	 * it compares the answer instead of asking who answered.
+	 */
+	it("resolves the bare name by path rather than comparing versions", () => {
+		const readme = readFileSync("README.md", "utf8");
+		const section = readme.slice(readme.indexOf("## Install"), readme.indexOf("To remove it"));
+		ok(section.includes("command -v clio"), "the README asks which file the bare name reaches");
+		ok(
+			!/`clio --version` and\s+`[^`]*\/clio" --version` agree/u.test(section),
+			"and no longer treats agreeing versions as proof the name resolves to this install",
+		);
+	});
+
+	/**
+	 * The paragraph above promises the installer warns about a shadowing clio.
+	 * It is a promise about a program, so it is checked by running the program:
+	 * a stub `clio` earlier on PATH, an install into a bin dir that is not, and
+	 * the dry run that changes nothing.
+	 */
+	it("backs the shadowing claim: the installer names the other clio on PATH", () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-install-shadow-"));
+		try {
+			const shadowDir = join(scratch, "shadow");
+			const binDir = join(scratch, "bin");
+			mkdirSync(shadowDir);
+			mkdirSync(binDir);
+			const shadow = join(shadowDir, "clio");
+			writeFileSync(shadow, '#!/bin/sh\necho "clio 0.0.0-other"\n');
+			chmodSync(shadow, 0o755);
+
+			const run = spawnSync("bash", ["scripts/install-local.sh", "--dry-run", "--skip-deps", "--no-build"], {
+				encoding: "utf8",
+				env: { ...process.env, PATH: `${shadowDir}:${process.env.PATH ?? ""}`, CLIO_BIN_DIR: binDir },
+			});
+			strictEqual(run.status, 0, `dry run should succeed: ${run.stderr}`);
+			const output = `${run.stdout}${run.stderr}`;
+			ok(output.includes(`another clio is on your PATH at ${shadow}`), `installer names it: ${output}`);
+			ok(output.includes(`check it with: ${shadow} --version`), `and says how to identify it: ${output}`);
+
+			// The same stub, reached through a link into the launcher this run is
+			// about, is one installation and must not be reported as two. Comparing
+			// the raw paths said it was.
+			const linked = join(scratch, "linked");
+			mkdirSync(linked);
+			symlinkSync(resolve("scripts/install-local.sh"), join(binDir, "clio"));
+			symlinkSync(join(binDir, "clio"), join(linked, "clio"));
+			const sameInstall = spawnSync("bash", ["scripts/install-local.sh", "--dry-run", "--skip-deps", "--no-build"], {
+				encoding: "utf8",
+				env: { ...process.env, PATH: `${linked}:${process.env.PATH ?? ""}`, CLIO_BIN_DIR: binDir },
+			});
+			ok(
+				!`${sameInstall.stdout}${sameInstall.stderr}`.includes("another clio is on your PATH"),
+				"a name that resolves through to this launcher is not a second installation",
+			);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
 	});
 });
