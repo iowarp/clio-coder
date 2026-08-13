@@ -6,8 +6,7 @@ import {
 	type ContextActivityStatus,
 } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { visibleWidth } from "../engine/tui.js";
-import { type ClioTheme, clioTheme, formatCompactMs, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
+import { type ClioTheme, clioTheme, formatCompactMs, frame, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
 
 export interface ContextActivitySnapshot {
 	kind: ContextActivityKind;
@@ -123,18 +122,6 @@ function statusLabel(theme: ClioTheme, activity: ContextActivitySnapshot, tick: 
 	if (activity.status === "failed") return theme.fg("error", `${GLYPH.error} failed`);
 	if (activity.status === "completed") return theme.fg("success", `${GLYPH.ok} done`);
 	return theme.fg("accent", `${spinnerFrame(tick)} ${phaseLabel(activity.kind, activity.phase)}`);
-}
-
-function frame(theme: ClioTheme, title: string, body: string[], width: number): string[] {
-	const bodyWidth = Math.max(1, width - 4);
-	const label = title.length > 0 ? `─ ${title} ` : "─ ";
-	const fill = Math.max(0, bodyWidth - visibleWidth(label) + 1);
-	const top = `${theme.fg("frame", "┌─")}${theme.style("title", label, { bold: true })}${theme.fg("frame", "─".repeat(fill))}${theme.fg("frame", "┐")}`;
-	const formattedBody = body.map(
-		(line) => `${theme.fg("frame", "│")} ${padAnsi(line, bodyWidth)} ${theme.fg("frame", "│")}`,
-	);
-	const bottom = `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(bodyWidth + 2))}${theme.fg("frame", "┘")}`;
-	return [top, ...formattedBody, bottom];
 }
 
 export function formatContextActivityIslandLines(

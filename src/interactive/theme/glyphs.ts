@@ -42,6 +42,8 @@ export const GLYPH = {
 	phaseRetry: "↻",
 	phaseCompact: "♻",
 	phaseDispatch: "⇲",
+	ellipsis: "…",
+	favorite: "★",
 } as const;
 
 export const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"] as const;

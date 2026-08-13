@@ -515,7 +515,7 @@ function renderThinkingLines(
 		const label = streaming
 			? `Thinking (${display.tokens} tokens)${display.marker === "provider-reported" ? "" : " ≈ estimated"}…`
 			: THINKING_HIDDEN_LABEL;
-		return [dimWrap(truncateToWidth(label, lineBudget, "...", false))];
+		return [dimWrap(truncateToWidth(label, lineBudget, GLYPH.ellipsis, false))];
 	}
 	const splitLines = thinking.split("\n");
 	let visible: string[];

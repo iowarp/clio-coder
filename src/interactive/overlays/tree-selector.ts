@@ -380,7 +380,7 @@ export function openTreeOverlay(tui: TUI, deps: OpenTreeOverlayDeps): OverlayHan
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: TREE_OVERLAY_WIDTH,
-		title: "Tree",
+		title: "Session Tree",
 		footerHint: () => view.getHint(),
 	});
 }

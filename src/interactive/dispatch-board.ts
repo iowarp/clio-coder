@@ -375,7 +375,7 @@ export function renderDispatchCard(
 	// than amber or the accentDeep structure color.
 	const statusStr = theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`);
 
-	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? "waiting..." : "n/a";
+	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? `waiting${GLYPH.ellipsis}` : "n/a";
 	const target = `${theme.fg("muted", `${row.runtimeKind}:${row.targetId}`)} ${theme.fg("dim", "▸")} ${theme.fg("muted", row.wireModelId)}`;
 
 	// The agent label is the frame title and can be arbitrarily long (agent ids
@@ -383,7 +383,7 @@ export function renderDispatchCard(
 	// the right corner past the card width.
 	const selectionWidth = options.selected === true ? visibleWidth(GLYPH.cursor) + 1 : 0;
 	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10 - selectionWidth);
-	const clampedLabel = truncateToWidth(agentLabel, labelBudget, "...", false);
+	const clampedLabel = truncateToWidth(agentLabel, labelBudget, GLYPH.ellipsis, false);
 	const cardTitle =
 		options.selected === true
 			? `${theme.fg("accent", GLYPH.cursor)} ${theme.style("title", clampedLabel, { bold: true })}`

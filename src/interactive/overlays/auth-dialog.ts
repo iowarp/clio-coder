@@ -211,7 +211,7 @@ export function openAuthDialog(tui: TUI, title: string, onCancel: () => void): A
 	const handle = showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: AUTH_DIALOG_WIDTH,
-		title: "Auth",
+		title: "Authentication",
 		footerHint: getHint,
 	});
 	return {

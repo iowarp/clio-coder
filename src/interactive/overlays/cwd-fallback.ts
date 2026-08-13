@@ -135,7 +135,7 @@ export function openCwdFallbackOverlay(tui: TUI, deps: OpenCwdFallbackOverlayDep
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: CWD_FALLBACK_OVERLAY_WIDTH,
-		title: "Session cwd",
+		title: "Session Working Directory",
 		footerHint: buildHint([{ key: "Enter", verb: "select" }]),
 	});
 }
