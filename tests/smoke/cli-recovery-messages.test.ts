@@ -94,7 +94,7 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 		// This row used to say `unreadable:` for a file it had just read
 		// successfully. It names the parse failure now, and points at the YAML
 		// rather than at read permissions.
-		ok(settingsRow?.includes("invalid YAML:"), `expected a parse-error row, got ${settingsRow}`);
+		ok(settingsRow?.includes("not valid YAML:"), `expected a parse-error row, got ${settingsRow}`);
 		ok(!settingsRow?.includes("unreadable:"), `a readable file must not be called unreadable: ${settingsRow}`);
 		ok(settingsRow?.includes("fix the YAML in"), `the parse-error row names the repair that fits: ${settingsRow}`);
 		ok(settingsRow?.includes("clio reset --config --force"), "the parse-error row carries a remedy too");
