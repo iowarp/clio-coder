@@ -213,7 +213,8 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 		return 2;
 	}
 	if (parsed.help) {
-		process.stdout.write(renderConnectableProviderRows(listConnectableProviderRows()));
+		// Usage only, like list|status|logout. Printing the runtime inventory first
+		// made `login --help` read as though the picker had already started.
 		process.stdout.write(USAGE);
 		return 0;
 	}

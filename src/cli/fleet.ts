@@ -770,7 +770,12 @@ function runAdmissionControl(command: "drain" | "resume", args: ReadonlyArray<st
 
 export async function runFleetCommand(args: ReadonlyArray<string>): Promise<number> {
 	const sub = args[0];
-	if (sub === "--help" || sub === "-h" || sub === "help") {
+	// Asking for help is not a usage error, and it is not an argument either.
+	// `status|drain|resume --help` answered `unknown flag: --help` on stderr with
+	// status 2, `run --help` answered its usage the same way, and `list --help`
+	// ignored the flag and listed the contracts. Anywhere on the line it is a
+	// question, answered here before any subcommand executes.
+	if (sub === "help" || args.includes("--help") || args.includes("-h")) {
 		process.stdout.write(HELP);
 		return 0;
 	}

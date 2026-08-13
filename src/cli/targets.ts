@@ -47,6 +47,26 @@ Aliases:
   --fleet-model, carried over from before the worker/fleet rename.
 `;
 
+const USE_USAGE =
+	"clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]";
+
+/**
+ * `--help` anywhere on a targets subcommand is a question, not an argument.
+ *
+ * `use --help` and `remove --help` read it as the target id and answered
+ * `no target with id --help`; `rename`, `profile`, and `convert` answered their
+ * usage as an error on stderr. Each now prints the same usage on stdout with
+ * status 0 and executes nothing.
+ */
+function wantsHelp(args: ReadonlyArray<string>): boolean {
+	return args.includes("--help") || args.includes("-h");
+}
+
+function printUsage(usage: string): number {
+	process.stdout.write(`usage: ${usage}\n`);
+	return 0;
+}
+
 interface ListArgs {
 	json: boolean;
 	probe: boolean;
@@ -233,6 +253,7 @@ function parseUseArgs(args: ReadonlyArray<string>): UseArgs | null {
 }
 
 function runUse(args: ReadonlyArray<string>): number {
+	if (wantsHelp(args)) return printUsage(USE_USAGE);
 	let parsed: UseArgs | null;
 	try {
 		parsed = parseUseArgs(args);
@@ -241,9 +262,7 @@ function runUse(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	if (!parsed) {
-		printError(
-			"usage: clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]",
-		);
+		printError(`usage: ${USE_USAGE}`);
 		return 2;
 	}
 	ensureClioState();
@@ -402,6 +421,7 @@ function runProfileSet(
 	args: ReadonlyArray<string>,
 	usage = "clio targets profile <name> <id> [--model <id>] [--thinking <level>]",
 ): number {
+	if (wantsHelp(args)) return printUsage(usage);
 	let parsed: WorkerProfileArgs | null;
 	try {
 		parsed = parseWorkerArgs(args);
@@ -433,6 +453,7 @@ function runProfileSet(
 }
 
 function runProfileRemove(args: ReadonlyArray<string>): number {
+	if (wantsHelp(args)) return printUsage("clio targets profile remove <name> [--force]");
 	let parsed: ProfileRemoveArgs | null;
 	try {
 		parsed = parseProfileRemoveArgs(args);
@@ -476,6 +497,7 @@ function runProfileRemove(args: ReadonlyArray<string>): number {
 }
 
 function runProfileRename(args: ReadonlyArray<string>): number {
+	if (wantsHelp(args)) return printUsage("clio targets profile rename <old> <new>");
 	let parsed: ProfileRenameArgs | null;
 	try {
 		parsed = parseProfileRenameArgs(args);
@@ -520,6 +542,7 @@ function runProfileRename(args: ReadonlyArray<string>): number {
 }
 
 function runProfileBind(args: ReadonlyArray<string>): number {
+	if (wantsHelp(args)) return printUsage("clio targets profile bind <agentId> <profileName>");
 	let parsed: ProfileBindArgs | null;
 	try {
 		parsed = parseProfileBindArgs(args);
@@ -552,6 +575,7 @@ function runProfileBind(args: ReadonlyArray<string>): number {
 }
 
 function runProfileUnbind(args: ReadonlyArray<string>): number {
+	if (wantsHelp(args)) return printUsage("clio targets profile unbind <agentId>");
 	let parsed: string;
 	try {
 		if (args.length !== 1) throw new Error("usage: clio targets profile unbind <agentId>");
@@ -694,6 +718,7 @@ function runFleet(args: ReadonlyArray<string>, usage = "clio targets fleet [--js
 }
 
 function runRemove(args: ReadonlyArray<string>): number {
+	if (wantsHelp(args)) return printUsage("clio targets remove <id>");
 	if (args.length !== 1 || !args[0]) {
 		printError("usage: clio targets remove <id>");
 		return 2;
@@ -703,6 +728,7 @@ function runRemove(args: ReadonlyArray<string>): number {
 }
 
 function runRename(args: ReadonlyArray<string>): number {
+	if (wantsHelp(args)) return printUsage("clio targets rename <old> <new>");
 	if (args.length !== 2 || !args[0] || !args[1]) {
 		printError("usage: clio targets rename <old> <new>");
 		return 2;
@@ -711,10 +737,13 @@ function runRename(args: ReadonlyArray<string>): number {
 	return runTargetRename(args[0], args[1]);
 }
 
+const CONVERT_USAGE = "clio targets convert <id> --runtime <runtimeId>";
+
 function runConvert(args: ReadonlyArray<string>): number {
+	if (wantsHelp(args)) return printUsage(CONVERT_USAGE);
 	const id = args[0];
 	if (!id || id.startsWith("-")) {
-		printError("usage: clio targets convert <id> --runtime <runtimeId>");
+		printError(`usage: ${CONVERT_USAGE}`);
 		return 2;
 	}
 	let runtimeId: string | undefined;
@@ -729,10 +758,6 @@ function runConvert(args: ReadonlyArray<string>): number {
 			runtimeId = value;
 			i += 1;
 			continue;
-		}
-		if (arg === "--help" || arg === "-h") {
-			process.stdout.write("usage: clio targets convert <id> --runtime <runtimeId>\n");
-			return 0;
 		}
 		printError(`unknown convert argument: ${arg}`);
 		return 2;

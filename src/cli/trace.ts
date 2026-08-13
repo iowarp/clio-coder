@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -27,6 +28,8 @@ clio the subcommands above are the way in. They read the same database.
 interface ParsedTraceArgs {
 	positional: string[];
 	db: string;
+	/** True when --db named the path, so a miss is the operator's path, not the default. */
+	dbExplicit: boolean;
 	follow: boolean;
 	limit: number;
 	port: number;
@@ -35,6 +38,7 @@ interface ParsedTraceArgs {
 function parseTraceArgs(args: string[]): ParsedTraceArgs {
 	const positional: string[] = [];
 	let db = traceDatabasePath(clioStatePath());
+	let dbExplicit = false;
 	let follow = false;
 	let limit = 50;
 	let port = 0;
@@ -45,16 +49,20 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 			const value = args[index + 1];
 			if (value === undefined) throw new Error(`${arg} requires a value`);
 			index += 1;
-			if (arg === "--db") db = resolve(value);
-			else if (arg === "--limit") limit = parseInteger(value, "--limit", 1, 500);
+			if (arg === "--db") {
+				db = resolve(value);
+				dbExplicit = true;
+			} else if (arg === "--limit") limit = parseInteger(value, "--limit", 1, 500);
 			else port = parseInteger(value, "--port", 0, 65_535);
-		} else if (arg?.startsWith("--db=")) db = resolve(arg.slice(5));
-		else if (arg?.startsWith("--limit=")) limit = parseInteger(arg.slice(8), "--limit", 1, 500);
+		} else if (arg?.startsWith("--db=")) {
+			db = resolve(arg.slice(5));
+			dbExplicit = true;
+		} else if (arg?.startsWith("--limit=")) limit = parseInteger(arg.slice(8), "--limit", 1, 500);
 		else if (arg?.startsWith("--port=")) port = parseInteger(arg.slice(7), "--port", 0, 65_535);
 		else if (arg?.startsWith("-")) throw new Error(`unknown trace flag: ${arg}`);
 		else if (arg !== undefined) positional.push(arg);
 	}
-	return { positional, db, follow, limit, port };
+	return { positional, db, dbExplicit, follow, limit, port };
 }
 
 export async function runTraceCommand(args: string[]): Promise<number> {
@@ -79,6 +87,14 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 		return command === "help" ? 0 : 2;
 	}
 	if (command === "ui") return runTraceUi(parsed.db, parsed.port);
+
+	// A database that was never written is the empty state, not a failure. Handing
+	// the absent path to node:sqlite produced "unable to open database file",
+	// which named neither the file nor a next step, and loading the module leaked
+	// its ExperimentalWarning onto the user's stderr on a fresh install. A path
+	// the operator typed is a different claim, so a --db that is not there stays
+	// an error and says which path it means.
+	if (!existsSync(parsed.db)) return missingDatabase(parsed);
 
 	let reader: TraceReader;
 	try {
@@ -224,6 +240,20 @@ function parseInteger(value: string, flag: string, min: number, max: number): nu
 	if (!Number.isInteger(parsed) || parsed < min || parsed > max)
 		throw new Error(`${flag} must be an integer in [${min}, ${max}]`);
 	return parsed;
+}
+
+function missingDatabase(parsed: ParsedTraceArgs): number {
+	if (parsed.dbExplicit) {
+		process.stderr.write(
+			`trace database not found: ${parsed.db}\n` +
+				`  --db named this path. omit it to read the default at ${traceDatabasePath(clioStatePath())}\n`,
+		);
+		return 1;
+	}
+	process.stdout.write(
+		`no trace database yet at ${parsed.db}. runs are recorded when dispatches execute; run \`clio run "<task>"\` to create one.\n`,
+	);
+	return 0;
 }
 
 function missingRunId(command: string): number {
