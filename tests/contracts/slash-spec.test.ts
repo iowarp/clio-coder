@@ -680,9 +680,18 @@ describe("contracts/slash-spec", () => {
 		const byName = new Map(commands.map((command) => [command.name, command]));
 
 		ok(!byName.has("status"), "retired /status command is not suggested");
-		for (const removedName of ["compact", "context-init", "context-clear", "context-view"]) {
+		for (const removedName of ["context-init", "context-clear", "context-view"]) {
 			ok(!byName.has(removedName), `removed /${removedName} is not suggested`);
 		}
+		// /compact was retired as a standalone command and came back as an alias
+		// for `/context compact`. It dispatches, so completion has to offer it.
+		// It stands for a subcommand, so it carries neither hint nor argument
+		// completions: /context's siblings cannot follow it.
+		const compact = byName.get("compact");
+		ok(compact, "the /compact alias is suggested because typing it runs");
+		strictEqual(compact?.argumentHint, undefined);
+		strictEqual(compact?.getArgumentCompletions, undefined);
+		strictEqual(byName.get("ctx")?.argumentHint, "compact | init | refresh | reset");
 		strictEqual(byName.get("context")?.argumentHint, "compact | init | refresh | reset");
 		strictEqual(byName.get("quit")?.argumentHint, undefined);
 		strictEqual(byName.get("help")?.argumentHint, "[query]");

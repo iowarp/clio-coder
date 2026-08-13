@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
@@ -53,7 +53,10 @@ function targetStatus(runtime: RuntimeDescriptor): TargetStatus {
 	} as TargetStatus;
 }
 
-function makeLifecycle(auth: RuntimeDescriptor["auth"]): {
+function makeLifecycle(
+	auth: RuntimeDescriptor["auth"],
+	options: { damage?: string; apiKeyAnswer?: string } = {},
+): {
 	lifecycle: ReturnType<typeof createOverlayLifecycle>;
 	events: string[];
 	connect: () => Promise<void>;
@@ -78,6 +81,9 @@ function makeLifecycle(auth: RuntimeDescriptor["auth"]): {
 				detail: null,
 			}),
 			setApiKey: () => events.push("set-api-key"),
+			// The store records a refused write here instead of throwing, and keeps
+			// serving the credential from memory afterwards.
+			damageReason: () => options.damage ?? null,
 		},
 	} as unknown as ProvidersContract;
 	const app = {
@@ -129,7 +135,7 @@ function makeLifecycle(auth: RuntimeDescriptor["auth"]): {
 					appendLine: (line) => events.push(`append:${line}`),
 					prompt: (label) => {
 						events.push(`prompt:${label}`);
-						return new Promise<string>(() => {});
+						return options.apiKeyAnswer === undefined ? new Promise<string>(() => {}) : Promise.resolve(options.apiKeyAnswer);
 					},
 					cancel: () => events.push("cancel"),
 					dismiss: () => events.push("dismiss"),
@@ -196,6 +202,46 @@ describe("contracts/interactive auth overlay lifecycle", () => {
 			"task-island",
 			"render",
 		]);
+		lifecycle.dispose();
+	});
+
+	// `setApiKey` throws only for the damaged-store refusal. Every other write
+	// failure is recorded in damageReason() while the in-memory store keeps
+	// serving the key, so the probe that follows succeeded and the overlay
+	// reported a connection that would be gone at the next start.
+	it("does not probe or report a connection when the key never reached disk", async () => {
+		const { lifecycle, events, connect } = makeLifecycle("api-key", {
+			apiKeyAnswer: "sk-not-a-real-key",
+			damage: "it could not be written: EACCES: permission denied",
+		});
+
+		await connect();
+
+		ok(
+			!events.some((event) => event.startsWith("probe:")),
+			`a refused write must not be probed as a connection: ${events.join(", ")}`,
+		);
+		ok(
+			!events.some((event) => event.startsWith("notify:info:connected")),
+			`no connection is claimed: ${events.join(", ")}`,
+		);
+		const failure = events.find((event) => event.startsWith("notify:error:"));
+		ok(failure?.includes("was not stored"), `the refusal is named: ${failure}`);
+		ok(failure?.includes("EACCES"), `the reason is carried: ${failure}`);
+		lifecycle.dispose();
+	});
+
+	// The guard is about a write that failed. A clean store still connects.
+	it("probes and reports the connection when the key lands", async () => {
+		const { lifecycle, events, connect } = makeLifecycle("api-key", { apiKeyAnswer: "sk-not-a-real-key" });
+
+		await connect();
+
+		ok(events.includes("probe:test-target"), `got: ${events.join(", ")}`);
+		ok(
+			events.some((event) => event.startsWith("notify:info:connected test-target")),
+			`got: ${events.join(", ")}`,
+		);
 		lifecycle.dispose();
 	});
 });

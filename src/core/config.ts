@@ -112,21 +112,58 @@ function foldToOneLine(text: string): string {
 }
 
 /**
+ * The summary line of a YAML parse error, without the source excerpt it carries.
+ *
+ * The `yaml` package formats an error as a summary, then a blank line, then the
+ * offending source, then a caret diagram. Folding all of that into one line
+ * dragged the raw fragment into the middle of the notice, so a settings file
+ * containing `\t\t: : :` reported "at line 1, column 1: : : : ^^", where the
+ * tail reads as corruption of the message rather than a quote of the file. The
+ * summary already names the line and the column, which is what locates the
+ * fault; the excerpt is the operator's own file and they are being sent to it.
+ *
+ * The summary ends on the colon that introduced the excerpt, so dropping the
+ * excerpt leaves it dangling in front of whatever follows.
+ */
+function yamlErrorSummary(error: unknown): string {
+	const raw = error instanceof Error ? error.message : String(error);
+	return (raw.split("\n")[0] ?? raw).trim().replace(/:$/u, "");
+}
+
+/** The failure in three words, for a line whose tail may not survive clamping. */
+function settingsFailureHeadline(kind: SettingsIssueKind): string {
+	if (kind === "unreadable") return "settings.yaml cannot be read";
+	if (kind === "syntax") return "settings.yaml is not valid YAML";
+	return "settings.yaml failed validation";
+}
+
+/**
  * One operator-facing line for a settings file that will not load, carrying
  * the exact key paths for a schema failure and the remedy that fits whatever
  * actually failed. Doctor renders it as its settings row and the runtime
  * reload path renders it as a TUI notice, so both speak with one voice.
+ *
+ * Order is load-bearing: kind, then remedy, then detail. Both live surfaces
+ * clamp this to the frame width with no way to expand it, so a line that ended
+ * with the remedy ended with the only part the operator could act on cut off,
+ * and every notice read as a complaint with no fix attached. Detail is last
+ * because it is the part a clamp can afford to lose: the remedy already names
+ * the file to go and look at.
  */
 export function formatSettingsIssues(issues: ReadonlyArray<SettingsIssue>): string {
 	if (issues.length === 0) return "";
 	const path = join(resolveClioDirs().config, "settings.yaml");
 	const kind = issuesKind(issues);
+	// A file-level issue message repeats the kind because the thrown multi-line
+	// error has no headline of its own. Here the headline says it already.
 	const detail =
 		kind === "schema"
 			? issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")
-			: issues.map((issue) => issue.message).join("; ");
+			: issues.map((issue) => issue.message.replace(/^(?:invalid YAML|unreadable): /u, "")).join("; ");
 	const discard = "`clio reset --config --force` to start from defaults";
-	return foldToOneLine(`${detail} (${settingsRemedyInline(kind, path)}, or ${discard})`);
+	return foldToOneLine(
+		`${settingsFailureHeadline(kind)}: ${settingsRemedyInline(kind, path)}, or ${discard}. ${detail}`,
+	);
 }
 
 /**
@@ -1318,9 +1355,7 @@ export function validateSettingsFile(): SettingsValidationResult {
 	} catch (err) {
 		return {
 			settings: cloneValue(DEFAULT_SETTINGS),
-			issues: [
-				{ path: "(root)", message: `invalid YAML: ${err instanceof Error ? err.message : String(err)}`, kind: "syntax" },
-			],
+			issues: [{ path: "(root)", message: `invalid YAML: ${yamlErrorSummary(err)}`, kind: "syntax" }],
 		};
 	}
 	return validateSettings(parsed);

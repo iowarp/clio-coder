@@ -90,6 +90,7 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 			remove: () => {},
 			login: async () => {},
 			logout: () => {},
+			damageReason: () => null,
 			getOAuthProviders: () => [],
 			setRuntimeOverrideForTarget: () => {},
 			clearRuntimeOverrideForTarget: () => {},

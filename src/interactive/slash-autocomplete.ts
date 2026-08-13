@@ -102,8 +102,47 @@ function argumentCompletionItems(
 	});
 }
 
+/**
+ * The alias spellings tab-completion offers as commands of their own.
+ *
+ * An alias is a real invocation: `/exit`, `/ctx`, `/compact`, and `/models` all
+ * run. Completion built its list from canonical names only, so typing `/exi`
+ * offered nothing and the spelling the operator was taught by `/help` looked
+ * like it did not exist. Colon aliases stay out: `/skill:` and `/skills:` are
+ * routed by the dedicated skill branch, which offers skill names after the
+ * colon, and listing the bare prefixes beside `/skill` would put three near
+ * identical rows in front of that.
+ */
+function aliasCompletionEntries(): SlashAutocompleteCommand[] {
+	const entries: SlashAutocompleteCommand[] = [];
+	for (const ref of commandReference()) {
+		for (const alias of ref.aliases) {
+			if (alias.includes(":")) continue;
+			const standsFor = ref.aliasArgs?.[alias];
+			const argumentHint = standsFor === undefined ? compactArgumentHint(ref.args) : undefined;
+			const args = standsFor === undefined ? ref.args : undefined;
+			entries.push({
+				name: alias,
+				// An alias that stands for a subcommand takes that subcommand's
+				// arguments, not the command's, so it gets neither hint nor argument
+				// completions: offering `/context`'s siblings after `/compact` would
+				// name subcommands that cannot follow it.
+				description: `${ref.description} (alias of /${ref.name}${standsFor === undefined ? "" : ` ${standsFor}`})`,
+				...(argumentHint ? { argumentHint } : {}),
+				...(args
+					? {
+							getArgumentCompletions: (argumentText: string) =>
+								argumentCompletionItems(args, argumentText, ref.subcommandDescriptions),
+						}
+					: {}),
+			});
+		}
+	}
+	return entries;
+}
+
 export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
-	return commandReference().map((ref) => {
+	const canonical = commandReference().map((ref) => {
 		const argumentHint = compactArgumentHint(ref.args);
 		const args = ref.args;
 		return {
@@ -118,6 +157,9 @@ export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
 				: {}),
 		};
 	});
+	// Canonical names first so a prefix matching both ranks the primary spelling
+	// above the alias that stands for it.
+	return [...canonical, ...aliasCompletionEntries()];
 }
 
 /**

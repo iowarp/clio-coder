@@ -13,7 +13,7 @@ import { type AuthDialogHandle, openAuthDialog } from "./overlays/auth-dialog.js
 import type { TargetsHubNoticeLevel } from "./providers-overlay.js";
 
 type AuthProviders = Pick<ProvidersContract, "getRuntime" | "probeTarget"> & {
-	auth: Pick<ProvidersContract["auth"], "statusForTarget" | "setApiKey" | "login">;
+	auth: Pick<ProvidersContract["auth"], "statusForTarget" | "setApiKey" | "login" | "damageReason">;
 };
 
 export interface OverlayAuthLifecycleDeps {
@@ -58,6 +58,23 @@ const maybeOpenExternalUrl = (url: string): void => {
 		// Best effort only.
 	}
 };
+
+/**
+ * Fail the connect flow when the credential the operator just supplied never
+ * reached disk.
+ *
+ * The store records a refused write in `damageReason()` rather than throwing,
+ * and keeps serving the credential from memory, so the probe that follows
+ * succeeds and the dialog reports a connection that will be gone at the next
+ * start. Throwing puts this on the flow's own error path, which is what stops
+ * `probeTarget()` from running and notifies with the reason. `clio auth login`
+ * refuses the same way; see cli/shared.ts credentialWriteFailed().
+ */
+function assertCredentialStored(auth: AuthProviders["auth"], providerId: string): void {
+	const damage = auth.damageReason();
+	if (damage === null) return;
+	throw new Error(`credential for ${providerId} was not stored: ${damage}`);
+}
 
 export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): OverlayAuthLifecycle {
 	let authDialogDismiss: (() => void) | null = null;
@@ -207,6 +224,7 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 						const apiKey = (await dialog.controller.prompt("API key")).trim();
 						if (apiKey.length === 0) throw new Error("empty API key");
 						deps.providers.auth.setApiKey(authTarget.providerId, apiKey);
+						assertCredentialStored(deps.providers.auth, authTarget.providerId);
 						authDialogDismiss = null;
 						await probeTarget();
 					} catch (error) {
@@ -263,6 +281,7 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 							dialog.controller.appendLine(message);
 						},
 					});
+					assertCredentialStored(deps.providers.auth, authTarget.providerId);
 					authDialogDismiss = null;
 					await probeTarget();
 				} catch (error) {
