@@ -1,7 +1,7 @@
 ---
 name: design-council
 description: Use when a design decision has real tradeoffs and needs several expert perspectives that challenge each other before code is written, such as architecture choices, API shapes, storage formats, parallelization strategies, or dependency decisions. Quick mode runs a single round for a fast perspective check. Triggers on "council", "debate this", "multiple perspectives", "weigh the options", "what would experts say". Not for a one-question-at-a-time interrogation of a plan; use grill-me. Not for splitting implementation work across workers; use dispatch directly.
-version: 0.1.1
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - dispatch
@@ -11,56 +11,63 @@ allowed-tools:
   - ls
   - context
   - code_nav
-registry-id: iowarp/clio-coder
-source-url: https://github.com/iowarp/clio-coder/tree/main/skills/design-council
-audit: pass
+clio:
+  registry-id: iowarp/clio-coder
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/design-council
+  audit: pass
+  provenance: designed
+  eval-status: scenarios-recorded
+  model-size: large
+  agents:
+    - scout
+    - researcher
+    - provenance
 ---
 
 # Design Council
 
 Run a bounded multi-perspective debate on a real design decision. The council
-exists to surface the crux of a disagreement before code commits to one side;
-it is not a ritual, and it is not needed when everyone would agree.
+surfaces the crux of a disagreement before code commits to one side. It is not
+a ritual: if experts would agree, do not convene it.
 
-## Compose Perspectives
+## Step 0 — Check the question is contested
+
+Before composing anyone, ask: would credible experts actually disagree on the
+answer? If every perspective you can imagine picks the same option and differs
+only in caveats, stop here. Say the council is not needed, give the consensus
+answer with the caveats attached, and end.
+
+## Step 1 — Compose perspectives
 
 Derive 3 to 5 perspectives from the topic itself, never from a generic role
-menu. Four sharp perspectives beat eight generic ones. Each perspective gets:
+menu. Each perspective gets:
 
-- a name and a stance (what it argues for)
-- the expertise it argues from
-- the specific thing it should attack in the other positions
+- a name and a stance (what it argues for);
+- the expertise it argues from;
+- the specific thing it must attack in the other positions.
 
-For "HDF5 vs Zarr for checkpoints" that might be: an HPC I/O veteran defending
-single-file HDF5 on parallel filesystems, a cloud-native engineer arguing
-object-store-first Zarr, an operator worried about tooling and recovery, and a
-numerics lead demanding bit-exact round-trips. Not "optimist, pessimist,
+Example, "HDF5 vs Zarr for checkpoints": an HPC I/O veteran defending
+single-file HDF5 on parallel filesystems; a cloud-native engineer arguing
+object-store-first Zarr; an operator worried about tooling and recovery; a
+numerics lead demanding bit-exact round-trips. Never "optimist, pessimist,
 pragmatist".
 
-Before composing anyone, ask whether credible experts actually disagree on the
-answer. If every perspective you can imagine would pick the same option and
-differ only in caveats, the council is not needed: say so, give the consensus
-answer with those caveats attached, and stop. Do not build personas whose only
-purpose is to oppose a settled question.
+## Step 2 — Dispatch each perspective as a read-only worker
 
-## Vehicle
-
-Dispatch each perspective as a read-only worker. The recipe fixes capability;
-your task prompt supplies the persona and the accumulated transcript. Pick per
+The recipe fixes capability; your task prompt supplies the persona. Pick per
 perspective from the read-only recipes in the live catalog:
 
-- `scout` for stances that should be grounded in this repository's code
-- `researcher` for stances that lean on external docs, standards, or papers
-- `provenance` for stances arguing from runtime evidence and receipts
+- `scout`: stance grounded in this repository's code.
+- `researcher`: stance leaning on external docs, standards, or papers.
+- `provenance`: stance arguing from runtime evidence and receipts.
 
-Run one round's perspectives in parallel (one `dispatch` call carrying the
-round's task prompts in `tasks` with `mode="parallel"`), rounds sequential.
-Workers never edit; the debate is analysis. Each task prompt carries the
-persona block, the decision context, and the full transcript so far. Dispatch
-receipts link every statement to a worker run, so the debate is evidence, not
-vibes.
+Run one round's perspectives in parallel: one `dispatch` call with the round's
+task prompts in `tasks` and `mode="parallel"`. Rounds are sequential. Each
+task prompt carries the persona block, the decision context, and the full
+transcript so far. Workers never edit files; the debate is analysis only.
+Dispatch receipts link every statement to a worker run.
 
-## Rounds
+## Step 3 — Run the rounds
 
 1. **Positions.** Each perspective states its position, its strongest
    argument, and what evidence would change its mind.
@@ -70,19 +77,18 @@ vibes.
    still disagrees and why that crux is the crux, and its final
    recommendation.
 
-Quick mode (fast perspective check, or the user asked for a light pass):
-round 1 plus synthesis, no responses.
+**Quick mode** (user asked for a light pass): round 1 plus synthesis. No
+responses round.
 
-Early termination: judge disagreement on the decision question itself, not on
-side conditions. If every round 1 position picks the same option and differs
-only in caveats, toggles, or requests to measure later, that is consensus:
-stop, say the council was not needed, and return the consensus with the
-caveats attached. Do not run responses or convergence rounds, and never
-manufacture friction to justify the ceremony.
+**Early termination.** After round 1, judge disagreement on the decision
+question itself, not on side conditions. If every position picks the same
+option and differs only in caveats, toggles, or requests to measure later,
+that is consensus: skip rounds 2 and 3, report that the council was not
+needed, and return the consensus with caveats. Never manufacture friction.
 
-## Synthesis
+## Step 4 — Synthesize
 
-After the last round, the orchestrator (you) writes:
+After the last round, you (the orchestrator) write:
 
 ```markdown
 ## Council Synthesis - <decision>
@@ -100,22 +106,21 @@ Dissent preserved:
 - <perspective>: <the objection that survives the recommendation>
 ```
 
-Cite the transcript for every claim (perspective and round). Dispatch receipts
-and evidence bundles preserve the full worker outputs for audit.
+Cite the transcript (perspective and round) for every claim. Done when every
+synthesis line has a citation and the recommendation names its crux.
 
-## Degraded Mode
+## Degraded mode
 
 If dispatch is unavailable or admission-denied, run the same rounds inline:
-write each perspective's contribution yourself, sequentially, keeping the same
-round structure and synthesis format. Label the output clearly as degraded
-(single-model debate, no receipts) so nobody mistakes it for independent
-workers.
+write each perspective's contribution yourself, sequentially, same round
+structure and synthesis format. Label the output as degraded (single-model
+debate, no receipts).
 
 ## Boundaries
 
-A plan that needs stress-testing by questioning its author one question at a
-time is grill-me, not a council. Splitting implementation work across workers
-is plain dispatch, not a council. Council workers analyze; they never build.
+Stress-testing a plan by questioning its author one question at a time is
+`grill-me`, not a council. Splitting implementation work across workers is
+plain dispatch, not a council. Council workers analyze; they never build.
 
 ## Red Flags
 

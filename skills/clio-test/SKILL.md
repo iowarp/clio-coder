@@ -1,11 +1,15 @@
 ---
 name: clio-test
 description: Use when writing or modifying Clio Coder's own source under src/, or verifying a change end-to-end against the real test harness. Covers the three real layers (contracts / smoke / boundaries), choosing which to run for a given change, the mock-provider and ACP-over-stdio harness, and the hot-reload dev loop for picking up latest code. Activate on any src/ edit, before declaring a change verified, or when asked whether Clio still works.
-version: 0.1.2
+version: 0.1.3
 license: Apache-2.0
-registry-id: iowarp/clio-coder
-source-url: https://github.com/iowarp/clio-coder/tree/main/skills/clio-test
-audit: pass
+clio:
+  registry-id: iowarp/clio-coder
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/clio-test
+  audit: pass
+  provenance: designed
+  eval-status: scenarios-recorded
+  model-size: any
 ---
 
 # Clio Test

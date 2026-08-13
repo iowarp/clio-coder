@@ -129,10 +129,15 @@ interface ProvenanceFields {
 }
 
 /**
- * Replace install-lifecycle frontmatter with the recorded fields. Registry
- * identity lines (`registry-id`, `registry-url`) are content, not lifecycle,
- * so they survive the install and keep pinned drift checks working on the
- * installed copy.
+ * Replace install-lifecycle frontmatter with the recorded fields, written
+ * nested under the reserved `clio:` block (merged into an existing block-style
+ * `clio:` mapping when the skill carries one). Registry identity lines
+ * (`registry-id`, `registry-url`) are content, not lifecycle, so they survive
+ * the install and keep pinned drift checks working on the installed copy.
+ *
+ * A flow-style `clio: {...}` value cannot take appended block lines, so that
+ * rare shape falls back to the legacy flat stamps, which the hash and loader
+ * still understand.
  */
 function injectProvenanceFrontmatter(rawText: string, fields: ProvenanceFields): string {
 	const region = frontmatterRegion(rawText);
@@ -140,7 +145,7 @@ function injectProvenanceFrontmatter(rawText: string, fields: ProvenanceFields):
 	// Same removal the hash uses, so what is written and what is compared can
 	// never disagree about which lines the install lifecycle owns.
 	const kept = stripProvenanceLines(region.lines);
-	const added = [
+	const stamps = [
 		`source-url: ${yamlQuote(fields.sourceUrl)}`,
 		`installed-at: ${yamlQuote(fields.installedAt)}`,
 		...(fields.updatedAt ? [`updated-at: ${yamlQuote(fields.updatedAt)}`] : []),
@@ -148,7 +153,21 @@ function injectProvenanceFrontmatter(rawText: string, fields: ProvenanceFields):
 		// Audit is a human decision; installs always land unreviewed.
 		"audit: unknown",
 	];
-	return `${region.head}${[...kept, ...added].join("\n")}${region.tail}`;
+	const clioIndex = kept.findIndex((line) => /^clio:/.test(line));
+	if (clioIndex >= 0 && !/^clio:\s*$/.test(kept[clioIndex] as string)) {
+		return `${region.head}${[...kept, ...stamps].join("\n")}${region.tail}`;
+	}
+	const nested = stamps.map((line) => `  ${line}`);
+	if (clioIndex < 0) {
+		return `${region.head}${[...kept, "clio:", ...nested].join("\n")}${region.tail}`;
+	}
+	let blockEnd = clioIndex + 1;
+	while (blockEnd < kept.length) {
+		const line = kept[blockEnd] as string;
+		if (line.trim().length > 0 && !/^[ \t]/.test(line)) break;
+		blockEnd += 1;
+	}
+	return `${region.head}${[...kept.slice(0, blockEnd), ...nested, ...kept.slice(blockEnd)].join("\n")}${region.tail}`;
 }
 
 function resolveSkillDir(target: string): string {

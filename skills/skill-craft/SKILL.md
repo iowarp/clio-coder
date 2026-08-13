@@ -1,14 +1,18 @@
 ---
 name: skill-craft
 description: Use when writing, reviewing, or pruning a SKILL.md — authoring a new skill, editing an installed one, or judging whether a skill's description, body, or length is earning its cost. Triggers on "write a skill", "improve this skill", "why isn't this skill firing", "is this skill too long".
-version: 0.1.0
+version: 0.1.1
 license: Apache-2.0
 allowed-tools:
   - read
   - grep
-registry-id: iowarp/clio-coder
-source-url: https://github.com/iowarp/clio-coder/tree/main/skills/skill-craft
-audit: pass
+clio:
+  registry-id: iowarp/clio-coder
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/skill-craft
+  audit: pass
+  provenance: designed
+  eval-status: scenarios-recorded
+  model-size: large
 ---
 
 # Skill Craft

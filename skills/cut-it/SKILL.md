@@ -1,7 +1,7 @@
 ---
 name: cut-it
 description: Use when a plan, PRD, or milestone must become an executable sprint — dependency-ordered vertical slices sized for one focused agent run each, with done-when verification per slice. Never fabricates a plan; if none exists or it is too vague to slice, says so and recommends an interview first. Triggers on "cut it", "slice this plan", "make this executable", "turn this into a sprint".
-version: 0.2.0
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -14,9 +14,14 @@ allowed-tools:
   - write
   - artifact
   - ask_user
-registry-id: iowarp/clio-coder
-source-url: https://github.com/iowarp/clio-coder/tree/main/skills/cut-it
-audit: pass
+clio:
+  registry-id: iowarp/clio-coder
+  source-url: https://github.com/iowarp/clio-coder/tree/main/skills/cut-it
+  audit: pass
+  provenance: adapted
+  origin: https://github.com/TheOrcDev/skills
+  eval-status: scenarios-recorded
+  model-size: any
 ---
 
 # Cut It
@@ -25,9 +30,6 @@ Transform an existing plan into ordered execution slices that a coding agent
 can run one at a time, leaving the build green after every slice. The output
 is a `SPRINT.md` another agent can execute cold — no conversation context
 required.
-
-Adapted from the community `cut-it` skill (TheOrcDev/skills), shaped to Clio's
-agent fleet and sprint conventions.
 
 ## Step 1 — Locate the plan
 
