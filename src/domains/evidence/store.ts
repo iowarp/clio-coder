@@ -28,15 +28,45 @@ export function evidenceDirectory(dataDir: string, evidenceId: string): string {
 	return join(evidenceRoot(dataDir), evidenceId);
 }
 
+/**
+ * Thrown when a bundle id resolves to no bundle. Callers hold an id, not a
+ * path, so the store names the id; the CLI adds the listing command that shows
+ * which ids exist.
+ */
+export class EvidenceNotFoundError extends Error {
+	constructor(readonly evidenceId: string) {
+		super(`evidence artifact not found: ${evidenceId}`);
+		this.name = "EvidenceNotFoundError";
+	}
+}
+
+function isMissingFile(error: unknown): boolean {
+	return (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
 export async function loadEvidenceOverview(dataDir: string, evidenceId: string): Promise<EvidenceOverview> {
-	const raw = await readFile(join(evidenceDirectory(dataDir, evidenceId), "overview.json"), "utf8");
+	let raw: string;
+	try {
+		raw = await readFile(join(evidenceDirectory(dataDir, evidenceId), "overview.json"), "utf8");
+	} catch (error) {
+		if (isMissingFile(error)) throw new EvidenceNotFoundError(evidenceId);
+		throw error;
+	}
 	const parsed = parseJson(raw, `${evidenceId}/overview.json`);
 	return parseOverview(parsed, `${evidenceId}/overview.json`);
 }
 
 export async function inspectEvidence(dataDir: string, evidenceId: string): Promise<EvidenceInspectable> {
 	const overview = await loadEvidenceOverview(dataDir, evidenceId);
-	const findingsRaw = await readFile(join(evidenceDirectory(dataDir, evidenceId), "findings.json"), "utf8");
+	let findingsRaw: string;
+	try {
+		findingsRaw = await readFile(join(evidenceDirectory(dataDir, evidenceId), "findings.json"), "utf8");
+	} catch (error) {
+		// The overview above read, so the bundle exists and this one member of it
+		// does not. That is a different fault from a missing bundle and says so.
+		if (isMissingFile(error)) throw new Error(`evidence artifact ${evidenceId} is missing findings.json`);
+		throw error;
+	}
 	const findingsParsed = parseJson(findingsRaw, `${evidenceId}/findings.json`);
 	const findings = parseFindingsFile(findingsParsed, `${evidenceId}/findings.json`);
 	return { overview, findings };

@@ -24,7 +24,7 @@ const TAG_PRIORITY = [
 ] as const satisfies ReadonlyArray<EvidenceTag>;
 
 export async function proposeMemoryFromEvidence(dataDir: string, evidenceId: string): Promise<MemoryProposalResult> {
-	const evidence = await inspectEvidenceForMemory(dataDir, evidenceId);
+	const evidence = await inspectEvidence(dataDir, evidenceId);
 	const existing = (await loadMemoryRecords(dataDir)).find((record) => record.id === memoryIdFromEvidence(evidenceId));
 	if (existing !== undefined) return { record: existing, created: false };
 
@@ -165,18 +165,6 @@ function formatSource(overview: EvidenceOverview): string {
 	return `eval:${overview.source.evalId}`;
 }
 
-async function inspectEvidenceForMemory(
-	dataDir: string,
-	evidenceId: string,
-): Promise<{ overview: EvidenceOverview; findings: EvidenceFinding[] }> {
-	try {
-		return await inspectEvidence(dataDir, evidenceId);
-	} catch (error) {
-		if (isErrorWithCode(error) && error.code === "ENOENT") throw new Error(`evidence artifact not found: ${evidenceId}`);
-		throw error;
-	}
-}
-
 function truncateText(value: string, maxChars: number): string {
 	if (value.length <= maxChars) return value;
 	if (maxChars <= 3) return value.slice(0, maxChars);
@@ -189,8 +177,4 @@ function uniqueStrings(values: ReadonlyArray<string>): string[] {
 
 function compareStrings(a: string, b: string): number {
 	return a.localeCompare(b);
-}
-
-function isErrorWithCode(error: unknown): error is NodeJS.ErrnoException {
-	return typeof error === "object" && error !== null && "code" in error;
 }

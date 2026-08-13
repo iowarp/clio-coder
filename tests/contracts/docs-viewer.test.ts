@@ -1,6 +1,9 @@
 import { ok, strictEqual } from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { request } from "node:http";
+import { tmpdir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import {
 	contentTypeFor,
@@ -11,6 +14,8 @@ import {
 	synthesizeMenu,
 	topicToFile,
 } from "../../src/cli/docs.js";
+
+const CLI_ENTRY = join(new URL("../..", import.meta.url).pathname, "dist", "cli", "index.js");
 
 function httpGet(base: string, path: string): Promise<{ status: number; contentType: string; body: string }> {
 	return new Promise((resolve, reject) => {
@@ -115,5 +120,56 @@ describe("contracts/docs viewer server", () => {
 	it("refuses to escape the html root", async () => {
 		const res = await httpGet(handle.url, "/%2e%2e/package.json");
 		strictEqual(res.status, 403);
+	});
+});
+
+/**
+ * The banner names a fixed install directory, so it has to name it the way
+ * every other path this CLI prints is named: absolutely. It used to be
+ * relativized against the cwd, which from anywhere outside the install printed
+ * a `../../../home/...` string that only resolved from the directory the
+ * operator happened to be standing in.
+ */
+describe("contracts/docs viewer banner", () => {
+	/** Start the viewer from `cwd`, read until it has printed its banner, then Ctrl+C it. */
+	function runViewerBanner(cwd: string): Promise<string> {
+		return new Promise((resolve, reject) => {
+			const child = spawn(process.execPath, [CLI_ENTRY, "docs", "safety", "--no-open"], {
+				cwd,
+				env: process.env,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			let stdout = "";
+			let stopped = false;
+			const timer = setTimeout(() => {
+				child.kill("SIGKILL");
+				reject(new Error(`docs viewer printed no banner in time: ${stdout}`));
+			}, 15_000);
+			child.stdout.setEncoding("utf8");
+			child.stdout.on("data", (chunk: string) => {
+				stdout += chunk;
+				if (!stopped && stdout.includes("press Ctrl+C to stop.")) {
+					stopped = true;
+					child.kill("SIGINT");
+				}
+			});
+			child.on("error", (err) => {
+				clearTimeout(timer);
+				reject(err);
+			});
+			child.on("close", () => {
+				clearTimeout(timer);
+				resolve(stdout);
+			});
+		});
+	}
+
+	it("prints the served directory absolutely, from a cwd outside the install", async () => {
+		const banner = await runViewerBanner(tmpdir());
+		const served = banner.split("\n").find((line) => line.includes("serving ")) ?? "";
+		const path = served.replace(/^\s*serving\s+/, "");
+		strictEqual(path, resolveDocsHtmlDir(), `banner line was ${JSON.stringify(served)}`);
+		ok(isAbsolute(path), `served path must be absolute: ${path}`);
+		ok(!path.includes(".."), `served path must not be relativized: ${path}`);
 	});
 });

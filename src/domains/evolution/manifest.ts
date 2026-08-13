@@ -72,7 +72,15 @@ export interface ChangeManifestSummary {
 }
 
 export async function loadChangeManifestJson(path: string): Promise<unknown> {
-	const raw = await readFile(path, "utf8");
+	let raw: string;
+	try {
+		raw = await readFile(path, "utf8");
+	} catch (error) {
+		// Same voice as the invalid-JSON refusal below: name the artifact, then
+		// the path, rather than repeating node:fs at the operator.
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`change manifest not found: ${path}`);
+		throw error;
+	}
 	try {
 		return JSON.parse(raw) as unknown;
 	} catch (error) {
