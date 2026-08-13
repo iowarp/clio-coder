@@ -117,13 +117,13 @@
             
             <div class="atlas-grid" style="margin-top:1.5rem;">
               <div class="atlas-menu">
-                <button type="button" class="atlas-btn active" onclick="selectPlane(1)">1. Read Plane</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(2)">2. Edit Plane</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(3)">3. Execute Plane</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(4)">4. Search Plane</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(5)">5. Fleet Plane</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(6)">6. Context Plane</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(7)">7. Communication Plane</button>
+                <button type="button" class="atlas-btn active" onclick="selectPlane(1)">1. Observe Plane (7)</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(2)">2. Mutate Plane (2)</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(3)">3. Execute Plane (3)</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(4)">4. Orchestrate Plane (4)</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(5)">5. Retrieve Plane (1)</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(6)">6. Interact Plane (1)</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(7)">7. Artifact Plane (1)</button>
               </div>
 
               <div class="atlas-details" id="planeDetails">
@@ -210,52 +210,57 @@
   <script>
     const PLANES = {
       1: {
-        title: "Read Plane",
+        title: "Observe Plane (7 Tools)",
         tools: [
-          { name: "read", params: "path, offset, limit, tail", desc: "Reads text files line by line, capped at 50KB or 2000 lines. Larger files must be paged or offset." }
+          { name: "read", params: "path, offset, limit, tail", desc: "Reads text files line by line, capped at 50KB or 2000 lines. Larger files must be paged or offset." },
+          { name: "grep", params: "pattern, path, mode, glob, ignore_case, literal, context, limit, include_ignored", desc: "Ripgrep search across workspace directory models (capped at 16KB content / 8KB files)." },
+          { name: "find", params: "pattern, path, order, limit, include_ignored", desc: "Locates files by regex/glob matching (capped at 8KB)." },
+          { name: "ls", params: "path, limit, include_ignored", desc: "Lists directory contents with file sizes and recursive child counts (capped at 8KB)." },
+          { name: "code_nav", params: "mode, query, limit", desc: "Navigates CodeWiki symbol indexes, outlines, dependencies, dependents, or architecture pages (capped at 16KB)." },
+          { name: "context", params: "scope, query, limit, name, include_tree", desc: "Gathers workspace priming context, documentation folders, or installed skill definitions (capped at 16KB docs / 50KB skills/workspace)." },
+          { name: "credential_present", params: "name, source, file", desc: "Checks whether a required credential exists in environment or files without exposing secret values." }
         ]
       },
       2: {
-        title: "Edit Plane",
+        title: "Mutate Plane (2 Tools)",
         tools: [
-          { name: "edit", params: "path, edits: {oldText, newText}[]", desc: " Surgical matching/patching edits in files. Matches exactly one region. Uses exact, fuzzy, and indent-relaxed fallback algorithms." },
-          { name: "write", params: "path, content", desc: "Overwrites entire files. Serialized with edit via file mutation lock queues." }
+          { name: "write", params: "path, content", desc: "Atomically writes or overwrites entire file contents under write boundary governance." },
+          { name: "edit", params: "path, edits: {oldText, newText}[]", desc: "Surgical matching/patching edits in files. Uses exact, whitespace-relaxed, and fuzzy match strategies." }
         ]
       },
       3: {
-        title: "Execute Plane",
+        title: "Execute Plane (3 Tools)",
         tools: [
-          { name: "bash", params: "command, cwd, timeout_ms", desc: "Executes a shell command in a persistent or single-session bash subprocess. Captures profile paths." }
+          { name: "bash", params: "command, cwd, timeout_ms", desc: "Executes shell commands within workspace boundaries and timeout limits (default 300,000 ms)." },
+          { name: "git", params: "op, path, cached, stat, name_only, limit, cwd", desc: "Runs safe git status, diff, and log inspections." },
+          { name: "verify", params: "check, focus", desc: "Runs declared project verification suites (tests, lints, typechecks, builds)." }
         ]
       },
       4: {
-        title: "Search Plane",
+        title: "Orchestrate Plane (4 Tools)",
         tools: [
-          { name: "grep", params: "Query, SearchPath, Includes, MatchPerLine", desc: "Ripgrep search across workspace directory models." },
-          { name: "find", params: "SearchPath, Query", desc: "Locates files by glob patterns." },
-          { name: "ls", params: "DirectoryPath", desc: "List directory contents." }
+          { name: "dispatch", params: "task, tasks, mode, detach, agent, target, model, node, failover, allowed_candidates, thinking_level, cwd, timeout_ms, briefing, max_output_bytes", desc: "Dispatches worker agents, compete worktree groups, or fan-out batch execution plans." },
+          { name: "monitor", params: "run_id, mode", desc: "Inspects active/dispatched worker execution timelines, statuses, and receipts." },
+          { name: "steer", params: "run_id, action, message", desc: "Steers with guidance or cancels in-flight worker execution runs." },
+          { name: "tasks", params: "action, title, tasks, id, note", desc: "Manages structured session task boards across plan, add, start, done, block, and drop actions." }
         ]
       },
       5: {
-        title: "Fleet Plane",
+        title: "Retrieve Plane (1 Tool)",
         tools: [
-          { name: "dispatch", params: "Agent, Prompt, Workspace", desc: "Runs separate worker agents on the same workspace." },
-          { name: "monitor", params: "RunId", desc: "Inspect active/dispatched worker execution timelines." },
-          { name: "steer", params: "RunId, Action", desc: "Steers or cancels dispatched runs." }
+          { name: "web_fetch", params: "url, method, headers, body, timeout_ms, max_bytes, format", desc: "Fetches external web documentation, arXiv/AlphaXiv papers, and APIs with boilerplate stripping (default 600KB)." }
         ]
       },
       6: {
-        title: "Context Plane",
+        title: "Interact Plane (1 Tool)",
         tools: [
-          { name: "context", params: "scope, query", desc: "Gathers workspace priming inputs, codewiki listings, and local documentation folders." },
-          { name: "code_nav", params: "mode, query", desc: "Navigates codewiki indexes by symbols, outline, dependents, or wiki." }
+          { name: "ask_user", params: "action, mode, questions, decisions, summary, max_rounds", desc: "Asks clarification questions or gets structured multi-choice decisions from operator." }
         ]
       },
       7: {
-        title: "Communication Plane",
+        title: "Artifact Plane (1 Tool)",
         tools: [
-          { name: "ask_user", params: "Prompt, Options", desc: "Asks clarification questions or gets approvals from operator." },
-          { name: "artifact", params: "Title, Type, Data", desc: "Creates markdown blueprints/reports." }
+          { name: "artifact", params: "kind, content, title, path", desc: "Writes terminal markdown blueprints, plans, reviews, or reports at workspace root." }
         ]
       }
     };
