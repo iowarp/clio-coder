@@ -631,6 +631,10 @@ async function runCompactionFlow(
 		messagesSummarized: result.messagesSummarized,
 		isSplitTurn: result.isSplitTurn,
 		tokensAfter: estimateTokensAfterCompaction(entries, result),
+		// The summarization call is a real model call. Persisting its provider
+		// usage on the entry is what puts it in front of `/cost` and `clio usage
+		// report`, which folded the ledger and so counted every call but this one.
+		...(result.usage !== undefined ? { usage: result.usage } : {}),
 	};
 	if (trigger !== undefined) entry.trigger = trigger;
 	session.appendEntry(entry);

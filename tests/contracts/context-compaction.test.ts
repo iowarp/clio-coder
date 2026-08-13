@@ -577,3 +577,47 @@ describe("contracts/context compaction mask_observations", () => {
 		ok(callIndex >= 0 && resultIndex > callIndex, `callIndex=${callIndex} resultIndex=${resultIndex}`);
 	});
 });
+
+/**
+ * `/context compact` spends a real turn at the target. `/cost` was byte-identical
+ * before and after it, because the summarization call reported its usage to
+ * nobody: `compact` dropped the `done` message's usage on the floor, so nothing
+ * downstream could record it. The result carries it now, summed across the one
+ * or two streams a compaction runs.
+ */
+describe("contracts/context compaction reports what its call spent", () => {
+	it("returns the provider usage of every summarization stream it ran", async () => {
+		const modelId = "usage-compaction-model";
+		const faux = registerFauxProvider({
+			provider: "usage-compaction-provider",
+			models: [{ id: modelId }],
+			tokensPerSecond: 0,
+		});
+		const step = () => fauxAssistantMessage("## Goal\nSummarized.");
+		faux.setResponses([step, step]);
+		try {
+			const entries: SessionEntry[] = [
+				user("01", "Do the work."),
+				assistant("02", [{ type: "text", text: "Working on it." }], "01"),
+				user("03", "Keep going.", "02"),
+				assistant("04", [{ type: "text", text: "Still working." }], "03"),
+			];
+			const result = await compact({
+				entries,
+				model: faux.getModel(modelId) as EngineModel,
+				keepRecentTokens: 1,
+			});
+			const usage = result.usage;
+			ok(usage, "the summarization call's usage reaches the caller");
+			strictEqual(usage.apiCalls, 2, "a split turn runs two streams and both are billed");
+			ok(usage.input > 0 && usage.output > 0, `prompt and completion sides are recorded: ${JSON.stringify(usage)}`);
+			strictEqual(
+				usage.totalTokens,
+				usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
+				"the summed total matches its components",
+			);
+		} finally {
+			faux.unregister();
+		}
+	});
+});

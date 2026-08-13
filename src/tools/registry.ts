@@ -593,11 +593,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		// reason replaces the generic denial so the model gets recovery guidance.
 		const loopReason = observeRejectedAttempt(entry.call, entry.decision, entry.options);
 		entry.resolve(
-			guardOverrideForRejectedAttempt(entry.call, entry.decision, loopReason) ?? {
-				kind: "blocked",
-				reason: loopReason ?? reason,
-				decision: entry.decision,
-			},
+			guardOverrideForRejectedAttempt(entry.call, entry.decision, loopReason) ??
+				parkAnsweredBlockedVerdict(entry.decision, entry.call.tool, loopReason ?? reason),
 		);
 	};
 
@@ -844,6 +841,35 @@ function guardBlockedVerdict(
 			hints: [],
 		},
 		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode: GUARD_BLOCK_REASON_CODE } } : {}),
+	};
+	return { kind: "blocked", reason, decision: blocked };
+}
+
+/**
+ * Terminal blocked verdict for a parked call that has been answered: denied at
+ * the confirmation prompt, cancelled with the turn, or settled by an abort.
+ *
+ * The ask decision's rejection explains that the call *is* parked and what
+ * approving it would do. Once the answer is in, that text is stale, and
+ * `formatModelRejection` printed it as a second paragraph restating a denial the
+ * reason had already stated, followed by four approval hints for an approval
+ * that is not coming. The answer is the whole message; the composer still closes
+ * it with the standing pivot instruction.
+ */
+function parkAnsweredBlockedVerdict(
+	decision: SafetyDecision,
+	tool: string,
+	reason: string,
+): Extract<RegistryVerdict, { kind: "blocked" }> {
+	const blocked: SafetyDecision = {
+		kind: "block",
+		classification: decision.classification,
+		rejection: {
+			short: `${tool} blocked: ${decision.classification.actionClass} was not approved`,
+			detail: reason,
+			hints: [],
+		},
+		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
 	return { kind: "blocked", reason, decision: blocked };
 }

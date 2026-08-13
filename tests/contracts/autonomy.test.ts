@@ -19,6 +19,7 @@ import {
 } from "../../src/domains/safety/autonomy.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import { createSafetyBundle } from "../../src/domains/safety/extension.js";
+import { formatModelRejection } from "../../src/domains/safety/rejection-feedback.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import {
@@ -553,6 +554,51 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			autonomyNotice?.text,
 			"[approval] worker coder (run r-def) asks to run write (write): asks at autonomy suggest. Approve once, or Esc to deny this call.",
 		);
+	});
+});
+
+/**
+ * Denying one bash call rendered the denied state six times on one frame. Two of
+ * those were paragraphs inside the model-facing payload: the operator's decision,
+ * then the ask-time rejection explaining that the call is parked and how
+ * approving it would resume it, followed by four hints for an approval that is
+ * not coming, and a closing "do not retry" that the decision line had already
+ * said. The answer is the message; the composer still closes it with the
+ * standing pivot.
+ */
+describe("contracts/autonomy denial payload says the denial once", () => {
+	const denial = "User cancelled this tool call from the permission confirmation prompt. Wait for new instruction.";
+
+	it("carries the operator's decision and drops the pre-decision ask text", async () => {
+		const registry = registryAt("auto-edit");
+		registry.onPermissionRequired((_call, _decision, meta) => {
+			registry.cancelParkedCall(meta.requestId, denial);
+		});
+		const verdict = await registry.invoke(bashCall("id"));
+
+		strictEqual(verdict.kind, "blocked");
+		ok(verdict.kind === "blocked" && "rejection" in verdict.decision);
+		const rejection = verdict.kind === "blocked" && "rejection" in verdict.decision ? verdict.decision.rejection : null;
+		strictEqual(rejection?.detail, denial, "the decision is the whole explanation");
+		deepStrictEqual([...(rejection?.hints ?? [])], [], "no approval hints after the approval was refused");
+
+		const modelText = formatModelRejection(verdict.kind === "blocked" ? verdict.reason : "", rejection ?? undefined);
+		const lines = modelText.split("\n");
+		strictEqual(lines.filter((line) => line.includes("cancelled this tool call")).length, 1);
+		ok(!modelText.includes("The call is parked until"), `no stale parked-state paragraph: ${modelText}`);
+		ok(!modelText.includes("Approving resumes only this call"), modelText);
+		strictEqual(lines.length, 2, `one denial plus the standing pivot: ${modelText}`);
+	});
+
+	it("keeps the blocked decision shape downstream consumers read", async () => {
+		const registry = registryAt("auto-edit");
+		registry.onPermissionRequired((_call, _decision, meta) => {
+			registry.cancelParkedCall(meta.requestId, denial);
+		});
+		const verdict = await registry.invoke(bashCall("id"));
+		ok(verdict.kind === "blocked");
+		strictEqual(verdict.decision.kind, "block", "an answered park is a block, not a pending ask");
+		strictEqual(verdict.decision.classification.actionClass, "execute");
 	});
 });
 

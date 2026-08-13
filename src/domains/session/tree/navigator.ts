@@ -9,11 +9,29 @@ import type { ResolvedLabel } from "./manager.js";
  * deliver a serializable structure to overlay renderers in slice 12b-2.
  */
 
+/**
+ * Node kinds the navigator renders. `tree.json` stores turn kinds only, so the
+ * two structural events a session can carry, a compaction and a returned-from
+ * branch, live in the ledger as `compactionSummary` / `branchSummary` entries.
+ * They are the two moments a reader most needs to see in the tree, so the
+ * snapshot admits them as node kinds and the builder links them by their
+ * recorded parent turn.
+ */
+export type TreeNodeKind = SessionTreeNode["kind"] | "compaction" | "branch";
+
+/** A tree node the snapshot builder accepts: a persisted turn node or a ledger-derived structural node. */
+export interface TreeInputNode {
+	id: string;
+	parentId: string | null;
+	at: string;
+	kind: TreeNodeKind;
+}
+
 export interface TreeSnapshotNode {
 	id: string;
 	parentId: string | null;
 	at: string;
-	kind: SessionTreeNode["kind"];
+	kind: TreeNodeKind;
 	label?: string;
 	/**
 	 * Single-line, ANSI/sentinel-stripped synopsis of the underlying turn
@@ -73,13 +91,13 @@ function pickMeta(meta: SessionMeta): TreeSnapshot["meta"] {
  * tree() when the caller has not explicitly tracked a current-branch
  * pointer yet.
  */
-export function computeLeafId(nodes: ReadonlyArray<SessionTreeNode>): string | null {
+export function computeLeafId(nodes: ReadonlyArray<TreeInputNode>): string | null {
 	if (nodes.length === 0) return null;
 	const hasChild = new Set<string>();
 	for (const node of nodes) {
 		if (node.parentId) hasChild.add(node.parentId);
 	}
-	let leaf: SessionTreeNode | null = null;
+	let leaf: TreeInputNode | null = null;
 	for (const node of nodes) {
 		if (hasChild.has(node.id)) continue;
 		if (!leaf || node.at >= leaf.at) leaf = node;
@@ -94,7 +112,7 @@ export function computeLeafId(nodes: ReadonlyArray<SessionTreeNode>): string | n
  */
 export function buildTreeSnapshot(input: {
 	meta: SessionMeta;
-	nodes: ReadonlyArray<SessionTreeNode>;
+	nodes: ReadonlyArray<TreeInputNode>;
 	labels: ReadonlyMap<string, ResolvedLabel>;
 	leafId?: string | null;
 	/**

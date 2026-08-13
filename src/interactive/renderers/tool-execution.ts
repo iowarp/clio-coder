@@ -403,7 +403,7 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 	const parts: string[] = [];
 	const outcome = outcomeSummary(finished);
 	if (outcome !== null) parts.push(outcome);
-	const bytes = shownBytesOf(finished);
+	const bytes = isNonExecutedOutcome(finished.outcome) ? null : shownBytesOf(finished);
 	if (bytes !== null && bytes > 0) parts.push(formatBytes(bytes));
 	const offloadPath = offloadPathOf(finished);
 	return {
@@ -579,7 +579,26 @@ function webFetchMeta(result: unknown): string | null {
 	return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-function buildSublineBody(toolName: string, args: unknown, status: HeaderStatus, result?: unknown): string {
+/**
+ * A call the permission gate blocked never executed, so the collapsed row must
+ * not claim it did. `ran \`id\` · 667B ✗ blocked` read as a command that ran and
+ * produced 667 bytes, while the expanded header for the same node correctly said
+ * `bash(id) ✗ blocked`. Blocked rows use that same call-signature form, and the
+ * ledger byte count is suppressed because those bytes are the denial text, not
+ * output.
+ */
+function isNonExecutedOutcome(outcome: ToolExecutionFinished["outcome"]): boolean {
+	return outcome === "blocked";
+}
+
+function buildSublineBody(
+	toolName: string,
+	args: unknown,
+	status: HeaderStatus,
+	result?: unknown,
+	outcome?: ToolExecutionFinished["outcome"],
+): string {
+	if (isNonExecutedOutcome(outcome)) return buildUnknownToolBody(toolName, args);
 	if (toolName === "web_fetch") {
 		const meta = status === undefined ? null : webFetchMeta(result);
 		return `${buildUnknownToolBody(toolName, args)}${meta ? dim(` · ${meta}`) : ""}`;
@@ -615,7 +634,7 @@ function sublineParts(
 	meta: StatusMeta,
 ): SublineParts {
 	const finished = "result" in call ? call : null;
-	const body = styleSublineBody(buildSublineBody(call.toolName, call.args, status, finished?.result));
+	const body = styleSublineBody(buildSublineBody(call.toolName, call.args, status, finished?.result, finished?.outcome));
 	const resourceLabel = classifyResourceRead(call.toolName, call.args);
 	const resource = resourceLabel !== null ? dim(` · ${resourceLabel}`) : "";
 	if (finished !== null) {

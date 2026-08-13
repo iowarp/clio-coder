@@ -89,7 +89,7 @@ function emptyUsageTotals(): UsageTotals {
 }
 
 function addUsageCall(totals: UsageTotals, call: LedgerUsageCall): void {
-	totals.apiCalls += 1;
+	totals.apiCalls += call.apiCalls ?? 1;
 	totals.input += call.input;
 	totals.output += call.output;
 	totals.cacheRead += call.cacheRead;

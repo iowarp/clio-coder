@@ -272,6 +272,44 @@ describe("contracts/session-tree-continuity", () => {
 		await contract.close();
 	});
 
+	/**
+	 * /tree recorded neither a fork nor a compaction. Both exist on disk: the
+	 * fork's meta.json carries parentSessionId/parentTurnId and a compaction
+	 * appends a compactionSummary entry with its own turn id and parent pointer.
+	 * The navigator reads tree.json, which holds message turns only, so the
+	 * snapshot draws the structural entries from the ledger.
+	 */
+	it("shows a compaction as a node and a fork's parent in the snapshot", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "u1" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "a1" } });
+		contract.appendEntry({
+			kind: "compactionSummary",
+			parentTurnId: a1.id,
+			summary: "older history summarized",
+			tokensBefore: 9901,
+			tokensAfter: 2100,
+			messagesSummarized: 6,
+			firstKeptTurnId: a1.id,
+		});
+
+		const snapshot = contract.tree(meta.id);
+		const compactionNodes = Object.values(snapshot.nodesById).filter((node) => node.kind === "compaction");
+		strictEqual(compactionNodes.length, 1, "the compaction is a node in the tree");
+		strictEqual(compactionNodes[0]?.parentId, a1.id, "hung off the turn it kept");
+		ok(compactionNodes[0]?.preview?.includes("6 entries summarized"), compactionNodes[0]?.preview);
+		strictEqual(snapshot.leafId, a1.id, "the next append point is still the last turn, not the marker");
+
+		const forkedMeta = contract.fork(a1.id);
+		const forkSnapshot = contract.tree(forkedMeta.id);
+		strictEqual(forkSnapshot.meta.parentSessionId, meta.id, "the fork names the session it came from");
+		strictEqual(forkSnapshot.meta.parentTurnId, a1.id, "and the turn it split at");
+
+		await contract.close();
+	});
+
 	it("fork excludes a compaction summary written after the fork point", async () => {
 		const bundle = createSessionBundle(stubContext());
 		const contract = bundle.contract;

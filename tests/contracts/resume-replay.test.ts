@@ -143,6 +143,48 @@ describe("contracts/resume replay transcript notices", () => {
 		ok(!rendered.includes("[aborted]"), "the notice explains itself and carries no error line");
 	});
 
+	/**
+	 * `promptRecompiled` is a diagnostics breadcrumb. The live transcript never
+	 * showed it; replay dumped `custom:promptRecompiled` plus a JSON blob of
+	 * hashes into the middle of a forked conversation, so /fork and /resume
+	 * rendered a line the session itself never did.
+	 */
+	it("suppresses diagnostics custom entries the live transcript never rendered", () => {
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, [
+			{ kind: "message", role: "user", turnId: "u1", parentTurnId: null, timestamp: ts, payload: { text: "hi" } },
+			{
+				kind: "custom",
+				customType: "promptRecompiled",
+				turnId: "c1",
+				parentTurnId: "u1",
+				timestamp: ts,
+				data: { previousHash: null, hash: "9994f4add15203e9", tokenEstimate: 2366 },
+			},
+			{ kind: "message", role: "assistant", turnId: "a1", parentTurnId: "c1", timestamp: ts, payload: { text: "ok" } },
+		]);
+		const rendered = strip(panel.render(80).join("\n"));
+		ok(!rendered.includes("promptRecompiled"), "the raw entry type must not reach the transcript");
+		ok(!rendered.includes("tokenEstimate"), "nor its JSON payload");
+		ok(rendered.includes("ok"), "the surrounding turns still replay");
+	});
+
+	it("still replays a custom entry a writer marked for display", () => {
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, [
+			{
+				kind: "custom",
+				customType: "operatorNote",
+				turnId: "c1",
+				parentTurnId: null,
+				timestamp: ts,
+				display: true,
+				data: { note: "visible" },
+			},
+		]);
+		ok(strip(panel.render(80).join("\n")).includes("custom:operatorNote"), "an opted-in entry still renders");
+	});
+
 	it("keeps the aborted line on a mid-stream abort the provider reported", () => {
 		const panel = createChatPanel();
 		rehydrateChatPanelFromTurns(panel, [

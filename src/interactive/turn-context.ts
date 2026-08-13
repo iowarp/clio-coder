@@ -100,6 +100,12 @@ export interface TurnContext {
 	flushReconciledSnapshot(): void;
 	/** Reconcile the live snapshot against one API call's provider usage. */
 	reconcileUsage(usage: Usage): void;
+	/**
+	 * Prompt-side tokens the current snapshot accounts for. The prompt of an
+	 * in-flight call is spent whatever the operator does next, so an interrupted
+	 * turn records this rather than zero. 0 when no snapshot exists yet.
+	 */
+	promptSideTokens(): number;
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
 	refreshAgentMessagesFromSession(agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry>;
 	runAutoCompact(
@@ -309,6 +315,28 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const compactionFailureMessage = (error: unknown): string =>
 		`compaction failed: ${error instanceof Error ? error.message : String(error)}`;
 
+	const recordCompactionUsage = (agentRuntime: AgentRuntime, result: CompactResult): void => {
+		const usage = result.usage;
+		if (!usage || !deps.observability) return;
+		if (usage.totalTokens <= 0 && usage.cost.total <= 0) return;
+		deps.observability.recordTokens(
+			agentRuntime.targetId,
+			agentRuntime.wireModelId,
+			usage.totalTokens,
+			usage.cost.total,
+			{
+				input: usage.input,
+				output: usage.output,
+				cacheRead: usage.cacheRead,
+				cacheWrite: usage.cacheWrite,
+				reasoningTokens: usage.reasoning,
+				totalTokens: usage.totalTokens,
+				apiCalls: Math.max(1, Math.round(usage.apiCalls)),
+			},
+			agentRuntime.runtimeResolution.costProvenance,
+		);
+	};
+
 	/**
 	 * Two-mechanism context protection. When pressure crosses the single
 	 * threshold, first mask the bodies of tool observations older than
@@ -427,6 +455,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return false;
 		}
 
+		// The summarization call spends tokens on the same target the turn would
+		// have. The ledger entry carries its usage for a later reseed; this is the
+		// live sink, so `/cost` and the footer move the moment /context compact
+		// returns instead of staying byte-identical to before it ran.
+		recordCompactionUsage(agentRuntime, result);
+
 		refreshAgentMessagesFromSession(agentRuntime);
 
 		const postCompactSnapshot = captureRuntimeContextSnapshot(
@@ -504,6 +538,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// track usage; persistence waits for the run to settle.
 			currentContextSnapshot = reconcileSnapshot(currentContextSnapshot, usage);
 			snapshotPersistPending = true;
+		},
+
+		promptSideTokens(): number {
+			return currentContextSnapshot ? snapshotInputTokens(currentContextSnapshot) : 0;
 		},
 
 		/**

@@ -12,6 +12,7 @@ import type { AgentEvent, AgentMessage, Usage } from "../engine/types.js";
 import {
 	type AssistantCallTiming,
 	assistantSessionPayload,
+	estimatedUsageForInterruptedTurn,
 	extractUserText,
 	hasPersistableAssistantContent,
 	isEmptyAbortedAssistantMessage,
@@ -34,6 +35,12 @@ export interface TurnPersistenceDeps {
 	removeQueuedMirrorEntry: (text: string) => void;
 	/** Prompt-cache record for a persisted assistant call (T3.2 + cold stamp). */
 	promptCachePayloadForAssistant: (usage: Usage) => Record<string, unknown>;
+	/**
+	 * Prompt-side tokens the live context accounting holds for the turn in
+	 * flight. Used only to record what an interrupted call is known to have
+	 * spent when the provider reported no usage at all; 0 when unknown.
+	 */
+	promptSideTokens: () => number;
 }
 
 export interface TurnPersistence {
@@ -77,6 +84,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		if (usage && typeof usage === "object") {
 			payload.promptCache = deps.promptCachePayloadForAssistant(usage);
 		}
+		// A cancelled turn's provider usage is the object the stream started with
+		// and never updated. Record what the call is known to have spent instead of
+		// the zeros, in the shape a completed turn uses and flagged as an estimate.
+		const interruptedUsage = estimatedUsageForInterruptedTurn(message, deps.promptSideTokens());
+		if (interruptedUsage !== null) payload.usage = interruptedUsage;
 		if (isLengthStopAssistantMessage(message) && state.runtime) {
 			const contextExhaustion = recordValue(payload.contextExhaustion);
 			const contextWindow = state.runtime.runtimeResolution.capabilityDecisions.contextWindow;

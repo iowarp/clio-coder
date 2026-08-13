@@ -513,6 +513,22 @@ function renderRetryStatusEntry(entry: CustomEntry, width: number): string[] {
 	return wrapTextWithAnsi(formatRetryStatus(status), width);
 }
 
+/**
+ * Custom entries the replay renders. A custom entry is an extension point: some
+ * carry operator-facing text, and the rest are diagnostics the live transcript
+ * never shows. `promptRecompiled` is the latter, and replay dumped it as the
+ * literal type name plus a JSON blob of hashes in the middle of a resumed
+ * conversation, so a fork or resume showed a line the session itself never did.
+ * Rendering is opt-in: a known type, or `display: true` from a writer that means
+ * the entry to be seen.
+ */
+function rendersCustomEntry(entry: CustomEntry): boolean {
+	if (entry.display === false) return false;
+	if (entry.customType === "retryStatus") return true;
+	if (entry.customType === "finishContractAdvisory" || entry.customType === "middlewareReminder") return true;
+	return entry.display === true;
+}
+
 function renderCustomEntry(entry: CustomEntry, width: number): string[] {
 	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width);
 	// "finishContractAdvisory" is the pre-middleware name for the same entry
@@ -520,6 +536,7 @@ function renderCustomEntry(entry: CustomEntry, width: number): string[] {
 	if (entry.customType === "finishContractAdvisory" || entry.customType === "middlewareReminder") {
 		return renderReminderMessageEntry(entry, width);
 	}
+	if (entry.display !== true) return [];
 	const body = stringifyPreview(entry.data);
 	const suffix = body.length > 0 ? ` ${body}` : "";
 	return wrapTextWithAnsi(`custom:${entry.customType}${suffix}`, width);
@@ -893,7 +910,7 @@ export function rehydrateChatPanelFromTurns(
 				chatPanel.appendReplayBlock((width) => renderBashExecutionEntry(entry, width));
 				break;
 			case "custom":
-				if (entry.display !== false) chatPanel.appendReplayBlock((width) => renderCustomEntry(entry, width));
+				if (rendersCustomEntry(entry)) chatPanel.appendReplayBlock((width) => renderCustomEntry(entry, width));
 				break;
 			case "modelChange":
 				chatPanel.appendReplayBlock((width) => renderModelChangeEntry(entry, width));

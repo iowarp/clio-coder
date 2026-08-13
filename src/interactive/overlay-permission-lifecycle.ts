@@ -63,7 +63,13 @@ export interface OverlayPermissionLifecycle {
 	dispose(): void;
 }
 
-function shouldAnnouncePermissionRequest(seenRequestIds: Set<string>, requestId: string, maxSize = 2048): boolean {
+/**
+ * Mark a permission request as surfaced to the operator and report whether this
+ * was the first time. Both surfaces (the dialog and the fallback notice) mark,
+ * so a re-notified head that already had a dialog does not also produce a
+ * notice.
+ */
+function markPermissionRequestSurfaced(seenRequestIds: Set<string>, requestId: string, maxSize = 2048): boolean {
 	if (seenRequestIds.has(requestId)) return false;
 	seenRequestIds.add(requestId);
 	if (seenRequestIds.size > maxSize) {
@@ -186,10 +192,16 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const unsubscribePermission =
 		deps.toolRegistry?.onPermissionRequired((call, decision, meta) => {
 			const autonomy = deps.getAutonomy();
-			if (shouldAnnouncePermissionRequest(announcedRequestIds, meta.requestId)) {
+			// The dialog states the tool, the target, the action class, the axis
+			// that asked, and the keys that answer it. While it is on screen the
+			// notice repeats all of that one line above the transcript, so it is
+			// emitted only when no dialog could open (another overlay holds the
+			// screen), which is the case where it is the operator's only signal.
+			const announceParked = (): void => {
+				if (!markPermissionRequestSurfaced(announcedRequestIds, meta.requestId)) return;
 				const notice = approvalParkedNotice(call.tool, decision, autonomy);
 				deps.appendNotice(notice.level, notice.text);
-			}
+			};
 			if (meta.toolCallId !== undefined) {
 				deps.applyApprovalState({
 					type: "tool_approval_state",
@@ -197,9 +209,16 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					state: "awaiting-approval",
 				});
 			}
-			if (deps.getOverlayState() !== "closed") return;
+			if (deps.getOverlayState() !== "closed") {
+				announceParked();
+				return;
+			}
 			const view = mainApprovalRequestView(call, decision, meta, autonomy, deps.toolRegistry?.parkedCount());
-			if (!deps.openPermissionOverlay(view)) return;
+			if (!deps.openPermissionOverlay(view)) {
+				announceParked();
+				return;
+			}
+			markPermissionRequestSurfaced(announcedRequestIds, meta.requestId);
 			pendingPermission = { call, decision, meta };
 			pendingWorker = null;
 			confirmed = false;
@@ -261,9 +280,12 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				requestedBy: "tool:one_shot",
 			});
 		} else {
+			// One sentence each. The blocked-call composer always closes with the
+			// standing "do not retry, pivot or report" instruction, so restating it
+			// here printed the same guidance twice in one payload.
 			const cancellationReason = stopping
-				? "User denied this tool call and stopped the turn from the permission confirmation prompt. The turn is over. Do not retry anything."
-				: "User cancelled this tool call from the permission confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.";
+				? "User denied this tool call and stopped the turn from the permission confirmation prompt. The turn is over."
+				: "User cancelled this tool call from the permission confirmation prompt. Wait for new instruction.";
 			deps.bus.emit(BusChannels.PermissionResolved, {
 				status: "denied",
 				...(permission?.meta ? { requestId: permission.meta.requestId } : {}),
