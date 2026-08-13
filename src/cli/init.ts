@@ -196,6 +196,20 @@ export async function runInitCommand(args: string[]): Promise<number> {
 				})}\n`,
 			);
 		}
+		// `--rewrite` asks for a draft that ignores the current CLIO.md. When the
+		// model pass fails, the fallback rebuilds the handbook from that very
+		// file and the write is reported as a refresh, so a caller scripting the
+		// exit code is told a rewrite happened that did not. Name what was
+		// written, name the two ways forward, and fail. The plain heuristic
+		// fallback still exits 0: it is a legitimate degraded mode, and the
+		// warning line above already names it.
+		if (parsed.options.rewriteClioMd === true && result.telemetry.generation.mode === "existing") {
+			process.stderr.write(
+				"clio context init: --rewrite did not rewrite CLIO.md; the model draft failed and the fallback rebuilt the handbook from the existing file.\n" +
+					"  rerun `clio context init --rewrite` once the bootstrap target answers, or `clio context init --rewrite --heuristic` to replace it with the deterministic draft.\n",
+			);
+			return 1;
+		}
 		return 0;
 	} catch (err) {
 		process.stderr.write(`clio context init failed: ${err instanceof Error ? err.message : String(err)}\n`);

@@ -118,6 +118,32 @@ describe("dispatch failure classification", () => {
 		strictEqual(decideRetry("target-rate-limit", 0, 2).retryAfterMs, 1_000);
 	});
 
+	/**
+	 * llama-server answers HTTP 400 "failed to parse grammar" when the response
+	 * schema Clio attached will not compile into a sampler grammar beside the
+	 * tool grammar. That is a verdict on the request, not on the endpoint, and
+	 * classifying it as worker-runtime parked a healthy target behind the
+	 * breaker for every other run while the caller's schema-free retry was
+	 * refused admission.
+	 */
+	it("treats a rejected response-schema grammar as deterministic, not target health", () => {
+		const rejection = {
+			exitCode: 1,
+			signal: null,
+			stderrTail:
+				'400: {"code":400,"message":"Failed to initialize samplers: failed to parse grammar","type":"invalid_request_error"}',
+		} as const;
+		strictEqual(classifyFailure(BASE_EVIDENCE, rejection, "failed", null), "deterministic-task");
+		strictEqual(affectsTargetBreaker("deterministic-task"), false);
+		strictEqual(decideRetry("deterministic-task", 0, 2).retry, false);
+		// A 400 that says nothing about a grammar or a schema stays a plain
+		// worker-runtime failure; the predicate is not a catch-all for 400s.
+		strictEqual(
+			classifyFailure(BASE_EVIDENCE, { exitCode: 1, signal: null, stderrTail: "400: bad request" }, "failed", null),
+			"worker-runtime",
+		);
+	});
+
 	it("keeps cancellation and permission neutral to target cooldown and retry", async () => {
 		for (const kind of ["cancel", "permission"] as const) {
 			const settings = structuredClone(DEFAULT_SETTINGS);

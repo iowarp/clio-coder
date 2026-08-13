@@ -697,6 +697,33 @@ describe("contracts/bootstrap", () => {
 		strictEqual(bundle.contract.contextState(scratch).clioMd, "ok");
 	});
 
+	// The warning named the risk and left the operator to guess both the flag
+	// and the pattern Clio writes, though `--help` documents the flag one screen
+	// away.
+	it("names the flag and the line when the .gitignore update is declined", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
+		const stderr: string[] = [];
+
+		await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => false,
+			io: { stdout: () => {}, stderr: (text) => stderr.push(text) },
+			modelId: "stub-model",
+			now: () => new Date("2026-05-01T00:00:00.000Z"),
+			generate: () => ({
+				projectName: "Mock Project",
+				identity: "Mock Project is a dynamic test project.",
+				conventions: [],
+				invariants: [],
+			}),
+		});
+
+		const warning = stderr.join("");
+		match(warning, /\.gitignore does not ignore \.clio\//);
+		match(warning, /rerun with --yes to append '\.clio\/' to \.gitignore without prompting/);
+		strictEqual(existsSync(join(scratch, ".gitignore")), false);
+	});
+
 	it("preserves an existing blanket .clio gitignore entry", async () => {
 		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
 		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");
