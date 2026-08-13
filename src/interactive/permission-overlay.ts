@@ -92,6 +92,7 @@ export function createPermissionOverlayBody(view: ApprovalRequestView): Componen
 			: []),
 		"",
 		"Parked until you decide; allow or deny applies to this call only.",
+		"Stopping the turn denies it and ends the run, so nothing asks again.",
 		"Hard-blocked actions remain blocked.",
 	];
 	if (view.queueDepth !== undefined && view.queueDepth > 1) {

@@ -124,6 +124,7 @@ export interface OverlayLifecycleController {
 	openExtensionsOverlayState(): void;
 	toggleDispatchBoardOverlay(): void;
 	confirmPermission(): void;
+	stopTurnFromPermission(): void;
 	cancelAskUser(): void;
 	dispose(): void;
 }
@@ -215,7 +216,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				anchor: "center",
 				width: PERMISSION_OVERLAY_WIDTH,
 				title: permissionOverlayTitle(),
-				footerHint: buildHint("commit", [{ key: "Enter", verb: "allow once" }]),
+				footerHint: buildHint("commit", [
+					{ key: "Enter", verb: "allow once" },
+					{ key: "s", verb: "stop turn" },
+				]),
 			});
 			tui.requestRender();
 			return true;
@@ -224,6 +228,14 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		appendNotice: (level, text) => appendNotice(level, text, busNoticeSink),
 		applyApprovalState: (event) => chatRenderer.applyEvent(event),
 		requestRender: () => tui.requestRender(),
+		// An operator cancel, audited as one. The reason distinguishes it from an
+		// Esc or Ctrl-C in the audit trail without inventing a new abort source.
+		stopActiveTurn: (reason) =>
+			deps.app.chat.cancel({
+				reason,
+				source: "stream_cancel",
+				auditReason: "operator stopped the turn at a permission prompt",
+			}),
 	});
 
 	overlayAskUser = createOverlayAskUserLifecycle({
@@ -408,6 +420,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		toggleDispatchBoardOverlay,
 		confirmPermission: () => {
 			overlayPermission?.confirm();
+			footer.refresh();
+			tui.requestRender();
+		},
+		stopTurnFromPermission: () => {
+			overlayPermission?.stopTurn();
 			footer.refresh();
 			tui.requestRender();
 		},

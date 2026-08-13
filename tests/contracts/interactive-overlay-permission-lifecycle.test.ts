@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels, type PermissionRequestedPayload } from "../../src/core/bus-events.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
@@ -36,6 +36,7 @@ function createPermissionHarness(): PermissionHarness {
 			return true;
 		},
 		cancelParkedCalls: (reason: string) => events.push(`cancel-all:${reason}`),
+		renotifyHead: () => events.push("renotify-head"),
 		resumeParkedCalls: () => Promise.resolve(),
 	} as unknown as ToolRegistry;
 	const app = {
@@ -54,6 +55,10 @@ function createPermissionHarness(): PermissionHarness {
 				events.push(`resolve-worker:${runId}:${requestId}:${decision}`),
 		},
 		getSettings: () => ({ autonomy: "ask" }),
+		chat: {
+			cancel: (options?: { reason?: string; source?: string; auditReason?: string }) =>
+				events.push(`chat-cancel:${options?.source}:${options?.reason}`),
+		},
 	} as unknown as OverlayLifecycleApplicationDeps;
 	const runtime = {
 		app,
@@ -124,6 +129,70 @@ describe("contracts/interactive permission overlay lifecycle", () => {
 			"task-island",
 			"render",
 		]);
+	});
+
+	/**
+	 * Denying one call left the run going and the model asked again, six times,
+	 * with the command mutated each time; quitting the app was the only exit.
+	 * Stopping denies every call the turn has parked, ends the run, and does not
+	 * re-notify, or the operator lands straight back in the loop they left.
+	 */
+	it("denies every parked call, ends the run, and does not re-notify the next one", () => {
+		const harness = createPermissionHarness();
+		harness.permissionRequired({ tool: "bash", args: {} } as ClassifierCall, askDecision, {
+			requestId: "req-stop",
+			toolCallId: "tool-stop",
+		} as PermissionRequiredMeta);
+		strictEqual(harness.lifecycle.getState(), "permission-confirm");
+		harness.events.length = 0;
+
+		harness.lifecycle.stopTurnFromPermission();
+
+		strictEqual(harness.lifecycle.getState(), "closed");
+		const joined = harness.events.join("\n");
+		ok(
+			joined.includes(`emit:${BusChannels.PermissionResolved}:denied:req-stop`),
+			`the parked call is denied, not allowed: ${joined}`,
+		);
+		ok(
+			harness.events.some((event) => event.startsWith("cancel-all:") && event.includes("stopped the turn")),
+			`every parked call is cancelled under the stop reason: ${joined}`,
+		);
+		ok(
+			harness.events.some((event) => event.startsWith("chat-cancel:stream_cancel:") && event.includes("turn stopped")),
+			`the run is cancelled with operator-facing text: ${joined}`,
+		);
+		ok(!harness.events.includes("renotify-head"), `a stop must not re-open the next parked call: ${joined}`);
+	});
+
+	it("names the tool the operator denied in the stop text", () => {
+		const harness = createPermissionHarness();
+		harness.permissionRequired({ tool: "write", args: {} } as ClassifierCall, askDecision, {
+			requestId: "req-named",
+		} as PermissionRequiredMeta);
+		harness.events.length = 0;
+
+		harness.lifecycle.stopTurnFromPermission();
+
+		ok(
+			harness.events.some((event) => event.includes("you denied write")),
+			`the stop text names the tool: ${harness.events.join("\n")}`,
+		);
+	});
+
+	it("leaves Enter allowing and Escape denying exactly one call", () => {
+		const harness = createPermissionHarness();
+		harness.permissionRequired({ tool: "bash", args: {} } as ClassifierCall, askDecision, {
+			requestId: "req-esc",
+		} as PermissionRequiredMeta);
+		harness.events.length = 0;
+
+		harness.lifecycle.closeOverlay();
+
+		const joined = harness.events.join("\n");
+		ok(joined.includes("cancel:req-esc:"), "Escape still cancels just this request");
+		ok(!joined.includes("cancel-all:"), "Escape must not cancel the whole queue");
+		ok(!joined.includes("chat-cancel:"), "Escape must not end the run");
 	});
 
 	it("resolves worker escalations in FIFO order without publishing main permission resolutions", () => {
