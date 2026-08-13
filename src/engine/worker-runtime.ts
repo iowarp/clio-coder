@@ -9,7 +9,7 @@
  * own worker runners before pi-agent model synthesis.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { validateSettingsFile } from "../core/config.js";
 import {
@@ -22,6 +22,7 @@ import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import {
 	type ObservedReadRanges,
+	type ObservedRunEffects,
 	parseResultContract,
 	RESULT_CONTRACT_REPAIR_LIMIT,
 	type ResultContract,
@@ -50,6 +51,7 @@ import type { ActionClass } from "../domains/safety/action-classifier.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
+import { createRunEffectsRecorder } from "../domains/safety/run-effects.js";
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import {
@@ -216,6 +218,7 @@ function terminalContractViolation(
 	message: AgentMessage | undefined,
 	cwd: string,
 	observedReadRanges: ObservedReadRanges,
+	observedRunEffects: ObservedRunEffects,
 ): string | null {
 	if (!isAssistantMessage(message)) return null;
 	const text = assistantMessageText(message);
@@ -235,6 +238,7 @@ function terminalContractViolation(
 		output: text,
 		cwd,
 		observedReadRanges,
+		observedRunEffects,
 		// Repair rounds judge shape and grounding only. Network posture belongs to
 		// the orchestrator's sealed validation, which runs again on the receipt.
 		networkAllowed: true,
@@ -245,6 +249,9 @@ function terminalContractViolation(
 				} catch {
 					return null;
 				}
+			},
+			pathExists(filePath) {
+				return existsSync(filePath);
 			},
 		},
 	});
@@ -493,6 +500,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	/** Read tool call id -> what was asked for, pending that call's result. */
 	const pendingReadCitations = new Map<string, { path: string; offset: number | null; tail: boolean }>();
 	const observedReadRanges = new Map<string, Array<readonly [number, number]>>();
+	// The write-side equivalent: what this run changed and what it validated,
+	// so a mutation report is judged against the run instead of believed.
+	const runEffects = createRunEffectsRecorder(contractCwd);
 
 	/**
 	 * Fold one successful read into the observed spans. The request says where
@@ -620,6 +630,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// Read spans this run actually observed. They ground the terminal result
 		// (a cited line has to fall inside one) and they are handed back verbatim
 		// in a repair round, so re-emitting findings never invites invention.
+		if (event.type === "tool_execution_start") {
+			runEffects.start(event.toolCallId, event.toolName, event.args as Record<string, unknown>);
+		}
+		if (event.type === "tool_execution_end") {
+			runEffects.finish(event.toolCallId, event.isError === true);
+		}
 		if (event.type === "tool_execution_start" && event.toolName === ToolNames.Read) {
 			const args = event.args as Record<string, unknown>;
 			const readPath = typeof args.path === "string" ? args.path.trim() : "";
@@ -650,7 +666,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// which the model can still act on the validator's reason.
 		const contract = input.resultContract;
 		if (contract && event.type === "message_end" && isTerminalAssistantMessage(event.message)) {
-			const violation = terminalContractViolation(contract, event.message, contractCwd, observedReadRanges);
+			const violation = terminalContractViolation(
+				contract,
+				event.message,
+				contractCwd,
+				observedReadRanges,
+				runEffects.snapshot(),
+			);
 			if (violation !== null) {
 				if (resultContractRepairsQueued < RESULT_CONTRACT_REPAIR_LIMIT) {
 					resultContractRepairsQueued += 1;

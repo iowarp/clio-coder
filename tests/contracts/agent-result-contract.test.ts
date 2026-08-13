@@ -218,6 +218,136 @@ describe("contracts/agent result contract", () => {
 		);
 	});
 
+	it("rejects a mutation report naming a path the run never wrote and that does not exist", () => {
+		// Receipt 3queklvuxnmb: a git-master run answering a read-only question
+		// returned the shape example verbatim, and `src/file.ts` existed nowhere
+		// in that repository. Shape alone sealed conformance and quality pass.
+		const output = JSON.stringify({
+			mutatedPaths: ["src/file.ts"],
+			validations: [{ name: "git status check", passed: true, evidence: "master branch with clean working tree" }],
+		});
+		const readOnlyRun = {
+			contract: { kind: "mutation-report" } as const,
+			output,
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem: { readFile: () => null, pathExists: () => false },
+			observedRunEffects: {
+				mutatedPaths: new Set<string>(),
+				failedMutationPaths: new Set<string>(),
+				validationCommands: new Set<string>(),
+			},
+		};
+		const fabricated = contract(readOnlyRun);
+		strictEqual(fabricated.conformance, "fail");
+		ok(fabricated.reason?.includes("never wrote and that does not exist: src/file.ts"));
+		ok(fabricated.reason?.includes("this run wrote nothing"));
+		// The same report from a run that did write the file is the postcondition
+		// the contract exists to certify.
+		strictEqual(
+			contract({
+				...readOnlyRun,
+				observedRunEffects: {
+					mutatedPaths: new Set(["/repo/src/file.ts"]),
+					failedMutationPaths: new Set<string>(),
+					validationCommands: new Set(["npm test"]),
+				},
+			}).conformance,
+			"pass",
+		);
+		// Absent evidence keeps the report's own word, which is what every caller
+		// that cannot observe the run's effects still gets.
+		strictEqual(
+			contract({ contract: { kind: "mutation-report" }, output, cwd: "/repo", networkAllowed: false, filesystem })
+				.conformance,
+			"pass",
+		);
+	});
+
+	it("a mutation this run cannot account for is unmeasured rather than passed", () => {
+		const output = JSON.stringify({
+			mutatedPaths: ["src/generated.ts"],
+			validations: [{ name: "npm test", passed: true, evidence: "exit 0" }],
+		});
+		const run = (effects: {
+			mutatedPaths: Set<string>;
+			failedMutationPaths?: Set<string>;
+			validationCommands: Set<string>;
+		}) =>
+			contract({
+				contract: { kind: "mutation-report" },
+				output,
+				cwd: "/repo",
+				networkAllowed: false,
+				// The file is on disk, so it is not a fabrication.
+				filesystem: { readFile: () => null, pathExists: (p: string) => p === "/repo/src/generated.ts" },
+				observedRunEffects: { failedMutationPaths: new Set<string>(), ...effects },
+			});
+		// Written through a channel no tool event enumerates (a script the run
+		// executed): the postcondition holds, but nothing here measured it.
+		const unenumerable = run({ mutatedPaths: new Set(), validationCommands: new Set(["npm test"]) });
+		strictEqual(unenumerable.conformance, "pass");
+		strictEqual(unenumerable.quality, "unmeasured");
+		// A validation the run never ran is not correctness evidence either.
+		const unrunValidation = run({ mutatedPaths: new Set(["/repo/src/generated.ts"]), validationCommands: new Set() });
+		strictEqual(unrunValidation.conformance, "pass");
+		strictEqual(unrunValidation.quality, "unmeasured");
+		// Both grounded is the only shape that reaches the routing denominator.
+		const grounded = run({
+			mutatedPaths: new Set(["/repo/src/generated.ts"]),
+			validationCommands: new Set(["npm test"]),
+		});
+		strictEqual(grounded.quality, "pass");
+		const { receipt, envelope } = receiptWithQuality(grounded.quality);
+		strictEqual(reduceRouteQuality({ subject: { receipt, envelope }, receipts: [] }).label, "pass");
+	});
+
+	it("rejects a mutation report claiming a file whose write this run was refused", () => {
+		// Receipt 182h2ai478p5: the coder's edit was denied by the worker
+		// permission policy, src/math.js was left byte-identical, and the report
+		// still named it. Presence on disk cannot separate that from a real edit;
+		// the run's own refused tool result can.
+		const refused = contract({
+			contract: { kind: "mutation-report" },
+			output: JSON.stringify({
+				mutatedPaths: ["src/math.js"],
+				validations: [{ name: "npm test", passed: true, evidence: "exit 0" }],
+			}),
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem: { readFile: () => "export function add() {}", pathExists: () => true },
+			observedRunEffects: {
+				mutatedPaths: new Set<string>(),
+				failedMutationPaths: new Set(["/repo/src/math.js"]),
+				validationCommands: new Set<string>(),
+			},
+		});
+		strictEqual(refused.conformance, "fail");
+		ok(refused.reason?.includes("only write this run attempted was refused: src/math.js"));
+	});
+
+	it("a self-reported validation failure still seals failed quality", () => {
+		// Reporting against your own interest is the one claim here that needs no
+		// corroboration, so ungrounded effects must not soften it to unmeasured.
+		const failed = contract({
+			contract: { kind: "mutation-report" },
+			output: JSON.stringify({
+				mutatedPaths: [],
+				validations: [{ name: "npm test", passed: false, evidence: "1 failing" }],
+			}),
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem: { readFile: () => null, pathExists: () => false },
+			observedRunEffects: {
+				mutatedPaths: new Set<string>(),
+				failedMutationPaths: new Set<string>(),
+				validationCommands: new Set<string>(),
+			},
+		});
+		strictEqual(failed.conformance, "pass");
+		strictEqual(failed.quality, "fail");
+	});
+
 	it("verifier check failure becomes failed quality evidence", () => {
 		const validation = contract({
 			contract: { kind: "verifier-report" },
