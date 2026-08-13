@@ -26,8 +26,8 @@ import { Value } from "typebox/value";
 import yaml from "yaml";
 
 /** Upper bound on any single deterministic step, generous enough for a full suite. */
-export const FLEET_COMMAND_MAX_TIMEOUT_MS = 3_600_000;
-export const FLEET_COMMAND_MIN_TIMEOUT_MS = 1_000;
+const FLEET_COMMAND_MAX_TIMEOUT_MS = 3_600_000;
+const FLEET_COMMAND_MIN_TIMEOUT_MS = 1_000;
 export const FLEET_COMMAND_DEFAULT_TIMEOUT_MS = 600_000;
 
 /**

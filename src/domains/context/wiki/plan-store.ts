@@ -63,7 +63,7 @@ export function sanitizePagePath(value: unknown): string | null {
 	return normalized;
 }
 
-export function wikiPlanPath(dir: string): string {
+function wikiPlanPath(dir: string): string {
 	return join(dir, WIKI_PLAN_FILE);
 }
 

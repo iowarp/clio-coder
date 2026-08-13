@@ -3,14 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Script } from "node:vm";
-import {
-	combineSafeOutput,
-	runCommandVector,
-	SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES,
-	SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-} from "../../core/safe-exec.js";
+import { combineSafeOutput, runCommandVector } from "../../core/safe-exec.js";
+import { escapeRegExp } from "../ignore-policy.js";
 import { resolveReadPath } from "../path-utils.js";
 import type { ToolResult, ToolResultDetails } from "../registry.js";
+import { maxOutputArg, timeoutArg } from "../safe-exec.js";
 import { truncateUtf8 } from "../truncate-utf8.js";
 
 export const BROWSER_MODES = ["auto", "required", "off"] as const;
@@ -638,18 +635,6 @@ function browserModeArg(value: unknown): BrowserMode {
 		: "auto";
 }
 
-function timeoutArg(args: Record<string, unknown>): number {
-	return typeof args.timeout_ms === "number" && args.timeout_ms > 0
-		? Math.floor(args.timeout_ms)
-		: SAFE_EXEC_DEFAULT_TIMEOUT_MS;
-}
-
-function maxOutputArg(args: Record<string, unknown>): number {
-	return typeof args.max_output_bytes === "number" && args.max_output_bytes > 0
-		? Math.floor(args.max_output_bytes)
-		: SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES;
-}
-
 function resultDetails(
 	artifactPath: string,
 	browserMode: BrowserMode,
@@ -697,8 +682,4 @@ function lineAt(text: string, index: number): number {
 		if (text.charCodeAt(i) === 10) line += 1;
 	}
 	return line;
-}
-
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -7,6 +7,7 @@ import { detectProjectType, type ProjectType } from "../session/workspace/projec
 import {
 	type AdoptionScanResult,
 	adoptionSnapshotsHash,
+	RULE_KEYWORDS,
 	renderImportedAgentContext,
 	scanAgentConfigs,
 } from "./adoption.js";
@@ -313,7 +314,6 @@ function pushUnique(target: string[], value: string): void {
 	target.push(value);
 }
 
-const RULE_KEYWORDS = /\b(always|never|must|should|prefer|avoid|do not|don't|use)\b/i;
 const SKIP_BULLET_PATTERNS = [/^marker\s*[:=]/i, /marker[-_:]\s*\w+-\w+/i, /^todo\b/i, /^note\b/i, /^example\b/i];
 
 function harvestSiblingBullets(files: ReadonlyArray<SiblingContextFile>): string[] {
@@ -698,7 +698,7 @@ function bootstrapOutputFromParsed(parsed: ParsedClioMd): BootstrapStructuredOut
 	return out;
 }
 
-export function existingClioMdBootstrapOutput(cwd: string): BootstrapStructuredOutput | null {
+function existingClioMdBootstrapOutput(cwd: string): BootstrapStructuredOutput | null {
 	const parsed = tryReadClioMd(cwd);
 	if (!parsed?.ok) return null;
 	return bootstrapOutputFromParsed(parsed.value);

@@ -12,6 +12,7 @@
 
 import { mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { sleep } from "../../core/timers.js";
 import { clioStatePath } from "../../core/xdg.js";
 
 /** A holder that has not released within the router load wait is presumed dead. */
@@ -43,10 +44,6 @@ function tryAcquire(lockPath: string): boolean {
 		// released it. The next attempt races for it normally.
 	}
 	return false;
-}
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

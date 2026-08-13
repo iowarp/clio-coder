@@ -124,7 +124,7 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
  * this is the one place prose still drives the decision. Candidate for a future
  * structured "limitation" signal so the whole gate becomes text-independent.
  */
-export function hasExplicitLimitation(text: string): boolean {
+function hasExplicitLimitation(text: string): boolean {
 	const normalized = text.trim();
 	if (normalized.length === 0) return false;
 	return LIMITATION_PATTERNS.some((pattern) => pattern.test(normalized));

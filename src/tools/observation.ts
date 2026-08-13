@@ -2,6 +2,7 @@ import { GUARDRAIL_DEFAULTS, GUARDRAIL_ENV_VARS, resolveGuardrail } from "../cor
 import type { ToolInvokeOptions, ToolResult } from "./registry.js";
 import { offloadPointer, writeToolOffload } from "./result-shaping.js";
 import { formatSize } from "./truncate.js";
+import { byteLength } from "./truncate-utf8.js";
 
 /**
  * Shared observation envelope for the OBSERVE plane (read, grep, find, ls,
@@ -94,10 +95,6 @@ export interface ObservationReservation {
 	committed: boolean;
 	/** True once the charge has been reconciled or refunded exactly once. */
 	settled: boolean;
-}
-
-function byteLength(text: string): number {
-	return Buffer.byteLength(text, "utf8");
 }
 
 // A `next` continuation is a compact call fragment (`limit=200`, `offset=451`).

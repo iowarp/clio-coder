@@ -22,7 +22,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
-import { barSep, clioTheme, GLYPH, rule } from "../theme/index.js";
+import { barSep, clioTheme, GLYPH, padAnsi, rule } from "../theme/index.js";
 import { modelsForTarget } from "./model-selector.js";
 
 export const SETTINGS_OVERLAY_WIDTH = "100%";
@@ -1013,13 +1013,8 @@ interface RowColumns {
 	path: number;
 }
 
-function padAnsi(text: string, width: number): string {
-	const clipped = truncateToWidth(text, Math.max(0, width), ELLIPSIS, true);
-	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
-}
-
 function fixedLines(lines: readonly string[], width: number, height: number): string[] {
-	const out = lines.slice(0, height).map((line) => padAnsi(line, width));
+	const out = lines.slice(0, height).map((line) => padAnsi(line, width, ELLIPSIS));
 	while (out.length < height) out.push(" ".repeat(Math.max(0, width)));
 	return out;
 }
@@ -1066,7 +1061,7 @@ function formatSettingRow(
 	const theme = clioTheme();
 	const indent = " ".repeat(Math.max(0, indentWidth));
 	const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
-	const labelText = padAnsi(item.label, columns.label);
+	const labelText = padAnsi(item.label, columns.label, ELLIPSIS);
 	const label = selected ? theme.style("accent", labelText, { bold: true }) : labelText;
 	const modified = !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue;
 	const marker = pending
@@ -1077,7 +1072,7 @@ function formatSettingRow(
 	let used = visibleWidth(indent) + 2 + columns.label + visibleWidth(ROW_GAP);
 	let pathSegment = "";
 	if (columns.path > 0) {
-		pathSegment = `${theme.fg("dim", padAnsi(item.configPath, columns.path))}${ROW_GAP}`;
+		pathSegment = `${theme.fg("dim", padAnsi(item.configPath, columns.path, ELLIPSIS))}${ROW_GAP}`;
 		used += columns.path + visibleWidth(ROW_GAP);
 	}
 	const valueWidth = Math.max(1, width - used - 2);
@@ -1360,7 +1355,8 @@ export class SettingsCenter implements Component {
 		const right = this.renderRightLane(rightWidth, contentHeight);
 		const body = Array.from(
 			{ length: contentHeight },
-			(_, index) => `${padAnsi(left[index] ?? "", leftWidth)}${separator}${padAnsi(right[index] ?? "", rightWidth)}`,
+			(_, index) =>
+				`${padAnsi(left[index] ?? "", leftWidth, ELLIPSIS)}${separator}${padAnsi(right[index] ?? "", rightWidth, ELLIPSIS)}`,
 		);
 		return [...body, ...footer];
 	}

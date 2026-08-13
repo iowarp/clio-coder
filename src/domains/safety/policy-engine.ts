@@ -719,6 +719,7 @@ function matchSourcedRule(commandString: string, rules: ReadonlyArray<SourcedRul
 	return null;
 }
 
+// Excludes "unknown" because damage control overrides must classify actions into concrete, actionable categories.
 const ACTION_CLASSES = new Set<ActionClass>([
 	"read",
 	"write",

@@ -138,7 +138,7 @@ function escalationCountsFrom(safety: RunReceipt["safety"]): RunEscalationCounts
 }
 
 /** Leading prefix of a persona-override prompt hash, with an ellipsis when clipped. */
-export function formatPersonaHashPrefix(promptHash: string): string {
+function formatPersonaHashPrefix(promptHash: string): string {
 	if (promptHash.length <= PERSONA_HASH_PREFIX_CHARS) return promptHash;
 	return `${promptHash.slice(0, PERSONA_HASH_PREFIX_CHARS)}...`;
 }

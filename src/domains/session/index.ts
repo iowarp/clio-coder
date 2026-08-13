@@ -54,7 +54,7 @@ export type {
 	TaskLedgerValidationEvidence,
 	ThinkingLevelChangeEntry,
 } from "./entries.js";
-export { isSessionEntry, isSessionFileEntry, isSessionHeader, SESSION_ENTRY_KINDS } from "./entries.js";
+export { isSessionEntry, isSessionHeader, SESSION_ENTRY_KINDS } from "./entries.js";
 export { SessionManifest } from "./manifest.js";
 export { CURRENT_SESSION_FORMAT_VERSION, runMigrations } from "./migrations/index.js";
 export {

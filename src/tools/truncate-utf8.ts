@@ -11,3 +11,7 @@ export function truncateUtf8(text: string, maxBytes: number, marker: string): st
 
 	return `${buf.subarray(0, cut).toString("utf8")}${marker}`;
 }
+
+export function byteLength(text: string): number {
+	return Buffer.byteLength(text, "utf8");
+}

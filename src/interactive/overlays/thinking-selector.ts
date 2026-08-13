@@ -108,9 +108,3 @@ export function resolveThinkingLabeler(
 	const mechanism = thinking?.mechanism ?? null;
 	return (level) => thinkingLevelChoiceLabel(mechanism, level);
 }
-
-/**
- * Back-compat export for tests and older callers. New UI and runtime paths
- * should ask `resolveThinkingCapability` for the full effective surface.
- */
-export { restrictThinkingLevelsByMechanism as restrictLevelsByMechanism } from "../thinking-level-policy.js";

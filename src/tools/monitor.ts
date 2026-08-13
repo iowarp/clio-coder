@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Type } from "typebox";
+import { sleep } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -296,10 +297,6 @@ function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence {
 		integrityNote: null,
 		integrityFailure: false,
 	};
-}
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

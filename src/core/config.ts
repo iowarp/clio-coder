@@ -20,6 +20,7 @@ import {
 	ACTIVE_ROUTING_POSTURES,
 	ACTIVE_ROUTING_ROLES,
 	DEFAULT_SETTINGS,
+	THINKING_LEVELS,
 } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { MAX_TIMER_DELAY_MS } from "./timers.js";
@@ -326,7 +327,6 @@ const THINKING_FORMATS = [
 	"harmony",
 ] as const;
 const STRUCTURED_OUTPUTS = ["json-schema", "gbnf", "xgrammar", "none"] as const;
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 const AUTONOMY_LEVELS = ["read-only", "suggest", "auto-edit", "full-auto"] as const;
 const TOOL_GOVERNANCE = ["clio-policy", "agent-managed", "deny-all"] as const;
 

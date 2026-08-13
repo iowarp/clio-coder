@@ -42,7 +42,7 @@ export const BOOTSTRAP_MAX_OUTPUT_BYTES = 256 * 1024;
  * orchestrator, so a task prompt claiming to override it changes nothing a
  * model is graded on. Scout obeying its own recipe was the bug.
  */
-export const CONTEXT_BOOTSTRAP_AGENT_ID = "context-bootstrap";
+const CONTEXT_BOOTSTRAP_AGENT_ID = "context-bootstrap";
 
 /**
  * Model-driven CLIO.md generation. Dispatches Clio's internal

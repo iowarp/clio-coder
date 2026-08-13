@@ -16,7 +16,7 @@ export interface WorkspaceFallbackLimits {
 export type WorkspaceFallbackLimitKind = "entries" | "depth" | "path-bytes" | "time";
 export type WorkspaceEnumerationOperation = "open-root" | "read-directory" | "open-directory" | "inspect-entry";
 
-export const DEFAULT_WORKSPACE_FALLBACK_LIMITS: Readonly<WorkspaceFallbackLimits> = Object.freeze({
+const DEFAULT_WORKSPACE_FALLBACK_LIMITS: Readonly<WorkspaceFallbackLimits> = Object.freeze({
 	maxVisitedEntries: 100_000,
 	maxDepth: 64,
 	maxPathBytes: 64 * 1024 * 1024,

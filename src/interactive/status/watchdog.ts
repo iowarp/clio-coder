@@ -9,7 +9,7 @@ export const TIER_THRESHOLDS_MS = {
 	postAbortCeiling: 300_000,
 } as const;
 
-export function stuckThresholdMs(): number {
+function stuckThresholdMs(): number {
 	const override = Number(process.env.CLIO_STATUS_STUCK_MS);
 	if (Number.isFinite(override) && override > 0) return override;
 	return TIER_THRESHOLDS_MS.stuck;

@@ -695,7 +695,7 @@ export function validateFleetCommands(contract: FleetContract, registry: FleetCo
  * one: a repo that wants a different `sdlc` writes `.clio/fleets/sdlc.md` and
  * gets it, with no precedence surprises beyond that single rule.
  */
-export function builtinFleetsDir(): string {
+function builtinFleetsDir(): string {
 	return join(resolvePackageRoot(), "src", "domains", "agents", "fleets");
 }
 

@@ -12,7 +12,7 @@ import {
 
 const ID_PATTERN = /^mem-[a-f0-9]{16}$/;
 
-export function isMemoryScope(value: string): value is MemoryScope {
+function isMemoryScope(value: string): value is MemoryScope {
 	return (MEMORY_SCOPES as ReadonlyArray<string>).includes(value);
 }
 

@@ -1,3 +1,5 @@
+import { escapeRegExp } from "../tools/ignore-policy.js";
+
 /**
  * Whether a runtime's models are prone to narrating tool calls as prose instead
  * of emitting them.
@@ -54,10 +56,6 @@ const TOOL_PROSE_ASSESS_STRIDE_CHARS = 512;
 export function shouldAssessToolProse(textLength: number, lastAssessedChars: number): boolean {
 	if (textLength < MIN_TOOL_PROSE_CHARS) return false;
 	return textLength - lastAssessedChars >= TOOL_PROSE_ASSESS_STRIDE_CHARS;
-}
-
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function count(pattern: RegExp, text: string): number {

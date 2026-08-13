@@ -9,3 +9,7 @@ export function clampTimerDelayMs(value: number): number {
 	if (Number.isNaN(value) || value <= 0) return 0;
 	return value >= MAX_TIMER_DELAY_MS ? MAX_TIMER_DELAY_MS : Math.floor(value);
 }
+
+export function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}

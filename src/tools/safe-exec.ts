@@ -13,7 +13,7 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 
 const TRUNCATION_MARKER = "\n[output truncated]\n";
 
-function timeoutArg(args: Record<string, unknown>, fallback = SAFE_EXEC_DEFAULT_TIMEOUT_MS): number {
+export function timeoutArg(args: Record<string, unknown>, fallback = SAFE_EXEC_DEFAULT_TIMEOUT_MS): number {
 	return typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? Math.floor(args.timeout_ms) : fallback;
 }
 
@@ -21,7 +21,7 @@ function cwdArg(args: Record<string, unknown>): string | undefined {
 	return typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined;
 }
 
-function maxOutputArg(args: Record<string, unknown>): number {
+export function maxOutputArg(args: Record<string, unknown>): number {
 	return typeof args.max_output_bytes === "number" && args.max_output_bytes > 0
 		? Math.floor(args.max_output_bytes)
 		: SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES;

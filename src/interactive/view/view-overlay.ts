@@ -9,7 +9,7 @@ import {
 	visibleWidth,
 } from "../../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, GLYPH, markdownTheme } from "../theme/index.js";
+import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
 import {
 	type ArtifactProvider,
 	listViewArtifacts,
@@ -94,11 +94,6 @@ export interface ViewOverlayOptions {
 
 function artifactKey(artifact: ViewArtifact): string {
 	return `${artifact.category}:${artifact.id}:${artifact.path ?? ""}`;
-}
-
-function padAnsi(text: string, width: number): string {
-	const clipped = truncateToWidth(text, Math.max(0, width), ELLIPSIS, true);
-	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
 function categoryLabel(category: ViewArtifactCategory): string {
@@ -340,7 +335,7 @@ export function buildArtifactHeader(
 	verification: ViewVerificationState | undefined,
 	width: number,
 ): string {
-	if (!artifact) return padAnsi(clioTheme().fg("muted", "No artifact selected"), width);
+	if (!artifact) return padAnsi(clioTheme().fg("muted", "No artifact selected"), width, ELLIPSIS);
 	const theme = clioTheme();
 	const timestamp = formatLocalTime(artifact.timestamp);
 	const size = formatArtifactSize(artifact.sizeBytes);
@@ -351,7 +346,7 @@ export function buildArtifactHeader(
 		const token = verification?.status === "ok" ? "success" : verification?.status === "fail" ? "error" : "info";
 		parts.push(theme.fg(token, verify));
 	}
-	return padAnsi(parts.join("  "), width);
+	return padAnsi(parts.join("  "), width, ELLIPSIS);
 }
 
 export function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: number): string {
@@ -511,14 +506,14 @@ export class ViewOverlayView implements Component {
 		const lines: string[] = [];
 		const filterLabel = this.focus === "list" ? theme.fg("accent", "filter") : theme.fg("dim", "filter");
 		const filterValue = this.filterText.length > 0 ? this.filterText : theme.fg("dim", "(empty)");
-		lines.push(padAnsi(`${filterLabel}: ${filterValue}`, width));
+		lines.push(padAnsi(`${filterLabel}: ${filterValue}`, width, ELLIPSIS));
 
 		if (this.loadingArtifacts) {
-			lines.push(padAnsi(theme.fg("dim", "loading artifacts…"), width));
+			lines.push(padAnsi(theme.fg("dim", "loading artifacts…"), width, ELLIPSIS));
 			return this.fixedLines(lines, width, height);
 		}
 		if (this.artifactError) {
-			lines.push(padAnsi(theme.fg("error", this.artifactError), width));
+			lines.push(padAnsi(theme.fg("error", this.artifactError), width, ELLIPSIS));
 			return this.fixedLines(lines, width, height);
 		}
 
@@ -535,11 +530,11 @@ export class ViewOverlayView implements Component {
 		for (const row of rows.slice(this.listScrollOffset, this.listScrollOffset + rowHeight)) {
 			if (row.type === "group") {
 				const count = filtered.filter((artifact) => artifact.category === row.category).length;
-				lines.push(padAnsi(theme.fg("dim", `── ${categoryLabel(row.category)} (${count})`), width));
+				lines.push(padAnsi(theme.fg("dim", `── ${categoryLabel(row.category)} (${count})`), width, ELLIPSIS));
 				continue;
 			}
 			if (row.type === "empty") {
-				lines.push(padAnsi(theme.fg("dim", "  (empty)"), width));
+				lines.push(padAnsi(theme.fg("dim", "  (empty)"), width, ELLIPSIS));
 				continue;
 			}
 			if (!row.item) continue;
@@ -553,7 +548,7 @@ export class ViewOverlayView implements Component {
 			const titleWidth = Math.max(1, available - (metaWidth > 0 ? metaWidth + 1 : 0));
 			const clippedTitle = truncateToWidth(title, titleWidth, ELLIPSIS, true);
 			const gap = " ".repeat(Math.max(1, available - visibleWidth(clippedTitle) - metaWidth));
-			lines.push(padAnsi(`${cursor}${clippedTitle}${metaWidth > 0 ? `${gap}${meta}` : ""}`, width));
+			lines.push(padAnsi(`${cursor}${clippedTitle}${metaWidth > 0 ? `${gap}${meta}` : ""}`, width, ELLIPSIS));
 		}
 
 		return this.fixedLines(lines, width, height);
@@ -572,13 +567,13 @@ export class ViewOverlayView implements Component {
 		if (this.contentScrollOffset > maxOffset) this.contentScrollOffset = maxOffset;
 		const visible = body
 			.slice(this.contentScrollOffset, this.contentScrollOffset + bodyHeight)
-			.map((line) => padAnsi(line, width));
+			.map((line) => padAnsi(line, width, ELLIPSIS));
 		const lines = [header, ...visible];
 		return this.fixedLines(lines, width, height);
 	}
 
 	private fixedLines(lines: readonly string[], width: number, height: number): string[] {
-		const out = lines.slice(0, height).map((line) => padAnsi(line, width));
+		const out = lines.slice(0, height).map((line) => padAnsi(line, width, ELLIPSIS));
 		while (out.length < height) out.push(" ".repeat(Math.max(0, width)));
 		return out;
 	}

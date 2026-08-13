@@ -33,7 +33,6 @@ export {
 	type BootstrapProgressSink,
 	type BootstrapRunTelemetry,
 	type BootstrapStructuredOutput,
-	existingClioMdBootstrapOutput,
 	fallbackBootstrapOutput,
 	type RunBootstrapInput,
 	type RunBootstrapResult,
@@ -139,7 +138,6 @@ export {
 	sanitizePagePath,
 	sanitizeWikiPlan,
 	scopePlanForUpdate,
-	wikiPlanPath,
 	writeWikiPlanFile,
 } from "./wiki/plan-store.js";
 export {

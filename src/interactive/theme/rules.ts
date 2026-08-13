@@ -2,8 +2,8 @@ import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
 import type { ClioTheme, ClioToken } from "./tokens.js";
 
-function padAnsi(text: string, width: number): string {
-	const clipped = truncateToWidth(text, Math.max(0, width), "", true);
+export function padAnsi(text: string, width: number, ellipsis = ""): string {
+	const clipped = truncateToWidth(text, Math.max(0, width), ellipsis, true);
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 

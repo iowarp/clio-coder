@@ -7,11 +7,11 @@ import {
 	type ContextInitOptions,
 	validateInitOptions,
 } from "../domains/context/init-options.js";
-import type { ThinkingLevel } from "../domains/providers/index.js";
+import { type ThinkingLevel, VALID_THINKING_LEVELS } from "../domains/providers/index.js";
 import { modelBootstrapGenerate } from "./bootstrap-generate.js";
 
 const HELP = `Usage:
-  clio context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--propose|--apply|--rewrite]
+  clio context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
                     [--target <id> [--model <id>] [--thinking <level>]]
 
 Explore the repository and bootstrap the project context in one pass: CLIO.md,
@@ -25,6 +25,7 @@ Options:
   --preview        show the plan without writing any files
   --heuristic      skip model exploration; use the deterministic generator (offline)
   --adopt          refresh only the managed Imported agent context section
+  --global         include global sibling agent context from user home directory
   --propose        write an ignored .clio/proposals/CLIO-*.md draft when CLIO.md exists
   --apply          replace an existing CLIO.md with a draft grounded in the existing handbook
   --rewrite        replace an existing CLIO.md with a fresh draft that ignores it as source
@@ -32,7 +33,7 @@ Options:
   --yes, -y        update .gitignore without prompting
   --target <id>    override the configured Scout target for this noninteractive run
   --model <id>     override the Scout wire model (requires --target)
-  --thinking <n>   override Scout thinking: off|minimal|low|medium|high|xhigh (requires --target)
+  --thinking <n>   override Scout thinking: ${VALID_THINKING_LEVELS.join("|")} (requires --target)
 `;
 
 function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
@@ -52,7 +53,7 @@ function parseContextInitArgs(args: ReadonlyArray<string>): {
 	let target: string | undefined;
 	let model: string | undefined;
 	let thinkingLevel: ThinkingLevel | undefined;
-	const thinkingLevels = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+	const thinkingLevels = new Set<ThinkingLevel>(VALID_THINKING_LEVELS);
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index] as string;
 		if (arg === "--help" || arg === "-h" || arg === "--yes" || arg === "-y") continue;

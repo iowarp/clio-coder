@@ -38,7 +38,7 @@ export interface PendingSkillToolPolicy {
  * the escape hatch the block message points at when a workflow genuinely
  * needs a tool its skill did not declare.
  */
-export const SKILL_SURFACE_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["context", "ask_user"]);
+const SKILL_SURFACE_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["context", "ask_user"]);
 
 export interface SkillToolSurfaceViolation {
 	/** Every loaded skill that contributed a declaration to the merged surface. */

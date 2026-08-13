@@ -19,7 +19,7 @@ import { createAgentProgress } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type { ApplicationController } from "./application-controller.js";
+import { APPLICATION_DOUBLE_TAP_MS, type ApplicationController } from "./application-controller.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
@@ -197,7 +197,6 @@ export interface InteractiveDeps {
 	onShutdown: () => Promise<void>;
 }
 
-export const CTRL_C_DOUBLE_TAP_MS = 500;
 export const ENTER = "\r";
 export const ESC = "\x1b";
 
@@ -279,7 +278,7 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 	// A modal is an input boundary. Never let a global double-tap or an active
 	// run escape through it; Ctrl+C cancels/closes the focused overlay instead.
 	if (deps.overlayState !== "closed") return "close-overlay";
-	if (deps.lastCtrlCAt > 0 && deps.now - deps.lastCtrlCAt <= CTRL_C_DOUBLE_TAP_MS) {
+	if (deps.lastCtrlCAt > 0 && deps.now - deps.lastCtrlCAt <= APPLICATION_DOUBLE_TAP_MS) {
 		return "shutdown";
 	}
 	if (deps.streaming) return "cancel-stream";

@@ -30,7 +30,7 @@ export interface RunBashCommandOptions {
 	signal?: AbortSignal;
 }
 
-export function buildToolEnv(): NodeJS.ProcessEnv {
+function buildToolEnv(): NodeJS.ProcessEnv {
 	const env = { ...process.env };
 	for (const key of CLIO_CONTROL_ENV_KEYS) {
 		Reflect.deleteProperty(env, key);

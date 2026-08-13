@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
-export function findExecutableOnPath(name: string): string | null {
+function findExecutableOnPath(name: string): string | null {
 	const pathEnv = process.env.PATH;
 	if (!pathEnv) return null;
 	for (const dir of pathEnv.split(delimiter)) {

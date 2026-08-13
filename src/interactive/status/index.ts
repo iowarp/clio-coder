@@ -1,7 +1,7 @@
 export type { StatusController, StatusControllerDeps } from "./controller.js";
 export { createStatusController } from "./controller.js";
 export { type ReduceContext, reduceStatus, type StatusInputEvent } from "./state-machine.js";
-export { type BuildSummaryInput, buildSummary, emptySummary } from "./summary.js";
+export { type BuildSummaryInput, buildSummary } from "./summary.js";
 export {
 	type AgentStatus,
 	type AgentStatusChangedPayload,
@@ -13,5 +13,5 @@ export {
 	type TurnSummary,
 	type WatchdogTier,
 } from "./types.js";
-export { formatStatusElapsed, resolveFooterVerb, resolveInlineVerb, spinnerFrame, type VerbRender } from "./verbs.js";
-export { computeWatchdogTier, stuckThresholdMs, TIER_THRESHOLDS_MS } from "./watchdog.js";
+export { resolveFooterVerb, resolveInlineVerb, spinnerFrame, type VerbRender } from "./verbs.js";
+export { computeWatchdogTier, TIER_THRESHOLDS_MS } from "./watchdog.js";
