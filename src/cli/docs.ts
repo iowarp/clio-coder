@@ -327,7 +327,7 @@ export async function runDocsCommand(args: ReadonlyArray<string> = []): Promise<
 	const handle = await startDocsServer({ htmlDir });
 	const landingUrl = landing === "index.html" ? handle.url : `${handle.url}${landing}`;
 	printHeader("Clio docs viewer");
-	process.stdout.write(`  serving ${relative(process.cwd(), htmlDir) || htmlDir}\n`);
+	process.stdout.write(`  serving ${htmlDir}\n`);
 	process.stdout.write(`  open ${chalk.cyan(landingUrl)}\n`);
 	process.stdout.write("  bound to 127.0.0.1 only: no external network, no daemon, no state.\n");
 	process.stdout.write("  press Ctrl+C to stop.\n");

@@ -22,9 +22,20 @@ export async function writeEvalArtifactV4(dataDir: string, artifact: EvalArtifac
 	return path;
 }
 
-/** Read only the current explicit-link artifact format; retired shapes are rejected. */
+/**
+ * Read only the current explicit-link artifact format; retired shapes are
+ * rejected. An id with no artifact under the store root is named as such: the
+ * caller supplied an id, not a path, so the path node:fs would have quoted is
+ * not the thing they can correct.
+ */
 export async function loadEvalArtifactV4(dataDir: string, evalId: string): Promise<EvalArtifactV4> {
-	const raw = await readFile(evalArtifactPathV4(dataDir, evalId), "utf8");
+	let raw: string;
+	try {
+		raw = await readFile(evalArtifactPathV4(dataDir, evalId), "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`eval artifact not found: ${evalId}`);
+		throw error;
+	}
 	return parseEvalArtifactV4(JSON.parse(raw) as unknown, evalId);
 }
 

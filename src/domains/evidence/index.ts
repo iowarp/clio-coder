@@ -15,6 +15,7 @@ export {
 export type { EvidenceRunProvenance } from "./store.js";
 export {
 	EVIDENCE_FILES,
+	EvidenceNotFoundError,
 	evidenceDirectory,
 	evidenceRoot,
 	inspectEvidence,

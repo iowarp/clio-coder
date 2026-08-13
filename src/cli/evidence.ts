@@ -4,6 +4,7 @@ import type { EvidenceOverview, EvidenceRunProvenance } from "../domains/evidenc
 import {
 	buildEvalEvidence,
 	buildEvidence,
+	EvidenceNotFoundError,
 	inspectEvidence,
 	listEvidenceOverviews,
 	loadEvidenceRunProvenance,
@@ -162,6 +163,9 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 		return 2;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
+		// The id came from the user, and the command that shows which ids exist is
+		// the only thing that turns this exit into a working one.
+		if (error instanceof EvidenceNotFoundError) process.stderr.write("  run `clio evidence list` to see local bundles\n");
 		return error instanceof InvalidIdError ? 2 : 1;
 	}
 }

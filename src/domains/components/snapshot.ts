@@ -11,7 +11,15 @@ import {
 } from "./types.js";
 
 export async function loadComponentSnapshot(path: string): Promise<ComponentSnapshot> {
-	const raw = await readFile(path, "utf8");
+	let raw: string;
+	try {
+		raw = await readFile(path, "utf8");
+	} catch (error) {
+		// Same voice as the invalid-JSON refusal below: name the artifact, then
+		// the path, rather than repeating node:fs at the operator.
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`component snapshot not found: ${path}`);
+		throw error;
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw) as unknown;
