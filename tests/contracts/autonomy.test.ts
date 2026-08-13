@@ -415,6 +415,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			"1 of 2 parked",
 			"",
 			"Parked until you decide; allow or deny applies to this call only.",
+			"Stopping the turn denies it and ends the run, so nothing asks again.",
 			"Hard-blocked actions remain blocked.",
 		]);
 
@@ -432,6 +433,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			"Asked by: worker scout (run r-abc), safety-net rail bash-command-substitution",
 			"",
 			"Parked until you decide; allow or deny applies to this call only.",
+			"Stopping the turn denies it and ends the run, so nothing asks again.",
 			"Hard-blocked actions remain blocked.",
 		]);
 
@@ -449,6 +451,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			"Asked by: worker coder (run r-def), autonomy level suggest",
 			"",
 			"Parked until you decide; allow or deny applies to this call only.",
+			"Stopping the turn denies it and ends the run, so nothing asks again.",
 			"Hard-blocked actions remain blocked.",
 		]);
 	});
