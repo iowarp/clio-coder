@@ -76,6 +76,8 @@ export interface InteractivePresentationDeps {
 	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 	getTaskMemorySeedOffer?: () => { source: string; count: number } | null;
 	getContextState?: (cwd?: string) => ContextState;
+	/** Whether the Ctrl+G leader is armed and waiting for its next key. */
+	getLeaderArmed?: () => boolean;
 	getCwd?: () => string;
 	scheduleInterval?: (callback: () => void, intervalMs: number) => PresentationTickerHandle;
 	clearScheduledInterval?: (handle: PresentationTickerHandle) => void;
@@ -240,6 +242,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		getContextActivity: () => contextActivityStore.current(),
+		...(deps.getLeaderArmed ? { getLeaderArmed: deps.getLeaderArmed } : {}),
 		getToolCounts: () => ({
 			tools: Object.fromEntries(footerToolCounts),
 			errors: footerToolErrors,

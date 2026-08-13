@@ -3,6 +3,10 @@ import type { SlashCommandContext } from "../slash-commands.js";
 import { clioTheme } from "../theme/index.js";
 import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
+/** @internal exported for contract tests */
+export const EXTENSIONS_EMPTY =
+	"no extensions installed. install one with `clio extensions install <path>`, then `clio extensions list` shows what it contributed.";
+
 export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
 	const list = ctx.listExtensions?.() ?? [];
 	const items: ListOverlayItem[] = list.map((ext) => {
@@ -44,7 +48,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 		title: "Extensions Reference",
 		items,
 		filterable: true,
-		emptyMessage: "No extensions found",
+		emptyMessage: EXTENSIONS_EMPTY,
 		onClose,
 	});
 }

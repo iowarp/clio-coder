@@ -59,6 +59,13 @@ export interface SessionFacts {
 	toolProfile: string | null;
 	/** Active transcript detail mode, shown in the dashboard so visibility is never implicit. */
 	outputVerbosity?: OutputVerbosity | null;
+	/**
+	 * Ctrl+G armed the portable leader and is waiting for the next key. Shown
+	 * because the frame between the two keystrokes was otherwise identical to
+	 * the idle frame, on the fallback whose users have no working Alt to check
+	 * it against.
+	 */
+	leaderArmed?: boolean;
 	/** Proactive-memory status; kept as one atomic fact row in the expanded dashboard. */
 	memoryIntervention?: {
 		enabled: boolean;
@@ -341,6 +348,7 @@ export function compactSecondaryLine(
 	sessionTokens: UsageBreakdown | null = null,
 	sessionCost: CostAggregate | null = null,
 	outputVerbosity?: OutputVerbosity | null,
+	leaderArmed = false,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
 	const barCells = compactContextBarWidth(safeWidth);
@@ -369,6 +377,7 @@ export function compactSecondaryLine(
 		maxRightWidth,
 		compactMetricChipLimit(safeWidth),
 		outputVerbosity,
+		leaderArmed,
 	);
 	// At the smallest widths the context meter consumes the entire secondary
 	// row, so keep a compact mode marker on the left instead of silently hiding
@@ -1003,6 +1012,7 @@ export function buildHarnessStatePill(
  * detail used to spend all of it, so a session holding 9.7k measured tokens
  * showed none of them.
  */
+const CHIP_RANK_LEADER = -1;
 const CHIP_RANK_TOTALS = 0;
 const CHIP_RANK_DETAIL = 1;
 const CHIP_RANK_DEFERRED = 2;
@@ -1050,11 +1060,12 @@ export function buildMetricStrip(
 	maxWidth: number,
 	maxChipsCount = 6,
 	outputVerbosity?: OutputVerbosity | null,
+	leaderArmed = false,
 ): string {
 	const safeMaxWidth = Math.max(0, Math.floor(maxWidth));
 	if (safeMaxWidth <= 0) return "";
 	const isStreaming = status.phase !== "idle" && status.phase !== "ended";
-	if (!isStreaming && !lastTurn && !outputVerbosity) return "";
+	if (!isStreaming && !lastTurn && !outputVerbosity && !leaderArmed) return "";
 
 	const candidates: Array<string | null> = [];
 	/** Per-turn detail that ranks below the session totals when the strip is cut. */
@@ -1129,6 +1140,9 @@ export function buildMetricStrip(
 
 	const chipLimit = Math.max(0, Math.floor(maxChipsCount));
 	const chips: RankedChip[] = [];
+	// Ranked above every measurement: the strip is cut by dropping the
+	// lowest-ranked chip, and this one is the answer to "did that key register".
+	pushChip(chips, leaderArmed ? theme.fg("accent", "leader armed") : null, CHIP_RANK_LEADER);
 	for (const chip of candidates) pushChip(chips, chip, CHIP_RANK_DETAIL);
 	pushChip(chips, totalChip, CHIP_RANK_TOTALS);
 	pushChip(chips, costChip, CHIP_RANK_DETAIL);

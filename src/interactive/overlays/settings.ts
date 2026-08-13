@@ -34,6 +34,16 @@ const WIDE_LAYOUT_MIN_WIDTH = 96;
 const DROP_PATH_COLUMN_WIDTH = 52;
 const FALLBACK_THINKING_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const ROW_GAP = "  ";
+/**
+ * The product's cut marker, as the help center and every list overlay use it.
+ *
+ * A setting key is an identifier the operator types into settings.yaml, and the
+ * panel rendered `delegation.defaults.toolGovernanc` for
+ * `delegation.defaults.toolGovernance` with nothing to say it was short. An
+ * unmarked cut presents a fragment as the whole value, so every cell, row, and
+ * explanation line in this overlay carries the marker.
+ */
+const ELLIPSIS = "…";
 
 /**
  * Scope tells the operator where an edit lands. Derived from the config-change
@@ -73,7 +83,11 @@ const SETTINGS_SECTION_DESCRIPTIONS = {
 
 export const SETTINGS_LABELS_BY_ID = {
 	autonomy: "Autonomy level",
-	"workers.onPermission": "Worker approvals routing",
+	// Labels follow the CLI's post-rename vocabulary: the config surface is the
+	// fleet, and `worker` is the runtime entity the descriptions still name. A
+	// section headed Fleet whose rows read "Worker profiles" and "Worker
+	// retries" made one setting look like two subsystems.
+	"workers.onPermission": "Fleet approvals routing",
 	"delegation.defaults.toolGovernance": "Delegation governance",
 	"skills.trustProjectCompatRoots": "Trust project skill roots",
 	safetyNet: "Safety net",
@@ -91,15 +105,15 @@ export const SETTINGS_LABELS_BY_ID = {
 	"workers.default.target": "Default target",
 	"workers.default.model": "Default model",
 	"workers.default.thinkingLevel": "Default thinking level",
-	"workers.profiles": "Worker profiles",
+	"workers.profiles": "Fleet profiles",
 	"workers.agentBindings": "Agent bindings",
-	"workers.maxRetries": "Worker retries",
+	"workers.maxRetries": "Fleet retries",
 	scope: "Model cycle set",
 	"modelSelector.recentLimit": "Recent models kept",
 	"modelSelector.favorites": "Pinned favorites",
 	"budget.sessionCeilingUsd": "Session ceiling (USD)",
 	"defaults.maxTokens": "Output budget (tokens)",
-	"budget.concurrency": "Worker concurrency",
+	"budget.concurrency": "Fleet concurrency",
 	"compaction.auto": "Auto-compact",
 	"compaction.excludeLastTurns": "Protected recent turns",
 	"compaction.threshold": "Compaction threshold",
@@ -1000,7 +1014,7 @@ interface RowColumns {
 }
 
 function padAnsi(text: string, width: number): string {
-	const clipped = truncateToWidth(text, Math.max(0, width), "", true);
+	const clipped = truncateToWidth(text, Math.max(0, width), ELLIPSIS, true);
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
@@ -1067,7 +1081,7 @@ function formatSettingRow(
 		used += columns.path + visibleWidth(ROW_GAP);
 	}
 	const valueWidth = Math.max(1, width - used - 2);
-	const valueText = truncateToWidth(displayValue, valueWidth, "", true);
+	const valueText = truncateToWidth(displayValue, valueWidth, ELLIPSIS, true);
 	const value = pending
 		? theme.fg("warning", valueText)
 		: item.readOnly
@@ -1075,7 +1089,7 @@ function formatSettingRow(
 			: selected
 				? theme.fg("success", valueText)
 				: theme.fg("muted", valueText);
-	return truncateToWidth(`${indent}${prefix}${label}${ROW_GAP}${pathSegment}${marker}${value}`, width, "", true);
+	return truncateToWidth(`${indent}${prefix}${label}${ROW_GAP}${pathSegment}${marker}${value}`, width, ELLIPSIS, true);
 }
 
 export interface SettingsCenterOptions {
@@ -1460,7 +1474,7 @@ export class SettingsCenter implements Component {
 		if (item.help) contentLines.push(...wrapTextWithAnsi(theme.fg("dim", item.help), safeWidth));
 		const detail = this.footerDetail(item, theme);
 		if (detail) contentLines.push(...wrapTextWithAnsi(detail, safeWidth));
-		const note = theme.fg("dim", truncateToWidth(this.footerScopeNote(item), safeWidth, "", true));
+		const note = theme.fg("dim", truncateToWidth(this.footerScopeNote(item), safeWidth, ELLIPSIS, true));
 		return this.assembleFooter([separator, breadcrumb], contentLines, note, maxFooterLines, safeWidth);
 	}
 
@@ -1497,13 +1511,21 @@ export class SettingsCenter implements Component {
 		maxFooterLines: number,
 		width: number,
 	): string[] {
-		const fit = (line: string): string => truncateToWidth(line, width, "", true);
+		const fit = (line: string): string => truncateToWidth(line, width, ELLIPSIS, true);
 		let out: string[];
 		if (maxFooterLines <= top.length) {
 			out = top.slice(0, maxFooterLines).map(fit);
 		} else {
 			const middleBudget = Math.max(0, maxFooterLines - top.length - 1);
-			out = [...top.map(fit), ...middle.slice(0, middleBudget).map(fit), fit(note)];
+			// The explanation is wrapped, so a short terminal drops whole lines off
+			// its end rather than cutting one. At 40 columns the autonomy help
+			// stopped at "read-only observes; suggest" and read as the whole
+			// sentence, so the last line it keeps says that it is not.
+			const kept = middle.slice(0, middleBudget);
+			const last = kept.at(-1);
+			const marked =
+				middle.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${ELLIPSIS}`] : kept;
+			out = [...top.map(fit), ...marked.map(fit), fit(note)];
 		}
 		while (out.length < maxFooterLines) out.push("");
 		return out.slice(0, maxFooterLines);

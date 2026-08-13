@@ -29,6 +29,21 @@ const LEFT_PANE_MAX_WIDTH = 44;
 const SEPARATOR = " │ ";
 const ELLIPSIS = "…";
 
+/**
+ * Below this the two panes cannot both be read.
+ *
+ * The list holds a 30-column floor and the detail pane takes what is left, so
+ * at 40 columns the detail got three: `accountability` came out as `ac…/Acc/
+ * oun/tab/ili/ty` down the right edge. One pane at a time is the readable
+ * answer, and Tab already switches between them.
+ */
+const TWO_PANE_MIN_WIDTH = LEFT_PANE_MIN_WIDTH + 3 + 24;
+
+/** Whether a body this wide shows one pane instead of two. */
+function viewUsesSinglePane(bodyWidth: number): boolean {
+	return bodyWidth < TWO_PANE_MIN_WIDTH;
+}
+
 export type ViewPaneFocus = "list" | "content";
 export type ViewNoticeLevel = "info" | "success" | "warning" | "error";
 export type ViewVerificationState =
@@ -339,7 +354,22 @@ export function buildArtifactHeader(
 	return padAnsi(parts.join("  "), width);
 }
 
-export function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean): string {
+export function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: number): string {
+	// One pane at a time means Tab is how the other one is reached, so the
+	// narrow footer states it. The generic elider drops middle entries, and Tab
+	// sits in the middle.
+	if (innerWidth !== undefined && viewUsesSinglePane(innerWidth - 2)) {
+		const budget = innerWidth - 3;
+		const tiers =
+			focus === "list"
+				? [
+						"[↑↓] select · [type] filter · [Tab] detail · [Esc] close",
+						"[↑↓] select · [Tab] detail · [Esc] close",
+						"[↑↓] select · [Tab] detail",
+					]
+				: ["[↑↓] scroll · [Tab] list · [Esc] close", "[↑↓] scroll · [Tab] list"];
+		return tiers.find((tier) => visibleWidth(tier) <= budget) ?? (tiers.at(-1) as string);
+	}
 	if (focus === "list") {
 		return buildHint([
 			{ key: "↑↓", verb: "select" },
@@ -400,8 +430,8 @@ export class ViewOverlayView implements Component {
 		})();
 	}
 
-	getHint(): string {
-		return viewFooterHint(this.focus, !!this.selectedArtifact()?.verify);
+	getHint(innerWidth?: number): string {
+		return viewFooterHint(this.focus, !!this.selectedArtifact()?.verify, innerWidth);
 	}
 
 	private filteredArtifacts(): ViewArtifact[] {
@@ -555,6 +585,9 @@ export class ViewOverlayView implements Component {
 
 	render(width: number): string[] {
 		const bodyHeight = Math.max(1, this.options.getBodyHeight());
+		if (viewUsesSinglePane(width)) {
+			return this.focus === "content" ? this.renderContent(width, bodyHeight) : this.renderList(width, bodyHeight);
+		}
 		const separatorWidth = visibleWidth(SEPARATOR);
 		const leftWidth = Math.min(
 			LEFT_PANE_MAX_WIDTH,
@@ -700,7 +733,7 @@ export function openViewOverlay(
 		maxHeight: VIEW_OVERLAY_MAX_HEIGHT,
 		margin: VIEW_OVERLAY_MARGIN,
 		title: "View",
-		footerHint: () => view.getHint(),
+		footerHint: (innerWidth) => view.getHint(innerWidth),
 	});
 	view.refresh();
 	return handle;

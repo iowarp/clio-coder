@@ -1,7 +1,16 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import { validateSettings } from "../../src/core/config.js";
+import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
+import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
+import {
+	buildProviderSupportEntry,
+	defaultModelForRuntime,
+	describeRuntimeModels,
+} from "../../src/domains/providers/support.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 // BUG-007: a partial non-interactive `configure` invocation (only --id, or only
@@ -145,4 +154,84 @@ describe("contracts/configure-cli runtime inventories agree", () => {
 			match(result.stderr, /clio configure --list/);
 		});
 	}
+});
+
+/**
+ * The pi-ai provider catalogs are keyed in name order. `--list` printed the
+ * first two ids of that order as though they were the models to use, which for
+ * openai is `gpt-4, gpt-4-turbo` out of 38 current ids, and `configure` with no
+ * --model persisted the same head as the target's defaultModel. Nothing in the
+ * dependency's model records supports a recency ranking, so the fix is to stop
+ * asserting one: report the size and the source, and require the operator to
+ * name the model.
+ */
+describe("contracts/configure-cli catalog-ordered model ids", () => {
+	const scratch = makeScratchHome("clio-catalog-models-");
+	after(() => scratch.cleanup());
+
+	function registry(): ReturnType<typeof createRuntimeRegistry> {
+		const created = createRuntimeRegistry();
+		registerBuiltinRuntimes(created);
+		return created;
+	}
+
+	it("offers no default model for a catalog-ordered runtime and keeps one for a repo-owned list", () => {
+		const runtimes = registry().list();
+		const openai = runtimes.find((runtime) => runtime.id === "openai");
+		ok(openai, "openai runtime must be registered");
+		if (!openai) return;
+		const openaiEntry = buildProviderSupportEntry(openai);
+		strictEqual(openaiEntry.modelSource, "catalog");
+		strictEqual(openaiEntry.defaultModel, undefined);
+		strictEqual(defaultModelForRuntime("openai"), undefined);
+		ok(openaiEntry.modelHints.length > 2, "the catalog must still be readable as a whole");
+
+		// alcf owns its ids in src/domains/providers/runtimes/cloud/alcf.ts, ordered
+		// with intent, so its head is a recommendation and stays one.
+		const alcf = runtimes.find((runtime) => runtime.id === "alcf");
+		ok(alcf, "alcf runtime must be registered");
+		if (!alcf) return;
+		const alcfEntry = buildProviderSupportEntry(alcf);
+		strictEqual(alcfEntry.modelSource, "runtime");
+		strictEqual(alcfEntry.defaultModel, alcf.knownModels?.[0]);
+		strictEqual(describeRuntimeModels(alcfEntry, 2), alcf.knownModels?.slice(0, 2).join(", "));
+	});
+
+	it("describes a catalog-ordered runtime by size and source, never by a sample", () => {
+		for (const runtime of registry().list()) {
+			const entry = buildProviderSupportEntry(runtime);
+			if (entry.modelSource !== "catalog") continue;
+			strictEqual(describeRuntimeModels(entry, 2), `${entry.modelHints.length} in pi-ai catalog`);
+		}
+	});
+
+	it("clio configure --list prints the catalog size for openai instead of its two oldest ids", async () => {
+		const result = await runCli(["configure", "--list"], { env: scratch.env });
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		// At 80 columns the list uses its two-line form, so the models cell is on
+		// the line after the id; at wider widths it is on the same one.
+		const lines = result.stdout.split("\n");
+		const index = lines.findIndex((line) => /^ {2}openai\s/.test(line));
+		ok(index >= 0, `no openai row in:\n${result.stdout}`);
+		const row = `${lines[index]}\n${lines[index + 1] ?? ""}`;
+		match(row, /models=\d+ in pi-ai catalog/);
+		ok(!/models=gpt-/.test(result.stdout), `a catalog row still samples ids:\n${result.stdout}`);
+	});
+
+	it("clio configure refuses to seed defaultModel from the catalog and names --model", async () => {
+		const result = await runCli(["configure", "--id", "oa", "--runtime", "openai", "--api-key-env", "OPENAI_API_KEY"], {
+			env: scratch.env,
+			input: "",
+		});
+		strictEqual(result.code, 2, `stdout=${result.stdout}`);
+		match(result.stderr, /--model is required for openai/);
+		match(result.stderr, /pi-ai catalog in name order/);
+		match(result.stderr, /clio configure --runtime openai/);
+
+		// Refusing means nothing was written: no target, and no gpt-4 anywhere.
+		const settings = join(scratch.dir, "config", "settings.yaml");
+		const written = existsSync(settings) ? readFileSync(settings, "utf8") : "";
+		ok(!written.includes("gpt-4"), `settings.yaml carries a catalog-seeded model:\n${written}`);
+		ok(!written.includes("id: oa"), `settings.yaml carries the refused target:\n${written}`);
+	});
 });

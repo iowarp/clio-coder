@@ -752,16 +752,32 @@ describe("contracts/slash-spec", () => {
 		strictEqual(await context?.getArgumentCompletions?.("compact "), null, "compact switches to free-form text");
 	});
 
-	it("returns one action before and null after the trailing space through the editor provider", async () => {
+	/**
+	 * The popup's Enter accepts the selected completion rather than submitting,
+	 * so a suggestion the input already equals costs a keystroke that changes
+	 * nothing on screen: `/memory seed` needed two Enters and typing through the
+	 * first one concatenated onto the unsent line. A fully typed action opens no
+	 * popup, so the first Enter submits. The completion source itself is
+	 * unchanged: `getArgumentCompletions` still returns the token, and a partial
+	 * token still completes.
+	 */
+	it("opens no popup for a fully typed action, and none after the trailing space", async () => {
 		const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
 		for (const action of ["compact", "init", "refresh", "reset"]) {
 			const before = `/context ${action}`;
-			const suggestion = await provider.getSuggestions([before], 0, before.length, {
+			strictEqual(
+				await provider.getSuggestions([before], 0, before.length, { signal: new AbortController().signal }),
+				null,
+				`${action} is complete, so there is nothing to accept`,
+			);
+
+			const partial = `/context ${action.slice(0, 2)}`;
+			const suggestion = await provider.getSuggestions([partial], 0, partial.length, {
 				signal: new AbortController().signal,
 			});
-			deepStrictEqual(
-				suggestion?.items.map((item) => item.value),
-				[action],
+			ok(
+				suggestion?.items.some((item) => item.value === action),
+				`${action} still completes from a partial token`,
 			);
 
 			const after = `${before} `;

@@ -1,5 +1,12 @@
 import { type TaskBoardSnapshot, type TaskBoardTask, taskBoardCounts } from "../domains/session/task-board.js";
-import { type Component, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
+import {
+	type Component,
+	matchesKey,
+	type OverlayHandle,
+	type TUI,
+	truncateToWidth,
+	wrapTextWithAnsi,
+} from "../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { type ClioToken, clioTheme, fitUnits, GLYPH, rule } from "./theme/index.js";
 
@@ -90,10 +97,18 @@ export function formatTasksOverlayBodyLines(
 	const theme = clioTheme();
 	const width = Math.max(1, Math.floor(contentWidth));
 	if (!board || board.tasks.length === 0) {
+		// The empty state is one statement and one remedy, and the remedy is the
+		// only thing on the surface that says how a board comes to exist. It used
+		// to be emitted at its natural length and hard-cut by the frame, so at 80
+		// and 40 columns the sentence ended at "before multi-step" and the reader
+		// was left with a fragment of the only instruction here.
 		return [
-			muted("No task board declared in this session."),
+			...wrapTextWithAnsi(muted("No task board declared in this session."), width),
 			"",
-			dim('The agent declares one with the tasks tool (action="plan") before multi-step work.'),
+			...wrapTextWithAnsi(
+				dim('The agent declares one with the tasks tool (action="plan") before multi-step work.'),
+				width,
+			),
 		];
 	}
 	const counts = taskBoardCounts(board);

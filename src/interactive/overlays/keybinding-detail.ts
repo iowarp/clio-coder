@@ -34,8 +34,9 @@ function row(
 ): string[] {
 	const theme = clioTheme();
 	const prefix = `${fitCell(theme.fg("dim", label), LABEL_WIDTH)} `;
-	const available = Math.max(8, width - visibleWidth(prefix));
-	const lines: string[] = [];
+	const prefixWidth = visibleWidth(prefix);
+	const available = Math.max(8, width - prefixWidth);
+	const values: string[] = [];
 	const words = value.split(/\s+/g).filter(Boolean);
 	let current = "";
 	for (const word of words) {
@@ -44,16 +45,18 @@ function row(
 			current = next;
 			continue;
 		}
-		if (current.length > 0) lines.push(`${prefix}${current}`);
+		if (current.length > 0) values.push(current);
 		current = word;
 	}
-	if (current.length > 0) lines.push(`${prefix}${current}`);
-	if (lines.length === 0) lines.push(prefix.trimEnd());
+	if (current.length > 0) values.push(current);
+	if (values.length === 0) return [prefix.trimEnd()];
 	const valueStyle = options.valueStyle ?? ((text: string) => theme.fg("muted", text));
-	return lines.map((line, index) => {
-		const rawValue = line.slice(prefix.length);
+	// The label names the field once. Repeating it on every wrapped line read as
+	// two rows of the same field, which a long description made routine.
+	return values.map((text, index) => {
+		const lead = index === 0 ? prefix : " ".repeat(prefixWidth);
 		const styledPrefix = index === 0 ? (options.firstValuePrefix ?? "") : "";
-		return fitLine(`${prefix}${styledPrefix}${valueStyle(rawValue)}`, width);
+		return fitLine(`${lead}${styledPrefix}${valueStyle(text)}`, width);
 	});
 }
 

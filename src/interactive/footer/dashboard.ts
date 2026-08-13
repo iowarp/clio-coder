@@ -102,6 +102,8 @@ export interface FooterDashboardDeps {
 	getExtensionStats?: () => { active: number; installed: number };
 	getContextState?: () => ContextState;
 	getNotifications?: () => ReadonlyArray<Notification>;
+	/** Whether the Ctrl+G leader is armed and waiting for its next key. */
+	getLeaderArmed?: () => boolean;
 	dismissKeyLabel?: string;
 	now?: () => number;
 	resolveCurrentBranch?: (cwd: string) => Promise<string | null>;
@@ -161,6 +163,7 @@ function renderFooterCompactLines(state: FooterDashboardRenderState, width: numb
 			state.sessionTokens,
 			state.sessionCost,
 			state.session.outputVerbosity,
+			state.session.leaderArmed ?? false,
 		),
 	].map((line) => fitDashboardLine(line, safeWidth));
 }
@@ -426,6 +429,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				safety,
 				toolProfile,
 				outputVerbosity: settings?.terminal.outputVerbosity ?? "default",
+				leaderArmed: deps.getLeaderArmed?.() ?? false,
 				memoryIntervention: taskMemory
 					? {
 							enabled: taskMemory.enabled,

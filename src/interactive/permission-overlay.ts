@@ -29,10 +29,10 @@ const PERMISSION_OVERLAY_CONTENT_WIDTH = 78;
 export const PERMISSION_OVERLAY_WIDTH = PERMISSION_OVERLAY_CONTENT_WIDTH + 4;
 
 class PermissionOverlayBody implements Component {
-	constructor(private readonly lines: readonly string[]) {}
+	constructor(private readonly view: ApprovalRequestView) {}
 
-	render(_width: number): string[] {
-		return [...this.lines];
+	render(width: number): string[] {
+		return permissionOverlayLines(this.view, width);
 	}
 
 	invalidate(): void {}
@@ -40,6 +40,37 @@ class PermissionOverlayBody implements Component {
 
 function truncate(value: string, max: number): string {
 	return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
+}
+
+/** `label: value`, with the value ellipsized to what the box actually has. */
+function field(label: string, value: string, width: number): string {
+	return `${label}${truncate(value, Math.max(1, width - label.length))}`;
+}
+
+/**
+ * Greedy word wrap for prose. The safety sentences are the operator's only
+ * statement of what allow and stop mean, so they wrap: cutting them at the
+ * border produced "allow or de" on the surface where a misread is a wrong
+ * decision about a tool call.
+ */
+function wrapSentence(value: string, max: number): string[] {
+	if (max <= 0) return [value];
+	const lines: string[] = [];
+	let current = "";
+	for (const word of value.split(" ")) {
+		if (current.length === 0) current = word;
+		else if (current.length + 1 + word.length <= max) current = `${current} ${word}`;
+		else {
+			lines.push(current);
+			current = word;
+		}
+		while (current.length > max) {
+			lines.push(current.slice(0, max));
+			current = current.slice(max);
+		}
+	}
+	if (current.length > 0) lines.push(current);
+	return lines;
 }
 
 function wrapArtifactLine(value: string, max: number): string[] {
@@ -73,30 +104,66 @@ export function permissionOverlayTitle(): string {
 	return "Allow this action once?";
 }
 
-export function createPermissionOverlayBody(view: ApprovalRequestView): Component {
+/**
+ * The footer for a box `innerWidth` columns wide inside its borders.
+ *
+ * The generic hint elider drops middle entries, which at 40 columns removed
+ * `[s] stop turn` and left "allow once" and an ambiguous "close" in front of an
+ * operator trying to refuse. The key kept working, so the layout was hiding a
+ * live safety action. Shorter labels come first here, and stop is the last
+ * thing to go, never the first.
+ */
+export function permissionOverlayHint(innerWidth: number): string {
+	const budget = innerWidth - 3;
+	const tiers = [
+		"[Enter] allow once · [s] stop turn · [Esc] close",
+		"[Enter] allow · [s] stop · [Esc] close",
+		"[Enter] allow · [s] stop",
+	];
+	return tiers.find((tier) => tier.length <= budget) ?? (tiers.at(-1) as string);
+}
+
+const SAFETY_SENTENCES: ReadonlyArray<string> = [
+	"Parked until you decide; allow or deny applies to this call only.",
+	"Stopping the turn denies it and ends the run, so nothing asks again.",
+	"Hard-blocked actions remain blocked.",
+];
+
+/**
+ * The overlay's body, laid out for the width the frame gives it.
+ *
+ * Every line used to be sized for a 78-column box and the frame hard-cut the
+ * rest, so a 40-column terminal saw the safety sentences end mid-word and an
+ * 80-column one saw the command being authorized end mid-argument, both with
+ * nothing marking the cut.
+ */
+export function permissionOverlayLines(view: ApprovalRequestView, width: number): string[] {
+	const content = Math.max(8, Math.floor(width));
 	// The parked call is awaiting a decision, not blocked: the raw rejection
 	// short ("<tool> blocked: <class>") is never rendered here because its
 	// wording contradicts the ask. Tool, Target, Action, and the asking axis
 	// carry everything the operator needs to decide.
 	const lines = [
-		`Tool: ${truncate(view.tool, 72)}`,
-		...(view.target !== undefined && view.target.length > 0 ? [`Target: ${truncate(view.target, 70)}`] : []),
-		`Action: ${truncate(view.actionClass, 70)}`,
-		`Asked by: ${truncate(askedBy(view), 68)}`,
+		field("Tool: ", view.tool, content),
+		...(view.target !== undefined && view.target.length > 0 ? [field("Target: ", view.target, content)] : []),
+		field("Action: ", view.actionClass, content),
+		field("Asked by: ", askedBy(view), content),
 		...(view.artifact !== undefined
 			? [
 					"",
 					"Resolved dispatch plan:",
-					...view.artifact.text.split(/\r?\n/u).flatMap((line) => wrapArtifactLine(line, PERMISSION_OVERLAY_CONTENT_WIDTH)),
+					...view.artifact.text.split(/\r?\n/u).flatMap((line) => wrapArtifactLine(line, content)),
 				]
 			: []),
 		"",
-		"Parked until you decide; allow or deny applies to this call only.",
-		"Stopping the turn denies it and ends the run, so nothing asks again.",
-		"Hard-blocked actions remain blocked.",
+		...SAFETY_SENTENCES.flatMap((sentence) => wrapSentence(sentence, content)),
 	];
 	if (view.queueDepth !== undefined && view.queueDepth > 1) {
 		lines.splice(lines.indexOf(""), 0, `1 of ${view.queueDepth} parked`);
 	}
-	return new PermissionOverlayBody(lines);
+	return lines;
+}
+
+export function createPermissionOverlayBody(view: ApprovalRequestView): Component {
+	return new PermissionOverlayBody(view);
 }
