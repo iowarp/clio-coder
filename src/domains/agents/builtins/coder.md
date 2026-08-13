@@ -3,9 +3,9 @@ version: 1
 name: Coder
 description: Implements bounded code changes, repairs, and behavior-preserving refactors.
 tools:
-  required: [read, {anyOf: [write, edit]}]
-  optional: [grep, find, ls, web_fetch, git, verify, code_nav]
-skills: []
+  required: [read, {anyOf: [write, edit]}, context]
+  optional: [grep, find, ls, web_fetch, git, verify, code_nav, bash]
+skills: [piv-commit, piv-review-changes]
 audience: base
 category: implement
 capabilityClass: workspace-edit

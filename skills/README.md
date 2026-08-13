@@ -47,6 +47,22 @@ and a `version`. A skill a user wrote themselves carries none of those fields.
 | [`find-skills`](find-skills/) | workflow | A capability might exist as an installable skill. Searches with `clio skills search`, browses the ecosystem read-only, and installs only through `clio skills install`. |
 | [`credentials`](credentials/) | discipline | A task needs an API key, token, or facility credential. Verifies presence without exposing values, collects new secrets via hidden terminal input, and contains leaks. |
 | [`workflow-distiller`](workflow-distiller/) | workflow | A workflow that just ran should become a reusable skill. Reconstructs it from the session record, interviews, checks overlap, gates on approval, then writes it following `skill-craft`. |
+| [`herdr`](herdr/) | integration | The user asks to launch, drive, or inspect another agent or command in a Herdr pane — including a second Clio Coder instance. Requires `HERDR_ENV=1`. |
+| [`ast-grep`](ast-grep/) | workflow | A code search needs structure, not text: AST patterns, "X inside Y", or grep is too noisy. Test-first rule writing, search only. |
+| [`piv-commit`](piv-commit/) | workflow | The user asks to commit finished work. One atomic conventional commit, explicit-path staging, no push. |
+| [`piv-create-pr`](piv-create-pr/) | workflow | The user asks to push the branch and open a PR. Base detection, state gates, structured body, URL back. |
+| [`piv-investigate-issue`](piv-investigate-issue/) | workflow | A GitHub issue needs diagnosis before a fix: parallel exploration, evidence-cited why-chain, reviewable RCA. |
+| [`piv-review-changes`](piv-review-changes/) | workflow | Pre-commit review of uncommitted work: real bugs and security, verified findings, severity-ranked report. |
+| [`worktree-create`](worktree-create/) | workflow | Stand up isolated worktrees for parallel branches: detected install/config/health-check, per-worktree verification. |
+| [`worktree-merge`](worktree-merge/) | workflow | Integrate finished worktree branches through a throwaway integration branch with per-merge tests and a full final gate. |
+| [`resolving-merge-conflicts`](resolving-merge-conflicts/) | workflow | A merge/rebase is stopped on conflicts. Resolves from both sides' reconstructed intent, validates, completes the operation. |
+| [`plan-create-prd`](plan-create-prd/) | interview | A greenfield idea needs a problem-first product document with a falsifiable hypothesis and zero engineering decisions. |
+| [`plan-architecture`](plan-architecture/) | interview | An intent needs its engineering approach decided interactively: options, trade-offs, spikes, a high-level decision doc. |
+| [`plan-create-stories`](plan-create-stories/) | workflow | A finished PRD/architecture doc must become real tracker tickets with verifiable acceptance criteria. |
+| [`tdd`](tdd/) | discipline | Build or fix test-first: red → green at pre-agreed public seams, one vertical slice per cycle. |
+| [`prototype`](prototype/) | workflow | A design question should be answered with clearly-marked throwaway code, then the verdict captured and the code discarded. |
+| [`coding-standards`](coding-standards/) | reference | TypeScript correct-by-construction standards: errors as values, parse don't validate, deep modules. Provisional. |
+| [`tech-spec`](tech-spec/) | workflow | A typed call-stack architecture handoff: contracts + execution flows, implementation-ready. User-invoked only. Provisional. |
 | [`skill-craft`](skill-craft/) | reference | Writing, reviewing, or pruning any SKILL.md: invocation cost, trigger-only descriptions, completion criteria, progressive disclosure, and the pruning pass. |
 
 Each SKILL.md may declare `allowed-tools` / `disallowed-tools`. After a skill
@@ -161,8 +177,13 @@ Field semantics inside `clio:`:
   the local-model bar (explicit, imperative, short steps, explicit stop
   conditions) and runs on ~30B-class local models; `large` means the skill
   leans on judgment or synthesis that degrades on small models.
-- `agents` lists the dispatch recipes the body binds to, so a harness without
-  those agents knows what degrades.
+- `agents` records agent bindings: the agent surfaces the skill is written
+  for (`main`, `coder`, or a recipe name whose definition lists the skill)
+  and, for orchestration skills, the recipes the body dispatches. A harness
+  without those agents knows what degrades.
+- `provisional: true` marks a skill accepted into the catalog on trial: it
+  passed review but its fit for the ecosystem is still being judged, and it
+  may be revised or dropped without a deprecation cycle.
 
 `requires: [skill:<name>, ...]` stays top-level: Clio's loader consumes it for
 dependency warnings, and other harnesses ignore it like any unknown key.
