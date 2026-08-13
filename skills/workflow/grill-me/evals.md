@@ -71,3 +71,8 @@ Expected:
 - Interview ends when the user gets tired, with no decision log.
 - Asks about facts discoverable via grep/read.
 - Hits the round limit without a useful closeout.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS (smoke). Skill loaded and interviewed; judge emitted nothing (truncation).

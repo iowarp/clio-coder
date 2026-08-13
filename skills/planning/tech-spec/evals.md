@@ -5,8 +5,17 @@ bullet. Status: written at port time, not yet executed (`eval-status:
 untested`); skill is marked provisional and user-invoked only.
 
 ## S1 — sufficient context (Path A)
-Setup: conversation and codebase fully describe a bounded change.
-Prompt: "/tech-spec for adding rate limiting to the ingest endpoint."
+Setup: write a tech spec for adding per-client rate limiting to the ingest
+endpoint in src/ingest.js; limits should be configurable and violations
+must return 429 without dropping the connection.
+
+Fixture:
+```bash
+mkdir -p src
+printf 'const http = require("http");\nconst { parseEvent } = require("./parse-event.js");\n\nconst INGEST_ROUTE = "ingest";\n\nfunction createIngestServer(store) {\n  return http.createServer((req, res) => {\n    if (req.url.slice(1) !== INGEST_ROUTE || req.method !== "POST") {\n      res.writeHead(404);\n      res.end();\n      return;\n    }\n    let body = "";\n    req.on("data", (chunk) => { body += chunk; });\n    req.on("end", () => {\n      const parsed = parseEvent(body);\n      if (parsed.err) {\n        res.writeHead(400);\n        res.end(JSON.stringify({ error: parsed.err }));\n        return;\n      }\n      store.append(parsed.value);\n      res.writeHead(202);\n      res.end();\n    });\n  });\n}\n\nmodule.exports = { createIngestServer };\n' > src/ingest.js
+printf 'function parseEvent(raw) {\n  try {\n    const value = JSON.parse(raw);\n    if (typeof value.client !== "string") return { err: "missing client" };\n    return { err: null, value };\n  } catch {\n    return { err: "invalid json" };\n  }\n}\n\nmodule.exports = { parseEvent };\n' > src/parse-event.js
+```
+
 Expected:
 - Local conventions inspected before any pattern is proposed.
 - 2-3 materially different alternatives compared before recommending.
@@ -31,3 +40,8 @@ Expected:
 - Prose-only spec with no typed contracts or call stacks.
 - Single foregone design presented as "the" answer.
 - Implementation snuck in.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Spec written and its claims exercised with node -e; judge 4/4.

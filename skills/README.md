@@ -206,9 +206,11 @@ Field semantics inside `clio:`:
   `adapted` from an external skill (name it in `origin`), or `imported`
   near-verbatim.
 - `eval-status` is honest test standing: `untested` (no scenarios),
-  `scenarios-recorded` (evals.md scenarios written, not yet executed via
-  `clio skills eval`), `eval-run` (scenarios executed and passing; record the
-  date in evals.md when setting this).
+  `scenarios-recorded` (evals.md scenarios written, not yet executed),
+  `smoke-checked` (one representative scenario executed through
+  `clio skills eval` and the transcript showed the skill loading and driving
+  its core behavior), `eval-run` (the full scenario set executed and passing;
+  record the date in evals.md when setting this).
 - `model-size` is body-quality guidance: `any` means the body is written to
   the local-model bar (explicit, imperative, short steps, explicit stop
   conditions) and runs on ~30B-class local models; `large` means the skill

@@ -11,13 +11,14 @@ allowed-tools:
   - bash
   - edit
   - ask_user
+  - artifact
 clio:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/git/resolve-merge-conflicts
   audit: pass
   provenance: adapted
   origin: https://github.com/mattpocock/skills/tree/main/skills/engineering/resolve-merge-conflicts
-  eval-status: untested
+  eval-status: smoke-checked
   model-size: any
   agents:
     - main

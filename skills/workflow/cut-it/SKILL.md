@@ -20,7 +20,7 @@ clio:
   audit: pass
   provenance: adapted
   origin: https://github.com/TheOrcDev/skills
-  eval-status: scenarios-recorded
+  eval-status: smoke-checked
   model-size: any
 ---
 

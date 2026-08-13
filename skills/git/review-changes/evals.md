@@ -78,3 +78,8 @@ Expected:
 - Formatting nitpicks presented as findings.
 - Unverified speculation labeled critical.
 - Editing the code under review.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Read full files, wrote the report under .clio/reviews/, judge 4/4.

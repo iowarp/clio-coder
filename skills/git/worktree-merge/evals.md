@@ -107,3 +107,8 @@ Expected:
 - Merging straight into the current branch without an integration branch.
 - Skipping the per-merge test run, losing failure localization.
 - Cleanup without asking.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Integration branch, --no-ff merges with tests between. Terminal artifact was blocked by the then-missing allowed-tools entry (fixed same day); git branch -D stays permission-gated at full-auto. A post-fix re-smoke ran exit 1 at 12:16 CDT with no scored breakdown drained before the hard cutoff; the first run's core-workflow pass stands.

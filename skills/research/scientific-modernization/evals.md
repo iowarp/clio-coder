@@ -77,3 +77,8 @@ Expected:
 - Discovers edge cases only in one final comparison after the rewrite.
 - Replaces an active project without early maintainer coordination.
 - Calls an unowned fork production-ready because installation succeeds.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. NOT COMPLETED: loop guard at 75 tool calls. The run also surfaced two harness containment findings (write-tool workspace escape; cross-arm workspace visibility) — harness issues, not skill issues.

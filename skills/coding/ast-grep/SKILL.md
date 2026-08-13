@@ -15,7 +15,7 @@ clio:
   audit: pass
   provenance: adapted
   origin: https://github.com/coleam00/skills/tree/main/.claude/skills/ast-grep
-  eval-status: untested
+  eval-status: scenarios-recorded
   model-size: any
   agents:
     - main

@@ -21,7 +21,7 @@ Expected:
   goals, not fashion.
 
 ## S3 — altitude check
-Prompt drifts toward "list the files to change".
+Setup: mid-session the user asks "just list the files to change for this".
 Expected:
 - Pulls back up to decisions; hands task-level planning to cut-it.
 
@@ -29,3 +29,8 @@ Expected:
 - One-shot architecture doc with silent convergence.
 - No alternatives, no trade-offs, no spikes.
 - Implementation task lists in the decision doc.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. SMOKE ACTED but substance bullets failed (wrote final_report.md, skipped the loop). Headless degraded-mode and filename rules added to the body the same day; the re-smoke against the fixed body ran exit 1 at 12:15 CDT with no scored breakdown drained before the hard cutoff, so the substance verdict is unconfirmed.

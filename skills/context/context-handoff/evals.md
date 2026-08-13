@@ -3,12 +3,31 @@
 Run a subagent WITHOUT the skill to capture the gap, then WITH it to confirm.
 
 ## H1 — end-of-session brief
-Setup: a session that fixed a bug, left one refactor mid-flight, hit a flaky
-test. Prompt: "write a handoff for the next session."
+Setup: Write a handoff for the next session. This session: we fixed the
+timezone bug in parser.js (dates were parsed as UTC, now local), left the
+retry refactor in fetch.js mid-flight (backoff constant extracted, jitter
+still hardcoded — pick up there), and tests/net.test.js is flaky (fails
+about one run in five on a timing assertion; not yet diagnosed).
+
+Fixture:
+```bash
+git init -q .
+git branch -M main
+git config user.email eval@clio.local
+git config user.name "Clio Eval"
+git config commit.gpgsign false
+printf 'function parseDate(raw) {\n  return new Date(raw);\n}\nmodule.exports = { parseDate };\n' > parser.js
+printf 'const BACKOFF_MS = 200;\nfunction fetchRetry(url) {\n  return { url, backoff: BACKOFF_MS, jitter: 17 };\n}\nmodule.exports = { fetchRetry };\n' > fetch.js
+git add parser.js fetch.js
+git commit -qm "chore: seed session state"
+printf 'const BACKOFF_MS = 200;\nfunction fetchRetry(url) {\n  return { url, backoff: BACKOFF_MS, jitter: 17 };\n}\n// TODO: extract jitter\nmodule.exports = { fetchRetry };\n' > fetch.js
+```
+
 Expected:
 - Runs `date +%F`; uses the real date, never a fabricated one.
 - Produces the template sections, including the exact pick-up point for the WIP.
-- Writes to `.clio/handoffs/handoff-<date>.md` (uses `scripts/new-handoff.sh`).
+- Writes to `.clio/handoffs/handoff-<date>.md` (via `scripts/new-handoff.sh`
+  when available, else directly).
 - Confirms the path and names `context-prime` as the next step.
 - Copies a supplied `clio-task-memory` fence verbatim under `## Task memory
   snapshot`; omits the section when no structured source is present.
@@ -31,3 +50,8 @@ Expected:
 - Fabricates the date.
 - Copies whole documents instead of referencing them.
 - Forgets to redact secrets.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS on the re-run with the bare-number scenario form (harness exit 0, all bullets pass, 2026-08-13 12:17 CDT).

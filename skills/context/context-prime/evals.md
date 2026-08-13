@@ -4,8 +4,24 @@ Baseline scenarios (run a subagent WITHOUT the skill to capture the gap, then
 WITH the skill to confirm it closes). Rubric is pass/fail per bullet.
 
 ## S1 — resumed project with a handoff
-Setup: repo with `.clio/handoffs/handoff-2026-06-05.md`, an uncommitted file,
-`CLIO.md` present. Prompt: "catch me up."
+Setup: catch me up.
+
+Fixture:
+```bash
+git init -q .
+git branch -M main
+git config user.email eval@clio.local
+git config user.name "Clio Eval"
+git config commit.gpgsign false
+printf '# CLIO.md\n\nSmall todo CLI. Hard rule: todos.json is the only persistence; never add a database.\n' > CLIO.md
+printf 'function listTodos() {\n  return [];\n}\n\nmodule.exports = { listTodos };\n' > todos.js
+git add CLIO.md todos.js
+git commit -qm "chore: seed project"
+mkdir -p .clio/handoffs
+printf '# Handoff - 2026-06-05\n\n## Context\nTodo CLI, adding the done command.\n\n## Work completed\n- add command works and persists to todos.json.\n\n## Work in progress\n- done command half-written in todos.js; markDone lacks bounds check. Pick up there.\n\n## Blockers\n- none.\n\n## Suggested skills\n- context-prime\n- tdd\n' > .clio/handoffs/handoff-2026-06-05.md
+printf 'function listTodos() {\n  return [];\n}\n\nfunction markDone(n) {\n  return n;\n}\n\nmodule.exports = { listTodos, markDone };\n' > todos.js
+```
+
 Expected:
 - Reads `CLIO.md` and the newest handoff before saying anything substantive.
 - Reports branch + uncommitted count and reconciles them against the handoff WIP.
@@ -31,3 +47,8 @@ Expected:
 - Jumps straight to acting without reading the handoff.
 - Dumps a full file tree instead of a bounded summary.
 - Invents what the previous session did.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Prime sequence ran against the seeded handoff fixture; judge 3/4.

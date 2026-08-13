@@ -8,6 +8,7 @@ allowed-tools:
   - grep
   - ls
   - bash
+  - tasks
   - ask_user
 clio:
   registry-id: iowarp/clio-coder
@@ -15,7 +16,7 @@ clio:
   audit: pass
   provenance: adapted
   origin: https://github.com/coleam00/skills/tree/main/.claude/skills/backlog
-  eval-status: untested
+  eval-status: smoke-checked
   model-size: any
   agents:
     - main
@@ -69,6 +70,11 @@ gh issue create --title "..." --body "..." --label "phase-N" [--milestone "..."]
 Acceptance criteria go in the body as a markdown checklist. Capture every
 created issue number and URL. A failed create is reported per ticket, not
 papered over.
+
+Local fallback: when the workspace has no GitHub remote, gh is unavailable,
+or the user asks for local tracking, create each confirmed ticket with the
+`tasks` tool instead (one task per ticket, acceptance criteria in the
+description) and capture the task ids. Say which target was used and why.
 
 ## Step 5 — Report
 

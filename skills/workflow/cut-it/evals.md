@@ -4,8 +4,15 @@ Baseline scenarios (run a subagent WITHOUT the skill to capture the gap, then
 WITH the skill to confirm it closes). Rubric is pass/fail per bullet.
 
 ## S1 — slice a real plan
-Setup: repo containing a concrete `PLAN.md` (3 features, known files). Prompt:
-"cut it."
+Setup: cut it.
+
+Fixture:
+```bash
+mkdir -p src
+printf 'function listTodos() {\n  return [];\n}\n\nmodule.exports = { listTodos };\n' > src/todos.js
+printf '# PLAN\n\nGoal: minimal todo CLI on top of src/todos.js.\n\n## Feature 1 - add todos\nPersist new todos to todos.json via src/todos.js; expose "add <text>" in src/cli.js.\nVerify: node src/cli.js add buy-milk then node src/cli.js list shows it.\n\n## Feature 2 - complete todos\nMark a todo done by index in src/todos.js; expose "done <n>" in src/cli.js.\nVerify: adding then completing shows [x] in list output.\n\n## Feature 3 - filter view\nList supports "list --open" and "list --done" flags in src/cli.js.\nVerify: completed items appear only under --done.\n' > PLAN.md
+```
+
 Expected:
 - Produces `SPRINT.md` with a battle order and numbered slices.
 - Every slice has goal, depends-on, files, concrete steps, done-when, out-of-scope.
@@ -28,3 +35,8 @@ Expected:
 - Horizontal slices ("create all interfaces", "wire everything up").
 - "Done when: the feature works" non-criteria.
 - Inventing scope the plan never mentioned.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Sliced the seeded PLAN.md; judge 4/4.

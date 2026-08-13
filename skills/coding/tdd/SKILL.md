@@ -19,7 +19,7 @@ clio:
   audit: pass
   provenance: adapted
   origin: https://github.com/mattpocock/skills/tree/main/skills/engineering/tdd
-  eval-status: untested
+  eval-status: smoke-checked
   model-size: any
   agents:
     - main
@@ -60,6 +60,12 @@ Per cycle, exactly:
 
 One seam, one test, one minimal implementation per cycle. Refactoring is a
 separate later pass with its own review, not part of this loop.
+
+If the test command cannot execute at all (runner missing, execution
+blocked, environment broken), STOP and report exactly that. A test result
+exists only when a run was observed; never mark a case passed from reading
+the code, and never write "verified" or a pass table for runs that did not
+happen.
 
 Vertical slices only: one test → one implementation → repeat, each test a
 tracer bullet informed by the last cycle. Writing all tests first then all
