@@ -50,7 +50,88 @@ function buildFakeChatLoop(events: ChatLoopEvent[]): ChatLoop {
 }
 
 describe("contracts/headless-print", () => {
-	it("exits 0 with empty output when the turn ends on a terminating tool result (artifact plan)", async () => {
+	function captureStdout(): { text: () => string; restore: () => void } {
+		const original = process.stdout.write;
+		let captured = "";
+		// The callback matters: runHeadlessMainAgent ends on a flush that awaits it.
+		process.stdout.write = ((
+			chunk: string | Uint8Array,
+			encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+			callback?: (error?: Error | null) => void,
+		): boolean => {
+			captured += String(chunk);
+			const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+			done?.(null);
+			return true;
+		}) as typeof process.stdout.write;
+		return { text: () => captured, restore: () => (process.stdout.write = original) };
+	}
+
+	it("prints the terminating tool's result when the artifact is the whole answer", async () => {
+		// F4 of the 3b sweep: a headless turn that ended on a terminating artifact
+		// wrote PLAN.md, printed nothing at all, and exited 0. The tool's own
+		// result is what the operator needed: what was written, and where.
+		const chat = buildFakeChatLoop([
+			{ type: "tool_execution_start", toolCallId: "1", toolName: "artifact", args: { kind: "plan" } },
+			{
+				type: "tool_execution_end",
+				toolCallId: "1",
+				toolName: "artifact",
+				result: {
+					content: [{ type: "text", text: "wrote plan artifact (572B) to PLAN.md" }],
+					details: { kind: "plan", paths: ["/work/PLAN.md"] },
+					terminate: true,
+				},
+				isError: false,
+			},
+		] as unknown as ChatLoopEvent[]);
+		const stdout = captureStdout();
+		try {
+			const exitCode = await runHeadlessMainAgent(chat, { prompt: "write a plan" });
+			strictEqual(exitCode, 0);
+			strictEqual(stdout.text(), "wrote plan artifact (572B) to PLAN.md\n");
+		} finally {
+			stdout.restore();
+		}
+	});
+
+	it("supersedes mid-workflow chatter with the terminating tool's result", async () => {
+		// The near-miss is worse than the silence: the last assistant text before
+		// the artifact call was a dangling "let me try...", and that is what the
+		// CLI printed for a turn that had already written its report.
+		const chat = buildFakeChatLoop([
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "Let me take a step back and search for a couple more papers." }],
+					stopReason: "stop",
+				},
+			},
+			{ type: "tool_execution_start", toolCallId: "1", toolName: "artifact", args: { kind: "report" } },
+			{
+				type: "tool_execution_end",
+				toolCallId: "1",
+				toolName: "artifact",
+				result: {
+					content: [{ type: "text", text: "wrote report artifact (3566B) to REPORT.md" }],
+					details: { kind: "report", paths: ["/work/REPORT.md"] },
+					terminate: true,
+				},
+				isError: false,
+			},
+		] as unknown as ChatLoopEvent[]);
+		const stdout = captureStdout();
+		try {
+			const exitCode = await runHeadlessMainAgent(chat, { prompt: "survey the literature" });
+			strictEqual(exitCode, 0);
+			strictEqual(stdout.text(), "wrote report artifact (3566B) to REPORT.md\n");
+		} finally {
+			stdout.restore();
+		}
+	});
+
+	it("exits 0 when the turn ends on a terminating tool result that said nothing (artifact plan)", async () => {
 		// Regression for FINDINGS.md F2's headless corroboration: a turn whose
 		// only action is a terminal artifact (kind=plan/review/report) never
 		// produces an assistant message_end (ToolResult.terminate skips the

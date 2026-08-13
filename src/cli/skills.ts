@@ -41,7 +41,10 @@ and a judge run scoring each Expected bullet from the transcripts. Exit is 1
 when a treatment bullet fails and 3 when a scenario was never measured (a
 truncated or unparseable judge response scores no bullet, which is not a skill
 failure). Every arm runs hermetic: the network tool plane is stripped from the
-child runs unless you pass --allow-network. --scenario takes a full id as written
+child runs unless you pass --allow-network. The baseline and treatment arms run
+at autonomy full-auto in per-run disposable workspaces, because a headless run
+has no operator to approve anything and a gated arm measures the harness rather
+than the skill. --scenario takes a full id as written
 in evals.md, whose prefix is per-skill (S1, but also D2 in clio-dev, T3 in
 clio-test, F1 in find-skills, H2 in context-handoff), or a bare number that
 selects that scenario whatever its prefix. --json emits one JSONL row per
@@ -273,8 +276,14 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			const matchesQuery = (name: string, description: string): boolean =>
 				name.toLowerCase().includes(query) || description.toLowerCase().includes(query);
 			const installed = list.items.filter((skill) => matchesQuery(skill.name, skill.description));
+			// A catalog group name is the other thing an operator types here, and
+			// `install --category git` treats it as a real field: without this,
+			// `search git` answered with the skills whose prose mentions git and
+			// omitted every member of skills/git/.
 			const marketplace = discovery.skills.filter(
-				(skill) => !installedNames.has(skill.name) && matchesQuery(skill.name, skill.description),
+				(skill) =>
+					!installedNames.has(skill.name) &&
+					(matchesQuery(skill.name, skill.description) || skill.category?.toLowerCase() === query),
 			);
 			// Search must report anything that made the result incomplete: loader
 			// diagnostics (like list) plus marketplace discovery diagnostics, so a
@@ -318,7 +327,16 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			const list = loadSkills({ cwd: process.cwd() });
 			const skill = list.items.find((entry) => entry.name === name);
 			if (!skill) {
-				printError(`unknown skill: ${name}`);
+				// inspect reads an installed skill's loaded record, which a marketplace
+				// entry does not have yet. Saying "unknown skill" about a name `search`
+				// just listed denies the skill exists; name the state and the one
+				// command that changes it.
+				const available = discoverMarketplaceSkills({ cwd: process.cwd() }).skills.some((entry) => entry.name === name);
+				printError(
+					available
+						? `skill not installed: ${name} (available in the marketplace; install it with: clio skills install ${name})`
+						: `unknown skill: ${name}`,
+				);
 				return 1;
 			}
 			if (parsed.json) process.stdout.write(`${JSON.stringify({ skill }, null, 2)}\n`);

@@ -66,6 +66,14 @@ interface HeadlessMainAgentResult {
 	 */
 	sawTerminatingToolResult: boolean;
 	/**
+	 * What that terminating tool returned ("wrote plan artifact (572B) to
+	 * PLAN.md"). The turn ends there by design, so this text is the whole
+	 * answer: without it a text-mode run wrote the artifact, said nothing, and
+	 * exited 0, and a run that had chattered before calling the tool printed
+	 * that mid-workflow line as if it were the reply.
+	 */
+	terminatingToolText: string;
+	/**
 	 * The interrupt reason from a cancelled turn (`notice` event keyed
 	 * "turn.interrupted"). An interrupted turn always reports a nonzero exit
 	 * with this reason, never a fabricated answer.
@@ -90,6 +98,23 @@ function assistantText(message: AgentMessage | undefined): string {
 		.join("");
 }
 
+/** The text blocks of a tool result, which is what the tool told the model. */
+function toolResultText(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter((item): item is { type: "text"; text: string } => {
+			return (
+				typeof item === "object" &&
+				item !== null &&
+				(item as { type?: unknown }).type === "text" &&
+				typeof (item as { text?: unknown }).text === "string"
+			);
+		})
+		.map((item) => item.text)
+		.join("")
+		.trim();
+}
+
 function assistantError(message: AgentMessage | undefined): string | null {
 	if (!message || typeof message !== "object" || message.role !== "assistant") return null;
 	const stopReason = (message as { stopReason?: unknown }).stopReason;
@@ -107,8 +132,13 @@ function assistantError(message: AgentMessage | undefined): string | null {
  */
 function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult): HeadlessMainAgentResult {
 	if (event.type === "tool_execution_end") {
-		const terminate = (event.result as { terminate?: boolean } | undefined)?.terminate === true;
-		return { ...current, sawTerminatingToolResult: terminate && !event.isError };
+		const result = event.result as { terminate?: boolean; content?: unknown } | undefined;
+		const terminate = result?.terminate === true && !event.isError;
+		return {
+			...current,
+			sawTerminatingToolResult: terminate,
+			terminatingToolText: terminate ? toolResultText(result?.content) : "",
+		};
 	}
 	if (event.type === "notice") {
 		if (event.surface !== "transcript") return current;
@@ -341,6 +371,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		text: "",
 		error: null,
 		sawTerminatingToolResult: false,
+		terminatingToolText: "",
 		abortReason: null,
 		lastNotice: null,
 	};
@@ -517,8 +548,17 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				: "clio run: no assistant response";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
-	} else if (result.text.length > 0 && mode === "text") {
-		stdoutMessage = result.text;
+	} else if (mode === "text") {
+		// A terminating tool ends the turn in place of an assistant message, so its
+		// result is the answer and any assistant text before it is mid-workflow
+		// chatter the model never offered as a reply. Printing that chatter instead
+		// hands the operator a dangling "let me try..." for a turn that succeeded.
+		stdoutMessage =
+			result.sawTerminatingToolResult && result.terminatingToolText.length > 0
+				? result.terminatingToolText
+				: result.text.length > 0
+					? result.text
+					: null;
 	}
 	const exitCode = terminal.exitCode;
 

@@ -5,6 +5,7 @@ import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { combineBashOutput, runBashCommand } from "../core/bash-exec.js";
+import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import {
 	type EvalHarnessMetrics,
@@ -44,6 +45,19 @@ import { formatColumns, printError } from "./shared.js";
  */
 
 const DEFAULT_RUN_TIMEOUT_MS = 600_000;
+/**
+ * The autonomy the acting arms run at.
+ *
+ * A headless `clio run` has no operator to answer a permission ask, so below
+ * full-auto every exec-class call in an arm dies with the harness's own denial
+ * and the judge scores a skill that was never allowed to act. Operator decision
+ * of 2026-08-13 (docs/findings/HARNESS-NOTES.md item 4): eval arms run
+ * full-auto, because their workspaces are per-run copies created under a
+ * private temp root and removed when the scenario ends. The judge arm is
+ * excluded: it scores text and is instructed to call no tools, so granting it
+ * unattended write and exec buys nothing.
+ */
+const ARM_AUTONOMY = "full-auto";
 const CHILD_OUTPUT_LIMIT = 4_000_000;
 const PREVIEW_MAX_CHARS = 300;
 const TRANSCRIPT_HEAD_CHARS = 9_000;
@@ -163,7 +177,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 		return 2;
 	}
 
-	process.stderr.write(`clio skills eval: ${describeNetworkPolicy(options.allowNetwork)}\n`);
+	process.stderr.write(`clio skills eval: ${describeArmPolicy(options.allowNetwork)}\n`);
 	const childEnv = evalChildEnv(options.allowNetwork);
 	const timeoutMs = options.timeoutSeconds !== undefined ? options.timeoutSeconds * 1000 : DEFAULT_RUN_TIMEOUT_MS;
 	const workspaceOverride = await resolveWorkspaceOverride(options.workspace);
@@ -231,6 +245,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 						verdict: bullet.verdict,
 						reason: bullet.reason,
 						network: networkPolicyLabel(options.allowNetwork),
+						autonomy: ARM_AUTONOMY,
 						baselineSessionId: outcome.baseline?.sessionId ?? null,
 						treatmentSessionId: outcome.treatment?.sessionId ?? null,
 						judgeSessionId: outcome.judge?.sessionId ?? null,
@@ -262,10 +277,75 @@ function networkPolicyLabel(allowNetwork: boolean): NetworkPolicyLabel {
 	return allowNetwork ? "allowed" : "hermetic";
 }
 
-function describeNetworkPolicy(allowNetwork: boolean): string {
-	return allowNetwork
-		? "network: allowed (--allow-network), so arm runs keep the web tools"
-		: "network: hermetic, so the web tools are stripped from every arm run (pass --allow-network to keep them)";
+/**
+ * One line stating everything the harness imposes on its children, before the
+ * first arm starts. Autonomy sits beside the network mode because they are the
+ * same kind of fact: a reader who has to guess either one cannot tell what a
+ * verdict was measured under.
+ */
+function describeArmPolicy(allowNetwork: boolean): string {
+	const network = allowNetwork
+		? "network allowed (--allow-network), so arm runs keep the web tools"
+		: "network hermetic, so the web tools are stripped from every arm run (pass --allow-network to keep them)";
+	return `policy: autonomy ${ARM_AUTONOMY} for the baseline and treatment arms in per-run disposable workspaces; ${network}`;
+}
+
+/** The same two facts in the past tense, for the tail of the human report. */
+function describeArmPolicyOutcome(allowNetwork: boolean): string {
+	const network = allowNetwork
+		? "network: allowed (--allow-network); arm runs kept the web tools"
+		: "network: hermetic; the web tools were stripped from every arm run";
+	return `policy: the baseline and treatment arms ran at autonomy ${ARM_AUTONOMY}; ${network}`;
+}
+
+type EvalArm = "baseline" | "treatment" | "judge";
+
+/**
+ * The argv for one arm's child `clio run`. Every arm streams terminal JSON
+ * events (a turn that ends on a terminating tool carries its content there,
+ * not in text mode) and runs with discovery off so only the explicit --skill
+ * of the treatment arm loads.
+ *
+ * @internal Exported for contract tests.
+ */
+export function armRunArgs(
+	arm: EvalArm,
+	prompt: string,
+	options: { target?: string | undefined; skillBaseDir?: string | undefined } = {},
+): string[] {
+	const args = ["run", "--json", "--json-events", "terminal", "--no-skills"];
+	if (arm !== "judge") args.push("--autonomy", ARM_AUTONOMY);
+	if (options.skillBaseDir !== undefined) args.push("--skill", options.skillBaseDir);
+	if (options.target !== undefined) args.push("--target", options.target);
+	args.push(prompt);
+	return args;
+}
+
+/**
+ * The harness's own permission gate, found in an arm transcript.
+ *
+ * A headless run denies any call it cannot get an operator's approval for, and
+ * the denial reaches the model as a tool error. An arm that collected those is
+ * not evidence about the skill in either direction: it never ran the skill's
+ * workflow, so its bullets are unmeasured, exactly like a judge that never
+ * scored them. Reported as an infra error, never as a verdict.
+ *
+ * @internal Exported for contract tests.
+ */
+export function permissionWallReason(arm: EvalArm, run: CapturedRun): string | null {
+	const haystack = `${run.transcript}\n${run.finalText}`;
+	let blocked = 0;
+	let at = haystack.indexOf(HEADLESS_PERMISSION_DENIED_MARKER);
+	while (at >= 0) {
+		blocked += 1;
+		at = haystack.indexOf(HEADLESS_PERMISSION_DENIED_MARKER, at + HEADLESS_PERMISSION_DENIED_MARKER.length);
+	}
+	if (blocked === 0) return null;
+	return `${arm} arm transcript carries the headless permission wall ${blocked} time(s) ("${HEADLESS_PERMISSION_DENIED_MARKER}"): this run measured the harness's own autonomy gate, not the skill`;
+}
+
+function unmeasuredBullets(scenario: SkillEvalScenario, reason: string): ScoredBullet[] {
+	return scenario.expected.map((text, index) => ({ index: index + 1, text, verdict: "unmeasured", reason }));
 }
 
 /**
@@ -359,7 +439,6 @@ async function runScenario(
 	const scenarioStart = Date.now();
 	const workspace = await mkdtemp(join(tmpdir(), "clio-skill-eval-seed-"));
 	let runWorkspaces: MaterializedSkillEvalWorkspaces | null = null;
-	const targetArgs = target === undefined ? [] : ["--target", target];
 	try {
 		if (workspaceOverride !== null) await copyWorkspace(workspaceOverride, workspace);
 		const fixtureError = await runFixtureCommands(scenario, workspace, timeoutMs, trustFixtures);
@@ -377,23 +456,13 @@ async function runScenario(
 		}
 		runWorkspaces = await materializeSkillEvalWorkspaces(workspace);
 		const baseline = await captureHeadlessRun(
-			["run", "--json", "--json-events", "terminal", "--no-skills", ...targetArgs, scenario.setup],
+			armRunArgs("baseline", scenario.setup, { target }),
 			runWorkspaces.baseline,
 			timeoutMs,
 			childEnv,
 		);
 		const treatment = await captureHeadlessRun(
-			[
-				"run",
-				"--json",
-				"--json-events",
-				"terminal",
-				"--no-skills",
-				"--skill",
-				skillBaseDir,
-				...targetArgs,
-				`/skill:${skillName} ${scenario.setup}`,
-			],
+			armRunArgs("treatment", `/skill:${skillName} ${scenario.setup}`, { target, skillBaseDir }),
 			runWorkspaces.treatment,
 			timeoutMs,
 			childEnv,
@@ -411,19 +480,28 @@ async function runScenario(
 				infraError: infra,
 			});
 		}
+		// An arm the harness itself blocked is scored by nobody: spending a judge
+		// run on those transcripts would only buy well-reasoned verdicts about
+		// the permission wall.
+		const wall = permissionWallReason("baseline", baseline) ?? permissionWallReason("treatment", treatment);
+		if (wall !== null) {
+			return await completeScenarioOutcome({
+				scenario,
+				bullets: unmeasuredBullets(scenario, wall),
+				baseline,
+				treatment,
+				judge: null,
+				workspace,
+				wallTimeMs: Date.now() - scenarioStart,
+				infraError: wall,
+			});
+		}
 		// The judge also runs with --json: a model that ends the turn through a
-		// terminating tool (artifact plan/review/report) prints nothing in text mode,
-		// while the event stream still carries the verdict content.
+		// terminating tool (artifact plan/review/report) prints only that tool's
+		// result line in text mode, while the event stream carries the artifact
+		// content the verdict may live in.
 		const judge = await captureHeadlessRun(
-			[
-				"run",
-				"--json",
-				"--json-events",
-				"terminal",
-				"--no-skills",
-				...targetArgs,
-				judgePrompt(scenario, baseline.transcript, treatment.transcript),
-			],
+			armRunArgs("judge", judgePrompt(scenario, baseline.transcript, treatment.transcript), { target }),
 			runWorkspaces.judge,
 			timeoutMs,
 			childEnv,
@@ -1013,9 +1091,11 @@ function sidecar(
 		skill: skillName,
 		evalId,
 		network: networkPolicyLabel(allowNetwork),
+		autonomy: ARM_AUTONOMY,
 		deltas: [
 			"bullet verdicts are judge-scored from run transcripts, not command exit codes; the evals-domain artifact carries scenario-level records with empty command lists",
 			"a bullet the judge never scored is recorded unmeasured, not failed: its scenario record is pass:false with exitCode 3 and no failureClass",
+			"an arm whose transcript carries the headless permission wall is recorded unmeasured with an infraError: the harness's own gate is not a verdict about the skill",
 			"tokens and cost are rolled up from headless main-agent receipts when those receipts are present",
 			"this sidecar is additive and is registered in overview.json files[]",
 		],
@@ -1095,11 +1175,7 @@ function printHumanReport(
 			);
 		}
 	}
-	process.stdout.write(
-		allowNetwork
-			? "network: allowed (--allow-network); arm runs kept the web tools\n"
-			: "network: hermetic; the web tools were stripped from every arm run\n",
-	);
+	process.stdout.write(`${describeArmPolicyOutcome(allowNetwork)}\n`);
 	process.stdout.write(`eval artifact: ${evalId}\n`);
 	if (evidenceId !== null && evidenceDirectory !== null) {
 		process.stdout.write(`evidence: ${evidenceId} at ${evidenceDirectory} (per-bullet detail in skill-eval.json)\n`);
