@@ -238,4 +238,59 @@ describe("contracts/list-overlay", () => {
 		const emptyLine = view.render(80).find((line) => line.includes("No matches found")) ?? "";
 		ok(emptyLine.includes(clioTheme().fgSequence("muted")), "empty filtered state is muted, not a warning");
 	});
+
+	// A filter that excluded every row and a list that never had one read the
+	// same to the eye and mean different things. The caller's empty message
+	// describes the second state only, and it wraps so a remedy stays legible in
+	// a narrow pane instead of being cut with an ellipsis.
+	it("shows the caller's empty message only for an empty list, wrapped to the pane", () => {
+		const emptyMessage =
+			"no skills installed and no local marketplace configured. install one with `clio skills install <path>`.";
+		const empty = new ListOverlayView(
+			{ title: "Test", items: [], filterable: true, emptyMessage, onClose: () => {} },
+			() => {},
+		);
+		// The first row is the filter input; the rest is the empty state.
+		const rendered = empty.render(40).slice(1).map(stripAnsi);
+		const body = rendered
+			.filter((line) => line.trim().length > 0)
+			.map((line) => line.trim())
+			.join(" ");
+		strictEqual(body, emptyMessage);
+		ok(
+			rendered.every((line) => !line.includes("…")),
+			`the empty message must wrap, not truncate: ${JSON.stringify(rendered)}`,
+		);
+
+		const filtered = new ListOverlayView(
+			{ title: "Test", items: [{ id: "1", label: "Apple" }], filterable: true, emptyMessage, onClose: () => {} },
+			() => {},
+		);
+		filtered.handleInput("z");
+		const filteredLines = filtered.render(80).map(stripAnsi);
+		ok(
+			filteredLines.some((line) => line.includes("No matches found")),
+			"a filter that matched nothing says so",
+		);
+		ok(
+			filteredLines.every((line) => !line.includes("no skills installed")),
+			"a filter that matched nothing must not claim the list is empty",
+		);
+	});
+
+	it("offers only Esc in the footer when the list has no rows", () => {
+		const view = new ListOverlayView(
+			{
+				title: "Test",
+				items: [],
+				filterable: true,
+				emptyMessage: "nothing here yet",
+				hints: [{ key: "i", verb: "install" }],
+				onSelect: () => {},
+				onClose: () => {},
+			},
+			() => {},
+		);
+		strictEqual(view.getHint(), "[Esc] close");
+	});
 });

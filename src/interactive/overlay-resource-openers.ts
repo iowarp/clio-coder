@@ -17,7 +17,6 @@ export interface OverlayResourceOpenersDeps {
 	keybindings: ClioKeybindingManager;
 	editor: Pick<ClioEditor, "setText">;
 	getSlashContext: () => SlashCommandContext;
-	cacheDir: string;
 	resources?: Pick<ResourcesContract, "skills">;
 	closeOverlay: () => void;
 	openHelpOverlay?: typeof openHelpOverlay;
@@ -63,7 +62,6 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 		deps.transitions.state = "skills-hub";
 		deps.transitions.handle = openSkills(deps.tui, {
 			listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
-			cacheDir: deps.cacheDir,
 			setEditorText: (text) => {
 				deps.editor.setText(text);
 				deps.tui.requestRender();

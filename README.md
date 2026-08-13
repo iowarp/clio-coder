@@ -687,7 +687,7 @@ locally with interactive blueprints.
 | Installation, upgrade, reset, uninstallation, configuration folders, permissions | [installation-and-lifecycle.md](docs/installation-and-lifecycle.md) |
 | Every environment variable the runtime reads | [environment-variables.md](docs/environment-variables.md) |
 | Prompt and skill resources, extension manifests, portable share archives | [extensions-and-sharing.md](docs/extensions-and-sharing.md) |
-| Skills Hub marketplace discovery, cache behavior, install actions, publishing | [skills-marketplace.md](docs/skills-marketplace.md) |
+| Skills Hub marketplace discovery, install actions, publishing | [skills-marketplace.md](docs/skills-marketplace.md) |
 | Runtime model refresh, catalog sources, local and cloud model quirks | [model-catalog.md](docs/model-catalog.md) |
 | Active component snapshots and the experimental middleware hook contract | [middleware-and-components.md](docs/middleware-and-components.md) |
 | Advisory validation-contract patterns for scientific artifacts and HPC assumptions | [scientific-validation.md](docs/scientific-validation.md) |

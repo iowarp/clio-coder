@@ -30,7 +30,7 @@ current source, tests, and `CHANGELOG.md`.
 | Evidence directory structures, findings, and operator-approved memory retrieval | [evidence-and-memory.md](evidence-and-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |
 | Local YAML eval suites, reports, comparisons, and command evidence | [eval-runner.md](eval-runner.md) ([Interactive Blueprint](html/eval_blueprint.html)) |
 | Prompt and skill resources, extension manifests, and portable share archives | [extensions-and-sharing.md](extensions-and-sharing.md) ([Interactive Blueprint](html/extensions_blueprint.html)) |
-| Skills Hub marketplace discovery, cache behavior, install actions, and publishing flow | [skills-marketplace.md](skills-marketplace.md) ([Interactive Blueprint](html/skills_blueprint.html)) |
+| Skills Hub marketplace discovery, install actions, and publishing flow | [skills-marketplace.md](skills-marketplace.md) ([Interactive Blueprint](html/skills_blueprint.html)) |
 | Runtime model refresh, catalog sources, local/cloud model quirks, and benchmarking notes | [model-catalog.md](model-catalog.md) ([Interactive Blueprint](html/models_blueprint.html)) |
 | Active component snapshots and the experimental middleware hook/effect contract | [middleware-and-components.md](middleware-and-components.md) ([Interactive Blueprint](html/middleware_blueprint.html)) |
 | Advisory validation-contract patterns for scientific artifacts and HPC assumptions | [scientific-validation.md](scientific-validation.md) ([Interactive Blueprint](html/validation_blueprint.html)) |

@@ -132,8 +132,6 @@ export interface InteractiveDeps {
 	stateDir: string;
 	/** XDG data dir (clioDataDir()). `/view` reads durable evidence bundles from <dataDir>/evidence/. */
 	dataDir: string;
-	/** XDG cache dir (clioCacheDir()). The Skills Hub marketplace cache lives here. */
-	cacheDir: string;
 	/**
 	 * Resolver for current settings. Footer reads the orchestrator target
 	 * (what chat actually dispatches to) rather than the providers catalog's

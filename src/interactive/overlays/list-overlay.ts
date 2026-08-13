@@ -8,6 +8,7 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildHint, FILTER_HINT, type HintEntry, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, markdownTheme, rule, selectListTheme } from "../theme/index.js";
@@ -88,6 +89,10 @@ export class ListOverlayView implements Component {
 	}
 
 	getHint(): string {
+		// A list with no rows has no row to select, invoke, or act on. Offering
+		// those keys anyway is the same lie the empty state exists to stop telling.
+		if (this.options.items.length === 0) return buildHint([], "close");
+
 		const hintEntries: HintEntry[] = [];
 		hintEntries.push({ key: "↑↓", verb: "select" });
 		if (this.options.filterable) {
@@ -170,8 +175,13 @@ export class ListOverlayView implements Component {
 		}
 
 		if (filteredItems.length === 0) {
-			const noMatchText = clioTheme().fg("muted", `  ${this.options.emptyMessage ?? "No matches found"}`);
-			lines.push(this.padLine(noMatchText, width));
+			// A list with nothing in it and a filter that matched nothing are
+			// different states. Only the first one is the caller's empty state, and
+			// it wraps rather than truncating so a remedy survives a narrow pane.
+			const text = allItems.length === 0 ? (this.options.emptyMessage ?? "No matches found") : "No matches found";
+			for (const wrapped of wrapTextWithAnsi(text, Math.max(1, width - 2))) {
+				lines.push(this.padLine(clioTheme().fg("muted", `  ${wrapped}`), width));
+			}
 		} else {
 			const selectedRowIndex = renderedRows.findIndex(
 				(row) => row.type === "item" && row.itemIndex === this.selectedIndex,
