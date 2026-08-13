@@ -31,3 +31,8 @@ Expected:
 - Probing `herdr workspace create` with no arguments (it executes).
 - Predicting pane IDs or reusing IDs from documentation examples.
 - Stealing user focus by splitting without `--no-focus`.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. NOT SMOKED: requires HERDR_ENV and live panes; never run before the campaign time-box.

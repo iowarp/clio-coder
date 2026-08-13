@@ -84,3 +84,8 @@ MPI checkpointing module writing one raw npy per rank per step).
   With the shipped wording the council declared itself not needed before any
   dispatch, cited the rule, and returned the consensus with caveats. No
   manufactured friction.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. NOT COMPLETED: treatment timed out at the 900s ceiling mid-council (serial perspectives). Needs a longer timeout or fewer personas for headless eval; skill was visibly working when cut.

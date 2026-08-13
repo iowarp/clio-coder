@@ -131,3 +131,8 @@ accumulation loop; regression check fails by 1.474e-4).
   CONFIRMED/REFUTED verdicts citing command output, untested H3 marked N/A,
   fix applied only after the CONFIRMED verdict, and a commit message citing
   the confirming observation. All six S1 bullets pass.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Judge 6/6 on the seeded numerical fixture; cleanest research run.

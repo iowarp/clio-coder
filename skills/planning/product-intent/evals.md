@@ -29,3 +29,8 @@ Expected:
 - One-shot PRD generated from thin air.
 - Hypothesis with no WRONG condition.
 - "React + Postgres" appearing anywhere in the document.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Interview degraded gracefully headless; PRD written to docs/, judge 5/5.

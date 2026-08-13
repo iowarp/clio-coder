@@ -34,3 +34,8 @@ Expected:
 - Descriptions that describe what the skill is instead of when to use it.
 - "Done when it works" completion criteria.
 - Rewording weak lines instead of deleting them.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. NOT COMPARABLE: baseline arm hit the loop guard, so no baseline exists; treatment was visibly scaffolding a skill when the run was scored INFRA.

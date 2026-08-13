@@ -14,13 +14,14 @@ allowed-tools:
   - code_nav
   - dispatch
   - write
+  - artifact
 clio:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/git/investigate-issue
   audit: pass
   provenance: adapted
   origin: https://github.com/coleam00/skills/tree/main/.claude/skills/investigate-issue
-  eval-status: untested
+  eval-status: smoke-checked
   model-size: large
   agents:
     - main

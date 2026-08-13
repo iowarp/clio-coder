@@ -16,7 +16,7 @@ clio:
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/meta/credentials
   audit: pass
   provenance: designed
-  eval-status: scenarios-recorded
+  eval-status: smoke-checked
   model-size: any
 ---
 

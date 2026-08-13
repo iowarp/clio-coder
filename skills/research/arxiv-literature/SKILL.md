@@ -10,12 +10,13 @@ allowed-tools:
   - grep
   - find
   - ls
+  - artifact
 clio:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/skills/research/arxiv-literature
   audit: pass
   provenance: designed
-  eval-status: scenarios-recorded
+  eval-status: smoke-checked
   model-size: any
   agents:
     - researcher
@@ -88,7 +89,10 @@ Never paste raw Atom XML or full paper text into the response. Output format:
 
 Done when every returned paper has a card with a working link and the
 recommendation section is filled in. Stop after one search round unless the
-user asks to go deeper; do not keep fetching to "be thorough".
+user asks to go deeper; do not keep fetching to "be thorough". One round
+means at most two Atom API fetches: the initial query plus one refinement.
+Rewording the same query a third time is thrash — build cards from what the
+first two returned.
 
 ## Gotchas
 

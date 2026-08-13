@@ -12,7 +12,7 @@ clio:
   audit: pass
   provenance: adapted
   origin: https://github.com/dmmulroy/skills/tree/main/coding-standards
-  eval-status: untested
+  eval-status: smoke-checked
   model-size: any
   provisional: true
   agents:

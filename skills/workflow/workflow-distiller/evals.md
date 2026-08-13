@@ -5,8 +5,13 @@ WITH the skill to confirm it closes). Rubric is pass/fail per bullet.
 
 ## S1 - "make what we just did a skill"
 
-Setup: a session in which a multi-step workflow visibly ran (fetch, transform,
-verify). User says "make this a skill."
+Setup: Make what we just did a skill. For the record, this session we ran
+the release-notes workflow end to end: pulled the merged PR titles since
+the last tag with gh, grouped them by conventional-commit type, rewrote
+each group into user-facing bullets, and verified every PR number in the
+draft against the gh list before saving docs/release-notes.md. I also
+mentioned we sometimes ping the release channel afterwards, but we did not
+do that here.
 
 Expected:
 
@@ -95,3 +100,8 @@ prompt; the phases still had to run in order.
   creation moved to writing SKILL.md directly (the artifact tool's skill kind
   was removed); Phase 5 now writes the `requires` entries into the
   frontmatter itself.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Inline session-trace setup engaged; judge 5/6.

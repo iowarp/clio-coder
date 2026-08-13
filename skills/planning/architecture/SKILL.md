@@ -20,7 +20,7 @@ clio:
   audit: pass
   provenance: adapted
   origin: https://github.com/coleam00/skills/tree/main/.claude/skills/architecture
-  eval-status: untested
+  eval-status: smoke-checked
   model-size: large
   agents:
     - main
@@ -44,6 +44,12 @@ Never converge silently. Optimize for the user's goals, familiarity (a
 stack they know beats a "better" one they don't), leanness (decide only
 what is needed to move), and reversibility (spend deliberation on the
 expensive calls only).
+
+When asking is unavailable (headless or worker run), do not skip the loop
+and do not go quiet: for each decision, state the options, the
+recommendation, and the reasoning inline, adopt the recommendation, and
+mark it `assumed — confirm`. Every other rule still applies, including the
+output path below.
 
 ## Step 0 — Ground
 
@@ -90,7 +96,8 @@ user's call. Skip what does not apply and say that you skipped it:
 Only after the calls are made. Default location: `docs/architecture-<slug>.md`
 (or folded into the PRD as an `## Architecture` section when the user
 prefers one document; a tracker page when the user names one and an
-integration exists). Shape:
+integration exists). Never invent another filename — `final_report.md`,
+`REPORT.md`, and similar are wrong. Shape:
 
 ```markdown
 # Architecture — <intent name>

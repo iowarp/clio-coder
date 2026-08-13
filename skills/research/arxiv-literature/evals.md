@@ -51,3 +51,8 @@ Expected:
   "recent work".
 - Fetching every search hit instead of the top candidates.
 - Uncited claims: summaries with no ids or links a reader can follow.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS (driver FAIL overturned on transcript review): skill loaded, skill_surface blocked two curl attempts, retrieval ran through web_fetch on the Atom API per the designed dispatch-unavailable fallback. Judge misread the OR in bullet 1. Query thrash (8 fetches) led to the two-fetch cap now in the body.

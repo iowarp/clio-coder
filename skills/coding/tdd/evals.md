@@ -5,8 +5,14 @@ bullet. Status: written at port time, not yet executed (`eval-status:
 untested`).
 
 ## S1 — small feature, test-first
-Setup: repo with a test runner configured. Prompt: "add parseDuration
-test-first."
+Setup: add a parseDuration function (strings like "1h30m" to seconds)
+test-first.
+
+Fixture:
+```bash
+printf '{\n  "name": "eval-app",\n  "version": "1.0.0",\n  "private": true,\n  "type": "commonjs",\n  "scripts": {\n    "test": "node --test"\n  }\n}\n' > package.json
+```
+
 Expected:
 - Seams proposed and confirmed before any test.
 - Each cycle: one failing test observed red, then minimal implementation.
@@ -28,3 +34,8 @@ Expected:
 - Implementation written first, tests back-filled.
 - A batch of tests written up front (horizontal slicing).
 - Tests mocking the module under test's internals.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS on re-run under working exec: red observed, then green. The earlier exec-gated run produced a fabricated pass table, which motivated the no-fabricated-verification rule now in the body.

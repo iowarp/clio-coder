@@ -5,8 +5,12 @@ WITH the skill to confirm it closes). Rubric is pass/fail per bullet.
 
 ## S1 - "make this kernel faster"
 
-Setup: a project with a benchmarkable kernel and no validation contract.
-Prompt: "make this kernel faster."
+Setup: make the smoothing kernel in kernel.py faster.
+
+Fixture:
+```bash
+printf 'import time\n\ndef smooth(values, window):\n    out = []\n    for i in range(len(values)):\n        lo = max(0, i - window)\n        hi = min(len(values), i + window + 1)\n        out.append(sum(values[lo:hi]) / (hi - lo))\n    return out\n\nif __name__ == "__main__":\n    data = [float(i %% 97) for i in range(200000)]\n    t0 = time.perf_counter()\n    smooth(data, 25)\n    print("seconds:", round(time.perf_counter() - t0, 3))\n' > kernel.py
+```
 
 Expected:
 
@@ -80,3 +84,8 @@ Prompt: "Make this kernel faster."
   was rejected and logged in the dead-ends ledger. Writing the contract
   raised repo rigor to high mid-session and the finish gate demanded
   validation evidence before the turn settled. All five S1 bullets pass.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Pre-registration written before touching the seeded kernel; judge 5/5.

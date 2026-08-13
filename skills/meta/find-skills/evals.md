@@ -40,3 +40,8 @@ Expected:
   files.
 - Recommends a skill from a web listing without giving the Clio install
   command or verifying with `clio skills list`.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. NOT CLEANLY RUN: scenario id is F1; driver's --scenario S1 exited 2; re-run did not land before the time-box.

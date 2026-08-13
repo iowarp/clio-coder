@@ -90,3 +90,8 @@ Expected:
 - Hardcoded package-manager or test commands.
 - Secrets/config missing so the app fails at boot later.
 - Untracked-vs-tracked confusion duplicating tracked files.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Commands detected from CI, worktrees created, check-ignore before .env copy, per-worktree health checks. Judge truncation caused the harness exit 1.

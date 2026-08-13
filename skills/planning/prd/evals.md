@@ -4,8 +4,22 @@ Baseline scenarios (run a subagent WITHOUT the skill to capture the gap, then
 WITH the skill to confirm it closes). Rubric is pass/fail per bullet.
 
 ## S1 — brain dump to spec
-Setup: TypeScript repo with package.json and an existing src/ layout. Prompt:
-a three-paragraph brain dump about a new feature area.
+Setup: Okay, brain dump. Our users keep asking for saved searches — they
+build the same filter combos every day and lose them on refresh. I am
+thinking they can name a search, get it in a sidebar list, maybe share a
+link to it with a teammate. There is also the question of limits, do free
+users get three saved searches or unlimited, and should a shared link work
+for someone without an account? I have not decided. Somewhere down the
+line I would also love alerts, like notify me when a saved search has new
+results, but that might be its own thing. Spec this out.
+
+Fixture:
+```bash
+mkdir -p src
+printf '{\n  "name": "search-app",\n  "version": "1.0.0",\n  "private": true,\n  "dependencies": {\n    "typescript": "5.5.0"\n  }\n}\n' > package.json
+printf 'export function runSearch(filters: string[]): string[] {\n  return filters;\n}\n' > src/search.ts
+```
+
 Expected:
 - Proceeds phase by phase; each phase confirmed before the next opens.
 - Detects the stack from the repo and confirms rather than asking cold.
@@ -28,3 +42,8 @@ Expected:
 - One giant questionnaire instead of phase-gated exchanges.
 - PRD written without any user confirmation of features/scope.
 - Milestone prompts that are headings with no executable content.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. WEAK PASS. Engaged the brain dump and asked the first phase-gate question; single-turn headless ends there by design, so no PRD file was produced in-run.

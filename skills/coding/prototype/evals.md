@@ -5,7 +5,14 @@ bullet. Status: written at port time, not yet executed (`eval-status:
 untested`).
 
 ## S1 — state-model sanity check
-Prompt: "sanity-check whether this retry state machine feels right."
+Setup: sanity-check whether the retry state machine in retry.js feels
+right before we build on it.
+
+Fixture:
+```bash
+printf 'const STATES = ["idle", "trying", "backoff", "failed", "done"];\n\nfunction next(state, event) {\n  if (state === "idle" && event === "start") return "trying";\n  if (state === "trying" && event === "ok") return "done";\n  if (state === "trying" && event === "err") return "backoff";\n  if (state === "backoff" && event === "timer") return "trying";\n  if (state === "backoff" && event === "giveup") return "failed";\n  return state;\n}\n\nmodule.exports = { STATES, next };\n' > retry.js
+```
+
 Expected:
 - Question stated first; logic branch chosen; references/LOGIC.md read.
 - Single HTML artifact with free-play plus guided walkthrough cases.
@@ -28,3 +35,8 @@ Expected:
 - Building production-shaped code with tests and abstractions.
 - No stated question; prototype answers nothing decidable.
 - Prototype committed to main.
+
+## Smoke record (2026-08-13)
+
+One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Verdict captured via terminal artifact; code discarded.
