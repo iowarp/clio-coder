@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { readFile as readFileAsync } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { classifyCHeaderLanguage, isAmbiguousHeaderPath } from "../../../core/c-header-language.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
@@ -7,6 +8,7 @@ import { enumerateWorkspaceFiles, filterWorkspaceFileCandidates } from "../../..
 import type { ProjectType, SourceProjectType } from "../../session/workspace/project-type.js";
 import { EXCLUDED_DIRS } from "../excluded-dirs.js";
 import { extractCMake, isCMakePath } from "./cmake.js";
+import { type CooperativeSlicer, createSlicer } from "./cooperative.js";
 import { createTreeSitterExtractor, type TreeSitterExtractor } from "./tree-sitter.js";
 
 export type CodewikiLanguage = SourceProjectType | "config";
@@ -73,6 +75,12 @@ export type CodewikiReadFile = (path: string) => string | null;
 
 export interface CodewikiBuildOptions {
 	readFile?: CodewikiReadFile;
+	/**
+	 * Slice budget shared across a whole index run. Callers that chain several
+	 * phases pass one slicer so the budget applies end to end rather than
+	 * resetting at each phase boundary. Defaults to a fresh slicer.
+	 */
+	slicer?: CooperativeSlicer;
 }
 
 export interface ExtractedSymbol {
@@ -937,30 +945,70 @@ function candidatePathsForImport(cwd: string, fromRel: string, specifier: string
 	);
 }
 
-function resolveImport(
-	cwd: string,
-	fromRel: string,
-	specifier: string,
-	pathToId: ReadonlyMap<string, string>,
-): string | null {
-	for (const candidate of candidatePathsForImport(cwd, fromRel, specifier)) {
-		if (pathToId.has(candidate)) return pathToId.get(candidate) ?? null;
-		try {
-			if (statSync(join(cwd, candidate)).isFile()) return pathToId.get(candidate) ?? null;
-		} catch {
-			// keep trying candidates already known to the index
+/**
+ * Per-run memo for import resolution.
+ *
+ * A candidate list depends only on the importing file's directory and the
+ * specifier, and a candidate's on-disk status cannot change while a single edge
+ * rebuild is in flight, so both collapse to a map lookup after the first miss.
+ * Uncached, one rebuild of a 1100-file TypeScript repo issued roughly 80 000
+ * `statSync` calls, most of them for paths that do not exist, and spent about
+ * four seconds doing it.
+ */
+function createImportResolver(cwd: string): {
+	resolve(fromRel: string, specifier: string, pathToId: ReadonlyMap<string, string>): string | null;
+} {
+	const candidatesByOrigin = new Map<string, string[]>();
+	const onDisk = new Map<string, boolean>();
+	const candidatesFor = (fromRel: string, specifier: string): string[] => {
+		// The candidate set is a function of the directory, not the file: every
+		// sibling importing the same specifier resolves through the same list.
+		const key = `${dirname(fromRel)}\0${specifier}`;
+		let candidates = candidatesByOrigin.get(key);
+		if (!candidates) {
+			candidates = candidatePathsForImport(cwd, fromRel, specifier);
+			candidatesByOrigin.set(key, candidates);
 		}
-	}
-	return null;
+		return candidates;
+	};
+	const isFile = (candidate: string): boolean => {
+		const cached = onDisk.get(candidate);
+		if (cached !== undefined) return cached;
+		let exists: boolean;
+		try {
+			exists = statSync(join(cwd, candidate)).isFile();
+		} catch {
+			exists = false;
+		}
+		onDisk.set(candidate, exists);
+		return exists;
+	};
+	return {
+		resolve(fromRel, specifier, pathToId): string | null {
+			for (const candidate of candidatesFor(fromRel, specifier)) {
+				if (pathToId.has(candidate)) return pathToId.get(candidate) ?? null;
+				// An unindexed file that exists still claims the specifier: it shadows
+				// any later candidate, and having no id makes the edge external.
+				if (isFile(candidate)) return null;
+			}
+			return null;
+		},
+	};
 }
 
-function buildEdges(cwd: string, files: ReadonlyArray<CodewikiFile>): CodewikiEdge[] {
+async function buildEdges(
+	cwd: string,
+	files: ReadonlyArray<CodewikiFile>,
+	slicer: CooperativeSlicer,
+): Promise<CodewikiEdge[]> {
 	const pathToId = new Map(files.map((file) => [file.path, file.id] as const));
+	const resolver = createImportResolver(cwd);
 	const edges: CodewikiEdge[] = [];
 	const seen = new Set<string>();
 	for (const file of files) {
 		for (const specifier of file.imports) {
-			const target = resolveImport(cwd, file.path, specifier, pathToId);
+			await slicer.tick();
+			const target = resolver.resolve(file.path, specifier, pathToId);
 			const edge = target
 				? ({ fileId: file.id, toFileId: target } satisfies CodewikiInternalEdge)
 				: ({ fileId: file.id, externalModule: specifier } satisfies CodewikiExternalEdge);
@@ -998,7 +1046,12 @@ function promoteSingleSourceEntry(files: CodewikiFile[]): CodewikiFile[] {
 	return files.map((file) => (file.id === only.id ? { ...file, role: "entry" } : file));
 }
 
-function codewikiFromBuiltFiles(cwd: string, language: ProjectType, builtFiles: ReadonlyArray<BuiltFile>): Codewiki {
+async function codewikiFromBuiltFiles(
+	cwd: string,
+	language: ProjectType,
+	builtFiles: ReadonlyArray<BuiltFile>,
+	slicer: CooperativeSlicer,
+): Promise<Codewiki> {
 	const baseBuiltFiles = builtFiles.map((item) => ({
 		...item,
 		file: { ...item.file, role: roleFor(item.file.path, item.file.lang) },
@@ -1015,7 +1068,7 @@ function codewikiFromBuiltFiles(cwd: string, language: ProjectType, builtFiles: 
 		language,
 		files: normalizedFiles,
 		symbols: normalizedBuilt.flatMap((item) => item.symbols).sort(compareCodewikiSymbols),
-		edges: buildEdges(cwd, normalizedFiles),
+		edges: await buildEdges(cwd, normalizedFiles, slicer),
 	};
 }
 
@@ -1025,16 +1078,20 @@ async function buildFromPaths(
 	relPaths: ReadonlyArray<string>,
 	options: CodewikiBuildOptions = {},
 ): Promise<Codewiki> {
+	const slicer = options.slicer ?? createSlicer();
 	const sortedPaths = [...relPaths].sort(compareStrings);
 	const treeSitterExtractor = await loadTreeSitterExtractor();
 	await treeSitterExtractor.ensureGrammarsForPaths(sortedPaths);
 	const readFile = options.readFile ?? defaultReadFile;
 	const builtFiles: BuiltFile[] = [];
 	for (const relPath of sortedPaths) {
+		// One read plus one tree-sitter parse per file; a full build of a large
+		// repo is thousands of them and must not land as a single turn.
+		await slicer.tick();
 		const built = buildFile(cwd, relPath, treeSitterExtractor, readFile);
 		if (built) builtFiles.push(built);
 	}
-	return codewikiFromBuiltFiles(cwd, language, builtFiles);
+	return codewikiFromBuiltFiles(cwd, language, builtFiles, slicer);
 }
 
 export async function buildCodewiki(input: BuildCodewikiInput, options: CodewikiBuildOptions = {}): Promise<Codewiki> {
@@ -1072,6 +1129,7 @@ export async function updateCodewikiPaths(
 		// remains byte-equivalent to a full build.
 		return buildCodewiki({ cwd, language: codewiki.language }, options);
 	}
+	const slicer = options.slicer ?? createSlicer();
 	const existingPaths = new Set(codewiki.files.map((file) => file.path));
 	const visiblePaths = new Set(filterWorkspaceFileCandidates(cwd, normalizedPaths, EXCLUDED_DIRS));
 	const readFile = options.readFile ?? defaultReadFile;
@@ -1091,6 +1149,7 @@ export async function updateCodewikiPaths(
 		const treeSitterExtractor = await loadTreeSitterExtractor();
 		await treeSitterExtractor.ensureGrammarsForPaths(rebuildPaths);
 		for (const relPath of rebuildPaths) {
+			await slicer.tick();
 			const built = buildFile(cwd, relPath, treeSitterExtractor, readFile);
 			if (built) rebuiltFiles.push(built);
 		}
@@ -1106,7 +1165,7 @@ export async function updateCodewikiPaths(
 	const keptFiles: BuiltFile[] = codewiki.files
 		.filter((file) => !changedPathSet.has(file.path))
 		.map((file) => ({ file, symbols: symbolsByFileId.get(file.id) ?? [] }));
-	return codewikiFromBuiltFiles(cwd, codewiki.language, [...keptFiles, ...rebuiltFiles]);
+	return codewikiFromBuiltFiles(cwd, codewiki.language, [...keptFiles, ...rebuiltFiles], slicer);
 }
 
 /**
@@ -1121,11 +1180,15 @@ export async function syncCodewiki(
 	codewiki: Codewiki,
 	options: CodewikiBuildOptions = {},
 ): Promise<Codewiki> {
+	const slicer = options.slicer ?? createSlicer();
 	const readFile = options.readFile ?? defaultReadFile;
 	const currentPaths = enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath);
 	const currentFiles = new Map<string, string>();
 	const currentTexts = new Map<string, string>();
 	for (const relPath of currentPaths) {
+		// Reads and hashes every visible file in the workspace. Cheap per file,
+		// seconds in aggregate on a large repo.
+		await slicer.tick();
 		const text = readFile(join(cwd, relPath));
 		if (text !== null) {
 			currentFiles.set(relPath, contentHash(text));
@@ -1143,6 +1206,7 @@ export async function syncCodewiki(
 	if (changedPaths.size === 0) return codewiki;
 	const syncOptions: CodewikiBuildOptions = {
 		...options,
+		slicer,
 		readFile: (path) => currentTexts.get(normalizeRel(cwd, path)) ?? readFile(path),
 	};
 	return updateCodewikiPaths(cwd, codewiki, [...changedPaths], syncOptions);
@@ -1189,6 +1253,22 @@ function readCodewikiRaw(cwd: string): { raw: string; codewiki: Codewiki } | nul
 
 export function readCodewiki(cwd: string): Codewiki | null {
 	return readCodewikiRaw(cwd)?.codewiki ?? null;
+}
+
+/**
+ * Read and parse the artifact without blocking on the file read. The parse
+ * itself still runs as one turn, which is what a JSON artifact costs; the read
+ * is the part that scales with repository size and it now happens off the loop.
+ * For status surfaces that poll, prefer this over `readCodewiki`.
+ */
+export async function readCodewikiAsync(cwd: string): Promise<Codewiki | null> {
+	let raw: string;
+	try {
+		raw = await readFileAsync(codewikiPath(cwd), "utf8");
+	} catch {
+		return null;
+	}
+	return parseCodewikiRaw(raw);
 }
 
 export function codewikiEntries(codewiki: Codewiki): CodewikiEntry[] {

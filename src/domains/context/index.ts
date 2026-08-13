@@ -40,6 +40,7 @@ export {
 } from "./bootstrap.js";
 export { type RunContextClearInput, type RunContextClearResult, runContextClear } from "./clear.js";
 export { parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
+export { type CooperativeSlicer, createSlicer, INDEX_SLICE_MS } from "./codewiki/cooperative.js";
 export { renderCodewikiDigest } from "./codewiki/digest.js";
 export {
 	buildCodewiki,
@@ -47,13 +48,19 @@ export {
 	codewikiEntries,
 	codewikiNeedsBackfill,
 	readCodewiki,
+	readCodewikiAsync,
 	structuralCodewikiHash,
 	syncCodewiki,
 	updateCodewikiPaths,
 	writeCodewiki,
 } from "./codewiki/indexer.js";
 export type { ContextContract, ContextState, ProjectPromptContext, ProjectStructuredContext } from "./contract.js";
-export { computeFingerprint, isStale } from "./fingerprint.js";
+export {
+	type ComputeFingerprintAsyncOptions,
+	computeFingerprint,
+	computeFingerprintAsync,
+	isStale,
+} from "./fingerprint.js";
 export {
 	type LoadedOperatorProfile,
 	loadOperatorProfile,
@@ -153,4 +160,5 @@ export {
 	wikiCompleteness,
 	wikiCompletenessFromMeta,
 	wikiStaleness,
+	wikiStalenessAsync,
 } from "./wiki/staleness.js";

@@ -1,4 +1,4 @@
-import { probeGit } from "./git-probe.js";
+import { type GitProbeResult, probeGit, probeGitAsync } from "./git-probe.js";
 import { detectProjectType, type ProjectType } from "./project-type.js";
 
 /**
@@ -39,8 +39,7 @@ export function emptyWorkspaceSnapshot(cwd: string): WorkspaceSnapshot {
 	};
 }
 
-export function probeWorkspace(cwd: string): WorkspaceSnapshot {
-	const git = probeGit(cwd);
+function snapshotFrom(cwd: string, git: GitProbeResult): WorkspaceSnapshot {
 	let projectType: WorkspaceSnapshot["projectType"];
 	try {
 		projectType = detectProjectType(cwd);
@@ -59,4 +58,17 @@ export function probeWorkspace(cwd: string): WorkspaceSnapshot {
 		projectType,
 		capturedAt: new Date().toISOString(),
 	};
+}
+
+export function probeWorkspace(cwd: string): WorkspaceSnapshot {
+	return snapshotFrom(cwd, probeGit(cwd));
+}
+
+/**
+ * Same snapshot without blocking. Session bind runs before first paint, so the
+ * interactive layer uses this to paint an empty workspace chip and fill it in
+ * when the probe lands rather than holding the frame for ~280 ms.
+ */
+export async function probeWorkspaceAsync(cwd: string): Promise<WorkspaceSnapshot> {
+	return snapshotFrom(cwd, await probeGitAsync(cwd));
 }

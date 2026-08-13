@@ -168,6 +168,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getContextUsage: () => deps.chat.contextUsage(),
 		getWorkspaceSnapshot,
 		getExtensionStats,
+		// The repository probe runs off the render path now, so the frame that
+		// shows its result has to be asked for when the probe lands.
+		onFactsRefreshed: requestRender,
 		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});

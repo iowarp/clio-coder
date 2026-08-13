@@ -118,6 +118,12 @@ export const EXPANDED_ULTRAWIDE = 120;
 /** Compact footer shows the git section only when there is room for it. */
 const COMPACT_GIT_MIN_WIDTH = 72;
 
+/**
+ * The `visibleWidth` guard looks redundant against `truncateToWidth`, which
+ * measures internally, but it is not: dropping it pads wide-char truncations
+ * with a trailing space and strips a bare ANSI reset at width 0. Both are
+ * visible output, so the extra measurement stays.
+ */
 export function fitDashboardLine(line: string, width: number): string {
 	return visibleWidth(line) > width ? truncateToWidth(line, width, "…", true) : line;
 }

@@ -186,7 +186,9 @@ function harness() {
 		getLiveWorkspaceSnapshot: () => ({}) as ReturnType<WorkspaceFacts["getLiveWorkspaceSnapshot"]>,
 		refreshLiveWorkspaceGit: () => {
 			workspaceRefreshes += 1;
+			return Promise.resolve();
 		},
+		ready: () => Promise.resolve(),
 		getExtensionStats: () => ({ active: 0, installed: 0 }),
 	};
 	const observability = {

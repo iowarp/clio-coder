@@ -2,9 +2,18 @@ import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
 import type { ClioTheme, ClioToken } from "./tokens.js";
 
+/**
+ * Pad or clip a styled string to exactly `width` visible columns.
+ *
+ * `truncateToWidth(…, pad = true)` already returns a string of exactly `width`
+ * columns on both its paths: it appends the shortfall on the fits path and pads
+ * through its own finalizer on the cut path. Measuring the result again to
+ * compute a repeat count that is always zero cost ~24 µs per line whenever the
+ * string missed pi-tui's width cache, which is every footer line that carries a
+ * spinner frame or an elapsed time.
+ */
 export function padAnsi(text: string, width: number, ellipsis = ""): string {
-	const clipped = truncateToWidth(text, Math.max(0, width), ellipsis, true);
-	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
+	return truncateToWidth(text, Math.max(0, width), ellipsis, true);
 }
 
 /**

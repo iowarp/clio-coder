@@ -20,6 +20,7 @@ import { abbreviateModelId, clioTheme } from "../../src/interactive/theme/index.
 import {
 	buildWelcomeDashboardLines,
 	deriveWelcomeDashboardStats,
+	placeholderRepositoryFacts,
 	readWelcomeRepositoryFacts,
 	WELCOME_REPOSITORY_FACTS_TTL_MS,
 	WelcomeDashboard,
@@ -459,5 +460,104 @@ describe("welcome-dashboard and footer integration tests", () => {
 		dashboard.invalidate();
 		dashboard.render(100);
 		strictEqual(probes, 3, "invalidate drops the cache so a context command shows up immediately");
+	});
+	it("paints dim placeholders at constant height until the first probe lands", async () => {
+		// The banner sits at line 0. Once the transcript has scrolled past one
+		// viewport, any change to the banner's line count makes firstChanged land
+		// above the viewport top, which is pi-tui's full-clear-and-repaint trigger.
+		// So the placeholder frame must have exactly the height the filled frame has.
+		const cwd = scratchDashboardProject();
+		await writeDashboardCodewiki(cwd);
+
+		const placeholderStats = deriveWelcomeDashboardStats({
+			providers: mockProviders,
+			observability: mockObservability,
+			getSettings: () => mockSettings,
+			getWorkspaceSnapshot: () => emptyWorkspaceSnapshot(cwd),
+			readRepositoryFacts: placeholderRepositoryFacts,
+		});
+		const settledStats = deriveWelcomeDashboardStats({
+			providers: mockProviders,
+			observability: mockObservability,
+			getSettings: () => mockSettings,
+			getWorkspaceSnapshot: () => emptyWorkspaceSnapshot(cwd),
+			readRepositoryFacts: readWelcomeRepositoryFacts,
+		});
+
+		for (const width of [60, 80, 100, 120, 160]) {
+			const pending = buildWelcomeDashboardLines(placeholderStats, width);
+			const settled = buildWelcomeDashboardLines(settledStats, width);
+			strictEqual(
+				pending.length,
+				settled.length,
+				`width ${width}: placeholder banner must be the same height as the filled banner`,
+			);
+			for (const line of pending) {
+				strictEqual(visibleWidth(line) <= width, true, `width ${width}: placeholder line overflows`);
+			}
+		}
+
+		// A placeholder says it does not know yet; it must not assert a wrong fact.
+		const pendingText = stripAnsi(buildWelcomeDashboardLines(placeholderStats, 120).join("\n"));
+		ok(pendingText.includes("codewiki"), "the pending context row names what it is still reading");
+		ok(!pendingText.includes("no codewiki"), "a repository that has a codewiki must never be told it has none");
+	});
+
+	it("keeps the repository probe off the render call stack", async () => {
+		const cwd = scratchDashboardProject();
+		await writeDashboardCodewiki(cwd);
+		const dashboard = new WelcomeDashboard({
+			providers: mockProviders,
+			observability: mockObservability,
+			getSettings: () => mockSettings,
+			getWorkspaceSnapshot: () => emptyWorkspaceSnapshot(cwd),
+		});
+
+		// First frame: nothing has been probed, so the banner is placeholders and
+		// render() returned without touching git or parsing the codewiki.
+		const first = stripAnsi(dashboard.render(120).join("\n"));
+		ok(first.includes("codewiki"), "the first frame renders before any probe has run");
+
+		// Let the scheduled probe land, then the banner fills in.
+		for (let i = 0; i < 50; i += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			const text = stripAnsi(dashboard.render(120).join("\n"));
+			if (/\d+ modules/u.test(text)) {
+				strictEqual(
+					dashboard.render(120).length,
+					dashboard.render(120).length,
+					"a settled banner renders at a stable height",
+				);
+				return;
+			}
+		}
+		throw new Error("the asynchronous repository probe never filled the banner in");
+	});
+
+	it("serves the rendered banner from cache while its stats are unchanged", async () => {
+		const cwd = scratchDashboardProject();
+		await writeDashboardCodewiki(cwd);
+		let builds = 0;
+		const dashboard = new WelcomeDashboard({
+			providers: mockProviders,
+			observability: mockObservability,
+			getSettings: () => mockSettings,
+			getWorkspaceSnapshot: () => emptyWorkspaceSnapshot(cwd),
+			readRepositoryFacts: (probedCwd) => {
+				builds += 1;
+				return readWelcomeRepositoryFacts(probedCwd);
+			},
+		});
+
+		const first = dashboard.render(120);
+		for (let frame = 0; frame < 60; frame += 1) {
+			strictEqual(dashboard.render(120), first, "an unchanged banner returns the identical array, not a rebuild");
+		}
+		strictEqual(builds, 1);
+
+		// A width change must miss.
+		const narrow = dashboard.render(80);
+		ok(narrow !== first);
+		strictEqual(dashboard.render(80), narrow);
 	});
 });

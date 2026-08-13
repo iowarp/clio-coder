@@ -373,6 +373,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const workspaceFacts = createWorkspaceFacts({
 		cwd: process.cwd(),
 		getSessionWorkspace: () => deps.session?.current()?.workspace ?? null,
+		// The workspace probe lands after first paint now; ask for the frame that
+		// shows the branch chip once it does.
+		onRefreshed: () => tui.requestRender(),
 		...(deps.extensions ? { extensions: deps.extensions } : {}),
 	});
 	const { refreshLiveWorkspaceGit } = workspaceFacts;
