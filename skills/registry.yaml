@@ -6,12 +6,18 @@ skills:
   - name: arxiv-literature
     version: 0.2.0
     sha256: d4ee3b1cf7251ad000d8a8d612edce335714b9fe5ca84aa5a30fdd7bf2393ddd
+  - name: ast-grep
+    version: 0.1.0
+    sha256: a6c0857271deb5318bc000f6d9a98bcacdda58ac9aebae05028482e7cad1f91f
   - name: clio-dev
     version: 0.2.0
     sha256: e990c3de452f6a09f407e2e88cdb205e63a4a2451e2367df233c2260fdd039f8
   - name: clio-test
     version: 0.1.3
     sha256: d7fe83a364982d59391d18542ecc95786698aff3413c916ca4016dfecd2cfc5a
+  - name: coding-standards
+    version: 0.1.0
+    sha256: 934a59c1642def265df0ce9af1880fa38ab0c00cf24534b9839d3a59b5e421d8
   - name: context-handoff
     version: 0.3.1
     sha256: a40459c7f9d0110dca6c42523139f87ad38dcc6e104b79b674fb5c6fd21c2340
@@ -36,9 +42,39 @@ skills:
   - name: grill-me
     version: 0.3.2
     sha256: d80ae4e8b2195bef289306863ad4a53299cf872bc980af08672bb1ee96741282
+  - name: herdr
+    version: 0.1.0
+    sha256: c0699c94a7220530687f7b04a95bf351e6e7d289872eefe2ca7c919cc5e1c520
+  - name: piv-commit
+    version: 0.1.0
+    sha256: 08e4477786a656588023408c1245e52b37653a0b74bb6e7548ae5a358658a669
+  - name: piv-create-pr
+    version: 0.1.0
+    sha256: 00c7ab589b58e724c6a17305401bbd7289088d030cf9f473e7d87ad11cbb713d
+  - name: piv-investigate-issue
+    version: 0.1.0
+    sha256: d37ddc1b16705cbd7d95d373b518499379b3440734e70ff839a27b94ba42005f
+  - name: piv-review-changes
+    version: 0.1.0
+    sha256: 24d02812e4ea69987d51a8248ab5c406544e6eb23b21c7875839b9726e529141
+  - name: plan-architecture
+    version: 0.1.0
+    sha256: fc9c83d9724a3bbfc337271757fe1b659fb1f9d54c72b05a5eb9829c7ba6098f
+  - name: plan-create-prd
+    version: 0.1.0
+    sha256: 62ab6b969d309a45cc772f463e952e45dc74ac2284563491e1f7013d9e73742c
+  - name: plan-create-stories
+    version: 0.1.0
+    sha256: 50903c2322cb44f6b2014115ec341108f8b449005ade6a6fc7f8012ee67473fc
   - name: prd
     version: 0.2.1
     sha256: f4871536a0f1408f817010a435680cc5b39628eb63afe97ddb121a52bd1e2000
+  - name: prototype
+    version: 0.1.0
+    sha256: 5ce952eadf1933c99436a637f2c1d8c6ba1f27172fca238dd35fcaecc47837a4
+  - name: resolving-merge-conflicts
+    version: 0.1.0
+    sha256: 87398f629055c71c2c26901d7384b1053a61346be1da7da8ea7a49f8a09116af
   - name: scientific-debugging
     version: 0.1.2
     sha256: e40ba5679070c90dbb2670e44ea83f7caaf86a73fa732d02708f0250f7dfb24f
@@ -48,6 +84,18 @@ skills:
   - name: skill-craft
     version: 0.1.1
     sha256: e3a72020e833c95f0e1323ec1f1f57fb35cb378c9d0230e643f065b8f26ff017
+  - name: tdd
+    version: 0.1.0
+    sha256: 01ae764f15e94f8a364621b3722aea242df8d66d869cb6c826576081ad894c7e
+  - name: tech-spec
+    version: 0.1.0
+    sha256: 34567ba7512c0e5239508783725249db5bbd7b3fb53eab4df04d4b273d1e3091
   - name: workflow-distiller
     version: 0.2.1
     sha256: 263b22346725129a902410bfcaecca3d1ab4095113dc66ad3ec4e3985f9a7f18
+  - name: worktree-create
+    version: 0.1.0
+    sha256: 8a3118b57354fe79e9cc0dd20928102998f6f0d10693f0f9f508653c4c4c6c21
+  - name: worktree-merge
+    version: 0.1.0
+    sha256: 9bec2d56b7cbe794111e09bb8d75964761c86a3d5e44b5e59074ee84839b5f6f

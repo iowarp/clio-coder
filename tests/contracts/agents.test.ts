@@ -41,7 +41,7 @@ describe("contracts/agents", () => {
 	it("loads shipped recipes as explicit strict specs", () => {
 		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
 		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
-		strictEqual(recipes.length, 11);
+		strictEqual(recipes.length, 12);
 		for (const entry of recipes) {
 			strictEqual(entry.version, 1);
 			ok(entry.body.trim().length > 0);
@@ -69,6 +69,16 @@ describe("contracts/agents", () => {
 		deepStrictEqual(bootstrap?.resultContract, { kind: "context-handbook" });
 		const scout = recipes.find((entry) => entry.id === "scout");
 		deepStrictEqual(scout?.resultContract, { kind: "scout-report" });
+		const gitMaster = recipes.find((entry) => entry.id === "git-master");
+		strictEqual(gitMaster?.audience, "base");
+		strictEqual(gitMaster?.capabilityClass, "workspace-edit");
+		deepStrictEqual(gitMaster?.resultContract, { kind: "mutation-report" });
+		strictEqual(
+			gitMaster?.boundSkillPaths.some((path) => path.endsWith("skills/piv-commit/SKILL.md")),
+			true,
+		);
+		const coder = recipes.find((entry) => entry.id === "coder");
+		deepStrictEqual(coder?.skills, ["piv-commit", "piv-review-changes"]);
 	});
 
 	it("keeps display metadata visible while policy reads hard semantics", () => {
