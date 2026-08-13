@@ -129,6 +129,49 @@ describe("contracts/session usage reseed", () => {
 		strictEqual(calls.length, 1);
 	});
 
+	/**
+	 * The live path records under the target id and the wire model. Reading the
+	 * runtime out of the payload instead split one endpoint into two blocks in
+	 * /cost, so a single `dynamo` target on `llamacpp` rendered as two providers
+	 * whose turn counts diverged with every resume.
+	 */
+	it("attributes reseeded calls to the target, matching how live turns are recorded", () => {
+		const calls = ledgerUsageCalls([assistantTurn(completedCall, "a1")], {
+			target: "dynamo",
+			model: "Nemo-3.5-Lightning",
+		});
+		strictEqual(calls[0]?.providerId, "dynamo", "not the runtime name from the payload");
+		strictEqual(calls[0]?.modelId, "Nemo-3.5-Lightning");
+	});
+
+	it("follows a modelChange row so a session that switched targets attributes each call correctly", () => {
+		const calls = ledgerUsageCalls(
+			[
+				assistantTurn(completedCall, "a1"),
+				{
+					kind: "modelChange",
+					turnId: "m1",
+					parentTurnId: "a1",
+					timestamp: "t",
+					provider: "lmstudio",
+					modelId: "gemma-4",
+					target: "mini",
+				},
+				assistantTurn(completedCall, "a2"),
+			] as unknown as SessionEntry[],
+			{ target: "dynamo", model: "Nemo-3.5-Lightning" },
+		);
+		deepStrictEqual(
+			calls.map((call) => `${call.providerId}/${call.modelId}`),
+			["dynamo/Nemo-3.5-Lightning", "mini/gemma-4"],
+		);
+	});
+
+	it("falls back to the payload's own provider when the session names no target", () => {
+		const calls = ledgerUsageCalls([assistantTurn(completedCall, "a1")]);
+		strictEqual(calls[0]?.providerId, "llamacpp");
+	});
+
 	it("derives a total when the provider reported only the component counts", () => {
 		const calls = ledgerUsageCalls([
 			assistantTurn({ stopReason: "stop", usage: { input: 100, output: 20, cacheRead: 5, cacheWrite: 1 } }, "a1"),

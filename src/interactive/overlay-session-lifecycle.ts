@@ -47,6 +47,16 @@ export interface OverlaySessionLifecycle {
 	openMessagePicker(): void;
 }
 
+/**
+ * The target and model a session started under, so reseeded calls land in the
+ * same `/cost` bucket the live path writes to. Without it a single target read
+ * as two providers, one under the target id and one under the runtime name.
+ */
+function sessionUsageDefaults(session: SessionContract): { target?: string | null; model?: string | null } {
+	const meta = session.current() as { target?: string | null; model?: string | null } | null | undefined;
+	return { target: meta?.target ?? null, model: meta?.model ?? null };
+}
+
 function restorePriorSessionOrReopen(
 	preResumeSessionId: string | null,
 	deps: { session: SessionContract; reopen: () => void; onWarning: (message: string) => void },
@@ -91,7 +101,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
 					const leafTurnId = session.tree(sessionId).leafId;
 					deps.chat.resetForSession(leafTurnId, replayMessages);
-					if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns);
+					if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session));
 				} catch (error) {
 					deps.stderr(`[/resume] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 				}
@@ -139,7 +149,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					rehydrateChatPanelFromTurns(deps.chatPanel, turns, { uptoTurnId: turnId });
 					const replayMessages = buildReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
 					deps.chat.resetForSession(turnId, replayMessages);
-					if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns);
+					if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session));
 				} catch (error) {
 					deps.notify(
 						"error",
@@ -199,7 +209,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			const replayMessages = buildReplayAgentMessagesFromTurns(turns);
 			const leafTurnId = session.tree(forkedSessionId).leafId ?? parentTurnId;
 			deps.chat.resetForSession(leafTurnId, replayMessages);
-			if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns);
+			if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session));
 		} catch (error) {
 			deps.stderr(`[/fork] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 			deps.chat.resetForSession(null);

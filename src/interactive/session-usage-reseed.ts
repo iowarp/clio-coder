@@ -72,13 +72,40 @@ function stringAt(source: Record<string, unknown>, ...keys: string[]): string | 
 	return null;
 }
 
+/** The target and model a session ran under before any modelChange row. */
+export interface SessionUsageDefaults {
+	target?: string | null;
+	model?: string | null;
+}
+
 /**
  * One entry per completed assistant API call that carried provider usage.
- * Exported for the contract test; the reseed itself is the only caller.
+ *
+ * Attribution follows the live path, which records under the *target* id and
+ * the wire model rather than the runtime name. Reading the runtime out of the
+ * payload instead split one endpoint into two blocks in `/cost`, so a single
+ * `dynamo` target on `llamacpp` rendered as two providers whose turn counts
+ * diverged with every resume. `modelChange` rows are replayed in order so a
+ * session that switched targets mid-way attributes each call to the one that
+ * served it.
+ *
+ * Exported for the contract test; the reseed itself is the only other caller.
  */
-export function ledgerUsageCalls(entries: ReadonlyArray<SessionEntry>): LedgerCall[] {
+export function ledgerUsageCalls(
+	entries: ReadonlyArray<SessionEntry>,
+	defaults: SessionUsageDefaults = {},
+): LedgerCall[] {
 	const calls: LedgerCall[] = [];
+	let currentTarget = defaults.target ?? null;
+	let currentModel = defaults.model ?? null;
 	for (const entry of entries) {
+		if (entry?.kind === "modelChange") {
+			const change = entry as { target?: unknown; modelId?: unknown; provider?: unknown };
+			if (typeof change.target === "string" && change.target.length > 0) currentTarget = change.target;
+			else if (typeof change.provider === "string" && change.provider.length > 0) currentTarget = change.provider;
+			if (typeof change.modelId === "string" && change.modelId.length > 0) currentModel = change.modelId;
+			continue;
+		}
 		if (entry?.kind !== "message" || entry.role !== "assistant") continue;
 		const payload = entry.payload;
 		if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
@@ -99,8 +126,8 @@ export function ledgerUsageCalls(entries: ReadonlyArray<SessionEntry>): LedgerCa
 		const cost = usage.cost;
 		const costUsd = cost && typeof cost === "object" ? numberAt(cost as Record<string, unknown>, "total") : 0;
 		calls.push({
-			providerId: stringAt(record, "provider", "api") ?? "unknown",
-			modelId: stringAt(record, "responseModel", "model") ?? "unknown",
+			providerId: currentTarget ?? stringAt(record, "provider", "api") ?? "unknown",
+			modelId: currentModel ?? stringAt(record, "responseModel", "model") ?? "unknown",
 			input,
 			output,
 			cacheRead,
@@ -118,9 +145,13 @@ export function ledgerUsageCalls(entries: ReadonlyArray<SessionEntry>): LedgerCa
  * into them. Safe to call with an empty ledger: the totals reset to zero, which
  * is the honest answer for a session that has spent nothing.
  */
-export function reseedSessionUsageFromLedger(sink: SessionUsageSink, entries: ReadonlyArray<SessionEntry>): void {
+export function reseedSessionUsageFromLedger(
+	sink: SessionUsageSink,
+	entries: ReadonlyArray<SessionEntry>,
+	defaults: SessionUsageDefaults = {},
+): void {
 	sink.resetSession();
-	for (const call of ledgerUsageCalls(entries)) {
+	for (const call of ledgerUsageCalls(entries, defaults)) {
 		sink.recordTokens(call.providerId, call.modelId, call.totalTokens, call.costUsd, {
 			input: call.input,
 			output: call.output,
