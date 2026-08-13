@@ -1,7 +1,7 @@
 ---
 name: design-council
 description: Use when a design decision has real tradeoffs and needs several expert perspectives that challenge each other before code is written, such as architecture choices, API shapes, storage formats, parallelization strategies, or dependency decisions. Quick mode runs a single round for a fast perspective check. Triggers on "council", "debate this", "multiple perspectives", "weigh the options", "what would experts say". Not for a one-question-at-a-time interrogation of a plan; use grill-me. Not for splitting implementation work across workers; use dispatch directly.
-version: 0.2.0
+version: 0.3.0
 license: Apache-2.0
 allowed-tools:
   - dispatch
@@ -39,8 +39,15 @@ answer with the caveats attached, and end.
 
 ## Step 1 — Compose perspectives
 
-Derive 3 to 5 perspectives from the topic itself, never from a generic role
-menu. Each perspective gets:
+Derive perspectives from the topic itself, never from a generic role menu.
+Three is the default and the right number for almost every decision. Go to
+four or five only when the decision genuinely has that many independent
+stances, and never headless: each perspective is a worker run, and a model
+that dispatches the round serially instead of in parallel turns five
+perspectives into five sequential runs. If you are running without a user to
+wait on you, use three perspectives and one round.
+
+Each perspective gets:
 
 - a name and a stance (what it argues for);
 - the expertise it argues from;

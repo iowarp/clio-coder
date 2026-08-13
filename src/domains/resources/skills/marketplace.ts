@@ -33,6 +33,8 @@ export interface MarketplaceSkill {
 	sourceUrl: string;
 	version?: string;
 	audit?: "pass" | "warn" | "fail" | "unknown";
+	/** Catalog grouping ("git", "research", ...); absent in a flat catalog. */
+	category?: string;
 	origin: MarketplaceSkillOrigin;
 }
 
@@ -73,6 +75,14 @@ function isIndexSkill(value: unknown): value is { name: string; description: str
 	);
 }
 
+function optionalString(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function indexAudit(value: unknown): MarketplaceSkill["audit"] {
+	return value === "pass" || value === "warn" || value === "fail" || value === "unknown" ? value : undefined;
+}
+
 function indexSkills(indexPath: string, diagnostics: string[]): MarketplaceSkill[] {
 	try {
 		const parsed = JSON.parse(readFileSync(indexPath, "utf8")) as unknown;
@@ -81,12 +91,24 @@ function indexSkills(indexPath: string, diagnostics: string[]): MarketplaceSkill
 			: parsed && typeof parsed === "object" && Array.isArray((parsed as { skills?: unknown }).skills)
 				? (parsed as { skills: unknown[] }).skills
 				: [];
-		return rawSkills.filter(isIndexSkill).map((skill) => ({
-			name: skill.name.trim(),
-			description: skill.description.trim(),
-			sourceUrl: skill.sourceUrl.trim(),
-			origin: "index" as const,
-		}));
+		return rawSkills.filter(isIndexSkill).map((skill) => {
+			const record = skill as unknown as Record<string, unknown>;
+			// Version, audit and category are published by `npm run skills:pin`.
+			// They are advisory display metadata; an index entry stays installable
+			// without them, which is why only name/description/sourceUrl gate.
+			const version = optionalString(record.version);
+			const audit = indexAudit(record.audit);
+			const category = optionalString(record.category);
+			return {
+				name: skill.name.trim(),
+				description: skill.description.trim(),
+				sourceUrl: skill.sourceUrl.trim(),
+				...(version ? { version } : {}),
+				...(audit ? { audit } : {}),
+				...(category ? { category } : {}),
+				origin: "index" as const,
+			};
+		});
 	} catch (err) {
 		diagnostics.push(`skill marketplace index unreadable: ${err instanceof Error ? err.message : String(err)}`);
 		return [];
@@ -128,14 +150,28 @@ function resolveCatalogDir(options: DiscoverMarketplaceOptions): string | null {
 	return looksLikeSkillCatalog(repoCatalog) ? repoCatalog : null;
 }
 
-function catalogEntry(skill: Skill): MarketplaceSkill {
+/**
+ * The catalog folder a package sits in, which is the grouping `--category`
+ * installs by. A flat catalog has none, and a package outside the catalog dir
+ * (which `path.relative` reports with a leading "..") is not grouped by it.
+ */
+function catalogCategory(catalogDir: string, baseDir: string): string | undefined {
+	const rel = path.relative(catalogDir, baseDir);
+	const category = path.dirname(rel);
+	if (rel.length === 0 || rel.startsWith("..") || category === "." || category.startsWith("..")) return undefined;
+	return category;
+}
+
+function catalogEntry(skill: Skill, catalogDir: string): MarketplaceSkill {
 	const version = typeof skill.metadata.version === "string" ? skill.metadata.version : undefined;
+	const category = catalogCategory(catalogDir, skill.baseDir);
 	return {
 		name: skill.name,
 		description: skill.description,
 		sourceUrl: skill.baseDir,
 		...(version ? { version } : {}),
 		...(skill.provenance?.audit ? { audit: skill.provenance.audit } : {}),
+		...(category ? { category } : {}),
 		origin: "catalog",
 	};
 }
@@ -145,7 +181,7 @@ function catalogSkills(dir: string, diagnostics: string[]): MarketplaceSkill[] {
 	for (const diag of list.diagnostics) {
 		if (diag.type === "warning" || diag.type === "error") diagnostics.push(diag.message);
 	}
-	return list.items.map(catalogEntry);
+	return list.items.map((skill) => catalogEntry(skill, dir));
 }
 
 export function discoverMarketplaceSkills(options: DiscoverMarketplaceOptions = {}): MarketplaceDiscoveryResult {

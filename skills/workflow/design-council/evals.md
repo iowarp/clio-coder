@@ -89,3 +89,9 @@ MPI checkpointing module writing one raw npy per rank per step).
 
 One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. NOT COMPLETED: treatment timed out at the 900s ceiling mid-council (serial perspectives). Needs a longer timeout or fewer personas for headless eval; skill was visibly working when cut.
+
+Follow-up (2026-08-13, v0.3.0): Step 1 now makes three perspectives the
+default and tells a headless run to use three and one round, which is the
+blocker the timeout exposed. Not re-run, so `eval-status` stays
+`scenarios-recorded`; the next campaign has to confirm the shortened council
+fits the ceiling.

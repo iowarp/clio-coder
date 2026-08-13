@@ -50,6 +50,7 @@
 		"src/domains/agents/fleets/**",
 		"skills/workflow/cut-it/**",
 		"skills/git/**",
+		"skills/skill-marketplace.json",
 		"src/domains/providers/models/**",
 		"src/domains/prompts/fragments/**",
 		"docs/*.md",

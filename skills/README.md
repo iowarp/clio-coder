@@ -119,11 +119,40 @@ clio skills install context-handoff
 
 # User scope: copy into the Clio config skills dir, available everywhere
 clio skills install clio-dev --user
+
+# Several at once, or a whole catalog group
+clio skills install context-prime context-handoff --user
+clio skills install --category git
 ```
 
 Bare names resolve through the local marketplace (this catalog when run from
 the repo, `CLIO_SKILL_CATALOG_DIR`, or the skill-marketplace.json index); an
 existing local path always wins over a same-named marketplace entry.
+`--category` installs every marketplace skill in one catalog group and is the
+short form for the sets below; it reports each install separately and exits
+nonzero if any of them failed.
+
+### Which scope
+
+Scope is about where the skill is true, not about how much you like it. A
+skill that describes how *you* work belongs to your user config; a skill that
+describes how *this repository* works belongs to the repository, where a
+teammate cloning it gets the same behavior.
+
+| Set | Scope | Why |
+|---|---|---|
+| `context-prime`, `context-handoff` | user | Session boundaries follow the operator across every repo; a handoff written in one project is read at the start of the next. |
+| `find-skills`, `skill-craft` | user | Discovery and authoring are things you do to your toolkit, not things a project does. Installing `find-skills` at user scope is also what makes the Clio copy outrank the compat-root one. |
+| `credentials` | user | Credential handling is a personal-machine discipline; a repo does not get to define it. |
+| `clio-dev`, `clio-test` | project, in this repo only | They describe Clio's own source tree. Elsewhere they are noise. |
+| `--category git` | project, where `git-master` is used | Branch, PR, and worktree conventions are the repository's, and the recipe binds them by name. |
+| `--category research` | project, per project | An arXiv survey or a modernization oracle is scoped to the science being done, not to the person. |
+| `--category planning` | project | PRD and architecture output lands in the repo and is reviewed there. |
+| `--category coding` | project | `tdd` and `coding-standards` follow the language and the test seams of the checkout. |
+| `--category workflow` | either | `grill-me` and `cut-it` travel with the operator; `design-council` is worth pinning per project when the project has recurring design forks. |
+
+When both scopes carry the same name, project wins: `.clio/skills` outranks the
+user root, which outranks every compat root.
 
 After install, confirm Clio sees it:
 
@@ -154,6 +183,32 @@ compat roots. Install the catalog copy so it wins:
 ```bash
 clio skills install find-skills --user   # or --project for one repo
 ```
+
+## Publishing: the marketplace index
+
+`npm run skills:pin` writes two files. `registry.yaml` pins content hashes and
+is what drift is measured against. `skill-marketplace.json` is the published
+index: one entry per skill with `name`, `description`, `sourceUrl` (the
+skill's own `clio.source-url`), `version`, `audit`, and `category`. It carries
+no hashes, because duplicating them into a second published artifact only
+creates a way for the two to disagree.
+
+A Clio install anywhere points at it and gets bare-name installs from this
+catalog:
+
+```bash
+export CLIO_SKILL_MARKETPLACE_INDEX=/path/to/skill-marketplace.json
+clio skills search worktree      # entries show (index, v0.2.0, audit: pass)
+clio skills install worktree-merge
+```
+
+Install then clones the repository named in that entry's `sourceUrl` and copies
+the skill out of it, so the index is only as live as the branch its URLs name.
+The catalog's `source-url` values all point at `main`; until a release branch
+lands there, an install through the index fails naming the repository, the
+branch, and the missing path. `npm run skills:check` fails if a skill's
+`source-url` stops ending with its catalog path, which is how a skill moved
+between categories cannot ship a stale pointer.
 
 ## Frontmatter spec
 
@@ -187,7 +242,7 @@ clio:
   audit: pass                 # pass | warn | fail | unknown; reset to unknown on install
   provenance: designed        # designed | adapted | imported
   origin: <url or project>    # required when provenance is not "designed"
-  eval-status: scenarios-recorded  # untested | scenarios-recorded | eval-run
+  eval-status: scenarios-recorded  # untested | scenarios-recorded | smoke-checked | eval-run
   model-size: any             # any (runs on ~30B local models) | large
   agents:                     # optional: shadow agents / recipes the body dispatches
     - researcher
@@ -231,6 +286,84 @@ still read by the loader as a fallback for copies installed before the nested
 form existed; the catalog itself must use the nested form, and `npm run
 skills:check` enforces that.
 
+### Versioning policy
+
+`version` describes the skill as a working instrument, and the pinned hash
+already records every byte, so the version only moves when the thing an
+operator runs changes:
+
+| Change | Version |
+|---|---|
+| Body text, steps, completion criteria | minor bump |
+| `allowed-tools` / `disallowed-tools` / `requires` | minor bump |
+| `description` or `name` (what triggers it) | minor bump |
+| Bundled `references/`, `scripts/`, `evals.md` scenarios | minor bump |
+| `eval-status`, `audit`, `provenance`, `source-url` | no bump |
+| Catalog reorganization that moves the folder | no bump |
+
+Patch releases are for a correction that leaves the workflow identical, such as
+a broken link or a typo in a step. Nothing in this catalog is 1.0: a major bump
+is reserved for a skill whose triggers change enough that an operator relying on
+the old one would be surprised.
+
+Metadata changes do not bump because `registry.yaml` pins a
+provenance-stripped hash, so content edits are already caught byte-exactly, and
+raising a version for an `eval-status` line would make the number mean two
+different things at once. The trade is deliberate: the version is coarse, the
+hash is exact, and drift detection uses the hash.
+
+## Claude Code interop
+
+The invariant is that a catalog skill dropped unmodified into `.claude/skills`
+loads and runs in Claude Code. Verified against Claude Code 2.1.231:
+`skills/git/commit-crafting` copied into a scratch project's
+`.claude/skills/`, invoked headlessly, loaded through the `Skill` tool and
+answered a question about its own body. The `clio:` block is an unknown
+frontmatter key there and is ignored.
+
+**`allowed-tools` means the opposite thing in each harness, and that is the one
+finding that shapes this section.** In Clio it narrows: after activation, calls
+outside the declared surface are blocked with reason code `skill_surface`. In
+Claude Code it grants: the parsed list is merged into
+`toolPermissionContext.alwaysAllowRules.command`, which pre-approves those
+tools for the turn. Nothing is denied there for being absent from the list.
+
+Claude Code matches permission rules by exact string equality on the tool name,
+through a four-entry alias table (`Task`, `KillShell`, `AgentOutputTool`,
+`BashOutputTool`) with no case folding. Clio's tool names are lowercase
+(`read`, `bash`, `web_fetch`), so none of them match a Claude Code tool. A
+catalog skill's `allowed-tools` is therefore **inert** in Claude Code: it grants
+nothing, denies nothing, and the skill loads and runs with whatever surface the
+session already had.
+
+That inertness is the safe outcome, and it is why the catalog keeps Clio tool
+names rather than mapping them. Translating `bash` to `Bash` for
+Claude-compatibility would not restrict anything; it would silently add `Bash`
+to the always-allow rules of every session that loaded the skill. The same goes
+for a `clio skills export --for claude` lane, so there is no such lane. To keep
+a well-meaning edit from introducing that, `npm run skills:check` fails on any
+`allowed-tools` entry that is not a Clio tool name in canonical lowercase.
+
+The rest of the surface, read from the same build:
+
+| Key | Claude Code behavior |
+|---|---|
+| `name`, `description` | Read; description is trimmed, and a non-string one is dropped with a warning. No length limit is enforced at load. |
+| `version`, `license` | Carried as metadata; `license` is unused. |
+| `disable-model-invocation` | Honored, and accepts `true` or the string `"true"`. Matches Clio. |
+| `allowed-tools` | Grants, as above. Accepts a YAML list or one comma/space-separated string, same as Clio. |
+| `disallowed-tools` | Not read. A Clio denial is not enforced there. |
+| `requires:` | Not read; ignored as an unknown key, so a dependency warning is Clio-only. |
+| `clio:` | Not read; ignored as an unknown key. This is the invariant. |
+| Unparseable frontmatter | The per-skill load is wrapped in a bare catch: the skill is skipped silently, with no diagnostic. Clio warns instead. |
+| Size | No cap on SKILL.md. Clio rejects over 1 MiB and warns over 50 KiB, the activation delivery cap. |
+| `references/`, `scripts/` subfolders | Not enumerated at load time; they are files the body tells the model to read, which works in both. |
+
+Degradation summary for a catalog skill running under Claude Code: it loads,
+its body drives the workflow, and its tool narrowing does not apply. A skill
+whose safety argument rests on narrowing (`ast-grep` is search-only,
+`review-changes` does not write) is advisory there and enforced here.
+
 ## Contributing / approval
 
 A skill is "approved for the marketplace" when a maintainer:
@@ -246,10 +379,25 @@ against (RED-GREEN per [`skill-craft`](meta/skill-craft/)). `clio skills eval <n
 executes those scenarios instead of trusting the prose; the eval lane is the
 curation gate for this catalog, not an end-user feature.
 
+What the eval lane does and does not isolate, because a curation gate that
+overstates its own rigor is worse than none. Each of the three arms (baseline,
+treatment, judge) gets a private temp root with its workspace nested inside,
+so `..` from a workspace reveals only that arm and the arms are no longer
+adjacent, similarly-named siblings. The judge's copy of the treatment
+transcript has the loaded SKILL.md body replaced with a marker, so a bullet
+cannot pass on instructions the model merely read. But nothing confines a run
+to its workspace: the write boundary is a per-run tool policy, not something a
+harness can impose on a child process it spawns, and a full-auto arm has been
+observed writing outside its workspace. Eval numbers are evidence about a
+cooperative model, not an isolation guarantee. Run campaigns with `CLIO_*`
+pointed at throwaway directories.
+
 `npm run skills:pin` enforces this contract structurally: it refuses to pin a
 catalog where any skill is missing the required frontmatter, `audit: pass`, or
-its `evals.md`, and `npm run skills:check` (run in CI) fails on any drift
-between the catalog and `registry.yaml`. Pinned hashes are provenance-stripped
+its `evals.md`, declares a tool name Clio does not have, or carries a
+`source-url` that no longer ends with its catalog path. `npm run skills:check`
+(run in CI) fails on any drift between the catalog and either generated file,
+`registry.yaml` or `skill-marketplace.json`. Pinned hashes are provenance-stripped
 (install-lifecycle stamps like `installed-at` do not count as drift; content
 and registry-identity edits do), so a copy installed via `clio skills install`
 still verifies against its audited source at activation.

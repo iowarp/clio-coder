@@ -4,9 +4,13 @@
  * install-lifecycle frontmatter still compare equal to their audited source).
  * Run with `npm run skills:pin` after editing any skills/<name>/SKILL.md.
  *
+ * The same run publishes `skill-marketplace.json`: the index a Clio install
+ * outside this repo points `CLIO_SKILL_MARKETPLACE_INDEX` at so bare-name
+ * installs resolve to the catalog's GitHub source URLs.
+ *
  * Modes:
- *   default          rewrite the manifest from the catalog
- *   --check          verify the manifest matches the catalog; exit 1 on drift
+ *   default          rewrite the manifest and the published index from the catalog
+ *   --check          verify both files match the catalog; exit 1 on drift
  *   --dir <path>     operate on a different catalog directory (tests)
  *
  * Malformed frontmatter is a hard failure in both modes: a skill file whose
@@ -19,12 +23,16 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import yaml from "yaml";
+import { ALL_TOOL_NAMES } from "../src/core/tool-names.js";
 import { normalizedSkillHash } from "../src/domains/resources/skills/content-hash.js";
 
 /** Top-level frontmatter every published catalog skill must carry (skills/README.md). */
 const REQUIRED_CORE_KEYS = ["name", "description", "version", "license"] as const;
 /** Keys required inside the reserved nested `clio:` block (skills/README.md). */
 const REQUIRED_CLIO_KEYS = ["registry-id", "source-url", "provenance", "eval-status"] as const;
+/** Tool-surface keys whose values must name Clio tools in canonical spelling. */
+const TOOL_SURFACE_KEYS = ["allowed-tools", "disallowed-tools"] as const;
+const CLIO_TOOL_NAMES = new Set<string>(ALL_TOOL_NAMES);
 
 const argv = process.argv.slice(2);
 const checkMode = argv.includes("--check");
@@ -35,6 +43,7 @@ const catalogDir =
 		? path.resolve(argv[dirFlagIndex + 1] as string)
 		: path.join(repoRoot, "skills");
 const manifestPath = path.join(catalogDir, "registry.yaml");
+const indexPath = path.join(catalogDir, "skill-marketplace.json");
 
 interface PinEntry {
 	name: string;
@@ -42,6 +51,16 @@ interface PinEntry {
 	path: string;
 	version: string | null;
 	sha256: string;
+}
+
+/** A pin entry plus the fields the published marketplace index carries. */
+interface CatalogEntry extends PinEntry {
+	description: string;
+	/** `clio.source-url`: where `clio skills install <name>` fetches this skill from. */
+	sourceUrl: string;
+	audit: string;
+	/** Catalog category folder, or null in a flat catalog. */
+	category: string | null;
 }
 
 /**
@@ -62,8 +81,49 @@ function collectPackageDirs(dir: string, rel: string): string[] {
 	return found;
 }
 
-function collectEntries(): { entries: PinEntry[]; errors: string[] } {
-	const entries: PinEntry[] = [];
+/**
+ * Frontmatter tool-surface entries, in either spelling the loader accepts.
+ * Returns null when the key is absent, so "declared nothing" and "declared an
+ * empty list" stay distinguishable.
+ */
+function toolSurfaceEntries(value: unknown): string[] | null {
+	if (typeof value === "string") return value.split(",").map((entry) => entry.trim());
+	if (Array.isArray(value)) return value.map((entry) => (typeof entry === "string" ? entry.trim() : String(entry)));
+	return null;
+}
+
+/**
+ * Catalog `allowed-tools` must name Clio tools in canonical lowercase spelling.
+ *
+ * Not style enforcement. Claude Code reads the same key with the opposite
+ * meaning: it merges the listed names into `alwaysAllowRules.command`, so a
+ * declaration there *grants* pre-approval instead of narrowing, and its rule
+ * matching is exact string equality with no case folding. Clio's lowercase
+ * names therefore match no Claude tool and stay inert when a catalog skill is
+ * dropped into `.claude/skills`. Spelling one of them `Bash` would silently
+ * auto-approve Bash in Claude Code for anyone who installed the skill. See
+ * skills/README.md, "Claude Code interop".
+ */
+function toolSurfaceErrors(skillPath: string, fm: Record<string, unknown>): string[] {
+	const errors: string[] = [];
+	for (const key of TOOL_SURFACE_KEYS) {
+		const declared = toolSurfaceEntries(fm[key]);
+		if (declared === null) continue;
+		for (const entry of declared) {
+			if (CLIO_TOOL_NAMES.has(entry)) continue;
+			const canonical = ALL_TOOL_NAMES.find((tool) => tool === entry.toLowerCase());
+			errors.push(
+				canonical
+					? `${skillPath}: ${key} entry "${entry}" must be spelled "${canonical}"; a capitalized name grants tool approval in Claude Code instead of narrowing`
+					: `${skillPath}: ${key} entry "${entry}" is not a Clio tool name`,
+			);
+		}
+	}
+	return errors;
+}
+
+function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
+	const entries: CatalogEntry[] = [];
 	const errors: string[] = [];
 	for (const relPath of collectPackageDirs(catalogDir, "")) {
 		const skillPath = path.join(catalogDir, relPath, "SKILL.md");
@@ -100,6 +160,7 @@ function collectEntries(): { entries: PinEntry[]; errors: string[] } {
 			fm.clio !== null && typeof fm.clio === "object" && !Array.isArray(fm.clio)
 				? (fm.clio as Record<string, unknown>)
 				: null;
+		let sourceUrl = "";
 		if (!clio) {
 			errors.push(`${skillPath}: missing the required nested "clio:" frontmatter block`);
 		} else {
@@ -114,11 +175,30 @@ function collectEntries(): { entries: PinEntry[]; errors: string[] } {
 					`${skillPath}: catalog skills must carry "audit: pass" under clio: (found ${JSON.stringify(clio.audit ?? null)})`,
 				);
 			}
+			if (typeof clio["source-url"] === "string") sourceUrl = clio["source-url"].trim();
+			// The published index installs from this URL, so a skill that moved
+			// between categories without its source-url following would publish a
+			// pointer at its old location: `clio skills install <name>` would then
+			// fetch a path the repository no longer has.
+			if (sourceUrl.length > 0 && !sourceUrl.replace(/\/+$/, "").endsWith(`/${relPath}`)) {
+				errors.push(`${skillPath}: clio.source-url does not end with the catalog path "${relPath}": ${sourceUrl}`);
+			}
 		}
+		errors.push(...toolSurfaceErrors(skillPath, fm));
 		if (!existsSync(path.join(catalogDir, relPath, "evals.md"))) {
 			errors.push(`${skillPath}: catalog skills must ship an evals.md beside SKILL.md`);
 		}
-		entries.push({ name, path: relPath, version, sha256: normalizedSkillHash(raw) });
+		const category = path.dirname(relPath);
+		entries.push({
+			name,
+			path: relPath,
+			version,
+			sha256: normalizedSkillHash(raw),
+			description: typeof fm.description === "string" ? fm.description.trim() : "",
+			sourceUrl,
+			audit: typeof clio?.audit === "string" ? clio.audit : "unknown",
+			category: category === "." ? null : category,
+		});
 	}
 	return { entries, errors };
 }
@@ -129,20 +209,24 @@ function collectEntries(): { entries: PinEntry[]; errors: string[] } {
  * catalog's table of contents. Still one YAML document with a single
  * `skills:` list; comments are invisible to the parser.
  */
-function renderManifest(entries: ReadonlyArray<PinEntry>): string {
-	const sorted = [...entries].sort((a, b) => {
+function catalogOrder(entries: ReadonlyArray<CatalogEntry>): CatalogEntry[] {
+	return [...entries].sort((a, b) => {
 		const categoryOrder = path.dirname(a.path).localeCompare(path.dirname(b.path));
 		return categoryOrder !== 0 ? categoryOrder : a.name.localeCompare(b.name);
 	});
+}
+
+function renderManifest(entries: ReadonlyArray<CatalogEntry>): string {
 	const lines: string[] = ["skills:"];
 	let currentCategory: string | null = null;
-	for (const entry of sorted) {
+	for (const entry of catalogOrder(entries)) {
 		const category = path.dirname(entry.path);
 		if (category !== currentCategory) {
 			currentCategory = category;
 			lines.push(`  # ── ${category === "." ? "(catalog root)" : category} ──`);
 		}
-		const rendered = yaml.stringify([entry]).trimEnd();
+		const pin: PinEntry = { name: entry.name, path: entry.path, version: entry.version, sha256: entry.sha256 };
+		const rendered = yaml.stringify([pin]).trimEnd();
 		lines.push(...rendered.split("\n").map((line) => `  ${line}`));
 	}
 	return [
@@ -152,6 +236,28 @@ function renderManifest(entries: ReadonlyArray<PinEntry>): string {
 		"# a mismatch surfaces a drift warning.",
 		`${lines.join("\n")}\n`,
 	].join("\n");
+}
+
+/**
+ * The published marketplace index: what a Clio install outside this repo reads
+ * when `CLIO_SKILL_MARKETPLACE_INDEX` points at the file this catalog serves.
+ *
+ * `sourceUrl` is each skill's own `clio.source-url`, so a bare-name install
+ * resolves to the same GitHub tree the audit and the pinned hash describe.
+ * No hashes here: drift is measured against registry.yaml, which is the file
+ * the audit signs, and duplicating hashes into a second published artifact
+ * only creates a way for the two to disagree.
+ */
+function renderIndex(entries: ReadonlyArray<CatalogEntry>): string {
+	const skills = catalogOrder(entries).map((entry) => ({
+		name: entry.name,
+		description: entry.description,
+		sourceUrl: entry.sourceUrl,
+		...(entry.version ? { version: entry.version } : {}),
+		audit: entry.audit,
+		...(entry.category ? { category: entry.category } : {}),
+	}));
+	return `${JSON.stringify({ generatedBy: "npm run skills:pin", skills }, null, "\t")}\n`;
 }
 
 /** Human drift summary: which pins are missing, stale, or orphaned. */
@@ -187,23 +293,34 @@ if (errors.length > 0) {
 }
 
 const manifest = renderManifest(entries);
+const index = renderIndex(entries);
+
+function readOrNull(file: string): string | null {
+	try {
+		return readFileSync(file, "utf8");
+	} catch {
+		return null;
+	}
+}
 
 if (checkMode) {
-	let current: string | null = null;
-	try {
-		current = readFileSync(manifestPath, "utf8");
-	} catch {
-		current = null;
-	}
-	if (current === manifest) {
+	const currentManifest = readOrNull(manifestPath);
+	const currentIndex = readOrNull(indexPath);
+	if (currentManifest === manifest && currentIndex === index) {
 		process.stdout.write(`registry pin check ok (${entries.length} skills)\n`);
 		process.exit(0);
 	}
-	process.stderr.write(`pin-skills: ${manifestPath} does not match the catalog content hashes\n`);
-	for (const line of describeDrift(current ?? "", entries)) process.stderr.write(`pin-skills:   ${line}\n`);
+	if (currentManifest !== manifest) {
+		process.stderr.write(`pin-skills: ${manifestPath} does not match the catalog content hashes\n`);
+		for (const line of describeDrift(currentManifest ?? "", entries)) process.stderr.write(`pin-skills:   ${line}\n`);
+	}
+	if (currentIndex !== index) {
+		process.stderr.write(`pin-skills: ${indexPath} does not match the catalog\n`);
+	}
 	process.stderr.write("pin-skills: run `npm run skills:pin` and commit the result\n");
 	process.exit(1);
 }
 
 writeFileSync(manifestPath, manifest, "utf8");
-process.stdout.write(`pinned ${entries.length} skills -> ${manifestPath}\n`);
+writeFileSync(indexPath, index, "utf8");
+process.stdout.write(`pinned ${entries.length} skills -> ${manifestPath}\npublished index -> ${indexPath}\n`);

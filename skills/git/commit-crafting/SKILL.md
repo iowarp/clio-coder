@@ -1,7 +1,7 @@
 ---
 name: commit-crafting
 description: Use when the user asks to commit the current work — "commit this", "make a commit", "commit what we did" — and the changes are complete. Stages reviewed files, writes one atomic conventional-tagged commit, and reports what changed. Local commit only; never pushes. Not for opening a PR; use create-pr.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read

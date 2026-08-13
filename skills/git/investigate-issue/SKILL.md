@@ -1,7 +1,7 @@
 ---
 name: investigate-issue
 description: Use when a GitHub issue needs diagnosis before any fix — "investigate issue 123", "root-cause this bug", "what's behind this issue". Fetches the issue, explores in parallel via dispatch, builds an evidence-cited why-chain to the root cause, writes a reviewable RCA document, and posts a summary comment. Diagnosis only; the fix is a separate task. Not for failures without an issue; use scientific-debugging.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read

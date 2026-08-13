@@ -1,7 +1,7 @@
 ---
 name: architecture
 description: 'Use when an intent (PRD, epic, brief, or idea) needs its engineering approach decided — "how should we build this", "pick the stack", "architecture for this feature". An interactive working session: investigates, proposes 2-3 genuinely different approaches with trade-offs, recommends with reasoning, lets the user decide, and writes a high-level architecture decision doc. Not a task-by-task plan; use cut-it for that. Not a multi-perspective debate; use design-council. Not product intent; use product-intent.'
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read
