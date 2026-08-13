@@ -23,10 +23,26 @@ export interface CostAggregate {
 	hasEstimated: boolean;
 	hasUnknown: boolean;
 	allKnownFree: boolean;
+	/**
+	 * How many priced calls this aggregate folded.
+	 *
+	 * Zero and "measured zero" are different claims and the flags above cannot
+	 * tell them apart: a session that has not made a call and a session whose one
+	 * call was genuinely free both reduce to `knownUsd: 0` with every flag false.
+	 * The footer rendered the first as `$0.00`, a number nothing had measured,
+	 * while `/cost` on the same session said no usage was recorded. Callers ask
+	 * {@link costWasMeasured} rather than reading this directly.
+	 */
+	calls: number;
 }
 
 export function emptyCostAggregate(): CostAggregate {
-	return { knownUsd: 0, hasEstimated: false, hasUnknown: false, allKnownFree: false };
+	return { knownUsd: 0, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 0 };
+}
+
+/** False when nothing has been priced yet, so no cost claim of any kind is available. */
+export function costWasMeasured(cost: CostAggregate | null | undefined): cost is CostAggregate {
+	return cost !== null && cost !== undefined && cost.calls > 0;
 }
 
 function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmount, first: boolean): CostAggregate {
@@ -35,6 +51,7 @@ function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmount, firs
 		hasEstimated: aggregate.hasEstimated || amount.provenance === "estimated",
 		hasUnknown: aggregate.hasUnknown || amount.provenance === "unknown",
 		allKnownFree: amount.provenance === "known_free" && (first || aggregate.allKnownFree),
+		calls: aggregate.calls + 1,
 	};
 }
 
@@ -50,13 +67,29 @@ function formatUsdAmount(value: number): string {
 	return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
 }
 
-/** Shared truthful formatter for every cost surface. */
-export function formatCostAggregate(cost: CostAggregate): string {
+/**
+ * The one derivation every cost surface renders. Null means nothing has been
+ * priced, and a null must be shown as the absence of a cost field rather than
+ * as any number: `$0.00` before the first call was a measurement that had not
+ * happened, and it sat beside a `/cost` overlay saying no usage was recorded.
+ *
+ * Once there is something to say, both surfaces say the same words: `cost
+ * unknown` when the provider priced nothing, the amount when it did.
+ */
+export function formatCostAggregate(cost: CostAggregate | null | undefined): string | null {
+	if (!costWasMeasured(cost)) return null;
 	if (cost.allKnownFree) return "$0.00 local";
 	if (cost.hasUnknown) return cost.knownUsd > 0 ? `${formatUsdAmount(cost.knownUsd)} +?` : "cost unknown";
 	if (cost.hasEstimated) return `~${formatUsdAmount(cost.knownUsd)} est`;
 	return formatUsdAmount(cost.knownUsd);
 }
+
+/**
+ * What a fixed-width surface says when nothing has been priced. The footer and
+ * `/cost` drop their cost field instead; a table cell that owns a column cannot,
+ * so it says the same thing in words rather than inventing `$0.00`.
+ */
+export const COST_NOT_MEASURED = "not measured";
 
 export function costAggregateForAmount(usd: number, provenance: CostProvenance | undefined): CostAggregate {
 	return aggregateCostAmounts([{ usd, provenance: normalizeCostProvenance(provenance) }]);

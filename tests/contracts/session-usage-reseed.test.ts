@@ -56,6 +56,24 @@ function assistantTurn(payload: Record<string, unknown>, id = "a1"): SessionEntr
 	} as unknown as SessionEntry;
 }
 
+/** A completed call with an explicit parent, for building a branched ledger. */
+function branchedTurn(totalTokens: number, id: string, parentTurnId: string | null): SessionEntry {
+	return {
+		kind: "message",
+		role: "assistant",
+		turnId: id,
+		parentTurnId,
+		timestamp: "2026-08-12T12:00:00.000Z",
+		payload: {
+			text: "done",
+			stopReason: "stop",
+			provider: "llamacpp",
+			responseModel: "Nemo-3.5-Lightning",
+			usage: { input: totalTokens, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens, cost: { total: 0 } },
+		},
+	} as unknown as SessionEntry;
+}
+
 const completedCall = {
 	text: "done",
 	stopReason: "stop",
@@ -259,5 +277,61 @@ describe("contracts/session usage reseed", () => {
 			assistantTurn({ stopReason: "stop", usage: { input: 100, output: 20, cacheRead: 5, cacheWrite: 1 } }, "a1"),
 		]);
 		strictEqual(calls[0]?.totalTokens, 126);
+	});
+
+	/**
+	 * current.jsonl is append-only, so a `/tree` switch leaves the abandoned
+	 * sibling turns in the file. The transcript filters them out through
+	 * `filterEntriesToActivePath` and `/cost` and the footer Σ did not, which put
+	 * a total on screen for turns the reader had just been told were off this
+	 * branch. Both now fold the same slice.
+	 */
+	it("counts only the branch the transcript is showing after a tree switch", () => {
+		// a1 -> a2, then a switch back to a1 and a new a3. a2 is abandoned.
+		const branched = [
+			branchedTurn(10_000, "a1", null),
+			branchedTurn(20_000, "a2", "a1"),
+			branchedTurn(30_000, "a3", "a1"),
+		];
+
+		const scoped = makeSink();
+		reseedSessionUsageFromLedger(scoped.sink, branched, {}, "a3");
+		strictEqual(scoped.calls.length, 2, "only the two turns on the active branch");
+		strictEqual(
+			scoped.calls.reduce((sum, call) => sum + call.tokens, 0),
+			40_000,
+			"the abandoned sibling's tokens are not in the session total",
+		);
+
+		// The pointer is load-bearing, not decorative: switching back to the other
+		// branch has to move the total, and the sum is never the file's 60,000.
+		const other = makeSink();
+		reseedSessionUsageFromLedger(other.sink, branched, {}, "a2");
+		strictEqual(
+			other.calls.reduce((sum, call) => sum + call.tokens, 0),
+			30_000,
+			"a2's branch carries a2's turns, not a3's",
+		);
+
+		// With no pointer at all the fold follows the newest message's ancestry,
+		// which is the same fallback the transcript uses for an offline read.
+		const unpinned = makeSink();
+		reseedSessionUsageFromLedger(unpinned.sink, branched);
+		strictEqual(
+			unpinned.calls.reduce((sum, call) => sum + call.tokens, 0),
+			40_000,
+			"an abandoned sibling is off the total either way",
+		);
+	});
+
+	it("leaves a linear session unchanged when it is scoped to its own leaf", () => {
+		const linear = [branchedTurn(10_000, "a1", null), branchedTurn(20_000, "a2", "a1")];
+		const { sink, calls } = makeSink();
+		reseedSessionUsageFromLedger(sink, linear, {}, "a2");
+		strictEqual(
+			calls.reduce((sum, call) => sum + call.tokens, 0),
+			30_000,
+			"no branch, nothing to exclude",
+		);
 	});
 });

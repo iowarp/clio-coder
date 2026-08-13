@@ -56,7 +56,7 @@ describe("contracts/cost provenance algebra", () => {
 				{ usd: 0.42, provenance: "known" },
 				{ usd: 0, provenance: "unknown" },
 			]),
-			{ knownUsd: 0.42, hasEstimated: false, hasUnknown: true, allKnownFree: false },
+			{ knownUsd: 0.42, hasEstimated: false, hasUnknown: true, allKnownFree: false, calls: 2 },
 		);
 	});
 
@@ -66,19 +66,21 @@ describe("contracts/cost provenance algebra", () => {
 			hasEstimated: false,
 			hasUnknown: false,
 			allKnownFree: false,
+			calls: 0,
 		});
 		deepStrictEqual(aggregateCostAmounts([{ usd: 0, provenance: "known_free" }]), {
 			knownUsd: 0,
 			hasEstimated: false,
 			hasUnknown: false,
 			allKnownFree: true,
+			calls: 1,
 		});
 		deepStrictEqual(
 			aggregateCostAmounts([
 				{ usd: 0.12, provenance: "estimated" },
 				{ usd: 0, provenance: "unknown" },
 			]),
-			{ knownUsd: 0.12, hasEstimated: true, hasUnknown: true, allKnownFree: false },
+			{ knownUsd: 0.12, hasEstimated: true, hasUnknown: true, allKnownFree: false, calls: 2 },
 		);
 	});
 
@@ -93,6 +95,7 @@ describe("contracts/cost provenance algebra", () => {
 				hasEstimated: false,
 				hasUnknown: false,
 				allKnownFree: false,
+				calls: 2,
 			},
 		);
 	});
@@ -107,6 +110,7 @@ describe("contracts/cost provenance algebra", () => {
 			hasEstimated: false,
 			hasUnknown: true,
 			allKnownFree: false,
+			calls: 1,
 		});
 	});
 

@@ -361,6 +361,20 @@ function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>
 	return false;
 }
 
+/** Index of the newest assistant entry, optionally restricted to ones that rendered something. */
+function lastAssistantIndex(
+	transcript: ReadonlyArray<TranscriptEntry>,
+	options: { withOutput?: boolean } = {},
+): number | null {
+	for (let index = transcript.length - 1; index >= 0; index -= 1) {
+		const entry = transcript[index];
+		if (entry?.role !== "assistant") continue;
+		if (options.withOutput === true && !hasVisibleOutput(entry)) continue;
+		return index;
+	}
+	return null;
+}
+
 function hasStreamingText(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
 	const tail = entry.segments[entry.segments.length - 1];
 	return tail?.kind === "text" && !tail.finalized && tail.text.trim().length > 0;
@@ -622,6 +636,19 @@ function renderEntryLines(
 	}
 	if (entry.role === "retryStatus") {
 		return wrapTextWithAnsi(formatRetryStatus(entry.status), width);
+	}
+	// A settled assistant entry that rendered nothing at all contributes nothing.
+	// A mid-turn notice splits the transcript, so the events after it open a
+	// fresh entry that a stopped turn never fills; that entry used to reach the
+	// tail below and print a lone agent bubble under the notice.
+	if (
+		!entry.pending &&
+		entry.thinking.length === 0 &&
+		entry.turnUsage === undefined &&
+		!hasVisibleOutput(entry) &&
+		entry.segments.length === 0
+	) {
+		return [];
 	}
 	const lines: string[] = [];
 	// Thinking renders BEFORE assistant text/tool segments so the folded marker
@@ -1176,12 +1203,19 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				entryRenderCache.clear();
 				const runUsage = aggregateAssistantUsage(event.messages);
 				if (runUsage !== undefined) {
-					for (let index = transcript.length - 1; index >= 0; index -= 1) {
-						const entry = transcript[index];
-						if (entry?.role === "assistant") {
-							entry.turnUsage = runUsage;
-							break;
-						}
+					// The usage line is a caption on rendered output, so it goes on the
+					// last entry that rendered any. A mid-turn notice splits entries, and
+					// a turn that stops after one leaves an empty tail entry behind: the
+					// run total landed there while the entry above kept its own
+					// message_end line, so one turn printed the identical line twice, once
+					// on each side of the notice. Entries after the caption rendered
+					// nothing and must not carry a second copy.
+					const index = lastAssistantIndex(transcript, { withOutput: true }) ?? lastAssistantIndex(transcript);
+					const target = index === null ? undefined : transcript[index];
+					if (target?.role === "assistant") target.turnUsage = runUsage;
+					for (let after = (index ?? -1) + 1; after < transcript.length; after += 1) {
+						const later = transcript[after];
+						if (later?.role === "assistant") delete later.turnUsage;
 					}
 				}
 				// The run is over: no tool can still be executing anywhere in the

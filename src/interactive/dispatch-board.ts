@@ -15,6 +15,7 @@ import {
 	runKindSupportsLiveSteering,
 } from "../domains/dispatch/types.js";
 import {
+	COST_NOT_MEASURED,
 	costAggregateForAmount,
 	formatCostAggregate,
 	type ObservabilityNotice,
@@ -367,7 +368,7 @@ export function renderDispatchCard(
 	const contentWidth = Math.max(0, width - 4);
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
-	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance));
+	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance)) ?? COST_NOT_MEASURED;
 	const detail = terminalDetail(row);
 
 	const presentation = dispatchStatusPresentation(row.status, {
@@ -482,7 +483,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 	const theme = clioTheme();
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
-	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance));
+	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance)) ?? COST_NOT_MEASURED;
 
 	const dot = dotSep(theme);
 	const presentation = dispatchStatusPresentation(row.status, {

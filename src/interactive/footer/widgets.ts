@@ -841,11 +841,10 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	}
 	const total = cumulativeTokens(options.sessionTokens);
 	rows.push(total > 0 ? styledKv("totals", theme.fg("muted", `Σ${formatFooterTokens(total)}`)) : statusRow(null));
-	rows.push(
-		options.sessionCost !== null && options.sessionCost !== undefined
-			? styledKv("cost", theme.fg("muted", formatCostAggregate(options.sessionCost)))
-			: statusRow(null),
-	);
+	// Null until something has actually been priced, and an absent row is the
+	// only honest rendering of that. See formatCostAggregate.
+	const cost = formatCostAggregate(options.sessionCost);
+	rows.push(cost === null ? statusRow(null) : styledKv("cost", theme.fg("muted", cost)));
 	rows.push(
 		kv("fleet", fleetValue(facts.dispatchSummary, facts.dispatchRows), facts.dispatchSummary ? "action" : "dim"),
 	);
@@ -1011,6 +1010,8 @@ export function buildMetricStrip(
 	if (!isStreaming && !lastTurn && !outputVerbosity) return "";
 
 	const candidates: Array<string | null> = [];
+	/** Per-turn detail that ranks below the session totals when the strip is cut. */
+	const deferred: Array<string | null> = [];
 	if (outputVerbosity) candidates.push(theme.fg("muted", `out ${outputVerbosityLabel(outputVerbosity)}`));
 	if (isStreaming) {
 		const tps = finiteNonNegative(throughput?.tokensPerSecond);
@@ -1046,7 +1047,13 @@ export function buildMetricStrip(
 					)
 				: null,
 		);
-		candidates.push(
+		// Held back so the session totals below outrank them. The chip list is cut
+		// to `maxChipsCount` before it is measured, and with cache and tools ahead
+		// of the totals an 80-column terminal spent the whole budget on per-turn
+		// detail: the cost field disappeared from the footer at the exact moment
+		// it acquired a value, while `/cost` on the same session read `cost
+		// unknown`. Two surfaces, two answers, because of a slice.
+		deferred.push(
 			lastTurn.cacheReadTokens > 0 || lastTurn.cacheWriteTokens > 0
 				? theme.fg(
 						"dim",
@@ -1057,16 +1064,21 @@ export function buildMetricStrip(
 		if (lastTurn.toolCount > 0) {
 			const label = `${lastTurn.toolCount} tool${lastTurn.toolCount === 1 ? "" : "s"}`;
 			const errors = lastTurn.toolErrorCount > 0 ? theme.fg("error", ` ${lastTurn.toolErrorCount}${GLYPH.error}`) : "";
-			candidates.push(`${theme.fg("muted", label)}${errors}`);
+			deferred.push(`${theme.fg("muted", label)}${errors}`);
 		} else {
-			candidates.push(null);
+			deferred.push(null);
 		}
 	}
 
 	const fallbackTotal = finiteNonNegative(sessionTokens?.input) + finiteNonNegative(sessionTokens?.output);
 	const cumulativeTotal = finiteNonNegative(sessionTokens?.totalTokens) || fallbackTotal;
 	candidates.push(cumulativeTotal > 0 ? theme.fg("muted", `Σ${formatFooterTokens(cumulativeTotal)}`) : null);
-	candidates.push(sessionCost ? theme.fg("muted", formatCostAggregate(sessionCost)) : null);
+	// Null until a call has been priced, and an absent chip is the honest
+	// rendering of that. `$0.00` on a session that had made no call was a number
+	// nothing measured. See formatCostAggregate.
+	const cost = formatCostAggregate(sessionCost);
+	candidates.push(cost === null ? null : theme.fg("muted", cost));
+	candidates.push(...deferred);
 
 	const chipLimit = Math.max(0, Math.floor(maxChipsCount));
 	const activeChips = candidates

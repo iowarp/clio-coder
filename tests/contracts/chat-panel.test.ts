@@ -732,4 +732,42 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		ok(!rendered.includes("third-secret"), rendered);
 		ok(rendered.includes("[redacted]"), rendered);
 	});
+
+	/**
+	 * A mid-turn notice splits the transcript, so the events after it open a
+	 * fresh assistant entry. A turn that stopped there never filled it, and
+	 * `agent_end` wrote the run total onto it because it was simply the last
+	 * assistant entry: the identical usage line printed above and below the
+	 * notice, the lower one under a lone agent bubble with nothing in it.
+	 */
+	it("prints one usage line for a turn a notice split, and no empty bubble", () => {
+		const message = {
+			role: "assistant",
+			stopReason: "stop",
+			usage: { input: 14073, output: 198, cacheRead: 10404, cacheWrite: 0 },
+		};
+		const panel = createChatPanel();
+		panel.appendUser("a question");
+		panel.applyEvent({ type: "text_delta", delta: "an answer" } as ChatLoopEvent);
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		panel.appendReplayBlock(() => ["  stopped: aborted by user"]);
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+
+		const lines = panel.render(80).map(strip);
+		const usageLines = lines.filter((line) => line.includes("turn · in "));
+		strictEqual(usageLines.length, 1, `one turn, one usage line: ${JSON.stringify(lines)}`);
+		ok(usageLines[0]?.includes("in 14073"), `it carries the run total: ${usageLines[0]}`);
+
+		const noticeIndex = lines.findIndex((line) => line.includes("stopped: aborted by user"));
+		ok(noticeIndex >= 0, "the notice is rendered");
+		ok(
+			lines.indexOf(usageLines[0] ?? "") < noticeIndex,
+			`the usage line captions the output above the notice: ${JSON.stringify(lines)}`,
+		);
+		ok(
+			!lines.slice(noticeIndex + 1).some((line) => line.trim() === GLYPH.agent),
+			`no bare agent bubble after the notice: ${JSON.stringify(lines.slice(noticeIndex + 1))}`,
+		);
+	});
 });

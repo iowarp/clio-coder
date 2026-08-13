@@ -130,8 +130,10 @@ function statusText(status: AgentStatus | undefined, now: number, width: number,
 	return status.phase === "ended" ? verb.text : `${spinnerFrame(frame)} ${verb.text}`;
 }
 
+/** Null before anything has been priced, so the footer shows no cost field at all. */
 function costSegment(value: CostAggregate | undefined): string | null {
-	return value ? `cost ${formatCostAggregate(value)}` : null;
+	const cost = formatCostAggregate(value);
+	return cost === null ? null : `cost ${cost}`;
 }
 
 /** Compact footer: two always-on lines, deliberately free of model/mode/thinking (the editor rail owns those). */

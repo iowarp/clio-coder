@@ -4,6 +4,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { DispatchContract, DispatchSnapshot } from "../domains/dispatch/contract.js";
 import {
+	COST_NOT_MEASURED,
 	costAggregateForAmount,
 	formatCostAggregate,
 	type ObservabilitySnapshot,
@@ -171,7 +172,7 @@ function runningRow(row: DispatchSnapshot["running"][number], width: number, pro
 		muted(fitRight(formatCompactMs(row.elapsedMs), 7)),
 		muted(fitRight(formatTokens(row.tokens.total), 8)),
 	];
-	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance));
+	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance)) ?? COST_NOT_MEASURED;
 	const line = [...fields, muted(fitRight(cost, 12))].join(" ");
 	// The proof marker is a compact trailing evidence chip; truncateToWidth clips
 	// it ANSI-aware on tight widths, so it never overflows the existing columns.
@@ -204,7 +205,11 @@ function totalsRows(totals: DispatchSnapshot["totals"]): string[] {
 		kvRow("input", formatTokens(totals.inputTokens), keyWidth),
 		kvRow("output", formatTokens(totals.outputTokens), keyWidth),
 		kvRow("total", formatTokens(totals.totalTokens), keyWidth),
-		kvRow("cost", formatCostAggregate(totals.cost ?? costAggregateForAmount(totals.costUsd, undefined)), keyWidth),
+		kvRow(
+			"cost",
+			formatCostAggregate(totals.cost ?? costAggregateForAmount(totals.costUsd, undefined)) ?? COST_NOT_MEASURED,
+			keyWidth,
+		),
 		kvRow("runtime", formatCompactMs(totals.runtimeSeconds * 1000), keyWidth),
 	];
 }

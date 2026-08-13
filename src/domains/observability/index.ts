@@ -26,10 +26,12 @@ export type {
 } from "./contract.js";
 export {
 	aggregateCostAmounts,
+	COST_NOT_MEASURED,
 	type CostAggregate,
 	type CostAmount,
 	type CostEntry,
 	costAggregateForAmount,
+	costWasMeasured,
 	emptyCostAggregate,
 	formatCostAggregate,
 	type UsageBreakdown,
