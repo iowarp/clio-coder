@@ -76,3 +76,5 @@ export { createTaskBoardStore, foldTaskBoard, taskBoardCounts, toTaskLedgerEntry
 // overlay-facing types surface here; callers that need deeper helpers import
 // from the concrete submodules directly (session domain only).
 export type { TreeSnapshot, TreeSnapshotNode } from "./tree/navigator.js";
+export type { LedgerUsageCall, SessionUsageDefaults } from "./usage.js";
+export { ledgerUsageCalls } from "./usage.js";

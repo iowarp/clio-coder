@@ -433,14 +433,33 @@ describe("contracts/usage-report edges", () => {
 	const scratch = makeScratchHome("clio-usage-edge-");
 	after(() => scratch.cleanup());
 
-	it("reports a clean zero report on an empty state dir", async () => {
+	/**
+	 * An empty state dir has no session store and no receipt store, so every
+	 * number the report could print about them is a measurement of nothing. It
+	 * printed `sessions in window: 0` and concluded `none:` anyway, which reads
+	 * as thirty quiet days on a machine whose archive is absent.
+	 */
+	it("says the stores are missing on an empty state dir instead of measuring zero", async () => {
 		const result = await runUsage(scratch, ["report"]);
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 		strictEqual(result.stderr, "");
-		ok(result.stdout.includes("sessions in window: 0"));
-		ok(result.stdout.includes("dispatch runs (receipts) in window: 0"));
+		ok(result.stdout.includes("session store missing at "), result.stdout);
+		ok(result.stdout.includes("receipt store missing at "), result.stdout);
+		ok(!result.stdout.includes("sessions in window:"), `absence must not be printed as a count:\n${result.stdout}`);
+		ok(!result.stdout.includes("dispatch runs (receipts) in window:"), result.stdout);
 		ok(result.stdout.includes("opportunities"));
-		ok(result.stdout.includes("none:"), result.stdout);
+		ok(result.stdout.includes("not computed: the inputs are absent"), result.stdout);
+		ok(!result.stdout.includes("none:"), `a conclusion drawn from absent inputs:\n${result.stdout}`);
+	});
+
+	it("emits the absence as a fact in --json rather than a zero count", async () => {
+		const result = await runUsage(scratch, ["report", "--json"]);
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		const rows = parseJsonl(result.stdout);
+		strictEqual(facts(rows, "sessions").length, 0, "no session count is emitted over a store that is not there");
+		strictEqual(facts(rows, "dispatch-runs").length, 0);
+		ok(String(facts(rows, "session-store-missing")[0]?.path).endsWith("/sessions"), result.stdout);
+		ok(String(facts(rows, "receipt-store-missing")[0]?.path).endsWith("/receipts"), result.stdout);
 	});
 
 	it("exits 2 on usage errors before reading any state", async () => {
@@ -455,6 +474,108 @@ describe("contracts/usage-report edges", () => {
 			const result = await runCli(args, { env: usageEnv(scratch), cwd: scratch.dir, timeoutMs: 30_000 });
 			strictEqual(result.code, 2, `expected exit 2 for: ${args.join(" ")} (stderr=${result.stderr})`);
 		}
+	});
+});
+
+/**
+ * The report read every session ledger already and still could not answer what
+ * a month cost, so the one question an operator brings to a usage report was
+ * the one fact it did not carry. These numbers fold the same per-call usage
+ * the `/cost` overlay reseeds from, through the same session-domain function,
+ * so the two surfaces cannot disagree about what a session spent.
+ */
+describe("contracts/usage-report token and cost facts", () => {
+	const scratch = makeScratchHome("clio-usage-tokens-");
+	let rows: JsonRow[] = [];
+	let stdout = "";
+
+	function assistantUsageLine(
+		turnId: string,
+		timestamp: string,
+		usage: Record<string, unknown>,
+		extra: Record<string, unknown> = {},
+	): string {
+		return JSON.stringify({
+			kind: "message",
+			role: "assistant",
+			turnId,
+			parentTurnId: null,
+			timestamp,
+			payload: { text: "done", stopReason: "stop", provider: "dynamo", responseModel: "Nemo-3.5", usage, ...extra },
+		});
+	}
+
+	before(async () => {
+		const sessions = join(scratch.dir, "state", "sessions", "repohash");
+		writeJsonl(join(sessions, "sess-tokens", "current.jsonl"), [
+			assistantUsageLine("t1", RECENT, {
+				input: 138,
+				output: 3,
+				cacheRead: 10274,
+				cacheWrite: 0,
+				totalTokens: 10415,
+				cost: { total: 0.25 },
+			}),
+			assistantUsageLine("t2", RECENT, {
+				input: 10,
+				output: 5,
+				cacheRead: 0,
+				cacheWrite: 7,
+				reasoningTokens: 40,
+				totalTokens: 22,
+				cost: { total: 0.05 },
+			}),
+			// Aborted: its usage is not a completed call, exactly as the reseed
+			// treats it, so the report must not count it either.
+			assistantUsageLine(
+				"t3",
+				RECENT,
+				{ input: 900, output: 900, cacheRead: 0, cacheWrite: 0, totalTokens: 1800, cost: { total: 9 } },
+				{ stopReason: "aborted" },
+			),
+			// Out of window: the ledger is fresh, but this call is not.
+			assistantUsageLine("t4", OLD, {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 500,
+				cost: { total: 4 },
+			}),
+		]);
+		const result = await runUsage(scratch, ["report", "--json"]);
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		rows = parseJsonl(result.stdout);
+		stdout = (await runUsage(scratch, ["report"])).stdout;
+	});
+	after(() => scratch.cleanup());
+
+	it("totals the in-window per-call usage the cost overlay reads", () => {
+		const tokens = facts(rows, "tokens")[0];
+		ok(tokens, "expected a tokens fact");
+		strictEqual(tokens?.apiCalls, 2, "the aborted and out-of-window calls are not calls in this window");
+		strictEqual(tokens?.totalTokens, 10415 + 22);
+		strictEqual(tokens?.input, 148);
+		strictEqual(tokens?.output, 8);
+		strictEqual(tokens?.cacheRead, 10274);
+		strictEqual(tokens?.cacheWrite, 7);
+		strictEqual(tokens?.reasoningTokens, 40);
+		strictEqual(tokens?.costUsd, 0.3);
+	});
+
+	it("attributes the calls to the provider and model the ledger recorded", () => {
+		const model = facts(rows, "model-usage").find((row) => row.modelId === "Nemo-3.5");
+		ok(model, `expected a model-usage fact: ${JSON.stringify(rows)}`);
+		strictEqual(model?.providerId, "dynamo");
+		strictEqual(model?.apiCalls, 2);
+		strictEqual(model?.totalTokens, 10437);
+	});
+
+	it("prints the totals and the per-model table in the text report", () => {
+		ok(stdout.includes("tokens in window: 10437 over 2 model calls"), stdout);
+		ok(stdout.includes("provider-reported cost in window: $0.3000"), stdout);
+		ok(stdout.includes("tokens by model (from session ledgers, provider-reported)"), stdout);
+		ok(stdout.includes("dynamo"), stdout);
 	});
 });
 
