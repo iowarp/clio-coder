@@ -32,6 +32,7 @@ export type OverlayState =
 export interface PermissionOverlayKeyDeps {
 	cancelPermission: () => void;
 	confirmPermission: () => void;
+	stopTurnFromPermission: () => void;
 }
 
 export interface DispatchBoardOverlayKeyDeps {
@@ -64,6 +65,13 @@ export function routePermissionOverlayKey(data: string, deps: PermissionOverlayK
 	}
 	if (isEscapeKey(data)) {
 		deps.cancelPermission();
+		return true;
+	}
+	// Denying one call does not stop the model asking again, and it re-asked six
+	// times with the command mutated each time. Escape answers this call; `s`
+	// answers the turn.
+	if (matchesKey(data, "s") && !isKeyRelease(data)) {
+		deps.stopTurnFromPermission();
 		return true;
 	}
 	return false;

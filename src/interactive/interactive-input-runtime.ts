@@ -52,6 +52,7 @@ export interface InteractiveInputRuntimeDeps {
 		getState(): OverlayState;
 		closeOverlay(): void;
 		confirmPermission(): void;
+		stopTurnFromPermission(): void;
 		cancelAskUser(): void;
 		toggleFooterDashboardState(): void;
 		toggleDispatchBoardOverlay(): void;
@@ -184,6 +185,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				{
 					cancelPermission: () => deps.overlay.closeOverlay(),
 					confirmPermission: () => deps.overlay.confirmPermission(),
+					stopTurnFromPermission: () => deps.overlay.stopTurnFromPermission(),
 					closeOverlay: () => deps.overlay.closeOverlay(),
 					selectPreviousDispatch: () => {
 						deps.dispatchBoard.selectPrevious();

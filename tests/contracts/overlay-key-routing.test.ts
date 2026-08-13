@@ -43,6 +43,7 @@ function makeDeps(): {
 	closed: () => number;
 	cancelledPermissions: () => number;
 	confirmedPermissions: () => number;
+	stoppedTurns: () => number;
 	cancelledAskUser: () => number;
 	selectedPrevious: () => number;
 	selectedNext: () => number;
@@ -52,6 +53,7 @@ function makeDeps(): {
 	let closeCount = 0;
 	let cancelPermissionCount = 0;
 	let confirmPermissionCount = 0;
+	let stopTurnCount = 0;
 	let cancelAskUserCount = 0;
 	let selectPreviousCount = 0;
 	let selectNextCount = 0;
@@ -66,6 +68,9 @@ function makeDeps(): {
 		},
 		confirmPermission: () => {
 			confirmPermissionCount += 1;
+		},
+		stopTurnFromPermission: () => {
+			stopTurnCount += 1;
 		},
 		selectPreviousDispatch: () => {
 			selectPreviousCount += 1;
@@ -88,6 +93,7 @@ function makeDeps(): {
 		closed: () => closeCount,
 		cancelledPermissions: () => cancelPermissionCount,
 		confirmedPermissions: () => confirmPermissionCount,
+		stoppedTurns: () => stopTurnCount,
 		cancelledAskUser: () => cancelAskUserCount,
 		selectedPrevious: () => selectPreviousCount,
 		selectedNext: () => selectNextCount,
@@ -281,6 +287,17 @@ describe("list-overlay key routing", () => {
 		strictEqual(routePermissionOverlayKey(KITTY_ESC_RELEASE, permission.deps), false);
 		strictEqual(permission.confirmedPermissions(), 1);
 		strictEqual(permission.cancelledPermissions(), 0);
+	});
+
+	it("routes `s` at a permission prompt to stopping the turn, and ignores its release", () => {
+		const permission = makeDeps();
+		strictEqual(routePermissionOverlayKey("s", permission.deps), true);
+		strictEqual(permission.stoppedTurns(), 1);
+		strictEqual(permission.cancelledPermissions(), 0, "stopping is its own decision, not an Esc");
+		strictEqual(permission.confirmedPermissions(), 0, "stopping never allows the call");
+		// Every other letter still falls through, so typing does not stop a turn.
+		strictEqual(routePermissionOverlayKey("a", permission.deps), false);
+		strictEqual(permission.stoppedTurns(), 1);
 	});
 
 	it("dedupes permission parked notices by requestId", () => {

@@ -30,6 +30,7 @@ it("constructs the input runtime without a terminal and wires controller-owned a
 			getState: () => "closed",
 			closeOverlay: () => events.push("overlay:close"),
 			confirmPermission: () => events.push("permission:confirm"),
+			stopTurnFromPermission: () => events.push("permission:stop-turn"),
 			cancelAskUser: () => events.push("ask:cancel"),
 			toggleFooterDashboardState: () => events.push("footer:toggle"),
 			toggleDispatchBoardOverlay: () => events.push("board:toggle"),

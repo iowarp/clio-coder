@@ -46,10 +46,19 @@ export interface OverlayPermissionLifecycleDeps {
 	appendNotice(level: NoticeLevel, text: string): void;
 	applyApprovalState(event: ToolApprovalStateEvent): void;
 	requestRender(): void;
+	/** End the in-flight run, carrying the text the operator will see. */
+	stopActiveTurn(reason: string): void;
 }
 
 export interface OverlayPermissionLifecycle {
 	confirm(): void;
+	/**
+	 * Deny the parked call and end the turn that keeps asking. Escape answers one
+	 * call and leaves the run going, which is the loop the operator could not get
+	 * out of: six denials produced six re-requests with the command mutated each
+	 * time, and quitting the app was the only exit.
+	 */
+	stopTurn(): void;
 	onPermissionOverlayClosed(): void;
 	dispose(): void;
 }
@@ -159,6 +168,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const workerQueue: WorkerEscalationEntry[] = [];
 	const announcedRequestIds = new Set<string>();
 	let confirmed = false;
+	let stopping = false;
 
 	const openWorker = (entry: WorkerEscalationEntry): void => {
 		if (deps.getOverlayState() !== "closed") return;
@@ -251,8 +261,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				requestedBy: "tool:one_shot",
 			});
 		} else {
-			const cancellationReason =
-				"User cancelled this tool call from the permission confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.";
+			const cancellationReason = stopping
+				? "User denied this tool call and stopped the turn from the permission confirmation prompt. The turn is over. Do not retry anything."
+				: "User cancelled this tool call from the permission confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.";
 			deps.bus.emit(BusChannels.PermissionResolved, {
 				status: "denied",
 				...(permission?.meta ? { requestId: permission.meta.requestId } : {}),
@@ -264,8 +275,17 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				requestedBy: "tool",
 				at: Date.now(),
 			});
-			if (permission?.meta) deps.toolRegistry?.cancelParkedCall(permission.meta.requestId, cancellationReason);
+			// A stop answers every call the turn has parked, not just the one on
+			// screen. Denying the head and re-notifying the next would put the
+			// operator straight back in the loop they asked to leave.
+			if (stopping) deps.toolRegistry?.cancelParkedCalls(cancellationReason);
+			else if (permission?.meta) deps.toolRegistry?.cancelParkedCall(permission.meta.requestId, cancellationReason);
 			else deps.toolRegistry?.cancelParkedCalls(cancellationReason);
+		}
+		if (stopping) {
+			stopping = false;
+			workerQueue.length = 0;
+			return;
 		}
 		maybeOpenWorker();
 		if (deps.getOverlayState() === "closed" && deps.toolRegistry?.hasParkedCalls()) {
@@ -277,6 +297,20 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		confirm: () => {
 			confirmed = true;
 			deps.closeOverlay();
+		},
+		stopTurn: () => {
+			const tool = pendingPermission?.call.tool ?? pendingWorker?.agentId;
+			stopping = true;
+			confirmed = false;
+			// closeOverlay drives onPermissionOverlayClosed, which denies under the
+			// stop reason. The run is cancelled after that, so the denial reaches the
+			// parked calls before the abort settles them.
+			deps.closeOverlay();
+			deps.stopActiveTurn(
+				tool === undefined
+					? "[Clio Coder] turn stopped: you denied the tool call and asked to stop being asked."
+					: `[Clio Coder] turn stopped: you denied ${tool} and asked to stop being asked.`,
+			);
 		},
 		onPermissionOverlayClosed,
 		dispose: () => {
