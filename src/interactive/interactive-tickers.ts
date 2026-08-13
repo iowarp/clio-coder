@@ -69,12 +69,19 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 	let contextIslandTicker: InteractiveTickerHandle | null = null;
 	let contextIslandVisible = false;
 
+	let taskIslandHidden = true;
+
 	const renderTaskIsland = (): void => {
 		const rows = deps.dispatchBoardStore.activeRows();
 		const contextActive = deps.contextActivityStore.active();
-		taskIslandHandle.setHidden(
-			deps.getOverlayState() !== "closed" || deps.isFooterExpanded() || contextActive || rows.length === 0,
-		);
+		const hidden = deps.getOverlayState() !== "closed" || deps.isFooterExpanded() || contextActive || rows.length === 0;
+		taskIslandHandle.setHidden(hidden);
+		// A hidden island with nothing to show still ran the frame builder and two
+		// truncateToWidth calls four times a second, forever, to produce lines no
+		// one could see. Formatting the empty case is pure waste; staying hidden
+		// leaves the last text in place, which is unreachable while hidden.
+		if (hidden && taskIslandHidden && rows.length === 0) return;
+		taskIslandHidden = hidden;
 		taskIsland.setText(formatTaskIslandLines(rows).join("\n"));
 		taskIsland.invalidate();
 	};

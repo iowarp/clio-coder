@@ -6,9 +6,12 @@ import { EXPERIMENTAL_RELEASE_WARNING } from "../core/release.js";
 import {
 	listWikiPages,
 	readCodewiki,
+	readCodewikiAsync,
 	renderCodewikiDigest,
+	type WikiStaleness,
 	wikiCompleteness,
 	wikiStaleness,
+	wikiStalenessAsync,
 } from "../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
@@ -34,6 +37,8 @@ export interface WelcomeDashboardDeps {
 	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 	/** Overridable repository probe. Tests count calls through it; production uses the default. */
 	readRepositoryFacts?: (cwd: string) => WelcomeRepositoryFacts;
+	/** Called when an off-render probe lands, so the layer that owns the frame can ask for one. */
+	onFactsRefreshed?: () => void;
 }
 
 /**
@@ -52,6 +57,13 @@ export interface WelcomeRepositoryFacts {
 	wikiDigestExcerpt: string[];
 	handoffCount: number;
 	handoffFreshness: string;
+	/**
+	 * True while the first probe is still in flight. The rows that depend on it
+	 * render dim placeholders rather than wrong values, and keep their row count,
+	 * because the banner sits at line 0 and a height change there forces pi-tui
+	 * to clear and repaint the entire buffer once the transcript has scrolled.
+	 */
+	pending?: boolean;
 }
 
 export interface WelcomeDashboardStats {
@@ -79,6 +91,8 @@ export interface WelcomeDashboardStats {
 	handoffCount: number;
 	handoffFreshness: string;
 	taskMemory: TaskMemoryOperatorStatus | null;
+	/** Mirrors `WelcomeRepositoryFacts.pending`; drives the dim placeholder rows. */
+	factsPending?: boolean;
 }
 
 function activeStatus(status: TargetStatus): boolean {
@@ -170,72 +184,102 @@ function entryPointExcerpt(codewikiDigest: string): string[] {
 	return out.slice(0, 4);
 }
 
-export function readWelcomeRepositoryFacts(cwd: string): WelcomeRepositoryFacts {
-	let clioMdStatus = "none";
-	let hasCodewiki = false;
-	let codewikiCount = 0;
-	let wikiPageCount = 0;
-	let wikiStatus = "no wiki; run clio context wiki";
-	let wikiDigestExcerpt: string[] = [];
-	let handoffCount = 0;
-	let handoffFreshness = "none";
+const NO_WIKI_STATUS = "no wiki; run clio context wiki";
 
-	const clioMdPath = join(cwd, "CLIO.md");
-	if (existsSync(clioMdPath)) {
-		clioMdStatus = "ok";
-	}
+function clioMdStatusFor(cwd: string): string {
+	return existsSync(join(cwd, "CLIO.md")) ? "ok" : "none";
+}
 
-	const codewiki = readCodewiki(cwd);
-	if (codewiki) {
-		hasCodewiki = true;
-		codewikiCount = codewiki.files.filter((file) => file.lang !== "config").length;
-		wikiDigestExcerpt = entryPointExcerpt(renderCodewikiDigest(codewiki));
-		const staleness = wikiStaleness(cwd);
-		if (staleness.state !== "absent") {
-			wikiPageCount = listWikiPages(cwd).length;
-			const completeness = wikiCompleteness(cwd);
-			const freshness =
-				staleness.state === "stale"
-					? `stale, ${staleness.changedFiles} changed file${staleness.changedFiles === 1 ? "" : "s"}`
-					: "fresh";
-			// An incomplete wiki reports what it owes even when it is current,
-			// otherwise a half-finished run reads as a finished one.
-			wikiStatus =
-				completeness && completeness.owed > 0
-					? `${freshness}, ${completeness.pagesWritten}/${completeness.pagesPlanned} pages`
-					: freshness;
-		}
-	}
-
-	const handoffsDir = join(cwd, ".clio", "handoffs");
-	if (existsSync(handoffsDir)) {
-		try {
-			const files = readdirSync(handoffsDir).filter((f) => f.startsWith("handoff-") && f.endsWith(".md"));
-			handoffCount = files.length;
-			if (files.length > 0) {
-				let newestMtime = 0;
-				for (const file of files) {
-					const mtime = statSync(join(handoffsDir, file)).mtimeMs;
-					if (mtime > newestMtime) newestMtime = mtime;
-				}
-				if (newestMtime > 0) {
-					handoffFreshness = formatRelativeTime(newestMtime);
-				}
-			}
-		} catch {
-			// Ignore
-		}
-	}
-
+/** Shape the wiki rows from a staleness verdict the caller already paid for. */
+function wikiFactsFrom(cwd: string, staleness: WikiStaleness): { wikiPageCount: number; wikiStatus: string } {
+	if (staleness.state === "absent") return { wikiPageCount: 0, wikiStatus: NO_WIKI_STATUS };
+	const wikiPageCount = listWikiPages(cwd).length;
+	const completeness = wikiCompleteness(cwd);
+	const freshness =
+		staleness.state === "stale"
+			? `stale, ${staleness.changedFiles} changed file${staleness.changedFiles === 1 ? "" : "s"}`
+			: "fresh";
+	// An incomplete wiki reports what it owes even when it is current,
+	// otherwise a half-finished run reads as a finished one.
 	return {
-		clioMdStatus,
-		hasCodewiki,
-		codewikiCount,
 		wikiPageCount,
-		wikiStatus,
-		wikiDigestExcerpt,
-		handoffCount,
-		handoffFreshness,
+		wikiStatus:
+			completeness && completeness.owed > 0
+				? `${freshness}, ${completeness.pagesWritten}/${completeness.pagesPlanned} pages`
+				: freshness,
+	};
+}
+
+function handoffFacts(cwd: string): { handoffCount: number; handoffFreshness: string } {
+	const handoffsDir = join(cwd, ".clio", "handoffs");
+	if (!existsSync(handoffsDir)) return { handoffCount: 0, handoffFreshness: "none" };
+	try {
+		const files = readdirSync(handoffsDir).filter((f) => f.startsWith("handoff-") && f.endsWith(".md"));
+		if (files.length === 0) return { handoffCount: 0, handoffFreshness: "none" };
+		let newestMtime = 0;
+		for (const file of files) {
+			const mtime = statSync(join(handoffsDir, file)).mtimeMs;
+			if (mtime > newestMtime) newestMtime = mtime;
+		}
+		return {
+			handoffCount: files.length,
+			handoffFreshness: newestMtime > 0 ? formatRelativeTime(newestMtime) : "none",
+		};
+	} catch {
+		return { handoffCount: 0, handoffFreshness: "none" };
+	}
+}
+
+export function readWelcomeRepositoryFacts(cwd: string): WelcomeRepositoryFacts {
+	const codewiki = readCodewiki(cwd);
+	const wiki = codewiki ? wikiFactsFrom(cwd, wikiStaleness(cwd)) : { wikiPageCount: 0, wikiStatus: NO_WIKI_STATUS };
+	return {
+		clioMdStatus: clioMdStatusFor(cwd),
+		hasCodewiki: codewiki !== null,
+		codewikiCount: codewiki ? codewiki.files.filter((file) => file.lang !== "config").length : 0,
+		...wiki,
+		wikiDigestExcerpt: codewiki ? entryPointExcerpt(renderCodewikiDigest(codewiki)) : [],
+		...handoffFacts(cwd),
+	};
+}
+
+/**
+ * The same facts without blocking a frame. The sync form costs a codewiki parse
+ * of a multi-megabyte artifact plus up to four `git` subprocesses, measured at
+ * 219 ms, and it used to run on the render call stack every ten seconds.
+ */
+export async function readWelcomeRepositoryFactsAsync(cwd: string): Promise<WelcomeRepositoryFacts> {
+	const codewiki = await readCodewikiAsync(cwd);
+	const wiki = codewiki
+		? wikiFactsFrom(cwd, await wikiStalenessAsync(cwd))
+		: { wikiPageCount: 0, wikiStatus: NO_WIKI_STATUS };
+	return {
+		clioMdStatus: clioMdStatusFor(cwd),
+		hasCodewiki: codewiki !== null,
+		codewikiCount: codewiki ? codewiki.files.filter((file) => file.lang !== "config").length : 0,
+		...wiki,
+		wikiDigestExcerpt: codewiki ? entryPointExcerpt(renderCodewikiDigest(codewiki)) : [],
+		...handoffFacts(cwd),
+	};
+}
+
+/**
+ * What the banner paints before the first probe returns. Everything here is one
+ * `existsSync` or cheaper. `hasCodewiki` is resolved for real rather than
+ * guessed, because it decides whether the Wiki row exists at all and the whole
+ * point of a placeholder is that the banner never changes height.
+ */
+export function placeholderRepositoryFacts(cwd: string): WelcomeRepositoryFacts {
+	return {
+		clioMdStatus: clioMdStatusFor(cwd),
+		hasCodewiki: existsSync(join(cwd, ".clio", "codewiki.json")),
+		codewikiCount: 0,
+		wikiPageCount: 0,
+		wikiStatus: NO_WIKI_STATUS,
+		wikiDigestExcerpt: [],
+		handoffCount: 0,
+		handoffFreshness: "none",
+		pending: true,
 	};
 }
 
@@ -275,6 +319,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		wikiDigestExcerpt,
 		handoffCount,
 		handoffFreshness,
+		pending,
 	} = (deps.readRepositoryFacts ?? readWelcomeRepositoryFacts)(cwd);
 
 	return {
@@ -301,6 +346,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		handoffCount,
 		handoffFreshness,
 		taskMemory: deps.getTaskMemoryStatus?.() ?? null,
+		...(pending ? { factsPending: true } : {}),
 	};
 }
 
@@ -367,32 +413,43 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		clioMdStr = `${theme.fg("dim", "CLIO.md none")}`;
 	}
 
-	const codewikiStr =
-		stats.codewikiCount > 0
+	// While the probe is in flight these rows say "reading", not "none": a dim
+	// placeholder is honest about not knowing yet, where "no codewiki" would be a
+	// wrong answer that corrects itself a moment later.
+	const pending = stats.factsPending === true;
+	const placeholder = (label: string): string => theme.fg("dim", `${label} ${GLYPH.ellipsis}`);
+
+	const codewikiStr = pending
+		? placeholder("codewiki")
+		: stats.codewikiCount > 0
 			? `${theme.fg("info", `${stats.codewikiCount} modules`)}`
 			: `${theme.fg("dim", "no codewiki")}`;
 
-	const handoffStr =
-		stats.handoffCount > 0
+	const handoffStr = pending
+		? placeholder("handoff")
+		: stats.handoffCount > 0
 			? `${theme.fg("muted", `handoff ${stats.handoffFreshness}`)}`
 			: `${theme.fg("dim", "no handoff")}`;
 
 	const safetyStr = `autonomy ${theme.fg("accentDeep", stats.autonomy)}`;
 	const profileStr = `profile ${theme.fg("dim", stats.toolProfile)}`;
 	const compactStr = `compact @${theme.fg("muted", stats.compactionThreshold)}`;
-	const wikiStateStr =
-		stats.wikiStatus === "no wiki; run clio context wiki"
+	const wikiStateStr = pending
+		? placeholder("wiki")
+		: stats.wikiStatus === NO_WIKI_STATUS
 			? theme.fg("dim", stats.wikiStatus)
 			: `${theme.fg("info", `${stats.wikiPageCount} page${stats.wikiPageCount === 1 ? "" : "s"}`)} · ${theme.fg(
 					stats.wikiStatus === "fresh" ? "success" : "warning",
 					stats.wikiStatus,
 				)}`;
-	const wikiUnits = [
-		wikiStateStr,
-		...(stats.wikiDigestExcerpt.length > 0
-			? stats.wikiDigestExcerpt.map((path, index) => theme.fg("muted", index === 0 ? `entry points: ${path}` : path))
-			: [theme.fg("muted", "entry points: none")]),
-	];
+	const wikiUnits = pending
+		? [wikiStateStr, theme.fg("dim", `entry points ${GLYPH.ellipsis}`)]
+		: [
+				wikiStateStr,
+				...(stats.wikiDigestExcerpt.length > 0
+					? stats.wikiDigestExcerpt.map((path, index) => theme.fg("muted", index === 0 ? `entry points: ${path}` : path))
+					: [theme.fg("muted", "entry points: none")]),
+			];
 
 	// Section 2.5 grammar: an affordance is `[Key] verb`, the same shape the
 	// overlay footers use, so the banner teaches the vocabulary the rest of the
@@ -469,7 +526,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			`  ${theme.fg("warning", "May break or change.")}`,
 			`  ${targetVal} · ${thinkVal}`,
 			`  ${clioMdStr} · ${codewikiStr}`,
-			...(stats.hasCodewiki ? [`  wiki ${stats.wikiStatus}`] : []),
+			...(stats.hasCodewiki ? [`  wiki ${pending ? GLYPH.ellipsis : stats.wikiStatus}`] : []),
 			`  ${safetyStr} · ${hintKey("Alt+U")} ${theme.fg("muted", "toggle")}`,
 			...(memoryUnits.length > 0 ? [fitUnits(theme, kvKey("Memory"), memoryUnits, safeWidth)] : []),
 			// A cut with no marker presents the fragment as the whole value, which is
@@ -489,9 +546,48 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
  */
 export const WELCOME_REPOSITORY_FACTS_TTL_MS = 10_000;
 
+/**
+ * Everything in `WelcomeDashboardStats` that can change what the banner prints,
+ * flattened to one comparable string. Cheap enough to build per frame; the
+ * alternative was rebuilding seven framed rows, which cost 1.67 ms/frame and was
+ * 94% of all time spent inside the root container's render.
+ */
+function statsSignature(stats: WelcomeDashboardStats): string {
+	const w = stats.workspace;
+	return [
+		stats.activeTargets,
+		stats.totalTargets,
+		stats.targetLabel,
+		stats.modelLabel,
+		stats.thinkingLevel,
+		stats.cwd,
+		w && `${w.branch}${w.dirty}${w.projectType}${w.isGit}${w.remoteUrl}`,
+		stats.currentAvailable,
+		stats.targetHealthLabel,
+		stats.activeCapabilities.join(","),
+		stats.extensions && `${stats.extensions.active}/${stats.extensions.installed}`,
+		stats.autonomy,
+		stats.toolProfile,
+		stats.compactionThreshold,
+		stats.clioMdStatus,
+		stats.hasCodewiki,
+		stats.codewikiCount,
+		stats.wikiPageCount,
+		stats.wikiStatus,
+		stats.wikiDigestExcerpt.join(","),
+		stats.handoffCount,
+		stats.handoffFreshness,
+		stats.taskMemory && `${stats.taskMemory.enabled}${stats.taskMemory.tier}${stats.taskMemory.size}`,
+		stats.factsPending === true,
+	].join(" ");
+}
+
 export class WelcomeDashboard implements Component {
 	private readonly logo: Component | null;
 	private cachedFacts: { cwd: string; at: number; facts: WelcomeRepositoryFacts } | null = null;
+	private cachedRender: { width: number; signature: string; lines: string[] } | null = null;
+	/** Single-flight latch: a probe slower than the TTL must not stack refreshes. */
+	private refreshing = false;
 
 	constructor(
 		private readonly deps: WelcomeDashboardDeps,
@@ -502,26 +598,60 @@ export class WelcomeDashboard implements Component {
 
 	render(width: number): string[] {
 		const stats = deriveWelcomeDashboardStats({ ...this.deps, readRepositoryFacts: (cwd) => this.facts(cwd) });
-		const lines = buildWelcomeDashboardLines(stats, width);
-		if (width < WIDE_MIN || !getCapabilities().images || !this.logo) return lines;
-		return [...this.logo.render(width), ...lines];
+		const signature = statsSignature(stats);
+		const cached = this.cachedRender;
+		if (cached !== null && cached.width === width && cached.signature === signature) return cached.lines;
+		const body = buildWelcomeDashboardLines(stats, width);
+		const lines =
+			width < WIDE_MIN || !getCapabilities().images || !this.logo ? body : [...this.logo.render(width), ...body];
+		this.cachedRender = { width, signature, lines };
+		return lines;
 	}
 
-	/** Drops the repository probe so the next frame re-reads it. */
+	/** Drops the repository probe and the rendered lines so the next frame re-reads both. */
 	invalidate(): void {
 		this.cachedFacts = null;
+		this.cachedRender = null;
 	}
 
+	/**
+	 * Returns immediately, always. On a miss it hands back a placeholder (or the
+	 * last known reading) and schedules the real probe off the render path. The
+	 * probe used to run here, synchronously, inside `Container.render`.
+	 */
 	private facts(cwd: string): WelcomeRepositoryFacts {
 		const at = this.now();
 		const cached = this.cachedFacts;
 		// A changed cwd is a different repository, not a stale reading of this one.
-		if (cached !== null && cached.cwd === cwd && at - cached.at < WELCOME_REPOSITORY_FACTS_TTL_MS) {
-			return cached.facts;
+		const usable = cached !== null && cached.cwd === cwd;
+		if (usable && at - cached.at < WELCOME_REPOSITORY_FACTS_TTL_MS) return cached.facts;
+		// A test-injected probe is synchronous by contract and cheap by construction.
+		const override = this.deps.readRepositoryFacts;
+		if (override) {
+			const facts = override(cwd);
+			this.cachedFacts = { cwd, at, facts };
+			return facts;
 		}
-		const facts = (this.deps.readRepositoryFacts ?? readWelcomeRepositoryFacts)(cwd);
-		this.cachedFacts = { cwd, at, facts };
-		return facts;
+		this.scheduleFactsRefresh(cwd);
+		return usable ? cached.facts : placeholderRepositoryFacts(cwd);
+	}
+
+	private scheduleFactsRefresh(cwd: string): void {
+		if (this.refreshing) return;
+		this.refreshing = true;
+		void readWelcomeRepositoryFactsAsync(cwd)
+			.then((facts) => {
+				this.cachedFacts = { cwd, at: this.now(), facts };
+				this.cachedRender = null;
+				this.deps.onFactsRefreshed?.();
+			})
+			.catch(() => {
+				// A failed probe leaves the last known facts in place and retries on the
+				// next frame past the TTL; the banner is not worth surfacing an error for.
+			})
+			.finally(() => {
+				this.refreshing = false;
+			});
 	}
 }
 

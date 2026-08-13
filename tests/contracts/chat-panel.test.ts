@@ -822,3 +822,114 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		);
 	});
 });
+
+describe("chat-panel render caching", () => {
+	/**
+	 * Steps 3 and 4 of the render performance pass replaced a whole-cache clear
+	 * with targeted invalidation, and memoized the completed source lines of a
+	 * streaming segment. Both are only safe if the rendered bytes never change,
+	 * so each case renders the same transcript through the cached path and
+	 * through a panel built from scratch and compares them.
+	 */
+	const settledTurns = (panel: ReturnType<typeof createChatPanel>, count: number): void => {
+		for (let i = 0; i < count; i += 1) {
+			panel.appendUser(`question ${i}`);
+			panel.applyEvent({
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: `answer ${i}` }] },
+			} as ChatLoopEvent);
+			panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		}
+	};
+
+	it("renders identically after a tool event that no longer clears the whole cache", () => {
+		const cached = createChatPanel();
+		settledTurns(cached, 12);
+		cached.render(80);
+
+		cached.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "bash",
+			args: { command: "echo hi" },
+		} as ChatLoopEvent);
+		cached.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "t1",
+			partialResult: "partial output",
+		} as ChatLoopEvent);
+		cached.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "t1",
+			result: "done",
+			isError: false,
+		} as ChatLoopEvent);
+		cached.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+
+		const fresh = createChatPanel();
+		settledTurns(fresh, 12);
+		fresh.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "bash",
+			args: { command: "echo hi" },
+		} as ChatLoopEvent);
+		fresh.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "t1",
+			partialResult: "partial output",
+		} as ChatLoopEvent);
+		fresh.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "t1",
+			result: "done",
+			isError: false,
+		} as ChatLoopEvent);
+		fresh.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+
+		strictEqual(cached.render(80).join("\n"), fresh.render(80).join("\n"));
+	});
+
+	it("renders a streaming tail identically whether or not completed lines were memoized", () => {
+		const streamed = createChatPanel();
+		const lines = [
+			"First paragraph that is long enough to wrap across more than one row at eighty columns.",
+			"Second line here.",
+			"",
+			"Fourth line with a much longer body so the wrap boundary lands somewhere interesting.",
+			"Fifth and final line so far",
+		];
+		// Stream line by line, rendering between deltas so the wrap cache fills.
+		for (let i = 0; i < lines.length; i += 1) {
+			const delta = i === 0 ? lines[0] : `\n${lines[i]}`;
+			streamed.applyEvent({ type: "text_delta", contentIndex: 0, delta } as ChatLoopEvent);
+			streamed.render(80);
+		}
+
+		// Same text, delivered in one delta, so nothing was ever memoized.
+		const oneShot = createChatPanel();
+		oneShot.applyEvent({ type: "text_delta", contentIndex: 0, delta: lines.join("\n") } as ChatLoopEvent);
+
+		strictEqual(streamed.render(80).join("\n"), oneShot.render(80).join("\n"));
+	});
+
+	it("re-wraps a memoized streaming tail when the width changes", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "A line long enough that eighty columns and forty columns wrap it differently.\nsecond",
+		} as ChatLoopEvent);
+		const wide = panel.render(80).join("\n");
+		const narrow = panel.render(40).join("\n");
+
+		const fresh = createChatPanel();
+		fresh.applyEvent({
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "A line long enough that eighty columns and forty columns wrap it differently.\nsecond",
+		} as ChatLoopEvent);
+		strictEqual(narrow, fresh.render(40).join("\n"));
+		ok(wide !== narrow, "the two widths must actually wrap differently for this test to mean anything");
+	});
+});

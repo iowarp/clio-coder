@@ -10,19 +10,20 @@ import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
 import { runContextClear } from "./clear.js";
 import { tryReadClioMd } from "./clio-md.js";
+import { createSlicer } from "./codewiki/cooperative.js";
 import {
 	buildCodewiki,
 	type Codewiki,
 	codewikiNeedsBackfill,
 	codewikiPath,
 	parseCodewikiRaw,
-	readCodewiki,
+	readCodewikiAsync,
 	syncCodewiki,
 	updateCodewikiPaths,
 	writeCodewiki,
 } from "./codewiki/indexer.js";
 import type { ContextContract, ContextState } from "./contract.js";
-import { computeFingerprint, isStale } from "./fingerprint.js";
+import { computeFingerprintAsync, isStale } from "./fingerprint.js";
 import { renderPromptContext } from "./prompt-context.js";
 import { runContextRefresh } from "./refresh.js";
 import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
@@ -59,6 +60,12 @@ function persistState(
  * the last full index. Runs once at session start (catches branch switches, git
  * pulls, and out-of-session edits) and again at stop. Skips projects that were
  * never indexed so we never index an arbitrary directory unprompted.
+ *
+ * Every phase runs through one shared slicer. This work overlaps a mounted TUI:
+ * before slicing, a drifted tree on a 1100-file repository held the event loop
+ * for roughly four seconds at session start, during which the prompt was on
+ * screen and keystrokes queued silently. `void` on the promise never helped,
+ * because nothing inside it awaited.
  */
 async function ensureCodewikiFresh(cwd: string): Promise<void> {
 	// The bootstrap model-generation child runs a headless session purely to draft
@@ -66,8 +73,9 @@ async function ensureCodewikiFresh(cwd: string): Promise<void> {
 	if (process.env.CLIO_BOOTSTRAP_GENERATE_CHILD === "1") return;
 	const state = readClioState(cwd);
 	if (!state && !existsSync(codewikiPath(cwd))) return;
-	const codewiki = readCodewiki(cwd);
-	const fingerprint = computeFingerprint(cwd, codewiki);
+	const slicer = createSlicer();
+	const codewiki = await readCodewikiAsync(cwd);
+	const fingerprint = await computeFingerprintAsync(cwd, codewiki, { slicer });
 	const stale =
 		!state ||
 		isStale(state.fingerprint, fingerprint) ||
@@ -78,10 +86,10 @@ async function ensureCodewikiFresh(cwd: string): Promise<void> {
 	const indexedAt = new Date().toISOString();
 	const projectType = state?.projectType ?? detectProjectType(cwd);
 	const synced = codewiki
-		? await syncCodewiki(cwd, codewiki)
-		: await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+		? await syncCodewiki(cwd, codewiki, { slicer })
+		: await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt }, { slicer });
 	writeCodewiki(cwd, synced);
-	persistState(cwd, computeFingerprint(cwd, synced), indexedAt, state, synced.version);
+	persistState(cwd, await computeFingerprintAsync(cwd, synced, { slicer }), indexedAt, state, synced.version);
 }
 
 const CONTEXT_STATE_CACHE_TTL_MS = 1500;
@@ -225,10 +233,19 @@ export function createContextBundle(
 				const rel = paths
 					.map((p) => (isAbsolute(p) ? relative(cwd, p) : p))
 					.filter((p) => p.length > 0 && !p.startsWith(".."));
-				const updated = await updateCodewikiPaths(cwd, codewiki, rel);
+				// Fires after every write the agent makes, mid-turn, with the TUI
+				// mounted; an edge rebuild here is the same cost as one at start.
+				const slicer = createSlicer();
+				const updated = await updateCodewikiPaths(cwd, codewiki, rel, { slicer });
 				if (updated === codewiki) return; // No indexable file actually changed.
 				writeCachedCodewiki(cwd, updated);
-				persistState(cwd, computeFingerprint(cwd, updated), new Date().toISOString(), readClioState(cwd), updated.version);
+				persistState(
+					cwd,
+					await computeFingerprintAsync(cwd, updated, { slicer }),
+					new Date().toISOString(),
+					readClioState(cwd),
+					updated.version,
+				);
 				contextState.invalidate(cwd);
 			})
 			.catch(() => {
@@ -245,18 +262,21 @@ export function createContextBundle(
 			unsubscribeSessionStart?.();
 			unsubscribeSessionStart = null;
 			await incrementalQueue;
+			// Stop runs the same rebuild as start and the TUI is still mounted while
+			// it drains, so it shares the sliced path rather than blocking the quit.
+			const slicer = createSlicer();
 			const projectType = detectProjectType(lastCwd);
 			const state = readClioState(lastCwd);
 			let codewiki = readCachedCodewiki(lastCwd);
-			let fingerprint = computeFingerprint(lastCwd, codewiki);
+			let fingerprint = await computeFingerprintAsync(lastCwd, codewiki, { slicer });
 			let lastIndexedAt = state?.lastIndexedAt;
 			if (!state || isStale(state.fingerprint, fingerprint) || !codewiki || codewikiNeedsBackfill(codewiki)) {
 				lastIndexedAt = new Date().toISOString();
 				codewiki = codewiki
-					? await syncCodewiki(lastCwd, codewiki)
-					: await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt });
+					? await syncCodewiki(lastCwd, codewiki, { slicer })
+					: await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt }, { slicer });
 				writeCachedCodewiki(lastCwd, codewiki);
-				fingerprint = computeFingerprint(lastCwd, codewiki);
+				fingerprint = await computeFingerprintAsync(lastCwd, codewiki, { slicer });
 			}
 			writeClioState(lastCwd, {
 				version: 1,

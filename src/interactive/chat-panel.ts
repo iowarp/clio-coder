@@ -88,6 +88,14 @@ type TextSegment = {
 	 * invalidate only the tail segment's cache on re-canonicalization.
 	 */
 	md?: Markdown;
+	/**
+	 * Wrapped output for every source line except the last, plus the width and
+	 * source-line count it was built at. A streaming segment only ever grows at
+	 * its tail: source lines before the last one are terminated by a newline and
+	 * can never change, yet every frame re-wrapped all of them. On a 16k-char
+	 * answer that was 5-22 ms per frame to reproduce identical rows.
+	 */
+	wrapCache?: { width: number; completedLines: number; lines: string[] };
 };
 type ToolSegment = {
 	kind: "tool";
@@ -414,10 +422,19 @@ function hasStreamingText(entry: Extract<TranscriptEntry, { role: "assistant" }>
 
 function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	if (!seg.finalized) {
-		const wrapped: string[] = [];
-		for (const line of seg.text.split("\n")) {
-			wrapped.push(...wrapTextWithAnsi(line, width));
+		const source = seg.text.split("\n");
+		// The final element is the live tail; everything before it is newline-
+		// terminated and frozen.
+		const completedCount = source.length - 1;
+		const cache = seg.wrapCache;
+		const reusable = cache !== undefined && cache.width === width && cache.completedLines <= completedCount;
+		const completed = reusable ? cache.lines.slice() : [];
+		for (let i = reusable ? cache.completedLines : 0; i < completedCount; i += 1) {
+			for (const line of wrapTextWithAnsi(source[i] ?? "", width)) completed.push(line);
 		}
+		seg.wrapCache = { width, completedLines: completedCount, lines: completed };
+		const wrapped = completed.slice();
+		for (const line of wrapTextWithAnsi(source[completedCount] ?? "", width)) wrapped.push(line);
 		return wrapped;
 	}
 	if (!seg.md) {
@@ -814,16 +831,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * result may upgrade the synthetic settle, but a segment that finished
 	 * with its own result is never rewritten after the fact.
 	 */
-	const findToolSegment = (toolCallId: string): ToolSegment | undefined => {
-		let settledMatch: ToolSegment | undefined;
+	const findToolSegmentOwner = (toolCallId: string): { segment: ToolSegment; entry: TranscriptEntry } | undefined => {
+		let settledMatch: { segment: ToolSegment; entry: TranscriptEntry } | undefined;
 		for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 			const entry = transcript[entryIndex];
 			if (entry?.role !== "assistant") continue;
 			for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
 				const seg = entry.segments[segIndex];
 				if (seg?.kind !== "tool" || seg.id !== toolCallId) continue;
-				if (!seg.finished) return seg;
-				if (seg.settledWithoutResult === true) settledMatch ??= seg;
+				if (!seg.finished) return { segment: seg, entry };
+				if (seg.settledWithoutResult === true) settledMatch ??= { segment: seg, entry };
 			}
 		}
 		return settledMatch;
@@ -876,6 +893,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (tail?.kind === "text" && !tail.finalized && (replaceTail || text.startsWith(tail.text))) {
 			tail.text = text;
 			tail.finalized = true;
+			// The streaming wrap cache assumes append-only text. This is the one
+			// path that rewrites it wholesale, and finalized segments render through
+			// Markdown instead, so the cache is dead here either way.
+			delete tail.wrapCache;
 			if (tail.md) tail.md.setText(text);
 			return;
 		}
@@ -910,10 +931,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const render = (width: number): string[] => {
 		const startedAt = performance.now();
 		const expandKey = resolveExpandKey();
-		const out: string[] = [];
-		const latestHintToolId = latestCollapsedFinishedToolId();
-		const nowMs = now();
 		const verbosity = options.getOutputVerbosity?.() ?? "default";
+		// The hit guard runs before any transcript scan. latestCollapsedFinishedToolId
+		// walks the whole transcript when the newest tool is expanded or absent, and
+		// it is not part of the panel-level key, so computing it above the guard cost
+		// a full scan per frame for a value the early return discards.
 		if (
 			!dirty &&
 			cachedWidth === width &&
@@ -924,12 +946,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: true, entriesRendered: 0 });
 			return cachedLines;
 		}
+		const out: string[] = [];
+		const latestHintToolId = latestCollapsedFinishedToolId();
+		const nowMs = now();
+		// Loop-invariant: nothing in the key depends on the entry.
+		const cacheKey = `${width}|${expandKey ?? ""}|${latestHintToolId ?? ""}|${verbosity}|${liveToolOutput}`;
 		let entriesRendered = 0;
 		for (let i = 0; i < transcript.length; i += 1) {
 			const entry = transcript[i];
 			if (!entry) continue;
 			if (i > 0) out.push("");
-			const cacheKey = `${width}|${expandKey ?? ""}|${latestHintToolId ?? ""}|${verbosity}|${liveToolOutput}`;
 			const cached = entryRenderCache.get(entry);
 			const cacheable =
 				i >= transcript.length - MAX_ENTRY_RENDER_CACHE &&
@@ -937,7 +963,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				(entry.role !== "assistant" ||
 					(!entry.pending && !entry.segments.some((segment) => segment.kind === "tool" && !segment.finished)));
 			if (cacheable && cached?.key === cacheKey) {
-				out.push(...cached.lines);
+				// A spread here is slower than a loop for large arrays and blows the
+				// stack outright for a single entry that renders enough lines.
+				for (const line of cached.lines) out.push(line);
 				continue;
 			}
 			entriesRendered += 1;
@@ -951,7 +979,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				verbosity,
 				liveToolOutput,
 			);
-			out.push(...renderedEntry);
+			for (const line of renderedEntry) out.push(line);
 			if (cacheable) {
 				entryRenderCache.set(entry, { key: cacheKey, lines: renderedEntry });
 				while (entryRenderCache.size > MAX_ENTRY_RENDER_CACHE) {
@@ -1126,8 +1154,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_approval_state") {
-				entryRenderCache.clear();
-				const tool = findToolSegment(event.toolCallId);
+				// Only the entry that owns the segment can change. Clearing the whole
+				// 256-entry cache re-rendered every settled turn in the transcript;
+				// on a 400-turn session that was 26.7 ms per event, and
+				// tool_execution_update fires on every output tick of a running command.
+				const owner = findToolSegmentOwner(event.toolCallId);
+				if (owner) invalidateEntryCache(owner.entry);
+				const tool = owner?.segment;
 				if (tool && !tool.finished) {
 					tool.awaitingApproval = event.state === "awaiting-approval" ? true : undefined;
 					markDirty();
@@ -1135,7 +1168,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_execution_update") {
-				entryRenderCache.clear();
 				// pi-agent emits `partialResult` as a cumulative tool-result envelope
 				// (the bash tool concatenates its rolling tail buffer on every tick).
 				// Unwrap with the same helper the finished-result path uses, then
@@ -1143,7 +1175,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// semantics are cumulative, so appending would double-print every
 				// snapshot. Render dispatch picks up the new buffer on the next
 				// frame via `renderToolSegmentLines`.
-				const tool = findToolSegment(event.toolCallId);
+				const owner = findToolSegmentOwner(event.toolCallId);
+				if (owner) invalidateEntryCache(owner.entry);
+				const tool = owner?.segment;
 				if (tool && !tool.finished) {
 					const unwrapped = unwrapResultEnvelope(event.partialResult);
 					tool.partialOutput = typeof unwrapped === "string" ? unwrapped : previewResult(unwrapped);
@@ -1152,8 +1186,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_execution_end") {
-				entryRenderCache.clear();
-				const tool = findToolSegment(event.toolCallId);
+				const owner = findToolSegmentOwner(event.toolCallId);
+				if (owner) invalidateEntryCache(owner.entry);
+				const tool = owner?.segment;
 				if (tool) {
 					tool.result = event.result;
 					tool.isError = event.isError;
@@ -1204,7 +1239,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "message_end") {
-				entryRenderCache.clear();
 				const text = extractAssistantText(event.message);
 				const thinking = extractAssistantThinking(event.message);
 				const extractedTerminalError = extractAssistantTerminalError(event.message);
@@ -1216,6 +1250,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const usage = assistantUsage(event.message);
 				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0 && usage === undefined) return;
 				const assistant = ensureAssistant();
+				// message_end rewrites exactly one entry: the assistant it lands on.
+				invalidateEntryCache(assistant);
 				if (usage !== undefined) assistant.turnUsage = usage;
 				if (terminalError.length > 0) assistant.isError = true;
 				if (thinking.length > 0) {
@@ -1242,7 +1278,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "agent_end") {
-				entryRenderCache.clear();
+				// agent_end can touch many entries, but it names every one it touches:
+				// the usage caption's target, the later entries whose caption it
+				// removes, and any entry it settles or un-pends below. Each is
+				// invalidated at the point of mutation instead of dropping the whole
+				// cache and re-rendering settled history.
 				const runUsage = aggregateAssistantUsage(event.messages);
 				if (runUsage !== undefined) {
 					// The usage line is a caption on rendered output, so it goes on the
@@ -1254,10 +1294,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// nothing and must not carry a second copy.
 					const index = lastAssistantIndex(transcript, { withOutput: true }) ?? lastAssistantIndex(transcript);
 					const target = index === null ? undefined : transcript[index];
-					if (target?.role === "assistant") target.turnUsage = runUsage;
+					if (target?.role === "assistant") {
+						invalidateEntryCache(target);
+						target.turnUsage = runUsage;
+					}
 					for (let after = (index ?? -1) + 1; after < transcript.length; after += 1) {
 						const later = transcript[after];
-						if (later?.role === "assistant") delete later.turnUsage;
+						if (later?.role !== "assistant") continue;
+						if (later.turnUsage !== undefined) invalidateEntryCache(later);
+						delete later.turnUsage;
 					}
 				}
 				// The run is over: no tool can still be executing anywhere in the
@@ -1276,10 +1321,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				for (const entry of transcript) {
 					if (entry.role !== "assistant") continue;
 					for (const seg of entry.segments) {
-						if (seg.kind === "tool" && !seg.finished)
+						if (seg.kind === "tool" && !seg.finished) {
+							invalidateEntryCache(entry);
 							settleUnfinishedToolSegment(seg, runWasAborted ? "aborted" : "orphaned");
+						}
 					}
 					if (entry.pending) {
+						invalidateEntryCache(entry);
 						entry.pending = false;
 						entry.statusLine = null;
 					}

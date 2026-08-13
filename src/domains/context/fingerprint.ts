@@ -1,10 +1,14 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
-import { type Codewiki, isIndexablePath, readCodewiki } from "./codewiki/indexer.js";
+import { type CooperativeSlicer, createSlicer } from "./codewiki/cooperative.js";
+import { type Codewiki, isIndexablePath, readCodewiki, readCodewikiAsync } from "./codewiki/indexer.js";
 import { EXCLUDED_DIRS } from "./excluded-dirs.js";
+
+const execFileAsync = promisify(execFile);
 
 export interface Fingerprint {
 	treeHash: string;
@@ -65,6 +69,15 @@ function currentGitHead(cwd: string): string | null {
 	}
 }
 
+async function currentGitHeadAsync(cwd: string): Promise<string | null> {
+	try {
+		const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], { cwd, encoding: "utf8" });
+		return stdout.trim();
+	} catch {
+		return null;
+	}
+}
+
 function countLines(filePath: string): number {
 	try {
 		const text = readFileSync(filePath, "utf8");
@@ -84,27 +97,78 @@ function locFromCodewiki(codewiki: Codewiki | null): number | null {
 	return codewiki.files.reduce((sum, file) => (file.lang === "config" ? sum : sum + file.loc), 0);
 }
 
+/**
+ * Hash one file's identity into the tree hash and accumulate its line count.
+ * Shared verbatim by the sync and sliced walks so the two produce identical
+ * fingerprints for the same tree.
+ */
+function accumulateFile(
+	cwd: string,
+	relPath: string,
+	hash: ReturnType<typeof createHash>,
+	artifactLoc: number | null,
+): number {
+	const absPath = join(cwd, relPath);
+	let stat: ReturnType<typeof statSync>;
+	try {
+		stat = statSync(absPath);
+	} catch {
+		return 0;
+	}
+	hash.update(`${relPath}:${stat.size}:${Math.floor(stat.mtimeMs)}\n`);
+	if (artifactLoc === null && LOC_EXTENSIONS.has(extensionOf(relPath))) return countLines(absPath);
+	return 0;
+}
+
 export function computeFingerprint(cwd: string, codewiki: Codewiki | null = readCodewiki(cwd)): Fingerprint {
 	const files = enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath);
 
 	const hash = createHash("sha256");
 	const artifactLoc = locFromCodewiki(codewiki);
 	let loc = 0;
-	for (const relPath of files) {
-		const absPath = join(cwd, relPath);
-		let stat: ReturnType<typeof statSync>;
-		try {
-			stat = statSync(absPath);
-		} catch {
-			continue;
-		}
-		hash.update(`${relPath}:${stat.size}:${Math.floor(stat.mtimeMs)}\n`);
-		if (artifactLoc === null && LOC_EXTENSIONS.has(extensionOf(relPath))) loc += countLines(absPath);
-	}
+	for (const relPath of files) loc += accumulateFile(cwd, relPath, hash, artifactLoc);
 
 	return {
 		treeHash: hash.digest("hex"),
 		gitHead: currentGitHead(cwd),
+		loc: artifactLoc ?? loc,
+	};
+}
+
+export interface ComputeFingerprintAsyncOptions {
+	slicer?: CooperativeSlicer;
+}
+
+/**
+ * Same fingerprint, sliced. One `statSync` per visible file plus a `git
+ * rev-parse` is tens of milliseconds on a large repository, which is a dropped
+ * frame if it lands in one turn. Callers on a status-surface poll or on the
+ * session-start path should use this; one-shot CLI paths need not bother.
+ *
+ * `enumerateWorkspaceFiles` still runs as a single synchronous turn. It lives in
+ * src/core and has no sliced form, so it is the remaining floor here.
+ */
+export async function computeFingerprintAsync(
+	cwd: string,
+	codewiki: Codewiki | null | undefined = undefined,
+	options: ComputeFingerprintAsyncOptions = {},
+): Promise<Fingerprint> {
+	const slicer = options.slicer ?? createSlicer();
+	const artifact = codewiki === undefined ? await readCodewikiAsync(cwd) : codewiki;
+	await slicer.tick();
+	const files = enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath);
+
+	const hash = createHash("sha256");
+	const artifactLoc = locFromCodewiki(artifact);
+	let loc = 0;
+	for (const relPath of files) {
+		await slicer.tick();
+		loc += accumulateFile(cwd, relPath, hash, artifactLoc);
+	}
+
+	return {
+		treeHash: hash.digest("hex"),
+		gitHead: await currentGitHeadAsync(cwd),
 		loc: artifactLoc ?? loc,
 	};
 }
