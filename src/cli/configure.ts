@@ -34,7 +34,7 @@ import {
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import { credentialWriteFailed, printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
-import { terminalColumns } from "./text-layout.js";
+import { terminalColumns, wrapPlain } from "./text-layout.js";
 import { validateModelChoice } from "./validate-model.js";
 
 const HELP = `clio configure
@@ -273,6 +273,9 @@ function defaultUrlFor(runtimeId: string): string {
 	return port ? `http://127.0.0.1:${port}` : "http://127.0.0.1:8080";
 }
 
+const RUNTIME_LIST_CAPTION =
+	"every registered runtime. run `clio auth list` for the ones clio authenticates itself; the rest authenticate through their own tool (claude-cli, aws-sdk) or need no credential.";
+
 function printRuntimeList(includeHidden: boolean): void {
 	const settings = readSettings();
 	const auth = openAuthStorage();
@@ -305,7 +308,15 @@ function printRuntimeList(includeHidden: boolean): void {
 					: (defaultModelForRuntime(entry.runtimeId) ?? "-"),
 		});
 	}
-	for (const line of formatRuntimeList(rows, terminalColumns())) {
+	const width = terminalColumns();
+	for (const line of formatRuntimeList(rows, width)) {
+		process.stdout.write(`${line}\n`);
+	}
+	// The other half of the pair `clio auth list` names. This table is every
+	// registered runtime; that one is the subset Clio holds a credential for,
+	// and a user who found a name here and could not find it there was reading
+	// two screens that each claimed to be the list of what you can connect.
+	for (const line of wrapPlain(RUNTIME_LIST_CAPTION, width)) {
 		process.stdout.write(`${line}\n`);
 	}
 }

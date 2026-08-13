@@ -14,6 +14,21 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { columnWidths, formatColumnRow } from "./shared.js";
 
+/**
+ * What the connectable listing is a listing of.
+ *
+ * `clio auth` shows the runtimes whose credential Clio owns: an OAuth flow it
+ * drives or an API key it stores (`connectable` in
+ * `buildProviderSupportEntry`). Runtimes that authenticate through a vendor CLI
+ * (`claude-cli`), a cloud credential chain (`aws-sdk`), or nothing at all are
+ * registered, configurable, and absent here. `clio configure --list` renders
+ * the same registry unfiltered, so a user reading one screen found eight
+ * runtimes that the other did not admit existed. Both now say which set they
+ * are showing and name the command that shows the rest.
+ */
+export const CONNECTABLE_LIST_CAPTION =
+	"runtimes clio authenticates itself. run `clio configure --list` for every registered runtime, including those that authenticate through their own tool or need no credential.";
+
 export interface ConnectableProviderRow {
 	entry: ProviderSupportEntry;
 	status: ReturnType<ReturnType<typeof openAuthStorage>["statusForTarget"]> | null;

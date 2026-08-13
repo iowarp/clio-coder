@@ -8,6 +8,7 @@ import { supportGroupLabel } from "../domains/providers/index.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import {
+	CONNECTABLE_LIST_CAPTION,
 	type ConnectableProviderRow,
 	listConnectableProviderRows,
 	renderConnectableProviderRows,
@@ -20,6 +21,7 @@ import {
 	printOk,
 	printPlaintextCredentialWarning,
 } from "./shared.js";
+import { terminalColumns, wrapPlain } from "./text-layout.js";
 
 const USAGE = `usage: clio auth list
        clio auth status [target-or-runtime]
@@ -54,6 +56,14 @@ function parseAuthTargetArgs(args: ReadonlyArray<string>, verb: string): ParsedA
 		parsed.target = arg;
 	}
 	return parsed;
+}
+
+/** The connectable listing plus the sentence that says what it left out. */
+function printConnectableListing(rows: ReadonlyArray<ConnectableProviderRow>): void {
+	process.stdout.write(renderConnectableProviderRows(rows));
+	for (const line of wrapPlain(CONNECTABLE_LIST_CAPTION, terminalColumns())) {
+		process.stdout.write(`${line}\n`);
+	}
 }
 
 function printStatusLine(id: string, label: string, type: string | null, present: boolean, source: string): void {
@@ -130,6 +140,11 @@ async function promptForLoginTarget(rows: ReadonlyArray<ConnectableProviderRow>)
 			process.stdout.write(
 				`    ${String(index + 1).padStart(2)}. ${row.entry.runtimeId.padEnd(22)} ${status.padEnd(18)} targets=${row.targetCount}\n`,
 			);
+		}
+		// The picker is where a runtime id copied off `clio configure --list` gets
+		// typed, so it says here which runtimes it can accept.
+		for (const line of wrapPlain(CONNECTABLE_LIST_CAPTION, terminalColumns())) {
+			process.stdout.write(`${line}\n`);
 		}
 		process.stdout.write("\n");
 		for (;;) {
@@ -220,7 +235,7 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 	}
 	if (!parsed.target) {
 		if (!input.isTTY || !output.isTTY) {
-			process.stdout.write(renderConnectableProviderRows(listConnectableProviderRows()));
+			printConnectableListing(listConnectableProviderRows());
 			process.stderr.write(USAGE);
 			return 2;
 		}
@@ -281,7 +296,14 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	if (resolved.runtime.auth !== "api-key") {
+		// Where a runtime id copied off `clio configure --list` lands when it is
+		// one of the ones this command cannot log into. Saying only that it is
+		// unsupported leaves the user holding a name that another Clio screen
+		// showed them as connectable.
 		printError(`runtime ${resolved.runtime.id} does not support interactive auth login`);
+		process.stderr.write(
+			`  it authenticates as '${resolved.runtime.auth}', outside clio: \`clio auth status ${resolved.runtime.id}\` reports its state, and \`clio configure --list\` shows how it is registered\n`,
+		);
 		return 1;
 	}
 
@@ -430,7 +452,7 @@ export async function runAuthCommand(args: ReadonlyArray<string>): Promise<numbe
 			return 2;
 		}
 		warnIfCredentialsDamaged(openAuthStorage());
-		process.stdout.write(renderConnectableProviderRows(listConnectableProviderRows()));
+		printConnectableListing(listConnectableProviderRows());
 		return 0;
 	}
 	if (subcommand === "status") return runStatus(rest);

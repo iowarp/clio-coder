@@ -1,11 +1,12 @@
-import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { parseFleetCommands } from "../../src/domains/agents/fleet-commands.js";
 import {
+	FleetCommandRegistryMissingError,
 	type FleetContract,
 	listFleetContracts,
 	parseFleetContract,
@@ -509,6 +510,54 @@ describe("builtin SDLC fleets", () => {
 			strictEqual(sdlc?.source, "builtin");
 			strictEqual(sdlc?.contract, null);
 			ok(sdlc?.error?.includes("commands.yaml"));
+			// Unrunnable for a reason the operator fixes by writing a file, and the
+			// listing carries which ids that file has to bind. A fleet with no code
+			// steps at all is untouched by any of this.
+			deepStrictEqual(sdlc?.needsCommands, ["commit", "test"]);
+			deepStrictEqual(listings.find((entry) => entry.name === "build-test")?.needsCommands, ["test"]);
+			strictEqual(listings.find((entry) => entry.name === "build-review")?.needsCommands, null);
+			strictEqual(listings.find((entry) => entry.name === "build-review")?.error, null);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("a registry that exists and does not bind the ids is an error, not unfinished setup", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-fleets-"));
+		try {
+			execFileSync("mkdir", ["-p", join(root, ".clio", "fleets")]);
+			writeFileSync(
+				join(root, ".clio", "fleets", "commands.yaml"),
+				["version: 1", "commands:", "  lint:", '    argv: ["true"]'].join("\n"),
+			);
+			const sdlc = listFleetContracts(root).find((entry) => entry.name === "sdlc");
+			strictEqual(sdlc?.contract, null);
+			match(sdlc?.error ?? "", /names unknown command 'commit'/);
+			// The repo answered the question; the answer is wrong. Telling it to
+			// write the file it already wrote would be the useless remedy.
+			strictEqual(sdlc?.needsCommands, null);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("the missing-registry failure is typed and names the ids the contract binds", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-fleets-"));
+		try {
+			const builtTest = listFleetContracts(root).find((entry) => entry.name === "build-test");
+			ok(builtTest !== undefined);
+			throws(
+				() => {
+					const parsed = parseFleetContract(readFileSync(builtTest.path, "utf8"), builtTest.path);
+					validateFleetCommands(parsed, null);
+				},
+				(err: unknown) => {
+					ok(err instanceof FleetCommandRegistryMissingError);
+					deepStrictEqual([...err.commands], ["test"]);
+					match(err.message, /require a command registry/);
+					return true;
+				},
+			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

@@ -20,8 +20,12 @@ import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import {
 	AgentsDomainModule,
+	FLEET_COMMANDS_REMEDY,
+	FLEET_COMMANDS_REPO_PATH,
 	type FleetCommandRegistry,
+	FleetCommandRegistryMissingError,
 	type FleetContract,
+	type FleetContractListing,
 	type FleetContractStep,
 	listFleetContracts,
 	loadFleetCommands,
@@ -154,6 +158,10 @@ function renderStep(step: FleetContractStep): string {
 	return `loop:${step.id}(${check} -> ${step.repair.agent} x${step.maxAttempts})`;
 }
 
+function listingLine(entry: FleetContractListing, state: string, detail: string): string {
+	return `${entry.name}  ${entry.source}  ${state.padEnd(7)}  ${detail}\n`;
+}
+
 function runList(): number {
 	const listings = listFleetContracts(process.cwd());
 	if (listings.length === 0) {
@@ -163,13 +171,23 @@ function runList(): number {
 	for (const entry of listings) {
 		if (entry.contract !== null) {
 			const steps = entry.contract.steps.map(renderStep).join(" -> ");
-			process.stdout.write(`${entry.name}  ${entry.source}  valid    ${steps}\n`);
+			process.stdout.write(listingLine(entry, "valid", steps));
 			if (entry.contract.description.length > 0) {
 				process.stdout.write(`  ${entry.contract.description}\n`);
 			}
 			continue;
 		}
-		process.stdout.write(`${entry.name}  ${entry.source}  invalid  ${entry.error}\n`);
+		// A shipped fleet whose only gap is a registry this repo has never written
+		// is unfinished setup, not a broken contract. Both stay unrunnable; only
+		// one of them is fixed by writing a file, so only one is told to.
+		if (entry.needsCommands !== null) {
+			process.stdout.write(
+				listingLine(entry, "setup", `needs ${FLEET_COMMANDS_REPO_PATH} declaring ${entry.needsCommands.join(", ")}`),
+			);
+			process.stdout.write(`  ${FLEET_COMMANDS_REMEDY}\n`);
+			continue;
+		}
+		process.stdout.write(listingLine(entry, "invalid", entry.error ?? "unknown error"));
 	}
 	return 0;
 }
@@ -245,6 +263,12 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		// read is the binding the runner executes.
 		commands = loadFleetCommands(process.cwd());
 	} catch (err) {
+		// The listing calls this state `setup` and says how to leave it; the run
+		// path is where a user meets it with intent, so it says the same thing.
+		if (err instanceof FleetCommandRegistryMissingError) {
+			process.stderr.write(`clio fleet: ${err.message}\n  ${FLEET_COMMANDS_REMEDY}\n`);
+			return 2;
+		}
 		return fail(err instanceof Error ? err.message : String(err));
 	}
 
