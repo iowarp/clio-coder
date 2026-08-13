@@ -93,11 +93,31 @@ export interface BranchSummaryEntry extends BaseSessionEntry {
  */
 export type CompactionTrigger = "auto" | "force" | "overflow";
 
+/**
+ * Provider usage for the summarization call a compaction ran, summed over the
+ * one or two streams it takes. A compaction is a model call like any other and
+ * is billed like one, so it carries the same fields the assistant payload's
+ * `usage` carries and the ledger usage fold reads both from one place.
+ */
+export interface CompactionUsage {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	reasoning: number;
+	totalTokens: number;
+	cost: { total: number };
+	/** How many summarization streams this compaction ran (1, or 2 on a split turn). */
+	apiCalls: number;
+}
+
 export interface CompactionSummaryEntry extends BaseSessionEntry {
 	kind: "compactionSummary";
 	summary: string;
 	tokensBefore: number;
 	firstKeptTurnId: string;
+	/** Provider usage for the summarization call. Absent when the provider reported none. */
+	usage?: CompactionUsage;
 	/** What kicked off this compaction. Optional so v1 entries written before the field existed still parse. */
 	trigger?: CompactionTrigger;
 	/** Estimated context tokens after the compaction bridge message replaced the older turns. */
@@ -309,6 +329,23 @@ function isTaskLedgerEvidence(value: unknown): value is TaskLedgerValidationEvid
 	);
 }
 
+function isOptionalCompactionUsage(value: unknown): boolean {
+	if (value === undefined) return true;
+	if (!isRecord(value)) return false;
+	const cost = value.cost;
+	return (
+		isNumber(value.input) &&
+		isNumber(value.output) &&
+		isNumber(value.cacheRead) &&
+		isNumber(value.cacheWrite) &&
+		isNumber(value.reasoning) &&
+		isNumber(value.totalTokens) &&
+		isNumber(value.apiCalls) &&
+		isRecord(cost) &&
+		isNumber(cost.total)
+	);
+}
+
 function isProtectedArtifact(value: unknown): value is ProtectedArtifactEntryArtifact {
 	if (!isRecord(value)) return false;
 	return (
@@ -369,6 +406,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isString(v.summary) &&
 				isNumber(v.tokensBefore) &&
 				isString(v.firstKeptTurnId) &&
+				isOptionalCompactionUsage(v.usage) &&
 				(v.trigger === undefined || isOneOf(v.trigger, COMPACTION_TRIGGERS)) &&
 				isOptionalNumber(v.tokensAfter) &&
 				isOptionalNumber(v.messagesSummarized) &&

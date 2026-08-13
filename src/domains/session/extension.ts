@@ -6,7 +6,7 @@ import {
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { performCheckpoint } from "./checkpoint.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
-import type { LabelEntry } from "./entries.js";
+import type { LabelEntry, SessionEntry } from "./entries.js";
 import { listSessionsForCwd } from "./history.js";
 import {
 	appendEntry,
@@ -20,7 +20,7 @@ import {
 } from "./manager.js";
 import { forkFromState } from "./tree/fork.js";
 import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
-import { buildTreeSnapshot, computeLeafId, type TreeSnapshot } from "./tree/navigator.js";
+import { buildTreeSnapshot, computeLeafId, type TreeInputNode, type TreeSnapshot } from "./tree/navigator.js";
 import { buildTurnPreview } from "./tree/preview.js";
 import { probeWorkspace } from "./workspace/index.js";
 
@@ -66,6 +66,35 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		}
 	}
 
+	/**
+	 * Structural nodes the turn tree cannot hold. `tree.json` records message
+	 * turns; a compaction and a returned-from branch are ledger entries with
+	 * their own turn ids and parent pointers, and /tree showed neither, so a
+	 * session that had been compacted looked exactly like one that had not.
+	 * Their previews carry the facts already on the entry.
+	 */
+	function structuralTreeNodes(entries: ReadonlyArray<SessionEntry>, previews: Map<string, string>): TreeInputNode[] {
+		const nodes: TreeInputNode[] = [];
+		for (const entry of entries) {
+			if (entry.kind === "compactionSummary") {
+				nodes.push({ id: entry.turnId, parentId: entry.parentTurnId, at: entry.timestamp, kind: "compaction" });
+				const summarized = entry.messagesSummarized === undefined ? "history" : `${entry.messagesSummarized} entries`;
+				const after = entry.tokensAfter === undefined ? "" : ` -> ~${entry.tokensAfter}`;
+				previews.set(entry.turnId, `${summarized} summarized, ~${entry.tokensBefore}${after} tokens`);
+				continue;
+			}
+			if (entry.kind === "branchSummary") {
+				nodes.push({ id: entry.turnId, parentId: entry.parentTurnId, at: entry.timestamp, kind: "branch" });
+				const text = entry.summary.split("\n", 1)[0] ?? "";
+				previews.set(
+					entry.turnId,
+					text.length > 0 ? `returned from ${entry.fromTurnId}: ${text}` : `returned from ${entry.fromTurnId}`,
+				);
+			}
+		}
+		return nodes;
+	}
+
 	function snapshotFor(sessionId: string): TreeSnapshot {
 		const bundle = readTreeBundle(sessionId);
 		// Prefer the live in-memory meta when we are looking at the current
@@ -76,12 +105,14 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		// payload slices. Reading turns is cheap (single jsonl scan) and
 		// happens only when the overlay opens.
 		const previews = new Map<string, string>();
+		let structural: TreeInputNode[] = [];
 		try {
 			for (const entry of bundle.entries) {
 				if (entry.kind !== "message") continue;
 				const text = buildTurnPreview({ kind: entry.role, payload: entry.payload });
 				if (text.length > 0) previews.set(entry.turnId, text);
 			}
+			structural = structuralTreeNodes(bundle.entries, previews);
 		} catch {
 			// Best-effort: if the on-disk transcript cannot be read, fall back
 			// to a previewless snapshot. The overlay handles missing previews
@@ -89,10 +120,13 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		}
 		return buildTreeSnapshot({
 			meta,
-			nodes: bundle.nodes,
+			nodes: [...bundle.nodes, ...structural],
 			labels: bundle.labels,
 			previews,
-			...(state?.meta.id === sessionId ? { leafId: currentTurnId } : {}),
+			// The leaf is the next append point, so it is computed over turn nodes
+			// only: a structural node marks a moment in the timeline, never a place
+			// the session continues from.
+			leafId: state?.meta.id === sessionId ? currentTurnId : computeLeafId(bundle.nodes),
 		});
 	}
 

@@ -11,8 +11,8 @@
  */
 
 import { stream } from "../../../engine/ai.js";
-import type { EngineModel } from "../../../engine/types.js";
-import type { SessionEntry } from "../entries.js";
+import type { EngineModel, Usage } from "../../../engine/types.js";
+import type { CompactionUsage, SessionEntry } from "../entries.js";
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
@@ -108,6 +108,12 @@ export interface CompactInput {
 export interface CompactResult {
 	/** Generated summary text. Empty when there was nothing to summarize. */
 	summary: string;
+	/**
+	 * Provider usage for the summarization call(s), summed. A compaction is a
+	 * real model call and is billed like one; absent when the provider reported
+	 * no usage at all, so a caller never records a fabricated zero-token call.
+	 */
+	usage?: CompactionUsage;
 	/** Index into `entries` of the first entry that remains post-compaction. */
 	firstKeptEntryIndex: number;
 	/** Turn id of that first-kept entry, or null when entries is empty. */
@@ -301,12 +307,53 @@ function formatFileOperations(fileOps: FileOperations): string {
 	return sections.length > 0 ? `\n\n${sections.join("\n\n")}` : "";
 }
 
+function numberOrZero(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * Fold one summarization call's provider usage into the running total. A split
+ * turn runs two calls; both are billed, so both are counted. Returns the
+ * accumulator unchanged when the provider reported nothing, so "no usage" stays
+ * distinguishable from "a call that cost zero".
+ */
+function addCompactionUsage(total: CompactionUsage | undefined, raw: unknown): CompactionUsage | undefined {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return total;
+	const usage = raw as Partial<Usage> & { reasoning?: number };
+	const input = numberOrZero(usage.input);
+	const output = numberOrZero(usage.output);
+	const cacheRead = numberOrZero(usage.cacheRead);
+	const cacheWrite = numberOrZero(usage.cacheWrite);
+	const totalTokens = numberOrZero(usage.totalTokens) || input + output + cacheRead + cacheWrite;
+	if (totalTokens === 0) return total;
+	const base = total ?? {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		reasoning: 0,
+		totalTokens: 0,
+		cost: { total: 0 },
+		apiCalls: 0,
+	};
+	return {
+		input: base.input + input,
+		output: base.output + output,
+		cacheRead: base.cacheRead + cacheRead,
+		cacheWrite: base.cacheWrite + cacheWrite,
+		reasoning: base.reasoning + numberOrZero(usage.reasoning),
+		totalTokens: base.totalTokens + totalTokens,
+		cost: { total: base.cost.total + numberOrZero(usage.cost?.total) },
+		apiCalls: base.apiCalls + 1,
+	};
+}
+
 async function runSummaryStream(
 	input: CompactInput,
 	userText: string,
 	systemPrompt: string,
 	maxTokens: number,
-): Promise<string> {
+): Promise<{ text: string; usage: unknown }> {
 	const options: Record<string, unknown> = { maxTokens };
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.headers !== undefined) options.headers = input.headers;
@@ -324,9 +371,11 @@ async function runSummaryStream(
 	);
 
 	let summary = "";
+	let usage: unknown;
 	for await (const event of events) {
 		if (event.type === "done") {
 			summary = textFromAssistant(event.message);
+			usage = (event.message as { usage?: unknown }).usage;
 			break;
 		}
 		if (event.type === "error") {
@@ -334,7 +383,7 @@ async function runSummaryStream(
 			throw new Error(`compaction stream failed: ${reason}`);
 		}
 	}
-	return summary.trim();
+	return { text: summary.trim(), usage };
 }
 
 /**
@@ -390,18 +439,21 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	const systemPrompt = input.systemPrompt ?? COMPACTION_SYSTEM_PROMPT;
 	const maxTokens = Math.max(1024, Math.floor(reserveTokens * 0.8));
 	const summaryParts: string[] = [];
+	let usage: CompactionUsage | undefined;
 	if (pre.length > 0) {
 		const conversationText = serializeConversation(pre);
 		const userText = buildUserText(conversationText, input.instructions, previousContextText);
 		const historySummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
-		if (historySummary.length > 0) summaryParts.push(historySummary);
+		usage = addCompactionUsage(usage, historySummary.usage);
+		if (historySummary.text.length > 0) summaryParts.push(historySummary.text);
 	}
 	if (turnPrefix.length > 0) {
 		const conversationText = serializeConversation(turnPrefix);
 		const userText = buildTurnPrefixUserText(conversationText, input.instructions, previousContextText);
 		const prefixSummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
-		if (prefixSummary.length > 0) {
-			summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary}`);
+		usage = addCompactionUsage(usage, prefixSummary.usage);
+		if (prefixSummary.text.length > 0) {
+			summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary.text}`);
 		}
 	}
 
@@ -414,6 +466,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		tokensBefore,
 		messagesSummarized: pre.length + turnPrefix.length,
 		isSplitTurn: cut.isSplitTurn,
+		...(usage !== undefined ? { usage } : {}),
 	};
 }
 

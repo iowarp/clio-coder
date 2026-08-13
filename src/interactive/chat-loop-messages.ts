@@ -12,7 +12,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { canonicalJson, sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
-import { extractReasoningTokens } from "../domains/session/context-accounting.js";
+import { ceilChars, extractReasoningTokens } from "../domains/session/context-accounting.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
 
@@ -471,6 +471,53 @@ export function assistantSessionPayload(
 		if (stopReason === "length") payload.contextExhaustion = lengthStopMetadata(message);
 	}
 	return payload;
+}
+
+/**
+ * Usage for an interrupted assistant turn whose provider never reported any.
+ *
+ * A cancel lands a partial assistant message carrying the usage object the
+ * stream was initialized with and never updated: all zeros, persisted next to
+ * thousands of characters of streamed text, on a call whose prompt was paid for
+ * the moment it was sent. The prompt side is known from the turn's own context
+ * accounting and the output side from the text that actually arrived, so both
+ * are recorded as estimates rather than as zero.
+ *
+ * `estimated: true` is the provenance marker: no surface may report these as
+ * provider-reported numbers. The usage fold and the context estimator both skip
+ * aborted turns already, so this never reaches `/cost` or the window math; it is
+ * the record's own honesty about what the cancelled call cost.
+ *
+ * Returns null when the provider did report usage (there is nothing to fill in)
+ * or when nothing streamed (an empty abort spent only the prompt, which the
+ * caller's snapshot already carries).
+ */
+export function estimatedUsageForInterruptedTurn(
+	message: AgentMessage,
+	promptSideTokens: number,
+): Record<string, unknown> | null {
+	if ((message as { stopReason?: unknown }).stopReason !== "aborted") return null;
+	const reported = (message as { usage?: Record<string, unknown> }).usage;
+	if (reported && typeof reported === "object") {
+		for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"] as const) {
+			const value = reported[key];
+			if (typeof value === "number" && value > 0) return null;
+		}
+	}
+	const streamedChars = extractText(message).length + extractThinking(message).length;
+	if (streamedChars === 0 && promptSideTokens <= 0) return null;
+	const input = Math.max(0, Math.round(promptSideTokens));
+	const output = streamedChars > 0 ? Math.max(1, ceilChars(streamedChars)) : 0;
+	return {
+		input,
+		output,
+		cacheRead: 0,
+		cacheWrite: 0,
+		reasoning: 0,
+		totalTokens: input + output,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		estimated: true,
+	};
 }
 
 export function hasPersistableAssistantContent(

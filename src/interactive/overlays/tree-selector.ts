@@ -79,9 +79,28 @@ function fallbackPreview(node: TreeSnapshotNode): string {
 			return "(system)";
 		case "checkpoint":
 			return "(checkpoint)";
+		case "compaction":
+			return "(history compacted)";
+		case "branch":
+			return "(branch returned)";
 		default:
 			return `(${node.kind})`;
 	}
+}
+
+/**
+ * The lineage row for a forked session. A fork writes `parentSessionId` and
+ * `parentTurnId` into its own meta.json and nothing else records the split, so
+ * without this the navigator showed a fork and its parent as the same flat list
+ * of turns and the discarded branch had no route back. Returns null for a
+ * session that was not forked.
+ */
+export function forkParentLine(snapshot: TreeSnapshot, theme: ClioTheme): string | null {
+	const parentSessionId = snapshot.meta.parentSessionId;
+	if (typeof parentSessionId !== "string" || parentSessionId.length === 0) return null;
+	const parentTurnId = snapshot.meta.parentTurnId;
+	const at = typeof parentTurnId === "string" && parentTurnId.length > 0 ? ` at ${shortTurnId(parentTurnId)}` : "";
+	return `${theme.fg("dim", "↰ forked from ")}${theme.fg("muted", `${parentSessionId}${at}`)}${theme.fg("dim", " · /resume it to reach the turns left behind")}`;
 }
 
 function isLeaf(node: TreeSnapshotNode): boolean {
@@ -197,6 +216,8 @@ export class TreeOverlayView implements Component {
 		const contentWidth = Math.max(1, width);
 		const theme = clioTheme();
 		const lines: string[] = [];
+		const lineage = this.snapshot ? forkParentLine(this.snapshot, theme) : null;
+		if (lineage !== null) lines.push(truncateToWidth(lineage, contentWidth, "", true));
 		if (this.rows.length === 0) {
 			// The overlay navigates the CURRENT session's turn tree; an empty
 			// tree means no turns yet, not a missing session list.

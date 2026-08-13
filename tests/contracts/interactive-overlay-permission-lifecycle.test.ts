@@ -108,6 +108,42 @@ const askDecision = {
 } as SafetyDecision;
 
 describe("contracts/interactive permission overlay lifecycle", () => {
+	/**
+	 * One denial rendered the same state six times on one frame. The dialog
+	 * already names the tool, the target, the action class, the axis that asked
+	 * and the keys that answer it, so the `[approval] ... parked` notice above the
+	 * transcript was the same sentence a line higher. It stays only for the case
+	 * where no dialog can open, which is the one time it is the operator's only
+	 * signal that a call is waiting.
+	 */
+	it("does not also announce a parked call the dialog is already showing", () => {
+		const harness = createPermissionHarness();
+		harness.permissionRequired({ tool: "bash", args: {} } as ClassifierCall, askDecision, {
+			requestId: "req-quiet",
+			toolCallId: "tool-quiet",
+		} as PermissionRequiredMeta);
+
+		strictEqual(harness.lifecycle.getState(), "permission-confirm", "the dialog is the rendering");
+		ok(!harness.events.includes("notice"), `no notice beside the dialog: ${harness.events.join(",")}`);
+	});
+
+	it("announces a parked call that no dialog can show because one is already open", () => {
+		const harness = createPermissionHarness();
+		harness.permissionRequired({ tool: "bash", args: {} } as ClassifierCall, askDecision, {
+			requestId: "req-first",
+			toolCallId: "tool-first",
+		} as PermissionRequiredMeta);
+		strictEqual(harness.lifecycle.getState(), "permission-confirm");
+		harness.events.length = 0;
+
+		harness.permissionRequired({ tool: "write", args: {} } as ClassifierCall, askDecision, {
+			requestId: "req-queued",
+			toolCallId: "tool-queued",
+		} as PermissionRequiredMeta);
+
+		ok(harness.events.includes("notice"), `the notice is the only signal here: ${harness.events.join(",")}`);
+	});
+
 	it("hides before denying and cancels the exact parked request", () => {
 		const harness = createPermissionHarness();
 		harness.permissionRequired({ tool: "bash", args: {} } as ClassifierCall, askDecision, {
@@ -124,7 +160,7 @@ describe("contracts/interactive permission overlay lifecycle", () => {
 			"stop-board",
 			"hide:1",
 			`emit:${BusChannels.PermissionResolved}:denied:req-denied`,
-			"cancel:req-denied:User cancelled this tool call from the permission confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.",
+			"cancel:req-denied:User cancelled this tool call from the permission confirmation prompt. Wait for new instruction.",
 			"context-island",
 			"task-island",
 			"render",

@@ -56,7 +56,7 @@ export function reseedSessionUsageFromLedger(
 			cacheWrite: call.cacheWrite,
 			reasoningTokens: call.reasoningTokens,
 			totalTokens: call.totalTokens,
-			apiCalls: 1,
+			apiCalls: call.apiCalls ?? 1,
 		});
 	}
 }

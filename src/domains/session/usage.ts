@@ -32,6 +32,8 @@ export interface LedgerUsageCall {
 	reasoningTokens: number;
 	totalTokens: number;
 	costUsd: number;
+	/** API calls this row accounts for. Absent means one, which is every message row. */
+	apiCalls?: number;
 }
 
 /** The target and model a session ran under before any modelChange row. */
@@ -80,6 +82,30 @@ export function ledgerUsageCalls(
 	let currentTarget = defaults.target ?? null;
 	let currentModel = defaults.model ?? null;
 	for (const entry of entries) {
+		// A compaction summarizes history through a real model call, billed like
+		// any other. Its usage rides on the compactionSummary entry rather than on
+		// an assistant message, because the summary is context machinery and never
+		// enters the conversation; folding it here is what puts it on `/cost` and
+		// in `clio usage report`.
+		if (entry?.kind === "compactionSummary") {
+			const usage = entry.usage;
+			if (!usage || usage.totalTokens <= 0) continue;
+			calls.push({
+				providerId: currentTarget ?? "unknown",
+				modelId: currentModel ?? "unknown",
+				input: usage.input,
+				output: usage.output,
+				cacheRead: usage.cacheRead,
+				cacheWrite: usage.cacheWrite,
+				reasoningTokens: usage.reasoning,
+				totalTokens: usage.totalTokens,
+				costUsd: usage.cost.total,
+				// A split turn runs two summarization streams under one entry; the
+				// provider served that many calls even though one row records them.
+				apiCalls: Math.max(1, Math.round(usage.apiCalls)),
+			});
+			continue;
+		}
 		if (entry?.kind === "modelChange") {
 			const change = entry as { target?: unknown; modelId?: unknown; provider?: unknown };
 			if (typeof change.target === "string" && change.target.length > 0) currentTarget = change.target;

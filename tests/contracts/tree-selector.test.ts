@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { TreeSnapshot } from "../../src/domains/session/tree/navigator.js";
 import { visibleWidth } from "../../src/engine/tui.js";
-import { formatTreeRow, TreeOverlayView } from "../../src/interactive/overlays/tree-selector.js";
+import { forkParentLine, formatTreeRow, TreeOverlayView } from "../../src/interactive/overlays/tree-selector.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
 const ESC = "\x1b";
@@ -183,5 +183,76 @@ describe("contracts/tree-selector", () => {
 		strictEqual(view.getHint(), "[↑↓] move · [Enter] switch · [e] label · [Shift+T] ts:off · [Esc] close");
 		view.handleInput("d");
 		strictEqual(view.getHint(), "[↑↓] move · [Enter] switch · [e] label · [Shift+T] ts:off · [Esc] close");
+	});
+});
+
+/**
+ * /fork wrote `parentSessionId` and `parentTurnId` into the new session's
+ * meta.json and /tree showed neither, so a fork and its parent rendered as the
+ * same flat list and the turns left behind had no route back. A compaction was
+ * likewise invisible: the ledger holds a compactionSummary entry, and the
+ * navigator drew a session that had been compacted exactly like one that had
+ * not.
+ */
+describe("contracts/tree-selector shows the structure a session actually has", () => {
+	const forked = (): TreeSnapshot => ({
+		...snapshot,
+		meta: { ...snapshot.meta, parentSessionId: "uie4sywnmgu2", parentTurnId: "019ffafc-bdac-75cf-9cbb-048c508db780" },
+	});
+
+	it("names the parent session a fork came from", () => {
+		const line = forkParentLine(forked(), clioTheme());
+		ok(line !== null, "a forked session states its lineage");
+		const text = stripAnsi(line ?? "");
+		ok(text.includes("uie4sywnmgu2"), text);
+		ok(text.includes("019ffa"), `and the turn it split at: ${text}`);
+	});
+
+	it("says nothing about lineage for a session that was not forked", () => {
+		strictEqual(forkParentLine(snapshot, clioTheme()), null);
+	});
+
+	it("renders the lineage above the turn rows", () => {
+		const view = new TreeOverlayView({ session: session(), onSwitchTurn: () => {}, onClose: () => {} }, forked());
+		const lines = stripAnsi(view.render(88).join("\n")).split("\n");
+		ok(lines[0]?.includes("forked from uie4sywnmgu2"), lines.slice(0, 3).join(" | "));
+		ok(
+			lines.some((line) => line.includes("first")),
+			"the turn rows still render",
+		);
+	});
+
+	it("renders a compaction node as its own row", () => {
+		const compacted: TreeSnapshot = {
+			...snapshot,
+			nodesById: {
+				...snapshot.nodesById,
+				"turn-2": { ...snapshot.nodesById["turn-2"], children: ["c-1"] } as never,
+				"c-1": {
+					id: "c-1",
+					parentId: "turn-2",
+					at: "2026-06-11T00:00:02.000Z",
+					kind: "compaction",
+					preview: "6 entries summarized, ~9901 -> ~2100 tokens",
+					children: [],
+				},
+			},
+		};
+		const view = new TreeOverlayView({ session: session(), onSwitchTurn: () => {}, onClose: () => {} }, compacted);
+		const rendered = stripAnsi(view.render(88).join("\n"));
+		ok(rendered.includes("compaction"), rendered);
+		ok(rendered.includes("6 entries summarized"), rendered);
+	});
+
+	it("labels a structural node with no preview by what it is", () => {
+		const line = formatTreeRow(
+			{
+				depth: 0,
+				sessionId: "s",
+				node: { id: "c-1", parentId: null, at: "2026-06-11T00:00:02.000Z", kind: "compaction", children: [] },
+			} as never,
+			{ showTimestamps: false, width: 80 },
+		);
+		ok(stripAnsi(line).includes("(history compacted)"), stripAnsi(line));
 	});
 });

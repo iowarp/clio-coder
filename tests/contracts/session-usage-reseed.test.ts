@@ -172,6 +172,88 @@ describe("contracts/session usage reseed", () => {
 		strictEqual(calls[0]?.providerId, "llamacpp");
 	});
 
+	/**
+	 * `/context compact` sends a real turn to the target and was byte-identical
+	 * on `/cost` before and after: the summarization call reached no accounting
+	 * surface at all, so a session that compacted twice under-reported two calls.
+	 * The summary never enters the conversation, so its usage rides on the
+	 * compactionSummary entry and folds from there.
+	 */
+	it("counts the compaction summarization call the ledger records", () => {
+		const calls = ledgerUsageCalls(
+			[
+				assistantTurn(completedCall, "a1"),
+				{
+					kind: "compactionSummary",
+					turnId: "c1",
+					parentTurnId: "a1",
+					timestamp: "2026-08-12T12:01:00.000Z",
+					summary: "## Goal\nfinish",
+					tokensBefore: 9901,
+					firstKeptTurnId: "a1",
+					usage: {
+						input: 9658,
+						output: 280,
+						cacheRead: 0,
+						cacheWrite: 0,
+						reasoning: 0,
+						totalTokens: 9938,
+						cost: { total: 0.5 },
+						apiCalls: 1,
+					},
+				},
+			] as unknown as SessionEntry[],
+			{ target: "mini", model: "Nemo-3.5-Lightning" },
+		);
+		strictEqual(calls.length, 2, "the compaction is a model call like any other");
+		strictEqual(calls[1]?.totalTokens, 9938);
+		strictEqual(calls[1]?.costUsd, 0.5);
+		strictEqual(calls[1]?.providerId, "mini", "attributed to the target that served it");
+		strictEqual(calls[1]?.apiCalls, 1);
+	});
+
+	it("counts both summarization streams of a split-turn compaction", () => {
+		const { sink, calls } = makeSink();
+		reseedSessionUsageFromLedger(sink, [
+			{
+				kind: "compactionSummary",
+				turnId: "c1",
+				parentTurnId: null,
+				timestamp: "2026-08-12T12:01:00.000Z",
+				summary: "s",
+				tokensBefore: 100,
+				firstKeptTurnId: "",
+				usage: {
+					input: 20,
+					output: 4,
+					cacheRead: 0,
+					cacheWrite: 0,
+					reasoning: 0,
+					totalTokens: 24,
+					cost: { total: 0 },
+					apiCalls: 2,
+				},
+			},
+		] as unknown as SessionEntry[]);
+		strictEqual(calls.length, 1, "one ledger row");
+		strictEqual(calls[0]?.apiCalls, 2, "two calls billed under it");
+	});
+
+	it("ignores a compaction the provider reported no usage for", () => {
+		const calls = ledgerUsageCalls([
+			{
+				kind: "compactionSummary",
+				turnId: "c1",
+				parentTurnId: null,
+				timestamp: "2026-08-12T12:01:00.000Z",
+				summary: "s",
+				tokensBefore: 100,
+				firstKeptTurnId: "",
+			},
+		] as unknown as SessionEntry[]);
+		strictEqual(calls.length, 0, "no fabricated zero-token call");
+	});
+
 	it("derives a total when the provider reported only the component counts", () => {
 		const calls = ledgerUsageCalls([
 			assistantTurn({ stopReason: "stop", usage: { input: 100, output: 20, cacheRead: 5, cacheWrite: 1 } }, "a1"),

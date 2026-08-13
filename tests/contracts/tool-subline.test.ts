@@ -68,3 +68,53 @@ describe("contracts/tool subline rows identify the actual call", () => {
 		ok(text.includes("listing fleet agents"), text);
 	});
 });
+
+/**
+ * A call the permission gate blocked never ran. The collapsed row said
+ * "ran `id` · 667B ✗ blocked" while the expanded header for the same node said
+ * "bash(id) ✗ blocked", so the one line an operator skims claimed a command had
+ * executed and produced 667 bytes. Those bytes are the denial text.
+ */
+describe("contracts/tool subline rows do not claim a blocked call ran", () => {
+	const blockedBash = {
+		toolCallId: "call-1",
+		toolName: "bash",
+		args: { command: "id" },
+		result: { content: [{ type: "text", text: "User cancelled this tool call from the permission prompt." }] },
+		isError: true,
+		durationMs: 42_000,
+		resultSummary: { bytes: 667 },
+		outcome: "blocked" as const,
+	};
+
+	it("uses the call-signature form the expanded header uses", () => {
+		const text = strip(renderToolSubline(blockedBash, 120));
+		ok(text.includes("bash(id)"), text);
+		ok(!text.includes("ran "), `a blocked call must not read as one that ran: ${text}`);
+		ok(text.includes("blocked"), text);
+	});
+
+	it("drops the byte count, which measures the denial text and not any output", () => {
+		const text = strip(renderToolSubline(blockedBash, 120));
+		ok(!text.includes("667B"), `no output size for a call that produced none: ${text}`);
+	});
+
+	it("still says a command ran when one did", () => {
+		const text = strip(
+			renderToolSubline(
+				{
+					toolCallId: "call-2",
+					toolName: "bash",
+					args: { command: "id" },
+					result: "uid=1000",
+					isError: false,
+					durationMs: 12,
+					resultSummary: { bytes: 8 },
+				},
+				120,
+			),
+		);
+		ok(text.includes("ran `id`"), text);
+		ok(text.includes("8B"), text);
+	});
+});

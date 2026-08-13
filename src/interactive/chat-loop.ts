@@ -397,6 +397,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		consumePersistedEcho: (text) => queues.consumePersistedEcho(text),
 		removeQueuedMirrorEntry: (text) => queues.removeQueuedMirrorEntry(text),
 		promptCachePayloadForAssistant: (usage) => context.promptCachePayloadForAssistant(usage),
+		promptSideTokens: () => context.promptSideTokens(),
 	});
 
 	const recovery = createTurnRecovery({
