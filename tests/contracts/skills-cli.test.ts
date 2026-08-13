@@ -1,5 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
@@ -152,5 +152,62 @@ describe("contracts/skills-cli search diagnostics", () => {
 			payload.marketplaceDiagnostics.some((message: string) => message.includes("index unreadable")),
 			`marketplaceDiagnostics=${JSON.stringify(payload.marketplaceDiagnostics)}`,
 		);
+	});
+});
+
+describe("contracts/skills-cli bundle install", () => {
+	const scratch = makeScratchHome("clio-skills-bundle-");
+	after(() => scratch.cleanup());
+
+	function skill(name: string): string {
+		return `---\nname: ${name}\ndescription: catalog skill ${name}\n---\nBody for ${name}\n`;
+	}
+
+	function seedGrouped(label: string): { env: NodeJS.ProcessEnv; project: string } {
+		const catalog = seedCatalog(join(scratch.dir, "grouped"), {
+			"git/alpha/SKILL.md": skill("alpha"),
+			"git/beta/SKILL.md": skill("beta"),
+			"research/gamma/SKILL.md": skill("gamma"),
+		});
+		const project = join(scratch.dir, `grouped-project-${label}`);
+		mkdirSync(project, { recursive: true });
+		return { env: { ...scratch.env, CLIO_SKILL_CATALOG_DIR: catalog }, project };
+	}
+
+	it("installs one catalog group and leaves the other groups alone", async () => {
+		const { env, project } = seedGrouped("category");
+		const result = await runCli(["skills", "install", "--category", "git"], { env, cwd: project });
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		ok(readFileSync(join(project, ".clio", "skills", "alpha", "SKILL.md"), "utf8").includes("Body for alpha"));
+		ok(readFileSync(join(project, ".clio", "skills", "beta", "SKILL.md"), "utf8").includes("Body for beta"));
+		strictEqual(existsSync(join(project, ".clio", "skills", "gamma")), false, "research group must not be installed");
+	});
+
+	it("reports an empty category rather than silently installing nothing", async () => {
+		const { env, project } = seedGrouped("empty");
+		const result = await runCli(["skills", "install", "--category", "nope"], { env, cwd: project });
+		strictEqual(result.code, 1);
+		ok(result.stderr.includes('no marketplace skills in category "nope"'), `stderr=${result.stderr}`);
+	});
+
+	it("installs several named skills in one command and fails if any of them failed", async () => {
+		const { env, project } = seedGrouped("multi");
+		const ok2 = await runCli(["skills", "install", "alpha", "gamma"], { env, cwd: project });
+		strictEqual(ok2.code, 0, `stderr=${ok2.stderr}`);
+		ok(existsSync(join(project, ".clio", "skills", "alpha")));
+		ok(existsSync(join(project, ".clio", "skills", "gamma")));
+
+		// alpha is already there; beta is not. A partial install must not exit 0.
+		const partial = await runCli(["skills", "install", "alpha", "beta"], { env, cwd: project });
+		strictEqual(partial.code, 1, `stdout=${partial.stdout}`);
+		ok(existsSync(join(project, ".clio", "skills", "beta")), "the installable one must still be installed");
+	});
+
+	it("refuses --name for a multi-skill install instead of stacking them on one directory", async () => {
+		const { env, project } = seedGrouped("rename");
+		const result = await runCli(["skills", "install", "alpha", "beta", "--name", "merged"], { env, cwd: project });
+		strictEqual(result.code, 2);
+		ok(result.stderr.includes("--name applies to a single skill"), `stderr=${result.stderr}`);
+		strictEqual(existsSync(join(project, ".clio", "skills", "merged")), false);
 	});
 });
