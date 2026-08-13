@@ -115,7 +115,7 @@ function phaseTrail(theme: ClioTheme, activity: ContextActivitySnapshot, width: 
 			if (index === currentIndex && activity.status !== "completed") return theme.fg("accent", label);
 			return theme.fg("dim", label);
 		});
-	return padAnsi(parts.join(theme.fg("frame", " › ")), width);
+	return padAnsi(parts.join(theme.fg("frame", " › ")), width, GLYPH.ellipsis);
 }
 
 function statusLabel(theme: ClioTheme, activity: ContextActivitySnapshot, tick: number): string {
@@ -148,13 +148,17 @@ export function formatContextActivityIslandLines(
 	const percent = `${Math.round(activityProgress(activity) * 100)}%`.padStart(4);
 	const progressLine = `${progressBar(theme, activity, barWidth)} ${theme.fg("dim", percent)}`;
 	const message = theme.fg(activity.status === "failed" ? "error" : "muted", activity.message);
+	// Every row here can outrun a narrow island: at 40 columns the trail stopped
+	// at "sta" and the message at "refreshed pr", each reading as the whole
+	// value. padAnsi's default marker is empty, so the marker is passed
+	// explicitly. The progress bar is sized to fit and never cuts.
 	const body = [
-		padAnsi(topLine, bodyWidth),
+		padAnsi(topLine, bodyWidth, GLYPH.ellipsis),
 		padAnsi(progressLine, bodyWidth),
 		phaseTrail(theme, activity, bodyWidth),
-		padAnsi(message, bodyWidth),
+		padAnsi(message, bodyWidth, GLYPH.ellipsis),
 	];
-	if (activity.detail) body.push(padAnsi(theme.fg("dim", activity.detail), bodyWidth));
+	if (activity.detail) body.push(padAnsi(theme.fg("dim", activity.detail), bodyWidth, GLYPH.ellipsis));
 	return frame(theme, "Context", body, width);
 }
 

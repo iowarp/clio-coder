@@ -997,6 +997,15 @@ export class ModelOverlayView implements Component {
 			return;
 		}
 		if (kb.matches(data, "tui.select.cancel")) {
+			// Esc unwinds one step at a time: an active filter is the thing the
+			// user most recently built, so it goes first and the overlay stays
+			// open. A second press with no filter left closes. Typing a filter
+			// and reaching for Esc used to dump the whole overlay.
+			if (this.query.length > 0) {
+				this.clearQuery();
+				this.refreshActions.requestRender?.();
+				return;
+			}
 			this.onClose();
 			return;
 		}

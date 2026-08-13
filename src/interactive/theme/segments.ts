@@ -46,6 +46,30 @@ export function sectionTag(theme: ClioTheme, token: ClioToken, label: string, pa
 	return theme.style(token, text, { bold: true });
 }
 
+/**
+ * A screen or overlay title (section 2.4 level 2): bold in the `title` token.
+ *
+ * The settings lane header, the settings breadcrumb, and the dispatch card
+ * title each open-coded `theme.style("title", text, { bold: true })`, so the
+ * one rule for what a title looks like lived in as many places as there were
+ * titles. `rules.ts:frame` applies the same treatment to an unstyled title it
+ * is handed, which is why an island does not call this.
+ */
+export function screenTitle(theme: ClioTheme, label: string): string {
+	return theme.style("title", label, { bold: true });
+}
+
+/**
+ * A list-group header (section 2.4 level 4): `── running (1)` in dim.
+ *
+ * The leading double dash is a structural rule literal, not a status glyph.
+ * Fleet Runs kept a private copy and the generic list overlay inlined the same
+ * string, so a change to the group vocabulary had to be made twice and was not.
+ */
+export function listGroupHeader(theme: ClioTheme, label: string): string {
+	return theme.fg("dim", `── ${label}`);
+}
+
 /** A single colored chip. */
 export function chip(theme: ClioTheme, token: ClioToken, text: string): string {
 	return theme.fg(token, text);

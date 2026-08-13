@@ -94,6 +94,76 @@ export type OverlayEscVerb = "close" | "clear filter" | "back";
 export interface HintEntry {
 	key: string;
 	verb: string;
+	/**
+	 * A shorter spelling of the same action, tried before any entry is dropped.
+	 * `allow once` becomes `allow` rather than vanishing.
+	 */
+	short?: string;
+	/**
+	 * Overrides `isCriticalHintKey`. A critical entry survives every narrowing
+	 * pass except the last, so a surface can protect a key the default
+	 * classification does not know about, or release one it does.
+	 */
+	critical?: boolean;
+}
+
+/**
+ * The keys a footer may not silently drop.
+ *
+ * `elideHint` used to keep the first and last entry and splice out the middle,
+ * which is a statement about position rather than value: at 40 columns a list
+ * overlay kept `[↑↓] select`, which every terminal user already knows, and
+ * dropped `[Enter] use`, which is the only way to commit. The commit key and
+ * the way out are what a narrow footer is for.
+ */
+export function isCriticalHintKey(key: string): boolean {
+	const canonical = canonicalizeKey(key);
+	// `type` joins the commit key and the way out because on a list of a hundred
+	// models, typing is how a reader reaches the row they want at all; the
+	// per-row verbs beside it (refresh, favorite) are conveniences.
+	return canonical === "Esc" || canonical === "Enter" || canonical === "Enter/Space" || canonical === "type";
+}
+
+function isCriticalEntry(entry: HintEntry): boolean {
+	return entry.critical ?? isCriticalHintKey(entry.key);
+}
+
+function renderHintEntries(entries: ReadonlyArray<HintEntry>, short: boolean): string {
+	return entries
+		.map((entry) => `[${canonicalizeKey(entry.key)}] ${short ? (entry.short ?? entry.verb) : entry.verb}`)
+		.join(" · ");
+}
+
+/**
+ * Fit a hint to `maxWidth` by, in order: using every full label; using every
+ * short label; dropping droppable entries left to right; and only then dropping
+ * critical ones left to right, always keeping the last.
+ *
+ * Left to right is the useful direction because `buildHint` puts navigation
+ * first and the commit action and Esc last, so the entries a reader can guess
+ * go before the ones they cannot.
+ */
+export function fitHintEntries(entries: ReadonlyArray<HintEntry>, maxWidth: number): string {
+	if (entries.length === 0) return "";
+	for (const short of [false, true]) {
+		const rendered = renderHintEntries(entries, short);
+		if (visibleWidth(rendered) <= maxWidth) return rendered;
+	}
+	// Droppable entries go first, left to right, then critical ones by the same
+	// rule. The only positional invariant left is that one entry always survives,
+	// so a footer never renders empty; which one that is falls out of the
+	// classification rather than out of where the caller happened to list it.
+	const kept = [...entries];
+	for (const criticalPass of [false, true]) {
+		while (kept.length > 1) {
+			const index = kept.findIndex((entry) => criticalPass || !isCriticalEntry(entry));
+			if (index === -1) break;
+			kept.splice(index, 1);
+			const rendered = renderHintEntries(kept, true);
+			if (visibleWidth(rendered) <= maxWidth) return rendered;
+		}
+	}
+	return renderHintEntries(kept, true);
 }
 
 /**
@@ -127,22 +197,46 @@ export function buildHint(entries: ReadonlyArray<HintEntry>, esc: OverlayEscVerb
 	return finalEntries.map((e) => `[${e.key}] ${e.verb}`).join(" · ");
 }
 
+/**
+ * Build a hint that narrows itself, for `showClioOverlayFrame`'s `footerHint`.
+ *
+ * The returned function takes the box's inner width, which is what the frame
+ * hands a function hint, and subtracts the three columns the bottom border
+ * spends on `─ ` and the trailing space.
+ *
+ * An overlay whose stop key must outrank its close key states that here rather
+ * than hand-writing width tiers, which is what the permission overlay used to
+ * do because the positional elider would eat `[s] stop turn`.
+ */
+export function buildResponsiveHint(
+	entries: ReadonlyArray<HintEntry>,
+	esc: OverlayEscVerb | HintEntry | null = "close",
+): (innerWidth: number) => string {
+	const escEntry: HintEntry | null = esc === null ? null : typeof esc === "string" ? { key: "Esc", verb: esc } : esc;
+	const all = escEntry ? [...entries, escEntry] : [...entries];
+	return (innerWidth: number): string => fitHintEntries(all, innerWidth - 3);
+}
+
+/**
+ * Narrow an already-joined hint string, for the callers that pass `buildHint`'s
+ * output straight through. Parsing `[Key] verb` back out is lossy about `short`
+ * labels but recovers the key, which is all the critical-key classification
+ * needs, so a plain-string overlay gets the same protection as a structured one.
+ */
 export function elideHint(hint: string, maxCleanWidth: number): string {
 	const parts = hint.split(" · ");
 	if (parts.length <= 2) return hint;
-
-	const keepIndices = Array.from({ length: parts.length }, (_, i) => i);
-
-	while (keepIndices.length > 2) {
-		const currentHint = keepIndices.map((i) => parts[i]).join(" · ");
-		if (visibleWidth(currentHint) <= maxCleanWidth) {
-			return currentHint;
-		}
-		const midIdxInMiddle = Math.floor((keepIndices.length - 2) / 2) + 1;
-		keepIndices.splice(midIdxInMiddle, 1);
-	}
-
-	return keepIndices.map((i) => parts[i]).join(" · ");
+	const entries: HintEntry[] = parts.map((part) => {
+		const match = /^\[([^\]]+)\] ([\s\S]+)$/u.exec(part);
+		// A part that is not `[Key] verb` carries no key to classify, so it is
+		// droppable and rendered verbatim by giving it an empty key spelling.
+		if (!match) return { key: "", verb: part, critical: false };
+		return { key: match[1] ?? "", verb: match[2] ?? "" };
+	});
+	const rendered = fitHintEntries(entries, maxCleanWidth);
+	// `fitHintEntries` re-spells `[Key] verb`; an unparsed part would come back
+	// as `[] text`, so those are restored to the text they arrived as.
+	return rendered.replace(/\[\] /gu, "");
 }
 
 function brandedBottomBorder(innerWidth: number, hint?: string): string {

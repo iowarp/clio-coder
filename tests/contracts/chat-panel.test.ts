@@ -27,7 +27,10 @@ describe("chat-panel live thinking streaming", () => {
 		// Apply agent_end (pending = false)
 		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 		rendered = panel.render(80).join("\n");
-		ok(rendered.includes("Thinking..."));
+		// The settled label spells its ellipsis with U+2026, like every other cut
+		// and continuation marker in the TUI. ASCII "..." here was the last holdout.
+		ok(rendered.includes("Thinking…"));
+		ok(!rendered.includes("Thinking..."));
 		ok(!rendered.includes("tokens"));
 		ok(!rendered.includes("Thinking step 1"));
 	});

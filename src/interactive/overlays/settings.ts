@@ -22,7 +22,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
-import { barSep, clioTheme, GLYPH, padAnsi, rule } from "../theme/index.js";
+import { barSep, clioTheme, GLYPH, padAnsi, rule, screenTitle } from "../theme/index.js";
 import { modelsForTarget } from "./model-selector.js";
 
 export const SETTINGS_OVERLAY_WIDTH = "100%";
@@ -30,6 +30,12 @@ export const SETTINGS_OVERLAY_MAX_HEIGHT = "100%";
 export const SETTINGS_OVERLAY_MARGIN = { top: 1, right: 2, bottom: 1, left: 2 } as const;
 
 const SECTION_LANE_WIDTH = 24;
+/**
+ * The width at which the live description earns its own column instead of a
+ * footer strip. The overlay is `100%`, so this is the terminal's own width less
+ * the frame's four columns.
+ */
+const ULTRAWIDE_LAYOUT_MIN_WIDTH = 116;
 const WIDE_LAYOUT_MIN_WIDTH = 96;
 const DROP_PATH_COLUMN_WIDTH = 52;
 const FALLBACK_THINKING_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -1140,7 +1146,11 @@ export class SettingsCenter implements Component {
 		const bodyHeight = Math.max(1, this.options.getBodyHeight());
 		this.normalizeSelection();
 		this.narrowMode = width < WIDE_LAYOUT_MIN_WIDTH;
-		const lines = this.narrowMode ? this.renderStacked(width, bodyHeight) : this.renderWide(width, bodyHeight);
+		const lines = this.narrowMode
+			? this.renderStacked(width, bodyHeight)
+			: width >= ULTRAWIDE_LAYOUT_MIN_WIDTH
+				? this.renderUltraWide(width, bodyHeight)
+				: this.renderWide(width, bodyHeight);
 		return fixedLines(lines, width, bodyHeight);
 	}
 
@@ -1344,6 +1354,79 @@ export class SettingsCenter implements Component {
 		return { value: item.currentValue, pending: false };
 	}
 
+	/**
+	 * Section 2.6's ultrawide row: categories left, settings center, and the live
+	 * description as its own right column.
+	 *
+	 * Below this width the description is a footer under both lanes, which is the
+	 * only place it fits. At 120 columns that footer was spending five or six rows
+	 * of height on prose while 40-odd columns sat empty to the right of the
+	 * settings rows, so the panel scrolled a list it had the room to show. The
+	 * description lane is a readout, not a third focus target: Tab still moves
+	 * between sections and rows.
+	 */
+	private renderUltraWide(width: number, bodyHeight: number): string[] {
+		const theme = clioTheme();
+		const separator = barSep(theme);
+		const separatorWidth = visibleWidth(" │ ");
+		const leftWidth = Math.min(SECTION_LANE_WIDTH, Math.max(16, Math.floor(width * 0.28)));
+		const detailWidth = Math.max(28, Math.min(44, Math.floor(width * 0.3)));
+		const centerWidth = Math.max(1, width - leftWidth - detailWidth - separatorWidth * 2);
+		const left = this.renderSectionLane(leftWidth, bodyHeight);
+		const center = this.renderRightLane(centerWidth, bodyHeight);
+		const right = this.renderDetailLane(detailWidth, bodyHeight);
+		return Array.from({ length: bodyHeight }, (_, index) =>
+			[
+				padAnsi(left[index] ?? "", leftWidth, ELLIPSIS),
+				padAnsi(center[index] ?? "", centerWidth, ELLIPSIS),
+				padAnsi(right[index] ?? "", detailWidth, ELLIPSIS),
+			].join(separator),
+		);
+	}
+
+	/**
+	 * The right column: what the selected row is, what it means, and where a
+	 * change to it lands. Same content the footer carries below 120 columns,
+	 * wrapped to a narrow column instead of a wide strip, with the scope note
+	 * pinned to the bottom so it survives a long explanation.
+	 */
+	private renderDetailLane(width: number, height: number): string[] {
+		const theme = clioTheme();
+		const section = this.currentSection();
+		const item = this.selectedItem();
+		if (this.focusedLane === "sections" || !item) {
+			const rows = [
+				screenTitle(theme, section.label),
+				"",
+				...wrapTextWithAnsi(theme.fg("muted", SETTINGS_SECTION_DESCRIPTIONS[section.id]), width),
+				"",
+				theme.fg("dim", "Tab or → to edit its settings"),
+			];
+			return fixedLines(rows, width, height);
+		}
+		const body: string[] = [
+			screenTitle(theme, item.label),
+			"",
+			...wrapTextWithAnsi(theme.fg("muted", item.description), width),
+		];
+		if (item.help) body.push("", ...wrapTextWithAnsi(theme.fg("dim", item.help), width));
+		const detail = this.footerDetail(item, theme);
+		if (detail) body.push("", ...wrapTextWithAnsi(detail, width));
+		const note = wrapTextWithAnsi(theme.fg("dim", this.footerScopeNote(item)), width);
+		// The note is the answer to "where does this land", so it keeps its rows
+		// and the explanation above it is what gets cut, with a marker.
+		const bodyBudget = Math.max(0, height - note.length - 1);
+		const kept = body.slice(0, bodyBudget);
+		// A cut that lands on one of the blank spacer rows would otherwise mark it,
+		// leaving a lone `…` under the last full sentence. The marker belongs on the
+		// last line that actually carries text.
+		while (kept.length > 0 && (kept.at(-1) ?? "").trim().length === 0) kept.pop();
+		const last = kept.at(-1);
+		const marked = body.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${ELLIPSIS}`] : kept;
+		const filler = Array.from({ length: Math.max(0, height - marked.length - note.length) }, () => "");
+		return fixedLines([...marked, ...filler, ...note], width, height);
+	}
+
 	private renderWide(width: number, bodyHeight: number): string[] {
 		const footer = this.renderFooter(width, bodyHeight);
 		const contentHeight = Math.max(1, bodyHeight - footer.length);
@@ -1398,8 +1481,7 @@ export class SettingsCenter implements Component {
 			const display = this.displayValueFor(item, isSelected);
 			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending);
 		});
-		const header = theme.style("title", section.label, { bold: true });
-		return fixedLines([header, ...rows], width, height);
+		return fixedLines([screenTitle(theme, section.label), ...rows], width, height);
 	}
 
 	private renderStacked(width: number, bodyHeight: number): string[] {
@@ -1454,7 +1536,7 @@ export class SettingsCenter implements Component {
 		const positionText = theme.fg("dim", `section ${this.selectedSectionIndex + 1}/${sections.length}`);
 
 		if (this.focusedLane === "sections") {
-			const breadcrumb = `${theme.style("title", section.label, { bold: true })}  ${theme.fg("dim", "·")}  ${positionText}`;
+			const breadcrumb = `${screenTitle(theme, section.label)}  ${theme.fg("dim", "·")}  ${positionText}`;
 			const body = wrapTextWithAnsi(theme.fg("muted", SETTINGS_SECTION_DESCRIPTIONS[section.id]), safeWidth);
 			const note = theme.fg("dim", "Tab or → to edit its settings");
 			return this.assembleFooter([separator, breadcrumb], body, note, maxFooterLines, safeWidth);
@@ -1464,7 +1546,7 @@ export class SettingsCenter implements Component {
 			return this.assembleFooter([separator], [], theme.fg("muted", "No setting selected."), maxFooterLines, safeWidth);
 		}
 
-		const breadcrumb = `${theme.style("title", section.label, { bold: true })} ${theme.fg("dim", "›")} ${theme.style("accent", item.label, { bold: true })}  ${theme.fg("dim", "·")}  ${positionText}`;
+		const breadcrumb = `${screenTitle(theme, section.label)} ${theme.fg("dim", "›")} ${theme.style("accent", item.label, { bold: true })}  ${theme.fg("dim", "·")}  ${positionText}`;
 		const contentLines: string[] = [];
 		contentLines.push(...wrapTextWithAnsi(theme.fg("muted", item.description), safeWidth));
 		if (item.help) contentLines.push(...wrapTextWithAnsi(theme.fg("dim", item.help), safeWidth));

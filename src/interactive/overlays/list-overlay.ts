@@ -11,7 +11,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildHint, FILTER_HINT, type HintEntry, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, GLYPH, markdownTheme, rule, selectListTheme } from "../theme/index.js";
+import { clioTheme, GLYPH, listGroupHeader, markdownTheme, rule, selectListTheme } from "../theme/index.js";
 
 const ELLIPSIS = "…";
 
@@ -207,7 +207,7 @@ export class ListOverlayView implements Component {
 
 			for (const row of visibleRows) {
 				if (row.type === "group") {
-					lines.push(this.padLine(clioTheme().fg("dim", `── ${row.groupName}`), width));
+					lines.push(this.padLine(listGroupHeader(clioTheme(), row.groupName ?? ""), width));
 				} else {
 					const item = row.item;
 					if (!item) {

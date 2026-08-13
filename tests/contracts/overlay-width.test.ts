@@ -14,8 +14,17 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { visibleWidth } from "../../src/engine/tui.js";
-import { ClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
+import { formatContextActivityIslandLines } from "../../src/interactive/context-activity.js";
+import {
+	buildHint,
+	ClioOverlayFrame,
+	elideHint,
+	FILTER_HINT,
+	fitHintEntries,
+	isCriticalHintKey,
+} from "../../src/interactive/overlay-frame.js";
 import { EXTENSIONS_EMPTY } from "../../src/interactive/overlays/extensions.js";
+import { ModelOverlayView, type ModelRow } from "../../src/interactive/overlays/model-selector.js";
 import { PROMPTS_EMPTY } from "../../src/interactive/overlays/prompts.js";
 import { buildSettingItems, SETTINGS_SECTIONS, SettingsCenter } from "../../src/interactive/overlays/settings.js";
 import {
@@ -118,6 +127,112 @@ describe("contracts/overlay width — permission overlay", () => {
 		// not fit and the elider would have removed the middle entry.
 		strictEqual(permissionOverlayHint(38), "[Enter] allow · [s] stop");
 	});
+
+	// This surface used to hand-write those three tiers because the generic
+	// elider dropped by position. It now declares allow and stop critical and Esc
+	// droppable, and the generic fitter reproduces the tiers. If the two ever
+	// disagree again, this is the case that says so.
+	it("expresses its tiers through the shared hint fitter, not a private ladder", () => {
+		strictEqual(permissionOverlayHint(50), "[Enter] allow · [s] stop · [Esc] close");
+		// Below every tier, the last thing standing is a safety action, not `close`.
+		ok(/\[s\] stop/u.test(permissionOverlayHint(20)), permissionOverlayHint(20));
+	});
+});
+
+/**
+ * A narrow footer exists to answer "how do I commit this" and "how do I leave".
+ * The old elider kept the first and last entry and spliced the middle, so it
+ * kept `[↑↓] select`, which every terminal user can guess, and dropped
+ * `[Enter] use`, which is the only way to act.
+ */
+describe("contracts/overlay width — hint elision keeps the keys that act", () => {
+	const listHint = buildHint([{ key: "↑↓", verb: "select" }, FILTER_HINT, { key: "Enter", verb: "use" }]);
+
+	it("drops guessable navigation before the commit key, at every narrowing step", () => {
+		strictEqual(elideHint(listHint, 80), "[↑↓] select · [type] filter · [Enter] use · [Esc] close");
+		strictEqual(elideHint(listHint, 45), "[type] filter · [Enter] use · [Esc] close");
+		strictEqual(elideHint(listHint, 30), "[Enter] use · [Esc] close");
+	});
+
+	it("keeps Enter and Esc while anything is dropped at all", () => {
+		for (let width = 26; width <= 60; width += 1) {
+			const elided = elideHint(listHint, width);
+			ok(elided.includes("[Enter]"), `at ${width} columns the commit key was dropped: ${elided}`);
+			ok(elided.includes("[Esc]"), `at ${width} columns the way out was dropped: ${elided}`);
+			ok(visibleWidth(elided) <= width || elided === "[Enter] use · [Esc] close", elided);
+		}
+	});
+
+	it("classifies by key, so a surface may release a key the default protects", () => {
+		ok(isCriticalHintKey("Enter"));
+		ok(isCriticalHintKey("esc"));
+		ok(!isCriticalHintKey("Tab"));
+		strictEqual(
+			fitHintEntries(
+				[
+					{ key: "Esc", verb: "close", critical: false },
+					{ key: "s", verb: "stop", critical: true },
+				],
+				12,
+			),
+			"[s] stop",
+		);
+	});
+});
+
+/**
+ * The in-flow context island is 40 columns wide on a narrow terminal, where its
+ * phase trail and progress message both outrun the body. `padAnsi` defaults to
+ * an empty marker, so both used to stop mid-word: `… › CLIO.md › sta`.
+ */
+describe("contracts/overlay width — context activity island", () => {
+	const activity = {
+		kind: "context-init" as const,
+		phase: "codewiki" as const,
+		status: "running" as const,
+		message: "indexed 480 modules and refreshed project state",
+		startedAtMs: 1000,
+		updatedAtMs: 1500,
+		completedAtMs: null,
+		current: 240,
+		total: 480,
+		detail: "src/domains/context/bootstrap.ts",
+	};
+
+	/** The body rows, stripped of the `│ ` gutters the frame adds on each side. */
+	function islandBody(width: number): string[] {
+		return formatContextActivityIslandLines(activity, width, 2000, 1)
+			.slice(1, -1)
+			.map((line) => stripAnsi(line).slice(2, -2).trimEnd());
+	}
+
+	it("marks every row it cuts, and spans exactly the width it was given", () => {
+		for (const width of WIDTHS) {
+			for (const line of formatContextActivityIslandLines(activity, width, 2000, 1)) {
+				strictEqual(visibleWidth(line), width, `island line did not span ${width}: ${JSON.stringify(stripAnsi(line))}`);
+			}
+			for (const row of islandBody(width)) {
+				// A row either fits inside the body or says that it does not.
+				ok(
+					row.length < width - 4 || row.endsWith("…"),
+					`at ${width} cols a row filled the body with no cut marker: ${JSON.stringify(row)}`,
+				);
+			}
+		}
+	});
+
+	it("cuts the narrow trail and message with a marker rather than mid-word", () => {
+		const body = islandBody(40);
+		const trail = body.find((row) => row.startsWith("scan"));
+		const message = body.find((row) => row.startsWith("indexed 480"));
+		ok(trail?.endsWith("…"), `the phase trail was cut without a marker: ${JSON.stringify(trail)}`);
+		ok(message?.endsWith("…"), `the message was cut without a marker: ${JSON.stringify(message)}`);
+		// At 80 the same rows fit whole, so the marker is a statement about width.
+		ok(
+			islandBody(80).some((row) => row.endsWith("state")),
+			islandBody(80).join("\n"),
+		);
+	});
 });
 
 /**
@@ -164,6 +279,43 @@ describe("contracts/overlay width — settings overlay", () => {
 		// must say that it was squeezed.
 		const rendered = stripAnsi(settingsCenter(20).render(40).join("\n"));
 		ok(rendered.includes("…"), `nothing marked as cut at 40 columns:\n${rendered}`);
+	});
+
+	/**
+	 * Section 2.6's width ladder for this surface: one column at 40, categories
+	 * and settings at 80, and the live description as its own third column at
+	 * 120. The description used to be a footer strip at every width, which spent
+	 * six rows of height while forty columns sat empty beside the settings rows.
+	 */
+	it("gives the description its own column at 120 and not below", () => {
+		const center = settingsCenter(16);
+		center.setSelection("safety", 0, "rows");
+		const dividersAt = (width: number): number =>
+			Math.max(...center.render(width).map((line) => (stripAnsi(line).match(/│/gu) ?? []).length));
+		strictEqual(dividersAt(120), 2, "120 columns lays out three lanes");
+		strictEqual(dividersAt(100), 1, "100 columns keeps two lanes and the footer");
+		strictEqual(dividersAt(40), 0, "40 columns stays a single stacked column");
+	});
+
+	it("keeps the selected setting's meaning and its scope note visible at 120", () => {
+		const center = settingsCenter(16);
+		center.setSelection("safety", 0, "rows");
+		const flat = stripAnsi(center.render(120).join(" ")).replace(/\s+/gu, " ");
+		ok(flat.includes("Autonomy level"), flat);
+		ok(flat.includes("How freely Clio acts"), `the description column lost the explanation: ${flat}`);
+		ok(flat.includes("Enter applies to this session now"), `the description column lost the scope note: ${flat}`);
+	});
+
+	it("marks the description column when the explanation outruns the height", () => {
+		const center = settingsCenter(12);
+		center.setSelection("safety", 0, "rows");
+		const rendered = stripAnsi(center.render(120).join("\n"));
+		ok(rendered.includes("…"), `nothing marked as cut in a short 3-column pane:\n${rendered}`);
+		// The marker belongs on a line that carries text, never alone on a spacer.
+		for (const line of rendered.split("\n")) {
+			const cell = line.split("│").at(-1)?.trim() ?? "";
+			ok(cell !== "…", `the cut marker landed on an empty row: ${JSON.stringify(line)}`);
+		}
 	});
 
 	it("marks the explanation pane when it does not fit", () => {
@@ -242,6 +394,74 @@ describe("contracts/overlay width — /view panes", () => {
 		ok(viewFooterHint("content", false, 38).includes("[Tab] list"));
 		// Wide stays exactly as it was.
 		strictEqual(viewFooterHint("list", false, 118), viewFooterHint("list", false));
+	});
+});
+
+/**
+ * Esc unwinds one step per press. Every other list overlay clears a typed
+ * filter first and closes on the second press; `/models` closed on the first,
+ * so narrowing to one model and reaching for Esc threw away the whole overlay.
+ */
+describe("contracts/overlay — model selector Esc hierarchy", () => {
+	function modelRow(model: string): ModelRow {
+		return {
+			value: `mini/${model}`,
+			target: "mini",
+			model,
+			runtimeName: "ollama",
+			runtimeShortName: "ollama",
+			runtimeId: "ollama",
+			apiFamily: "openai",
+			bucket: "local",
+			source: "live",
+			authText: "ok",
+			available: true,
+			reason: "",
+			healthGlyph: " ",
+			healthText: "healthy",
+			caps: {} as ModelRow["caps"],
+			badges: "",
+			context: "262k",
+			maxTokens: "16k",
+			active: false,
+			scoped: false,
+			selectable: true,
+			visibleByDefault: true,
+		} as ModelRow;
+	}
+
+	function view(closes: string[]): ModelOverlayView {
+		return new ModelOverlayView(
+			[modelRow("qwen3.6-35b"), modelRow("deepseek-r1-14b")],
+			{ totalModels: 2, targets: 1, localModels: 2, cloudModels: 0, activeRef: "mini/qwen3.6-35b" },
+			() => closes.push("select"),
+			undefined,
+			() => closes.push("close"),
+			{ requestRender: () => {} },
+		);
+	}
+
+	const ESC_KEY = String.fromCharCode(27);
+
+	it("clears an active filter on the first Esc and closes on the second", () => {
+		const closes: string[] = [];
+		const overlay = view(closes);
+		// The overlay takes one keypress at a time, so a typed filter is four calls.
+		for (const character of "qwen") overlay.handleInput(character);
+		ok(stripAnsi(overlay.render(82).join("\n")).includes("qwen"), "the filter should be showing");
+
+		overlay.handleInput(ESC_KEY);
+		strictEqual(closes.length, 0, "the first Esc cleared the filter and must not close the overlay");
+		ok(!stripAnsi(overlay.render(82).join("\n")).includes("> qwen"), "the filter should be gone");
+
+		overlay.handleInput(ESC_KEY);
+		strictEqual(closes.at(-1), "close", "the second Esc closes");
+	});
+
+	it("closes on the first Esc when no filter was typed", () => {
+		const closes: string[] = [];
+		view(closes).handleInput(ESC_KEY);
+		strictEqual(closes.at(-1), "close");
 	});
 });
 

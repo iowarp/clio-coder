@@ -37,6 +37,7 @@ import {
 	GLYPH,
 	innerDivider,
 	padAnsi,
+	screenTitle,
 	spinnerFrame,
 } from "./theme/index.js";
 
@@ -385,9 +386,7 @@ export function renderDispatchCard(
 	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10 - selectionWidth);
 	const clampedLabel = truncateToWidth(agentLabel, labelBudget, GLYPH.ellipsis, false);
 	const cardTitle =
-		options.selected === true
-			? `${theme.fg("accent", GLYPH.cursor)} ${theme.style("title", clampedLabel, { bold: true })}`
-			: clampedLabel;
+		options.selected === true ? `${theme.fg("accent", GLYPH.cursor)} ${screenTitle(theme, clampedLabel)}` : clampedLabel;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
