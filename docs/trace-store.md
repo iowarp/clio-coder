@@ -93,6 +93,14 @@ clio trace sql <SELECT query> [--db PATH]
 clio trace ui [--db PATH] [--port N]
 ```
 
+`clio trace --help` and every subcommand `--help` print usage and exit with code 0.
+
+### Database Resolution and Error Handling
+
+When resolving the SQLite database path:
+- **Default Database Path:** If `--db` is omitted and no database has been created yet, `clio trace` prints an informational notice (`no trace database yet at <path>`) and exits cleanly with code 0.
+- **Explicit Database Path:** If an explicit `--db <path>` is specified but does not exist, `clio trace` prints `error: trace database not found: <path>` and exits with code 1.
+
 ### Subcommand Specifications
 
 1. **`runs`**: Lists recent dispatch runs from the trace store. `--limit` sets maximum rows (1 to 500, default 50). Formats status, start time, total tokens, total USD cost, and run ID.
@@ -101,4 +109,3 @@ clio trace ui [--db PATH] [--port N]
 4. **`procs`**: Lists orchestrator and worker process executions associated with a `runId`. Displays state (`live` or `ended`), PID, process kind, name, and command string.
 5. **`sql`**: Executes a single read-only `SELECT` or `WITH` SQL statement against the SQLite trace database. The subcommand enforces read-only access: queries containing semicolons or data mutation keywords (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, etc.) are rejected with exit code 2. BigInt numbers in result objects format as JSON strings.
 6. **`ui`**: Launches the web-based interactive trace viewer server on the specified `--port` (default 0). This subcommand requires a source checkout containing `apps/trace-viewer/server.mjs`.
-

@@ -145,13 +145,10 @@ baseline, treatment, and judge runs; see
 verifies. Fixture commands in an `evals.md` are real shell and only run with
 `--trust-fixtures`.
 
-Every arm runs hermetic: the network tool plane is stripped from the child runs
-so a scenario measures the skill against its workspace and not against the open
-web. `--allow-network` keeps the web tools, and the run reports which policy was
-in force. Exit is 1 when a treatment bullet fails and 3 when a scenario went
-unmeasured, which is what a truncated or unparseable judge response produces:
-no bullet is scored, the scenario is not a pass, and nothing about it is a
-verdict on the skill.
+Every arm runs hermetic in a disposable workspace at autonomy `full-auto`: the network tool plane is stripped from child runs so a scenario measures the skill against its workspace and not against the open web. `--allow-network` keeps the web tools, and the run reports which network policy was in force. The per-arm execution timeout is set with `--timeout <seconds>`.
+
+Exit code is 1 when a treatment bullet fails. Exit code is 3 when a scenario goes unmeasured, such as when judge output is truncated, missing, or unparseable, or when a run dies at a permission wall. Permission-wall deaths and harness infrastructure failures are classified as unmeasured infrastructure errors rather than negative verdicts on the skill.
+
 
 Headless runs also accept `--no-skills` to disable discovery and repeatable `--skill <path>` to load one explicit `SKILL.md` file or skill directory for that run. Explicit `--skill` paths are honored even when `--no-skills` is set.
 

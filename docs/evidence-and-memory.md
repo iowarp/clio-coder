@@ -19,6 +19,8 @@ clio evidence inspect <evidenceId>
 clio evidence list
 ```
 
+`clio evidence inspect <id>` requires a valid evidence artifact ID. If the requested artifact does not exist on disk, it outputs `error: evidence artifact not found: <id> (see clio evidence list)` and exits with code 1.
+
 Evidence IDs are deterministic:
 
 | Source | ID shape |
@@ -28,6 +30,7 @@ Evidence IDs are deterministic:
 | Eval | `eval-<evalId>` |
 
 Rebuilding the same evidence ID rewrites the same directory under `<dataDir>/evidence/`.
+
 
 ---
 
@@ -148,8 +151,16 @@ whether applicable validation evidence was observed. Briefing provenance is
 also distinct from bounded project-context provenance: both can be absent or
 present independently, and neither hash is evidence for the other.
 
+### Mutation-Report Grounding
+
+Mutation-report receipts are grounded directly against observed tool events recorded in the run ledger:
+- When a worker run concludes, claimed modified files are validated against the actual write set observed from `edit` and `write` tool invocations.
+- If a target file was untouched during the run but already existed on disk, the result contract seals route quality as `unmeasured` rather than `fail`.
+- If a write attempt was refused or denied, mutation validation marks the outcome as `unmeasured`.
+- If an unattempted mutation target does not exist on disk, postcondition validation fails.
 
 ---
+
 
 ## Memory CLI
 

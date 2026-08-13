@@ -231,7 +231,7 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Alt+T` | Open the session tree navigator. |
 | `Alt+U` | Toggle the footer dashboard between compact and expanded layouts. |
 | `Alt+L` | Open the model and targets selector. |
-| `Alt+J` / `Alt+K` | Cycle through the scoped model set. |
+| `Alt+J` / `Alt+K` | Cycle through the scoped model set (when empty, displays a notice directing the operator to run `/scoped-models`). |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). |
 | `Alt+O` | Toggle the latest tool segment between collapsed and full body. |
 | `Ctrl+Alt+O` / `Alt+Shift+O` | Toggle all tool segments between collapsed and full bodies. |
@@ -514,6 +514,12 @@ For filtering, typing in the input row dynamically filters items using a fuzzy s
 
 The detail pane displays structured descriptions, usage, or state metadata using the Markdown component with the Clio markdown theme.
 
+### Responsive Width Adaptation
+
+All TUI overlays fluidly adapt to narrow terminals down to 40 columns:
+- Split overlays such as `/view` gracefully fall back to a single-pane presentation with `[Tab]` switching between list and content panes.
+- Text content and detail descriptions wrap cleanly without line truncation.
+
 ## Troubleshooting
 
 | Problem | Try this |
@@ -533,7 +539,11 @@ actual behavior. Redact secrets and private repository content.
 
 > [!NOTE]
 > `clio dev <command>` groups the instruments that answer a question about the
-> harness rather than about your own work. Nothing under it is deprecated: every
+> harness rather than about your own work. Bare `clio dev` or `clio dev --help` prints
+> developer instrument help and exits with code 0. Nothing under it is deprecated: every
 > name still resolves without the prefix, so scripts and agents driving Clio over
 > bash keep working unchanged. The prefix exists so `clio --help` stays the set of
-> commands a person needs to read; `clio --help --all` prints both lists.
+> commands a person needs to read; `clio --help --all` prints both lists. Across all
+> CLI subcommands (`targets use/remove/rename/profile/convert`, `context refresh`,
+> `fleet list/run/status/drain/resume`, `auth login`), passing `--help` prints
+> usage instructions and exits with code 0.
