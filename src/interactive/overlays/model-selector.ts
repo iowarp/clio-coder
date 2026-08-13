@@ -33,6 +33,7 @@ import {
 import {
 	buildHint,
 	clioError,
+	FILTER_HINT,
 	formatRuntimeResolutionDiagnostic,
 	runtimeResolutionDiagnosticLine,
 	showClioOverlayFrame,
@@ -1071,8 +1072,8 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 		anchor: "center",
 		width: overlayWidth,
 		title: "Models",
-		footerHint: buildHint("browse", [
-			{ key: "type", verb: "search" },
+		footerHint: buildHint([
+			FILTER_HINT,
 			{ key: "Tab", verb: "focus/all" },
 			{ key: "r", verb: "refresh target" },
 			{ key: "R", verb: "refresh all" },

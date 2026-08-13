@@ -65,7 +65,7 @@ export function openThinkingOverlay(tui: TUI, deps: OpenThinkingOverlayDeps): Ov
 		anchor: "center",
 		width: THINKING_OVERLAY_WIDTH,
 		title: "Thinking",
-		footerHint: buildHint("commit", [{ key: "Enter", verb: "select" }]),
+		footerHint: buildHint([{ key: "Enter", verb: "select" }]),
 	});
 }
 

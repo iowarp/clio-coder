@@ -261,37 +261,37 @@ class AskUserOverlayView implements Component {
 
 	footerHint(): string {
 		if (this.phase !== "asking") {
-			return buildHint("commit", []);
+			return buildHint([]);
 		}
 		const question = this.currentQuestion();
 		const state = this.currentState();
-		if (!question || !state) return buildHint("commit", []);
+		if (!question || !state) return buildHint([]);
 		if (state.mode === "text") {
 			return this.questions.length > 1
-				? buildHint("commit", [
+				? buildHint([
 						{ key: "Enter", verb: "submit" },
 						{ key: "Alt+Left/Right", verb: "question" },
 					])
-				: buildHint("commit", [{ key: "Enter", verb: "submit" }]);
+				: buildHint([{ key: "Enter", verb: "submit" }]);
 		}
 		if (question.multi_select === true) {
 			return this.questions.length > 1
-				? buildHint("commit", [
+				? buildHint([
 						{ key: "Left/Right", verb: "question" },
 						{ key: "Space", verb: "toggle" },
 						{ key: "Enter", verb: "commit" },
 					])
-				: buildHint("commit", [
+				: buildHint([
 						{ key: "Space", verb: "toggle" },
 						{ key: "Enter", verb: "commit" },
 					]);
 		}
 		return this.questions.length > 1
-			? buildHint("commit", [
+			? buildHint([
 					{ key: "Left/Right", verb: "question" },
 					{ key: "Enter", verb: "select" },
 				])
-			: buildHint("commit", [{ key: "Enter", verb: "select" }]);
+			: buildHint([{ key: "Enter", verb: "select" }]);
 	}
 
 	private finish(result: AskUserResult): void {

@@ -112,7 +112,7 @@ export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): Overla
 		anchor: "center",
 		width: SCOPED_OVERLAY_WIDTH,
 		title: "Scoped models",
-		footerHint: buildHint("commit", [
+		footerHint: buildHint([
 			{ key: "Space", verb: "toggle" },
 			{ key: "Enter", verb: "commit" },
 		]),

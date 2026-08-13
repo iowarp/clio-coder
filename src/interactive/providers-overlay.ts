@@ -712,7 +712,7 @@ export function openProvidersOverlay(
 		anchor: "center",
 		width: PROVIDERS_OVERLAY_WIDTH,
 		title: "Targets",
-		footerHint: buildHint("browse", [
+		footerHint: buildHint([
 			{ key: "Enter", verb: "detail" },
 			{ key: "u", verb: "use" },
 			{ key: "f", verb: "fleet" },

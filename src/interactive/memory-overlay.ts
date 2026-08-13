@@ -158,7 +158,7 @@ export function openMemoryOverlay(
 		anchor: "center",
 		width: MEMORY_OVERLAY_WIDTH,
 		title: () => "Memory",
-		footerHint: () => buildHint("browse", []),
+		footerHint: () => buildHint([]),
 	});
 	const timer = setInterval(() => tui.requestRender(), REFRESH_MS);
 	timer.unref?.();

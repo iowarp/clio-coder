@@ -69,7 +69,13 @@ describe("contracts/doctor store honesty", { concurrency: false }, () => {
 		ok(!row.detail.includes("s-clean"), "the intact ledger is not named");
 	});
 
-	it("caps the ledgers it names so a large damaged store cannot flood the row", () => {
+	/**
+	 * The damage that hits several ledgers at once hits them the same way, so the
+	 * row carried one sentence three times and ran to 607 characters on a line it
+	 * gets one of. The count and the files are what differ between them; the
+	 * sentence is not.
+	 */
+	it("says a repeated damage message once, and names the files that carry it", () => {
 		for (let i = 0; i < 6; i += 1) {
 			writeLedger(`s-torn-${i}`, [HEADER, '{"kind":"mess']);
 		}
@@ -77,8 +83,27 @@ describe("contracts/doctor store honesty", { concurrency: false }, () => {
 		const row = rowFor("session store");
 		strictEqual(row.ok, false);
 		match(row.detail, /6 of 6 ledgers/u);
-		strictEqual(row.detail.match(/invalid JSON skipped/gu)?.length, 3, "at most three files are named in full");
-		match(row.detail, /\+3 more/u);
+		strictEqual(
+			row.detail.match(/invalid JSON skipped/gu)?.length,
+			1,
+			`one message, said once: ${row.detail.length} chars: ${row.detail}`,
+		);
+		strictEqual(row.detail.match(/s-torn-\d/gu)?.length, 2, "two files named, the rest counted");
+		match(row.detail, /\+4 more/u);
+	});
+
+	it("keeps distinct damage messages apart, and still caps how many it names", () => {
+		// Three different failures, so three different sentences to say.
+		writeLedger("s-torn", [HEADER, '{"kind":"mess']);
+		writeLedger("s-bad-a", [HEADER, "not json at all"]);
+		writeLedger("s-bad-b", [HEADER, "{{{"]);
+
+		const row = rowFor("session store");
+		strictEqual(row.ok, false);
+		match(row.detail, /3 of 3 ledgers/u);
+		for (const name of ["s-torn", "s-bad-a", "s-bad-b"]) {
+			ok(row.detail.includes(name), `${name} is named: ${row.detail}`);
+		}
 	});
 
 	// Running as root defeats the mode, and the row would correctly report a

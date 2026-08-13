@@ -136,6 +136,6 @@ export function openCwdFallbackOverlay(tui: TUI, deps: OpenCwdFallbackOverlayDep
 		anchor: "center",
 		width: CWD_FALLBACK_OVERLAY_WIDTH,
 		title: "Session cwd",
-		footerHint: buildHint("commit", [{ key: "Enter", verb: "select" }]),
+		footerHint: buildHint([{ key: "Enter", verb: "select" }]),
 	});
 }

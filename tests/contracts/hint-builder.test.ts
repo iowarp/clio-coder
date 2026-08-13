@@ -28,11 +28,11 @@ describe("contracts/hint-builder", () => {
 		];
 
 		// Browse mode adds Esc close
-		const browseHint = buildHint("browse", entries);
+		const browseHint = buildHint(entries);
 		strictEqual(browseHint, "[Enter] select · [Tab] focus · [Esc] close");
 
 		// Commit mode adds Esc cancel
-		const commitHint = buildHint("commit", entries);
+		const commitHint = buildHint(entries);
 		strictEqual(commitHint, "[Enter] select · [Tab] focus · [Esc] cancel");
 	});
 
@@ -65,7 +65,7 @@ describe("contracts/hint-builder", () => {
 	});
 
 	it("elides the model-selector hint at width edges without losing first or Esc", () => {
-		const hint = buildHint("browse", [
+		const hint = buildHint([
 			{ key: "type", verb: "search" },
 			{ key: "Tab", verb: "focus/all" },
 			{ key: "r", verb: "refresh target" },

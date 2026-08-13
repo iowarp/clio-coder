@@ -50,7 +50,6 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 
 	return openListOverlay(tui, {
 		title: "Prompt Templates",
-		mode: "commit",
 		items: allItems,
 		filterable: true,
 		emptyMessage: "No prompt templates found",

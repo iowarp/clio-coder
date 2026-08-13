@@ -81,8 +81,35 @@ function directoryFinding(name: string, path: string): DoctorFinding {
 	return { ok: true, name, detail: path };
 }
 
-/** How many damaged ledgers a single row names before it summarizes the rest. */
+/** How many distinct damage messages a single row names before it summarizes the rest. */
 const SESSION_STORE_DAMAGE_DETAIL_LIMIT = 3;
+
+/** How many files a single repeated message names before it counts the rest. */
+const SESSION_STORE_DAMAGE_LOCATION_LIMIT = 2;
+
+/**
+ * One clause per distinct damage message, with the files that carry it.
+ *
+ * The row used to hold one clause per damaged file, and the damage that
+ * produces several at once produces the same damage in each: an interrupted
+ * rewrite truncates every ledger it touched the same way. Three files, one
+ * sentence, printed three times, 607 characters wide on a row that gets one
+ * line. Grouping by the message says the same thing once and spends the width
+ * on which files it happened to.
+ */
+function summarizeSessionDamage(warnings: ReadonlyArray<SessionJsonlWarning>): string[] {
+	const byMessage = new Map<string, string[]>();
+	for (const warning of warnings) {
+		const locations = byMessage.get(warning.message) ?? [];
+		locations.push(`${warning.path}:${warning.line}`);
+		byMessage.set(warning.message, locations);
+	}
+	return Array.from(byMessage, ([message, locations]) => {
+		const shown = locations.slice(0, SESSION_STORE_DAMAGE_LOCATION_LIMIT);
+		const rest = locations.length - shown.length;
+		return `${shown.join(", ")}${rest > 0 ? `, +${rest} more` : ""}: ${message}`;
+	});
+}
 
 /**
  * Collect every `*.jsonl` under the session store. The layout is
@@ -139,7 +166,7 @@ function sessionStoreFinding(stateDir: string, stateMetadataPresent: boolean): D
 
 	// One entry per damaged file, not per damaged line: a ledger truncated mid
 	// rewrite can warn on every line it holds, and the row is one line wide.
-	const damaged: string[] = [];
+	const damaged: SessionJsonlWarning[] = [];
 	for (const ledger of ledgers) {
 		const first: SessionJsonlWarning[] = [];
 		readSessionFileEntries(ledger, {
@@ -148,7 +175,7 @@ function sessionStoreFinding(stateDir: string, stateMetadataPresent: boolean): D
 			},
 		});
 		const warning = first[0];
-		if (warning) damaged.push(`${warning.path}:${warning.line}: ${warning.message}`);
+		if (warning) damaged.push(warning);
 	}
 
 	if (damaged.length === 0 && unlistable.length === 0) {
@@ -159,8 +186,9 @@ function sessionStoreFinding(stateDir: string, stateMetadataPresent: boolean): D
 		};
 	}
 
-	const shown = damaged.slice(0, SESSION_STORE_DAMAGE_DETAIL_LIMIT);
-	const remainder = damaged.length - shown.length;
+	const clauses = summarizeSessionDamage(damaged);
+	const shown = clauses.slice(0, SESSION_STORE_DAMAGE_DETAIL_LIMIT);
+	const remainder = clauses.length - shown.length;
 	const parts: string[] = [];
 	if (damaged.length > 0) {
 		parts.push(
@@ -280,9 +308,17 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	const stateRead = readStateInfoResult();
 	const state = stateRead.info;
 	const stateCurrent = Boolean(state && state.version === version.clio);
-	const stateStamp = state
-		? `installed ${state.installedAt}${state.upgradedAt ? `, upgraded ${state.upgradedAt}` : ""}`
-		: "";
+	// Each stamp names what actually happened. A record rebuilt by `--fix` over a
+	// state root whose install time was gone carries no installedAt, and the row
+	// used to print the repair minute as the day Clio was installed.
+	const stateStamps = state
+		? [
+				state.installedAt ? `installed ${state.installedAt}` : null,
+				state.repairedAt ? `repaired ${state.repairedAt}` : null,
+				state.upgradedAt ? `upgraded ${state.upgradedAt}` : null,
+			].filter((stamp): stamp is string => stamp !== null)
+		: [];
+	const stateStamp = stateStamps.join(", ");
 	findings.push({
 		ok: stateCurrent,
 		name: "state metadata",

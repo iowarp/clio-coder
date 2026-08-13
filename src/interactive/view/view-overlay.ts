@@ -341,7 +341,7 @@ export function buildArtifactHeader(
 
 export function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean): string {
 	if (focus === "list") {
-		return buildHint("browse", [
+		return buildHint([
 			{ key: "↑↓", verb: "select" },
 			{ key: "←→", verb: "category" },
 			{ key: "type", verb: "filter" },
@@ -350,7 +350,7 @@ export function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean): string
 			{ key: "o", verb: "path" },
 		]);
 	}
-	return buildHint("browse", [
+	return buildHint([
 		{ key: "↑↓", verb: "scroll" },
 		{ key: "←→", verb: "category" },
 		{ key: "PgUp/PgDn", verb: "page" },

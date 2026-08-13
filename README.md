@@ -108,22 +108,32 @@ experiment-protocol guides.
 ## Install
 
 ```bash
-git clone https://github.com/iowarp/clio-coder.git
+git clone --branch v0.3.0 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
 export PATH="$HOME/.local/bin:$PATH"
 hash -r
-clio --version
+"$HOME/.local/bin/clio" --version
 ```
+
+The clone is pinned to `v0.3.0`, the release these instructions describe.
+Without `--branch` you get the default branch, which is ahead of the release and
+is not what the rest of this page documents.
 
 `npm run install:local` verifies dependencies, builds the CLI, installs a
 symlink at `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`, and runs the installed
 CLI's structure repair so a fresh install passes plain `clio doctor` with no
 manual steps. It warns if the bin directory is not on your `PATH` and prints the
 `export` line above; the line is a no-op for the shell that already has it, and
-it is what makes `clio --version` resolve in the shell that does not. Put it in
+it is what makes a bare `clio` resolve in the shell that does not. Put it in
 your shell profile to keep it across sessions. The symlink executes
 `dist/cli/index.js`, so re-run `npm run build` after editing TypeScript sources.
+
+The last line runs the launcher by its full path on purpose. A bare `clio` may
+resolve to an older install earlier on your `PATH`, so it verifies whichever one
+that is rather than the one you just installed; the installer warns when it
+finds that shadowing. Once `clio --version` and
+`"$HOME/.local/bin/clio" --version` agree, use the bare name.
 
 To remove it, preview first:
 

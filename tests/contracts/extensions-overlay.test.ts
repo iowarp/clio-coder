@@ -70,7 +70,8 @@ describe("contracts/extensions-overlay", () => {
 
 		const options = mounted.options();
 		strictEqual(options.title, "Extensions Reference");
-		strictEqual(options.mode, "browse");
+		// Browse-only: Enter toggles the detail pane rather than committing.
+		strictEqual(options.onSelect, undefined);
 		strictEqual(
 			options.items.every((item) => item.group === "Extensions"),
 			true,

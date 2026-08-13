@@ -193,7 +193,6 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 	let installInFlight = false;
 	const handle = openListOverlay(tui, {
 		title: "Skills",
-		mode: "commit",
 		items,
 		filterable: true,
 		layout: "split",

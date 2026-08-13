@@ -5,8 +5,11 @@ import { clioStatePath } from "../../core/xdg.js";
 
 export interface StateInfo {
 	version: string;
-	installedAt: string;
+	/** Absent when this record was rebuilt over a state root whose install time was gone. */
+	installedAt?: string;
 	upgradedAt?: string;
+	/** When the record itself was rebuilt. Never the same claim as an install. */
+	repairedAt?: string;
 	platform: string;
 	nodeVersion: string;
 }

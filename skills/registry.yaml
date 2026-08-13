@@ -41,7 +41,7 @@ skills:
   - name: investigate-issue
     path: git/investigate-issue
     version: 0.1.0
-    sha256: 8a2fbb6d45ced2096ff5ab4dce545ff3aacb0061b6cd0726189c37cf7c5ee793
+    sha256: 39ea67c8a311c695e491c3a891093fd5e2b26a114990f8fc591f8c2dbed6f66d
   - name: resolve-merge-conflicts
     path: git/resolve-merge-conflicts
     version: 0.1.0

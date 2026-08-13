@@ -12,14 +12,20 @@ import { ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
+/** The default bin dir the installer links into, read from the installer itself. */
+function installerBinDir(): string {
+	const script = readFileSync("scripts/install-local.sh", "utf8");
+	const binDir = script.match(/^bin_dir=.*\$\{CLIO_BIN_DIR:-(?<fallback>[^}]+)\}/mu)?.groups?.fallback;
+	ok(binDir, "the installer still has a default bin dir");
+	return binDir;
+}
+
 function installerExportLine(): string {
 	const script = readFileSync("scripts/install-local.sh", "utf8");
 	// printf '... export PATH="%s:$PATH"\n' "$bin_dir"
 	const template = script.match(/export PATH="%s:\$PATH"/);
 	ok(template, "the installer still prints an export PATH line");
-	const binDir = script.match(/^bin_dir=.*\$\{CLIO_BIN_DIR:-(?<fallback>[^}]+)\}/mu)?.groups?.fallback;
-	ok(binDir, "the installer still has a default bin dir");
-	return `export PATH="${binDir}:$PATH"`;
+	return `export PATH="${installerBinDir()}:$PATH"`;
 }
 
 function readmeInstallBlock(): ReadonlyArray<string> {
@@ -43,8 +49,41 @@ describe("contracts/readme install block", () => {
 	it("exports the path before the step that needs it", () => {
 		const block = readmeInstallBlock();
 		const exported = block.findIndex((line) => line.startsWith("export PATH="));
-		const version = block.findIndex((line) => line.includes("clio --version"));
-		ok(version >= 0, "the block still verifies the install with clio --version");
+		const version = block.findIndex((line) => line.includes("--version"));
+		ok(version >= 0, "the block still verifies the install");
 		strictEqual(exported < version, true, "the export has to come before the command that resolves through PATH");
+	});
+
+	/**
+	 * The block cloned the default branch and never left it, so a stranger
+	 * following the README installed whatever was on main that day rather than
+	 * the release the rest of the page documents.
+	 */
+	it("pins the clone to the release this README describes", () => {
+		const version = JSON.parse(readFileSync("package.json", "utf8")).version as string;
+		const clone = readmeInstallBlock().find((line) => line.includes("git clone"));
+		ok(clone, "the block still clones the repository");
+		ok(
+			clone?.includes(`--branch v${version}`),
+			`the clone must pin v${version}, the version package.json declares: ${clone}`,
+		);
+	});
+
+	/**
+	 * A bare `clio` resolves through PATH and can answer for an older install
+	 * earlier on it, which verifies that one rather than the one just installed.
+	 * The installer warns about exactly that shadowing; the README's own
+	 * verification step must not walk into it.
+	 */
+	it("verifies with the launcher's own path, not a bare clio", () => {
+		const block = readmeInstallBlock();
+		const verify = block.find((line) => line.includes("--version"));
+		ok(verify, "the block still verifies the install");
+		ok(
+			verify?.includes("/clio") && !/^clio --version/u.test(verify.trim()),
+			`verification must name the installed launcher by path: ${verify}`,
+		);
+		const binDir = installerBinDir();
+		ok(verify?.includes(binDir), `it must be the path the installer links (${binDir}): ${verify}`);
 	});
 });

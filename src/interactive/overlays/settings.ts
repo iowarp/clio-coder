@@ -336,7 +336,7 @@ export class SubmenuWrapper implements Component {
 	constructor(
 		private readonly title: string,
 		private readonly child: Component,
-		private readonly hint: string = buildHint("commit", [{ key: "Enter", verb: "confirm" }]),
+		private readonly hint: string = buildHint([{ key: "Enter", verb: "confirm" }], "back"),
 		private readonly note?: string,
 	) {}
 
@@ -372,7 +372,7 @@ export function textInputSubmenu(title: string, note?: string): SettingSubmenuBu
 		input.focused = true;
 		input.onSubmit = (val) => done(val);
 		input.onEscape = () => done();
-		return new SubmenuWrapper(title, input, buildHint("commit", [{ key: "Enter", verb: "confirm" }]), note);
+		return new SubmenuWrapper(title, input, buildHint([{ key: "Enter", verb: "confirm" }], "back"), note);
 	};
 }
 
@@ -450,7 +450,7 @@ function editNumberSubmenu(title: string): SettingSubmenuBuilder {
 		return new SubmenuWrapper(
 			title,
 			input,
-			buildHint("commit", [{ key: "Enter", verb: "confirm" }]),
+			buildHint([{ key: "Enter", verb: "confirm" }], "back"),
 			"Use a non-negative number.",
 		);
 	};
@@ -1325,12 +1325,7 @@ export class SettingsCenter implements Component {
 		const note = restart
 			? "This knob only takes effect on the next start. Save it to settings.yaml?"
 			: "Also save it to settings.yaml as the default for new sessions?";
-		this.submenuComponent = new SubmenuWrapper(
-			title,
-			list,
-			buildHint("commit", [{ key: "Enter", verb: "choose" }]),
-			note,
-		);
+		this.submenuComponent = new SubmenuWrapper(title, list, buildHint([{ key: "Enter", verb: "choose" }], "back"), note);
 	}
 
 	private displayValueFor(item: SettingsCenterItem, selected: boolean): { value: string; pending: boolean } {
@@ -1576,7 +1571,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		maxHeight: SETTINGS_OVERLAY_MAX_HEIGHT,
 		margin: SETTINGS_OVERLAY_MARGIN,
 		title: "Settings",
-		footerHint: buildHint("commit", [
+		footerHint: buildHint([
 			{ key: "Tab", verb: "switch lane" },
 			{ key: "Space", verb: "preview" },
 			{ key: "Enter", verb: "edit" },

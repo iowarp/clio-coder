@@ -61,7 +61,6 @@ export function openAgentsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: (
 
 	return openListOverlay(tui, {
 		title: "Agents Reference",
-		mode: "browse",
 		items,
 		filterable: true,
 		emptyMessage: "No agents found",

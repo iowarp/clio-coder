@@ -51,7 +51,7 @@ describe("contracts/prompts-overlay", () => {
 
 		const options = mounted.options();
 		strictEqual(options.title, "Prompt Templates");
-		strictEqual(options.mode, "commit");
+		strictEqual(typeof options.onSelect, "function", "picking a template commits it");
 		const template = options.items.find((item) => item.id === "review");
 		ok(template);
 		strictEqual(template?.group, "Prompt Templates");
