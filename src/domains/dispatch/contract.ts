@@ -113,7 +113,8 @@ export interface DispatchSnapshot {
 		outputTokens: number;
 		totalTokens: number;
 		costUsd: number;
-		cost?: { knownUsd: number; hasEstimated: boolean; hasUnknown: boolean; allKnownFree: boolean };
+		/** Structural mirror of observability's CostAggregate; `calls` is what separates unpriced from priced-at-zero. */
+		cost?: { knownUsd: number; hasEstimated: boolean; hasUnknown: boolean; allKnownFree: boolean; calls: number };
 		runtimeSeconds: number;
 	};
 }

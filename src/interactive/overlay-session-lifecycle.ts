@@ -101,7 +101,8 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
 					const leafTurnId = session.tree(sessionId).leafId;
 					deps.chat.resetForSession(leafTurnId, replayMessages);
-					if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session));
+					if (deps.sessionUsage)
+						reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session), leafTurnId);
 				} catch (error) {
 					deps.stderr(`[/resume] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 				}
@@ -149,7 +150,10 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					rehydrateChatPanelFromTurns(deps.chatPanel, turns, { uptoTurnId: turnId });
 					const replayMessages = buildReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
 					deps.chat.resetForSession(turnId, replayMessages);
-					if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session));
+					// The same branch the transcript above was just scoped to. Without the
+					// leaf, /cost and the footer kept reporting the abandoned turns.
+					if (deps.sessionUsage)
+						reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session), turnId);
 				} catch (error) {
 					deps.notify(
 						"error",
@@ -209,7 +213,8 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			const replayMessages = buildReplayAgentMessagesFromTurns(turns);
 			const leafTurnId = session.tree(forkedSessionId).leafId ?? parentTurnId;
 			deps.chat.resetForSession(leafTurnId, replayMessages);
-			if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session));
+			if (deps.sessionUsage)
+				reseedSessionUsageFromLedger(deps.sessionUsage, turns, sessionUsageDefaults(session), leafTurnId);
 		} catch (error) {
 			deps.stderr(`[/fork] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 			deps.chat.resetForSession(null);

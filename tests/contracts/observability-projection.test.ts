@@ -68,6 +68,7 @@ function makeHarness(): Harness {
 			hasEstimated: false,
 			hasUnknown: false,
 			allKnownFree: false,
+			calls: 1,
 		}),
 		sessionTokens: () => session.tokens,
 		latestThroughput: () => session.throughput,

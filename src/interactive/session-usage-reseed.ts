@@ -15,6 +15,7 @@
  */
 
 import { ledgerUsageCalls, type SessionEntry, type SessionUsageDefaults } from "../domains/session/index.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 
 /** The slice of ObservabilityContract a reseed needs. */
 export interface SessionUsageSink {
@@ -41,14 +42,25 @@ export interface SessionUsageSink {
  * Clear the running totals and replay the supplied session's recorded calls
  * into them. Safe to call with an empty ledger: the totals reset to zero, which
  * is the honest answer for a session that has spent nothing.
+ *
+ * `activeLeafTurnId` scopes the fold to one branch, through the same
+ * `filterEntriesToActivePath` the transcript replays through. current.jsonl is
+ * append-only, so after a `/tree` switch the abandoned sibling turns are still
+ * in the file: the transcript stopped showing them and `/cost` and the footer Σ
+ * kept counting them, which put a session total on screen for turns the reader
+ * had just been told were not on this branch. Omitted, the fold follows the
+ * newest message's ancestry, the same fallback an offline read of the transcript
+ * takes; a ledger with no branch in it folds whole either way.
  */
 export function reseedSessionUsageFromLedger(
 	sink: SessionUsageSink,
 	entries: ReadonlyArray<SessionEntry>,
 	defaults: SessionUsageDefaults = {},
+	activeLeafTurnId?: string | null,
 ): void {
 	sink.resetSession();
-	for (const call of ledgerUsageCalls(entries, defaults)) {
+	const scoped = filterEntriesToActivePath(entries, activeLeafTurnId ?? undefined);
+	for (const call of ledgerUsageCalls(scoped, defaults)) {
 		sink.recordTokens(call.providerId, call.modelId, call.totalTokens, call.costUsd, {
 			input: call.input,
 			output: call.output,

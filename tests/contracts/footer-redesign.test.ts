@@ -317,7 +317,14 @@ describe("IT3: Metric strip", () => {
 		ok(stripped.includes("$5.50"), `should have cost, got "${stripped}"`);
 	});
 
-	it("drops lowest-priority chips first to fit within maxWidth", () => {
+	/**
+	 * Cost used to sit last and so was the first chip cut, which is how an
+	 * 80-column footer spent its whole budget on per-turn detail and dropped the
+	 * money field at the exact moment it acquired a value, while `/cost` on the
+	 * same session was reporting one. The session totals now outrank the per-turn
+	 * detail; below them the drop order is unchanged.
+	 */
+	it("drops per-turn detail before the session totals to fit within maxWidth", () => {
 		const fullStr = strip(
 			buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, knownCost, 500, 100),
 		);
@@ -326,14 +333,15 @@ describe("IT3: Metric strip", () => {
 		const cut1 = strip(
 			buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, knownCost, 500, maxLen - 8),
 		);
-		ok(!cut1.includes("$5.50"), `should have dropped cost, got "${cut1}"`);
+		ok(!cut1.includes("1 tool"), `should have dropped the tool count first, got "${cut1}"`);
+		ok(cut1.includes("$5.50"), `should keep cost, got "${cut1}"`);
 		ok(cut1.includes("Σ3k"), `should keep cumulative total, got "${cut1}"`);
 
 		const cut2 = strip(
 			buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, knownCost, 500, maxLen - 16),
 		);
-		ok(!cut2.includes("$5.50"), `should have dropped cost`);
-		ok(!cut2.includes("Σ3k"), `should have dropped cumulative total, got "${cut2}"`);
+		ok(!cut2.includes("$5.50"), `should have dropped cost, got "${cut2}"`);
+		ok(cut2.includes("Σ3k"), `should keep cumulative total, got "${cut2}"`);
 	});
 
 	it("never exceeds maxWidth while dropping whole chips", () => {

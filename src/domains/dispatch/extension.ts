@@ -5322,6 +5322,9 @@ export function createDispatchBundle(
 			hasEstimated: costAmounts.some((amount) => amount.provenance === "estimated"),
 			hasUnknown: costAmounts.some((amount) => amount.provenance === "unknown"),
 			allKnownFree: costAmounts.length > 0 && costAmounts.every((amount) => amount.provenance === "known_free"),
+			// Zero priced calls is not a cost of zero; every renderer reads this to
+			// decide whether it has anything to say at all.
+			calls: costAmounts.length,
 		};
 		return {
 			generatedAt: new Date(tickNow).toISOString(),
