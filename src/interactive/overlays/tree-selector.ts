@@ -255,10 +255,10 @@ export class TreeOverlayView implements Component {
 
 	private footerText(): string {
 		if (this.submode === "edit-label") {
-			return `label: ${this.labelBuffer}_  ${buildHint("commit", [{ key: "Enter", verb: "commit" }])}`;
+			return `label: ${this.labelBuffer}_  ${buildHint([{ key: "Enter", verb: "commit" }], "back")}`;
 		}
 		const tsLabel = this.showTimestamps ? "on" : "off";
-		return buildHint("browse", [
+		return buildHint([
 			{ key: "↑↓", verb: "move" },
 			{ key: "Enter", verb: "switch" },
 			{ key: "e", verb: "label" },

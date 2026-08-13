@@ -149,6 +149,6 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 		anchor: "center",
 		width: MESSAGE_PICKER_OVERLAY_WIDTH,
 		title: "Fork",
-		footerHint: rows.length > 0 ? buildHint("commit", [{ key: "Enter", verb: "select" }]) : buildHint("browse", []),
+		footerHint: rows.length > 0 ? buildHint([{ key: "Enter", verb: "select" }]) : buildHint([]),
 	});
 }

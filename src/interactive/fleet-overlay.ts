@@ -270,7 +270,7 @@ function renderSnapshot(
 
 function footerForMode(mode: FleetMode): string {
 	if (mode === "profiles") {
-		return buildHint("browse", [
+		return buildHint([
 			{ key: "Tab", verb: "mode" },
 			{ key: "n", verb: "new" },
 			{ key: "t/m/l/o", verb: "edit" },
@@ -279,7 +279,7 @@ function footerForMode(mode: FleetMode): string {
 		]);
 	}
 	if (mode === "bindings") {
-		return buildHint("browse", [
+		return buildHint([
 			{ key: "Tab", verb: "mode" },
 			{ key: "b", verb: "bind" },
 			{ key: "p", verb: "profile" },
@@ -287,7 +287,7 @@ function footerForMode(mode: FleetMode): string {
 			{ key: "u", verb: "unbind" },
 		]);
 	}
-	return buildHint("browse", [{ key: "Tab", verb: "mode" }]);
+	return buildHint([{ key: "Tab", verb: "mode" }]);
 }
 
 function nextMode(mode: FleetMode): FleetMode {
@@ -467,7 +467,7 @@ class FleetOverlayBody implements Component {
 
 	footerText(): string {
 		if (this.submenuComponent) return "";
-		if (this.confirmDeleteProfileName) return buildHint("commit", [{ key: "y", verb: "confirm" }]);
+		if (this.confirmDeleteProfileName) return buildHint([{ key: "y", verb: "confirm" }]);
 		return footerForMode(this.mode);
 	}
 

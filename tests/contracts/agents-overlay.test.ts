@@ -78,7 +78,7 @@ describe("contracts/agents-overlay", () => {
 
 		const options = mounted.options();
 		strictEqual(options.title, "Agents Reference");
-		strictEqual(options.mode, "browse");
+		strictEqual(options.onSelect, undefined);
 		strictEqual(options.filterable, true);
 		deepStrictEqual(
 			options.items.map((item) => item.group),

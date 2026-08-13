@@ -256,7 +256,7 @@ export function openCostOverlay(
 		anchor: "center",
 		width: COST_OVERLAY_WIDTH,
 		title: sessionId && sessionId.length > 0 ? `Session usage (${sessionId})` : "Session usage",
-		footerHint: buildHint("browse", []),
+		footerHint: buildHint([]),
 	});
 
 	// subscribe() fires immediately with the current snapshot, then on each

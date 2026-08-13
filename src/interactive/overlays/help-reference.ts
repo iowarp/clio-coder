@@ -127,7 +127,6 @@ export function openHelpOverlay(
 
 	return openListOverlay(tui, {
 		title: "Help Center",
-		mode: "browse",
 		items,
 		filterable: true,
 		...(initialFilter ? { initialFilter } : {}),

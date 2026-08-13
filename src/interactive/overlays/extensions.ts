@@ -42,7 +42,6 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 
 	return openListOverlay(tui, {
 		title: "Extensions Reference",
-		mode: "browse",
 		items,
 		filterable: true,
 		emptyMessage: "No extensions found",

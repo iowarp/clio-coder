@@ -37,7 +37,10 @@ leave a reviewable RCA artifact. No fix is implemented in this skill.
 ## Step 1 — Fetch the issue
 
 `gh issue view <id>` (requires an authenticated gh CLI; if `gh auth status`
-fails, report it and stop). Note title, description, comments, labels.
+or the fetch fails, report the exact failure and stop — never invent issue
+content). When the task itself carries the issue content (pasted title and
+body), use that as the issue record, note the id it claims, and skip the
+fetch. Note title, description, comments, labels.
 Edge gates before going further:
 
 - Issue already closed → report it; continue only if the user still wants

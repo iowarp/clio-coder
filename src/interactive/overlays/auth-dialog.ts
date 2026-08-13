@@ -112,7 +112,7 @@ function createAuthDialogController(
 	let promptLabel: string | null = null;
 	let resolver: ((value: string) => void) | undefined;
 	let rejecter: ((error: Error) => void) | undefined;
-	let currentHint = buildHint("commit", []);
+	let currentHint = buildHint([]);
 
 	titleView.setText(clioTheme().style("title", title, { bold: true }));
 	const box = new FocusBox([], {
@@ -156,11 +156,11 @@ function createAuthDialogController(
 		box.addChild(bodyView);
 		if (promptLabel) {
 			promptView.setText(clioTheme().fg("dim", normalizeAuthLine(promptLabel)));
-			currentHint = buildHint("commit", [{ key: "Enter", verb: "submit" }]);
+			currentHint = buildHint([{ key: "Enter", verb: "submit" }]);
 			box.addChild(promptView);
 			box.addChild(inputView);
 		} else {
-			currentHint = buildHint("commit", []);
+			currentHint = buildHint([]);
 		}
 		box.invalidate();
 	}

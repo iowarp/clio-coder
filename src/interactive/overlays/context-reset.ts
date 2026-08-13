@@ -103,6 +103,6 @@ export function openContextResetOverlay(tui: TUI, deps: OpenContextResetOverlayD
 		anchor: "center",
 		width: CONTEXT_RESET_OVERLAY_WIDTH,
 		title: "Reset project context",
-		footerHint: buildHint("commit", [{ key: "Enter", verb: "select" }]),
+		footerHint: buildHint([{ key: "Enter", verb: "select" }]),
 	});
 }

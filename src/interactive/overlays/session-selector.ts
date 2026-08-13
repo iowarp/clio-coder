@@ -10,7 +10,7 @@ import {
 	Text,
 	type TUI,
 } from "../../engine/tui.js";
-import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, FILTER_HINT, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { GLYPH } from "../theme/index.js";
 import { filterSessions } from "./session-selector-search.js";
 
@@ -268,10 +268,7 @@ export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): Over
 		anchor: "center",
 		width: SESSION_OVERLAY_WIDTH,
 		title: "Sessions",
-		footerHint: buildHint("commit", [
-			{ key: "type", verb: "search" },
-			{ key: "Enter", verb: "resume" },
-		]),
+		footerHint: buildHint([FILTER_HINT, { key: "Enter", verb: "resume" }]),
 	});
 	return {
 		...handle,

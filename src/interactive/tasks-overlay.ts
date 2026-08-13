@@ -155,7 +155,7 @@ export function openTasksOverlay(
 		anchor: "center",
 		width: TASKS_OVERLAY_WIDTH,
 		title: () => "Tasks",
-		footerHint: () => buildHint("browse", []),
+		footerHint: () => buildHint([]),
 	});
 	// The board mutates mid-turn as the agent works; a coarse ticker keeps the
 	// open overlay live without wiring a dedicated event channel.

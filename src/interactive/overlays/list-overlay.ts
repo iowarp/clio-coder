@@ -9,7 +9,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../../engine/tui.js";
-import { buildHint, type HintEntry, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, FILTER_HINT, type HintEntry, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, markdownTheme, rule, selectListTheme } from "../theme/index.js";
 
 const ELLIPSIS = "…";
@@ -28,7 +28,6 @@ export interface ListOverlayItem {
 
 export interface ListOverlayOptions {
 	title: string;
-	mode: "browse" | "commit";
 	items: ReadonlyArray<ListOverlayItem>;
 	/** Enables the type-to-filter input row. */
 	filterable?: boolean;
@@ -92,7 +91,7 @@ export class ListOverlayView implements Component {
 		const hintEntries: HintEntry[] = [];
 		hintEntries.push({ key: "↑↓", verb: "select" });
 		if (this.options.filterable) {
-			hintEntries.push({ key: "type", verb: "filter" });
+			hintEntries.push(FILTER_HINT);
 		}
 
 		const hasDetail = this.options.items.some((item) => !!item.detail);
@@ -109,7 +108,10 @@ export class ListOverlayView implements Component {
 			hintEntries.push(...this.options.hints);
 		}
 
-		return buildHint(this.options.mode, hintEntries);
+		// The footer follows clearFilterOrClose(). With a filter typed, Esc does
+		// not close, and saying it does sent operators out of an overlay they were
+		// still in and back in again to find out.
+		return buildHint(hintEntries, this.filterText.length > 0 ? "clear filter" : "close");
 	}
 
 	private padLine(line: string, targetWidth: number): string {

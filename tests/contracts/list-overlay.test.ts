@@ -17,7 +17,6 @@ describe("contracts/list-overlay", () => {
 		const view = new ListOverlayView(
 			{
 				title: "Test",
-				mode: "browse",
 				items,
 				filterable: false,
 				onClose: () => {},
@@ -51,7 +50,6 @@ describe("contracts/list-overlay", () => {
 		const view = new ListOverlayView(
 			{
 				title: "Test",
-				mode: "browse",
 				items,
 				filterable: true,
 				onClose: () => {},
@@ -93,7 +91,6 @@ describe("contracts/list-overlay", () => {
 		const view = new ListOverlayView(
 			{
 				title: "Test",
-				mode: "browse",
 				items,
 				filterable: true,
 				initialFilter: "c",
@@ -130,7 +127,6 @@ describe("contracts/list-overlay", () => {
 		const view = new ListOverlayView(
 			{
 				title: "Test",
-				mode: "browse",
 				items,
 				filterable: true,
 				onClose: () => {
@@ -153,7 +149,6 @@ describe("contracts/list-overlay", () => {
 		const view = new ListOverlayView(
 			{
 				title: "Test",
-				mode: "browse",
 				items,
 				filterable: false,
 				onClose: () => {},
@@ -187,7 +182,6 @@ describe("contracts/list-overlay", () => {
 		const view = new ListOverlayView(
 			{
 				title: "Test",
-				mode: "browse",
 				items,
 				filterable: false,
 				onClose: () => {},
@@ -218,7 +212,6 @@ describe("contracts/list-overlay", () => {
 		const view = new ListOverlayView(
 			{
 				title: "Test",
-				mode: "browse",
 				items,
 				filterable: true,
 				onClose: () => {},
@@ -234,7 +227,6 @@ describe("contracts/list-overlay", () => {
 		const view = new ListOverlayView(
 			{
 				title: "Test",
-				mode: "browse",
 				items: [{ id: "1", label: "Apple" }],
 				filterable: true,
 				onClose: () => {},

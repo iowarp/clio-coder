@@ -216,7 +216,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				anchor: "center",
 				width: PERMISSION_OVERLAY_WIDTH,
 				title: permissionOverlayTitle(),
-				footerHint: buildHint("commit", [
+				footerHint: buildHint([
 					{ key: "Enter", verb: "allow once" },
 					{ key: "s", verb: "stop turn" },
 				]),

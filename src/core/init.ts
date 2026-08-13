@@ -25,14 +25,33 @@ const STATE_SUBDIRS = ["sessions", "audit", "receipts", "interviews", "scratch"]
 
 interface InstallMetadata {
 	version: string;
-	installedAt: string;
+	/**
+	 * When Clio was first installed on this machine, present only when that is
+	 * actually known. Absent on a record this process had to synthesize over a
+	 * state root that already existed, where the install time is unrecoverable.
+	 */
+	installedAt?: string;
 	upgradedAt?: string;
+	/**
+	 * When this record was rebuilt because it was missing or unreadable. A repair
+	 * is not an install and must never be written into `installedAt`: `clio
+	 * doctor --fix` over a wiped state root reported the repair minute as the day
+	 * the user installed Clio, and every later run repeated it as fact.
+	 */
+	repairedAt?: string;
 	platform: string;
 	nodeVersion: string;
 }
 
 export function initializeClioHome(): InitReport {
 	enforceHomePrefixGuard();
+
+	// Probed from the resolved paths, before the accessors below create them:
+	// clioStateDir() makes the directory it is being asked about, so anything
+	// checked after it reports a first install on every run. A root that is
+	// already there means whatever this call is about to write is a repair.
+	const resolved = resolveClioDirs();
+	const preexistingHome = existsSync(resolved.state) || existsSync(resolved.config) || existsSync(resolved.data);
 
 	const configDir = clioConfigDir();
 	const dataDir = clioDataDir();
@@ -95,7 +114,9 @@ export function initializeClioHome(): InitReport {
 	if (!installMetadata) {
 		const payload: InstallMetadata = {
 			version: currentVersion,
-			installedAt: new Date().toISOString(),
+			// A first install knows when it happened. A repair does not, and saying
+			// `installedAt: now` there is a fact this process invented.
+			...(preexistingHome ? { repairedAt: new Date().toISOString() } : { installedAt: new Date().toISOString() }),
 			platform: process.platform,
 			nodeVersion: process.version,
 		};
@@ -108,7 +129,8 @@ export function initializeClioHome(): InitReport {
 	) {
 		const payload: InstallMetadata = {
 			version: currentVersion,
-			installedAt: installMetadata.installedAt,
+			...(installMetadata.installedAt !== undefined ? { installedAt: installMetadata.installedAt } : {}),
+			...(installMetadata.repairedAt !== undefined ? { repairedAt: installMetadata.repairedAt } : {}),
 			upgradedAt: new Date().toISOString(),
 			platform: process.platform,
 			nodeVersion: process.version,
@@ -123,16 +145,20 @@ function readInstallMetadata(path: string): InstallMetadata | null {
 	if (!existsSync(path)) return null;
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<InstallMetadata>;
+		// Either stamp is enough to call the record ours. Requiring installedAt
+		// would make every repaired record look corrupt and get re-synthesized on
+		// the next run, moving the repair time forward each time.
 		if (
 			typeof parsed.version === "string" &&
-			typeof parsed.installedAt === "string" &&
+			(typeof parsed.installedAt === "string" || typeof parsed.repairedAt === "string") &&
 			typeof parsed.platform === "string" &&
 			typeof parsed.nodeVersion === "string"
 		) {
 			return {
 				version: parsed.version,
-				installedAt: parsed.installedAt,
+				...(typeof parsed.installedAt === "string" ? { installedAt: parsed.installedAt } : {}),
 				...(typeof parsed.upgradedAt === "string" ? { upgradedAt: parsed.upgradedAt } : {}),
+				...(typeof parsed.repairedAt === "string" ? { repairedAt: parsed.repairedAt } : {}),
 				platform: parsed.platform,
 				nodeVersion: parsed.nodeVersion,
 			};

@@ -134,7 +134,7 @@ export function openContextOverlay(
 		anchor: "center",
 		width: CONTEXT_OVERLAY_WIDTH,
 		title: "Context window",
-		footerHint: buildHint("browse", []),
+		footerHint: buildHint([]),
 	});
 
 	const refresh = (): void => {

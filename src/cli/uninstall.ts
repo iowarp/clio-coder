@@ -287,6 +287,31 @@ function readNpmPrefix(): string | null {
 	}
 }
 
+/**
+ * The `clio` a shell will find, when that is not the launcher this uninstall
+ * was about.
+ *
+ * Both paths are resolved through their symlinks before they are compared: the
+ * PATH entry is normally a link into this checkout, and comparing the link to
+ * its own target reported two installations where there is one. A PATH entry
+ * that cannot be resolved is dangling, which is still something the operator
+ * will hit and still not this installation.
+ */
+export function otherClioOnPath(pathClio: string | null, localLink: string): string | null {
+	if (pathClio === null) return null;
+	if (pathClio === localLink) return null;
+	const resolve = (path: string): string | null => {
+		try {
+			return realpathSync(path);
+		} catch {
+			return null;
+		}
+	};
+	const resolvedPathClio = resolve(pathClio);
+	if (resolvedPathClio !== null && resolvedPathClio === resolve(localLink)) return null;
+	return pathClio;
+}
+
 function printRemovalGuidance(removeBinaryRequested: boolean): void {
 	const pathClio = findClioOnPath();
 	const npmPrefix = readNpmPrefix();
@@ -298,6 +323,16 @@ function printRemovalGuidance(removeBinaryRequested: boolean): void {
 	process.stdout.write(`  PATH lookup:      ${pathClio ?? "not currently found"}\n`);
 	if (npmPrefix) process.stdout.write(`  npm prefix bin:   ${join(npmPrefix, "bin")}\n`);
 	process.stdout.write(`  local source bin: ${localLink}${existsSync(localLink) ? "" : "  (absent)"}\n`);
+	// The two lines above are adjacent and were left for the reader to compare.
+	// When they differ they are two installations, and the operator who just read
+	// "removed Clio Coder state" will type `clio` next and reach the other one.
+	// Saying so is the whole point of printing both paths.
+	const survivor = otherClioOnPath(pathClio, localLink);
+	if (survivor !== null) {
+		process.stdout.write(`\nanother clio remains on your PATH at ${survivor}\n`);
+		process.stdout.write("  it is a different installation from the one this uninstall touched\n");
+		process.stdout.write(`  check it with: ${survivor} --version\n`);
+	}
 	process.stdout.write("\nUse the removal path that matches how you installed Clio Coder:\n");
 	// Re-suggesting the flag the operator just passed reads as though it had not
 	// run, so the source-symlink line only appears when it is still an option.

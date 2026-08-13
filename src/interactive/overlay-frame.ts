@@ -81,11 +81,32 @@ function brandedTopBorder(label: string, innerWidth: number): string {
 	return `${clioFrame("┌")}${clioFrame(clipped)}${clioFrame(fill)}${clioFrame("┐")}`;
 }
 
-export type OverlayMode = "browse" | "commit";
+/**
+ * What Esc does from where the overlay is right now.
+ *
+ * This used to be derived from whether the overlay committed anything, which
+ * produced `cancel` on half the overlays and `close` on the other half while
+ * neither word described what the key would do. Worse, every list overlay
+ * clears a typed filter on the first Esc and closes on the second, and the
+ * footer said `close` through both. The caller states the action because the
+ * caller is the only thing that knows it.
+ *
+ * `back` is for a submode that returns to the surface that opened it: a
+ * settings submenu, the `/tree` label editor.
+ */
+export type OverlayEscVerb = "close" | "clear filter" | "back";
+
 export interface HintEntry {
 	key: string;
 	verb: string;
 }
+
+/**
+ * The one word for narrowing a list by typing. `/help` said `filter`, `/models`
+ * and `/resume` said `search`, and they are the same gesture, so a reader who
+ * learned one had to relearn it in the next overlay.
+ */
+export const FILTER_HINT: HintEntry = { key: "type", verb: "filter" };
 
 export function canonicalizeKey(key: string): string {
 	const trimmed = key.trim();
@@ -103,11 +124,10 @@ export function canonicalizeKey(key: string): string {
 	return trimmed;
 }
 
-export function buildHint(mode: OverlayMode, entries: ReadonlyArray<HintEntry>): string {
-	const escVerb = mode === "browse" ? "close" : "cancel";
+export function buildHint(entries: ReadonlyArray<HintEntry>, esc: OverlayEscVerb = "close"): string {
 	const finalEntries = [
 		...entries.map((e) => ({ key: canonicalizeKey(e.key), verb: e.verb })),
-		{ key: "Esc", verb: escVerb },
+		{ key: "Esc", verb: esc },
 	];
 	return finalEntries.map((e) => `[${e.key}] ${e.verb}`).join(" · ");
 }

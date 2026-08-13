@@ -91,14 +91,20 @@ deps_are_acceptable() {
 	npm ls --depth=0 --silent >/dev/null 2>&1
 }
 
+# The verification line names the launcher this run installed, by path. A bare
+# `clio` resolves through PATH and can answer for an older install earlier on it,
+# which verifies that one instead of this one.
 print_next_steps() {
-	cat <<'NEXT'
+	cat <<NEXT
+
+Verify the install you just made:
+  $link_path --version
 
 Next: configure a model target, then start Clio:
   clio configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator --set-fleet-default
   clio
 
-If this shell still tries an old clio path, run `hash -r` (Bash) or `rehash` (Zsh), then try again.
+If this shell still tries an old clio path, run \`hash -r\` (Bash) or \`rehash\` (Zsh), then try again.
 NEXT
 }
 
