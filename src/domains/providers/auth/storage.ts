@@ -175,7 +175,9 @@ function readStorageData(content: string | undefined): StorageRead {
 		// flattening the whole thing turned the diagram into trailing ": : : ^^"
 		// noise that read as corruption of the message itself.
 		const raw = error instanceof Error ? error.message : String(error);
-		const detail = (raw.split("\n")[0] ?? raw).trim();
+		// The summary line ends on the colon that introduced the snippet, so
+		// dropping the snippet leaves it dangling in front of whatever follows.
+		const detail = (raw.split("\n")[0] ?? raw).trim().replace(/:$/u, "");
 		return { data: emptyData(), damage: `it is not valid YAML: ${detail}` };
 	}
 	// A document of only comments parses to null. Nothing is stored and nothing
