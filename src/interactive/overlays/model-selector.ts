@@ -514,7 +514,7 @@ export function buildModelItems(deps: {
 			};
 			items.push({
 				value: rowRef,
-				label: `${row.healthGlyph}${favorite ? "★" : scopeHit ? GLYPH.scoped : active ? GLYPH.active : " "} ${wireModel}`,
+				label: `${row.healthGlyph}${favorite ? GLYPH.favorite : scopeHit ? GLYPH.scoped : active ? GLYPH.active : " "} ${wireModel}`,
 				description: `${row.context}  ${badges}  ${runtimeShortName}  target=${target.id}`,
 			});
 			refs.push({ target: target.id, model: wireModel });
@@ -579,7 +579,7 @@ function fitLine(text: string, width: number): string {
 function activeMark(row: ModelRow): string {
 	const theme = clioTheme();
 	if (row.active) return theme.fg("accent", GLYPH.active);
-	if (row.favorite) return theme.fg("dim", "★");
+	if (row.favorite) return theme.fg("dim", GLYPH.favorite);
 	if (row.recent) return theme.fg("dim", "↺");
 	if (row.scoped) return theme.fg("muted", GLYPH.scoped);
 	if (row.defaultModel) return theme.fg("dim", "d");

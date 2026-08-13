@@ -102,7 +102,7 @@ export function openContextResetOverlay(tui: TUI, deps: OpenContextResetOverlayD
 	return showClioOverlayFrame(tui, new FocusBox(list), {
 		anchor: "center",
 		width: CONTEXT_RESET_OVERLAY_WIDTH,
-		title: "Reset project context",
+		title: "Reset Project Context",
 		footerHint: buildHint([{ key: "Enter", verb: "select" }]),
 	});
 }

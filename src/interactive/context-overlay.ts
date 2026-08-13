@@ -133,7 +133,7 @@ export function openContextOverlay(
 	const handle = showClioOverlayFrame(tui, text, {
 		anchor: "center",
 		width: CONTEXT_OVERLAY_WIDTH,
-		title: "Context window",
+		title: "Context Window",
 		footerHint: buildHint([]),
 	});
 

@@ -111,7 +111,7 @@ export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): Overla
 	const handle = showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: SCOPED_OVERLAY_WIDTH,
-		title: "Scoped models",
+		title: "Scoped Models",
 		footerHint: buildHint([
 			{ key: "Space", verb: "toggle" },
 			{ key: "Enter", verb: "commit" },

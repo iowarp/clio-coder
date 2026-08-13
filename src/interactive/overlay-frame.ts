@@ -65,7 +65,7 @@ export function clioError(text: string): string {
 function brandedTopBorder(label: string, innerWidth: number): string {
 	const clean = label.replace(/^[┌┐└┘├┤─│\s]+/, "").replace(/[┌┐└┘├┤─│\s]+$/, "");
 	const formatted = clean.length > 0 ? `─ ${clean} ` : "─";
-	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "...", true) : formatted;
+	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "…", true) : formatted;
 	const fill = "─".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
 	const cleanIndex = clipped.indexOf(clean);
 	if (cleanIndex !== -1) {
@@ -155,7 +155,7 @@ function brandedBottomBorder(innerWidth: number, hint?: string): string {
 		clean = elideHint(clean, maxCleanWidth);
 	}
 	const formatted = `─ ${clean} `;
-	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "...", true) : formatted;
+	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "…", true) : formatted;
 	const fill = "─".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
 	const cleanIndex = clipped.indexOf(clean);
 	if (cleanIndex !== -1) {
@@ -167,7 +167,7 @@ function brandedBottomBorder(innerWidth: number, hint?: string): string {
 }
 
 export function brandedContentRow(text: string, contentWidth: number): string {
-	return `${clioFrame("│")} ${padAnsi(truncateToWidth(text, contentWidth, "...", true), contentWidth)} ${clioFrame("│")}`;
+	return `${clioFrame("│")} ${padAnsi(truncateToWidth(text, contentWidth, "…", true), contentWidth)} ${clioFrame("│")}`;
 }
 
 export function formatRuntimeResolutionDiagnostic(diagnostic: RuntimeResolutionDiagnostic): string {
