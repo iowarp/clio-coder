@@ -371,9 +371,16 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 		return 2;
 	}
 	const auth = openAuthStorage();
+	warnIfCredentialsDamaged(auth);
 	const status = statusForResolvedTarget(resolved, auth);
 	if (!status.available) {
-		printError(`no stored credential for ${resolved.authTarget.providerId}`);
+		// A damaged store reads as zero credentials, so "no stored credential"
+		// would be the same understatement the warning above exists to remove.
+		printError(
+			auth.damageReason() === null
+				? `no stored credential for ${resolved.authTarget.providerId}`
+				: `cannot tell whether ${resolved.authTarget.providerId} is stored: the credentials file could not be fully read`,
+		);
 		return 1;
 	}
 	if (status.source === "environment") {

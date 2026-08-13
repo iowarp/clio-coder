@@ -170,16 +170,23 @@ function readStorageData(content: string | undefined): StorageRead {
 	try {
 		parsed = parseYaml(content);
 	} catch (error) {
-		// The YAML error carries a multi-line caret diagram. It is useful text but
-		// it has to survive being embedded in a sentence, so collapse it to one
-		// line rather than letting it break the message apart.
-		const detail = (error instanceof Error ? error.message : String(error)).replace(/\s+/gu, " ").trim();
+		// The YAML error is a summary line followed by the offending source and a
+		// caret diagram. Only the summary survives being embedded in a sentence:
+		// flattening the whole thing turned the diagram into trailing ": : : ^^"
+		// noise that read as corruption of the message itself.
+		const raw = error instanceof Error ? error.message : String(error);
+		const detail = (raw.split("\n")[0] ?? raw).trim();
 		return { data: emptyData(), damage: `it is not valid YAML: ${detail}` };
 	}
 	// A document of only comments parses to null. Nothing is stored and nothing
 	// is at risk.
 	if (parsed === null || parsed === undefined) return { data: emptyData(), damage: null };
 	if (!isRecord(parsed)) return { data: emptyData(), damage: "its top level is not a mapping" };
+	// An empty mapping is an empty store holding nothing at risk. This is not a
+	// hypothetical shape: `initializeClioHome` scaffolds exactly `{}` at
+	// src/core/init.ts:80, so treating it as damage made a brand-new install
+	// unable to log in at all.
+	if (Object.keys(parsed).length === 0) return { data: emptyData(), damage: null };
 	if (!("entries" in parsed) && !("version" in parsed)) {
 		return { data: emptyData(), damage: "it has neither a version nor an entries mapping" };
 	}

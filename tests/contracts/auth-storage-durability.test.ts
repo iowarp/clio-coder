@@ -108,6 +108,31 @@ describe("contracts/auth storage durability", () => {
 		strictEqual(open().listStored().length, 1, "a first login still writes");
 	});
 
+	/**
+	 * The exact bytes `initializeClioHome` scaffolds at src/core/init.ts:80. A
+	 * first guard at this shape called the product's own fresh file damaged, so a
+	 * brand-new install could not log in at all and `clio configure --api-key`
+	 * died with it. Pinned to the literal scaffold so a change to one side has to
+	 * be a change to both.
+	 */
+	it("accepts the credentials scaffold a fresh install ships", () => {
+		const scaffold = "# Managed via `clio auth`. Do not edit manually unless you know what you are doing.\n{}\n";
+		writeFileSync(path, scaffold, "utf8");
+
+		strictEqual(open().damageReason(), null, "the shipped scaffold is an empty store, not a damaged one");
+		const storage = open();
+		storage.setApiKey("openai", "sk-not-a-real-key-first-login");
+		strictEqual(open().listStored().length, 1, "the very first login on a fresh install succeeds");
+		ok(readFileSync(path, "utf8").includes("sk-not-a-real-key-first-login"));
+	});
+
+	it("still refuses a top-level mapping that is ours in neither shape", () => {
+		writeFileSync(path, "mistral:\n  key: sk-not-a-real-key\n", "utf8");
+		const storage = open();
+		ok(storage.damageReason() !== null, "a bare provider map was never a readable shape");
+		throws(() => storage.setApiKey("openai", "sk-not-a-real-key"), AuthStorageDamagedError);
+	});
+
 	it("round trips set, replace, and remove on a clean store", () => {
 		const storage = open();
 		storage.setApiKey("mistral", "sk-not-a-real-key-one");
