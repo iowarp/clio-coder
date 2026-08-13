@@ -67,6 +67,12 @@ export interface ToolExecutionFinished {
 	resultSummary?: Record<string, unknown> | undefined;
 	/** Honest terminal outcome for synthetic/or permission-blocked calls. */
 	outcome?: "blocked" | "aborted" | "orphaned" | undefined;
+	/**
+	 * Why admission refused this call, from the registry verdict. A blocked row
+	 * that states only that something was refused leaves the operator, and the
+	 * model reading the same transcript, to guess at the rule.
+	 */
+	blockReason?: string | undefined;
 }
 
 export interface ToolBodyRenderOptions {
@@ -437,10 +443,15 @@ export function renderToolAwaitingApproval(call: ToolExecutionStart, width: numb
  */
 type HeaderStatus = "ok" | "error" | undefined;
 
+/** Keeps a refusal reason to one scannable clause on the status tail. */
+const BLOCK_REASON_LIMIT = 72;
+
 interface StatusMeta {
 	durationMs?: number | undefined;
 	exitCode?: string | null;
 	outcome?: ToolExecutionFinished["outcome"];
+	/** Refusal reason, rendered only alongside a non-executed outcome. */
+	blockReason?: string | undefined;
 }
 
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
@@ -450,7 +461,12 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
 	const exitSuffix = meta.exitCode ? dim(` (exit ${meta.exitCode})`) : "";
 	const outcomeSuffix = meta.outcome ? dim(` ${meta.outcome}`) : "";
-	return ` ${red(STATUS_ERROR_GLYPH)}${outcomeSuffix}${exitSuffix}${durationSuffix}`;
+	// A refusal that names no rule tells the operator only that something was
+	// stopped. The reason rides the same tail as the outcome word so the
+	// collapsed subline and the expanded header state it identically.
+	const reason = meta.outcome !== undefined ? meta.blockReason?.trim() : undefined;
+	const reasonSuffix = reason ? dim(` · ${truncate(reason, BLOCK_REASON_LIMIT)}`) : "";
+	return ` ${red(STATUS_ERROR_GLYPH)}${outcomeSuffix}${reasonSuffix}${exitSuffix}${durationSuffix}`;
 }
 
 function headerLine(toolName: string, args: unknown, status: HeaderStatus, meta: StatusMeta = {}): string {
@@ -968,6 +984,7 @@ export function renderToolSubline(
 					durationMs: call.durationMs,
 					exitCode: call.toolName === "bash" && call.isError ? bashExitCodeFromResult(call.result) : null,
 					outcome: call.outcome,
+					blockReason: call.blockReason,
 				}
 			: {};
 	const parts = sublineParts(call, status, meta);
@@ -993,6 +1010,7 @@ export function renderToolExecution(
 		durationMs: finished.durationMs,
 		exitCode: finished.toolName === "bash" && finished.isError ? bashExitCodeFromResult(finished.result) : null,
 		outcome: finished.outcome,
+		blockReason: finished.blockReason,
 	};
 	const out: string[] = [];
 	out.push(...wrap(headerLine(finished.toolName, finished.args, status, statusMeta), width));
@@ -1049,6 +1067,7 @@ export function renderToolResultOnly(
 		durationMs: finished.durationMs,
 		exitCode: finished.toolName === "bash" && finished.isError ? bashExitCodeFromResult(finished.result) : null,
 		outcome: finished.outcome,
+		blockReason: finished.blockReason,
 	};
 	const out: string[] = [];
 	out.push(...wrap(headerLine(finished.toolName, undefined, status, statusMeta), width));

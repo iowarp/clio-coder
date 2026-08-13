@@ -49,6 +49,14 @@ export interface ToolStartEvent {
 
 export interface ToolFinishEvent {
 	tool: string;
+	/**
+	 * The engine's id for this call, when the caller supplied one through
+	 * `invokeOptions`. Consumers that correlate this authoritative outcome back
+	 * to an engine `tool_execution_end` event key on it: the engine event
+	 * carries only `isError` plus result text, which cannot distinguish a
+	 * permission block from a command that ran and exited nonzero.
+	 */
+	toolCallId?: string;
 	posture: "operating";
 	durationMs: number;
 	outcome: ToolOutcome;
@@ -98,6 +106,10 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	const { spec, args, registry, signal, telemetry } = input;
 	const startedAt = Date.now();
 	telemetry?.onStart?.({ tool: spec.name, posture: "operating", startedAt });
+	// Stamped onto every finish event so a consumer can join this authoritative
+	// outcome to the engine's `tool_execution_end` for the same call.
+	const callId = input.invokeOptions?.toolCallId;
+	const withCallId = callId === undefined ? {} : { toolCallId: callId };
 	const invokeOpts: ToolInvokeOptions = {};
 	if (input.invokeOptions) Object.assign(invokeOpts, input.invokeOptions);
 	if (signal) invokeOpts.signal = signal;
@@ -106,18 +118,19 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	try {
 		verdictPromise = registry.invoke({ tool: spec.name, args }, hasInvokeOpts ? invokeOpts : undefined);
 	} catch (err) {
-		emitFinish(telemetry, spec.name, startedAt, "error", { reason: errorMessage(err) });
+		emitFinish(telemetry, spec.name, startedAt, "error", { ...withCallId, reason: errorMessage(err) });
 		throw err;
 	}
 	let verdict: Awaited<typeof verdictPromise>;
 	try {
 		verdict = await verdictPromise;
 	} catch (err) {
-		emitFinish(telemetry, spec.name, startedAt, "error", { reason: errorMessage(err) });
+		emitFinish(telemetry, spec.name, startedAt, "error", { ...withCallId, reason: errorMessage(err) });
 		throw err;
 	}
 	if (verdict.kind !== "ok") {
 		emitFinish(telemetry, spec.name, startedAt, "blocked", {
+			...withCallId,
 			reason: verdict.reason,
 			...(verdict.kind === "blocked" ? { decision: verdict.decision } : {}),
 		});
@@ -131,6 +144,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	}
 	if (verdict.result.kind === "error") {
 		emitFinish(telemetry, spec.name, startedAt, "error", {
+			...withCallId,
 			reason: verdict.result.message,
 			decision: verdict.decision,
 		});
@@ -146,12 +160,14 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	if (verdict.result.terminate === true) {
 		result.terminate = true;
 		emitFinish(telemetry, spec.name, startedAt, "ok", {
+			...withCallId,
 			terminate: true,
 			decision: verdict.decision,
 			...(skillActivation ? { skillActivation } : {}),
 		});
 	} else {
 		emitFinish(telemetry, spec.name, startedAt, "ok", {
+			...withCallId,
 			decision: verdict.decision,
 			...(skillActivation ? { skillActivation } : {}),
 		});
@@ -164,7 +180,13 @@ function emitFinish(
 	tool: string,
 	startedAt: number,
 	outcome: ToolOutcome,
-	extra?: { reason?: string; terminate?: boolean; decision?: SafetyDecision; skillActivation?: SkillActivation },
+	extra?: {
+		reason?: string;
+		terminate?: boolean;
+		decision?: SafetyDecision;
+		skillActivation?: SkillActivation;
+		toolCallId?: string;
+	},
 ): void {
 	if (!telemetry?.onFinish) return;
 	const event: ToolFinishEvent = {
@@ -173,6 +195,7 @@ function emitFinish(
 		durationMs: Date.now() - startedAt,
 		outcome,
 	};
+	if (extra?.toolCallId !== undefined) event.toolCallId = extra.toolCallId;
 	if (extra?.reason !== undefined) event.reason = extra.reason;
 	if (extra?.terminate === true) event.terminate = true;
 	if (extra?.decision !== undefined) {
@@ -326,8 +349,11 @@ export function resolveSessionTools(
 	runtime: { runtimeResolution: ResolvedRuntimeTarget },
 	toolRegistry: ToolRegistry | undefined,
 	invokeOptions?: () => Partial<ToolInvokeOptions>,
+	telemetry?: ToolTelemetry,
 ): AgentTool[] {
 	if (!toolRegistry || runtime.runtimeResolution.capabilityDecisions.tools !== true) return [];
 	const input: ResolveAgentToolsInput = { registry: toolRegistry };
-	return resolveAgentTools(invokeOptions ? { ...input, invokeOptions } : input);
+	if (invokeOptions) input.invokeOptions = invokeOptions;
+	if (telemetry) input.telemetry = telemetry;
+	return resolveAgentTools(input);
 }

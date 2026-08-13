@@ -133,6 +133,12 @@ type ToolSegment = {
 	 */
 	awaitingApproval?: boolean | undefined;
 	settlement?: "blocked" | "aborted" | "orphaned" | undefined;
+	/**
+	 * The admission verdict's short reason, present only on a settlement the
+	 * registry actually rejected. A blocked row without it states that something
+	 * was refused and leaves the operator no way to learn why.
+	 */
+	blockReason?: string | undefined;
 };
 /**
  * A turn's terminal-error marker (`[error] ...`, `[aborted] ...`,
@@ -231,6 +237,32 @@ export interface ChatPanelOptions {
 	 * instead of the terminal's bounded view.
 	 */
 	unboundedToolBodies?: boolean;
+}
+
+/**
+ * An abort reaches the registry as a rejection, so it arrives here as a block
+ * whose reason names it (`run aborted before the operator decided`). Matching
+ * that is safe in a way that matching the tool's own output is not: this string
+ * is composed by Clio, never by the command that ran.
+ */
+const ABORTED_REASON_RE = /\babort(?:ed)?\b/i;
+
+/**
+ * Classify a finished tool call from the registry's admission verdict, which
+ * the turn runtime stamps onto the event as `outcome`. Only a call the registry
+ * refused settles as blocked; a call that executed and failed is an ordinary
+ * error and carries no settlement. Events with no verdict (replayed history, a
+ * surface that resolves tools without telemetry) settle as nothing rather than
+ * guessing.
+ */
+function toolSettlement(event: {
+	outcome?: unknown;
+	blockReason?: unknown;
+}): { settlement: "blocked" | "aborted"; reason?: string } | undefined {
+	if (event.outcome !== "blocked") return undefined;
+	const reason = typeof event.blockReason === "string" && event.blockReason.trim().length > 0 ? event.blockReason : null;
+	const settlement = reason !== null && ABORTED_REASON_RE.test(reason) ? "aborted" : "blocked";
+	return reason === null ? { settlement } : { settlement, reason };
 }
 
 function extractAssistantText(message: unknown): string {
@@ -585,6 +617,7 @@ function renderToolSegmentLines(
 						durationMs: seg.durationMs,
 						resultSummary: seg.resultSummary,
 						outcome: seg.settlement,
+						blockReason: seg.blockReason,
 					}
 				: { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs },
 			width,
@@ -612,6 +645,7 @@ function renderToolSegmentLines(
 			durationMs: seg.durationMs,
 			resultSummary: seg.resultSummary,
 			outcome: seg.settlement,
+			blockReason: seg.blockReason,
 		},
 		width,
 		{ unbounded: unboundedToolBodies },
@@ -1123,21 +1157,29 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (tool) {
 					tool.result = event.result;
 					tool.isError = event.isError;
-					tool.settlement =
-						event.isError && /\b(?:blocked|denied|cancel(?:led|ed)|permission)\b/i.test(previewResult(event.result))
-							? "blocked"
-							: event.isError && /\babort(?:ed)?\b/i.test(previewResult(event.result))
-								? "aborted"
-								: undefined;
+					// The chat loop enriches tool_execution_end with durationMs, the
+					// persisted resultSummary (bytes, truncated, offloadPath,
+					// observation counts), and the registry's admission verdict;
+					// carry them so the ledger line and replay render identical facts.
+					const enriched = event as {
+						durationMs?: unknown;
+						resultSummary?: unknown;
+						outcome?: unknown;
+						blockReason?: unknown;
+					};
+					// Settlement is that verdict, never an inference from result text.
+					// The text of a tool result is the tool's own output: `node --test`
+					// prints `cancelled 0` on every run and a linter can print
+					// "blocked" for its own reasons, so matching those words there
+					// labelled ordinary command failures as permission blocks and
+					// suppressed the output that would have explained them.
+					const settled = toolSettlement(enriched);
+					tool.settlement = settled?.settlement;
+					tool.blockReason = settled?.reason;
 					tool.finished = true;
 					// The true result replaces a synthetic settle; from here on the
 					// segment is model-finished and immutable to later end events.
 					tool.settledWithoutResult = undefined;
-					// The chat loop enriches tool_execution_end with durationMs and the
-					// persisted resultSummary (bytes, truncated, offloadPath,
-					// observation counts); carry both so the ledger line and replay
-					// render identical facts.
-					const enriched = event as { durationMs?: unknown; resultSummary?: unknown };
 					if (typeof enriched.durationMs === "number" && Number.isFinite(enriched.durationMs)) {
 						tool.durationMs = enriched.durationMs;
 					} else if (tool.startedAtMs !== undefined) {

@@ -355,7 +355,8 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		panel.applyEvent({ type: "tool_approval_state", toolCallId: "park2", state: "awaiting-approval" } as ChatLoopEvent);
 		ok(strip(panel.render(80).join("\n")).includes("⏸ awaiting approval"));
 		// Operator cancel: the registry resolves the parked promise blocked and
-		// the segment settles through its ordinary tool_execution_end.
+		// the segment settles through its ordinary tool_execution_end, which the
+		// turn runtime stamps with that verdict.
 		clock = 1600;
 		panel.applyEvent({
 			type: "tool_execution_end",
@@ -364,13 +365,60 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 			result: "User cancelled this tool call from the permission confirmation prompt.",
 			isError: true,
 			durationMs: 600,
+			outcome: "blocked",
+			blockReason: "operator denied bash at the confirmation prompt",
 		} as ChatLoopEvent);
 		const atEnd = strip(panel.render(80).join("\n"));
 		ok(!atEnd.includes("awaiting approval"), `a denied park sheds the awaiting marker, got: ${atEnd}`);
 		ok(atEnd.includes("✗ blocked"), `a denied park carries a blocked label, got: ${atEnd}`);
+		ok(
+			atEnd.includes("operator denied bash at the confirmation prompt"),
+			`a blocked row states why it was refused, got: ${atEnd}`,
+		);
 		// The settled line is time-invariant: no lingering spinner keeps counting.
 		clock = 100_000;
 		strictEqual(strip(panel.render(80).join("\n")), atEnd);
+	});
+
+	it("labels a command that ran and failed an error, not a permission block", () => {
+		// `node --test` prints `cancelled 0` in every summary and names the
+		// failing assertion in its trailer. Classifying settlement by searching
+		// result text for blocked/denied/cancelled/permission therefore labelled
+		// every failing Node test run a permission block and, because a blocked
+		// row is rendered as a call that never executed, hid the very output
+		// that explained the failure.
+		const panel = createChatPanel({ now: () => 1000 });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "run1",
+			toolName: "bash",
+			args: { command: "npm test" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "run1",
+			toolName: "bash",
+			result: [
+				"> tally@0.1.0 test",
+				"> node --test tests/*.test.js",
+				"ℹ tests 2",
+				"ℹ pass 0",
+				"ℹ fail 2",
+				"ℹ cancelled 0",
+				"TypeError: assert.deepStrictEqual is not a function",
+			].join("\n"),
+			isError: true,
+			durationMs: 323,
+		} as ChatLoopEvent);
+		const rendered = strip(panel.render(80).join("\n"));
+		ok(!rendered.includes("blocked"), `a command that ran is never blocked, got: ${rendered}`);
+		// The point of the label is the body it gates: a blocked row is rendered
+		// as a call that never executed, so mislabelling one suppressed the
+		// failure the operator and the model both needed to read.
+		ok(
+			rendered.includes("TypeError: assert.deepStrictEqual is not a function"),
+			`an executed command keeps its output, got: ${rendered}`,
+		);
 	});
 
 	it("settles a prior same-id segment when the model reuses a tool-call id", () => {

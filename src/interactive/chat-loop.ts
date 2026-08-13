@@ -498,7 +498,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const pendingSkillPolicy = createPendingSkillToolPolicy(pendingSkillRequests);
 			// Resolve the frozen session tool surface before turn_start so intent
 			// middleware sees the exact tools this request can actually call.
-			agentRuntime.agent.state.tools = resolveSessionTools(agentRuntime, deps.toolRegistry, currentToolInvokeOptions);
+			agentRuntime.agent.state.tools = resolveSessionTools(
+				agentRuntime,
+				deps.toolRegistry,
+				currentToolInvokeOptions,
+				turnRuntime.toolTelemetry,
+			);
 			const askUserPolicy = createAskUserToolPolicy(agentRuntime.agent.state.tools);
 			// turn_start: the prompt is accepted; registrations may inject
 			// context for this request. Accumulated reminders (turn_end

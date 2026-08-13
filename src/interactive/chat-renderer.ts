@@ -418,6 +418,9 @@ interface ReplayToolResult {
 	isError: boolean;
 	durationMs?: number;
 	resultSummary?: Record<string, unknown>;
+	/** Persisted admission verdict; absent on history written before it was recorded. */
+	outcome?: string;
+	blockReason?: string;
 }
 
 function extractToolResult(entry: MessageEntry): ReplayToolResult {
@@ -438,6 +441,8 @@ function extractToolResult(entry: MessageEntry): ReplayToolResult {
 		obj?.result ?? obj?.output ?? obj?.out ?? obj?.content ?? (contentText.length > 0 ? contentText : payload);
 	const durationMs = typeof obj?.durationMs === "number" && Number.isFinite(obj.durationMs) ? obj.durationMs : undefined;
 	const resultSummary = payloadObject(obj?.resultSummary) ?? undefined;
+	const outcome = typeof obj?.outcome === "string" && obj.outcome.length > 0 ? obj.outcome : undefined;
+	const blockReason = typeof obj?.blockReason === "string" && obj.blockReason.length > 0 ? obj.blockReason : undefined;
 	return {
 		id,
 		name,
@@ -445,6 +450,8 @@ function extractToolResult(entry: MessageEntry): ReplayToolResult {
 		isError: obj?.isError === true || obj?.error === true,
 		...(durationMs !== undefined ? { durationMs } : {}),
 		...(resultSummary !== undefined ? { resultSummary } : {}),
+		...(outcome !== undefined ? { outcome } : {}),
+		...(blockReason !== undefined ? { blockReason } : {}),
 	};
 }
 
@@ -875,6 +882,8 @@ export function rehydrateChatPanelFromTurns(
 							isError: result.isError,
 							...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
 							...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
+							...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
+							...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
 						} as ChatLoopEvent);
 					} else {
 						chatPanel.appendReplayBlock((width) =>
@@ -886,6 +895,8 @@ export function rehydrateChatPanelFromTurns(
 									isError: result.isError,
 									...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
 									...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
+									...(result.outcome === "blocked" ? { outcome: "blocked" as const } : {}),
+									...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
 								},
 								width,
 								{ unbounded: options.unboundedToolBodies === true },
