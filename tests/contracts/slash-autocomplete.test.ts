@@ -74,4 +74,36 @@ describe("contracts/slash-autocomplete", () => {
 		ok(values.includes("skill:find-skills"));
 		ok(!values.includes("skill:arxiv-literature"));
 	});
+
+	/**
+	 * An alias is a real invocation: /exit, /ctx, /compact and /models all run.
+	 * Completion built its list from canonical names only, so the spelling
+	 * `/help` teaches offered nothing back and read as though it did not exist.
+	 */
+	it("offers alias spellings, because typing one of them runs the command", async () => {
+		for (const [typed, alias] of [
+			["/exi", "exit"],
+			["/ct", "ctx"],
+			["/comp", "compact"],
+			["/model", "models"],
+		] as const) {
+			const values = ((await suggestionsFor(typed))?.items ?? []).map((item) => item.value);
+			ok(values.includes(alias), `${typed} does not offer ${alias}: ${values.join(", ")}`);
+		}
+	});
+
+	it("ranks the canonical spelling above the alias that stands for it", async () => {
+		const values = ((await suggestionsFor("/model"))?.items ?? []).map((item) => item.value);
+		ok(values.indexOf("model") < values.indexOf("models"), `got: ${values.join(", ")}`);
+	});
+
+	// The skill branch owns everything after the colon and offers skill names
+	// there. Listing the bare prefixes as commands would put two near identical
+	// rows in front of it.
+	it("keeps the colon skill prefixes out of the command list", async () => {
+		const values = ((await suggestionsFor("/ski"))?.items ?? []).map((item) => item.value);
+		ok(values.includes("skill"), `the canonical command is offered: ${values.join(", ")}`);
+		ok(!values.includes("skill:"), `got: ${values.join(", ")}`);
+		ok(!values.includes("skills:"), `got: ${values.join(", ")}`);
+	});
 });

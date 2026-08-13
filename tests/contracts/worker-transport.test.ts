@@ -712,6 +712,7 @@ function stubContext(): DomainContext {
 			remove: () => {},
 			login: async () => {},
 			logout: () => {},
+			damageReason: () => null,
 			getOAuthProviders: () => [],
 			setRuntimeOverrideForTarget: () => {},
 			clearRuntimeOverrideForTarget: () => {},

@@ -523,6 +523,44 @@ describe("contracts/config runtime reload failure", () => {
 		match(line, /fix the YAML in .*settings\.yaml/);
 	});
 
+	/**
+	 * Both surfaces that render this line clamp it to the frame width and offer
+	 * no way to expand it: the footer cuts it, and the Alt+U notices pane cuts it
+	 * the same way. So a line that ended with the remedy ended with the only
+	 * actionable part off-screen, and the tail it did show was the caret diagram
+	 * the YAML parser appends to its message, folded into "column 1: : : : ^^".
+	 */
+	it("leads with the remedy and quotes no raw source, because the tail is what a clamp cuts", () => {
+		writeFileSync(settingsPath(), "\t\t: : :\n", "utf8");
+		let thrown: unknown;
+		try {
+			readSettings();
+		} catch (err) {
+			thrown = err;
+		}
+		ok(thrown instanceof SettingsValidationError);
+		const line = formatSettingsFailure(thrown);
+
+		// The failure kind, then the fix, before anything that can be cut away.
+		const remedyAt = line.indexOf("fix the YAML in");
+		ok(remedyAt > 0, `the remedy is present: ${line}`);
+		ok(
+			remedyAt < line.indexOf("Tabs are not allowed"),
+			`the remedy must precede the detail so a clamp cuts detail, not the fix: ${line}`,
+		);
+		match(line.slice(0, remedyAt), /is not valid YAML/);
+
+		// The parser's excerpt and caret diagram are the operator's own file
+		// quoted back at them, and folded to one line they read as corruption of
+		// the message. The summary already names the line and the column.
+		ok(!line.includes(": : :"), `the raw source fragment is gone: ${line}`);
+		ok(!line.includes("^^"), `the caret diagram is gone: ${line}`);
+		match(line, /line 1, column 1/);
+
+		// A clamp at the narrowest supported frame still shows the fix.
+		ok(line.slice(0, 60).includes("fix the YAML"), `clamped to 60 the fix survives: ${line.slice(0, 60)}`);
+	});
+
 	it("keys a schema failure to the offending path", () => {
 		writeFileSync(settingsPath(), "version: 1\ntypoKey: 3\n", "utf8");
 		let thrown: unknown;

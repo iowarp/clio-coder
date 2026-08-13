@@ -108,17 +108,19 @@ describe("contracts/interactive editor submit", () => {
 		deepStrictEqual(harness.events, ["set:", "dispatch:/help topic", "render"]);
 	});
 
-	// pi-tui's submitValue() empties the editor before onSubmit is called, so a
-	// spelling the registry does not claim used to cost the operator the whole
-	// line. Putting the text back is what makes the notice actionable.
-	it("returns a mistyped command to the editor so it can be corrected in place", () => {
+	// A token the registry does not claim used to be put back so it could be
+	// corrected in place. The restored text carries no cursor of its own, so the
+	// next keystrokes landed in front of it, the line stopped parsing as a
+	// command, and the whole concatenation went to the model as a chat message
+	// the operator never wrote.
+	it("clears a token that is not a command so the next keystrokes cannot join it", () => {
 		const harness = createHarness();
 		const controller = createEditorSubmitController(harness.deps);
 
 		controller.submitEditorText("/thnking off");
 
-		strictEqual(harness.getText(), "/thnking off");
-		deepStrictEqual(harness.events, ["set:/thnking off", "dispatch:/thnking off", "render"]);
+		strictEqual(harness.getText(), "");
+		deepStrictEqual(harness.events, ["set:", "dispatch:/thnking off", "render"]);
 	});
 
 	it("returns input a command rejected on its arguments", () => {

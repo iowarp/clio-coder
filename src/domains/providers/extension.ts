@@ -516,6 +516,9 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			logout(providerId) {
 				authStore.logout(providerId);
 			},
+			damageReason() {
+				return authStore.damageReason();
+			},
 			getOAuthProviders() {
 				return authStore.getOAuthProviders();
 			},

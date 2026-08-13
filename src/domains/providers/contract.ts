@@ -121,6 +121,17 @@ export interface ProvidersContract {
 		remove(providerId: string): void;
 		login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<void>;
 		logout(providerId: string): void;
+		/**
+		 * Why the credentials store could not be fully read, or why the last write
+		 * to it did not land, or null when it is clean.
+		 *
+		 * `setApiKey` and `login` throw only for the damaged-store refusal. Every
+		 * other write failure is recorded here instead, and the in-memory store
+		 * still hands the credential back, so a caller that reports success
+		 * without asking claims a credential the file does not hold. Anything
+		 * that writes must consult this immediately afterwards.
+		 */
+		damageReason(): string | null;
 		getOAuthProviders(): ReadonlyArray<{ id: string; name: string }>;
 		/**
 		 * Install a process-lifetime API key override for the provider behind

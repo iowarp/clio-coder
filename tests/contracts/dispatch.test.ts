@@ -301,6 +301,7 @@ function stubContext(
 			remove: () => {},
 			login: async () => {},
 			logout: () => {},
+			damageReason: () => null,
 			getOAuthProviders: () => [],
 			setRuntimeOverrideForTarget: () => {},
 			clearRuntimeOverrideForTarget: () => {},

@@ -823,18 +823,53 @@ const TABLE_SHRINK_ORDER: ReadonlyArray<readonly [TargetTableColumn, number]> = 
 	["tier", 4],
 ];
 
+/**
+ * The order width above the minimum layout is handed back in, each up to what
+ * its own content needs.
+ *
+ * Shrinking in {@link TABLE_SHRINK_ORDER} until the row fits stops at the first
+ * width that happens to work, and where it stopped was wrong. At 120 columns it
+ * had taken url and model down to their floors and had not yet asked auth,
+ * runtime, or tier for anything, so four targets on different hosts all printed
+ * `http://127.…` while the auth column spent 20 columns on one env var name. A
+ * url that cannot be told from the next url is not a url.
+ *
+ * So the layout is built the other way around: every column drops to its floor,
+ * and whatever the terminal has above that minimum is given back here. url and
+ * model lead because they are the two columns whose whole job is to be told
+ * apart. `notes` appears twice for the same reason it does above: it takes a
+ * readable remainder before the categorical columns are restored, and the rest
+ * only once they are whole.
+ */
+const TABLE_GROW_ORDER: ReadonlyArray<readonly [TargetTableColumn, number]> = [
+	["url", Number.POSITIVE_INFINITY],
+	["model", Number.POSITIVE_INFINITY],
+	["notes", 16],
+	["auth", Number.POSITIVE_INFINITY],
+	["runtime", Number.POSITIVE_INFINITY],
+	["tier", Number.POSITIVE_INFINITY],
+	["notes", Number.POSITIVE_INFINITY],
+];
+
 function tableWidths(rows: ReadonlyArray<TargetTableRow>, width: number): TargetTableWidths {
-	const widths = {} as TargetTableWidths;
+	const natural = {} as TargetTableWidths;
 	for (const [index, key] of TABLE_COLUMNS.entries()) {
-		widths[key] = rows.reduce((widest, row) => Math.max(widest, row[key].length), (HEADER[index] ?? key).length);
+		natural[key] = rows.reduce((widest, row) => Math.max(widest, row[key].length), (HEADER[index] ?? key).length);
 	}
-	let over =
-		TABLE_COLUMNS.reduce((total, key) => total + widths[key], 0) + TABLE_GAP * (TABLE_COLUMNS.length - 1) - width;
-	for (const [key, floor] of TABLE_SHRINK_ORDER) {
-		if (over <= 0) break;
-		const give = Math.min(over, Math.max(0, widths[key] - floor));
-		widths[key] -= give;
-		over -= give;
+	// The minimum layout: every shrinkable column at the lowest floor it is
+	// given, which for `notes` is the second of its two entries.
+	const widths = { ...natural };
+	for (const [key, floor] of TABLE_SHRINK_ORDER) widths[key] = Math.min(widths[key], floor);
+	const total = (): number =>
+		TABLE_COLUMNS.reduce((sum, key) => sum + widths[key], 0) + TABLE_GAP * (TABLE_COLUMNS.length - 1);
+	// A terminal too narrow for even the minimum keeps it and takes the row cut
+	// that formatTargetTable applies; there is nothing left to give back.
+	let surplus = width - total();
+	for (const [key, ceiling] of TABLE_GROW_ORDER) {
+		if (surplus <= 0) break;
+		const take = Math.min(surplus, Math.max(0, Math.min(natural[key], ceiling) - widths[key]));
+		widths[key] += take;
+		surplus -= take;
 	}
 	return widths;
 }

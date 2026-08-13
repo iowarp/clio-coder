@@ -78,6 +78,30 @@ describe("contracts/targets table layout", () => {
 		ok(!url?.includes("compat"), "the cut url is not the whole url");
 	});
 
+	/**
+	 * Shrinking until the row happened to fit stopped at the wrong place: at 120
+	 * columns url and model were already at their 12-column floors while auth,
+	 * runtime, and tier had not been asked for anything, so four targets on four
+	 * different hosts all printed `http://127.…`. A url that cannot be told from
+	 * the next url is not a url.
+	 */
+	it("spends width above the minimum layout on url and model, so hosts stay distinguishable", () => {
+		const hosts: ReadonlyArray<TargetTableRow> = [
+			{ ...(ROWS[0] as TargetTableRow), id: "local-a", url: "http://127.0.0.11:1234/v1" },
+			{ ...(ROWS[0] as TargetTableRow), id: "local-b", url: "http://127.0.0.22:11434" },
+			{ ...(ROWS[0] as TargetTableRow), id: "local-c", url: "http://127.0.0.33:8080" },
+			{ ...(ROWS[0] as TargetTableRow), id: "local-d", url: "http://127.0.0.44:8000" },
+		];
+		const urls = formatTargetTable(hosts, 120).rows.map((row) =>
+			row.split(/\s+/u).find((cell) => cell.startsWith("http")),
+		);
+		strictEqual(
+			new Set(urls).size,
+			hosts.length,
+			`four hosts rendered as ${urls.length - new Set(urls).size + 1}: ${urls.join(" ")}`,
+		);
+	});
+
 	it("keeps the columns aligned across rows", () => {
 		const table = formatTargetTable(ROWS, 160);
 		const [first = "", second = ""] = table.rows;

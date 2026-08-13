@@ -17,19 +17,28 @@ import { parseSlashCommand, type RunIo, type SlashCommand } from "./slash-comman
 const EDITOR_BASH_TIMEOUT_MS = 300_000;
 
 /**
- * Command shapes that are rejected by the parser and never reach a handler.
+ * Command shapes whose text is put back in the editor after the parser rejects
+ * them.
  *
  * The terminal engine empties the editor inside its own submit path before
  * `onSubmit` runs, so the text is already gone by the time the notice is
- * written. An operator who mistyped one character of a long command got an
- * error naming a spelling they could no longer see and had to retype the whole
- * line. Putting the text back leaves the correction one keystroke away.
+ * written. A command that exists and was called wrong is worth restoring: the
+ * operator can see which flag the usage line is complaining about and fix that
+ * one token.
  *
- * Only parse-time rejections qualify. A command that ran and failed has done
- * work, and chat text belongs to the transcript, so both leave the line empty.
+ * `unknown-command` used to be restored on the same reasoning and it does not
+ * hold. The token matched no command at all, so there is nothing to correct
+ * against, and the restored text has no cursor placement of its own: the next
+ * keystrokes land in front of the leftover `/token`, which no longer parses as
+ * a command, so the whole concatenation goes to the model as a chat message the
+ * operator never wrote. An empty line after "is not a command" costs a retype
+ * and says exactly what happened.
+ *
+ * A command that ran and failed has done work, and chat text belongs to the
+ * transcript, so both also leave the line empty.
  */
 function isRejectedCommand(command: SlashCommand): boolean {
-	return command.kind === "unknown-command" || command.kind === "usage-error";
+	return command.kind === "usage-error";
 }
 
 export interface EditorSubmitExpansion {
