@@ -145,8 +145,13 @@
                 </tr>
                 <tr data-cat="guardrail">
                   <td class="env-name">CLIO_WORKER_TOOL_CALL_CAP</td>
-                  <td><code>50</code></td>
+                  <td><code>150</code></td>
                   <td>Lifetime tool-call cap per dispatched worker process run.</td>
+                </tr>
+                <tr data-cat="guardrail">
+                  <td class="env-name">CLIO_INTERNAL_DISPATCH_TIMEOUT_MS</td>
+                  <td><code>900000</code></td>
+                  <td>Internal dispatch execution timeout in milliseconds (15 minutes).</td>
                 </tr>
                 <tr data-cat="guardrail">
                   <td class="env-name">CLIO_MAX_RUNS</td>
@@ -170,8 +175,8 @@
                 </tr>
                 <tr data-cat="knob">
                   <td class="env-name">CLIO_RESIDENCY</td>
-                  <td><code>observe</code></td>
-                  <td>Control local model residency managers (observe/off).</td>
+                  <td><code>managed</code></td>
+                  <td>Control local model residency managers (managed/observe/off).</td>
                 </tr>
                 <tr data-cat="knob">
                   <td class="env-name">CLIO_TRUST_PROJECT_SKILLS</td>
