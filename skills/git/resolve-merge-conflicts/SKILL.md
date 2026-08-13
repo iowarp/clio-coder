@@ -1,7 +1,7 @@
 ---
 name: resolve-merge-conflicts
 description: Use when a git merge, rebase, or cherry-pick is stopped on conflicts and they need resolving — "fix these conflicts", "finish the merge", conflict markers in files. Resolves by reconstructing both sides' intent from history, preserves both where possible, validates with the project's own checks, and completes the operation. Not for planning an integration of many branches; use worktree-merge.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read

@@ -1,7 +1,7 @@
 ---
 name: prototype
 description: Use when a design question should be answered with throwaway code — "does this state model feel right", "sanity-check this logic", "what should this UI look like", "mock something up". Builds a clearly-marked, trivially-runnable, no-persistence prototype, then captures the verdict and discards the code. Not for pre-registered performance experiments; use experiment-protocol. Not for production implementation.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read

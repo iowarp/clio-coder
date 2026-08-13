@@ -1,7 +1,7 @@
 ---
 name: create-pr
 description: Use when the user asks to push the current branch and open a pull request — "open a PR", "create the pull request", "ship this for review". Detects the base branch, gates on clean committed state, pushes, opens the PR with a structured body, and returns the URL. Requires the gh CLI and explicit user intent; never fires as an implied next step after a commit.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read

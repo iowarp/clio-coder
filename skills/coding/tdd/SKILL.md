@@ -1,7 +1,7 @@
 ---
 name: tdd
 description: Use when the user wants to build a feature or fix a bug test-first, says "TDD", "red-green", or "write the test first", or when a change to tricky logic needs its behavior pinned before implementation. Runs the red → green loop at pre-agreed public seams, one vertical slice at a time. Not for designing benchmark criteria; use experiment-protocol.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read

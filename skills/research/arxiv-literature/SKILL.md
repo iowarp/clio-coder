@@ -1,7 +1,7 @@
 ---
 name: arxiv-literature
 description: Use when the user asks to search arXiv, summarize an arXiv paper, compare papers, find recent research, or build a compact literature survey. Prefer the Researcher shadow agent for noisy multi-paper retrieval; return only citation-ready, source-linked paper cards.
-version: 0.2.0
+version: 0.3.0
 license: Apache-2.0
 allowed-tools:
   - web_fetch

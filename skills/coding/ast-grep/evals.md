@@ -44,3 +44,13 @@ Expected:
 
 One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. NOT SMOKED: ast-grep binary absent on the eval host (2026-08-13). Needs the binary, then a re-run.
+
+Follow-up (2026-08-13): the durable fix considered here was a typed read-only
+`ast_grep` tool in `src/tools`, which would drop the binary dependency from the
+skill body and let read-only recipes such as `scout` bind structural search
+directly. Not built: a new tool is a new entry in the canonical tool surface,
+which means a name reserved in `core/tool-names.ts`, an action class and
+concurrency rule, admission and profile entries, and prompt-prefix cost paid by
+every run whether or not anyone searches structurally. That is a tool-surface
+decision, not skill-catalog cleanup. Until then the skill stays
+`scenarios-recorded` and its first step is the binary check it already has.

@@ -199,7 +199,18 @@ function fetchSource(spec: SkillSourceSpec): FetchedSource {
 			stdio: "pipe",
 			timeout: CLONE_TIMEOUT_MS,
 		});
-		return { skillDir: resolveSkillDir(path.join(tmp, spec.filePath)), cleanup };
+		const target = path.join(tmp, spec.filePath);
+		// A clone that succeeded but has no skill at that path is the common
+		// failure for a published index whose entries moved, or that names a
+		// branch the layout has not reached yet. Reporting the temp clone path
+		// describes a directory the operator never chose; name the repository,
+		// the branch, and the path they can actually check.
+		if (!existsSync(target)) {
+			throw new Error(
+				`${spec.cloneUrl} (branch ${spec.branch}) has no ${spec.filePath}; the source-url may name a path that branch does not carry`,
+			);
+		}
+		return { skillDir: resolveSkillDir(target), cleanup };
 	} catch (err) {
 		cleanup();
 		throw err instanceof Error ? err : new Error(String(err));

@@ -1,7 +1,7 @@
 ---
 name: review-changes
 description: Use before committing, when the user asks to review the uncommitted work — "review my changes", "check this before I commit", "pre-commit review". Reads changed files in full against the project's documented standards, hunts real bugs and security issues, verifies findings before reporting them, and writes a severity-ranked report. Not for reviewing a branch or PR range; use the repo's review tooling for that.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read

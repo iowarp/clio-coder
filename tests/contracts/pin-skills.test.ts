@@ -160,4 +160,68 @@ describe("contracts/pin-skills script", () => {
 		ok(result.stderr.includes('"audit: pass"'));
 		strictEqual(existsSync(join(catalog, "registry.yaml")), false);
 	});
+
+	it("publishes a marketplace index beside the manifest and checks it too", async () => {
+		const catalog = scratchCatalog();
+		writeSkill(catalog, "alpha", catalogFrontmatter("alpha", "Alpha skill.", "0.1.0"));
+		const pin = await runPinScript(["--dir", catalog]);
+		strictEqual(pin.code, 0, pin.stderr);
+
+		const indexPath = join(catalog, "skill-marketplace.json");
+		const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
+			skills: Array<{ name: string; description: string; sourceUrl: string; version?: string; audit?: string }>;
+		};
+		strictEqual(index.skills.length, 1);
+		const entry = index.skills[0];
+		strictEqual(entry?.name, "alpha");
+		strictEqual(entry?.description, "Alpha skill.");
+		strictEqual(entry?.sourceUrl, "https://example.invalid/skills/alpha");
+		strictEqual(entry?.version, "0.1.0");
+		strictEqual(entry?.audit, "pass");
+
+		// The index is a checked artifact: hand-editing it is drift, even while
+		// registry.yaml still matches the catalog byte for byte.
+		writeFileSync(indexPath, JSON.stringify({ generatedBy: "hand", skills: [] }, null, "\t"), "utf8");
+		const drift = await runPinScript(["--dir", catalog, "--check"]);
+		strictEqual(drift.code, 1);
+		ok(drift.stderr.includes("skill-marketplace.json does not match the catalog"), drift.stderr);
+	});
+
+	it("rejects a source-url that has stopped matching the skill's catalog path", async () => {
+		const catalog = scratchCatalog();
+		const moved = writeSkill(catalog, "alpha", [
+			'name: "alpha"',
+			'description: "Alpha skill."',
+			'version: "0.1.0"',
+			"license: Apache-2.0",
+			"clio:",
+			"  registry-id: iowarp/clio-coder",
+			"  source-url: https://example.invalid/skills/somewhere-else",
+			"  audit: pass",
+			"  provenance: designed",
+			"  eval-status: scenarios-recorded",
+		]);
+		const result = await runPinScript(["--dir", catalog]);
+		strictEqual(result.code, 1);
+		ok(result.stderr.includes(moved));
+		ok(result.stderr.includes('does not end with the catalog path "alpha"'), result.stderr);
+	});
+
+	it("rejects a tool surface spelled for another harness", async () => {
+		const catalog = scratchCatalog();
+		// `Bash` is Claude Code's spelling. Its allowed-tools GRANTS rather than
+		// narrows, so shipping the capitalized name would auto-approve Bash for
+		// anyone who dropped this skill into .claude/skills.
+		const capitalized = writeSkill(catalog, "alpha", [
+			...catalogFrontmatter("alpha", "Alpha skill.", "0.1.0"),
+			"allowed-tools:",
+			"  - Bash",
+			"  - Glob",
+		]);
+		const result = await runPinScript(["--dir", catalog]);
+		strictEqual(result.code, 1);
+		ok(result.stderr.includes(capitalized));
+		ok(result.stderr.includes('must be spelled "bash"'), result.stderr);
+		ok(result.stderr.includes('"Glob" is not a Clio tool name'), result.stderr);
+	});
 });
