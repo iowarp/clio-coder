@@ -372,7 +372,7 @@ Each completed memory step appends one content-free record to:
 <stateDir>/memory/steps.jsonl
 ```
 
-Use `clio paths --json` to resolve `stateDir`. The log rotates after 1 MiB and
+Use `clio paths --json` to resolve the state directory (the `"state"` property). The log rotates after 1 MiB and
 keeps one previous generation as `steps.jsonl.1`. Every exact-schema record has:
 
 - timestamp and schema version;
