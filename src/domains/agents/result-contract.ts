@@ -62,6 +62,15 @@ export interface ResultContractValidation {
 
 export interface ResultContractFilesystem {
 	readFile(path: string): string | null;
+	/**
+	 * Whether anything exists at this location. Optional because most contracts
+	 * only ever need a file's bytes; a mutation report needs presence, since a
+	 * run legitimately creates directories and writes through channels no tool
+	 * event enumerates. Absent means presence is unobservable here, and the
+	 * mutation grounding below degrades to the quality label rather than
+	 * calling an unreadable path fabricated.
+	 */
+	pathExists?(path: string): boolean;
 }
 
 /**
@@ -70,6 +79,20 @@ export interface ResultContractFilesystem {
  * worker that made the reads.
  */
 export type ObservedReadRanges = ReadonlyMap<string, ReadonlyArray<readonly [number, number]>>;
+
+/**
+ * The write-side counterpart of `ObservedReadRanges`: what this run's own tool
+ * calls show it changed and ran. Both are recorded by the layer that watched
+ * the tool stream (`domains/safety/run-effects.ts`).
+ */
+export interface ObservedRunEffects {
+	/** Absolute paths the run's successful tool calls aimed a mutation at. */
+	mutatedPaths: ReadonlySet<string>;
+	/** Absolute paths whose only mutation attempt came back blocked or errored. */
+	failedMutationPaths: ReadonlySet<string>;
+	/** Canonical validation commands the run ran to a clean exit. */
+	validationCommands: ReadonlySet<string>;
+}
 
 export interface ResultContractValidationInput {
 	contract: ResultContract;
@@ -84,6 +107,13 @@ export interface ResultContractValidationInput {
 	 * only the weaker existence check applies.
 	 */
 	observedReadRanges?: ObservedReadRanges;
+	/**
+	 * What this run did to the workspace. When supplied, a mutation report is
+	 * measured against it instead of being believed. Absent means the effects
+	 * are not observable at this layer and the report's own word stands, which
+	 * is what every caller got before grounding existed.
+	 */
+	observedRunEffects?: ObservedRunEffects;
 }
 
 /**
@@ -115,6 +145,8 @@ export interface ValidateRecipeResultInput {
 	 * caller owns this judgement because only it knows how the attempt ended.
 	 */
 	reachedTerminalResult: boolean;
+	/** What the run's tool calls show it changed and ran, when observed. */
+	observedRunEffects?: ObservedRunEffects;
 }
 
 /**
@@ -676,8 +708,55 @@ function validateResearch(
 	return success(contract, "unmeasured", value);
 }
 
-function validateMutation(contract: ResultContract, output: string | null): ResultContractValidation {
-	const parsed = parseJson(output);
+/** Paths this run wrote, as workspace-relative names, for a validator reason. */
+function describeWriteSet(effects: ObservedRunEffects, cwd: string): string {
+	if (effects.mutatedPaths.size === 0) return "this run wrote nothing";
+	const written = [...effects.mutatedPaths]
+		.map((target) => path.relative(cwd, target) || target)
+		.sort()
+		.slice(0, MUTATION_WRITE_SET_REASON_LIMIT);
+	const more = effects.mutatedPaths.size - written.length;
+	return `this run wrote ${written.join(", ")}${more > 0 ? ` (+${more} more)` : ""}`;
+}
+
+/** Written paths quoted back in one validator reason before it is truncated. */
+const MUTATION_WRITE_SET_REASON_LIMIT = 8;
+
+/**
+ * Whether anything is at this location. Without a presence check the validator
+ * cannot tell a fabricated path from a directory or an unreadable file, so it
+ * answers yes and lets the quality label carry the doubt.
+ */
+function pathIsPresent(filesystem: ResultContractFilesystem, target: string): boolean {
+	if (filesystem.pathExists === undefined) return true;
+	return filesystem.pathExists(target);
+}
+
+/**
+ * A mutation report states what the run changed and what it validated. Shape
+ * alone cannot tell either claim from an invention, and the shape example this
+ * module prints ends up echoed verbatim by small models, so a run that touched
+ * nothing has sealed `mutatedPaths: ["src/file.ts"]` as conforming fact.
+ *
+ * Where the run's own effects were observed, each reported path is measured
+ * against them:
+ *   - in the write set                   -> the run did this, and it is verified
+ *   - its only attempt came back refused -> the run's own tool result says the
+ *     write did not land, so the claim is false however the file looks on disk
+ *   - absent from it but present on disk -> the run may have written it through
+ *     a channel no tool event enumerates, so this is not a failure, but it is
+ *     not verified either
+ *   - absent from both                   -> nothing this run did could have
+ *     produced it, which is a failed postcondition, not a quality signal
+ *
+ * Quality follows the same rule as conformance. A reported validation the run
+ * never ran is not correctness evidence, so it seals `unmeasured` (the label
+ * this module already uses for "nothing here can be measured") instead of
+ * pass. A self-reported failure still seals `fail`: an agent reporting against
+ * its own interest is the one claim here that needs no corroboration.
+ */
+function validateMutation(contract: ResultContract, input: ResultContractValidationInput): ResultContractValidation {
+	const parsed = parseJson(input.output);
 	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
 	const value = parsed.value;
 	if (
@@ -692,7 +771,34 @@ function validateMutation(contract: ResultContract, output: string | null): Resu
 	const validations = parseChecks(value.validations);
 	if (validations === null)
 		return failure(contract, "unmeasured", "Mutation result must carry typed validation results");
-	return success(contract, validations.every((check) => check.passed) ? "pass" : "fail", value);
+	const reportedFailure = !validations.every((check) => check.passed);
+	const effects = input.observedRunEffects;
+	if (effects === undefined) return success(contract, reportedFailure ? "fail" : "pass", value);
+	const cwd = path.resolve(input.cwd);
+	let unverifiedMutation = false;
+	for (const reported of value.mutatedPaths as ReadonlyArray<string>) {
+		const target = path.resolve(cwd, reported);
+		if (effects.mutatedPaths.has(target)) continue;
+		if (effects.failedMutationPaths.has(target)) {
+			return failure(
+				contract,
+				"unmeasured",
+				`Mutation result names a path whose only write this run attempted was refused: ${reported} (${describeWriteSet(effects, cwd)})`,
+			);
+		}
+		if (pathIsPresent(input.filesystem, target)) {
+			unverifiedMutation = true;
+			continue;
+		}
+		return failure(
+			contract,
+			"unmeasured",
+			`Mutation result names a path this run never wrote and that does not exist: ${reported} (${describeWriteSet(effects, cwd)})`,
+		);
+	}
+	if (reportedFailure) return success(contract, "fail", value);
+	const measured = !unverifiedMutation && effects.validationCommands.size > 0;
+	return success(contract, measured ? "pass" : "unmeasured", value);
 }
 
 function validateProvenance(contract: ResultContract, output: string | null): ResultContractValidation {
@@ -763,7 +869,7 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 		case "research-report":
 			return validateResearch(input.contract, input.output, input.networkAllowed);
 		case "mutation-report":
-			return validateMutation(input.contract, input.output);
+			return validateMutation(input.contract, input);
 		case "provenance-report":
 			return validateProvenance(input.contract, input.output);
 		case "external-delegation":
@@ -801,6 +907,7 @@ export function validateRecipeResult(input: ValidateRecipeResultInput): RecipeRe
 		cwd: input.cwd,
 		networkAllowed: input.networkAllowed,
 		filesystem: input.filesystem,
+		...(input.observedRunEffects !== undefined ? { observedRunEffects: input.observedRunEffects } : {}),
 	});
 	return {
 		applicable: true,

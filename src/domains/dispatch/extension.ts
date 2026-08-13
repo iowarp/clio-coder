@@ -10,7 +10,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import { DEFAULT_SETTINGS, type DelegationToolGovernance } from "../../core/defaults.js";
@@ -85,6 +85,7 @@ import { assessFinishContract, type FinishContractAssessment } from "../safety/f
 import { WRITE_ROOT_REFUSED_TOOLS } from "../safety/policy-engine.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
+import { createRunEffectsRecorder, type RunEffectsRecorder } from "../safety/run-effects.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import {
@@ -536,6 +537,24 @@ function appendDispatchFinishContractEntry(
 		payload,
 	});
 	return role === "assistant" && text.trim().length > 0 ? { assistantText: text, assistantTurnId: turnId } : null;
+}
+
+/**
+ * Fold one worker tool event into the run's observed effects. The worker
+ * records the same events on its own side for its bounded repair round; this
+ * is the orchestrator's copy, so the sealed validation measures a mutation
+ * report against the run rather than re-reading the model's word for it.
+ */
+function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<string, unknown>): void {
+	const toolCallId = readStringOrNull(event.toolCallId);
+	if (toolCallId === null) return;
+	if (event.type === "tool_execution_start") {
+		const toolName = readStringOrNull(event.toolName) ?? readStringOrNull(event.tool);
+		if (toolName === null) return;
+		recorder.start(toolCallId, toolName, isRecord(event.args) ? event.args : undefined);
+		return;
+	}
+	if (event.type === "tool_execution_end") recorder.finish(toolCallId, event.isError === true);
 }
 
 /**
@@ -3953,6 +3972,10 @@ export function createDispatchBundle(
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
 		const finishContractEntries: unknown[] = [];
+		// The worker's own tool calls, folded into what this run changed and what
+		// it validated. The sealed mutation-report contract is measured against
+		// this, so a reported path the run never touched cannot seal as fact.
+		const runEffects = createRunEffectsRecorder(lifecycle.cwd);
 		let finishContractAssistantText = "";
 		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
@@ -4042,6 +4065,7 @@ export function createDispatchBundle(
 					finishContractAssistantText = finishEntry.assistantText;
 					finishContractAssistantTurnId = finishEntry.assistantTurnId;
 				}
+				recordWorkerRunEffect(runEffects, event);
 			}
 			if (event.type === "clio_permission_escalated" && event.payload && typeof event.payload.requestId === "string") {
 				escalationCounts.requested += 1;
@@ -4627,6 +4651,7 @@ export function createDispatchBundle(
 					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
 					cwd: lifecycle.cwd,
 					networkAllowed: lifecycle.admission.allowedTools.includes(ToolNames.WebFetch),
+					observedRunEffects: runEffects.snapshot(),
 					filesystem: {
 						readFile(filePath) {
 							try {
@@ -4634,6 +4659,9 @@ export function createDispatchBundle(
 							} catch {
 								return null;
 							}
+						},
+						pathExists(filePath) {
+							return existsSync(filePath);
 						},
 					},
 				});

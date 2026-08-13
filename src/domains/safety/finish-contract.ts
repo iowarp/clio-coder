@@ -386,7 +386,12 @@ function validationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
 	return candidate;
 }
 
-function typedValidationSummary(toolName: string, payload: Record<string, unknown>): string | null {
+/**
+ * The canonical command a typed validation tool call stands for, or null when
+ * the call is not a validation. Exported because run-effects grounds a mutation
+ * report's claimed validations against the same notion this gate uses.
+ */
+export function typedValidationSummary(toolName: string, payload: Record<string, unknown>): string | null {
 	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
 	if (toolName === "verify") {
 		const check = typeof args?.check === "string" ? args.check.trim() : "";
