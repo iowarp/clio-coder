@@ -160,6 +160,18 @@ export interface FleetContractListing {
 	source: FleetContractSource;
 	contract: FleetContract | null;
 	error: string | null;
+	/**
+	 * The command ids a well-formed contract binds when the repo declares no
+	 * registry at all, and null in every other case.
+	 *
+	 * This is the difference between a contract that is wrong and one this repo
+	 * has not finished configuring. Two of the three shipped builtins bind code
+	 * steps, so a fresh checkout listed them as `invalid` beside an error that
+	 * named a file and no way to produce it. They stay unrunnable either way
+	 * (`contract` is null and `error` is set, so nothing can plan one by
+	 * accident), but an operator can tell which of the two problems they have.
+	 */
+	needsCommands: ReadonlyArray<string> | null;
 }
 
 const FleetScopeSchema = Type.Union([Type.Literal("readonly"), Type.Literal("workspace")]);
@@ -629,6 +641,31 @@ export function fleetCodeSteps(contract: FleetContract): Array<{ id: string; com
 	return steps;
 }
 
+/** Where a repo declares what its fleet command ids run, relative to its root. */
+export const FLEET_COMMANDS_REPO_PATH = ".clio/fleets/commands.yaml";
+
+/** How to produce that file, for the surfaces that report it missing by name. */
+export const FLEET_COMMANDS_REMEDY =
+	"declare each id there under `commands:` with an `argv` list; `clio docs fleet_dispatch` has the schema";
+
+/**
+ * A well-formed contract binding code steps in a repo that declares no command
+ * registry. Separate from every other validation failure because it is the one
+ * an operator fixes by writing a file rather than by correcting the contract,
+ * and because two of the three shipped builtins land here on a fresh checkout.
+ */
+export class FleetCommandRegistryMissingError extends Error {
+	constructor(
+		readonly contractPath: string,
+		readonly commands: ReadonlyArray<string>,
+	) {
+		super(
+			`fleet contract ${contractPath}: code steps require a command registry at ${FLEET_COMMANDS_REPO_PATH} declaring ${commands.join(", ")}`,
+		);
+		this.name = "FleetCommandRegistryMissingError";
+	}
+}
+
 /**
  * Bind every code step to a registered command. A contract that names a
  * command the repo has not declared is invalid, and so is one that declares
@@ -640,9 +677,7 @@ export function validateFleetCommands(contract: FleetContract, registry: FleetCo
 	const codeSteps = fleetCodeSteps(contract);
 	if (codeSteps.length === 0) return;
 	if (registry === null) {
-		throw new Error(
-			`fleet contract ${contract.path}: code steps require a command registry at .clio/fleets/commands.yaml`,
-		);
+		throw new FleetCommandRegistryMissingError(contract.path, [...new Set(codeSteps.map((step) => step.command))].sort());
 	}
 	for (const step of codeSteps) {
 		if (!registry.commands.has(step.command)) {
@@ -720,7 +755,7 @@ export function listFleetContracts(cwd: string): FleetContractListing[] {
 				const contract = parseFleetContract(readFileSync(path, "utf8"), path);
 				if (registryError !== null && fleetCodeSteps(contract).length > 0) throw new Error(registryError);
 				validateFleetCommands(contract, registry);
-				listings.set(name, { name, path, source, contract, error: null });
+				listings.set(name, { name, path, source, contract, error: null, needsCommands: null });
 			} catch (err) {
 				listings.set(name, {
 					name,
@@ -728,6 +763,10 @@ export function listFleetContracts(cwd: string): FleetContractListing[] {
 					source,
 					contract: null,
 					error: err instanceof Error ? err.message : String(err),
+					// A registry this repo never wrote is unfinished setup. A registry
+					// that exists and does not parse, or one missing an id the contract
+					// names, is a real error and stays one.
+					needsCommands: err instanceof FleetCommandRegistryMissingError ? err.commands : null,
 				});
 			}
 		}

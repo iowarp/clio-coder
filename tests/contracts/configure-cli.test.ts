@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { after, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import { validateSettings } from "../../src/core/config.js";
@@ -57,4 +57,92 @@ describe("contracts/configure-cli non-interactive gating", () => {
 		);
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 	});
+});
+
+/**
+ * `clio configure --list` and `clio auth list` render the same runtime registry
+ * through two predicates: everything registered, and the subset whose
+ * credential Clio owns. Both screens read as "the runtimes you can connect", so
+ * the eight rows only one of them showed looked like a disagreement about what
+ * exists. The subset is correct and stays; what each screen owes the reader is
+ * the name of the other one.
+ */
+describe("contracts/configure-cli runtime inventories agree", () => {
+	const scratch = makeScratchHome("clio-runtime-lists-");
+	after(() => scratch.cleanup());
+
+	/** Runtime ids in listing order, from either table's `<id> ... targets=N` rows. */
+	function listedIds(stdout: string): string[] {
+		return stdout
+			.split("\n")
+			.map((line) => /^ {2}(\S+)\s+.*targets=\d+\s*$/.exec(line)?.[1])
+			.filter((id): id is string => id !== undefined);
+	}
+
+	/** The auth column `configure --list` prints for each runtime id. */
+	function authByRuntime(stdout: string): Map<string, string> {
+		const rows = new Map<string, string>();
+		for (const line of stdout.split("\n")) {
+			const match = /^ {2}(\S+)\s+(\S+)\s+targets=\d+\s*$/.exec(line);
+			if (match?.[1] !== undefined && match[2] !== undefined) rows.set(match[1], match[2]);
+		}
+		return rows;
+	}
+
+	it("the connectable list is an ordered subset of the full list, and each names the other", async () => {
+		const full = await runCli(["configure", "--list"], { env: scratch.env });
+		const connectable = await runCli(["auth", "list"], { env: scratch.env });
+		strictEqual(full.code, 0, `stderr=${full.stderr}`);
+		strictEqual(connectable.code, 0, `stderr=${connectable.stderr}`);
+
+		const fullIds = listedIds(full.stdout);
+		const connectableIds = listedIds(connectable.stdout);
+		ok(fullIds.length > connectableIds.length, "the full list must be the wider of the two");
+
+		// Subset: nothing is offered for login that configure does not admit exists.
+		for (const id of connectableIds) ok(fullIds.includes(id), `${id} is missing from configure --list`);
+
+		// Same order: the report read the omissions as a reordering. Both screens
+		// sort with compareProviderSupportEntries, so one is a subsequence of the other.
+		const positions = connectableIds.map((id) => fullIds.indexOf(id));
+		deepStrictEqual(
+			[...positions].sort((a, b) => a - b),
+			positions,
+			"auth list must keep configure --list's order",
+		);
+
+		// Every omission is a runtime that authenticates somewhere Clio is not.
+		const auth = authByRuntime(full.stdout);
+		const omitted = fullIds.filter((id) => !connectableIds.includes(id));
+		ok(omitted.length > 0, "this contract is vacuous if nothing is omitted");
+		for (const id of omitted) {
+			ok(
+				["claude-cli", "aws-sdk", "none"].includes(auth.get(id) ?? ""),
+				`${id} is omitted from auth list but configure calls its auth '${auth.get(id)}'`,
+			);
+		}
+
+		// Each screen says which set it is and where the rest are.
+		match(connectable.stdout, /runtimes clio authenticates itself/);
+		match(connectable.stdout, /clio configure --list/);
+		match(full.stdout, /every registered runtime/);
+		match(full.stdout, /clio auth list/);
+	});
+
+	// Where a name copied off the wider list lands if the caption did not stop
+	// the user first. Refusing is right; refusing without a next step is what
+	// made the two screens feel like a contradiction.
+	for (const [runtimeId, authKind] of [
+		["claude-code", "claude-cli"],
+		["bedrock", "aws-sdk"],
+	] as const) {
+		it(`clio auth login ${runtimeId} names where that runtime authenticates instead`, async () => {
+			const result = await runCli(["auth", "login", runtimeId], { env: scratch.env, input: "" });
+			strictEqual(result.code, 1, `stdout=${result.stdout}`);
+			match(result.stderr, new RegExp(`runtime ${runtimeId} does not support interactive auth login`));
+			match(result.stderr, new RegExp(`authenticates as '${authKind}'`));
+			match(result.stderr, new RegExp(`clio auth status ${runtimeId}`));
+			match(result.stderr, /clio configure --list/);
+		});
+	}
 });

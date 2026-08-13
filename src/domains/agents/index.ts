@@ -33,8 +33,11 @@ export type {
 } from "./fleet-contract.js";
 export {
 	builtinFleetsDir,
+	FLEET_COMMANDS_REMEDY,
+	FLEET_COMMANDS_REPO_PATH,
 	FLEET_LOOP_MAX_ATTEMPTS,
 	FLEET_WRITE_BOUNDARY_VERSION,
+	FleetCommandRegistryMissingError,
 	fleetCodeSteps,
 	fleetLoopCheckStepId,
 	fleetLoopRepairStepId,
