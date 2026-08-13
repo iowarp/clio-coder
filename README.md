@@ -551,7 +551,7 @@ decoupled from IDE frontends.
 
 ## What gets recorded
 
-Every run seals a receipt. Receipt integrity is at v12 and covers normalized
+Every run seals a receipt. Receipt integrity is at v15 and covers normalized
 routing intent, the resolved route, worker attestation, priced cost, phase
 timing, tool activity, safety decisions, and result-contract conformance.
 Gate decisions are v2 artifacts that seal route correlation across agent,

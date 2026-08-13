@@ -342,8 +342,39 @@ At plan compilation, the orchestrator unrolls each loop statically into a determ
 Deterministic code steps (`kind: code`) execute known commands directly as subprocesses rather than calling an agent model.
 - Registry binding: The `command` property must reference a command ID declared in `.clio/fleets/commands.yaml`. Invocation strings are never generated from model output.
 - Execution environment: Code steps run unattended with arguments bound from the command registry, fixed working directory, closed environment allowlist (`FLEET_COMMAND_BASE_ENV` plus declared command env), bounded timeout (`timeoutMs`), byte-capped output capture (`CODE_STEP_CAPTURE_MAX_BYTES` = 1 MB log artifact, `CODE_STEP_EXCERPT_MAX_BYTES` = 8 KB excerpt), no stdin pipe, no permission prompt, and no shell interpreter.
+- Missing registry diagnostic: If a contract declares code steps but `.clio/fleets/commands.yaml` is missing in the repository, `clio fleet list` reports the fleet status as `setup` and provides the remedy: `needs .clio/fleets/commands.yaml declaring <id>; declare each id there under commands: with an argv list; clio docs fleet_dispatch has the schema`.
 - Commit message sources: A code step with `commitFrom` populates its `commitMessage` placeholder from the output of preceding agent steps.
 - Route quality: Code steps do not consume model tokens or cost estimates; their quality reports `unmeasured` rather than zero.
+
+#### Command Registry Schema (`.clio/fleets/commands.yaml`)
+
+The repository command registry binds command IDs to exact argument vectors:
+
+```yaml
+version: 1
+commands:
+  test:
+    argv: ["npm", "test"]
+    timeoutMs: 600000
+    description: "Run repository test suite"
+  lint:
+    argv: ["npm", "run", "lint"]
+    timeoutMs: 300000
+  build:
+    argv: ["npm", "run", "build"]
+    timeoutMs: 600000
+  commit:
+    argv: ["git", "commit", "-m"]
+    timeoutMs: 60000
+```
+
+Each command entry supports:
+- `argv` (required): Array of command arguments starting with the binary name (no shell strings).
+- `cwd` (optional): Repository-relative working directory (defaults to repository root).
+- `timeoutMs` (optional): Per-step execution timeout in milliseconds (defaults to 600,000 ms; bounds: 1,000 to 3,600,000 ms).
+- `env` (optional): Array of extra environment variable names to pass through on top of `FLEET_COMMAND_BASE_ENV` (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`).
+- `description` (optional): Human-readable description.
+
 
 ## Measured route selection and agent automation
 

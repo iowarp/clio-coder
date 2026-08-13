@@ -482,6 +482,10 @@ clio configure --list
 clio configure --list --all
 ```
 
+`clio configure --list` outputs every registered runtime across all categories (local, cloud, subscription, worker-only) along with its auth type and catalog status. For catalog-backed runtimes, it reports the catalog size (for example, `models=38 in pi-ai catalog`). It also includes a reference to `clio auth list` for runtimes that require authentication.
+
+When configuring a catalog-backed runtime non-interactively, `clio configure` requires the `--model` flag to specify an explicit model from the catalog; it will not silently seed a generic default model.
+
 Register non-interactively:
 
 ```bash
@@ -495,6 +499,7 @@ clio configure \
 ```
 
 Add capability overrides such as `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` only when live probes cannot infer the right values for your runtime/model.
+
 
 ## Subscription-based Targets and Runtimes
 
@@ -768,6 +773,9 @@ clio auth status [target-or-runtime]
 clio auth login [target-or-runtime] [--api-key <value>]
 clio auth logout [target-or-runtime]
 ```
+
+`clio auth list` lists the specific runtimes that Clio authenticates itself (runtimes using API keys, OAuth, AWS SDK, or Vertex ADC), alongside their authentication status and credential sources. For the complete list of all registered runtime adapters (including local and unauthenticated runtimes), see `clio configure --list`.
+
 
 Auth types come from runtime descriptors:
 

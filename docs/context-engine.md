@@ -84,6 +84,9 @@ updating handbook prose stays with `/context init`.
 
 `clio context init` is model-driven by default. The `--heuristic` flag is the sole deterministic flag for offline handbook generation. The `--propose` flag writes ignored drafts to `.clio/proposals/`, `--apply` updates from the existing handbook, and `--rewrite` generates a fresh handbook.
 
+When bootstrapping across local runtimes such as `llamacpp` where strict grammar/schema enforcement might be rejected by the endpoint, generator logic retries automatically using a bounded prompt-parser fallback. If `--rewrite` was requested but the model generation fails to produce a valid handbook rewrite, `clio context init` prints a notice and exits with code 1 rather than leaving an inconsistent state.
+
+
 ---
 
 ## Codewiki and Wiki

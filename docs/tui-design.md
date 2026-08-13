@@ -136,6 +136,13 @@ Drawn as `<key padded, dim> <value>`, where the value defaults to `muted` unless
 - Spinner, glyph, and label all use the current phase's token color.
 - Badges are separated by dim dots: `· fleet 2` (action), `· tools 1` (muted).
 
+### 4.6 Narrow Terminal Behavior
+
+All TUI overlays and cards support compact widths down to 40 columns:
+- Split overlays such as `/view` fall back to a single pane layout with `[Tab]` switching between the artifact list and details.
+- Keybinding hints, cards, and markdown detail text wrap fluidly without horizontal clipping.
+
+
 ---
 
 ## 5. State Choreography
