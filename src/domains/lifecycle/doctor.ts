@@ -1,17 +1,6 @@
-import {
-	accessSync,
-	chmodSync,
-	constants,
-	type Dirent,
-	existsSync,
-	readdirSync,
-	readFileSync,
-	type Stats,
-	statSync,
-} from "node:fs";
+import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync, type Stats, statSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-import { readSettings, validateSettings } from "../../core/config.js";
+import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
@@ -237,15 +226,12 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	findings.push(directoryFinding("state dir", dirs.state));
 	findings.push(directoryFinding("cache dir", dirs.cache));
 
-	// The settings row runs the same strict schema validation as the loader,
-	// so anything readSettings would refuse to start on shows up here with the
-	// exact key paths, read-only.
+	// The settings row runs the loader's own read: anything readSettings would
+	// refuse to start on shows up here read-only, with the exact key paths and
+	// the remedy that fits the failure. Reading it here a second time and
+	// formatting it separately is what let this row call a parse error
+	// `unreadable:` while the loader called the same file invalid YAML.
 	const settings = join(config, "settings.yaml");
-	// Both failure branches carry the same remedy because it is the only one
-	// that works. `--fix` never rewrites settings content, so pointing at it
-	// here would describe a repair that cannot happen; editing the named keys
-	// or discarding the file are the two real moves.
-	const settingsRemedy = `(edit ${settings}, or \`clio reset --config --force\` to start from defaults)`;
 	if (!existsSync(settings)) {
 		findings.push({
 			ok: false,
@@ -253,18 +239,11 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			detail: "missing (run `clio doctor --fix` or `clio configure`)",
 		});
 	} else {
-		try {
-			accessSync(settings, constants.R_OK);
-			const validation = validateSettings(parseYaml(readFileSync(settings, "utf8")));
-			if (validation.issues.length === 0) {
-				findings.push({ ok: true, name: "settings.yaml", detail: settings });
-			} else {
-				const detail = validation.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
-				findings.push({ ok: false, name: "settings.yaml", detail: `invalid: ${detail} ${settingsRemedy}` });
-			}
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			findings.push({ ok: false, name: "settings.yaml", detail: `unreadable: ${msg} ${settingsRemedy}` });
+		const validation = validateSettingsFile();
+		if (validation.issues.length === 0) {
+			findings.push({ ok: true, name: "settings.yaml", detail: settings });
+		} else {
+			findings.push({ ok: false, name: "settings.yaml", detail: formatSettingsIssues(validation.issues) });
 		}
 	}
 

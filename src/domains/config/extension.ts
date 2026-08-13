@@ -1,5 +1,5 @@
 import { BusChannels, type ConfigChangePayload } from "../../core/bus-events.js";
-import { type ClioSettings, readSettings, updateSettings } from "../../core/config.js";
+import { type ClioSettings, formatSettingsFailure, readSettings, updateSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
 import { assertAgentIdNamespace } from "./agent-namespace.js";
@@ -16,6 +16,7 @@ interface NativeAgentNamespace {
 export function createConfigBundle(context: DomainContext): DomainBundle<ConfigContract> {
 	let watcher: ConfigWatcher | null = null;
 	let snapshot: ClioSettings | null = null;
+	let reloadFailure: string | null = null;
 	const listeners = new Map<ChangeKind, Set<ChangeListener>>([
 		["hotReload", new Set()],
 		["nextTurn", new Set()],
@@ -45,6 +46,19 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 		}
 	}
 
+	/**
+	 * Publish the rejection as one operator line, on transitions only. It used
+	 * to go to `console.error` with the raw error, which inside a running TUI
+	 * printed a util.inspect dump and a dist-chunk stack trace straight over
+	 * the live frame. The renderer subscribes and shows a normal notice; `null`
+	 * clears it once a later reload succeeds.
+	 */
+	function publishReloadFailure(message: string | null): void {
+		if (reloadFailure === message) return;
+		reloadFailure = message;
+		context.bus.emit(BusChannels.ConfigReloadFailed, { message });
+	}
+
 	function onWatcherFire(): void {
 		let next: ClioSettings;
 		try {
@@ -53,16 +67,19 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 			readSettings();
 			next = readLayeredSettings(process.cwd()).settings;
 		} catch (err) {
-			console.error("[clio:config] reload rejected:", err);
+			// The rejection is the whole effect: `snapshot` is untouched, so the
+			// session keeps running on the last good settings.
+			publishReloadFailure(formatSettingsFailure(err));
 			return;
 		}
 		const prev = snapshot;
 		try {
 			assertAgentNamespace(next);
 		} catch (err) {
-			console.error("[clio:config] reload rejected:", err);
+			publishReloadFailure(formatSettingsFailure(err));
 			return;
 		}
+		publishReloadFailure(null);
 		snapshot = next;
 		if (!prev) return;
 		const diff = diffSettings(prev, next);
