@@ -4,7 +4,13 @@ import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
 import { loadSkills } from "../domains/resources/index.js";
-import { listSessionLedgerRefs, parseSessionEntries, readAuditRows } from "../domains/session/index.js";
+import {
+	type LedgerUsageCall,
+	ledgerUsageCalls,
+	listSessionLedgerRefs,
+	parseSessionEntries,
+	readAuditRows,
+} from "../domains/session/index.js";
 import { cwdHash } from "../engine/session.js";
 import { formatColumns, printError } from "./shared.js";
 
@@ -53,6 +59,84 @@ interface SessionUsage {
 	bashShapes: Map<string, number>;
 	skillActivations: Set<string>;
 	entriesInWindow: number;
+	/** Completed API calls this session recorded in the window, one per call. */
+	usageCalls: LedgerUsageCall[];
+}
+
+/** Per-call usage folded over one grouping (a model, or the whole window). */
+interface UsageTotals {
+	apiCalls: number;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	reasoningTokens: number;
+	totalTokens: number;
+	costUsd: number;
+}
+
+function emptyUsageTotals(): UsageTotals {
+	return {
+		apiCalls: 0,
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		reasoningTokens: 0,
+		totalTokens: 0,
+		costUsd: 0,
+	};
+}
+
+function addUsageCall(totals: UsageTotals, call: LedgerUsageCall): void {
+	totals.apiCalls += 1;
+	totals.input += call.input;
+	totals.output += call.output;
+	totals.cacheRead += call.cacheRead;
+	totals.cacheWrite += call.cacheWrite;
+	totals.reasoningTokens += call.reasoningTokens;
+	totals.totalTokens += call.totalTokens;
+	totals.costUsd += call.costUsd;
+}
+
+/**
+ * Both stores the report reads, and whether they are on disk at all.
+ *
+ * An absent store and an empty one are different facts with different remedies,
+ * and the report printed the same `0` for both: a machine whose session store
+ * had never been created, or had been removed, read as thirty quiet days.
+ */
+interface StorePresence {
+	sessionsPath: string;
+	sessionsPresent: boolean;
+	receiptsPath: string;
+	receiptsPresent: boolean;
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+	try {
+		return (await stat(path)).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+async function readStorePresence(stateDir: string): Promise<StorePresence> {
+	const sessionsPath = join(stateDir, "sessions");
+	const receiptsPath = join(stateDir, "receipts");
+	return {
+		sessionsPath,
+		sessionsPresent: await isDirectory(sessionsPath),
+		receiptsPath,
+		receiptsPresent: await isDirectory(receiptsPath),
+	};
+}
+
+function missingStoreNotes(presence: StorePresence): string[] {
+	const notes: string[] = [];
+	if (!presence.sessionsPresent) notes.push(`session store missing at ${presence.sessionsPath}`);
+	if (!presence.receiptsPresent) notes.push(`receipt store missing at ${presence.receiptsPath}`);
+	return notes;
 }
 
 interface Diagnostics {
@@ -140,6 +224,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		notes: [],
 	};
 
+	const presence = await readStorePresence(stateDir);
 	const repoPath = parsed.repo === undefined ? undefined : resolve(parsed.repo);
 	const repoHash = repoPath === undefined ? undefined : cwdHash(repoPath);
 	const repoRunIds = repoPath === undefined ? null : await runIdsForCwd(stateDir, repoPath, diagnostics);
@@ -226,6 +311,28 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		}
 	}
 
+	// Token and cost facts fold the same per-call usage the `/cost` overlay
+	// reseeds from, through the same session-domain function, so the report and
+	// the overlay cannot disagree about what a session spent.
+	const usageByModel = new Map<string, { providerId: string; modelId: string; totals: UsageTotals }>();
+	const usageTotals = emptyUsageTotals();
+	for (const session of sessions) {
+		for (const call of session.usageCalls) {
+			addUsageCall(usageTotals, call);
+			const key = `${call.providerId}::${call.modelId}`;
+			const entry = usageByModel.get(key) ?? {
+				providerId: call.providerId,
+				modelId: call.modelId,
+				totals: emptyUsageTotals(),
+			};
+			addUsageCall(entry.totals, call);
+			usageByModel.set(key, entry);
+		}
+	}
+	const usageRows = [...usageByModel.values()].sort(
+		(a, b) => b.totals.totalTokens - a.totals.totalTokens || a.providerId.localeCompare(b.providerId),
+	);
+
 	const approvedMemory = memoryRecords.filter((record) => record.approved && record.rejectedAt === undefined);
 	const pendingMemory = memoryRecords.filter((record) => !record.approved && record.rejectedAt === undefined);
 
@@ -296,9 +403,19 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 				`${JSON.stringify({ schema: "experimental", windowDays: parsed.days, from: windowFrom, to: windowTo, ...row })}\n`,
 			);
 		};
-		emit({ kind: "fact", fact: "sessions", value: sessions.length });
-		emit({ kind: "fact", fact: "dispatch-runs", value: receipts.length });
+		// A missing store emits its absence instead of a count, because `0` here
+		// is a measurement and there was nothing to measure.
+		if (presence.sessionsPresent) emit({ kind: "fact", fact: "sessions", value: sessions.length });
+		else emit({ kind: "fact", fact: "session-store-missing", path: presence.sessionsPath });
+		if (presence.receiptsPresent) emit({ kind: "fact", fact: "dispatch-runs", value: receipts.length });
+		else emit({ kind: "fact", fact: "receipt-store-missing", path: presence.receiptsPath });
 		emit({ kind: "fact", fact: "audit-tool-calls", value: auditToolCalls.length, blocked: auditBlocked.length });
+		if (presence.sessionsPresent) {
+			emit({ kind: "fact", fact: "tokens", ...usageTotals });
+			for (const row of usageRows) {
+				emit({ kind: "fact", fact: "model-usage", providerId: row.providerId, modelId: row.modelId, ...row.totals });
+			}
+		}
 		for (const [tool, totals] of topTools) emit({ kind: "fact", fact: "top-tool", tool, ...totals });
 		for (const [shape, count] of topShapes) {
 			emit({ kind: "fact", fact: "bash-shape", shape, count, sessions: shapeSessions.get(shape)?.size ?? 0 });
@@ -333,9 +450,48 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	);
 	out("");
 	out("facts");
-	out(`  sessions in window: ${sessions.length} (${sessionsWithSkills.size} with skill activations)`);
-	out(`  dispatch runs (receipts) in window: ${receipts.length}`);
+	// `sessions in window: 0` over a store that does not exist is a measurement
+	// of nothing reported as a measurement of zero. The two have different
+	// remedies, so the row says which one this is.
+	if (presence.sessionsPresent) {
+		out(`  sessions in window: ${sessions.length} (${sessionsWithSkills.size} with skill activations)`);
+	} else {
+		out(`  session store missing at ${presence.sessionsPath}`);
+	}
+	if (presence.receiptsPresent) {
+		out(`  dispatch runs (receipts) in window: ${receipts.length}`);
+	} else {
+		out(`  receipt store missing at ${presence.receiptsPath}`);
+	}
 	out(`  audited tool calls in window: ${auditToolCalls.length} (${auditBlocked.length} blocked/denied)`);
+	if (presence.sessionsPresent) {
+		out(
+			`  tokens in window: ${usageTotals.totalTokens} over ${usageTotals.apiCalls} model calls (input ${usageTotals.input}, output ${usageTotals.output}, cache read ${usageTotals.cacheRead}, cache write ${usageTotals.cacheWrite}, reasoning ${usageTotals.reasoningTokens})`,
+		);
+		out(`  provider-reported cost in window: $${usageTotals.costUsd.toFixed(4)}`);
+	}
+	if (usageRows.length > 0) {
+		out("");
+		out("  tokens by model (from session ledgers, provider-reported)");
+		process.stdout.write(
+			indent(
+				formatColumns([
+					["provider", "model", "calls", "input", "output", "cache read", "reasoning", "tokens", "cost"],
+					...usageRows.map((row) => [
+						row.providerId,
+						row.modelId,
+						String(row.totals.apiCalls),
+						String(row.totals.input),
+						String(row.totals.output),
+						String(row.totals.cacheRead),
+						String(row.totals.reasoningTokens),
+						String(row.totals.totalTokens),
+						`$${row.totals.costUsd.toFixed(4)}`,
+					]),
+				]),
+			),
+		);
+	}
 	if (topTools.length > 0) {
 		out("");
 		out("  top tools (from receipt toolStats)");
@@ -413,7 +569,12 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	out(`  memory records: ${approvedMemory.length} approved, ${pendingMemory.length} pending`);
 	out("");
 	out("opportunities");
-	if (opportunities.length === 0) {
+	const absentInputs = missingStoreNotes(presence);
+	if (opportunities.length === 0 && absentInputs.length > 0) {
+		// "none" is a conclusion, and a conclusion drawn from stores that are not
+		// there is one this command did not earn. Say what is missing instead.
+		out(`  not computed: the inputs are absent (${absentInputs.join("; ")})`);
+	} else if (opportunities.length === 0) {
 		out("  none: no recurring unskilled bash shapes, repeated dispatch tasks, or unmemorized failure tags in window");
 	} else {
 		for (const opportunity of opportunities) {
@@ -563,6 +724,14 @@ async function readSessions(
 			bashShapes: new Map(),
 			skillActivations: new Set(),
 			entriesInWindow: 0,
+			// modelChange rows are kept regardless of the window: they carry no
+			// usage of their own, and dropping the ones that predate the window
+			// would attribute in-window calls to the wrong target.
+			usageCalls: ledgerUsageCalls(
+				parsedEntries.entries.filter(
+					(entry) => entry.kind === "modelChange" || inWindow(entry.timestamp, windowStart, windowEnd),
+				),
+			),
 		};
 		for (const entry of parsedEntries.entries) {
 			if (!inWindow(entry.timestamp, windowStart, windowEnd)) continue;

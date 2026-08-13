@@ -23,7 +23,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveGuardrail } from "../../core/guardrails.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
-import { clioStateDir } from "../../core/xdg.js";
+import { clioStateDir, clioStatePath } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { computeReceiptFindingsSummary } from "./receipt-findings.js";
 import { withReceiptIntegrity } from "./receipt-integrity.js";
@@ -68,6 +68,22 @@ function newRunId(): string {
 
 function runsPath(): string {
 	return join(clioStateDir(), "runs.json");
+}
+
+/**
+ * True when the state root this process resolved is no longer on disk.
+ *
+ * `clio uninstall` removes the whole root while processes that hold a ledger
+ * are still running, and every writer below mkdirs its parent back: the state
+ * file lock does it before the critical section, `atomicWrite` does it again.
+ * A persist landing after the removal therefore recreated `$CLIO_STATE_DIR`
+ * with runs.json inside it, so an uninstall that reported success left a state
+ * home behind and the next `clio` start read a ledger from a home that was
+ * supposed to be gone. Reads `clioStatePath()` rather than `clioStateDir()`
+ * because the latter creates the directory it is being asked about.
+ */
+function stateRootRemoved(): boolean {
+	return !existsSync(clioStatePath());
 }
 
 function receiptPathFor(runId: string): string {
@@ -212,6 +228,10 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 					? { ...receipt, findingsSummary: computeReceiptFindingsSummary(receipt, current) }
 					: receipt;
 			const receiptWithIntegrity = withReceiptIntegrity(draft, current);
+			// The sealed receipt is still returned to the finalizer that asked for
+			// it; what it must not do is write the state root back into existence
+			// under an uninstall. receiptPath stays null because no file was made.
+			if (stateRootRemoved()) return receiptWithIntegrity;
 			atomicWrite(target, JSON.stringify(receiptWithIntegrity, null, 2));
 			runs[idx] = { ...current, receiptPath: target };
 			return receiptWithIntegrity;
@@ -225,8 +245,13 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 		},
 
 		async persist(): Promise<void> {
+			// Checked twice: before the lock because acquiring it mkdirs the state
+			// root back, and again under it because the removal can land while this
+			// call waits for a sibling process to finish its own critical section.
+			if (stateRootRemoved()) return;
 			const target = runsPath();
 			await withStateFileLock(target, () => {
+				if (stateRootRemoved()) return;
 				const diskRuns = readRuns();
 				const merged = mergeRunsById(diskRuns, runs);
 				const capped = merged.slice(0, maxRuns);

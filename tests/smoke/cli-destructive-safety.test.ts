@@ -8,7 +8,7 @@
  * kept unlinking other installations' launchers.
  */
 import { match, ok, strictEqual } from "node:assert/strict";
-import { chmodSync, existsSync, lstatSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
@@ -22,6 +22,17 @@ const CLI_ENTRY = join(REPO_ROOT, "dist", "cli", "index.js");
  * `existsSync` passes whether or not the link was removed, which is how a
  * dangling launcher survived an uninstall that reported removing it.
  */
+/** Every file under `dir`, recursively, for before/after side-effect diffs. */
+function filesUnder(dir: string): string[] {
+	const out: string[] = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const full = join(dir, entry.name);
+		if (entry.isDirectory()) out.push(...filesUnder(full));
+		else out.push(full);
+	}
+	return out;
+}
+
 function linkPresent(path: string): boolean {
 	try {
 		lstatSync(path);
@@ -70,6 +81,35 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		ok(existsSync(locked), "the path that refused to delete is still named as surviving");
 		strictEqual(existsSync(cacheMarker), false, "a later root is still attempted after an earlier one fails");
 		ok(existsSync(join(scratch.dir, "cache")), "the skeleton is rebuilt even after a partial failure");
+	});
+
+	/**
+	 * `--dry-run` is documented as a preview that changes nothing, and it
+	 * shelled out to `npm config get prefix` for the removal guidance. npm
+	 * writes a debug log into `$HOME/.npm/_logs` on every invocation, so the
+	 * preview left a file in the home directory it had just finished promising
+	 * not to touch, and one under `.npm` at that.
+	 */
+	it("writes no npm cache files when the dry-run probes the npm prefix", async () => {
+		const home = join(scratch.dir, "fake-home");
+		const npmCache = join(home, "npm-cache");
+		mkdirSync(home, { recursive: true });
+		// npm_config_cache is pinned because npm exports its own to every child of
+		// an npm script, so an unpinned run under `npm run test` sends the debug
+		// log to the developer's real ~/.npm and the assertion below would pass
+		// while the litter landed somewhere worse.
+		const env = { ...scratch.env, HOME: home, npm_config_cache: npmCache };
+		await runCli(["doctor", "--fix"], { env });
+		const before = filesUnder(home);
+
+		const result = await runCli(["uninstall", "--dry-run"], { env });
+
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		match(result.stdout, /uninstall preview complete/);
+		// The probe still has to run; only its litter is gone.
+		match(result.stdout, /npm prefix bin:/);
+		const added = filesUnder(home).filter((path) => !before.includes(path));
+		strictEqual(added.length, 0, `a side-effect-free preview wrote: ${added.join(", ")}`);
 	});
 
 	it("keeps a launcher symlink that points at a different clio installation", async () => {

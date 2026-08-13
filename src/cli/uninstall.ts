@@ -173,6 +173,12 @@ function readNpmPrefix(): string | null {
 			encoding: "utf8",
 			timeout: 5000,
 			stdio: ["ignore", "pipe", "ignore"],
+			// A read-only probe that writes. npm drops a debug log into
+			// $HOME/.npm/_logs on every invocation, so the documented
+			// side-effect-free `--dry-run` path left a file behind in the home
+			// directory it had just finished promising not to touch. `logs-max=0`
+			// keeps npm from retaining any; the notifier is off for the same reason.
+			env: { ...process.env, npm_config_logs_max: "0", npm_config_update_notifier: "false" },
 		});
 		if (result.status !== 0) return null;
 		const prefix = result.stdout.trim();

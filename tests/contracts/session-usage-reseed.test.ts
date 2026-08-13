@@ -7,8 +7,8 @@
  */
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { SessionEntry } from "../../src/domains/session/index.js";
-import { ledgerUsageCalls, reseedSessionUsageFromLedger } from "../../src/interactive/session-usage-reseed.js";
+import { ledgerUsageCalls, type SessionEntry } from "../../src/domains/session/index.js";
+import { reseedSessionUsageFromLedger } from "../../src/interactive/session-usage-reseed.js";
 
 interface Recorded {
 	providerId: string;
