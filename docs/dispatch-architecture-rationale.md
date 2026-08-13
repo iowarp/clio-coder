@@ -6,7 +6,7 @@ convention. No code moved as a result of this document. It exists so that a
 later split is argued from invariants rather than from file counts.
 
 Counts verified against the current tree: 63 TypeScript files in
-`src/domains/dispatch/`, a 137-line barrel at `src/domains/dispatch/index.ts`,
+`src/domains/dispatch/`, a 138-line barrel at `src/domains/dispatch/index.ts`,
 and one dispatch → eval import.
 
 ---

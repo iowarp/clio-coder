@@ -100,6 +100,8 @@ Supported effect kinds:
 | `block_tool` | Hard-block a tool before execution. |
 | `protect_path` | Register a protected artifact path in session state. |
 | `request_continuation` | Ask the chat loop for one bounded automatic continuation. |
+| `require_tool` | Require a specific tool for the next turn. |
+| `lock_tools` | Lock available tools to the current subset. |
 
 Declarative rules run before coded registrations. Scoped registrations match by hook and, for tool hooks, by tool name. Hook failures emit diagnostics and later hooks still run.
 

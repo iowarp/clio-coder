@@ -156,8 +156,8 @@ The base provenance sets, steering, routing, quality, worker identity, and resul
 | `safety.toolTelemetry.ingestionErrors` | `number` | Current dispatch receipts | Malformed or lost frames, event-fold/source errors, and drain timeouts that make otherwise mediated telemetry incomplete | experimental |
 | `safety.toolTelemetry.unfinished` | `{ tool, count }[]` | Current dispatch receipts | Tool starts that had no matching finish when the receipt sealed | experimental |
 | `safety.toolTelemetry.workspaceMutationPossible` | `boolean` | Current dispatch receipts | Whether incomplete or unavailable telemetry could conceal a shared-workspace mutation; retry admission fails closed when true | experimental |
-| `autonomyEnforcement.grade` | `string` | Always in v0.2.9 | The autonomy grade level enforced for the run | experimental |
-| `autonomyEnforcement.autonomy` | `number` | Always in v0.2.9 | The exact numeric autonomy dial value | experimental |
+| `autonomyEnforcement.grade` | `string` | Always in v0.3.0 | The autonomy grade level enforced for the run | experimental |
+| `autonomyEnforcement.autonomy` | `string` | Always in v0.3.0 | The effective autonomy level name (e.g. auto-edit, suggest, read-only, full-auto) | experimental |
 | `autonomyEnforcement.externalMode` | `string` | When running external worker | The execution mode of the external worker runtime | experimental |
 | `autonomyEnforcement.dangerousBypass` | `boolean` | When running external worker | Whether a safety bypass was explicitly activated | experimental |
 

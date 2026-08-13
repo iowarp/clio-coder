@@ -24,23 +24,62 @@ src/
 └── utils/           # small support utilities
 ```
 
-Important domain directories include:
+Registered domain modules include:
 
 | Domain | Primary source | Public surface |
 | --- | --- | --- |
 | agents | `src/domains/agents/**` | Built-in, user, and project agent recipes. |
-| components | `src/domains/components/**` | Component snapshots and diffs. |
+| components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
 | config | `src/domains/config/**`, `src/core/config.ts` | `settings.yaml`, keybindings, hot reload. |
-| context/resources | `src/domains/context/**`, `src/domains/resources/**` | `CLIO.md`, prompts, skills, extension roots. |
-| dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, receipts, worker spawning. |
-| eval/evidence/memory | `src/domains/eval/**`, `src/domains/evidence/**`, `src/domains/memory/**` | Local evals, evidence corpora, approved memory. |
-| providers | `src/domains/providers/**` | Target-first runtime registry, model probing, auth. |
-| prompts | `src/domains/prompts/**` | Prompt fragments, prompt envelope, hashes. |
-| safety | `src/domains/safety/**` | Safety policy, path policy, project policy, damage control. |
-| session | `src/domains/session/**` | JSONL sessions, resume/fork/tree/compaction. |
-| extensions/share | `src/domains/extensions/**`, `src/domains/share/**` | Extension packages and portable share archives. |
+| context | `src/domains/context/**` | `CLIO.md`, codewiki indexer, repository context. |
+| dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, receipts, worker spawning, route policies. |
+| eval | `src/domains/eval/**` | Local evaluation harness, suites, JUnit/SWE-bench reports. |
+| evidence | `src/domains/evidence/**` | Forensic evidence bundles, failure attribution. |
+| evolution | `src/domains/evolution/**` | Authority-tiered self-edit manifests and gates. |
+| extensions | `src/domains/extensions/**` | Extension discovery, packaging, and lifecycle. |
+| lifecycle | `src/domains/lifecycle/**` | Doctor diagnostics, upgrade mechanics, uninstallation. |
+| memory | `src/domains/memory/**` | Approved long-term memory, proactive task intervention. |
+| middleware | `src/domains/middleware/**` | Declarative and programmatic lifecycle hooks and budgets. |
+| observability | `src/domains/observability/**` | SQLite trace store, metrics projections, live telemetry. |
+| prompts | `src/domains/prompts/**` | Prompt fragments, system prompt envelope, template hashing. |
+| providers | `src/domains/providers/**` | Target-first runtime registry, model probing, credentials. |
+| resources | `src/domains/resources/**` | Skills loader, marketplace synchronization, prompts loader. |
+| safety | `src/domains/safety/**` | 10-step policy engine, path policy, zero-access rails, audit. |
+| scheduling | `src/domains/scheduling/**` | Budget ceilings, node cluster states, batch capacity checks. |
+| session | `src/domains/session/**` | Append-only JSONL transcripts, tree navigation, compaction. |
+| share | `src/domains/share/**` | Portable workspace and resource archive export/import. |
 
 ---
+
+## Session Routing vs. Persisted Settings
+
+Clio maintains an explicit distinction between persisted user settings (`settings.yaml`) and session-local routing state (`src/core/session-routing.ts`).
+
+1. **Decoupled Overlays**: Turn-level selections (such as active target, model override, thinking level, and scoped models cycled via Alt+J / Alt+K) apply dynamically through `applySessionRouting` without mutating `settings.yaml`.
+2. **Lifecycle Flow**:
+   - `seedSessionRouting`: Seeds runtime fields from configuration at startup.
+   - `applyRoutingPatch`: Applies surgical routing mutations (such as changing active model or target in the TUI).
+   - `diffRouting`: Detects when an active session's routing diverges from `settings.yaml`.
+   - `routingChangeNotices`: Generates structured notifications when external edits modify `settings.yaml` during an active session, allowing graceful reconciliation.
+   - `restoreRoutingFields`: Restores persisted defaults when resetting session overlays.
+
+---
+
+## Workspace Enumeration and Language Classification
+
+Source: `src/core/workspace-files.ts`, `src/core/c-header-language.ts`.
+
+1. **Filesystem Walker Invariants**:
+   Fallback workspace file enumeration enforces strict safety caps to prevent runaway memory usage or hangs on massive trees:
+   - `maxVisitedEntries`: 100,000 entries
+   - `maxDepth`: 64 directory levels
+   - `maxPathBytes`: 64 MiB total path storage
+   - `maxDurationMs`: 5,000 ms timeout
+2. **C/C++ Header Classification**:
+   Header files (`.h`, `.hpp`, `.hxx`, `.hh`) are classified deterministically through a 3-tier inspection pipeline:
+   - Tier 1: Sibling source matches (for example matching `.cpp` or `.c` with the same base name).
+   - Tier 2: Distinctive `#include` directives (standard C++ headers vs standard C headers).
+   - Tier 3: Language-exclusive tokens (`template<`, `namespace `, `class `, `nullptr`, `constexpr`).
 
 ## Boundary invariants
 

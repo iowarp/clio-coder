@@ -127,6 +127,27 @@ Bash `cwd` is resolved under the workspace root. Escaping the workspace is block
 
 ---
 
+---
+
+## Policy Engine Evaluation Order
+
+Source: `src/domains/safety/policy-engine.ts`.
+
+Every tool call entering the safety engine passes through a strict 10-step evaluation sequence. Safety-net blocks are final; autonomy mapping applies only after the safety net passes:
+
+1. **Damage-Control Scan**: Evaluates compiled rule packs (`damage-control-rules.yaml`) against command strings, paths, and tool arguments.
+2. **Write-Root Containment**: Verifies that mutations remain within configured write boundaries (`evaluateWriteRoots`).
+3. **Hard Blocks**: Enforces unconditional blocks against destructive actions (such as `git_destructive` operations and zero-access credentials).
+4. **Invalid Project Policy Fail-Closed**: If `.clio/safety.yaml` contains parsing or schema errors, execution tools fail closed.
+5. **Path Policy Enforcement**: Evaluates `zeroAccessPaths`, `readOnlyPaths`, and `noDeletePaths`.
+6. **Bash Zero-Access Protocol**: Rejects shell commands attempting to read, exfiltrate, or redirect from protected credential files. A safe presence-check exception (`grep -sq "^NAME=" <file>`) is permitted for environment probing without exposing secrets.
+7. **Ask Rails**: Evaluates rules requiring confirmation (such as project `requireConfirmation` or unanalyzable command substitutions `$(...)`).
+8. **System Modify Checks**: Assesses operating-system level modification commands.
+9. **Bash Allowlist Recognition**: Checks whether the command matches the known safe command allowlist.
+10. **Default Allow**: If no prior rule intervened, the action proceeds to autonomy-level evaluation.
+
+---
+
 ## Project safety policy
 
 Clio searches upward from the current working directory for `.clio/safety.yaml`. The file is parsed once into a loaded policy. Invalid policy files fail closed for execution tools.
@@ -323,7 +344,11 @@ The assessor decision order is:
 
 ## Receipts and evidence
 
-Safety decisions feed receipts, audit rows, and evidence artifacts. Audit rows flush asynchronously from concurrent producers and are not time-ordered within a `.jsonl` file; consumers must sort rows by `ts` before reasoning about sequence (the evidence builder already does). The interactive [`/view`](observability.md) surface can inspect and verify receipt artifacts without mutating them. When reporting a problem, include redacted receipts or evidence IDs when possible so maintainers can see:
+Safety decisions feed receipts, audit rows, and evidence artifacts.
+
+- **Audit Ledger Durability (`src/domains/safety/audit.ts`)**: Audit entries are appended to `<stateDir>/audit/audit-<date>.jsonl` synchronously, backed by a debounced 5-second `fsyncSync` flush to guarantee on-disk durability without stalling interactive turns. Write errors are logged to stderr without throwing, ensuring auditing never crashes the main execution loop.
+- **Timestamp Ordering**: Audit rows flush asynchronously from concurrent producers and are not strictly time-ordered within a raw `.jsonl` file; consumers must sort rows by `ts` before reasoning about sequence (the evidence builder does this automatically).
+- **Inspection**: The interactive [`/view`](observability.md) surface can inspect and verify receipt artifacts without mutating them. When reporting a problem, include redacted receipts or evidence IDs when possible so maintainers can see:
 
 - mode and requested action class;
 - policy source and rule IDs;
