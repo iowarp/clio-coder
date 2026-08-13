@@ -27,7 +27,7 @@ import {
 	patchToolChoiceNonePayload,
 } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
-import type { resolveAgentTools } from "../tools/agent-tools.js";
+import type { resolveAgentTools, ToolOutcome, ToolTelemetry } from "../tools/agent-tools.js";
 import {
 	type AssistantCallTiming,
 	type BackendCacheVerdict,
@@ -84,10 +84,35 @@ export interface TurnRuntime {
 	ensureRuntime(): AgentRuntime | null;
 	ensureLiveCapabilitiesForSelectedModel(): Promise<void>;
 	cleanupSessionResources(sessionId: string | undefined): void;
+	/**
+	 * Install on the session tool surface so admission verdicts reach the panel.
+	 * The engine's `tool_execution_end` carries only `isError` and result text,
+	 * which cannot tell a permission block from a command that ran and exited
+	 * nonzero; this stream carries the registry's actual verdict.
+	 */
+	toolTelemetry: ToolTelemetry;
 }
 
 export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const { state, context, persistence, middleware, middlewareToolChoice } = deps;
+
+	/**
+	 * Authoritative admission outcome per call, keyed by the engine's
+	 * `toolCallId`, recorded as the registry settles and consumed when the
+	 * matching `tool_execution_end` arrives. Entries are deleted on consumption;
+	 * a call whose end event never arrives leaves at most one stale entry, which
+	 * the next run with the same id would overwrite.
+	 */
+	const toolOutcomes = new Map<string, { outcome: ToolOutcome; reason?: string }>();
+	const toolTelemetry: ToolTelemetry = {
+		onFinish(event) {
+			if (event.toolCallId === undefined) return;
+			toolOutcomes.set(
+				event.toolCallId,
+				event.reason === undefined ? { outcome: event.outcome } : { outcome: event.outcome, reason: event.reason },
+			);
+		},
+	};
 
 	/**
 	 * Resolution warnings the operator has already been shown, keyed by
@@ -438,10 +463,23 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const startedAt = deps.toolStartTimes.get(event.toolCallId);
 				deps.toolStartTimes.delete(event.toolCallId);
 				const durationMs = startedAt === undefined ? undefined : Math.max(0, eventAt - startedAt);
+				// Carry the registry's verdict alongside the engine's result. The
+				// panel classifies settlement from `outcome`; without it the only
+				// available signal is result text, and grepping that text for
+				// "blocked"/"cancelled" labels every failing `node --test` run
+				// (which prints `cancelled 0`) a permission block.
+				const admission = toolOutcomes.get(event.toolCallId);
+				toolOutcomes.delete(event.toolCallId);
 				enrichedEvent = {
 					...event,
 					...(durationMs !== undefined ? { durationMs } : {}),
 					resultSummary: toolResultSummary(event.result),
+					...(admission === undefined
+						? {}
+						: {
+								outcome: admission.outcome,
+								...(admission.reason === undefined ? {} : { blockReason: admission.reason }),
+							}),
 				} as typeof event;
 			} else if (event.type === "agent_end") {
 				// The engine's failure path (an abort or a thrown provider error)
@@ -641,5 +679,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		ensureRuntime,
 		ensureLiveCapabilitiesForSelectedModel,
 		cleanupSessionResources,
+		toolTelemetry,
 	};
 }

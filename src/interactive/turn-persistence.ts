@@ -53,6 +53,8 @@ export interface TurnPersistence {
 		event: Extract<AgentEvent, { type: "tool_execution_end" }> & {
 			durationMs?: number;
 			resultSummary?: Record<string, unknown>;
+			outcome?: string;
+			blockReason?: string;
 		},
 	): void;
 	/** Synthesized terminal row for a turn ended by a terminating tool result. */
@@ -160,6 +162,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				resultSummary: event.resultSummary ?? toolResultSummary(event.result),
 			};
 			if (event.durationMs !== undefined) payload.durationMs = event.durationMs;
+			// The admission verdict, so a resumed session and an exported
+			// transcript label a blocked call the same way the live panel did
+			// instead of re-deriving it from result text.
+			if (event.outcome !== undefined) payload.outcome = event.outcome;
+			if (event.blockReason !== undefined) payload.blockReason = event.blockReason;
 			const turn = deps.session.append({
 				kind: "tool_result",
 				parentId: state.lastTurnId,
