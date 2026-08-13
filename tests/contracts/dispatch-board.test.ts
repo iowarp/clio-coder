@@ -243,9 +243,11 @@ describe("dispatch board card", () => {
 		const estimated = stripSgr(renderDispatchCard(makeRow({ costUsd: 0.5, costProvenance: "estimated" }), 76).join("\n"));
 		ok(estimated.includes("cost ~$0.50 est"), estimated);
 
+		// A card owns its cost column and cannot drop the field the way the footer
+		// and /cost do, so it names the absence instead of doubling the word.
 		const { costProvenance: _legacyProvenance, ...legacyRow } = makeRow({ costUsd: 0 });
 		const unknown = stripSgr(renderDispatchCard(legacyRow, 76).join("\n"));
-		ok(unknown.includes("cost cost unknown"), unknown);
+		ok(unknown.includes("cost not measured"), unknown);
 
 		const narrow = stripSgr(renderDispatchCard(makeRow({ costUsd: 0.5, costProvenance: "estimated" }), 34).join("\n"));
 		ok(!narrow.includes("~$0.50") || narrow.includes("~$0.50 est"), narrow);

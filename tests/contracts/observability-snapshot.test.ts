@@ -119,11 +119,14 @@ describe("contracts/observability-snapshot wiring", { concurrency: false }, () =
 
 		const snap = bundle.contract.snapshot();
 		strictEqual(snap.session.costUsd, 0.25);
+		// `calls` is what separates a measured zero from nothing measured yet, so a
+		// folded dispatch has to move it off zero along with the amount.
 		deepStrictEqual(snap.session.cost, {
 			knownUsd: 0.25,
 			hasEstimated: true,
 			hasUnknown: false,
 			allKnownFree: false,
+			calls: 1,
 		});
 		strictEqual(snap.session.tokens.totalTokens, 800);
 		strictEqual(snap.session.tokens.input, 600);

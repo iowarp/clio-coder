@@ -44,6 +44,56 @@ console.log(path.resolve(process.argv[2]));
 NODE
 }
 
+# Prints the path with every symlink resolved, or nothing when it cannot be
+# resolved. `clio uninstall` treats an unresolvable path as unresolved rather
+# than as a match, because a dangling link is still something the operator will
+# hit and still not this installation.
+resolve_path() {
+	node - "$1" <<'NODE'
+const fs = require("node:fs");
+try {
+	console.log(fs.realpathSync(process.argv[2]));
+} catch {
+	process.exit(1);
+}
+NODE
+}
+
+# The `clio` a shell will find, when that is not the launcher this install is
+# about. Mirrors `otherClioOnPath` in src/cli/uninstall.ts: same comparison,
+# same wording, so the install and the uninstall describe one PATH the same way.
+# That function is TypeScript and this script runs before there is a dist to
+# import, so the shape is repeated here rather than shared.
+#
+# Both sides are resolved before they are compared. Comparing the raw paths
+# reported a second installation whenever the name resolved through a link into
+# the very launcher this run had just written.
+other_clio_on_path() {
+	local path_clio="$1" local_link="$2" resolved_path_clio resolved_local_link
+	[[ -z "$path_clio" ]] && return 1
+	[[ "$path_clio" == "$local_link" ]] && return 1
+	resolved_path_clio="$(resolve_path "$path_clio" 2>/dev/null || true)"
+	resolved_local_link="$(resolve_path "$local_link" 2>/dev/null || true)"
+	if [[ -n "$resolved_path_clio" && "$resolved_path_clio" == "$resolved_local_link" ]]; then
+		return 1
+	fi
+	printf '%s\n' "$path_clio"
+}
+
+# Being on PATH is not enough: an earlier PATH entry (an old npm-global clio,
+# say) shadows the freshly linked launcher, and a bare `clio` then answers for
+# the other installation. The README promises this warning.
+warn_about_shadowing_clio() {
+	local path_clio survivor
+	path_clio="$(command -v clio 2>/dev/null || true)"
+	survivor="$(other_clio_on_path "$path_clio" "$link_path" || true)"
+	[[ -z "$survivor" ]] && return 0
+	warn "another clio is on your PATH at $survivor"
+	warn "it shadows the launcher this install links at $link_path"
+	warn "check it with: $survivor --version"
+	warn "remove the shadowing install or reorder PATH, then run: hash -r"
+}
+
 path_is_under_repo() {
 	local candidate normalized_repo
 	candidate="$(normalize_path "$1")"
@@ -218,17 +268,16 @@ fi
 
 if path_contains_dir "$bin_dir"; then
 	ok "$bin_dir is on PATH"
-	# Being on PATH is not enough: an earlier PATH entry (for example an old
-	# npm-global clio) can shadow the freshly linked binary.
-	resolved_clio="$(command -v clio 2>/dev/null || true)"
-	if [[ $dry_run -eq 0 && -n "$resolved_clio" && "$resolved_clio" != "$link_path" ]]; then
-		warn "'clio' resolves to $resolved_clio, which shadows $link_path"
-		warn "remove the shadowing install or reorder PATH, then run: hash -r"
-	fi
 else
 	warn "$bin_dir is not on PATH"
 	printf '[install-local] add it for this shell with:\n  export PATH="%s:$PATH"\n' "$bin_dir" >&2
 fi
+
+# Outside that branch on purpose. A bin dir that is not on PATH is the case
+# where some *other* clio is the only one a bare name can reach, and the old
+# check skipped it there. A dry run reports it too: the divergence is a fact
+# about the machine, not about whether this run wrote anything.
+warn_about_shadowing_clio
 
 if [[ $dry_run -eq 1 ]]; then
 	log "would run: node $cli_target doctor --fix"

@@ -11,7 +11,7 @@ import {
 	type RunReceipt,
 	type RunReceiptVerification,
 } from "../domains/dispatch/types.js";
-import { costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
+import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import type { DispatchRunEventRegistry } from "./dispatch.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
@@ -108,7 +108,7 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 		`state: ${run.status}${run.outcome ? ` outcome=${run.outcome}` : ""}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 		`target=${run.targetId} model=${run.wireModelId} runtime=${run.runtimeKind} node=${run.node?.id ?? "local"}${reroutes}`,
 		`started=${run.startedAt} ended=${run.endedAt ?? "n/a"} exit=${run.exitCode ?? "n/a"}`,
-		`tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance))} receipt=${run.receiptPath ?? "n/a"}`,
+		`tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance)) ?? COST_NOT_MEASURED} receipt=${run.receiptPath ?? "n/a"}`,
 	];
 	if (live) {
 		lines.push(
@@ -374,7 +374,7 @@ function collectRunLine(row: CollectedRunRow): string[] {
 	const run = row.run;
 	const lines = run
 		? [
-				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance))} receipt=${run.receiptPath ?? "n/a"}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
+				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance)) ?? COST_NOT_MEASURED} receipt=${run.receiptPath ?? "n/a"}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 			]
 		: [`- ${row.runId} agent=${row.agentId} state=missing (ledger row pruned; receipt may still exist)`];
 	if (row.assignmentId !== null) {

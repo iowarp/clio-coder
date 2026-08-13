@@ -992,6 +992,53 @@ export function buildHarnessStatePill(
 	return `${mainPill}${badge}`;
 }
 
+/**
+ * Drop order for the metric strip. The chip budget and the width budget both cut
+ * from the highest rank down, so one ordering decides what an 80-column footer
+ * keeps.
+ *
+ * The session total sits alone at the top. It is measured, it does not depend on
+ * pricing, and it does not go stale between turns, which is not true of anything
+ * else on the strip. At 80 columns the budget is four chips and the per-turn
+ * detail used to spend all of it, so a session holding 9.7k measured tokens
+ * showed none of them.
+ */
+const CHIP_RANK_TOTALS = 0;
+const CHIP_RANK_DETAIL = 1;
+const CHIP_RANK_DEFERRED = 2;
+
+interface RankedChip {
+	text: string;
+	rank: number;
+}
+
+function pushChip(chips: RankedChip[], text: string | null, rank: number): void {
+	if (typeof text === "string" && text.length > 0) chips.push({ text, rank });
+}
+
+/**
+ * Cut the strip to the chip budget and then to the width, dropping the
+ * lowest-priority chip still standing each time. Within one rank the rightmost
+ * goes first, which keeps the surviving chips in the order they were built.
+ */
+function selectChips(
+	theme: ClioTheme,
+	chips: ReadonlyArray<RankedChip>,
+	chipLimit: number,
+	maxWidth: number,
+): string[] {
+	const dropOrder = chips
+		.map((chip, index) => ({ rank: chip.rank, index }))
+		.sort((a, b) => b.rank - a.rank || b.index - a.index);
+	const dropped = new Set<number>();
+	const surviving = (): string[] => chips.filter((_, index) => !dropped.has(index)).map((chip) => chip.text);
+	for (const { index } of dropOrder) {
+		if (chips.length - dropped.size <= chipLimit && visibleWidth(joinChips(theme, surviving())) <= maxWidth) break;
+		dropped.add(index);
+	}
+	return surviving();
+}
+
 export function buildMetricStrip(
 	theme: ClioTheme,
 	status: AgentStatus,
@@ -1072,18 +1119,19 @@ export function buildMetricStrip(
 
 	const fallbackTotal = finiteNonNegative(sessionTokens?.input) + finiteNonNegative(sessionTokens?.output);
 	const cumulativeTotal = finiteNonNegative(sessionTokens?.totalTokens) || fallbackTotal;
-	candidates.push(cumulativeTotal > 0 ? theme.fg("muted", `Σ${formatFooterTokens(cumulativeTotal)}`) : null);
-	// Null until a call has been priced, and an absent chip is the honest
+	const totalChip = cumulativeTotal > 0 ? theme.fg("muted", `Σ${formatFooterTokens(cumulativeTotal)}`) : null;
+	// Null when nothing priced these tokens, and an absent chip is the honest
 	// rendering of that. `$0.00` on a session that had made no call was a number
-	// nothing measured. See formatCostAggregate.
+	// nothing measured, and `cost unknown` beside a real Σ read as doubt about
+	// the tokens. See formatCostAggregate.
 	const cost = formatCostAggregate(sessionCost);
-	candidates.push(cost === null ? null : theme.fg("muted", cost));
-	candidates.push(...deferred);
+	const costChip = cost === null ? null : theme.fg("muted", cost);
 
 	const chipLimit = Math.max(0, Math.floor(maxChipsCount));
-	const activeChips = candidates
-		.filter((chip): chip is string => typeof chip === "string" && chip.length > 0)
-		.slice(0, chipLimit);
-	while (activeChips.length > 0 && visibleWidth(joinChips(theme, activeChips)) > safeMaxWidth) activeChips.pop();
-	return joinChips(theme, activeChips);
+	const chips: RankedChip[] = [];
+	for (const chip of candidates) pushChip(chips, chip, CHIP_RANK_DETAIL);
+	pushChip(chips, totalChip, CHIP_RANK_TOTALS);
+	pushChip(chips, costChip, CHIP_RANK_DETAIL);
+	for (const chip of deferred) pushChip(chips, chip, CHIP_RANK_DEFERRED);
+	return joinChips(theme, selectChips(theme, chips, chipLimit, safeMaxWidth));
 }

@@ -63,6 +63,8 @@ export interface OverlayLifecycleRuntimeDeps {
 	io: import("./slash-commands.js").RunIo;
 	readStructuredEntries: (sessionId: string) => import("../domains/session/index.js").SessionEntry[];
 	announceTaskMemorySeedOffer: () => void;
+	/** Rescopes the footer's last-turn line when a session overlay changes the branch. */
+	setLastTurnSummary?: (summary: import("./status/index.js").TurnSummary | null) => void;
 	keybindings: ReturnType<typeof import("./keybinding-manager.js").createKeybindingManager>;
 	editor: Pick<import("./clio-editor.js").ClioEditor, "getText" | "setText">;
 	getSlashContext: () => import("./slash-commands.js").SlashCommandContext;
@@ -143,6 +145,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		io,
 		readStructuredEntries,
 		announceTaskMemorySeedOffer,
+		setLastTurnSummary,
 		keybindings,
 		editor,
 		showOverlayFrame = showClioOverlayFrame,
@@ -303,6 +306,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.onForkSession ? { onForkSession: deps.app.onForkSession } : {}),
 		announceTaskMemorySeedOffer,
 		sessionUsage: deps.app.observability,
+		...(setLastTurnSummary ? { setLastTurnSummary } : {}),
 		refreshFooter: () => footer.refresh(),
 		requestRender: () => tui.requestRender(),
 		stderr: (text) => io.stderr(text),

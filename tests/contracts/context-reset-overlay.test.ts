@@ -112,7 +112,7 @@ describe("contracts/context-reset overlay", () => {
 			ok(clean.some((line) => line.includes("Delete CLIO.md")));
 			ok(clean.some((line) => line.includes("Cancel")));
 			strictEqual(clean.filter((line) => line.includes("[Enter] select")).length, 1);
-			strictEqual(clean.filter((line) => line.includes("[Esc] cancel")).length, 1);
+			strictEqual(clean.filter((line) => line.includes("[Esc] close")).length, 1);
 		}
 	});
 });

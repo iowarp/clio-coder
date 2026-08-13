@@ -132,9 +132,10 @@ function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>): st
 function summaryBlock(totalCost: CostAggregate, totalTokens: number, rows: ReadonlyArray<CostRow>): string[] {
 	const totals = sumRows(rows);
 	const resolvedTotal = totalTokens > 0 ? totalTokens : totals.tokens;
-	// No priced call, no cost row. The overlay used to print `cost $0.00` above
-	// its own "no token usage recorded" line, which is the same number the footer
-	// was inventing at the same moment. See formatCostAggregate.
+	// No priced call, no cost row: neither the `cost $0.00` the overlay used to
+	// print above its own "no token usage recorded" line, nor the `cost cost
+	// unknown` it printed for a target that reports no pricing. The token rows
+	// below are measured and stay either way. See formatCostAggregate.
 	const cost = formatCostAggregate(totalCost);
 	return kvBlock([
 		["turns", formatTokens(totals.runs)],
@@ -150,8 +151,9 @@ function summaryBlock(totalCost: CostAggregate, totalTokens: number, rows: Reado
 }
 
 function modelBlock(row: CostRow): string[] {
-	// A row exists because calls were folded into it, so its cost is measured.
-	// The fallback keeps the block honest if that ever stops being true.
+	// A row exists because calls were folded into it, so its tokens are measured.
+	// Its cost is a separate question: a target that reports no pricing leaves the
+	// block with token rows and no cost row.
 	const cost = formatCostAggregate(row.cost);
 	return kvBlock([
 		["turns", formatTokens(row.runs)],

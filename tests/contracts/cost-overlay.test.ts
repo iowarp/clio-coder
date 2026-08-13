@@ -93,7 +93,10 @@ describe("cost overlay", () => {
 		);
 		ok(body.includes("~$0.42 est"), body);
 		ok(body.includes("$0.42 +?"), body);
-		ok(body.includes("cost unknown"), body);
+		// The unpriced model's block keeps its token rows and carries no cost row:
+		// the overlay used to render the doubled `cost cost unknown` here.
+		ok(!body.includes("cost unknown"), body);
+		ok(body.includes("processed"), body);
 		ok(!body.includes("$0.00 local"), body);
 	});
 

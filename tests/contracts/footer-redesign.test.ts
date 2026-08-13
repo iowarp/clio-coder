@@ -376,7 +376,6 @@ describe("IT3: Metric strip", () => {
 			[costAggregateForAmount(0, "known_free"), "$0.00 local"],
 			[costAggregateForAmount(0.42, "estimated"), "~$0.42 est"],
 			[{ ...costAggregateForAmount(0.42, "known"), hasUnknown: true }, "$0.42 +?"],
-			[costAggregateForAmount(0, "unknown"), "cost unknown"],
 		] as const;
 		for (const [cost, expected] of costs) {
 			const full = strip(buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, null, cost, null, 100));

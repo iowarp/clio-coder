@@ -68,24 +68,29 @@ function formatUsdAmount(value: number): string {
 }
 
 /**
- * The one derivation every cost surface renders. Null means nothing has been
- * priced, and a null must be shown as the absence of a cost field rather than
- * as any number: `$0.00` before the first call was a measurement that had not
- * happened, and it sat beside a `/cost` overlay saying no usage was recorded.
+ * The one derivation every cost surface renders. Null means there is no cost
+ * claim to make, and a null must be shown as the absence of a cost field rather
+ * than as any number: `$0.00` before the first call was a measurement that had
+ * not happened, and it sat beside a `/cost` overlay saying no usage was recorded.
  *
- * Once there is something to say, both surfaces say the same words: `cost
- * unknown` when the provider priced nothing, the amount when it did.
+ * Two different situations reduce to null. Nothing priced yet is one. A target
+ * that reports no pricing at all is the other: those calls were made and their
+ * tokens were measured, but nobody put a number on them, so the honest cost
+ * field is no field. The words `cost unknown` were themselves a claim, and they
+ * rendered beside a Σ total that was real, which read as if the tokens were in
+ * doubt too. Usage always shows; cost shows when something priced it.
  */
 export function formatCostAggregate(cost: CostAggregate | null | undefined): string | null {
 	if (!costWasMeasured(cost)) return null;
 	if (cost.allKnownFree) return "$0.00 local";
-	if (cost.hasUnknown) return cost.knownUsd > 0 ? `${formatUsdAmount(cost.knownUsd)} +?` : "cost unknown";
+	// Partly priced still says what it knows, with the `+?` marking the rest.
+	if (cost.hasUnknown) return cost.knownUsd > 0 ? `${formatUsdAmount(cost.knownUsd)} +?` : null;
 	if (cost.hasEstimated) return `~${formatUsdAmount(cost.knownUsd)} est`;
 	return formatUsdAmount(cost.knownUsd);
 }
 
 /**
- * What a fixed-width surface says when nothing has been priced. The footer and
+ * What a fixed-width surface says when there is no cost claim. The footer and
  * `/cost` drop their cost field instead; a table cell that owns a column cannot,
  * so it says the same thing in words rather than inventing `$0.00`.
  */

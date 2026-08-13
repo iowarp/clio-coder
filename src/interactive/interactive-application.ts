@@ -547,6 +547,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		io,
 		readStructuredEntries,
 		announceTaskMemorySeedOffer,
+		setLastTurnSummary: (summary) => presentation.setLastTurnSummary(summary),
 		keybindings,
 		editor,
 		getSlashContext: () => slashRuntime.context,
