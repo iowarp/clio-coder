@@ -58,7 +58,27 @@ describe("clio doctor honesty about its own roots", { concurrency: false }, () =
 		strictEqual(result.code, 1);
 		const row = rowFor(result.stdout, "state dir");
 		ok(!row.startsWith("OK"), `state dir must not report OK: ${row}`);
-		match(row, /not readable, writable, and traversable/u);
+		match(row, /is not readable or writable or traversable/u);
+	});
+
+	// A row that says only "unusable" tells the operator it is unhappy without
+	// telling them what to change, so the permissions actually missing are named.
+	it("names which permission a root is missing rather than one string for all of them", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const cache = join(scratch.dir, "cache");
+
+		chmodSync(cache, 0o555);
+		const readOnly = await runCli(["doctor"], { env: scratch.env });
+		match(rowFor(readOnly.stdout, "cache dir"), /is not writable \(/u);
+
+		chmodSync(cache, 0o000);
+		const noAccess = await runCli(["doctor"], { env: scratch.env });
+		const noAccessRow = rowFor(noAccess.stdout, "cache dir");
+		match(noAccessRow, /is not readable or writable or traversable/u);
+		ok(
+			rowFor(readOnly.stdout, "cache dir") !== noAccessRow,
+			"a read-only root and an inaccessible one must not print the same string",
+		);
 	});
 
 	it("still prints the full report when --fix cannot finish", async () => {

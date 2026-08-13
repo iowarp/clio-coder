@@ -55,11 +55,27 @@ function directoryFinding(name: string, path: string): DoctorFinding {
 			detail: `${path} is ${describeNodeType(stats)}, not a directory (move it aside, then run \`clio doctor --fix\`)`,
 		};
 	}
-	try {
-		accessSync(path, constants.R_OK | constants.W_OK | constants.X_OK);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return { ok: false, name, detail: `${path} is not readable, writable, and traversable: ${message}` };
+	// Named one bit at a time. A single combined access() check reported the same
+	// string for a mode-555 root as for a mode-000 one, which told the operator
+	// the row was unhappy without telling them what to change.
+	const missing = (
+		[
+			["readable", constants.R_OK],
+			["writable", constants.W_OK],
+			["traversable", constants.X_OK],
+		] as const
+	)
+		.filter(([, bit]) => {
+			try {
+				accessSync(path, bit);
+				return false;
+			} catch {
+				return true;
+			}
+		})
+		.map(([label]) => label);
+	if (missing.length > 0) {
+		return { ok: false, name, detail: `${path} is not ${missing.join(" or ")} (run \`chmod u+rwx\` on it)` };
 	}
 	return { ok: true, name, detail: path };
 }
