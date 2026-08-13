@@ -10,7 +10,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
-import { type ClioToken, clioTheme, selectListTheme, settingsListTheme } from "./theme/index.js";
+import { type ClioToken, clioTheme, padAnsi, selectListTheme, settingsListTheme } from "./theme/index.js";
 
 export const IDENTITY = (text: string): string => text;
 
@@ -60,11 +60,6 @@ function clioTitle(text: string): string {
 
 export function clioError(text: string): string {
 	return clioTheme().fg("error", text);
-}
-
-function padAnsi(text: string, width: number): string {
-	const clipped = truncateToWidth(text, width, "", true);
-	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
 function brandedTopBorder(label: string, innerWidth: number): string {

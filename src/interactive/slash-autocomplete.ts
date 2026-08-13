@@ -1,5 +1,3 @@
-import { statSync } from "node:fs";
-import { delimiter, join } from "node:path";
 import type { Skill } from "../domains/resources/skills/loader.js";
 import type { MarketplaceSkill } from "../domains/resources/skills/marketplace.js";
 import {
@@ -9,6 +7,7 @@ import {
 	CombinedAutocompleteProvider,
 	type SlashCommand,
 } from "../engine/tui.js";
+import { resolveFdBinary } from "../tools/executables.js";
 import { commandReference } from "./slash-commands.js";
 import { type CommandArgsSpec, completeArgs, renderArgsSpec } from "./slash-spec.js";
 
@@ -26,28 +25,6 @@ export interface SlashAutocompleteOptions {
 	basePath?: string;
 	fdPath?: string | null;
 	listSkills?: () => { installed: Skill[]; marketplace: MarketplaceSkill[] };
-}
-
-export function resolveFdBinary(): string | null {
-	return findExecutableOnPath("fd") ?? findExecutableOnPath("fdfind");
-}
-
-function findExecutableOnPath(name: string): string | null {
-	const pathEnv = process.env.PATH;
-	if (!pathEnv) return null;
-	for (const dir of pathEnv.split(delimiter)) {
-		if (!dir) continue;
-		const candidate = join(dir, name);
-		try {
-			const stat = statSync(candidate);
-			if (stat.isFile() && (stat.mode & 0o111) !== 0) {
-				return candidate;
-			}
-		} catch {
-			// not present or not stat-able in this directory
-		}
-	}
-	return null;
 }
 
 /**

@@ -3,7 +3,7 @@ import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } fro
 export type ToolProfileName = "minimal-local" | "science-local" | "full-agent";
 
 export const TOOL_PROFILE_NAMES: ReadonlyArray<ToolProfileName> = ["minimal-local", "science-local", "full-agent"];
-export const CODEWIKI_TOOL_NAMES: ReadonlyArray<BuiltinToolName> = [ToolNames.CodeNav];
+const CODEWIKI_TOOL_NAMES: ReadonlyArray<BuiltinToolName> = [ToolNames.CodeNav];
 
 export interface ToolProfileContext {
 	agentId?: string;

@@ -4,6 +4,7 @@ import type { Readable } from "node:stream";
 
 import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
+import { readStderr, waitForClose } from "../external-subprocess.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 import { isClaudeCodeSessionId } from "./session-id.js";
@@ -247,22 +248,6 @@ async function readJsonLines(
 		}
 		emitTextDelta(emit, state, extractDelta(record));
 	}
-}
-
-async function readStderr(child: ClaudeChildProcess): Promise<string> {
-	let stderr = "";
-	for await (const chunk of child.stderr) {
-		stderr += String(chunk);
-		if (stderr.length > 8192) stderr = stderr.slice(-8192);
-	}
-	return stderr;
-}
-
-function waitForClose(child: ClaudeChildProcess): Promise<number> {
-	return new Promise((resolve) => {
-		child.once("error", () => resolve(1));
-		child.once("close", (code) => resolve(code ?? 1));
-	});
 }
 
 export function startClaudeCodeWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {

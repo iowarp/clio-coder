@@ -39,11 +39,12 @@ function sourceFiles(dir: string): string[] {
 
 function readEnvNames(): Map<string, string[]> {
 	const byName = new Map<string, string[]>();
-	const pattern = /env(?:\.(CLIO_[A-Z0-9_]+|NO_COLOR)|\[["'](CLIO_[A-Z0-9_]+|NO_COLOR)["']\])/g;
+	const pattern =
+		/(?:env(?:\.(CLIO_[A-Z0-9_]+|NO_COLOR)|\[["'](CLIO_[A-Z0-9_]+|NO_COLOR)["']\])|(?:const\s+[A-Z0-9_]+_ENV\s*=\s*["'](CLIO_[A-Z0-9_]+)["']))/g;
 	for (const file of sourceFiles(join(REPO_ROOT, "src"))) {
 		const source = readFileSync(file, "utf8");
 		for (const match of source.matchAll(pattern)) {
-			const name = match[1] ?? match[2];
+			const name = match[1] ?? match[2] ?? match[3];
 			if (name === undefined) continue;
 			const relative = file.slice(REPO_ROOT.length);
 			const sites = byName.get(name) ?? [];

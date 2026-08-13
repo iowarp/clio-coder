@@ -19,7 +19,7 @@ export const EVIDENCE_FILES = [
 	"findings.md",
 ] as const;
 
-export function evidenceRoot(dataDir: string): string {
+function evidenceRoot(dataDir: string): string {
 	return join(dataDir, "evidence");
 }
 
@@ -44,7 +44,7 @@ function isMissingFile(error: unknown): boolean {
 	return (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
-export async function loadEvidenceOverview(dataDir: string, evidenceId: string): Promise<EvidenceOverview> {
+async function loadEvidenceOverview(dataDir: string, evidenceId: string): Promise<EvidenceOverview> {
 	let raw: string;
 	try {
 		raw = await readFile(join(evidenceDirectory(dataDir, evidenceId), "overview.json"), "utf8");

@@ -53,9 +53,9 @@ export type AgentAudience = "base" | "shadow" | "custom" | "internal";
  */
 export type AgentProduct = "orientation";
 
-export const AGENT_PRODUCTS: ReadonlyArray<AgentProduct> = ["orientation"];
+const AGENT_PRODUCTS: ReadonlyArray<AgentProduct> = ["orientation"];
 
-export const AGENT_CATEGORIES: ReadonlyArray<AgentCategory> = [
+const AGENT_CATEGORIES: ReadonlyArray<AgentCategory> = [
 	"explore",
 	"plan",
 	"research",
@@ -67,7 +67,7 @@ export const AGENT_CATEGORIES: ReadonlyArray<AgentCategory> = [
 	"internal",
 ];
 
-export const AGENT_CAPABILITY_CLASSES: ReadonlyArray<AgentCapabilityClass> = [
+const AGENT_CAPABILITY_CLASSES: ReadonlyArray<AgentCapabilityClass> = [
 	"read-only",
 	"artifact-write",
 	"workspace-edit",
@@ -76,11 +76,11 @@ export const AGENT_CAPABILITY_CLASSES: ReadonlyArray<AgentCapabilityClass> = [
 	"internal",
 ];
 
-export const AGENT_LATENCY_CLASSES: ReadonlyArray<AgentLatencyClass> = ["fast", "balanced", "deep"];
+const AGENT_LATENCY_CLASSES: ReadonlyArray<AgentLatencyClass> = ["fast", "balanced", "deep"];
 
-export const AGENT_AUDIENCES: ReadonlyArray<AgentAudience> = ["base", "shadow", "custom", "internal"];
+const AGENT_AUDIENCES: ReadonlyArray<AgentAudience> = ["base", "shadow", "custom", "internal"];
 
-export const AGENT_PROJECT_CONTEXT_TIERS: ReadonlyArray<AgentProjectContextTier> = ["none", "bounded"];
+const AGENT_PROJECT_CONTEXT_TIERS: ReadonlyArray<AgentProjectContextTier> = ["none", "bounded"];
 
 export interface AgentToolRequirements {
 	required: ReadonlyArray<ToolName | { anyOf: ReadonlyArray<ToolName> }>;

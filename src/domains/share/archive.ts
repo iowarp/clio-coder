@@ -329,7 +329,7 @@ function parseArchive(raw: unknown): ClioShareArchive {
 	return archive;
 }
 
-export function readShareArchive(filePath: string): ClioShareArchive {
+function readShareArchive(filePath: string): ClioShareArchive {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(readFileSync(filePath, "utf8"));

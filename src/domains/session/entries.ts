@@ -440,7 +440,3 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 	}
 	return false;
 }
-
-export function isSessionFileEntry(value: unknown): value is SessionFileEntry {
-	return isSessionHeader(value) || isSessionEntry(value);
-}

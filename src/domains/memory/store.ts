@@ -98,7 +98,7 @@ export async function pruneStaleMemoryRecords(dataDir: string, now: Date = new D
 	return pruned;
 }
 
-export function isStaleMemoryRecord(record: MemoryRecord, now: Date): boolean {
+function isStaleMemoryRecord(record: MemoryRecord, now: Date): boolean {
 	const reference = record.lastVerifiedAt ?? record.createdAt;
 	const referenceMs = Date.parse(reference);
 	if (!Number.isFinite(referenceMs)) return true;

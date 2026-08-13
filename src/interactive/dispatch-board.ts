@@ -36,6 +36,7 @@ import {
 	frame,
 	GLYPH,
 	innerDivider,
+	padAnsi,
 	spinnerFrame,
 } from "./theme/index.js";
 
@@ -164,11 +165,6 @@ const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 	completed: 8,
 };
 const MAX_DISPATCH_BOARD_ROWS = 50;
-
-function padAnsi(text: string, width: number): string {
-	const clipped = truncateToWidth(text, width, "", true);
-	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
-}
 
 export function agentDisplayLabel(row: Pick<DispatchBoardRow, "agentId" | "agentAudience">): string {
 	if (row.agentAudience === "shadow") return `sh:${row.agentId}`;

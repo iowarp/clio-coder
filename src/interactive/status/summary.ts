@@ -168,30 +168,3 @@ export function buildSummary(input: BuildSummaryInput): TurnSummary {
 		...(input.truncated !== undefined ? { truncated: input.truncated } : {}),
 	});
 }
-
-export function emptySummary(input: {
-	startedAt: number;
-	endedAt: number;
-	modelId: string;
-	targetId: string;
-	watchdogPeak: WatchdogTier;
-	stopReason?: TurnStopReason;
-	stopDetail?: string;
-	truncated?: boolean;
-}): TurnSummary {
-	return {
-		elapsedMs: Math.max(0, input.endedAt - input.startedAt),
-		modelId: input.modelId,
-		targetId: input.targetId,
-		inputTokens: 0,
-		outputTokens: 0,
-		cacheReadTokens: 0,
-		cacheWriteTokens: 0,
-		toolCount: 0,
-		toolErrorCount: 0,
-		stopReason: input.stopReason ?? "stop",
-		...(input.stopDetail !== undefined ? { stopDetail: input.stopDetail } : {}),
-		watchdogPeak: input.watchdogPeak,
-		truncated: input.truncated === true,
-	};
-}

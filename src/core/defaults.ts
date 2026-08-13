@@ -12,6 +12,15 @@ export type { TargetDescriptor } from "../domains/providers/types/target-descrip
 export type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export const THINKING_LEVELS: ReadonlyArray<ThinkingLevel> = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+];
 
 export interface WorkerTarget {
 	target: string | null;

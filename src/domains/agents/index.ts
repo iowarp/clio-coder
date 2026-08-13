@@ -32,7 +32,6 @@ export type {
 	FleetStepScope,
 } from "./fleet-contract.js";
 export {
-	builtinFleetsDir,
 	FLEET_COMMANDS_REMEDY,
 	FLEET_COMMANDS_REPO_PATH,
 	FLEET_LOOP_MAX_ATTEMPTS,
@@ -58,7 +57,6 @@ export type {
 	AgentRecipe,
 	AgentToolAnyOfRequirement,
 	AgentToolRequirement,
-	AgentToolRequirements as AgentRecipeToolRequirements,
 	RecipeSource,
 } from "./recipe.js";
 export { parseAgentBudget } from "./recipe.js";

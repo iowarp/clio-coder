@@ -18,7 +18,7 @@ export function spinnerFrame(frameIndex: number): string {
  * `4.2s` under ten seconds, `42s`, then `1m5s` with no space and no zero pad
  * (the previous body emitted `1m 5s`).
  */
-export function formatStatusElapsed(elapsedMs: number): string {
+function formatStatusElapsed(elapsedMs: number): string {
 	return formatCompactMs(elapsedMs);
 }
 

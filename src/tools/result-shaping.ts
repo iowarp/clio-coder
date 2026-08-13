@@ -3,7 +3,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { DEFAULT_MAX_BYTES } from "./truncate.js";
-import { truncateUtf8 } from "./truncate-utf8.js";
+import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
 // Backstop for tools without an explicit resultSizePolicy. Sits above the
 // per-observation source cap (src/tools/truncate.ts) so a tool's own truncation
@@ -14,10 +14,6 @@ const RESULT_TRUNCATION_MARKER = "\n[tool result truncated]";
 const RESULT_OFFLOAD_MAX_BYTES = 10 * 1024 * 1024;
 
 type ToolResultShapeContext = Pick<ToolInvokeOptions, "sessionId" | "toolCallId">;
-
-function byteLength(text: string): number {
-	return Buffer.byteLength(text, "utf8");
-}
 
 function mergeDetails(details: ToolResultDetails | undefined, resultSize: Record<string, unknown>): ToolResultDetails {
 	return { ...(details ?? {}), resultSize };

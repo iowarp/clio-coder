@@ -32,14 +32,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /** Resolve the manifest path using the same catalog resolution as the marketplace. */
-export function resolveSkillPinManifestPath(cwd: string): string | null {
+function resolveSkillPinManifestPath(cwd: string): string | null {
 	const fromEnv = process.env.CLIO_SKILL_CATALOG_DIR;
 	const catalogDir = fromEnv && fromEnv.trim().length > 0 ? path.resolve(fromEnv.trim()) : path.join(cwd, "skills");
 	const manifestPath = path.join(catalogDir, SKILL_PIN_MANIFEST_FILENAME);
 	return existsSync(manifestPath) ? manifestPath : null;
 }
 
-export function loadSkillPinManifest(manifestPath: string): Map<string, SkillPinEntry> | null {
+function loadSkillPinManifest(manifestPath: string): Map<string, SkillPinEntry> | null {
 	let parsed: unknown;
 	try {
 		parsed = yaml.parse(readFileSync(manifestPath, "utf8"));

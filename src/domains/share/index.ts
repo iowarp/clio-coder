@@ -12,7 +12,6 @@ export {
 	createShareArchive,
 	importShareArchive,
 	planShareImport,
-	readShareArchive,
 	type ShareArchiveFile,
 	type ShareArchiveManifest,
 	type ShareDiagnostic,

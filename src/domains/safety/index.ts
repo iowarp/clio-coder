@@ -25,7 +25,7 @@ export type {
 	FinishContractInput,
 	FinishContractReason,
 } from "./finish-contract.js";
-export { assessFinishContract, FINISH_CONTRACT_ADVISORY_MESSAGE, hasExplicitLimitation } from "./finish-contract.js";
+export { assessFinishContract, FINISH_CONTRACT_ADVISORY_MESSAGE } from "./finish-contract.js";
 export { SafetyManifest } from "./manifest.js";
 export {
 	type CompiledPathPolicy,

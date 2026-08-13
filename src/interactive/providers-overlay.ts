@@ -24,7 +24,7 @@ import {
 } from "../engine/tui.js";
 import { buildHint, diagnosticSeverityToken, FocusBox, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
 import { applySettingChange } from "./overlays/settings.js";
-import { type ClioTheme, type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
+import { type ClioTheme, type ClioToken, clioTheme, GLYPH, padAnsi } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const TARGET_COL_WIDTH = 20;
@@ -46,11 +46,6 @@ export interface TargetsHubUseDeps {
 }
 
 export type TargetsHubNoticeLevel = "info" | "success" | "warning" | "error";
-
-function padAnsi(text: string, width: number): string {
-	const clipped = truncateToWidth(text, Math.max(0, width), "", true);
-	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
-}
 
 function targetLocation(status: TargetStatus): string {
 	return status.target.url ?? "(no url)";

@@ -1,3 +1,4 @@
+import { sleep } from "../../core/timers.js";
 import {
 	type ResidencyAdapter,
 	reconcileResidency,
@@ -160,10 +161,6 @@ async function postRouterModel(fetchImpl: typeof fetch, url: string, modelId: st
 	});
 	if (response.ok) return;
 	throw new Error(`llama.cpp router rejected ${url}: HTTP ${response.status}`);
-}
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function waitForLoaded(input: LlamaCppResidencyInput, fetchImpl: typeof fetch, modelId: string): Promise<void> {

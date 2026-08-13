@@ -23,9 +23,9 @@ import { toPosixPath } from "./path-utils.js";
  * layer 1 always stands.
  */
 
-export const ALWAYS_EXCLUDED_DIRS: ReadonlyArray<string> = [".clio", ".fallow", ".git"];
+const ALWAYS_EXCLUDED_DIRS: ReadonlyArray<string> = [".clio", ".fallow", ".git"];
 
-export const GENERATED_DIRS: ReadonlyArray<string> = [
+const GENERATED_DIRS: ReadonlyArray<string> = [
 	".cache",
 	".next",
 	".pytest_cache",
@@ -96,6 +96,10 @@ export function fallbackIgnoredDirs(includeIgnored: boolean): ReadonlySet<string
 // Glob matching primitives shared by the fallback walkers and code_nav.
 // Moved from the deleted glob tool; the pattern dialect (*, **, ?, [abc])
 // is unchanged.
+
+export function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function escapeRegexChar(ch: string): string {
 	return /[\\^$+?.()|{}]/.test(ch) ? `\\${ch}` : ch;

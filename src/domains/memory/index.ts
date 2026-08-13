@@ -4,7 +4,6 @@ export {
 	estimateMemoryTokens,
 	pruneStaleMemory,
 	rejectMemoryRecord,
-	retrieveApprovedMemory,
 	selectApprovedMemory,
 } from "./operations.js";
 export {
@@ -22,7 +21,6 @@ export {
 	proposeMemoryFromEvidence,
 } from "./proposal.js";
 export {
-	isStaleMemoryRecord,
 	loadMemoryRecords,
 	loadMemoryRecordsSync,
 	MEMORY_STALE_APPROVED_DAYS,
@@ -127,4 +125,4 @@ export type {
 	MemoryValidationIssue,
 } from "./types.js";
 export { MEMORY_SCOPES, MEMORY_VERSION } from "./types.js";
-export { isMemoryScope, validateMemoryRecord, validateMemoryStore } from "./validate.js";
+export { validateMemoryRecord, validateMemoryStore } from "./validate.js";

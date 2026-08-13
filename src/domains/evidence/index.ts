@@ -6,7 +6,6 @@ export { FINISH_CONTRACT_EVIDENCE_TAGS, finishContractEvidenceTags } from "./fin
 export type { RunEscalationCounts, RunProvenanceView } from "./provenance.js";
 export {
 	extractRunProvenance,
-	formatPersonaHashPrefix,
 	hasRunProvenance,
 	PERSONA_HASH_PREFIX_CHARS,
 	provenanceCompactSuffix,
@@ -17,11 +16,9 @@ export {
 	EVIDENCE_FILES,
 	EvidenceNotFoundError,
 	evidenceDirectory,
-	evidenceRoot,
 	inspectEvidence,
 	listEvidenceOverviews,
 	loadEvidenceGateDecisions,
-	loadEvidenceOverview,
 	loadEvidenceRunProvenance,
 } from "./store.js";
 export type {

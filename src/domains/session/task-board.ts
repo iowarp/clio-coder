@@ -14,7 +14,7 @@ import type { SessionEntry, TaskLedgerGoal, TaskLedgerStatus, TaskLedgerValidati
  *     so "done" carries its receipt instead of a bare status flip
  */
 
-export const TASK_BOARD_GOAL_ID = "board";
+const TASK_BOARD_GOAL_ID = "board";
 
 export interface TaskBoardTask {
 	id: string;

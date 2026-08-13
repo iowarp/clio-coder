@@ -150,7 +150,7 @@ const GENERATED_OR_SECRET_DIRS = new Set([
 
 const UNSAFE_FILE_NAME_RE =
 	/(^\.env(?:\.|$)|secret|credential|token|password|history|cache|session|\.log$|state\.json$)/i;
-const RULE_KEYWORDS =
+export const RULE_KEYWORDS =
 	/\b(always|never|must|should|prefer|avoid|do not|don't|use|run|keep|write|allow|allows|deny|denies|enable|enables|define|defines)\b/i;
 const SECRET_LINE_PATTERNS = [
 	/-----BEGIN [A-Z ]*PRIVATE KEY-----/i,

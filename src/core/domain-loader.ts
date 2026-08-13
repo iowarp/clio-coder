@@ -159,7 +159,7 @@ function topoSort(modules: ReadonlyArray<DomainModule>): string[] {
 	return order;
 }
 
-export class DomainLoadError extends Error {
+class DomainLoadError extends Error {
 	constructor(
 		public readonly domain: string,
 		public override readonly cause: unknown,

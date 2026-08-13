@@ -6,8 +6,8 @@ import {
 	type ContextActivityStatus,
 } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { truncateToWidth, visibleWidth } from "../engine/tui.js";
-import { type ClioTheme, clioTheme, formatCompactMs, GLYPH, spinnerFrame } from "./theme/index.js";
+import { visibleWidth } from "../engine/tui.js";
+import { type ClioTheme, clioTheme, formatCompactMs, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
 
 export interface ContextActivitySnapshot {
 	kind: ContextActivityKind;
@@ -81,11 +81,6 @@ function isContextActivityPayload(value: unknown): value is ContextActivityPaylo
 		typeof record.message === "string" &&
 		typeof record.at === "number"
 	);
-}
-
-function padAnsi(text: string, width: number): string {
-	const clipped = truncateToWidth(text, width, "", true);
-	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
 function phaseIndex(kind: ContextActivityKind, phase: ContextActivityPhase): number {

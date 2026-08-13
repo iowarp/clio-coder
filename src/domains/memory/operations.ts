@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ceilChars } from "../session/context-accounting.js";
-import { loadMemoryRecords, pruneStaleMemoryRecords, sortMemoryRecords, updateMemoryRecord } from "./store.js";
+import { pruneStaleMemoryRecords, sortMemoryRecords, updateMemoryRecord } from "./store.js";
 import type { MemoryRecord, MemoryRepositoryIdentity, MemoryRetrievalOptions } from "./types.js";
 
 export async function approveMemoryRecord(
@@ -22,13 +22,6 @@ export async function rejectMemoryRecord(
 
 export async function pruneStaleMemory(dataDir: string, now: Date = new Date()): Promise<MemoryRecord[]> {
 	return pruneStaleMemoryRecords(dataDir, now);
-}
-
-export async function retrieveApprovedMemory(
-	dataDir: string,
-	options: MemoryRetrievalOptions,
-): Promise<MemoryRecord[]> {
-	return selectApprovedMemory(await loadMemoryRecords(dataDir), options);
 }
 
 export function selectApprovedMemory(

@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { BASH_HARD_CAP_BYTES, buildToolEnv, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
+import { BASH_HARD_CAP_BYTES, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { ToolNames } from "../core/tool-names.js";
 import { expandPath } from "./path-utils.js";
@@ -174,5 +174,3 @@ export const bashTool: ToolSpec = {
 		}
 	},
 };
-
-export { buildToolEnv };
