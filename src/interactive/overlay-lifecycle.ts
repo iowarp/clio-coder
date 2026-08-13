@@ -302,6 +302,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.onResumeSession ? { onResumeSession: deps.app.onResumeSession } : {}),
 		...(deps.app.onForkSession ? { onForkSession: deps.app.onForkSession } : {}),
 		announceTaskMemorySeedOffer,
+		sessionUsage: deps.app.observability,
 		refreshFooter: () => footer.refresh(),
 		requestRender: () => tui.requestRender(),
 		stderr: (text) => io.stderr(text),
