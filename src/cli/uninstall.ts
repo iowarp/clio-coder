@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
@@ -11,6 +11,11 @@ import { printError, printHeader, printOk } from "./shared.js";
 const HELP = `clio uninstall [--remove-binary] [--dry-run] [--force]
 
 Remove all Clio Coder state: the config, data, state, and cache roots.
+
+Per-project \`.clio/\` directories are outside those roots and are never removed
+here. Every project Clio has run in is recorded in the session metadata, so both
+the real run and --dry-run list them and name the command that clears one,
+before the launcher is touched.
 
 Flags:
   --remove-binary  also remove the launcher symlink when it points at this
@@ -59,6 +64,100 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 
 function report(label: string, path: string): void {
 	process.stdout.write(`  ${label.padEnd(8)} remove ${path}${existsSync(path) ? "" : "  (absent)"}\n`);
+}
+
+export interface ProjectContextInventory {
+	/** Project directories the session store recorded, one per cwd hash. */
+	recorded: number;
+	/** Of those, the ones that still have a `.clio/` on disk. */
+	dirs: string[];
+	/** The session store was not there to read, so nothing could be enumerated. */
+	storeAbsent: boolean;
+}
+
+/**
+ * The projects Clio has run in, read from the session metadata under
+ * `<stateDir>/sessions/`.
+ *
+ * Uninstall removes four roots under the home directory and nothing else, so
+ * every `.clio/` it ever wrote inside a repository survived it, unlisted. The
+ * operator was left to remember which repositories those were, after the
+ * command that could have told them had deleted the record and, with
+ * `--remove-binary`, the binary that reads it.
+ *
+ * One `meta.json` per cwd-hash directory is enough: every session under a hash
+ * shares the `cwd` that produced it, so this reads one small file per project
+ * rather than one per session. Directories whose `.clio/` is already gone are
+ * dropped, because an inventory of nothing to do is noise.
+ */
+export function projectContextInventory(stateDir: string): ProjectContextInventory {
+	const root = join(stateDir, "sessions");
+	let hashes: string[];
+	try {
+		hashes = readdirSync(root);
+	} catch {
+		return { recorded: 0, dirs: [], storeAbsent: true };
+	}
+	const dirs = new Set<string>();
+	let recorded = 0;
+	for (const hash of hashes.sort()) {
+		const cwd = firstRecordedCwd(join(root, hash));
+		if (cwd === null) continue;
+		recorded += 1;
+		if (existsSync(join(cwd, ".clio"))) dirs.add(cwd);
+	}
+	return { recorded, dirs: [...dirs].sort(), storeAbsent: false };
+}
+
+/** The `cwd` from the first readable session meta under one cwd-hash directory. */
+function firstRecordedCwd(hashDir: string): string | null {
+	let sessions: string[];
+	try {
+		sessions = readdirSync(hashDir);
+	} catch {
+		return null;
+	}
+	for (const session of sessions.sort()) {
+		try {
+			const meta = JSON.parse(readFileSync(join(hashDir, session, "meta.json"), "utf8")) as { cwd?: unknown };
+			if (typeof meta.cwd === "string" && meta.cwd.length > 0) return meta.cwd;
+		} catch {
+			// A tombstoned, partial, or unreadable meta says nothing about the
+			// project; the next session under the same hash may still say it.
+		}
+	}
+	return null;
+}
+
+/**
+ * Print the project inventory and the command that clears one.
+ *
+ * Ordering is the point. This runs before the roots are removed, because the
+ * record it reads is inside one of them, and before the launcher is removed,
+ * because `clio context reset --all` needs the binary that is about to go.
+ */
+function reportProjectContext(inventory: ProjectContextInventory, removeBinary: boolean): void {
+	process.stdout.write("\nPer-project context (not removed by uninstall):\n");
+	if (inventory.storeAbsent) {
+		process.stdout.write("  no session store to read; any .clio/ directories must be found by hand\n");
+		return;
+	}
+	if (inventory.dirs.length === 0) {
+		process.stdout.write(
+			`  none: ${inventory.recorded} project director${inventory.recorded === 1 ? "y" : "ies"} recorded, none still has a .clio/\n`,
+		);
+		return;
+	}
+	for (const dir of inventory.dirs) process.stdout.write(`  ${join(dir, ".clio")}\n`);
+	// The cleaner is a clio subcommand, so with --remove-binary this run is
+	// taking the thing that would have run it. Saying "clear these first" after
+	// the launcher is already gone would be advice the operator cannot follow.
+	process.stdout.write(
+		removeBinary
+			? "\nThis run also removes the launcher. Clear each one from inside it first, then re-run:\n"
+			: "\nClear each one from inside it, while clio still runs:\n",
+	);
+	process.stdout.write("  clio context reset --all\n\n");
 }
 
 function launcherLinkPath(): string {
@@ -240,6 +339,10 @@ export function runUninstallCommand(argv: ReadonlyArray<string>): number {
 		["cache", dirs.cache],
 	] as const;
 	for (const [label, path] of roots) report(label, path);
+
+	// Read the session store before it is removed and report it before the
+	// launcher is: both halves of that ordering are load-bearing.
+	reportProjectContext(projectContextInventory(dirs.state), args.removeBinary);
 
 	// Every root is attempted even after one fails, so a single unwritable
 	// subtree cannot leave the other three behind unreported.

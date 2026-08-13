@@ -189,8 +189,15 @@ Selective recovery wipes:
 ```bash
 clio reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]
 ```
-Levels are combinable except `--all`. Each level clears exactly the root or file it names and nothing else, then bootstraps the missing structure again unless `--dry-run` is present. `--force` is required only for destructive execution:
-*   `--state` *(Default)*: Deletes the state root only: sessions, audit logs, receipts, runs, install metadata, migrations, interviews, and scratch state.
+Levels are combinable except `--all`. Each level clears exactly the root or file it names and nothing else, then bootstraps the missing structure again unless `--dry-run` is present. `--force` is required only for destructive execution.
+
+Every run lists each selected root and then the entries inside it, read off the
+disk on that run, before removing anything; `--dry-run` prints the identical
+listing. That listing, not this page and not `--help`, is the authoritative
+inventory of what a level covers, because a remembered list drifts as soon as a
+new artifact is written into a root.
+
+*   `--state` *(Default)*: Deletes the state root only. It holds every session transcript and the audit trail beside it, so a reset is the end of `resume`, `/view`, and their history. This is the level a bare `clio reset` selects, and it carries that note in its preview.
 *   `--data`: Deletes the data root only: memory, evidence, evals (durable products).
 *   `--cache`: Deletes the cache root only.
 *   `--auth`: Deletes `credentials.yaml`. Removes all saved keys.
@@ -216,7 +223,27 @@ hash -r
 `--dry-run` prints the roots and the optional launcher action without changing
 anything, and enumerates the same resolved absolute paths the real run would
 remove. It prints binary-removal guidance for the active launcher, npm-global
-installs, npm links, and the local source symlink. To wipe state selectively
+installs, npm links, and the local source symlink.
+
+#### Per-project `.clio/` directories
+
+Uninstall removes the four roots under your home directory. The `.clio/`
+directory Clio writes inside each repository it runs in is not one of them and
+is never removed here. Every project is recorded in the session metadata under
+the state root, so both the real run and `--dry-run` list the surviving
+`.clio/` directories and name the command that clears one:
+
+```bash
+clio context reset --all
+```
+
+That command works on the current directory, so run it from inside each listed
+project. The listing is printed before the roots are removed, because the record
+it reads lives in one of them, and before `--remove-binary` unlinks the launcher,
+because `clio context reset` needs the binary that is about to go. With
+`--remove-binary` the listing says so and tells you to clear the projects first,
+then re-run the uninstall. Neither the preview nor the real run deletes project
+data. To wipe state selectively
 while keeping settings or credentials, use `clio reset` instead of
 uninstalling. If the launcher is already gone but state remains, run the built
 CLI directly from the checkout: `node dist/cli/index.js uninstall --force`.

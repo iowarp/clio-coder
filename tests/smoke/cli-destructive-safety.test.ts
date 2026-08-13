@@ -174,6 +174,72 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		strictEqual(linkPresent(join(binDir, "clio")), false, "a broken clio launcher does not survive uninstall");
 	});
 
+	/**
+	 * A bare `clio reset` selects `--state` and takes every transcript on the
+	 * machine. The preview for that was one line naming the root, and the note
+	 * explaining the cost was attached to `--data`, the scope nobody gets by
+	 * accident.
+	 */
+	it("shows what a default reset is about to take, and says what losing it costs", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		mkdirSync(join(scratch.dir, "state", "sessions", "hash-a", "session-1"), { recursive: true });
+		writeFileSync(join(scratch.dir, "state", "runs.json"), "[]\n", "utf8");
+
+		const result = await runCli(["reset", "--dry-run"], { env: scratch.env });
+
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		match(result.stdout, /note: the state root holds every session transcript/);
+		// The contents are read off the root, so the subdirectories the help text
+		// never mentioned are in the preview.
+		match(result.stdout, /sessions\/ \(1\)/);
+		match(result.stdout, /interviews\//);
+		match(result.stdout, /scratch\//);
+		match(result.stdout, /runs\.json/);
+		ok(existsSync(join(scratch.dir, "state", "runs.json")), "a preview removes nothing");
+	});
+
+	/**
+	 * Uninstall removes four roots under the home directory, so every per-project
+	 * `.clio/` survived it unlisted, and `--remove-binary` removed the binary that
+	 * runs `clio context reset --all` before naming it.
+	 */
+	it("lists the project directories it is not removing, and names the cleaner before the binary", async () => {
+		const binDir = join(scratch.dir, "bin");
+		const launcher = join(binDir, "clio");
+		const project = join(scratch.dir, "a-project");
+		mkdirSync(binDir, { recursive: true });
+		mkdirSync(join(project, ".clio"), { recursive: true });
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const sessionDir = join(scratch.dir, "state", "sessions", "hash-a", "session-1");
+		mkdirSync(sessionDir, { recursive: true });
+		writeFileSync(
+			join(sessionDir, "meta.json"),
+			JSON.stringify({ id: "session-1", cwd: project, cwdHash: "hash-a" }),
+			"utf8",
+		);
+		symlinkSync(CLI_ENTRY, launcher);
+
+		const preview = await runCli(["uninstall", "--remove-binary", "--dry-run"], {
+			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+		});
+		strictEqual(preview.code, 0, `stderr=${preview.stderr}`);
+		ok(preview.stdout.includes(join(project, ".clio")), `preview lists the project: ${preview.stdout}`);
+		ok(preview.stdout.includes("clio context reset --all"), preview.stdout);
+		ok(existsSync(join(project, ".clio")), "and the preview removes none of it");
+
+		const result = await runCli(["uninstall", "--remove-binary", "--force"], {
+			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+		});
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		const cleaner = result.stdout.indexOf("clio context reset --all");
+		const binary = result.stdout.search(/binary\s+remove/);
+		ok(cleaner >= 0 && binary >= 0, result.stdout);
+		ok(cleaner < binary, "the cleaner is named while the binary that runs it is still there");
+		// Reading the record is this command's job; deleting the project's is not.
+		ok(existsSync(join(project, ".clio")), "uninstall never removes project data itself");
+		strictEqual(existsSync(launcher), false);
+	});
+
 	it("removes the launcher symlink that points at this installation", async () => {
 		const binDir = join(scratch.dir, "bin");
 		const launcher = join(binDir, "clio");
