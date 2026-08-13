@@ -475,7 +475,7 @@ function prefixClioLabel(lines: string[], width: number, prefix: string): string
  * Static marker used when thinking is folded. This matches pi-coding-agent's
  * hidden-thinking presentation and avoids previewing reasoning content.
  */
-const THINKING_HIDDEN_LABEL = "Thinking...";
+const THINKING_HIDDEN_LABEL = `Thinking${GLYPH.ellipsis}`;
 const THINKING_LINE_LIMIT = 12;
 const REASONING_CHARS_PER_TOKEN = 4;
 

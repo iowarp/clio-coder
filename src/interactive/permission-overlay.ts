@@ -1,4 +1,5 @@
 import type { Component } from "../engine/tui.js";
+import { buildResponsiveHint } from "./overlay-frame.js";
 
 export { type AskAxis, askAxis } from "../domains/safety/approval-axis.js";
 export { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -107,21 +108,21 @@ export function permissionOverlayTitle(): string {
 /**
  * The footer for a box `innerWidth` columns wide inside its borders.
  *
- * The generic hint elider drops middle entries, which at 40 columns removed
- * `[s] stop turn` and left "allow once" and an ambiguous "close" in front of an
- * operator trying to refuse. The key kept working, so the layout was hiding a
- * live safety action. Shorter labels come first here, and stop is the last
- * thing to go, never the first.
+ * At 40 columns the old positional elider removed `[s] stop turn` and left
+ * "allow once" and an ambiguous "close" in front of an operator trying to
+ * refuse. The key kept working, so the layout was hiding a live safety action.
+ * This surface used to answer that with three hand-written width tiers; it now
+ * states the same policy as data. Allow and stop are marked critical, Esc is
+ * marked droppable, and `fitHintEntries` shortens every label before it drops
+ * anything, which reproduces the three tiers exactly.
  */
-export function permissionOverlayHint(innerWidth: number): string {
-	const budget = innerWidth - 3;
-	const tiers = [
-		"[Enter] allow once · [s] stop turn · [Esc] close",
-		"[Enter] allow · [s] stop · [Esc] close",
-		"[Enter] allow · [s] stop",
-	];
-	return tiers.find((tier) => tier.length <= budget) ?? (tiers.at(-1) as string);
-}
+export const permissionOverlayHint = buildResponsiveHint(
+	[
+		{ key: "Enter", verb: "allow once", short: "allow", critical: true },
+		{ key: "s", verb: "stop turn", short: "stop", critical: true },
+	],
+	{ key: "Esc", verb: "close", critical: false },
+);
 
 const SAFETY_SENTENCES: ReadonlyArray<string> = [
 	"Parked until you decide; allow or deny applies to this call only.",

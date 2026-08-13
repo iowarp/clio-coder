@@ -38,23 +38,28 @@ describe("contracts/hint-builder", () => {
 		strictEqual(buildHint(entries, "back"), "[Enter] select · [Tab] focus · [Esc] back");
 	});
 
-	it("performs elision, dropping middle entries first and keeping first and Esc", () => {
+	/**
+	 * Elision used to keep whichever entries sat at the ends and splice out the
+	 * middle, so what survived a narrow footer was decided by the order the
+	 * caller happened to list its keys. It now drops by class: the commit key,
+	 * the filter key, and the way out outrank the per-row conveniences, wherever
+	 * the caller put them.
+	 */
+	it("drops conveniences before the keys that act, wherever they were listed", () => {
 		const hint = "[Enter] select · [Tab] focus · [Space] toggle · [r] refresh · [Esc] close";
 
-		// If it fits, no elision
+		// If it fits, nothing is dropped.
 		strictEqual(elideHint(hint, 100), hint);
 
-		// Narrower width should drop the middle-most entry first (which is "[Space] toggle")
-		const elided1 = elideHint(hint, 60);
-		strictEqual(elided1, "[Enter] select · [Tab] focus · [r] refresh · [Esc] close");
+		// `[Tab] focus` goes first: it is the leftmost droppable entry, even though
+		// the old rule protected it for being second from the start.
+		strictEqual(elideHint(hint, 60), "[Enter] select · [Space] toggle · [r] refresh · [Esc] close");
+		strictEqual(elideHint(hint, 45), "[Enter] select · [r] refresh · [Esc] close");
 
-		// Even narrower should drop "[r] refresh"
-		const elided2 = elideHint(elided1, 45);
-		strictEqual(elided2, "[Enter] select · [Tab] focus · [Esc] close");
-
-		// Minimum keeps first and last
-		const elided3 = elideHint(elided2, 20);
-		strictEqual(elided3, "[Enter] select · [Esc] close");
+		// Below the width that fits two critical entries, the way out is the last
+		// thing standing. A hint narrower than this would only render a cut key
+		// spelling, which names no key at all.
+		strictEqual(elideHint(hint, 20), "[Esc] close");
 	});
 
 	it("does not create double separators when eliding", () => {
@@ -66,7 +71,7 @@ describe("contracts/hint-builder", () => {
 		strictEqual(elided.endsWith("· "), false);
 	});
 
-	it("elides the model-selector hint at width edges without losing first or Esc", () => {
+	it("keeps the model selector's filter, commit, and close keys as it narrows", () => {
 		const hint = buildHint([
 			{ key: "type", verb: "search" },
 			{ key: "Tab", verb: "focus/all" },
@@ -76,8 +81,10 @@ describe("contracts/hint-builder", () => {
 			{ key: "Enter", verb: "use" },
 		]);
 
-		strictEqual(elideHint(hint, 80), "[type] search · [Tab] focus/all · [r] refresh target · [Enter] use · [Esc] close");
-		strictEqual(elideHint(hint, 60), "[type] search · [Tab] focus/all · [Enter] use · [Esc] close");
-		strictEqual(elideHint(hint, 40), "[type] search · [Esc] close");
+		strictEqual(elideHint(hint, 80), "[type] search · [R] refresh all · [*] fav · [Enter] use · [Esc] close");
+		strictEqual(elideHint(hint, 60), "[type] search · [*] fav · [Enter] use · [Esc] close");
+		// On a list of a hundred models, `[Enter] use` is the entry the old rule
+		// dropped here while keeping `[type] search` and nothing to press.
+		strictEqual(elideHint(hint, 40), "[Enter] use · [Esc] close");
 	});
 });

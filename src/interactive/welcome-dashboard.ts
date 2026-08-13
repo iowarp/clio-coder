@@ -22,7 +22,7 @@ import {
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
 import { type Component, getCapabilities, Image, type ImageTheme, truncateToWidth } from "../engine/tui.js";
-import { brandMark, type ClioTheme, clioTheme, fitUnits, formatTargetLabel, frame } from "./theme/index.js";
+import { brandMark, type ClioTheme, clioTheme, fitUnits, formatTargetLabel, frame, GLYPH } from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
 	providers: ProvidersContract;
@@ -306,6 +306,8 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 
 const WIDE_MIN = 90;
 const MID_MIN = 64;
+/** Widest banner key (`Context`, `Memory`), so every value starts in one column. */
+const WELCOME_KEY_WIDTH = 7;
 const LOGO_ASSET_PATH = "assets/clio-coder-logo-128.webp";
 
 let cachedLogoBase64: string | null | undefined;
@@ -338,6 +340,15 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
 	const contentWidth = safeWidth - 4;
+
+	/**
+	 * Section 2.4: a key-value key is dim, bare of punctuation, and padded to one
+	 * column width so every value starts in the same place. These labels used to
+	 * carry a colon and the `muted` body token, which put them in the same voice
+	 * as the values they introduce and made each row's alignment a hand-counted
+	 * run of spaces.
+	 */
+	const kvKey = (label: string): string => `  ${theme.fg("dim", label.padEnd(WELCOME_KEY_WIDTH))}  `;
 
 	// The whole styled title (logotype, bold name, dim version) is handed to
 	// the canonical island frame, which places it with one space on each side.
@@ -383,10 +394,14 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			: [theme.fg("muted", "entry points: none")]),
 	];
 
+	// Section 2.5 grammar: an affordance is `[Key] verb`, the same shape the
+	// overlay footers use, so the banner teaches the vocabulary the rest of the
+	// TUI speaks. These used to be prose ("Type /settings to edit").
+	const hintKey = (key: string): string => theme.fg("dim", `[${key}]`);
 	const hintUnits = [
-		`Type ${theme.fg("accent", "/settings")} to edit`,
-		`${theme.fg("accent", "/context init")} to bootstrap`,
-		`${theme.fg("accent", "Alt+U")} to toggle dashboard`,
+		`${hintKey("type")} ${theme.fg("accent", "/settings")} ${theme.fg("muted", "to configure")}`,
+		`${hintKey("type")} ${theme.fg("accent", "/context init")} ${theme.fg("muted", "to bootstrap")}`,
+		`${hintKey("Alt+U")} ${theme.fg("muted", "toggle dashboard")}`,
 	];
 	const memoryUnits = stats.taskMemory
 		? [
@@ -403,13 +418,13 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	// drops whole ` · `-separated units and closes with a dim ellipsis instead of
 	// cutting a path or phrase mid-glyph, so a truncated row still reads as facts.
 	if (safeWidth >= WIDE_MIN) {
-		const healthStr = stats.targetHealthLabel ? ` · health: ${theme.fg("success", stats.targetHealthLabel)}` : "";
-		const targetLine = `  ${theme.fg("muted", "Target:")}   ${targetVal} · ${thinkVal}${healthStr}`;
-		const contextLine = `  ${theme.fg("muted", "Context:")}  ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
-		const wikiLine = fitUnits(theme, `  ${theme.fg("muted", "Wiki:")}     `, wikiUnits, contentWidth);
-		const settingsLine = `  ${theme.fg("muted", "Config:")}   ${safetyStr} · ${profileStr} · ${compactStr}`;
-		const memoryLine = fitUnits(theme, `  ${theme.fg("muted", "Memory:")}   `, memoryUnits, contentWidth);
-		const hintLine = fitUnits(theme, `  ${theme.fg("muted", "Hint:")}     `, hintUnits, contentWidth);
+		const healthStr = stats.targetHealthLabel ? ` · health ${theme.fg("success", stats.targetHealthLabel)}` : "";
+		const targetLine = `${kvKey("Target")}${targetVal} · ${thinkVal}${healthStr}`;
+		const contextLine = `${kvKey("Context")}${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
+		const wikiLine = fitUnits(theme, kvKey("Wiki"), wikiUnits, contentWidth);
+		const settingsLine = `${kvKey("Config")}${safetyStr} · ${profileStr} · ${compactStr}`;
+		const memoryLine = fitUnits(theme, kvKey("Memory"), memoryUnits, contentWidth);
+		const hintLine = fitUnits(theme, kvKey("Hint"), hintUnits, contentWidth);
 
 		return frame(
 			theme,
@@ -426,12 +441,12 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			safeWidth,
 		);
 	} else if (safeWidth >= MID_MIN) {
-		const targetLine = `  ${theme.fg("muted", "Target:")}  ${targetVal} · ${thinkVal}`;
-		const contextLine = `  ${theme.fg("muted", "Context:")} ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
-		const wikiLine = fitUnits(theme, `  ${theme.fg("muted", "Wiki:")}    `, wikiUnits, contentWidth);
-		const configLine = `  ${theme.fg("muted", "Config:")}  ${safetyStr} · ${profileStr}`;
-		const memoryLine = fitUnits(theme, `  ${theme.fg("muted", "Memory:")}  `, memoryUnits, contentWidth);
-		const hintLine = fitUnits(theme, `  ${theme.fg("muted", "Hint:")}    `, hintUnits, contentWidth);
+		const targetLine = `${kvKey("Target")}${targetVal} · ${thinkVal}`;
+		const contextLine = `${kvKey("Context")}${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
+		const wikiLine = fitUnits(theme, kvKey("Wiki"), wikiUnits, contentWidth);
+		const configLine = `${kvKey("Config")}${safetyStr} · ${profileStr}`;
+		const memoryLine = fitUnits(theme, kvKey("Memory"), memoryUnits, contentWidth);
+		const hintLine = fitUnits(theme, kvKey("Hint"), hintUnits, contentWidth);
 
 		return frame(
 			theme,
@@ -455,9 +470,11 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			`  ${targetVal} · ${thinkVal}`,
 			`  ${clioMdStr} · ${codewikiStr}`,
 			...(stats.hasCodewiki ? [`  wiki ${stats.wikiStatus}`] : []),
-			`  ${safetyStr} · ${theme.fg("accent", "Alt+U")} toggle`,
-			...(memoryUnits.length > 0 ? [fitUnits(theme, "  Memory: ", memoryUnits, safeWidth)] : []),
-		].map((line) => truncateToWidth(line, safeWidth, "", true));
+			`  ${safetyStr} · ${hintKey("Alt+U")} ${theme.fg("muted", "toggle")}`,
+			...(memoryUnits.length > 0 ? [fitUnits(theme, kvKey("Memory"), memoryUnits, safeWidth)] : []),
+			// A cut with no marker presents the fragment as the whole value, which is
+			// the rule the 40/80/120 sweep was written against.
+		].map((line) => truncateToWidth(line, safeWidth, GLYPH.ellipsis, true));
 	}
 }
 

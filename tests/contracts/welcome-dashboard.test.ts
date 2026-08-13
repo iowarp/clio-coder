@@ -202,12 +202,24 @@ describe("welcome-dashboard and footer integration tests", () => {
 		});
 
 		const lines = buildWelcomeDashboardLines(stats, 100);
-		const joined = lines.join("\n");
+		// The key is padded inside its own color run, so the label and the two
+		// spaces after it are only adjacent once the escapes are gone.
+		const joined = lines.map(stripAnsi).join("\n");
 
-		ok(joined.includes("Target:"));
-		ok(joined.includes("Context:"));
-		ok(joined.includes("Config:"));
-		ok(joined.includes("Hint:"));
+		// Section 2.4 keys are bare and dim, padded to one column width. They used
+		// to carry a colon and the `muted` body token, which gave a label the same
+		// voice as the value it introduces.
+		for (const key of ["Target", "Context", "Config", "Hint"]) {
+			ok(joined.includes(`  ${key.padEnd(7)}  `), `banner lost the ${key} key: ${joined}`);
+			ok(!joined.includes(`${key}:`), `banner key ${key} still carries a colon`);
+		}
+		// Section 2.5: affordances read `[Key] verb`, not prose. The row fits two
+		// units at 100 columns and all three at 120; `fitUnits` drops whole units
+		// off the end, so the check for the last one runs at the wider size.
+		ok(joined.includes("[type] /settings to configure"), joined);
+		ok(!/Type \/settings/u.test(joined), "the hint row is no longer prose");
+		const wide = buildWelcomeDashboardLines(stats, 130).map(stripAnsi).join("\n");
+		ok(wide.includes("[Alt+U] toggle dashboard"), wide);
 		// abbreviateModelId now keeps whole dash-separated parts under 18 chars,
 		// so the version suffix survives instead of being clipped to "gemini-3.5".
 		ok(joined.includes("gemini-3.5-flash"), `model label should keep its version suffix, got: ${joined}`);
@@ -244,13 +256,13 @@ describe("welcome-dashboard and footer integration tests", () => {
 			}),
 		});
 
-		const wide = strippedDashboardRow(stats, 100, "Memory:");
-		ok(wide.includes("Memory:   on · tier LLM · bank 3"), wide);
+		const wide = strippedDashboardRow(stats, 100, "Memory ");
+		ok(wide.includes("Memory   on · tier LLM · bank 3"), wide);
 		const narrow = buildWelcomeDashboardLines(stats, 30)
 			.map(stripAnsi)
-			.find((line) => line.includes("Memory: on"));
+			.find((line) => line.includes("Memory   on"));
 		ok(narrow, "expected a narrow memory status row");
-		ok(narrow.includes("Memory: on · tier LLM …"), narrow);
+		ok(narrow.includes("Memory   on · tier LLM …"), narrow);
 		ok(!narrow.includes("ban"), `a bank fact must be retained whole or dropped: ${narrow}`);
 	});
 
@@ -259,7 +271,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 		await writeDashboardCodewiki(cwd);
 
 		const stats = dashboardStatsFor(cwd);
-		const row = strippedDashboardRow(stats, 120, "Wiki:");
+		const row = strippedDashboardRow(stats, 120, "Wiki ");
 
 		ok(row.includes("no wiki; run clio context wiki"), row);
 		ok(row.includes("entry points:"), row);
@@ -272,7 +284,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 		writeDashboardWiki(cwd);
 
 		const stats = dashboardStatsFor(cwd);
-		const row = strippedDashboardRow(stats, 120, "Wiki:");
+		const row = strippedDashboardRow(stats, 120, "Wiki ");
 
 		ok(row.includes("1 page"), row);
 		ok(row.includes("fresh"), row);
@@ -341,7 +353,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 
 		const hintRow = buildWelcomeDashboardLines(stats, 80)
 			.map(stripAnsi)
-			.find((line) => line.includes("Hint:"));
+			.find((line) => line.includes("Hint "));
 		ok(hintRow, "expected a Hint row");
 		ok(hintRow.includes("…"), `hint row should end in an ellipsis, got: ${hintRow}`);
 		ok(!hintRow.includes("…dashboard"), "the full hint must not survive the ellipsis at width 80");

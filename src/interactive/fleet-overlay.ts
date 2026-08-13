@@ -29,7 +29,7 @@ import {
 	selectTargetSubmenu,
 	textInputSubmenu,
 } from "./overlays/settings.js";
-import { type ClioToken, clioTheme, formatCompactMs, GLYPH, rule } from "./theme/index.js";
+import { type ClioToken, clioTheme, formatCompactMs, GLYPH, listGroupHeader, rule } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const REFRESH_MS = 1000;
@@ -106,12 +106,6 @@ function statusToken(value: string): ClioToken {
 
 function statusCell(value: string, width: number): string {
 	return clioTheme().fg(statusToken(value), fitLeft(value, width));
-}
-
-// The list-group header from the design system: `── running (1)` in dim. The
-// leading double dash is a structural rule literal, not a status glyph.
-function listGroupHeader(label: string): string {
-	return dim(`── ${label}`);
 }
 
 // A key-value row with a dim padded key and a muted value.
@@ -223,7 +217,7 @@ export function formatFleetOverlayBodyLines(
 	const lines: string[] = [];
 	lines.push(dim(`generated ${formatClock(snapshot.generatedAt)}`));
 	lines.push(divider(width));
-	lines.push(listGroupHeader(`running (${snapshot.running.length})`));
+	lines.push(listGroupHeader(clioTheme(), `running (${snapshot.running.length})`));
 	if (snapshot.running.length === 0) {
 		lines.push(dim("  none in this TUI process"));
 	} else {
@@ -235,7 +229,7 @@ export function formatFleetOverlayBodyLines(
 		}
 	}
 	lines.push("");
-	lines.push(listGroupHeader(`retrying (${snapshot.retrying.length})`));
+	lines.push(listGroupHeader(clioTheme(), `retrying (${snapshot.retrying.length})`));
 	if (snapshot.retrying.length === 0) {
 		lines.push(dim("  none in this TUI process"));
 	} else {
@@ -243,7 +237,7 @@ export function formatFleetOverlayBodyLines(
 		for (const row of snapshot.retrying) lines.push(retryRow(row, width));
 	}
 	lines.push("");
-	lines.push(listGroupHeader("totals"));
+	lines.push(listGroupHeader(clioTheme(), "totals"));
 	for (const totalRow of totalsRows(snapshot.totals)) lines.push(totalRow);
 	if (snapshot.running.length === 0 && snapshot.retrying.length === 0) {
 		lines.push("");
@@ -340,7 +334,7 @@ export function formatFleetNodesBodyLines(
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 ): string[] {
 	const width = Math.max(1, Math.floor(contentWidth));
-	const lines: string[] = [listGroupHeader(`nodes (${nodes.length})`), divider(width)];
+	const lines: string[] = [listGroupHeader(clioTheme(), `nodes (${nodes.length})`), divider(width)];
 	if (nodes.length === 0) {
 		lines.push(dim("no fleet nodes configured; every dispatch runs on the local node"));
 		lines.push(dim("declare fleet.nodes in settings.yaml and run `clio doctor` to preflight them"));
@@ -661,7 +655,7 @@ class FleetOverlayBody implements Component {
 
 	private renderProfiles(width: number): string[] {
 		const rows = this.profileRows();
-		const lines = [listGroupHeader(`profiles (${rows.length})`), divider(width), profileHeader(width)];
+		const lines = [listGroupHeader(clioTheme(), `profiles (${rows.length})`), divider(width), profileHeader(width)];
 		if (rows.length === 0) {
 			lines.push(muted("no fleet profiles configured. press n to create one"));
 		} else {
@@ -689,7 +683,7 @@ class FleetOverlayBody implements Component {
 
 	private renderBindings(width: number): string[] {
 		const rows = this.bindingRows();
-		const lines = [listGroupHeader(`agent routes (${rows.length})`), divider(width), bindingHeader(width)];
+		const lines = [listGroupHeader(clioTheme(), `agent routes (${rows.length})`), divider(width), bindingHeader(width)];
 		if (rows.length === 0) {
 			lines.push(muted("no bindable native agents found"));
 		} else {
