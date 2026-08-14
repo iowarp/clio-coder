@@ -75,7 +75,12 @@ SCICODE_PACKAGE = os.environ.get(
 GRADER_PACKAGES = ("h5py", "numpy", "scipy")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from clio_usage import add_usage, emit_observed_usage, empty_usage, fold_message_end_usage
+from clio_usage import (
+    add_usage,
+    emit_observed_usage,
+    empty_usage,
+    fold_message_end_usage,
+)
 from result_manifest import target_profile, write_result_manifest
 from uv_command import uv_python_cmd, uv_script_cmd
 
@@ -204,7 +209,7 @@ def extract_symbol_source(source: str, name: str) -> str | None:
 
 def render_previous_steps(problem: dict[str, Any], current_index: int, generated_dir: Path | None = None) -> str:
     chunks: list[str] = []
-    for index, step in enumerate(problem.get("sub_steps", [])[:current_index]):
+    for step in problem.get("sub_steps", [])[:current_index]:
         step_id = step_number(step)
         chunks.append(f"Step {step_id}: {step.get('step_description_prompt', '')}")
         code = None

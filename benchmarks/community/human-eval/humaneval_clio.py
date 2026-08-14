@@ -29,8 +29,9 @@ import tempfile
 import textwrap
 import time
 import urllib.request
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADAPTER_DIR = Path(__file__).resolve().parent
@@ -42,10 +43,16 @@ HUMANEVAL_URL = "https://raw.githubusercontent.com/openai/human-eval/master/data
 CLIO = os.environ.get("CLIO_CODER_BIN", "clio-coder")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from clio_usage import emit_observed_usage, fold_message_end_usage, receipt_total_tokens, run_id_from_events
+from clio_usage import (
+    emit_observed_usage,
+    fold_message_end_usage,
+    receipt_total_tokens,
+    run_id_from_events,
+)
 from result_manifest import target_profile, write_result_manifest
 from uv_command import uv_python_cmd, uv_script_cmd
 
+_FLEET: dict[str, Any] | None
 try:
     from clio_fleet import load_fleet
 
@@ -346,6 +353,7 @@ def generate_attempt(
     if not solution_path.exists() or force:
         solution_path.write_text(problem.get("prompt", ""), encoding="utf-8")
 
+    metric: dict[str, Any]
     if dry_run:
         metric = {"exit": 0, "timed_out": False, "wall_s": 0.0, "dry_run": True, "events": None}
     else:
@@ -563,8 +571,6 @@ def suite_summary(
 def write_suite_manifest(
     out_dir: Path,
     chosen: list[dict[str, Any]],
-    metrics_rows: list[dict[str, Any]],
-    grade_rows: list[dict[str, Any]],
     summary: dict[str, Any],
     model: str | None,
     target: str | None,
@@ -660,8 +666,6 @@ def run_suite(args: argparse.Namespace) -> int:
     manifest_path, summary_path = write_suite_manifest(
         out_dir,
         chosen,
-        metrics_rows,
-        grade_rows,
         summary,
         args.model,
         args.target,
@@ -712,8 +716,6 @@ def run_task(args: argparse.Namespace) -> int:
     write_suite_manifest(
         run_dir,
         [problems[task_id]],
-        [metric],
-        [],
         summary,
         args.model,
         args.target,
@@ -748,8 +750,6 @@ def grade_task(args: argparse.Namespace) -> int:
     write_suite_manifest(
         run_dir,
         [problems[task_id]],
-        [],
-        [result],
         summary,
         None,
         None,

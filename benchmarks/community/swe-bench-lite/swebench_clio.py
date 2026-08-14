@@ -32,7 +32,12 @@ CLIO = os.environ.get("CLIO_CODER_BIN", "clio-coder")
 # source of truth for fleet endpoints/model names. The import is guarded so the
 # adapter still runs if the config is missing; env vars override either way.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from clio_usage import emit_observed_usage, fold_message_end_usage, receipt_total_tokens, run_id_from_events
+from clio_usage import (
+    emit_observed_usage,
+    fold_message_end_usage,
+    receipt_total_tokens,
+    run_id_from_events,
+)
 from result_manifest import target_profile, write_result_manifest
 
 try:

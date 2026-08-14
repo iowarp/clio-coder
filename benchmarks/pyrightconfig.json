@@ -1,0 +1,14 @@
+{
+  "//": "Type-checking config for the benchmark adapters. The per-suite adapters run as standalone scripts and reach their shared helpers through a sys.path.insert of benchmarks/community, so extraPaths mirrors that at analysis time. Generated run outputs and downloaded corpora are model artifacts, not source, and are excluded.",
+  "include": ["community"],
+  "exclude": [
+    "**/runs",
+    "**/data",
+    "**/__pycache__",
+    "**/.venv"
+  ],
+  "extraPaths": ["community"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "warning"
+}
