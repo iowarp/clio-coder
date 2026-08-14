@@ -7,6 +7,8 @@
 
 import type { ClioSettings } from "../core/config.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
+import type { ObservabilityContract } from "../domains/observability/contract.js";
+import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { AgentEvent, AgentMessage, Usage } from "../engine/types.js";
 import {
@@ -15,9 +17,11 @@ import {
 	estimatedUsageForInterruptedTurn,
 	extractUserText,
 	hasPersistableAssistantContent,
+	hasStructuredToolCall,
 	isEmptyAbortedAssistantMessage,
 	isLengthStopAssistantMessage,
 	recordValue,
+	sumRunUsage,
 	terminalFailureFromAssistantMessage,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
@@ -41,6 +45,13 @@ export interface TurnPersistenceDeps {
 	 * spent when the provider reported no usage at all; 0 when unknown.
 	 */
 	promptSideTokens: () => number;
+	/**
+	 * Second sink for the same rows, mirroring the operator's own turns into the
+	 * trace database beside the runs this session dispatched. Optional: absent
+	 * observability leaves every append exactly as it was. The mirror is
+	 * best-effort by construction, so nothing here inspects or awaits it.
+	 */
+	observability?: ObservabilityContract | undefined;
 }
 
 export interface TurnPersistence {
@@ -69,9 +80,112 @@ export interface TurnPersistence {
 	appendModelChangeEntry(target: ChatLoopTarget): void;
 }
 
+/**
+ * `runs.agent` for a session turn. The chat loop is the orchestrator itself: it
+ * runs under no agent recipe, so this names what actually executed the turn
+ * rather than inventing an agent id that no catalog would resolve.
+ */
+const SESSION_TRACE_AGENT = "orchestrator";
+
 export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistence {
 	const { state } = deps;
 	const persistedAssistantMessages = new WeakSet<object>();
+
+	// --- trace mirror ---------------------------------------------------------
+	// One open runs/phases pair per operator turn, opened by the user row that
+	// starts the turn and closed by the assistant row that ends it. Every helper
+	// is a no-op without an observability contract or without an open turn, so a
+	// session that resumes mid-turn contributes nothing rather than half a run.
+	let traceRunId: string | null = null;
+	let traceEventSeq = 0;
+	let traceUsage: SessionTurnUsage | null = null;
+	const traceToolStarts = new Map<string, string>();
+
+	const traceNow = (): string => new Date().toISOString();
+
+	const mirror = (record: Parameters<ObservabilityContract["recordSessionTurn"]>[0] | null): void => {
+		if (record === null) return;
+		deps.observability?.recordSessionTurn(record);
+	};
+
+	const finishTracedTurn = (status: "success" | "fail", error: string | null): void => {
+		if (traceRunId === null) return;
+		mirror({ kind: "finish", runId: traceRunId, status, error, usage: traceUsage, at: traceNow() });
+		traceRunId = null;
+		traceUsage = null;
+		traceToolStarts.clear();
+	};
+
+	const startTracedTurn = (userTurnId: string, prompt: string, submitted?: AgentRuntime): void => {
+		if (deps.observability === undefined) return;
+		const runtime = submitted ?? state.runtime;
+		if (!runtime) return;
+		// A previous turn still open means it ended without a final assistant row
+		// (an abort, or a stream that died). The operator submitting again is the
+		// honest close for it; leaving it 'running' forever would be worse.
+		finishTracedTurn("success", null);
+		traceRunId = `session:${userTurnId}`;
+		traceEventSeq = 0;
+		mirror({
+			kind: "start",
+			runId: traceRunId,
+			agent: SESSION_TRACE_AGENT,
+			target: runtime.targetId,
+			model: runtime.wireModelId,
+			runtime: runtime.runtimeId,
+			prompt: prompt.length > 0 ? prompt : null,
+			at: traceNow(),
+		});
+	};
+
+	const traceEvent = (input: {
+		eventId?: string;
+		type: string;
+		name: string;
+		payload?: unknown;
+		tokens?: number | null;
+		startedAt?: string;
+		endedAt?: string | null;
+	}): void => {
+		if (traceRunId === null) return;
+		traceEventSeq += 1;
+		mirror({
+			kind: "event",
+			runId: traceRunId,
+			eventId: input.eventId ?? `event:${traceEventSeq}`,
+			type: input.type,
+			name: input.name,
+			...(input.payload === undefined ? {} : { payload: input.payload }),
+			tokens: input.tokens ?? null,
+			startedAt: input.startedAt ?? traceNow(),
+			endedAt: input.endedAt ?? null,
+		});
+	};
+
+	/** Fold one assistant message's provider-reported usage into the turn total. */
+	const accumulateTraceUsage = (message: AgentMessage): void => {
+		if (traceRunId === null) return;
+		const summary = sumRunUsage([message]);
+		if (!summary.hadUsage) return;
+		const total: SessionTurnUsage = traceUsage ?? {
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			reasoningTokens: 0,
+			totalTokens: 0,
+			costUsd: 0,
+		};
+		traceUsage = {
+			inputTokens: total.inputTokens + summary.input,
+			outputTokens: total.outputTokens + summary.output,
+			cacheReadTokens: total.cacheReadTokens + summary.cacheRead,
+			cacheWriteTokens: total.cacheWriteTokens + summary.cacheWrite,
+			reasoningTokens: total.reasoningTokens + summary.reasoning,
+			totalTokens: total.totalTokens + summary.tokens,
+			costUsd: (total.costUsd ?? 0) + summary.costUsd,
+		};
+	};
 
 	const appendAssistantTurn = (message: AgentMessage, timing?: AssistantCallTiming | null): void => {
 		if (message?.role !== "assistant") return;
@@ -96,7 +210,15 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			const contextWindow = state.runtime.runtimeResolution.capabilityDecisions.contextWindow;
 			if (contextExhaustion && contextWindow > 0) contextExhaustion.contextWindow = contextWindow;
 		}
-		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) return;
+		accumulateTraceUsage(message);
+		// The turn is over unless this message asked for tools. A message the
+		// ledger declines to keep still ended the turn, so the mirror closes on
+		// the same signal either way rather than on persistence.
+		const turnContinues = hasStructuredToolCall(message);
+		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) {
+			if (!turnContinues) finishTracedTurn(failure ? "fail" : "success", failure?.errorMessage ?? null);
+			return;
+		}
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
 		const turn = deps.session.append({
 			kind: "assistant",
@@ -104,6 +226,18 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			payload,
 		});
 		state.lastTurnId = turn.id;
+		traceEvent({
+			type: "message",
+			name: "assistant",
+			payload: {
+				text: payload.text,
+				stopReason: payload.stopReason ?? null,
+				model: payload.model ?? null,
+				toolCalls: turnContinues,
+			},
+			tokens: traceUsage?.totalTokens ?? null,
+		});
+		if (!turnContinues) finishTracedTurn(failure ? "fail" : "success", failure?.errorMessage ?? null);
 	};
 
 	return {
@@ -136,6 +270,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			state.activeUserTurnId = userTurn.id;
 			state.synthesisToolLock = false;
 			deps.middlewareToolChoice.reset();
+			startTracedTurn(userTurn.id, text);
 		},
 
 		appendToolCallTurn(event): void {
@@ -150,6 +285,15 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				},
 			});
 			state.lastTurnId = turn.id;
+			const startedAt = traceNow();
+			traceToolStarts.set(event.toolCallId, startedAt);
+			traceEvent({
+				eventId: `tool:${event.toolCallId}`,
+				type: "tool_call",
+				name: event.toolName,
+				payload: { tool: event.toolName, tool_call_id: event.toolCallId, args: event.args },
+				startedAt,
+			});
 		},
 
 		appendToolResultTurn(event): void {
@@ -173,6 +317,28 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				payload,
 			});
 			state.lastTurnId = turn.id;
+			// Same event row as the call, completed in place: `clio trace tail`
+			// shows one line per tool call carrying the E14 verdict fields, which
+			// is what "what did this turn actually execute" means.
+			const endedAt = traceNow();
+			const startedAt = traceToolStarts.get(event.toolCallId) ?? endedAt;
+			traceToolStarts.delete(event.toolCallId);
+			traceEvent({
+				eventId: `tool:${event.toolCallId}`,
+				type: "tool_call",
+				name: event.toolName,
+				payload: {
+					tool: event.toolName,
+					tool_call_id: event.toolCallId,
+					ok: event.isError !== true && event.outcome !== "error" && event.outcome !== "blocked",
+					duration_ms: event.durationMs ?? null,
+					result_summary: payload.resultSummary,
+					outcome: event.outcome ?? null,
+					block_reason: event.blockReason ?? null,
+				},
+				startedAt,
+				endedAt,
+			});
 		},
 
 		appendTerminalToolAssistantTurn(terminal): void {
@@ -189,6 +355,12 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				},
 			});
 			state.lastTurnId = turn.id;
+			traceEvent({
+				type: "message",
+				name: "assistant",
+				payload: { terminalToolResult: true, toolName: terminal.toolName, toolCallId: terminal.toolCallId },
+			});
+			finishTracedTurn("success", null);
 		},
 
 		appendSubmittedUserTurn(agentRuntime, text, images, synthetic): string | null {
@@ -217,6 +389,10 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			if (sessionId) {
 				agentRuntime.agent.sessionId = sessionId;
 			}
+			// The submitted runtime identity is the authority here: state.runtime is
+			// only set once the turn's agent is built, and a first submit runs
+			// before it.
+			startTracedTurn(userTurn.id, text, agentRuntime);
 			return userTurn.id;
 		},
 

@@ -141,7 +141,7 @@ export function createObservabilityBundle(
 	const cost = createCostTracker();
 	const trace: DispatchTraceMirror =
 		options.dispatchTrace === false
-			? { enqueue: () => {}, flush: async () => {}, close: async () => {} }
+			? { enqueue: () => {}, enqueueSessionTurn: () => {}, flush: async () => {}, close: async () => {} }
 			: createDispatchTraceMirror(traceDatabasePath(clioStateDir()));
 	const unsubscribes: Array<() => void> = [];
 	let latestThroughput: TokenThroughputSnapshot | null = null;
@@ -263,6 +263,9 @@ export function createObservabilityBundle(
 			telemetry.record("counter", "tokens.total", tokens);
 			cost.accumulate(providerId, modelId, tokens, costUsd, breakdown, costProvenance);
 			projection.refresh();
+		},
+		recordSessionTurn(sessionTurn) {
+			trace.enqueueSessionTurn(sessionTurn);
 		},
 		recordTokenThroughput(snapshot) {
 			latestThroughput = snapshot;

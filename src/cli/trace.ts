@@ -251,7 +251,7 @@ function missingDatabase(parsed: ParsedTraceArgs): number {
 		return 1;
 	}
 	process.stdout.write(
-		`no trace database yet at ${parsed.db}. runs are recorded when dispatches execute; run \`clio run "<task>"\` to create one.\n`,
+		`no trace database yet at ${parsed.db}. rows are recorded when a dispatch executes or an interactive turn runs; run \`clio run "<task>"\` or start a session to create one.\n`,
 	);
 	return 0;
 }

@@ -29,12 +29,78 @@ export const TRACE_WRITE_QUEUE_LIMIT = 2048;
 type DatabaseSyncConstructor = typeof import("node:sqlite").DatabaseSync;
 let sqliteConstructor: DatabaseSyncConstructor | null = null;
 
+/**
+ * Whether the operator asked to see where warnings come from.
+ *
+ * `--trace-warnings` is a request for more warning detail, not less, so the
+ * filter below stands down for it. Dropping a warning the operator explicitly
+ * asked to trace would be the one case where the suppression lies.
+ */
+function warningTracingRequested(): boolean {
+	const flagged = (argument: string): boolean =>
+		argument === "--trace-warnings" || argument.startsWith("--trace-warnings=");
+	if (process.execArgv.some(flagged)) return true;
+	const nodeOptions = process.env.NODE_OPTIONS;
+	if (nodeOptions === undefined) return false;
+	return nodeOptions.split(/\s+/).some(flagged);
+}
+
+/** Exactly the warning Node emits for the sqlite module, and nothing else. */
+function isSqliteExperimentalWarning(args: readonly unknown[]): boolean {
+	const [warning, second] = args;
+	const type =
+		typeof second === "string"
+			? second
+			: typeof second === "object" && second !== null && "type" in second
+				? (second as { type?: unknown }).type
+				: undefined;
+	if (type !== "ExperimentalWarning") return false;
+	const text = typeof warning === "string" ? warning : warning instanceof Error ? warning.message : "";
+	return text.includes("SQLite is an experimental feature");
+}
+
+function requireSqlite(): DatabaseSyncConstructor {
+	return (createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: DatabaseSyncConstructor }).DatabaseSync;
+}
+
+/**
+ * Run one synchronous module load with the SQLite ExperimentalWarning dropped.
+ *
+ * The warning names a Node internal the operator never chose and it lands on
+ * stderr in the middle of `clio trace` output, which is the fresh-install
+ * opacity F1 was filed for. Workers are already spawned with
+ * `--disable-warning=ExperimentalWarning` (dispatch/worker-spawn.ts), so
+ * silencing it here is consistency rather than new policy.
+ *
+ * The filter is as narrow as the problem: it covers one synchronous call,
+ * matches only the ExperimentalWarning naming SQLite, forwards everything else
+ * untouched, and restores the original `process.emitWarning` in a `finally` so
+ * a load that throws still hands the global back. An operator running with
+ * `--trace-warnings` asked for more warning detail, not less, so the filter
+ * stands down entirely for them.
+ *
+ * Exported for the contract test, which drives it with a load that emits both
+ * warnings; production has exactly one caller.
+ */
+export function loadWithSqliteWarningSuppressed<T>(load: () => T): T {
+	if (warningTracingRequested()) return load();
+	const emitWarning = process.emitWarning;
+	const forward = emitWarning.bind(process) as (...args: unknown[]) => void;
+	process.emitWarning = ((...args: unknown[]) => {
+		if (isSqliteExperimentalWarning(args)) return;
+		forward(...args);
+	}) as typeof process.emitWarning;
+	try {
+		return load();
+	} finally {
+		process.emitWarning = emitWarning;
+	}
+}
+
 function databaseSyncConstructor(): DatabaseSyncConstructor {
-	// Loading node:sqlite still emits an ExperimentalWarning on some supported
-	// Node builds. Keep that load lazy so unrelated Clio commands never pay the
-	// warning or module cost; the trace writer/reader is the first real consumer.
-	sqliteConstructor ??= (createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: DatabaseSyncConstructor })
-		.DatabaseSync;
+	// Keep the load lazy so unrelated Clio commands never pay the warning or the
+	// module cost; the trace writer/reader is the first real consumer.
+	sqliteConstructor ??= loadWithSqliteWarningSuppressed(requireSqlite);
 	return sqliteConstructor;
 }
 
@@ -83,6 +149,69 @@ export interface TraceSpendInput {
 	contextTokens?: number | null;
 	contextWindow?: number | null;
 }
+
+/**
+ * `runs.assignment_id` for a turn the operator ran themselves.
+ *
+ * A dispatched run carries its assignment id here; a session turn has no
+ * assignment, so the column holds this sentinel instead. That keeps session
+ * turns and dispatched runs in one `runs` table, which is what an operator
+ * asking "what did this session do" wants, and it avoids a schema bump:
+ * TraceSchemaVersionError refuses a version mismatch outright, so every
+ * existing trace.sqlite would need migrating for a column the sentinel already
+ * expresses.
+ *
+ * A row bearing it has no receipt and no worker process. Nothing in the trace
+ * read paths requires either, but a future reader that does must check this.
+ */
+export const SESSION_TRACE_ASSIGNMENT_ID = "session";
+
+export interface SessionTurnUsage {
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	reasoningTokens: number;
+	totalTokens: number;
+	costUsd?: number | null;
+}
+
+/** Opens the runs/phases pair for one operator turn. */
+export interface SessionTurnStart {
+	kind: "start";
+	runId: string;
+	agent: string;
+	target: string;
+	model: string;
+	runtime: string;
+	prompt: string | null;
+	at: string;
+}
+
+/** One row in that turn: the assistant message, a tool call, a tool result. */
+export interface SessionTurnEvent {
+	kind: "event";
+	runId: string;
+	eventId: string;
+	type: string;
+	name: string;
+	payload?: unknown;
+	tokens?: number | null;
+	startedAt: string;
+	endedAt?: string | null;
+}
+
+/** Closes the turn. `error` is the terminal failure text, when there was one. */
+export interface SessionTurnFinish {
+	kind: "finish";
+	runId: string;
+	status: "success" | "fail";
+	error: string | null;
+	usage: SessionTurnUsage | null;
+	at: string;
+}
+
+export type SessionTurnTrace = SessionTurnStart | SessionTurnEvent | SessionTurnFinish;
 
 export interface TraceGateCheck {
 	item: string;
@@ -683,6 +812,118 @@ export class TraceStore {
 			});
 		});
 	}
+
+	/**
+	 * Record one fact about a turn the operator ran in the chat loop.
+	 *
+	 * The three shapes reuse the dispatch tables exactly: `start` opens the
+	 * runs/phases pair, `event` appends to the same `events` table a worker's
+	 * tool calls land in, and `finish` closes both with the turn's usage. The
+	 * phase id is the run id, as it is for a dispatched run's single phase, so
+	 * `clio trace phases` and `clio trace tail` need no session-specific path.
+	 */
+	recordSessionTurn(input: SessionTurnTrace): void {
+		if (input.kind === "start") {
+			this.startSessionTurn(input);
+			return;
+		}
+		if (input.kind === "event") {
+			this.transaction(() => {
+				this.insertEventRaw({
+					eventId: `${input.runId}:${input.eventId}`,
+					runId: input.runId,
+					phaseId: input.runId,
+					parentId: `${input.runId}:turn_start`,
+					type: input.type,
+					name: input.name,
+					...(input.payload === undefined ? {} : { payload: input.payload }),
+					tokens: input.tokens ?? null,
+					startedAt: input.startedAt,
+					endedAt: input.endedAt ?? null,
+				});
+			});
+			return;
+		}
+		this.finishSessionTurn(input);
+	}
+
+	private startSessionTurn(input: SessionTurnStart): void {
+		this.transaction(() => {
+			this.db
+				.prepare(`INSERT INTO runs
+          (run_id, assignment_id, request, status, agent, target, model, runtime, node, started_at)
+          VALUES (?, ?, ?, 'running', ?, ?, ?, ?, NULL, ?)
+          ON CONFLICT(run_id) DO NOTHING`)
+				.run(
+					input.runId,
+					SESSION_TRACE_ASSIGNMENT_ID,
+					input.prompt === null ? null : traceText(input.prompt, 2000),
+					traceText(input.agent, 256),
+					traceText(input.target, 256),
+					traceText(input.model, 256),
+					traceText(input.runtime, 256),
+					input.at,
+				);
+			this.db
+				.prepare(`INSERT INTO phases
+          (phase_id, run_id, seq, name, kind, owner, description, status, started_at)
+          VALUES (?, ?, 0, ?, 'session', ?, ?, 'running', ?)
+          ON CONFLICT(phase_id) DO NOTHING`)
+				.run(
+					input.runId,
+					input.runId,
+					traceText(input.agent, 256),
+					traceText(input.agent, 256),
+					input.prompt === null ? null : traceText(input.prompt, 2000),
+					input.at,
+				);
+			this.insertEventRaw({
+				eventId: `${input.runId}:turn_start`,
+				runId: input.runId,
+				phaseId: input.runId,
+				type: "agent_start",
+				name: input.agent,
+				payload: { target: input.target, model: input.model, runtime: input.runtime, session: true },
+				startedAt: input.at,
+			});
+		});
+	}
+
+	private finishSessionTurn(input: SessionTurnFinish): void {
+		const usage = input.usage;
+		this.transaction(() => {
+			this.db
+				.prepare("UPDATE runs SET status=?, ended_at=?, total_tokens=?, total_cost_usd=? WHERE run_id=?")
+				.run(input.status, input.at, usage?.totalTokens ?? null, usage?.costUsd ?? null, input.runId);
+			this.db
+				.prepare(`UPDATE phases SET status=?, ended_at=?, error=?, input_tokens=?, output_tokens=?,
+          cache_read_tokens=?, cache_write_tokens=?, reasoning_tokens=?, total_tokens=?, total_cost_usd=?
+          WHERE phase_id=?`)
+				.run(
+					input.status,
+					input.at,
+					input.error,
+					usage?.inputTokens ?? null,
+					usage?.outputTokens ?? null,
+					usage?.cacheReadTokens ?? null,
+					usage?.cacheWriteTokens ?? null,
+					usage?.reasoningTokens ?? null,
+					usage?.totalTokens ?? null,
+					usage?.costUsd ?? null,
+					input.runId,
+				);
+			this.insertEventRaw({
+				eventId: `${input.runId}:turn_end`,
+				runId: input.runId,
+				phaseId: input.runId,
+				type: "agent_end",
+				name: input.status,
+				payload: { status: input.status, error: input.error, usage },
+				tokens: usage?.totalTokens ?? null,
+				startedAt: input.at,
+			});
+		});
+	}
 }
 
 export class TraceReader {
@@ -759,6 +1000,12 @@ export class TraceReader {
 
 export interface DispatchTraceMirror {
 	enqueue(channel: string, payload: unknown): void;
+	/**
+	 * Mirror one fact about the operator's own turn. Queued on the same chain as
+	 * dispatch events, so a turn's start, events and finish keep their order and
+	 * a session row never precedes the run row its events reference.
+	 */
+	enqueueSessionTurn(trace: SessionTurnTrace): void;
 	flush(): Promise<void>;
 	close(): Promise<void>;
 }
@@ -846,6 +1093,12 @@ export function createDispatchTraceMirror(
 				else if (channel === "dispatch.failed")
 					recordFailure(getStore(), raw as unknown as DispatchFailedPayload, observedAt);
 			});
+		},
+		enqueueSessionTurn(trace): void {
+			// A session turn is low-frequency and every one of its rows is the
+			// record itself rather than display detail, so none of it is eligible
+			// for the progress drop the queue limit applies to dispatch chatter.
+			schedule(() => getStore().recordSessionTurn(trace));
 		},
 		async flush(): Promise<void> {
 			await chain;

@@ -15,8 +15,11 @@ import {
 	workerToolCallCapSynthesisReason,
 } from "../../src/core/guardrails.js";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
-import { RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES } from "../../src/core/response-schema.js";
-import type { ToolName } from "../../src/core/tool-names.js";
+import {
+	RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES,
+	UnsupportedResponseSchemaError,
+} from "../../src/core/response-schema.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
@@ -5392,6 +5395,72 @@ rl.once("line", (line) => {
 			strictEqual(confinedTools.includes("verify"), false, "verify is never offered under confinement");
 			strictEqual(confinedTools.includes("bash"), false);
 			ok(confinedTools.includes("read") && confinedTools.includes("edit"), "the writer keeps its own tools");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	/**
+	 * E6: llama-server compiles `response_format.schema` into a sampler grammar
+	 * and cannot build it beside the tool-call grammar, so a request carrying
+	 * both is answered 400 before a token is generated. The capability probe
+	 * cannot see it, because `structuredOutputs: "json-schema"` is true of the
+	 * schema-only request it describes. Admission refuses instead of spending a
+	 * worker and a round trip on a run that is already doomed, and the refusal
+	 * is the same UnsupportedResponseSchemaError the bootstrap fallback already
+	 * arms its prompt-parser retry on.
+	 */
+	it("refuses a responseSchema that arrives with tools on the llama.cpp dialect", async () => {
+		const target: TargetDescriptor = { id: "mini", runtime: "llamacpp", defaultModel: "scout-model" };
+		const runtime: RuntimeDescriptor = {
+			id: "llamacpp",
+			displayName: "llama.cpp",
+			kind: "http",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: {
+				...EMPTY_CAPABILITIES,
+				chat: true,
+				tools: true,
+				structuredOutputs: "json-schema",
+			},
+			synthesizeModel: () => ({ id: "scout-model", provider: "llamacpp" }) as never,
+		};
+		const context = stubContext({
+			target,
+			runtime,
+			recipes: [
+				{
+					...agentRecipeFixture(),
+					tools: [ToolNames.Read],
+					toolRequirements: { required: [ToolNames.Read], optional: [] },
+				},
+			],
+		});
+		let spawned = false;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("must not spawn");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const failure = await bundle.contract
+				.dispatch({
+					agentId: "coder",
+					executionRole: "builder",
+					task: "inspect",
+					responseSchema: { type: "object", properties: { project: { type: "string" } } },
+				})
+				.then(
+					() => null,
+					(error: unknown) => error,
+				);
+			ok(failure instanceof UnsupportedResponseSchemaError, "the refusal keeps the type the fallback arms on");
+			strictEqual(failure.code, "UNSUPPORTED_RESPONSE_SCHEMA");
+			match(failure.message, /cannot build it beside a tool grammar/);
+			strictEqual(spawned, false, "nothing is spent on a request the server would refuse");
 		} finally {
 			await bundle.extension.stop?.();
 		}
