@@ -31,7 +31,7 @@ import { effectiveToolNames } from "../tools/agent-tools.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { createRegistry, type RegistryDeps, type ToolRegistry } from "../tools/registry.js";
-import { toolSignatureOf } from "../worker/protocol.js";
+import { type AgentLedgerPort, toolSignatureOf } from "../worker/protocol.js";
 
 /**
  * Build a worker-local SafetyContract that owns its own loop-detector state.
@@ -132,6 +132,7 @@ export function createWorkerToolRegistry(
 	hookRegistrations?: ReadonlyArray<MiddlewareHookRegistration>,
 	autonomy?: AutonomyLevel,
 	onMiddlewareEffects?: RegistryDeps["onMiddlewareEffects"],
+	agentLedger?: AgentLedgerPort,
 ): ToolRegistry {
 	// A worker always gets a middleware contract, even without a snapshot from
 	// the orchestrator, because the loop guard rides on it as a before_tool
@@ -149,7 +150,12 @@ export function createWorkerToolRegistry(
 		autonomy: () => autonomy ?? DEFAULT_AUTONOMY_LEVEL,
 		...(onMiddlewareEffects ? { onMiddlewareEffects } : {}),
 	});
+	// The ledger tool registers unconditionally. attestedToolSignature signs the
+	// names a bare registry produces, so a conditional registration would drift
+	// the signature and fail admission; only the injected port varies, and a run
+	// without one answers that it has no coordination ledger.
 	registerAllTools(registry, {
+		...(agentLedger ? { agentLedger } : {}),
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: skillLoaderOptions?.trustProjectCompatRoots === true,
 			disableDiscovery: skillLoaderOptions?.noSkills === true,

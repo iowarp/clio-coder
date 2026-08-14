@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import {
+	type AgentLedgerBody,
 	type ApprovedWorkerIdentity,
 	approvedIdentityForSpec,
 	createBoundedEventQueue,
@@ -110,6 +111,12 @@ export interface WorkerProcessOptions {
 	 * acknowledgements remain observable even when the bulk lane is saturated.
 	 */
 	onControl?: (frame: { kind: "heartbeat" | "cancel_ack" }) => void;
+	/**
+	 * One agent-ledger post from the worker. The worker supplies the body and
+	 * nothing else; the orchestrator stamps every attribution field from its own
+	 * admission record, so this callback only ever receives a validated body.
+	 */
+	onLedgerPost?: (body: AgentLedgerBody) => void;
 	/**
 	 * Identity the plan approved. Defaults to the identity of the spec actually
 	 * written to stdin, which is what every production caller wants; a caller
@@ -366,6 +373,16 @@ export function spawnWorkerProcess(
 			releaseHeldFrames();
 			return;
 		}
+		if (frame.value.kind === "ledger_post") {
+			if (!announceAccepted) {
+				// Attribution requires an admitted identity, so a post that arrives
+				// before the announce is accepted is dropped rather than queued.
+				appendStderr("[worker] dropped a ledger post that arrived before attestation was accepted\n");
+				return;
+			}
+			opts?.onLedgerPost?.(frame.value.body);
+			return;
+		}
 		opts?.onControl?.({ kind: frame.value.kind });
 	}
 
@@ -451,17 +468,20 @@ export function spawnWorkerProcess(
 	 */
 	let queuedStdinBytes = 0;
 
-	function failChannel(operation: "steer" | "permission_decision", detail: string): false {
+	function failChannel(operation: "steer" | "permission_decision" | "ledger_delta", detail: string): false {
 		channelFailure = new WorkerChannelFailure(operation, detail);
 		appendStderr(`[worker] ${channelFailure.message}\n`);
 		return false;
 	}
 
 	const send = (value: unknown): boolean => {
+		const frameType = typeof value === "object" && value !== null ? (value as { type?: unknown }).type : undefined;
 		const operation =
-			typeof value === "object" && value !== null && (value as { type?: unknown }).type === "permission_decision"
+			frameType === "permission_decision"
 				? "permission_decision"
-				: "steer";
+				: frameType === "ledger_delta"
+					? "ledger_delta"
+					: "steer";
 		if (!isAlive()) return failChannel(operation, "worker has exited");
 		const stdin = child.stdin;
 		if (!stdin || stdin.destroyed || !stdin.writable) return failChannel(operation, "worker stdin is not writable");

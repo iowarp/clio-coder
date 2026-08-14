@@ -227,7 +227,7 @@ export async function runScoutContinuationPlan<T, S>(input: {
 				}
 				return { ownerId: input.reservationOwnerId };
 			},
-			async run(step, handoffs, reservation) {
+			async run(step, handoffs, reservation, ledger) {
 				const bound = byStep.get(step.id);
 				if (bound?.request === undefined) throw new Error(`Scout step '${step.id}' has no trusted request`);
 				const request: DispatchRequest = {
@@ -235,6 +235,7 @@ export async function runScoutContinuationPlan<T, S>(input: {
 					predecessorHandoffs: handoffs,
 					reservation,
 					assignmentDeadlineAt,
+					...(ledger !== undefined ? { ledger } : {}),
 				};
 				const handle = await input.dispatch.dispatch(request);
 				return {

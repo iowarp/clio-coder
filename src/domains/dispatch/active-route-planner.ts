@@ -31,6 +31,9 @@ export function routeValidationProjection(
 		routeApproval,
 		routeAttemptDecision,
 		assignmentDeadlineAt,
+		// Orchestrator-minted, never model-authored: the ledger reference is
+		// stripped before validation for the same reason the reservation is.
+		ledger,
 		...raw
 	} = request;
 	const awaitingEnvelope =
@@ -46,6 +49,7 @@ export function routeValidationProjection(
 			...(routeApproval !== undefined ? { routeApproval } : {}),
 			...(routeAttemptDecision !== undefined ? { routeAttemptDecision } : {}),
 			...(assignmentDeadlineAt !== undefined ? { assignmentDeadlineAt } : {}),
+			...(ledger !== undefined ? { ledger } : {}),
 			...(awaitingEnvelope ? { failover: "approved" as const } : {}),
 		}),
 	};

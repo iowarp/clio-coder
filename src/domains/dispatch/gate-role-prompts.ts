@@ -15,7 +15,36 @@ export const JUDGE_GATE_PROMPT = [
 	"You cannot modify anything.",
 	'End with a JSON object only: {"winner":<candidate number>,"checks":[{"name":"...","passed":true,"evidence":"what you compared and observed"}]}.',
 	"The winner must be one of the candidate numbers you were given. Report at least one check.",
+	"Report in your checks where the candidates disagreed, covering approach, files touched, and tests, not only which one won.",
 ].join("\n");
+
+/**
+ * Posture a compete candidate runs under. Candidates otherwise differ only by
+ * worktree, and identical agents produce correlated output, so each candidate
+ * is handed a different stance to spread the attempts apart.
+ */
+export type CompeteStance = "minimal-diff" | "test-first" | "refactor-tolerant" | "spec-literal";
+
+/** Assignment order for candidate N: `COMPETE_STANCES[(N - 1) % COMPETE_STANCES.length]`. */
+export const COMPETE_STANCES: ReadonlyArray<CompeteStance> = [
+	"minimal-diff",
+	"test-first",
+	"refactor-tolerant",
+	"spec-literal",
+];
+
+const COMPETE_STANCE_LINERS: Record<CompeteStance, string> = {
+	"minimal-diff": "Prefer the smallest change that satisfies the task; do not restructure surrounding code.",
+	"test-first": "Write or extend a test that fails for the stated reason first, then make it pass.",
+	"refactor-tolerant":
+		"Reshape the surrounding code when the task exposes a bad shape, as long as existing behavior stays covered.",
+	"spec-literal": "Implement exactly what the task text states and nothing it leaves unasked.",
+};
+
+/** One-line posture liner rendered into the candidate's dynamic prompt. */
+export function competeStanceLiner(stance: CompeteStance): string {
+	return `Compete stance: ${stance}. ${COMPETE_STANCE_LINERS[stance]}`;
+}
 
 export function isBoundedGateRolePrompt(input: {
 	role: string | undefined;

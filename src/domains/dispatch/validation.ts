@@ -17,6 +17,7 @@ import {
 	type ExecutionHandoff,
 } from "./execution-handoff.js";
 import { isExecutionRole } from "./execution-role.js";
+import { COMPETE_STANCES, type CompeteStance } from "./gate-role-prompts.js";
 import { isRoutingIntent, type RoutingIntent } from "./routing-intent.js";
 import type {
 	DispatchRequestOrigin,
@@ -157,6 +158,12 @@ export interface JobSpec {
 	gate?: RunGateProvenance;
 	/** Plan-approval provenance sealed into the run's receipt. */
 	plan?: RunPlanProvenance;
+	/**
+	 * Posture assigned to one compete candidate so sibling attempts diverge.
+	 * Minted by the compete candidate loop and never model-authored, so a value
+	 * outside the closed union is a construction bug and fails admission.
+	 */
+	competeStance?: CompeteStance;
 }
 
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
@@ -197,7 +204,9 @@ const KNOWN_KEYS = new Set([
 	"autonomy",
 	"gate",
 	"plan",
+	"competeStance",
 ]);
+const VALID_COMPETE_STANCES = new Set<string>(COMPETE_STANCES);
 const VALID_THINKING = new Set<string>(THINKING_LEVELS);
 const VALID_REQUEST_ORIGINS = new Set(["user", "agent", "internal"]);
 const VALID_FAILOVER_MODES = new Set(["none", "approved", "automatic"]);
@@ -485,6 +494,12 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("competeStance" in spec && spec.competeStance !== undefined) {
+		if (typeof spec.competeStance !== "string" || !VALID_COMPETE_STANCES.has(spec.competeStance)) {
+			errors.push(`competeStance must be one of ${[...VALID_COMPETE_STANCES].join("|")}`);
+		}
+	}
+
 	if (errors.length > 0) {
 		return { ok: false, errors };
 	}
@@ -543,6 +558,9 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (isValidLineage(spec.lineage)) out.lineage = spec.lineage;
 	if (isAutonomyLevel(spec.autonomy)) out.autonomy = spec.autonomy;
 	if (isValidGate(spec.gate)) out.gate = cloneGate(spec.gate);
+	if (typeof spec.competeStance === "string" && VALID_COMPETE_STANCES.has(spec.competeStance)) {
+		out.competeStance = spec.competeStance as CompeteStance;
+	}
 	if (isValidPlan(spec.plan)) {
 		out.plan = { ...spec.plan, source: spec.plan.source === null ? null : { ...spec.plan.source } };
 	}

@@ -359,6 +359,19 @@ export interface RunValidationGrounding {
 }
 
 /**
+ * One run's sealed contribution to the agent ledger its dispatch coordinated
+ * on. Sealed orchestrator-side from the stored entries; a worker reports
+ * nothing about its own contribution.
+ */
+export interface RunLedgerContribution {
+	ledgerId: string;
+	posted: number;
+	refused: number;
+	/** sha256 over canonicalJson of this run's attributed entries in sequence order. */
+	digest: string;
+}
+
+/**
  * The pairing of a read-only recipe with a task that needs a write, decided at
  * admission. Present only on a run the harness admitted with the mismatch
  * flagged; a refused pairing never becomes a run at all.
@@ -748,6 +761,14 @@ export interface RunReceipt {
 	validationGrounding?: RunValidationGrounding;
 	/** Read-only recipe admitted against a mutating task; absent when the pairing was sound. */
 	capabilityMismatch?: RunCapabilityMismatch;
+	/**
+	 * What this run contributed to its dispatch's agent ledger. Optional and
+	 * absent unless the run had a ledger, following validationGrounding and
+	 * capabilityMismatch: receiptDigestFields skips undefined, so a receipt
+	 * without one digests exactly as it did before this landed and
+	 * RUN_RECEIPT_INTEGRITY_VERSION stays where it is.
+	 */
+	ledgerContribution?: RunLedgerContribution;
 	/**
 	 * Sealed route decision: the candidates, their estimates, the hard filters
 	 * that rejected some of them, and the tuple selected by the routing policy.

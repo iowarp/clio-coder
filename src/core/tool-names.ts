@@ -34,6 +34,7 @@ export const ToolNames = {
 	Monitor: "monitor",
 	Steer: "steer",
 	Tasks: "tasks",
+	Ledger: "ledger",
 	// RETRIEVE
 	WebFetch: "web_fetch",
 	// INTERACT

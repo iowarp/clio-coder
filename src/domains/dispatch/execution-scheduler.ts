@@ -1,3 +1,4 @@
+import { closeAgentLedger, openAgentLedger } from "./agent-ledger-store.js";
 import { type ExecutionHandoff, projectExecutionHandoffs } from "./execution-handoff.js";
 import {
 	type ExecutionPlan,
@@ -88,6 +89,12 @@ export interface ExecutionSchedulerAdapter {
 		step: ExecutionPlanAgentStep,
 		handoffs: ReadonlyArray<ExecutionHandoff>,
 		reservation: { ownerId: string; memberId: string },
+		/**
+		 * The agent ledger this plan's steps coordinate on, present only when the
+		 * plan has two or more agent steps. The adapter threads it onto the
+		 * request it builds; the scheduler owns the ledger's lifetime.
+		 */
+		ledger?: { id: string; sequence: number },
 	): Promise<{ assignmentId: string; result: Promise<ExecutionStepResult> }>;
 	/**
 	 * Execute a deterministic step. It takes no reservation because it holds no
@@ -192,6 +199,10 @@ export async function executePlan(
 	// are outside admission entirely: they reserve nothing and spawn no worker.
 	// Loop attempts are admitted up front too, because the bound is the ceiling
 	// an operator approved and a repair must never be admitted mid-run.
+	// A plan with a single agent step has no peers, so it gets no board.
+	const ledgerId = agentSteps.length >= 2 ? `ledger-plan-${plan.hash.slice(0, 12)}-${Date.now().toString(36)}` : null;
+	const ledger = ledgerId === null ? undefined : { id: ledgerId, sequence: 0 };
+	if (ledgerId !== null) await openAgentLedger(ledgerId);
 	const admissions = agentSteps.map((step) => adapter.preflight(step));
 	const reservation = adapter.reserve(plan, admissions);
 	const results = new Map<string, ExecutionStepResult>();
@@ -498,7 +509,7 @@ export async function executePlan(
 			const started = await Promise.all(
 				launch.map(async ({ step, handoffs }) => ({
 					step,
-					handle: await adapter.run(step, handoffs, { ownerId: reservation.ownerId, memberId: step.id }),
+					handle: await adapter.run(step, handoffs, { ownerId: reservation.ownerId, memberId: step.id }, ledger),
 				})),
 			);
 			for (const { step, handle } of started) running.set(step.id, { assignmentId: handle.assignmentId });
@@ -567,5 +578,6 @@ export async function executePlan(
 	} finally {
 		signal?.removeEventListener("abort", cancelOwned);
 		adapter.release(reservation.ownerId);
+		if (ledgerId !== null) await closeAgentLedger(ledgerId);
 	}
 }

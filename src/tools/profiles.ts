@@ -18,6 +18,9 @@ const MINIMAL_LOCAL_TOOLS: ReadonlyArray<BuiltinToolName> = [
 	ToolNames.Git,
 	ToolNames.Context,
 	ToolNames.CodeNav,
+	// A narrowed read-only scout swarm is the surface that most needs to see
+	// what its peers already staked.
+	ToolNames.Ledger,
 ];
 
 const SCIENCE_LOCAL_TOOLS: ReadonlyArray<BuiltinToolName> = [...MINIMAL_LOCAL_TOOLS, ToolNames.Verify];

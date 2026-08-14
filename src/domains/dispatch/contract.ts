@@ -36,6 +36,12 @@ export interface DispatchRequest extends JobSpec {
 	routeApproval?: ApprovedAssignmentRoute;
 	/** Resolver-authored active decision for this approved recovery attempt. */
 	routeAttemptDecision?: ApprovedAssignmentRoute["decision"];
+	/**
+	 * The agent ledger this run coordinates on. Set by the dispatch modes that
+	 * run two or more concurrent peers; absent everywhere else, and its absence
+	 * strips the ledger tool from this run's admitted surface.
+	 */
+	ledger?: { id: string; sequence: number };
 	/** Absolute root-assignment deadline derived once from the approved duration. */
 	assignmentDeadlineAt?: number;
 }

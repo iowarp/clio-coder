@@ -418,9 +418,9 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				if (!reservation) throw new Error("fleet whole-plan reservation is unavailable");
 				return { ownerId: reservation.ownerId };
 			},
-			async run(step, handoffs, reservation) {
+			async run(step, handoffs, reservation, ledger) {
 				// A loop repair is attempt n of the same logical work, so it enters
-				// the ledger as one: recovery evidence, not a fresh observation.
+				// the run ledger as one: recovery evidence, not a fresh observation.
 				const attempt = step.loop?.role === "repair" ? step.loop.attempt : 0;
 				const request: DispatchRequest = {
 					agentId: step.agentId,
@@ -430,6 +430,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					requestOrigin: "user",
 					lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt, depth: 1 },
 					reservation,
+					...(ledger !== undefined ? { ledger } : {}),
 					...(step.loop?.role === "check"
 						? {
 								gate: {

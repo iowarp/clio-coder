@@ -95,10 +95,188 @@ export interface WorkerAttestation {
 	resources: WorkerResourceFacts;
 }
 
+/**
+ * The agent ledger is the bounded coordination surface concurrent dispatch
+ * workers share. Its wire shapes live here because both the worker and the
+ * orchestrator validate them and src/worker may not value-import src/domains.
+ *
+ * The taxonomy is closed on purpose. A worker contributes a typed artifact or
+ * nothing: a claim stakes a scope so peers stop colliding, a finding carries a
+ * citation so a peer can corroborate it, and a review targets another entry so
+ * peer review reaches the board.
+ */
+export type AgentLedgerBody =
+	| { kind: "claim"; scope: ReadonlyArray<string>; intent: string }
+	| { kind: "finding"; claim: string; path?: string; line?: number }
+	| { kind: "review"; target: string; passed: boolean; evidence: string };
+
+/** Bounds on one posted body. Out-of-bounds input is refused, never truncated. */
+export const AGENT_LEDGER_SCOPE_MAX_ENTRIES = 8;
+export const AGENT_LEDGER_SCOPE_ENTRY_MAX_CHARS = 200;
+export const AGENT_LEDGER_INTENT_MAX_CHARS = 200;
+export const AGENT_LEDGER_CLAIM_MAX_CHARS = 400;
+export const AGENT_LEDGER_EVIDENCE_MAX_CHARS = 400;
+export const AGENT_LEDGER_PATH_MAX_CHARS = 400;
+
+/** `e<sequence>`: short enough that a weak model can retype it from a board. */
+const AGENT_LEDGER_ENTRY_ID = /^e[1-9][0-9]*$/;
+
+/** True when a string has the shape of a ledger entry id. */
+export function isAgentLedgerEntryId(value: unknown): value is string {
+	return typeof value === "string" && AGENT_LEDGER_ENTRY_ID.test(value);
+}
+
+export type AgentLedgerBodyParse = { ok: true; body: AgentLedgerBody } | { ok: false; reason: string };
+
+function boundedString(value: unknown, max: number): value is string {
+	return typeof value === "string" && value.length > 0 && value.length <= max;
+}
+
+/**
+ * The single shared validator. The worker tool calls it to refuse a model
+ * synchronously and the orchestrator calls it again at append, because the
+ * control lane is one-way and only the orchestrator's verdict is authoritative.
+ */
+export function parseAgentLedgerBody(value: unknown): AgentLedgerBodyParse {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return { ok: false, reason: "ledger body is not an object" };
+	}
+	const record = value as Record<string, unknown>;
+	switch (record.kind) {
+		case "claim": {
+			const scope = record.scope;
+			if (!Array.isArray(scope) || scope.length === 0) {
+				return { ok: false, reason: "claim scope must be a non-empty array of path prefixes" };
+			}
+			if (scope.length > AGENT_LEDGER_SCOPE_MAX_ENTRIES) {
+				return { ok: false, reason: `claim scope exceeds ${AGENT_LEDGER_SCOPE_MAX_ENTRIES} entries` };
+			}
+			for (const entry of scope) {
+				if (!boundedString(entry, AGENT_LEDGER_SCOPE_ENTRY_MAX_CHARS)) {
+					return {
+						ok: false,
+						reason: `claim scope entries must be 1..${AGENT_LEDGER_SCOPE_ENTRY_MAX_CHARS} characters`,
+					};
+				}
+			}
+			if (!boundedString(record.intent, AGENT_LEDGER_INTENT_MAX_CHARS)) {
+				return { ok: false, reason: `claim intent must be 1..${AGENT_LEDGER_INTENT_MAX_CHARS} characters` };
+			}
+			return { ok: true, body: { kind: "claim", scope: scope.map(String), intent: record.intent } };
+		}
+		case "finding": {
+			if (!boundedString(record.claim, AGENT_LEDGER_CLAIM_MAX_CHARS)) {
+				return { ok: false, reason: `finding claim must be 1..${AGENT_LEDGER_CLAIM_MAX_CHARS} characters` };
+			}
+			const body: { kind: "finding"; claim: string; path?: string; line?: number } = {
+				kind: "finding",
+				claim: record.claim,
+			};
+			if (record.path !== undefined) {
+				if (!boundedString(record.path, AGENT_LEDGER_PATH_MAX_CHARS)) {
+					return { ok: false, reason: `finding path must be 1..${AGENT_LEDGER_PATH_MAX_CHARS} characters` };
+				}
+				body.path = record.path;
+			}
+			if (record.line !== undefined) {
+				const line = record.line;
+				if (typeof line !== "number" || !Number.isSafeInteger(line) || line <= 0) {
+					return { ok: false, reason: "finding line must be a positive safe integer" };
+				}
+				body.line = line;
+			}
+			return { ok: true, body };
+		}
+		case "review": {
+			if (!isAgentLedgerEntryId(record.target)) {
+				return { ok: false, reason: "review target must be a ledger entry id such as e3" };
+			}
+			if (typeof record.passed !== "boolean") {
+				return { ok: false, reason: "review passed must be a boolean" };
+			}
+			if (!boundedString(record.evidence, AGENT_LEDGER_EVIDENCE_MAX_CHARS)) {
+				return { ok: false, reason: `review evidence must be 1..${AGENT_LEDGER_EVIDENCE_MAX_CHARS} characters` };
+			}
+			return {
+				ok: true,
+				body: { kind: "review", target: record.target, passed: record.passed, evidence: record.evidence },
+			};
+		}
+		default:
+			return { ok: false, reason: `unknown ledger entry kind ${String(record.kind)}` };
+	}
+}
+
+/**
+ * One admitted entry. Every attribution field is stamped by the orchestrator
+ * from its own admission record; no worker-supplied value reaches any of them.
+ */
+export interface AgentLedgerEntry {
+	/** `e<sequence>`, unique within one ledger. Weak models must be able to retype it. */
+	id: string;
+	sequence: number;
+	at: string;
+	runId: string;
+	assignmentId: string;
+	agentId: string;
+	nodeId: string;
+	body: AgentLedgerBody;
+	/** Entry ids of live peer claims this claim's scope overlaps. Orchestrator-computed. */
+	conflictsWith?: ReadonlyArray<string>;
+}
+
+/**
+ * Parse one attributed entry off the stdin lane. The worker re-validates what
+ * the orchestrator stamped because a mirror that accepted a malformed entry
+ * would render it back to the model as if it were an admitted contribution.
+ */
+export function parseAgentLedgerEntry(value: unknown): AgentLedgerEntry | null {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+	const record = value as Record<string, unknown>;
+	const sequence = record.sequence;
+	if (typeof sequence !== "number" || !Number.isSafeInteger(sequence) || sequence <= 0) return null;
+	if (!isAgentLedgerEntryId(record.id)) return null;
+	for (const key of ["at", "runId", "assignmentId", "agentId", "nodeId"] as const) {
+		if (typeof record[key] !== "string" || (record[key] as string).length === 0) return null;
+	}
+	const body = parseAgentLedgerBody(record.body);
+	if (!body.ok) return null;
+	const conflicts = record.conflictsWith;
+	if (conflicts !== undefined && !(Array.isArray(conflicts) && conflicts.every(isAgentLedgerEntryId))) return null;
+	return {
+		id: record.id,
+		sequence,
+		at: record.at as string,
+		runId: record.runId as string,
+		assignmentId: record.assignmentId as string,
+		agentId: record.agentId as string,
+		nodeId: record.nodeId as string,
+		body: body.body,
+		...(conflicts === undefined ? {} : { conflictsWith: [...(conflicts as string[])] }),
+	};
+}
+
+/** Stdin frame that pushes newly admitted entries toward one worker's mirror. */
+export interface AgentLedgerDeltaFrame {
+	type: "ledger_delta";
+	entries: ReadonlyArray<AgentLedgerEntry>;
+}
+
+/**
+ * The port both sides share. `post` is fire and forget over the control lane,
+ * so its refusal is the worker-local bound check; `read` answers from the local
+ * mirror and returns null when this run has no ledger at all.
+ */
+export interface AgentLedgerPort {
+	post(body: AgentLedgerBody): { ok: true } | { ok: false; reason: string };
+	read(): { open: boolean; watermark: number; entries: ReadonlyArray<AgentLedgerEntry> } | null;
+}
+
 export type WorkerControlFrame =
 	| { kind: "announce"; attestation: WorkerAttestation }
 	| { kind: "heartbeat"; at: number }
-	| { kind: "cancel_ack"; at: number };
+	| { kind: "cancel_ack"; at: number }
+	| { kind: "ledger_post"; body: AgentLedgerBody };
 
 function sha256Hex(input: string): string {
 	return createHash("sha256").update(input, "utf8").digest("hex");
@@ -313,6 +491,11 @@ export function parseControlFrame(line: string): FrameParseResult<WorkerControlF
 			const at = readFiniteNumber(record, "at");
 			if (at === null) return { ok: false, reason: "cancel_ack frame requires a finite at" };
 			return { ok: true, value: { kind: "cancel_ack", at } };
+		}
+		case "ledger_post": {
+			const body = parseAgentLedgerBody(record.body);
+			if (!body.ok) return { ok: false, reason: `ledger_post frame rejected: ${body.reason}` };
+			return { ok: true, value: { kind: "ledger_post", body: body.body } };
 		}
 		default:
 			return { ok: false, reason: `unknown control frame kind ${String(record.kind)}` };

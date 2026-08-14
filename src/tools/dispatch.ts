@@ -7,6 +7,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
+import { closeAgentLedger, openAgentLedger } from "../domains/dispatch/agent-ledger-store.js";
 import type { DetachedBatchRun } from "../domains/dispatch/batch-store.js";
 import type {
 	AbortReason,
@@ -38,7 +39,12 @@ import {
 	stagePendingGateDecision,
 	stagePendingGateOutput,
 } from "../domains/dispatch/gate-decisions.js";
-import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
+import {
+	COMPETE_STANCES,
+	type CompeteStance,
+	JUDGE_GATE_PROMPT,
+	REVIEWER_GATE_PROMPT,
+} from "../domains/dispatch/gate-role-prompts.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
@@ -525,10 +531,17 @@ async function runDetached(
 	if (!detached) {
 		return { kind: "error", message: "dispatch: detach is not supported in this context" };
 	}
-	const handle = await deps.dispatch.dispatchBatch(requests);
+	// Detached runs are concurrent peers too, so they get a board whenever there
+	// is more than one of them. Collection closes it, which can happen in a later
+	// process, so the batch record carries the id.
+	const ledgerId = requests.length >= 2 ? newGateGroupId("ledger") : null;
+	if (ledgerId !== null) await openAgentLedger(ledgerId);
+	const ledgered =
+		ledgerId === null ? requests : requests.map((request) => ({ ...request, ledger: { id: ledgerId, sequence: 0 } }));
+	const handle = await deps.dispatch.dispatchBatch(ledgered);
 	const registered = deps.runEvents.registerBatch(
 		handle,
-		requests.map((request) => request.agentId),
+		ledgered.map((request) => request.agentId),
 		fallbackProgressBus(deps),
 	);
 	const assignmentIds = handle.assignmentIds;
@@ -543,7 +556,12 @@ async function runDetached(
 	// retry) instead of falling back to a bare, possibly-failed first attempt.
 	await deps.dispatch.assignments?.flushWrites?.();
 	try {
-		await detached.register({ batchId: handle.batchId, runs, sessionId });
+		await detached.register({
+			batchId: handle.batchId,
+			runs,
+			sessionId,
+			...(ledgerId !== null ? { ledgerId } : {}),
+		});
 	} catch (err) {
 		// The runs are already live; report the durability gap instead of
 		// pretending the batch does not exist.
@@ -1483,6 +1501,12 @@ async function runCompete(
 	// preserved, and malformed crash leftovers remain untouched.
 	recoverCleanupReadyCompeteGroups(requestedRoot);
 	const group = newGateGroupId("compete");
+	// Candidates run concurrently and the judge reads what they contributed, so
+	// the board reaches the judge with corroboration and dispute labels instead
+	// of only per-candidate output.
+	const ledgerId = newGateGroupId("ledger");
+	const ledger = { id: ledgerId, sequence: 0 };
+	await openAgentLedger(ledgerId);
 	let ownership: CompeteGroupOwnership | null = null;
 	const worktrees: CandidateWorktree[] = [];
 	const runs: CompletedRun[] = [];
@@ -1640,6 +1664,8 @@ async function runCompete(
 						cwd: worktree.path,
 						protectedArtifactRemap: { sourceRoot: root, workerRoot: worktree.path },
 						gate: { role: "candidate", group, cycle: worktree.index },
+						ledger,
+						competeStance: COMPETE_STANCES[(worktree.index - 1) % COMPETE_STANCES.length] as CompeteStance,
 					};
 					return admitOwnedRun(
 						withResolvedPlanTaskPin(
@@ -1699,6 +1725,7 @@ async function runCompete(
 					cycle: 1,
 					subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
 				},
+				ledger,
 				...(compete.judge?.model !== undefined ? { model: compete.judge.model } : {}),
 				...(compete.judge?.target !== undefined ? { target: compete.judge.target } : {}),
 				...(compete.judge?.node !== undefined ? { node: compete.judge.node } : {}),
@@ -1853,6 +1880,8 @@ async function runCompete(
 	}
 	const finalizationErrors: unknown[] = [];
 	await Promise.allSettled(ownedRuns.map((run) => run.settlement));
+	// Every worker has settled, so no further post can be admitted.
+	await closeAgentLedger(ledgerId);
 	finalizationErrors.push(...abortErrors);
 
 	// Losers are always cleaned; the winner's worktree and branch survive
@@ -3148,10 +3177,16 @@ async function runBatch(
 	signal: AbortSignal | undefined,
 	background: BackgroundSwitch,
 ): Promise<CompletedRun[]> {
-	const handle = await deps.dispatch.dispatchBatch(requests);
+	// This arm is the concurrent parallel fan-out, so its peers can see each
+	// other. The ledger opens before admission and every request carries it, so
+	// no worker spawns into a dispatch whose board it cannot reach.
+	const ledgerId = newGateGroupId("ledger");
+	await openAgentLedger(ledgerId);
+	const ledgered = requests.map((request) => ({ ...request, ledger: { id: ledgerId, sequence: 0 } }));
+	const handle = await deps.dispatch.dispatchBatch(ledgered);
 	const registered = deps.runEvents.registerBatch(
 		handle,
-		requests.map((request) => request.agentId),
+		ledgered.map((request) => request.agentId),
 		fallbackProgressBus(deps),
 	);
 	// The operator signal is a cancel; the timer is a timeout. The timeout
@@ -3175,7 +3210,7 @@ async function runBatch(
 				handle.assignmentIds.map((runId, index) => ({
 					runId,
 					assignmentId: runId,
-					agentId: requests[index]?.agentId ?? "unknown",
+					agentId: ledgered[index]?.agentId ?? "unknown",
 				})),
 				[],
 				[],
@@ -3197,5 +3232,6 @@ async function runBatch(
 	} finally {
 		if (timer) clearTimeout(timer);
 		signal?.removeEventListener("abort", onSignalAbort);
+		await closeAgentLedger(ledgerId);
 	}
 }
