@@ -338,17 +338,35 @@ describe("contracts/settings center", () => {
 		}
 	});
 
-	it("renders a two-lane center with a breadcrumb footer at 120x30", () => {
+	// Same arithmetic as the two-lane cases below: the body is the terminal
+	// width less eight, so a 120-column terminal renders at 112 and a
+	// 119-column one at 111. Those two widths straddle the three-column floor.
+	it("renders a three-lane center at a 120-column terminal (112 inner columns)", () => {
 		const center = noopSettingsCenter(26);
-		const rendered = stripAnsi(center.render(112).join("\n"));
-		strictEqual(center.render(112).length, 26);
+		const lines = center.render(112);
+		const rendered = stripAnsi(lines.join("\n"));
+		strictEqual(lines.length, 26);
 		ok(rendered.includes("Sections"));
 		ok(rendered.includes("Autonomy & Safety"));
 		ok(rendered.includes("Models"));
 		ok(rendered.includes("Advanced"));
 		ok(rendered.includes("Autonomy level"));
+		const dividers = stripAnsi(lines[0] ?? "").split("│").length - 1;
+		strictEqual(dividers, 2, "112 inner columns earn the description its own column");
+		ok(rendered.includes("How freely Clio acts"), "the description column carries the explanation");
+		ok(rendered.includes(SCOPE_NOTE), "the description column states the live/global scope");
+	});
+
+	it("renders a two-lane center with a breadcrumb footer at a 119-column terminal (111 inner columns)", () => {
+		const center = noopSettingsCenter(26);
+		const lines = center.render(111);
+		const rendered = stripAnsi(lines.join("\n"));
+		strictEqual(lines.length, 26);
+		ok(rendered.includes("Sections"));
+		ok(rendered.includes("Autonomy level"));
 		ok(rendered.includes("autonomy"), "config path column shows at full width");
-		ok(rendered.includes("│"), "wide layout should include the lane divider");
+		const dividers = stripAnsi(lines[0] ?? "").split("│").length - 1;
+		strictEqual(dividers, 1, "one column short of the floor stays two-lane");
 		ok(rendered.includes("How freely Clio acts"));
 		ok(rendered.includes("Autonomy & Safety › Autonomy level"), "footer breadcrumb");
 		ok(rendered.includes(SCOPE_NOTE), "footer states the live/global scope");

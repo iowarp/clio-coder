@@ -6,6 +6,7 @@
  */
 
 import path from "node:path";
+import { THINKING_LEVELS, type ThinkingLevel } from "../../core/defaults.js";
 import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
 import type { AgentProduct } from "../agents/spec.js";
@@ -26,7 +27,8 @@ import type {
 	RunPlanProvenance,
 } from "./types.js";
 
-export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+/** Dispatch speaks the same thinking vocabulary as the rest of the product. */
+export type JobThinkingLevel = ThinkingLevel;
 
 /** Maximum UTF-8 size of caller-supplied parent-to-worker briefing data. */
 export const DISPATCH_BRIEFING_MAX_BYTES = 12_000;
@@ -196,7 +198,7 @@ const KNOWN_KEYS = new Set([
 	"gate",
 	"plan",
 ]);
-const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const VALID_THINKING = new Set<string>(THINKING_LEVELS);
 const VALID_REQUEST_ORIGINS = new Set(["user", "agent", "internal"]);
 const VALID_FAILOVER_MODES = new Set(["none", "approved", "automatic"]);
 

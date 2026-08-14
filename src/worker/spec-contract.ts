@@ -1,3 +1,4 @@
+import { THINKING_LEVELS } from "../core/defaults.js";
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
@@ -202,15 +203,6 @@ const RUNTIME_AUTHS = [
 	"claude-cli",
 	"none",
 ] as const satisfies ReadonlyArray<RuntimeAuth>;
-const THINKING_LEVELS = [
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-] as const satisfies ReadonlyArray<ThinkingLevel>;
 const TOOL_PROFILE_NAMES = [
 	"minimal-local",
 	"science-local",

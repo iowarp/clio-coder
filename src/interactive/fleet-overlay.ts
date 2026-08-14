@@ -1,5 +1,6 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
+import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { DispatchContract, DispatchSnapshot } from "../domains/dispatch/contract.js";
@@ -33,7 +34,6 @@ import { type ClioToken, clioTheme, formatCompactMs, GLYPH, listGroupHeader, rul
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const REFRESH_MS = 1000;
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export const FLEET_OVERLAY_WIDTH = "100%";
 

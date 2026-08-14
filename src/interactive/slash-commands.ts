@@ -1,4 +1,5 @@
 import { BusChannels } from "../core/bus-events.js";
+import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
@@ -337,15 +338,7 @@ export interface BuiltinSlashCommand {
 	handle(command: SlashCommand, ctx: SlashCommandContext): void;
 }
 
-const RUN_THINKING_LEVELS: ReadonlyArray<JobThinkingLevel> = [
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-];
+const RUN_THINKING_LEVELS: ReadonlyArray<JobThinkingLevel> = THINKING_LEVELS;
 
 function isRunThinkingLevel(value: string): value is JobThinkingLevel {
 	return RUN_THINKING_LEVELS.some((level) => level === value);

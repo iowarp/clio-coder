@@ -1,3 +1,4 @@
+import { THINKING_LEVELS } from "../core/defaults.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { AUTONOMY_LEVELS, type AutonomyLevel } from "../domains/safety/autonomy.js";
 import { globalFlagPositionHint } from "./argv.js";
@@ -47,7 +48,7 @@ export interface RunCliArgs {
 	diagnostics: CliArgDiagnostic[];
 }
 
-const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = THINKING_LEVELS;
 
 export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	const parsed: RunCliArgs = {
