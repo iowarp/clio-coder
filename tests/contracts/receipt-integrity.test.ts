@@ -352,6 +352,12 @@ describe("contracts/receipt-integrity", () => {
 				],
 			},
 			findingsSummary: sampleSummary,
+			ledgerContribution: {
+				ledgerId: "agent-ledger-1",
+				posted: 3,
+				refused: 1,
+				digest: "7".repeat(64),
+			},
 			validationGrounding: {
 				claimed: 1,
 				grounded: 0,

@@ -31,18 +31,48 @@ function installerExportLine(): string {
 	return `export PATH="${installerBinDir()}:$PATH"`;
 }
 
-function readmeInstallBlock(): ReadonlyArray<string> {
+/**
+ * The Install section carries two shell blocks. The npm block comes first
+ * because that is the path most readers take, so a test that wants the
+ * from-source steps has to anchor on its own prose line rather than on
+ * whichever block happens to be nearest the heading.
+ */
+function readmeBashBlockAfter(marker: string): ReadonlyArray<string> {
 	const readme = readFileSync("README.md", "utf8").split(/\r?\n/);
 	const heading = readme.indexOf("## Install");
 	ok(heading >= 0, "README has an Install section");
-	const open = readme.indexOf("```bash", heading);
-	ok(open > heading, "the Install section opens a shell block");
+	const anchor = readme.findIndex((line, index) => index > heading && line.startsWith(marker));
+	ok(anchor > heading, `the Install section still introduces its steps with ${JSON.stringify(marker)}`);
+	const open = readme.indexOf("```bash", anchor);
+	ok(open > anchor, `${JSON.stringify(marker)} opens a shell block`);
 	const close = readme.indexOf("```", open + 1);
 	ok(close > open, "the shell block is closed");
 	return readme.slice(open + 1, close);
 }
 
+/** The from-source steps: clone, install, PATH, verify. */
+function readmeInstallBlock(): ReadonlyArray<string> {
+	return readmeBashBlockAfter("From source");
+}
+
+/** The published-package steps. */
+function readmeNpmBlock(): ReadonlyArray<string> {
+	return readmeBashBlockAfter("From npm");
+}
+
 describe("contracts/readme install block", () => {
+	/**
+	 * The npm block is the first thing a reader runs, so it has to install the
+	 * package this repository actually publishes rather than a name that only
+	 * resembles it.
+	 */
+	it("installs the published package name in the npm block", () => {
+		const name = JSON.parse(readFileSync("package.json", "utf8")).name as string;
+		const install = readmeNpmBlock().find((line) => line.includes("npm install"));
+		ok(install, "the npm block still installs the package");
+		ok(install?.includes(name), `the npm block must install ${name}: ${install}`);
+	});
+
 	it("carries the export line the installer prints, verbatim", () => {
 		const expected = installerExportLine();
 		const block = readmeInstallBlock();
