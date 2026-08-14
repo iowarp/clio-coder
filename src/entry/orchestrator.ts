@@ -12,7 +12,7 @@ import { configureGuardrails } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { rememberRecentModel } from "../core/recent-models.js";
 import { EXPERIMENTAL_RELEASE_WARNING } from "../core/release.js";
-import { protectedResidencyModelIds } from "../core/residency-protection.js";
+import { protectedResidencyModels } from "../core/residency-protection.js";
 import {
 	applyOverrides,
 	applyRoutingPatch,
@@ -1284,7 +1284,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// operator's config references (orchestrator, worker default/profiles,
 	// target defaults) may never be evicted by another Clio stream, and a
 	// routing change updates the set on the next read.
-	setProtectedModelsProvider(() => protectedResidencyModelIds(getCurrentSettings()));
+	setProtectedModelsProvider(() => protectedResidencyModels(getCurrentSettings()));
 
 	const validatedKeybindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {});
 	const invalidBindings = validatedKeybindings.invalid;

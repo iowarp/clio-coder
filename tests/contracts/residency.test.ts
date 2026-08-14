@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { protectedResidencyModelIds } from "../../src/core/residency-protection.js";
+import { protectedResidencyModelIds, protectedResidencyModels } from "../../src/core/residency-protection.js";
 import {
 	decideResidency,
 	markClioLoaded,
@@ -449,5 +449,83 @@ describe("contracts/residency-protection settings extraction", () => {
 			"qwopus3.6-27b-coder-mtp",
 			"MiniCPM5-1B",
 		]);
+	});
+
+	it("tags each configured id with the plane that references it", () => {
+		const settings = {
+			...DEFAULT_SETTINGS,
+			targets: [{ id: "dynamo", runtime: "lmstudio-native", defaultModel: "target-default-model" }],
+			orchestrator: { ...DEFAULT_SETTINGS.orchestrator, target: "dynamo", model: "chat-model" },
+			background: { ...DEFAULT_SETTINGS.background, target: "dynamo", model: "memory-model" },
+			workers: {
+				...DEFAULT_SETTINGS.workers,
+				default: { target: "dynamo", model: "worker-model", thinkingLevel: "off" as const },
+			},
+		};
+
+		deepStrictEqual(protectedResidencyModels(settings), [
+			{ modelId: "chat-model", role: "chat" },
+			{ modelId: "memory-model", role: "memory" },
+			{ modelId: "worker-model", role: "worker" },
+			{ modelId: "target-default-model", role: "target-default" },
+		]);
+	});
+});
+
+describe("contracts/model residency role protection", () => {
+	afterEach(() => {
+		setResidencyNoticeSink(null);
+		setProtectedModelsProvider(null);
+		resetResidencyState();
+	});
+
+	/**
+	 * The defect this pins: a chat-model switch that frees a slot used to read as
+	 * an anonymous eviction, so unloading the model serving proactive memory was
+	 * indistinguishable from unloading a spare. The role travels with the id and
+	 * lands in both the message and the notice detail.
+	 */
+	it("names the role of a config-protected resident it is forced to evict", async () => {
+		const notices: ResidencyNotice[] = [];
+		setResidencyNoticeSink((notice) => notices.push(notice));
+		setProtectedModelsProvider(() => [{ modelId: "memory-small", role: "memory" as const }]);
+
+		const plan = await reconcileResidency(
+			baseAdapter({
+				targetKey: "roles",
+				keepModelId: "coder",
+				strategy: "router",
+				capacity: async () => 1,
+				listResident: async () => [{ modelId: "memory-small" }],
+				unload: async () => {},
+			}),
+		);
+
+		deepStrictEqual(
+			plan.evict.map((entry) => entry.modelId),
+			["memory-small"],
+		);
+		const swap = notices.find((notice) => notice.kind === "swap");
+		strictEqual(swap?.detail?.role, "memory");
+		strictEqual(swap?.message.includes("the memory model"), true, swap?.message);
+	});
+
+	it("still protects a bare configured id whose role the caller did not resolve", async () => {
+		setProtectedModelsProvider(() => ["operator-model"]);
+
+		const plan = await reconcileResidency(
+			baseAdapter({
+				targetKey: "roles-bare",
+				keepModelId: "coder",
+				strategy: "jit",
+				listResident: async () => [{ modelId: "operator-model" }, { modelId: "spare" }],
+			}),
+		);
+
+		deepStrictEqual(
+			plan.fallbackEvict.map((entry) => entry.modelId),
+			["spare", "operator-model"],
+			"an unprotected resident is swapped before a configured one",
+		);
 	});
 });

@@ -1,4 +1,5 @@
 import { THINKING_LEVELS } from "../core/defaults.js";
+import type { ProtectedModelRef, ResidencyRole } from "../core/residency-protection.js";
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
@@ -108,12 +109,13 @@ interface WorkerSpecFields {
 	/** Parent-session protections frozen before placement and worker launch. */
 	protectedArtifactState?: WorkerProtectedArtifactState;
 	/**
-	 * Wire model ids the operator's configuration references (orchestrator
-	 * model, worker default/profile models, target default models). The worker
-	 * seeds its residency layer with these so it never evicts another
-	 * profile's model from a shared local server.
+	 * Wire model ids the operator's configuration references, each tagged with
+	 * the role it serves (chat, memory, worker, target default). The worker
+	 * seeds its residency layer with these so it never evicts another profile's
+	 * model, or the memory plane, from a shared local server. A bare string is
+	 * accepted for an id whose role the sender did not resolve.
 	 */
-	protectedModels?: ReadonlyArray<string>;
+	protectedModels?: ReadonlyArray<string | ProtectedModelRef>;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
 	/** Skill names the agent recipe binds to this run; context(scope=skills) admits exactly these. */
@@ -216,6 +218,7 @@ const TOOL_PROFILE_NAMES = [
 ] as const satisfies ReadonlyArray<ToolProfileName>;
 const WORKER_PRODUCTS = ["orientation"] as const satisfies ReadonlyArray<AgentProduct>;
 const TARGET_LIFECYCLES = ["user-managed", "clio-managed"] as const;
+const RESIDENCY_ROLES = ["chat", "memory", "worker", "target-default"] as const satisfies ReadonlyArray<ResidencyRole>;
 const MIDDLEWARE_HOOKS = ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"] as const;
 const MIDDLEWARE_EFFECT_KINDS = [
 	"inject_reminder",
@@ -310,6 +313,26 @@ function readStringArray(value: unknown, source: string): string[] {
 
 function readOptionalStringArray(record: Record<string, unknown>, key: string, source: string): void {
 	if (record[key] !== undefined) readStringArray(record[key], `${source}.${key}`);
+}
+
+/**
+ * Configured residency protections. Each entry is either a bare wire model id
+ * or an id tagged with the configured role that references it; both spellings
+ * are accepted so a spec written by an older orchestrator still validates.
+ */
+function validateProtectedModels(value: unknown): void {
+	if (value === undefined) return;
+	if (!Array.isArray(value)) throw new Error("WorkerSpec.protectedModels must be an array");
+	value.forEach((item, index) => {
+		const source = `WorkerSpec.protectedModels[${index}]`;
+		if (typeof item === "string") {
+			readString(item, source);
+			return;
+		}
+		const ref = readRecord(item, source);
+		readString(ref.modelId, `${source}.modelId`);
+		readEnum(ref.role, `${source}.role`, RESIDENCY_ROLES);
+	});
 }
 
 function validateTarget(value: unknown, runtimeId: string): void {
@@ -554,7 +577,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	validateAllowedTools(spec.allowedTools);
 	validateWorkerBudget(spec.budget);
-	readOptionalStringArray(spec, "protectedModels", "WorkerSpec");
+	validateProtectedModels(spec.protectedModels);
 	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);
 	if (spec.protectedArtifactState !== undefined) validateProtectedArtifactState(spec.protectedArtifactState);

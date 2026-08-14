@@ -49,6 +49,8 @@ import { ceilChars } from "../../domains/session/context-accounting.js";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
+import { type DegradedInferenceWatchdog, startDegradedInferenceWatchdog } from "./degraded-inference.js";
+import { coResidentContextCeiling, duplicateInstances, fitLoadContextLength } from "./lmstudio-residency.js";
 import { openAICompletionsApiProvider } from "./openai-completions.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import {
@@ -59,6 +61,7 @@ import {
 	residencyManagedFor,
 } from "./residency.js";
 import { withResidencyLock } from "./residency-lock.js";
+import type { ResidentModelInfo } from "./resident-models.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 import { formatThinkingForReplay } from "./thinking-replay.js";
 
@@ -94,13 +97,35 @@ function normalizeHttpBaseUrl(url: string): string {
 	return `http://${trimmed}`;
 }
 
-// One loaded model in LM Studio's resident set, as the SDK socket reports it.
-// The reconciler (residency.ts) lists residents through these entries, and a
-// post-failure fallback swap unloads through them; loads go through the SDK's
-// JIT model open.
+// One loaded model instance in LM Studio's resident set, as the SDK socket
+// reports it. The reconciler (residency.ts) lists residents through these
+// entries, and a post-failure fallback swap unloads through them; loads go
+// through the SDK's JIT model open. `identifier` is per-instance rather than
+// per-model: LM Studio can hold two instances of one model key, and telling
+// them apart is what lets the duplicate be released.
 export interface ResidentModelEntry {
 	readonly modelKey: string;
+	readonly identifier?: string;
+	readonly sizeBytes?: number;
 	unload(): Promise<void>;
+}
+
+/**
+ * Collapse LM Studio's per-instance listing into the per-model view the
+ * reconciler decides on. Two instances of one model key are one resident model
+ * as far as eviction is concerned; the duplicate sweep handles the extra
+ * instance separately, before any eviction question arises.
+ */
+function residentModelInfos(entries: ReadonlyArray<ResidentModelEntry>): ResidentModelInfo[] {
+	const byKey = new Map<string, ResidentModelInfo>();
+	for (const entry of entries) {
+		if (byKey.has(entry.modelKey)) continue;
+		byKey.set(entry.modelKey, {
+			modelId: entry.modelKey,
+			...(entry.sizeBytes !== undefined ? { sizeBytes: entry.sizeBytes } : {}),
+		});
+	}
+	return [...byKey.values()];
 }
 
 function toolToLmStudio(tool: Tool): LLMTool {
@@ -421,7 +446,10 @@ function thinkingLevelFromHintOrModel(hints: RunStreamHints, model: Model<"lmstu
 
 const VALID_ENV_KV_CACHE_QUANTS: ReadonlySet<string> = new Set(KV_CACHE_QUANTS);
 
-export function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelConfig {
+export function loadModelConfig(
+	model: Model<"lmstudio-native">,
+	overrides?: { contextLength?: number },
+): LLMLoadModelConfig {
 	// LM Studio's REST `/api/v1/models/load` does not expose KV cache quant or
 	// fp16 KV options; those only round-trip through the SDK's WebSocket
 	// protocol (LLMLoadModelConfig.llama{K,V}CacheQuantizationType,
@@ -429,7 +457,7 @@ export function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelCo
 	// fit at f16 KV with parallel=1 and drop to q8_0 KV at parallel=4 without
 	// the user editing settings.yaml by hand.
 	const config: LLMLoadModelConfig = {
-		contextLength: automaticLoadContextLength(model),
+		contextLength: overrides?.contextLength ?? automaticLoadContextLength(model),
 		flashAttention: true,
 		gpu: { ratio: "max" },
 		gpuStrictVramCap: true,
@@ -663,6 +691,7 @@ async function pumpOpenAICompletions(
 	options: StreamOptions | undefined,
 	hints: RunStreamHints,
 	maxTokens: number,
+	onGeneratedChars?: (chars: number) => void,
 ): Promise<void> {
 	const simple: SimpleStreamOptions = {
 		...(options ?? {}),
@@ -678,6 +707,9 @@ async function pumpOpenAICompletions(
 		context,
 		simple,
 	)) {
+		if (onGeneratedChars && (event.type === "text_delta" || event.type === "thinking_delta")) {
+			onGeneratedChars(event.delta.length);
+		}
 		stream.push(event);
 	}
 	stream.end();
@@ -731,6 +763,10 @@ export function runStream(
 	};
 	if (signal && !signal.aborted) signal.addEventListener("abort", onAbort, { once: true });
 	else if (aborted) abortControllerOnce();
+	// Started once the model handle is open, so a slow first load is never
+	// mistaken for slow generation, and stopped in the `finally` below so a
+	// failed turn leaves no timer behind.
+	let degradedWatchdog: DegradedInferenceWatchdog | null = null;
 	(async () => {
 		try {
 			if (aborted) throw new Error("Request was aborted");
@@ -744,18 +780,18 @@ export function runStream(
 			const loadedContextWindow = await deps.discoverLoadedContext(baseUrl, model.id, controller.signal);
 			const budgetLimits = loadedContextWindow !== undefined ? { contextWindow: loadedContextWindow } : undefined;
 			const requestedMaxTokens = remainingContextMaxTokens(model, context, options, budgetLimits);
-			const loadConfig = loadModelConfig(model);
-			const requestedLoadContext = loadConfig.contextLength ?? model.contextWindow;
+			const requestedLoadContext = loadModelConfig(model).contextLength ?? model.contextWindow;
+			const targetKey = `lmstudio-native|${baseUrl}`;
 			// One reconciler decides LM Studio residency for both the interactive
-			// and headless paths. LM Studio loads just-in-time and fails an
-			// oversized load cleanly, so the plan never evicts up front: Clio
-			// attempts the co-resident load first and swaps the plan's ranked
-			// fallback candidates only after a will-not-fit failure. `loadedEntries`
-			// captures the SDK handles so a fallback swap reuses one listLoaded
+			// and headless paths. LM Studio loads just-in-time, so the plan never
+			// evicts up front: Clio attempts the co-resident load first and swaps the
+			// plan's ranked fallback candidates only after a load failure.
+			// `loadedEntries` captures the SDK handles so the duplicate sweep, the
+			// context-fit clamp, and a fallback swap all reuse one listLoaded
 			// round-trip.
 			let loadedEntries: ReadonlyArray<ResidentModelEntry> = [];
 			const plan = await deps.reconcile({
-				targetKey: `lmstudio-native|${baseUrl}`,
+				targetKey,
 				targetId: metadata.targetId,
 				runtimeId: "lmstudio-native",
 				keepModelId: model.id,
@@ -765,22 +801,94 @@ export function runStream(
 				...(model.contextWindow > 0 ? { modelMaxContext: model.contextWindow } : {}),
 				listResident: async () => {
 					loadedEntries = await client.llm.listLoaded();
-					return loadedEntries.map((entry) => ({ modelId: entry.modelKey }));
+					return residentModelInfos(loadedEntries);
 				},
 				unload: async (id) => {
-					await loadedEntries.find((entry) => entry.modelKey === id)?.unload();
+					// Every instance of the id, so an eviction that frees a slot really
+					// frees it when LM Studio holds the model twice.
+					for (const entry of loadedEntries.filter((handle) => handle.modelKey === id)) await entry.unload();
 				},
 			});
-			// Skip passing `config` to client.llm.model when the model is already
-			// resident, or when Clio is observing a foreign/opt-out server. LM Studio
-			// can report residency through listLoaded while the REST model metadata
-			// still omits context length; passing config in that state triggers a
-			// no-progress reload wait in the SDK.
 			const observeOnly = plan.decision === "observe";
-			const residentModelLoaded = plan.keepResident;
-			const loadedUnknownContext = residentModelLoaded && loadedContextWindow === undefined;
-			const loadedWithEnoughContext = loadedContextWindow !== undefined && loadedContextWindow >= requestedLoadContext;
-			const modelOpenConfig = observeOnly || loadedUnknownContext || loadedWithEnoughContext ? undefined : loadConfig;
+			const residencyLock = deps.lock ?? withResidencyLock;
+			// A second instance of the model Clio is about to use is pure loss: it
+			// holds another full weight copy and KV cache while serving the same
+			// requests. Releasing it takes no role's model away, so it happens before
+			// the fit question is even asked.
+			const duplicates = observeOnly ? [] : duplicateInstances(loadedEntries, model.id);
+			if (duplicates.length > 0) {
+				emitResidencyNotice({
+					kind: "co-resident",
+					level: "warning",
+					targetId: metadata.targetId,
+					runtimeId: "lmstudio-native",
+					model: model.id,
+					message: `'${metadata.targetId}' holds ${duplicates.length + 1} instances of '${model.id}'; releasing ${duplicates.length} duplicate instance(s) so one copy serves every request.`,
+					detail: { duplicateInstances: duplicates.length },
+				});
+				await residencyLock(targetKey, async () => {
+					for (const duplicate of duplicates) {
+						try {
+							await duplicate.unload();
+						} catch {
+							// Best-effort: a duplicate that survives is reported again next turn.
+						}
+					}
+				});
+				loadedEntries = loadedEntries.filter((entry) => !duplicates.includes(entry));
+			}
+			// Context-length fit. LM Studio's `gpuStrictVramCap` caps GPU offload
+			// instead of refusing an oversized load, so a KV cache that does not fit
+			// is served from CPU at a crawl rather than failing. While another model
+			// is resident, cap the load at the co-resident ceiling and say so before
+			// the first turn runs.
+			const fit = fitLoadContextLength({
+				requested: requestedLoadContext,
+				resident: loadedEntries,
+				keepModelId: model.id,
+				ceiling: coResidentContextCeiling(),
+			});
+			if (!observeOnly && !plan.keepResident && fit.clampedFrom !== undefined) {
+				emitResidencyNotice({
+					kind: "stress",
+					level: "warning",
+					targetId: metadata.targetId,
+					runtimeId: "lmstudio-native",
+					model: model.id,
+					message: `loading '${model.id}' on '${metadata.targetId}' alongside ${fit.neighbours.join(", ")}: context clamped ${fit.clampedFrom} -> ${fit.contextLength} tokens to keep the KV cache in GPU memory. Unload the co-resident model or raise CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT for the full window.`,
+					detail: {
+						requestedContext: fit.clampedFrom,
+						loadContext: fit.contextLength,
+						residentCount: fit.neighbours.length + 1,
+					},
+				});
+			}
+			const loadConfig = loadModelConfig(model, { contextLength: fit.contextLength });
+			// Never hand `config` to client.llm.model for a model that is already
+			// resident: LM Studio answers a configured open of a loaded key with a
+			// second instance (observed as `google/gemma-4-26b-a4b-qat:2`) or with a
+			// no-progress reload wait. A resident model is reused as loaded, and the
+			// output budget already follows the window the server actually has open.
+			const modelOpenConfig = observeOnly || plan.keepResident ? undefined : loadConfig;
+			// `loadedEntries` is non-empty only when this stream actually listed the
+			// resident set, so the reconciler's TTL fast path stays silent instead of
+			// repeating the same line every turn.
+			if (
+				plan.keepResident &&
+				loadedEntries.length > 0 &&
+				loadedContextWindow !== undefined &&
+				loadedContextWindow < requestedLoadContext
+			) {
+				emitResidencyNotice({
+					kind: "co-resident",
+					level: "info",
+					targetId: metadata.targetId,
+					runtimeId: "lmstudio-native",
+					model: model.id,
+					message: `'${model.id}' is resident on '${metadata.targetId}' with a ${loadedContextWindow}-token window, below the ${requestedLoadContext} Clio would load; reusing the loaded instance and budgeting against ${loadedContextWindow}. Unload it in LM Studio to have Clio reload it larger.`,
+					detail: { loadedContext: loadedContextWindow, requestedContext: requestedLoadContext },
+				});
+			}
 			const modelOpenOpts: { signal: AbortSignal; verbose: boolean; config?: LLMLoadModelConfig } = {
 				signal: controller.signal,
 				verbose,
@@ -808,9 +916,8 @@ export function runStream(
 				// The co-resident load did not fit. Swap the ranked candidates and
 				// retry once, serialized against other Clio processes mutating this
 				// server; a second failure is a genuine VRAM miss.
-				const lock = deps.lock ?? withResidencyLock;
 				try {
-					llm = await lock(`lmstudio-native|${baseUrl}`, async () => {
+					llm = await residencyLock(targetKey, async () => {
 						for (const entry of plan.fallbackEvict) {
 							emitResidencyNotice({
 								kind: "swap",
@@ -822,7 +929,9 @@ export function runStream(
 								detail: { swappedOut: entry.modelId },
 							});
 							try {
-								await loadedEntries.find((handle) => handle.modelKey === entry.modelId)?.unload();
+								for (const handle of loadedEntries.filter((held) => held.modelKey === entry.modelId)) {
+									await handle.unload();
+								}
 							} catch {
 								// Best-effort: the retry load reports the real fit verdict.
 							}
@@ -833,12 +942,36 @@ export function runStream(
 					failWillNotFit(retryErr);
 				}
 			}
+			// A model whose weights or KV cache spilled to CPU still answers, at a
+			// crawl and with no error. Watch the token rate so that shows up as a
+			// notice naming the resident set instead of an indefinite spinner.
+			const residentList = [...new Set([model.id, ...loadedEntries.map((entry) => entry.modelKey)])].join(", ");
+			degradedWatchdog = startDegradedInferenceWatchdog({
+				onDegraded: (report) => {
+					emitResidencyNotice({
+						kind: "degraded",
+						level: "warning",
+						targetId: metadata.targetId,
+						runtimeId: "lmstudio-native",
+						model: model.id,
+						message: `'${model.id}' on '${metadata.targetId}' has generated ${report.tokens} tokens in ${Math.round(report.elapsedMs / 1000)}s (${report.tokensPerSecond.toFixed(2)} tok/s); inference is running far below GPU speed, which is what a spill to CPU looks like. Resident there: ${residentList}. Unload a co-resident model or lower the context window.`,
+						detail: {
+							tokens: report.tokens,
+							elapsedMs: report.elapsedMs,
+							tokensPerSecond: Number(report.tokensPerSecond.toFixed(2)),
+							residents: residentList,
+						},
+					});
+				},
+			});
 			if (!sdkPredictionEnabled()) {
 				// The SDK opened no prediction channel on this path, so nothing is
 				// left for a late abort to race; the HTTP transport owns the signal
 				// from here.
 				predictionDone = true;
-				await pumpOpenAICompletions(stream, model, context, options, hints, requestedMaxTokens);
+				await pumpOpenAICompletions(stream, model, context, options, hints, requestedMaxTokens, (chars) =>
+					degradedWatchdog?.addTokens(ceilChars(chars)),
+				);
 				return;
 			}
 			stream.push({ type: "start", partial: output });
@@ -1062,6 +1195,7 @@ export function runStream(
 				signal: controller.signal,
 				onPredictionFragment: (fragment) => {
 					if (!fragment.content) return;
+					degradedWatchdog?.addTokens(fragment.tokensCount ?? ceilChars(fragment.content.length));
 					// LM Studio SDK reasoningType values:
 					//   "none"               normal content (text)
 					//   "reasoning"          chain-of-thought inside the block
@@ -1214,6 +1348,7 @@ export function runStream(
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
 		} finally {
+			degradedWatchdog?.stop();
 			if (signal) signal.removeEventListener("abort", onAbort);
 		}
 	})();

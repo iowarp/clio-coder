@@ -37,6 +37,7 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | `CLIO_CODER_HOOK_BUDGET_WARMUP_CALLS` | 1 | Hook calls exempted from budget accounting at startup. |
 | `CLIO_CODER_HOOK_BUDGET_WINDOW` | 5 | Sliding-window size for steady-state hook-budget warnings. |
 | `CLIO_CODER_HOOK_BUDGET_THRESHOLD` | 3 | Overruns within the window before a steady-state warning. |
+| `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT` | 131072 | Largest context length Clio requests when it loads an LM Studio model while another model is resident on the same server. LM Studio reports no VRAM and caps GPU offload instead of refusing an oversized load, so a KV cache that does not fit is served from CPU at a crawl; the ceiling bounds that by evidence. `off` or `0` disables clamping (`src/engine/apis/lmstudio-residency.ts`). |
 | `CLIO_CODER_LMSTUDIO_SDK_PREDICT` | off | `1` sends LM Studio predictions over the SDK again instead of its OpenAI-compatible port. Predictions moved to HTTP because the SDK surface ignores the thinking control, so this is an escape hatch back to the older transport and not a debug toggle. Listing, loading, and unloading always use the SDK (`src/engine/apis/lmstudio-native.ts`). |
 | `CLIO_CODER_SKILL_CATALOG_DIR` | unset | Local skill-catalog directory override (`src/domains/resources/skills/marketplace.ts`). |
 | `CLIO_CODER_SKILL_MARKETPLACE_INDEX` | unset | Skill-marketplace index path override (`src/domains/resources/skills/marketplace.ts`). |

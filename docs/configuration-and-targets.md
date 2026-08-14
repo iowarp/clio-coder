@@ -274,6 +274,33 @@ budgets. Workers routed to the same local target share that target's remaining
 VRAM with the orchestrator and scout model, so the same co-residency rule
 applies.
 
+LM Studio targets get three extra rules, because LM Studio reports no VRAM
+figure anywhere and `gpuStrictVramCap` caps GPU offload rather than refusing a
+load that will not fit. An oversized load therefore succeeds and then generates
+at CPU speed instead of failing.
+
+- **Context fit before load.** While another model is resident on the same
+  server, Clio caps a just-in-time load at 131,072 tokens and says so in a
+  warning naming the co-resident models. Raise or disable the ceiling with
+  `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT`. A target serving one model alone is
+  never clamped.
+- **One instance per model.** A load config is never sent for a model that is
+  already resident, because LM Studio answers that with a second instance
+  holding another copy of the weights and KV cache. A resident model is reused
+  as loaded, and the output budget follows the window the server actually has
+  open. Duplicate instances found at load time are released.
+- **Roles are never evicted blind.** Every model the configuration references
+  carries the plane it serves (chat, memory, worker, target default). Clio
+  evicts an unprotected resident first, and an eviction that has to touch a
+  configured model names its role in the warning, so unloading the model serving
+  proactive memory can never read as freeing a spare.
+
+A turn whose token rate collapses below 2 tokens per second for 30 seconds
+surfaces a `degraded` notice listing what is resident on the target. That is
+what a spill to CPU looks like from outside, and it is reported while the turn
+is still running rather than left as an indefinite spinner. The notice never
+cancels the turn.
+
 
 ---
 

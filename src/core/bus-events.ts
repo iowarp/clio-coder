@@ -72,7 +72,7 @@ export const BusChannels = {
 export type BusChannel = (typeof BusChannels)[keyof typeof BusChannels];
 
 /** Collision, capacity, or stress category for a {@link RuntimeNoticePayload}. */
-export type RuntimeNoticeKind = "will-not-fit" | "about-to-evict" | "swap" | "co-resident" | "stress";
+export type RuntimeNoticeKind = "will-not-fit" | "about-to-evict" | "swap" | "co-resident" | "stress" | "degraded";
 
 /**
  * Model-residency notice published on {@link BusChannels.RuntimeNotice} by the
@@ -82,6 +82,9 @@ export type RuntimeNoticeKind = "will-not-fit" | "about-to-evict" | "swap" | "co
  * footprint facts when the runtime exposed them, and `message` is the rendered
  * operator-facing line. A genuine VRAM miss surfaces a `will-not-fit` notice
  * carrying the same content the turn fails with, instead of a bare SDK error.
+ * `degraded` reports a live turn whose token rate collapsed (see
+ * src/engine/apis/degraded-inference.ts), which is how a silent spill to CPU
+ * becomes visible while it is happening.
  */
 export interface RuntimeNoticePayload {
 	kind: RuntimeNoticeKind;
