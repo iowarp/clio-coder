@@ -408,18 +408,18 @@ describe("contracts/model residency reconciler", () => {
 		strictEqual(notices.length, 1);
 	});
 
-	it("uses the CLIO_RESIDENCY opt-out as the process-wide observe-only switch", () => {
+	it("uses the CLIO_CODER_RESIDENCY opt-out as the process-wide observe-only switch", () => {
 		strictEqual(residencyManaged({}), true);
-		strictEqual(residencyManaged({ CLIO_RESIDENCY: "observe" }), false);
-		strictEqual(residencyManaged({ CLIO_RESIDENCY: "user-managed" }), false);
-		strictEqual(residencyManaged({ CLIO_RESIDENCY: "clio-managed" }), true);
+		strictEqual(residencyManaged({ CLIO_CODER_RESIDENCY: "observe" }), false);
+		strictEqual(residencyManaged({ CLIO_CODER_RESIDENCY: "user-managed" }), false);
+		strictEqual(residencyManaged({ CLIO_CODER_RESIDENCY: "clio-managed" }), true);
 	});
 
 	it("honors the explicit per-target lifecycle opt-out alongside the env switch", () => {
 		strictEqual(residencyManagedFor(undefined, {}), true);
 		strictEqual(residencyManagedFor("clio-managed", {}), true);
 		strictEqual(residencyManagedFor("user-managed", {}), false);
-		strictEqual(residencyManagedFor("clio-managed", { CLIO_RESIDENCY: "observe" }), false);
+		strictEqual(residencyManagedFor("clio-managed", { CLIO_CODER_RESIDENCY: "observe" }), false);
 	});
 });
 

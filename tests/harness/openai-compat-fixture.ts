@@ -116,7 +116,7 @@ export function seedOpenAICompatOrchestrator(configDir: string, url: string): vo
 				`    url: ${url}`,
 				"    defaultModel: mock-model",
 				"    auth:",
-				"      apiKeyEnvVar: CLIO_TEST_OPENAI_KEY",
+				"      apiKeyEnvVar: CLIO_CODER_TEST_OPENAI_KEY",
 				"    capabilities:",
 				"      vision: true",
 				"    wireModels:",

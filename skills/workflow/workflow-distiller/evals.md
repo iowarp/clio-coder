@@ -70,7 +70,7 @@ Expected:
 
 ## Observed results
 
-Runs 2026-07-02, headless `clio run --skill`. `ask_user` is not registered in
+Runs 2026-07-02, headless `clio-coder run --skill`. `ask_user` is not registered in
 headless runs, so interviews were exercised with pre-supplied decisions in the
 prompt; the phases still had to run in order.
 
@@ -80,7 +80,7 @@ prompt; the phases still had to run in order.
   question, Phase 3 listed installed skills with no name, Phase 4 presented
   the summary and stopped for approval even though pre-approval was offered
   (the strict reading of the gate), and after an explicit approval turn Phase
-  5's skill-creation call landed a loadable project skill that `clio skills
+  5's skill-creation call landed a loadable project skill that `clio-coder skills
   inspect` resolves, with placeholders instead of session paths. Phase 6
   recorded the validation scenario in the body.
 - S2 RED (no distiller, arxiv-literature installed): the baseline created the
@@ -103,5 +103,5 @@ prompt; the phases still had to run in order.
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS. Inline session-trace setup engaged; judge 5/6.

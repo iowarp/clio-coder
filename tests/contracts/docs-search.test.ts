@@ -34,7 +34,7 @@ function parsePayload(output: string): {
 }
 
 // The docs engine resolves the bundled docs directory through
-// resolvePackageRoot, so a CLIO_PACKAGE_ROOT fixture makes the contract
+// resolvePackageRoot, so a CLIO_CODER_PACKAGE_ROOT fixture makes the contract
 // hermetic: a known docs set instead of the shipped wording.
 // resolvePackageRoot caches its first resolution per process, so one fixture
 // serves the whole file.
@@ -94,13 +94,13 @@ describe("contracts/context docs scope", () => {
 			].join("\n"),
 			"utf8",
 		);
-		previousRoot = process.env.CLIO_PACKAGE_ROOT;
-		process.env.CLIO_PACKAGE_ROOT = scratch;
+		previousRoot = process.env.CLIO_CODER_PACKAGE_ROOT;
+		process.env.CLIO_CODER_PACKAGE_ROOT = scratch;
 	});
 
 	after(() => {
-		if (previousRoot === undefined) delete process.env.CLIO_PACKAGE_ROOT;
-		else process.env.CLIO_PACKAGE_ROOT = previousRoot;
+		if (previousRoot === undefined) delete process.env.CLIO_CODER_PACKAGE_ROOT;
+		else process.env.CLIO_CODER_PACKAGE_ROOT = previousRoot;
 		rmSync(scratch, { recursive: true, force: true });
 	});
 

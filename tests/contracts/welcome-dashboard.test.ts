@@ -274,7 +274,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 		const stats = dashboardStatsFor(cwd);
 		const row = strippedDashboardRow(stats, 120, "Wiki ");
 
-		ok(row.includes("no wiki; run clio context wiki"), row);
+		ok(row.includes("no wiki; run clio-coder context wiki"), row);
 		ok(row.includes("entry points:"), row);
 		ok(row.includes("src/index.ts"), row);
 	});

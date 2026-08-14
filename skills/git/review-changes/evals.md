@@ -29,7 +29,7 @@ Expected:
   CRITICAL severity.
 - Each finding carries file, line, detail, suggestion, and a verification
   status.
-- A report is written under `.clio/reviews/` and summarized to the user;
+- A report is written under `.clio-coder/reviews/` and summarized to the user;
   `items.js` is never edited.
 
 ## S2 — clean diff
@@ -81,5 +81,5 @@ Expected:
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
-(30B local, llamacpp on mini), full-auto sandbox. PASS. Read full files, wrote the report under .clio/reviews/, judge 4/4.
+One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
+(30B local, llamacpp on mini), full-auto sandbox. PASS. Read full files, wrote the report under .clio-coder/reviews/, judge 4/4.

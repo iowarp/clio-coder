@@ -342,7 +342,7 @@ export class AuthStorage {
 			// lock that could not be taken, a read-only config dir, a full disk.
 			// This used to go into an errors array with no consumer, so the store
 			// reported itself clean while disk held none of what was just written.
-			// damageReason() is the channel `clio auth` and `clio doctor` read.
+			// damageReason() is the channel `clio-coder auth` and `clio-coder doctor` read.
 			if (error instanceof AuthStorageDamagedError) throw error;
 			this.damage = error instanceof Error ? `it could not be written: ${error.message}` : "it could not be written";
 		}
@@ -388,7 +388,7 @@ export class AuthStorage {
 	/**
 	 * Install a process-lifetime API key override scoped to a specific target.
 	 * Overrides are keyed by `targetId` (not providerId) so two targets
-	 * sharing a runtime do not share the override. `clio --api-key <key>`
+	 * sharing a runtime do not share the override. `clio-coder --api-key <key>`
 	 * applies only to the active target, not every target on that provider.
 	 */
 	setRuntimeOverride(targetId: string, apiKey: string): void {

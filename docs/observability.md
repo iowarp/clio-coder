@@ -59,7 +59,7 @@ An `EvidenceIndexRow` has the following schema:
 
 ## Artifact Categories and Path Layouts
 
-Clio resolves directories under platform-specific XDG defaults (on Linux, these default to `~/.config/clio/`, `~/.local/share/clio/`, and `~/.local/state/clio/`).
+Clio resolves directories under platform-specific XDG defaults (on Linux, these default to `~/.config/clio-coder/`, `~/.local/share/clio-coder/`, and `~/.local/state/clio-coder/`).
 
 | Category | Description | Backing Path |
 | --- | --- | --- |
@@ -125,7 +125,7 @@ describes validation evidence inside that verified receipt. Likewise,
 message. Model-facing dispatch and collect output name all four concepts
 separately and never substitute one hash for another.
 
-The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`. A timed-out or denied escalation also raises an `escalation` finding in the bundle.
+The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio-coder evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`. A timed-out or denied escalation also raises an `escalation` finding in the bundle.
 
 The base provenance sets, steering, routing, quality, worker identity, and result-conformance coverage all enter in v0.2.9. These fields are labeled `experimental`: their strict v15 shape is frozen for the release, but the labels stay experimental until the schema is promoted post-1.0. For the complete version registry and migration contract across all artifacts, see [artifact-versions.md](artifact-versions.md).
 

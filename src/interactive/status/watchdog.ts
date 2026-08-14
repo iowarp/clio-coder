@@ -10,7 +10,7 @@ export const TIER_THRESHOLDS_MS = {
 } as const;
 
 function stuckThresholdMs(): number {
-	const override = Number(process.env.CLIO_STATUS_STUCK_MS);
+	const override = Number(process.env.CLIO_CODER_STATUS_STUCK_MS);
 	if (Number.isFinite(override) && override > 0) return override;
 	return TIER_THRESHOLDS_MS.stuck;
 }

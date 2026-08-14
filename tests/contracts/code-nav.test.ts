@@ -211,7 +211,7 @@ describe("contracts/code_nav", () => {
 			lastIndexedAt: generatedAt,
 		});
 		const future = new Date(Date.now() + 1000);
-		utimesSync(join(scratch, ".clio", "codewiki.json"), future, future);
+		utimesSync(join(scratch, ".clio-coder", "codewiki.json"), future, future);
 
 		const third = await loadCodewikiForTool(scratch);
 		const fourth = await loadCodewikiForTool(scratch);
@@ -229,7 +229,10 @@ describe("contracts/code_nav", () => {
 		const payload = parseJsonOutput(result.output);
 		ok(Array.isArray(payload.pages) && payload.pages.length === 0);
 		strictEqual((payload.staleness as Record<string, unknown>).state, "absent");
-		strictEqual(payload.message, "no wiki exists; wiki generation is operator-only: run `clio context wiki --update`");
+		strictEqual(
+			payload.message,
+			"no wiki exists; wiki generation is operator-only: run `clio-coder context wiki --update`",
+		);
 	});
 
 	it("lists Markdown wiki pages and staleness through mode=wiki", async () => {
@@ -277,7 +280,7 @@ describe("contracts/code_nav", () => {
 			id: "runtime-map",
 			title: "Architecture",
 			summary: "The runtime starts in `src/index.ts`.",
-			path: ".clio/wiki/runtime-map.md",
+			path: ".clio-coder/wiki/runtime-map.md",
 		});
 
 		const byTitle = await codeNavTool.run({ mode: "wiki", query: "Architecture" });
@@ -346,7 +349,7 @@ describe("contracts/code_nav", () => {
 		strictEqual((payload.staleness as Record<string, unknown>).state, "stale");
 		match(String(payload.message), /pages may be outdated/i);
 		match(String(payload.message), /wiki regeneration is operator-only/);
-		match(String(payload.message), /clio context wiki --update/);
+		match(String(payload.message), /clio-coder context wiki --update/);
 	});
 
 	it("advertises wiki in the mode enum and keeps unknown modes rejected", async () => {

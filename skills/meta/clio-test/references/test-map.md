@@ -17,7 +17,7 @@ create a new file only for a genuinely new domain cluster.
 | Area | File |
 |---|---|
 | ACP contract | `tests/contracts/acp.test.ts` |
-| context bootstrap / CLIO.md parse+render | `tests/contracts/bootstrap.test.ts` |
+| context bootstrap / CLIO-CODER.md parse+render | `tests/contracts/bootstrap.test.ts` |
 | config schema + hot-reload classification | `tests/contracts/config.test.ts` |
 | dispatch (validation / admission / ledger) | `tests/contracts/dispatch.test.ts` |
 | session / memory / evidence persistence | `tests/contracts/persistence.test.ts` |
@@ -56,4 +56,4 @@ node --import tsx --test --test-only tests/contracts/skills.test.ts
 - Biome rejects `delete obj.key`; use `Reflect.deleteProperty(obj, "key")` when
   cleaning env maps or object keys.
 - Filesystem tests use a scratch home via `makeScratchHome()` (smoke) or the
-  `CLIO_HOME` / `CLIO_*_DIR` env overrides (contracts); clean up in `finally`.
+  `CLIO_CODER_HOME` / `CLIO_CODER_*_DIR` env overrides (contracts); clean up in `finally`.

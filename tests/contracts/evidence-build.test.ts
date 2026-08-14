@@ -1,5 +1,5 @@
 /**
- * `clio evidence build` verdict contract (bt-02 finding 3): the operator-facing
+ * `clio-coder evidence build` verdict contract (bt-02 finding 3): the operator-facing
  * verdict line and exit code must tell the truth about receipt integrity. The
  * artifact is still written (the finding is part of the evidence), but a
  * corrupted receipt must fail the command, and a clean modern receipt (with
@@ -470,7 +470,7 @@ describe("contracts/evidence-build", () => {
 			strictEqual(bypassFinding?.runId, runId);
 			strictEqual(
 				bypassFinding?.message,
-				"run executed with external permission bypass (CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1); Clio safety blocks were not enforced",
+				"run executed with external permission bypass (CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1); Clio safety blocks were not enforced",
 			);
 
 			const inspected = await captureStdout(() => runEvidenceCommand(["inspect", result.evidenceId]));
@@ -507,7 +507,7 @@ describe("contracts/evidence-build", () => {
 				bypassFinding?.message,
 				"run used external agent-managed governance; Clio safety blocks were not enforced",
 			);
-			ok(!bypassFinding?.message.includes("CLIO_ALLOW_EXTERNAL_FULL_ACCESS"), bypassFinding?.message);
+			ok(!bypassFinding?.message.includes("CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS"), bypassFinding?.message);
 		});
 	});
 

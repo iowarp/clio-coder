@@ -191,7 +191,7 @@ export function middlewareHookFailedSessionNotice(payload: unknown, seenBudgetWa
  * A tool call parked for one-shot approval (sd-01 §3.3). The text names the
  * axis that produced the ask: a safety-net rail asks at every level, while an
  * autonomy ask exists only because of the current level and can be widened in
- * .clio/safety.yaml when it is an execute action.
+ * .clio-coder/safety.yaml when it is an execute action.
  */
 export function approvalParkedNotice(tool: string, decision: SafetyDecision, autonomy: string): BusNotice {
 	const actionClass = decision.classification.actionClass;
@@ -204,7 +204,7 @@ export function approvalParkedNotice(tool: string, decision: SafetyDecision, aut
 	}
 	const widen =
 		actionClass === "execute"
-			? " Approve once, or add it to .clio/safety.yaml commands."
+			? " Approve once, or add it to .clio-coder/safety.yaml commands."
 			: " Approve once, or Esc to deny this call.";
 	return {
 		level: "warn",

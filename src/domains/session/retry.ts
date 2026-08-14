@@ -62,7 +62,7 @@ const RETRYABLE_PATTERN =
  * Deliberately not folded into {@link RETRYABLE_PATTERN}: this is transient in
  * a different unit. A rate limit clears in a second or two; a 35B model loads
  * off disk in twenty to sixty, and retrying it on a rate limit's backoff burns
- * every attempt before the server is ready. `clio run --target dynamo --model
+ * every attempt before the server is ready. `clio-coder run --target dynamo --model
  * qwopus3.6-35b-a3b-coder-mtp` failed exactly this way: two attempts, six
  * seconds, "Model is unloaded." on stdout, while the load was still running.
  */

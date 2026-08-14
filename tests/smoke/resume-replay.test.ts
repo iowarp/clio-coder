@@ -60,14 +60,14 @@ describe("smoke/boot-time session resume replay", { concurrency: false }, () => 
 		scratch.cleanup();
 	});
 
-	it("CLIO_RESUME_SESSION_ID replays prior turns into the provider context and keeps one session root", async () => {
+	it("CLIO_CODER_RESUME_SESSION_ID replays prior turns into the provider context and keeps one session root", async () => {
 		const bootstrap = await runCli(["doctor", "--fix"], { env: scratch.env });
 		strictEqual(bootstrap.code, 0, `stderr=${bootstrap.stderr}`);
 		fixture = await startOpenAICompatFixture("acknowledged");
 		seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
 		const workRepo = join(scratch.dir, "work-repo");
 		mkdirSync(workRepo, { recursive: true });
-		const env = { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" };
+		const env = { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" };
 
 		const first = await runCli(
 			["--no-context-files", "--no-skills", "run", `Remember this codeword: ${FIRST_TURN_MARKER}.`],
@@ -78,7 +78,7 @@ describe("smoke/boot-time session resume replay", { concurrency: false }, () => 
 
 		const requestCountBeforeResume = fixture.requests.length;
 		const resumed = await runCli(["--no-context-files", "--no-skills", "run", "What was the codeword?"], {
-			env: { ...env, CLIO_RESUME_SESSION_ID: session.id },
+			env: { ...env, CLIO_CODER_RESUME_SESSION_ID: session.id },
 			cwd: workRepo,
 			timeoutMs: 30_000,
 		});

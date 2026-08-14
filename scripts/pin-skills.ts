@@ -5,7 +5,7 @@
  * Run with `npm run skills:pin` after editing any skills/<name>/SKILL.md.
  *
  * The same run publishes `skill-marketplace.json`: the index a Clio install
- * outside this repo points `CLIO_SKILL_MARKETPLACE_INDEX` at so bare-name
+ * outside this repo points `CLIO_CODER_SKILL_MARKETPLACE_INDEX` at so bare-name
  * installs resolve to the catalog's GitHub source URLs.
  *
  * Modes:
@@ -56,7 +56,7 @@ interface PinEntry {
 /** A pin entry plus the fields the published marketplace index carries. */
 interface CatalogEntry extends PinEntry {
 	description: string;
-	/** `clio.source-url`: where `clio skills install <name>` fetches this skill from. */
+	/** `clio.source-url`: where `clio-coder skills install <name>` fetches this skill from. */
 	sourceUrl: string;
 	audit: string;
 	/** Catalog category folder, or null in a flat catalog. */
@@ -178,7 +178,7 @@ function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
 			if (typeof clio["source-url"] === "string") sourceUrl = clio["source-url"].trim();
 			// The published index installs from this URL, so a skill that moved
 			// between categories without its source-url following would publish a
-			// pointer at its old location: `clio skills install <name>` would then
+			// pointer at its old location: `clio-coder skills install <name>` would then
 			// fetch a path the repository no longer has.
 			if (sourceUrl.length > 0 && !sourceUrl.replace(/\/+$/, "").endsWith(`/${relPath}`)) {
 				errors.push(`${skillPath}: clio.source-url does not end with the catalog path "${relPath}": ${sourceUrl}`);
@@ -240,7 +240,7 @@ function renderManifest(entries: ReadonlyArray<CatalogEntry>): string {
 
 /**
  * The published marketplace index: what a Clio install outside this repo reads
- * when `CLIO_SKILL_MARKETPLACE_INDEX` points at the file this catalog serves.
+ * when `CLIO_CODER_SKILL_MARKETPLACE_INDEX` points at the file this catalog serves.
  *
  * `sourceUrl` is each skill's own `clio.source-url`, so a bare-name install
  * resolves to the same GitHub tree the audit and the pinned hash describe.

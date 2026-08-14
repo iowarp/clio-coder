@@ -84,7 +84,7 @@ capacity is governed by durable expiring leases that survive process death.
 
 **Everything is auditable.** Each run seals a receipt covering token usage,
 priced cost, tool activity, safety decisions, routing intent, the resolved
-route, worker attestation, and result-contract conformance. `clio evidence`
+route, worker attestation, and result-contract conformance. `clio-coder evidence`
 and `/view verify` check them; nothing in the audit trail is reconstructed
 from prose.
 
@@ -111,7 +111,7 @@ From npm:
 
 ```bash
 npm install -g @iowarp/clio-coder
-clio --version
+clio-coder --version
 ```
 
 From source, pinned to this release:
@@ -122,7 +122,7 @@ cd clio-coder
 npm run install:local
 export PATH="$HOME/.local/bin:$PATH"
 hash -r
-"$HOME/.local/bin/clio" --version
+"$HOME/.local/bin/clio-coder" --version
 ```
 
 The clone is pinned to `v0.3.0`, the release these instructions describe.
@@ -130,15 +130,15 @@ Without `--branch` you get the default branch, which is ahead of the release and
 is not what the rest of this page documents.
 
 `npm run install:local` verifies dependencies, builds the CLI, installs a
-symlink at `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`, and runs the installed
-CLI's structure repair so a fresh install passes plain `clio doctor` with no
+symlink at `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`, and runs the installed
+CLI's structure repair so a fresh install passes plain `clio-coder doctor` with no
 manual steps. It warns if the bin directory is not on your `PATH` and prints the
 `export` line above; the line is a no-op for the shell that already has it, and
-it is what makes a bare `clio` resolve in the shell that does not. Put it in
+it is what makes a bare `clio-coder` resolve in the shell that does not. Put it in
 your shell profile to keep it across sessions. The symlink executes
 `dist/cli/index.js`, so re-run `npm run build` after editing TypeScript sources.
 
-The last line runs the launcher by its full path on purpose. A bare `clio` may
+The last line runs the launcher by its full path on purpose. A bare `clio-coder` may
 resolve to an older install earlier on your `PATH`, so it verifies whichever one
 that is rather than the one you just installed; the installer warns when it
 finds that shadowing, and names the other path.
@@ -146,10 +146,10 @@ finds that shadowing, and names the other path.
 Before you switch to the bare name, ask which file it reaches:
 
 ```bash
-command -v clio    # expect $HOME/.local/bin/clio
+command -v clio-coder    # expect $HOME/.local/bin/clio-coder
 ```
 
-Comparing `clio --version` against `"$HOME/.local/bin/clio" --version` does not
+Comparing `clio-coder --version` against `"$HOME/.local/bin/clio-coder" --version` does not
 answer that. Two installs of the same release print the same version, so the
 versions agree while the name still resolves to the other one. The path is the
 question.
@@ -157,12 +157,12 @@ question.
 To remove it, preview first:
 
 ```bash
-clio uninstall --dry-run
-clio uninstall --remove-binary --force
+clio-coder uninstall --dry-run
+clio-coder uninstall --remove-binary --force
 hash -r
 ```
 
-For selective wipes that keep settings or credentials, use `clio reset`. Full
+For selective wipes that keep settings or credentials, use `clio-coder reset`. Full
 details live in [docs/installation-and-lifecycle.md](docs/installation-and-lifecycle.md).
 
 ## Five-minute start
@@ -174,7 +174,7 @@ include `ollama-native`, `llamacpp`, `vllm`, and `sglang`.
 ```bash
 cd /path/to/your/repo
 
-clio configure \
+clio-coder configure \
   --id local-lmstudio \
   --runtime lmstudio-native \
   --url http://localhost:1234 \
@@ -182,17 +182,17 @@ clio configure \
   --set-orchestrator \
   --set-fleet-default
 
-clio targets use local-lmstudio
-clio targets --probe
+clio-coder targets use local-lmstudio
+clio-coder targets --probe
 ```
 
 Once the target probes healthy, teach Clio about your project, try a headless
 turn, then open the TUI:
 
 ```bash
-clio context init      # bootstraps local generated CLIO.md context from your real source tree
-clio run "Summarize this repository layout and identify the main entry points."
-clio                   # interactive terminal UI
+clio-coder context init      # bootstraps local generated CLIO-CODER.md context from your real source tree
+clio-coder run "Summarize this repository layout and identify the main entry points."
+clio-coder                   # interactive terminal UI
 ```
 
 Inside the TUI, `/targets`, `/agents`, `/fleet`, and `/skill` confirm what the
@@ -227,14 +227,14 @@ You can drive Clio from a ChatGPT Plus/Pro or Claude Pro/Max subscription
 instead of an API key.
 
 ```bash
-clio auth login anthropic-max     # Claude Pro/Max OAuth
-clio auth login openai-codex      # ChatGPT Plus/Pro OAuth
+clio-coder auth login anthropic-max     # Claude Pro/Max OAuth
+clio-coder auth login openai-codex      # ChatGPT Plus/Pro OAuth
 
-clio configure --id claude-sub  --runtime anthropic-max --model claude-sonnet-5 --set-orchestrator
-clio configure --id chatgpt-sub --runtime openai-codex  --model gpt-5.4        --set-orchestrator
+clio-coder configure --id claude-sub  --runtime anthropic-max --model claude-sonnet-5 --set-orchestrator
+clio-coder configure --id chatgpt-sub --runtime openai-codex  --model gpt-5.4        --set-orchestrator
 ```
 
-Pick model ids from `clio models --target <id>` after login.
+Pick model ids from `clio-coder models --target <id>` after login.
 
 > [!NOTE]
 > Connecting a Claude Pro/Max subscription over OAuth uses the same path as
@@ -251,13 +251,13 @@ permission gating in front of them.
 claude auth login   # authenticate the official Claude CLI first
 
 # Claude Code SDK worker, with enforced per-tool safety
-clio configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
+clio-coder configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
 
 # claude -p subprocess worker, advisory permission-mode gating only
-clio configure --id claude-code-worker --runtime claude-code --model sonnet
+clio-coder configure --id claude-code-worker --runtime claude-code --model sonnet
 
 # Google Antigravity subprocess worker, under your existing agy login
-clio configure --id agy-worker --runtime antigravity-code --model "Gemini 3.5 Flash (High)"
+clio-coder configure --id agy-worker --runtime antigravity-code --model "Gemini 3.5 Flash (High)"
 ```
 
 ### Mixing them
@@ -266,13 +266,13 @@ The interesting configuration is a strong orchestrator with cheap local
 muscle, or the reverse.
 
 ```bash
-clio configure --id chatgpt-orch --runtime openai-codex --model gpt-5.4 --set-orchestrator
-clio configure --id claude-worker --runtime claude-sdk --model sonnet
-clio configure --id local-fleet --runtime lmstudio-native --url http://localhost:1234 \
+clio-coder configure --id chatgpt-orch --runtime openai-codex --model gpt-5.4 --set-orchestrator
+clio-coder configure --id claude-worker --runtime claude-sdk --model sonnet
+clio-coder configure --id local-fleet --runtime lmstudio-native --url http://localhost:1234 \
   --model qwen-7b --set-fleet-default
 
-clio targets profile claude-sdk claude-worker --model sonnet
-clio run --agent coder "Refactor src/engine/parser.ts"
+clio-coder targets profile claude-sdk claude-worker --model sonnet
+clio-coder run --agent coder "Refactor src/engine/parser.ts"
 ```
 
 Full reference: [docs/configuration-and-targets.md](docs/configuration-and-targets.md).
@@ -349,8 +349,8 @@ fleet:
       maxWorkers: 1
 ```
 
-Then `clio doctor` runs a per-node preflight, `clio fleet list|run|status`
-drives and observes contracts, and `clio fleet drain|resume` closes or reopens
+Then `clio-coder doctor` runs a per-node preflight, `clio-coder fleet list|run|status`
+drives and observes contracts, and `clio-coder fleet drain|resume` closes or reopens
 durable dispatch admission. A drain preserves running work, rejects every new
 execution start, and expires after one hour unless renewed. The `/fleet`
 overlay shows nodes, profiles, bindings, and live runs. Nodes must share the
@@ -383,26 +383,26 @@ authority, tools, skills, result contract, locality, and approved governance;
 changing from a read-only Scout phase to workspace editing requires an
 authenticated plan approval or authority already granted by full-auto policy.
 
-## Project context: CLIO.md
+## Project context: CLIO-CODER.md
 
-Clio loads a local `CLIO.md` as generated project context on every session.
-`clio context init` grounds a draft in the actual source tree, preserves an
+Clio loads a local `CLIO-CODER.md` as generated project context on every session.
+`clio-coder context init` grounds a draft in the actual source tree, preserves an
 existing handbook until an explicit replacement action, and can adopt existing
 `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor, and Copilot context with
-provenance and conflict reporting. `CLIO.md` is a gitignored runtime artifact,
+provenance and conflict reporting. `CLIO-CODER.md` is a gitignored runtime artifact,
 not canonical repository documentation.
 
-Alongside it, `clio context index` builds a structural codewiki that the
+Alongside it, `clio-coder context index` builds a structural codewiki that the
 `code_nav` tool navigates, so a model can find a symbol without reading half
 the repository into its window.
 
 ## Skills
 
 Skills are reusable `SKILL.md` guides the model loads on demand. Clio
-discovers them from per-user and per-project roots, including `.clio/skills`
+discovers them from per-user and per-project roots, including `.clio-coder/skills`
 and cross-harness layouts such as `.claude/skills` and `.codex/skills`. A
 skill's `allowed-tools` declaration is enforced at tool admission, and a skill
-can ship executable RED-GREEN evals that `clio skills eval <name>` runs
+can ship executable RED-GREEN evals that `clio-coder skills eval <name>` runs
 instead of trusting the prose.
 
 This repository ships a curated catalog under [skills/](skills/README.md) with
@@ -411,13 +411,13 @@ provenance frontmatter, evals, and content hashes pinned in
 source at activation. Nothing auto-loads.
 
 ```bash
-clio skills install context-handoff   # copy into .clio/skills
-clio skills list                      # confirm Clio sees it
+clio-coder skills install context-handoff   # copy into .clio-coder/skills
+clio-coder skills list                      # confirm Clio sees it
 ```
 
 The catalog includes [`find-skills`](skills/meta/find-skills/), which routes
-discovery through `clio skills search` and `clio skills install`. Install it
-with `clio skills install find-skills --user` so it outranks the community
+discovery through `clio-coder skills search` and `clio-coder skills install`. Install it
+with `clio-coder skills install find-skills --user` so it outranks the community
 skill of the same name that other installers drop into compat roots.
 
 ## Memory that survives long tasks
@@ -431,7 +431,7 @@ The default tier is rules-only and makes no model calls. An LLM memory tier is
 opt-in through an independent background route. The action agent's prompt and
 tool surface never change, `/memory` inspects the bank, and disabling
 `memory.intervention.enabled` removes the whole mechanism. Durable lessons are
-separate, scoped, evidence-linked, and managed through `clio memory
+separate, scoped, evidence-linked, and managed through `clio-coder memory
 list|propose|approve|reject|prune`. Design notes:
 [docs/proactive-memory.md](docs/proactive-memory.md).
 
@@ -449,16 +449,16 @@ the deterministic `npm run ci:release` suite.
 
 | Problem | Try this |
 | --- | --- |
-| `clio: command not found` | Run `npm run install:local`, then `hash -r`; confirm `${CLIO_BIN_DIR:-$HOME/.local/bin}` is on `PATH`. |
-| No model target is available | Run `clio configure`, then `clio targets --probe`. |
+| `clio-coder: command not found` | Run `npm run install:local`, then `hash -r`; confirm `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}` is on `PATH`. |
+| No model target is available | Run `clio-coder configure`, then `clio-coder targets --probe`. |
 | Local model does not respond | Confirm the local runtime is running and the target URL is correct. |
-| Cloud model auth fails | Check `clio auth status <target>` and verify the API key or login flow. |
-| A fleet node never gets work | Run `clio doctor`; per-node preflight reports filesystem parity and target facts. |
+| Cloud model auth fails | Check `clio-coder auth status <target>` and verify the API key or login flow. |
+| A fleet node never gets work | Run `clio-coder doctor`; per-node preflight reports filesystem parity and target facts. |
 | Source changes do not appear | Re-run `npm run build`; the linked CLI points at `dist/`. |
-| State appears corrupted | Run `clio doctor`, then `clio doctor --fix`. |
+| State appears corrupted | Run `clio-coder doctor`, then `clio-coder doctor --fix`. |
 
-When filing an issue, include the output of `clio --version`, `node
---version`, `clio doctor`, and `clio targets`. Redact secrets, private
+When filing an issue, include the output of `clio-coder --version`, `node
+--version`, `clio-coder doctor`, and `clio-coder targets`. Redact secrets, private
 prompts, logs, and proprietary code.
 
 ---
@@ -476,7 +476,7 @@ The indexed entry points are `src/cli/index.ts`, `src/domains/agents/index.ts`,
 `src/domains/components/index.ts`, `src/domains/config/index.ts`,
 `src/domains/context/bootstrap.ts`, `src/domains/context/index.ts`,
 `src/domains/dispatch/index.ts`, and `src/domains/eval/index.ts`. When present,
-read the local generated `CLIO.md` after that index-led orientation; it carries
+read the local generated `CLIO-CODER.md` after that index-led orientation; it carries
 the project-specific invariants and traps that are not obvious from the source.
 
 ## The tool surface
@@ -559,14 +559,14 @@ is a fallback, not a router.
 ## Programmatic interfaces
 
 ```bash
-clio run "<task>" --json                 # one headless turn, JSONL events
-clio run "<task>" --agent coder          # one explicit fleet agent, writes a receipt
-clio acp                                 # serve ACP v1 over stdio for ACP frontends
-clio fleet run <contract>                # run a fleet DAG contract
-clio fleet drain                         # pause new execution starts for up to one hour
-clio fleet resume                        # reopen durable dispatch admission
-clio evidence build|inspect|list         # deterministic evidence artifacts
-clio eval validate|run|report|compare|gate
+clio-coder run "<task>" --json                 # one headless turn, JSONL events
+clio-coder run "<task>" --agent coder          # one explicit fleet agent, writes a receipt
+clio-coder acp                                 # serve ACP v1 over stdio for ACP frontends
+clio-coder fleet run <contract>                # run a fleet DAG contract
+clio-coder fleet drain                         # pause new execution starts for up to one hour
+clio-coder fleet resume                        # reopen durable dispatch admission
+clio-coder evidence build|inspect|list         # deterministic evidence artifacts
+clio-coder eval validate|run|report|compare|gate
 ```
 
 Dispatch can also delegate to external ACP agents while Clio mediates
@@ -588,11 +588,10 @@ fingerprint, WorkerSpec digest, runtime, target, endpoint identity hash, wire
 model, effective tool signature, and bounded resource facts before any model
 call. Any drift from the approved identity kills the worker.
 
-`clio trace` reads the same store and now records interactive turns beside
+`clio-coder trace` reads the same store and now records interactive turns beside
 dispatched runs, one event per tool call with its verdict.
 
-Verify from the TUI with `/view verify <runId>`, or from the shell with `clio
-evidence inspect`. See [docs/observability.md](docs/observability.md).
+Verify from the TUI with `/view verify <runId>`, or from the shell with `clio-coder evidence inspect`. See [docs/observability.md](docs/observability.md).
 
 ---
 
@@ -610,7 +609,7 @@ flowchart TB
   ENG --> TOOLS["src/tools<br/>20 typed tools, 7 planes"]
   ENG --> DOM["src/domains"]
   DOM --> DISP["dispatch<br/>plans, leases, routing, receipts"]
-  DOM --> CTX["context<br/>codewiki, compaction, CLIO.md"]
+  DOM --> CTX["context<br/>codewiki, compaction, CLIO-CODER.md"]
   DOM --> PROV["providers<br/>runtimes, auth, catalog"]
   DOM --> SAFE["safety<br/>damage control, policy"]
   DISP --> WORK["src/worker<br/>bounded worker runtime"]
@@ -657,14 +656,14 @@ audit. Live model validation is separate, manual, and opt-in, because no
 deterministic suite can promise that every local model behaves identically:
 
 ```bash
-CLIO_LIVE_SMOKE=1 \
-CLIO_LIVE_TARGET=openai-compat \
-CLIO_LIVE_RUNTIME=openai-compat \
-CLIO_LIVE_MODEL=your-model \
-CLIO_LIVE_BASE_URL=http://localhost:8080/v1 \
+CLIO_CODER_LIVE_SMOKE=1 \
+CLIO_CODER_LIVE_TARGET=openai-compat \
+CLIO_CODER_LIVE_RUNTIME=openai-compat \
+CLIO_CODER_LIVE_MODEL=your-model \
+CLIO_CODER_LIVE_BASE_URL=http://localhost:8080/v1 \
 npm run test:live
 
-CLIO_LIVE_SMOKE=1 npm run test:live -- --delegation   # needs local opencode and copilot
+CLIO_CODER_LIVE_SMOKE=1 npm run test:live -- --delegation   # needs local opencode and copilot
 npm run test:live-eval:fleet-dispatch                 # multi-node dispatch regression
 ```
 
@@ -690,7 +689,7 @@ Security reports go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## Documentation
 
-The full set lives under [docs/](docs/README.md), and `clio docs` serves it
+The full set lives under [docs/](docs/README.md), and `clio-coder docs` serves it
 locally with interactive blueprints.
 
 | Topic | Guide |
@@ -719,7 +718,7 @@ locally with interactive blueprints.
 | Runtime model refresh, catalog sources, local and cloud model quirks | [model-catalog.md](docs/model-catalog.md) |
 | Active component snapshots and the experimental middleware hook contract | [middleware-and-components.md](docs/middleware-and-components.md) |
 | Advisory validation-contract patterns for scientific artifacts and HPC assumptions | [scientific-validation.md](docs/scientific-validation.md) |
-| Falsifiable Change Manifest templates, auditability, and `clio evolve` | [evolution.md](docs/evolution.md) |
+| Falsifiable Change Manifest templates, auditability, and `clio-coder evolve` | [evolution.md](docs/evolution.md) |
 | Interface layout, palette, Unicode vocabulary, drawing choreography | [tui-design.md](docs/tui-design.md) |
 | Source-first docs workflow, mapping matrix, alpha wording guidance | [documentation-guide.md](docs/documentation-guide.md) |
 | Private context index determinism and target smoke matrices (internal) | [evals-internal.md](docs/evals-internal.md) |
@@ -735,7 +734,7 @@ counters in each session's `context-snapshots.jsonl`, so a slow session can be
 diagnosed from the ledger alone.
 
 ```bash
-clio usage report --days 7      # cost and token facts with cited run ids
+clio-coder usage report --days 7      # cost and token facts with cited run ids
 ```
 
 Inside the TUI, `/cost` shows session totals and `/context` opens the

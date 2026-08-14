@@ -49,7 +49,7 @@ them.
 
 ## Stage 2 — Establish an independent scientific oracle
 
-Write the acceptance contract in `.clio/validation.yaml` (preferred) or
+Write the acceptance contract in `.clio-coder/validation.yaml` (preferred) or
 `VALIDATION.md` before changing behavior. Pick at least one oracle that does
 not depend on the new implementation agreeing with itself:
 

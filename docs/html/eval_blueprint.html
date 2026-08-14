@@ -468,7 +468,7 @@
               YAML is empty. Load a preset.
             </div>
 
-            <button type="button" class="action-btn" id="runBtn" onclick="runSimulatedEval()">Simulate clio eval run</button>
+            <button type="button" class="action-btn" id="runBtn" onclick="runSimulatedEval()">Simulate clio-coder eval run</button>
 
             <div class="console-body" id="runConsole">Console ready. Click button to simulate runner.</div>
           </div>
@@ -529,9 +529,9 @@
         
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">CLI and Report Formats</h3>
         <p>Run task suites, build reports, and compare evaluation results across runs:</p>
-        <pre><code>clio eval run --task-file tasks.yaml [--repeat &lt;n&gt;]
-clio eval report &lt;evalId&gt; [--format swe-jsonl]
-clio eval compare &lt;baselineEvalId&gt; &lt;candidateEvalId&gt;</code></pre>
+        <pre><code>clio-coder eval run --task-file tasks.yaml [--repeat &lt;n&gt;]
+clio-coder eval report &lt;evalId&gt; [--format swe-jsonl]
+clio-coder eval compare &lt;baselineEvalId&gt; &lt;candidateEvalId&gt;</code></pre>
         <p>The option <code>--format swe-jsonl</code> generates reports in a newline-separated JSONL format matching benchmark schemas (containing <code>instance_id</code>, <code>model_patch</code>, <code>model_name_or_path</code>, <code>status</code>, <code>pass</code>, <code>tokens</code>, <code>wall_time_ms</code>, and <code>cost_usd</code>) suitable for scientific evaluations such as <strong>SWE-bench</strong>.</p>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Task-file schema</h3>

@@ -82,7 +82,7 @@ print a command group by running it without a subcommand: `herdr agent`,
    Native agent arguments go only after `--`. `agent start` returns once the
    agent is detected and input-ready (30 s default timeout).
 5. If no Clio kind is installed, fall back to the pane surface:
-   `herdr pane run <new-pane-id> "clio"` and drive it with pane commands;
+   `herdr pane run <new-pane-id> "clio-coder"` and drive it with pane commands;
    lifecycle states are then unavailable, so say so.
 
 ## Step 5 — Drive it

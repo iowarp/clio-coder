@@ -619,7 +619,7 @@
             <div class="verdict-header">Generated CLI Command</div>
             <div class="code-block-wrapper">
               <button type="button" class="copy-btn" onclick="copyCliText()">Copy</button>
-              <pre class="code-output" id="cliCommandOutput">clio configure ...</pre>
+              <pre class="code-output" id="cliCommandOutput">clio-coder configure ...</pre>
             </div>
           </div>
 
@@ -683,30 +683,30 @@
           </thead>
           <tbody>
             <tr>
-              <td><code>CLIO_HOME</code></td>
-              <td>Single-tree override: config at <code>$CLIO_HOME/config</code>, data at <code>$CLIO_HOME/data</code>, state at <code>$CLIO_HOME/state</code>, and cache at <code>$CLIO_HOME/cache</code>.</td>
+              <td><code>CLIO_CODER_HOME</code></td>
+              <td>Single-tree override: config at <code>$CLIO_CODER_HOME/config</code>, data at <code>$CLIO_CODER_HOME/data</code>, state at <code>$CLIO_CODER_HOME/state</code>, and cache at <code>$CLIO_CODER_HOME/cache</code>.</td>
             </tr>
             <tr>
-              <td><code>CLIO_CONFIG_DIR</code></td>
-              <td>Overrides config directory only. Default config directory is platform-specific (e.g. <code>~/.config/clio</code> on Linux).</td>
+              <td><code>CLIO_CODER_CONFIG_DIR</code></td>
+              <td>Overrides config directory only. Default config directory is platform-specific (e.g. <code>~/.config/clio-coder</code> on Linux).</td>
             </tr>
             <tr>
-              <td><code>CLIO_DATA_DIR</code></td>
+              <td><code>CLIO_CODER_DATA_DIR</code></td>
               <td>Overrides data directory only. Contains durable artifacts such as memory, evidence, and evals.</td>
             </tr>
             <tr>
-              <td><code>CLIO_STATE_DIR</code></td>
+              <td><code>CLIO_CODER_STATE_DIR</code></td>
               <td>Overrides state directory only. Contains sessions, audit logs, receipts, runs.json, recent models, install metadata, interviews, and scratch output.</td>
             </tr>
             <tr>
-              <td><code>CLIO_CACHE_DIR</code></td>
+              <td><code>CLIO_CODER_CACHE_DIR</code></td>
               <td>Overrides cache directory only.</td>
             </tr>
           </tbody>
         </table>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Autonomy Dial</h3>
-        <p>Clio v0.3.0 uses the <code>autonomy</code> dial for immediate execution, approvals, and auto-denials. Settings are validated directly against the current schema; <code>clio doctor --fix</code> does not transform removed keys into this shape.</p>
+        <p>Clio v0.3.0 uses the <code>autonomy</code> dial for immediate execution, approvals, and auto-denials. Settings are validated directly against the current schema; <code>clio-coder doctor --fix</code> does not transform removed keys into this shape.</p>
         <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
           <li style="margin-bottom: 0.3rem;"><strong><code>read-only</code></strong>: Clio inspects and answers. Write/execute tools are auto-denied.</li>
           <li style="margin-bottom: 0.3rem;"><strong><code>suggest</code></strong>: Every mutating action parks for operator confirmation.</li>
@@ -717,7 +717,7 @@
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">First-Run Target Setup</h3>
         <p>Clio works on checked-out code repositories. First register a target and set it as orchestrator:</p>
         <pre><code># Register local Ollama target
-clio configure \
+clio-coder configure \
   --id local-ollama \
   --runtime ollama-native \
   --url http://localhost:11434 \
@@ -726,9 +726,9 @@ clio configure \
   --set-fleet-default
 
 # Probe registered targets and models
-clio targets --probe
-clio models --target local-ollama
-clio</code></pre>
+clio-coder targets --probe
+clio-coder models --target local-ollama
+clio-coder</code></pre>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Live Routing vs Saved Defaults</h3>
         <p>Routing properties (<code>orchestrator.*</code>, <code>workers.default.*</code>) in <code>settings.yaml</code> are <strong>defaults</strong> that seed a TUI session on launch. Once running, Alt+L or <code>/model</code> modifications only apply to the current active terminal session and are serialized back for next-session setups without affecting other concurrent running TUI instances.</p>
@@ -1008,7 +1008,7 @@ orchestrator:
       const setOrch = document.getElementById('cliSetOrch').checked;
       const setFleet = document.getElementById('cliSetFleet').checked;
 
-      let cmd = `clio configure \\\n  --id ${id} \\\n  --runtime ${runtime} \\\n  --url ${url} \\\n  --model ${model}`;
+      let cmd = `clio-coder configure \\\n  --id ${id} \\\n  --runtime ${runtime} \\\n  --url ${url} \\\n  --model ${model}`;
 
       if (context) cmd += ` \\\n  --context-window ${context}`;
       if (maxTokens) cmd += ` \\\n  --max-tokens ${maxTokens}`;

@@ -346,8 +346,8 @@ describe("openai-completions thinking preservation", () => {
 		resetLlamaCppResidencyState();
 		// The residency lock file lives in the state dir; point it at a scratch
 		// dir so the contract test never writes outside the repo sandbox.
-		const originalStateDir = process.env.CLIO_STATE_DIR;
-		process.env.CLIO_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-residency-test-"));
+		const originalStateDir = process.env.CLIO_CODER_STATE_DIR;
+		process.env.CLIO_CODER_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-residency-test-"));
 		const originalFetch = globalThis.fetch;
 		const events: string[] = [];
 		let modelPolls = 0;
@@ -425,8 +425,8 @@ describe("openai-completions thinking preservation", () => {
 			ok(payloadIndex > loadIndex, events.join("\n"));
 		} finally {
 			globalThis.fetch = originalFetch;
-			if (originalStateDir === undefined) delete process.env.CLIO_STATE_DIR;
-			else process.env.CLIO_STATE_DIR = originalStateDir;
+			if (originalStateDir === undefined) delete process.env.CLIO_CODER_STATE_DIR;
+			else process.env.CLIO_CODER_STATE_DIR = originalStateDir;
 			resetLlamaCppResidencyState();
 		}
 	});

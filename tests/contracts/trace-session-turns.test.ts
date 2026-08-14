@@ -20,7 +20,7 @@ import { createTurnState } from "../../src/interactive/turn-state.js";
  * D2: the dispatch trace mirror subscribes to five dispatch bus channels, and
  * an interactive turn is not a dispatch. The only rows a session used to
  * contribute to trace.sqlite came from the workers it dispatched, so the
- * operator's own turns were structurally invisible to `clio trace` and to any
+ * operator's own turns were structurally invisible to `clio-coder trace` and to any
  * question of the form "what did this run actually execute".
  *
  * The turn's ledger appends already carry the whole trace vocabulary, so the

@@ -14,12 +14,12 @@ import {
 } from "../domains/observability/trace-store.js";
 
 const HELP = `Usage:
-  clio trace runs [--db PATH] [--limit N]
-  clio trace phases <runId> [--db PATH]
-  clio trace tail <runId> [--follow] [--db PATH]
-  clio trace procs <runId> [--db PATH]
-  clio trace sql <SELECT query> [--db PATH]
-  clio trace ui [--db PATH] [--port N]        source checkout only
+  clio-coder trace runs [--db PATH] [--limit N]
+  clio-coder trace phases <runId> [--db PATH]
+  clio-coder trace tail <runId> [--follow] [--db PATH]
+  clio-coder trace procs <runId> [--db PATH]
+  clio-coder trace sql <SELECT query> [--db PATH]
+  clio-coder trace ui [--db PATH] [--port N]        source checkout only
 
 The viewer ships with the repository, not the npm package, so from an installed
 clio the subcommands above are the way in. They read the same database.
@@ -201,7 +201,7 @@ async function runTraceUi(db: string, port: number): Promise<number> {
 		process.stderr.write(
 			"trace viewer is available only from a source checkout; apps/trace-viewer/server.mjs was not found\n" +
 				"  the npm package does not carry the viewer, so an installed clio cannot start it\n" +
-				`  the same run is readable here: clio trace runs --db ${db}\n` +
+				`  the same run is readable here: clio-coder trace runs --db ${db}\n` +
 				"  from a checkout of the repository: npm run trace:ui\n",
 		);
 		return 1;
@@ -251,7 +251,7 @@ function missingDatabase(parsed: ParsedTraceArgs): number {
 		return 1;
 	}
 	process.stdout.write(
-		`no trace database yet at ${parsed.db}. rows are recorded when a dispatch executes or an interactive turn runs; run \`clio run "<task>"\` or start a session to create one.\n`,
+		`no trace database yet at ${parsed.db}. rows are recorded when a dispatch executes or an interactive turn runs; run \`clio-coder run "<task>"\` or start a session to create one.\n`,
 	);
 	return 0;
 }

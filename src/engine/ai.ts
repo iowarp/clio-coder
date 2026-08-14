@@ -169,23 +169,23 @@ export function parseEngineStreamingJson<T = Record<string, unknown>>(partialJso
 }
 
 /**
- * When `CLIO_WORKER_FAUX=1`, register the pi-ai faux provider and queue a
+ * When `CLIO_CODER_WORKER_FAUX=1`, register the pi-ai faux provider and queue a
  * single deterministic assistant response. Used by the worker-entry diag so
  * the worker subprocess can run end-to-end without provider credentials.
  *
  * Env vars (all optional except the gate):
- *   CLIO_WORKER_FAUX               must equal "1" to arm registration
- *   CLIO_WORKER_FAUX_MODEL         model id registered under the faux provider (default "faux-model")
- *   CLIO_WORKER_FAUX_TEXT          assistant response text (default "ok")
- *   CLIO_WORKER_FAUX_STOP_REASON   assistant stopReason (default "stop")
- *   CLIO_WORKER_FAUX_ERROR_MESSAGE optional assistant errorMessage
+ *   CLIO_CODER_WORKER_FAUX               must equal "1" to arm registration
+ *   CLIO_CODER_WORKER_FAUX_MODEL         model id registered under the faux provider (default "faux-model")
+ *   CLIO_CODER_WORKER_FAUX_TEXT          assistant response text (default "ok")
+ *   CLIO_CODER_WORKER_FAUX_STOP_REASON   assistant stopReason (default "stop")
+ *   CLIO_CODER_WORKER_FAUX_ERROR_MESSAGE optional assistant errorMessage
  */
 export function registerFauxFromEnv(): EngineModel | null {
-	if (process.env.CLIO_WORKER_FAUX !== "1") return null;
-	const modelId = process.env.CLIO_WORKER_FAUX_MODEL ?? "faux-model";
-	const text = process.env.CLIO_WORKER_FAUX_TEXT ?? "ok";
-	const stopReason = (process.env.CLIO_WORKER_FAUX_STOP_REASON ?? "stop") as AssistantMessage["stopReason"];
-	const errorMessage = process.env.CLIO_WORKER_FAUX_ERROR_MESSAGE;
+	if (process.env.CLIO_CODER_WORKER_FAUX !== "1") return null;
+	const modelId = process.env.CLIO_CODER_WORKER_FAUX_MODEL ?? "faux-model";
+	const text = process.env.CLIO_CODER_WORKER_FAUX_TEXT ?? "ok";
+	const stopReason = (process.env.CLIO_CODER_WORKER_FAUX_STOP_REASON ?? "stop") as AssistantMessage["stopReason"];
+	const errorMessage = process.env.CLIO_CODER_WORKER_FAUX_ERROR_MESSAGE;
 	const reg = registerFauxProvider({
 		provider: "faux",
 		models: [{ id: modelId }],

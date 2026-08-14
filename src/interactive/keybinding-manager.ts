@@ -228,7 +228,7 @@ export function validateKeybindings(raw: Readonly<Record<string, string | string
 export function formatInvalidKeybindingNotice(invalid: ReadonlyArray<InvalidKeybinding>): string {
 	const count = invalid.reduce((sum, entry) => sum + entry.keys.length, 0);
 	const detail = invalid.flatMap((entry) => entry.keys.map((key) => `${entry.id}="${key}"`)).join(", ");
-	return `Clio Coder: ${count} invalid keybinding${count === 1 ? "" : "s"} in settings.yaml (defaults kept): ${detail}. Fix settings.yaml or run \`clio doctor\`.\n`;
+	return `Clio Coder: ${count} invalid keybinding${count === 1 ? "" : "s"} in settings.yaml (defaults kept): ${detail}. Fix settings.yaml or run \`clio-coder doctor\`.\n`;
 }
 
 function envValue(env: NodeJS.ProcessEnv | Readonly<Record<string, string | undefined>>, key: string): string {

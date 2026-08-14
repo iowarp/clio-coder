@@ -16,24 +16,24 @@ body:
       label: Reproduce
       description: Minimal commands, config shape, or session steps.
       placeholder: |
-        clio doctor
-        clio targets
-        clio run --agent scout "..."
+        clio-coder doctor
+        clio-coder targets
+        clio-coder run --agent scout "..."
     validations:
       required: true
   - type: textarea
     id: environment
     attributes:
       label: Environment
-      description: Output of `clio --version`, `node --version`, OS, shell, target id, runtime, and model.
+      description: Output of `clio-coder --version`, `node --version`, OS, shell, target id, runtime, and model.
       render: text
     validations:
       required: true
   - type: textarea
     id: doctor
     attributes:
-      label: clio doctor output
-      description: Paste the output of `clio doctor` (without `--fix`). Redact any secrets.
+      label: clio-coder doctor output
+      description: Paste the output of `clio-coder doctor` (without `--fix`). Redact any secrets.
       render: text
     validations:
       required: true

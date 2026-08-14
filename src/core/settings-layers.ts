@@ -2,8 +2,8 @@
  * Scoped settings layering. Effective settings come from four file layers plus
  * CLI flags, lowest precedence first:
  *
- *   built-in  <  user settings.yaml  <  project .clio/settings.yaml
- *             <  project .clio/settings.local.yaml  <  CLI flags
+ *   built-in  <  user settings.yaml  <  project .clio-coder/settings.yaml
+ *             <  project .clio-coder/settings.local.yaml  <  CLI flags
  *
  * Layering happens on the raw parsed blobs so each effective leaf can be
  * attributed to the layer that set it, then the merged blob is validated against
@@ -155,8 +155,8 @@ export interface ReadLayeredSettingsOptions {
 export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
 	const issues: SettingsLayerIssue[] = [];
 	const userFile = options.userPath ?? settingsPath();
-	const projectFile = join(cwd, ".clio", "settings.yaml");
-	const localFile = join(cwd, ".clio", "settings.local.yaml");
+	const projectFile = join(cwd, ".clio-coder", "settings.yaml");
+	const localFile = join(cwd, ".clio-coder", "settings.local.yaml");
 
 	const user = readRawLayer("user", userFile, issues);
 	const projectRaw = readRawLayer("project", projectFile, issues);

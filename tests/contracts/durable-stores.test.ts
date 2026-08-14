@@ -46,7 +46,7 @@ describe("contracts/durable customization stores", () => {
 		const source = path.join(scratch, "extension-source");
 		mkdirSync(source, { recursive: true });
 		writeFileSync(
-			path.join(source, "clio-extension.yaml"),
+			path.join(source, "clio-coder-extension.yaml"),
 			[
 				"manifestVersion: 1",
 				"id: durable-ext",
@@ -67,7 +67,7 @@ describe("contracts/durable customization stores", () => {
 		const disabled = disableExtension("durable-ext", { cwd: project, scope: "project" });
 		strictEqual(disabled.diagnostics.length, 0);
 
-		const statePath = path.join(project, ".clio", "extensions", "state.json");
+		const statePath = path.join(project, ".clio-coder", "extensions", "state.json");
 		const state = JSON.parse(readFileSync(statePath, "utf8")) as {
 			version: number;
 			disabled: string[];

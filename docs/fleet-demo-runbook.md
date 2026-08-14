@@ -22,7 +22,7 @@ works well on camera.
 
 ## 1. Declare the fleet (zbook)
 
-Add the nodes to `settings.yaml` (see `clio paths` for its location):
+Add the nodes to `settings.yaml` (see `clio-coder paths` for its location):
 
 ```yaml
 fleet:
@@ -46,11 +46,11 @@ explicit: workers on mini must never evict its resident models.
 ## 2. Preflight the nodes
 
 ```
-clio doctor
+clio-coder doctor
 ```
 
 Doctor probes each node over its real SSH channel: reachability, a
-version-matched `clio` on the remote path, path parity for the project root,
+version-matched `clio-coder` on the remote path, path parity for the project root,
 and a writable remote state dir. Passing nodes become dispatch-eligible;
 failures are warnings that name the fix. Re-run doctor after any host,
 project, or version change; admission fails closed on a stale preflight.
@@ -58,7 +58,7 @@ project, or version change; admission fails closed on a stale preflight.
 Confirm the durable view:
 
 ```
-clio fleet status
+clio-coder fleet status
 ```
 
 ## 3. Open the session and the fleet views
@@ -126,14 +126,14 @@ cmake --build build && ctest --test-dir build
 ## 6. Verify every receipt, including the remote ones
 
 ```
-clio fleet status --json
-clio evidence build --run <builderRunId>
-clio evidence build --run <reviewerRunId>
-clio evidence list
-clio evidence inspect <evidenceId>
+clio-coder fleet status --json
+clio-coder evidence build --run <builderRunId>
+clio-coder evidence build --run <reviewerRunId>
+clio-coder evidence list
+clio-coder evidence inspect <evidenceId>
 ```
 
-`clio evidence build` recomputes the receipt's integrity digest against the
+`clio-coder evidence build` recomputes the receipt's integrity digest against the
 run ledger; a tampered or mismatched receipt fails the build with the field
 that diverged. The receipts of the remote runs verify on zbook because the
 ledger and receipts live on the shared filesystem. Current receipts use strict
@@ -144,7 +144,7 @@ current binary has no historical receipt reader.
 ## Provenance walkthrough: what a PI can verify from receipts alone
 
 Each run's receipt is a JSON file under `<state>/receipts/<runId>.json`
-(`clio paths` shows the state dir; the monitor tool prints the exact path per
+(`clio-coder paths` shows the state dir; the monitor tool prints the exact path per
 run). From the receipts alone, with no session transcript, a PI can
 reconstruct:
 
@@ -166,14 +166,14 @@ reconstruct:
    backward reconstructs the whole review chain, and any edit to an earlier
    receipt breaks the digest the later one recorded.
 5. That nothing was altered. The `integrity` block is a sha256 over the
-   complete receipt schema and its stable ledger row. `clio evidence build
+   complete receipt schema and its stable ledger row. `clio-coder evidence build
    --run <id>` recomputes and cross-checks it; `verifyReceiptIntegrity` in
    `src/domains/dispatch/receipt-integrity.ts` is the reference
 	implementation. Current receipts use v15 and every other version fails
 	verification. Incompatible state must be archived or removed; it is never
 	read as evidence through a compatibility verifier.
 
-The walkthrough for an audience is three commands: `clio evidence build
+The walkthrough for an audience is three commands: `clio-coder evidence build
 --run <id>` (it verifies), open the receipt JSON (read `node`, `gate`,
-`plan`, `reproducibility.git`), and `clio evidence build` again after
+`plan`, `reproducibility.git`), and `clio-coder evidence build` again after
 hand-editing one byte of the receipt (it refuses, naming the mismatch).

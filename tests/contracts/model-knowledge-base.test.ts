@@ -113,7 +113,7 @@ describe("contracts/model knowledge base", () => {
 
 	it("resolves bundled, user, project, and env catalog roots in precedence order", () => {
 		const root = scratchDir("clio-kb-paths-");
-		const previousConfig = process.env.CLIO_CONFIG_DIR;
+		const previousConfig = process.env.CLIO_CODER_CONFIG_DIR;
 		const previousCatalogDirs = process.env[MODEL_CATALOG_DIRS_ENV];
 		try {
 			const configDir = join(root, "config");
@@ -121,12 +121,12 @@ describe("contracts/model knowledge base", () => {
 			const envDirA = join(root, "env-a");
 			const envDirB = join(root, "env-b");
 			const userCatalog = join(configDir, MODEL_CATALOG_OVERLAY_DIR);
-			const projectCatalog = join(projectDir, ".clio", MODEL_CATALOG_OVERLAY_DIR);
+			const projectCatalog = join(projectDir, ".clio-coder", MODEL_CATALOG_OVERLAY_DIR);
 			for (const dir of [userCatalog, projectCatalog, envDirA, envDirB]) {
 				mkdirSync(dir, { recursive: true });
 			}
 
-			process.env.CLIO_CONFIG_DIR = configDir;
+			process.env.CLIO_CODER_CONFIG_DIR = configDir;
 			process.env[MODEL_CATALOG_DIRS_ENV] = [envDirA, envDirB].join(delimiter);
 			resetXdgCache();
 
@@ -136,8 +136,8 @@ describe("contracts/model knowledge base", () => {
 			deepStrictEqual(dirs.overlays, [userCatalog, projectCatalog, envDirA, envDirB]);
 			deepStrictEqual(dirs.all, [dirs.bundled, userCatalog, projectCatalog, envDirA, envDirB]);
 		} finally {
-			if (previousConfig === undefined) delete process.env.CLIO_CONFIG_DIR;
-			else process.env.CLIO_CONFIG_DIR = previousConfig;
+			if (previousConfig === undefined) delete process.env.CLIO_CODER_CONFIG_DIR;
+			else process.env.CLIO_CODER_CONFIG_DIR = previousConfig;
 			if (previousCatalogDirs === undefined) delete process.env[MODEL_CATALOG_DIRS_ENV];
 			else process.env[MODEL_CATALOG_DIRS_ENV] = previousCatalogDirs;
 			resetXdgCache();

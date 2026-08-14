@@ -165,7 +165,7 @@ describe("contracts/codewiki", () => {
 			generatedAt: "2026-05-01T00:00:00.000Z",
 		});
 		writeCodewiki(scratch, codewiki);
-		const serialized = readFileSync(join(scratch, ".clio", "codewiki.json"), "utf8");
+		const serialized = readFileSync(join(scratch, ".clio-coder", "codewiki.json"), "utf8");
 		strictEqual(serialized.includes("\n  "), false);
 		strictEqual(serialized.endsWith("\n"), true);
 		deepStrictEqual(JSON.parse(serialized), codewiki);
@@ -234,9 +234,9 @@ describe("contracts/codewiki", () => {
 	});
 
 	it("treats v1 codewiki files as stale instead of throwing", () => {
-		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 		writeFileSync(
-			join(scratch, ".clio", "codewiki.json"),
+			join(scratch, ".clio-coder", "codewiki.json"),
 			JSON.stringify({
 				version: 1,
 				generatedAt: "2026-05-01T00:00:00.000Z",
@@ -250,9 +250,9 @@ describe("contracts/codewiki", () => {
 	});
 
 	it("upgrades v2 and v3 codewiki files to degraded v5 on read", async () => {
-		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 		writeFileSync(
-			join(scratch, ".clio", "codewiki.json"),
+			join(scratch, ".clio-coder", "codewiki.json"),
 			JSON.stringify({
 				version: 2,
 				generatedAt: "2026-05-01T00:00:00.000Z",
@@ -275,7 +275,7 @@ describe("contracts/codewiki", () => {
 		strictEqual(codewikiNeedsBackfill(read), true);
 
 		writeFileSync(
-			join(scratch, ".clio", "codewiki.json"),
+			join(scratch, ".clio-coder", "codewiki.json"),
 			JSON.stringify({
 				version: 3,
 				language: "typescript",
@@ -304,9 +304,9 @@ describe("contracts/codewiki", () => {
 	});
 
 	it("migrates v4 for a full extraction backfill and strips unsupported signature fields", () => {
-		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 		writeFileSync(
-			join(scratch, ".clio", "codewiki.json"),
+			join(scratch, ".clio-coder", "codewiki.json"),
 			JSON.stringify({
 				version: 4,
 				language: "typescript",
@@ -846,10 +846,10 @@ describe("contracts/codewiki", () => {
 
 	it("rebuilds missing or stale codewiki on tool demand", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
-		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 		writeFileSync(join(scratch, "src", "index.ts"), "export const rebuilt = true;\n", "utf8");
 		writeFileSync(
-			join(scratch, ".clio", "codewiki.json"),
+			join(scratch, ".clio-coder", "codewiki.json"),
 			JSON.stringify({
 				version: 1,
 				generatedAt: "2026-05-01T00:00:00.000Z",
@@ -863,17 +863,17 @@ describe("contracts/codewiki", () => {
 		if (!loaded.ok) throw new Error(loaded.message);
 		strictEqual(loaded.codewiki.version, 5);
 		ok(loaded.codewiki.symbols.some((symbol) => symbol.name === "rebuilt"));
-		ok(existsSync(join(scratch, ".clio", "codewiki.json")));
-		ok(existsSync(join(scratch, ".clio", "state.json")));
+		ok(existsSync(join(scratch, ".clio-coder", "codewiki.json")));
+		ok(existsSync(join(scratch, ".clio-coder", "state.json")));
 		strictEqual(readClioState(scratch)?.codewikiVersion, 5);
 	});
 
 	it("backfills degraded upgraded codewiki artifacts on tool demand", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
-		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 		writeFileSync(join(scratch, "src", "index.ts"), "export const backfilled = true;\n", "utf8");
 		writeFileSync(
-			join(scratch, ".clio", "codewiki.json"),
+			join(scratch, ".clio-coder", "codewiki.json"),
 			JSON.stringify({
 				version: 3,
 				language: "typescript",
@@ -1287,7 +1287,7 @@ describe("contracts/codewiki", () => {
 	it("excludes gitignored scratch directories from the index", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "real.ts"), "export const real = 1;\n", "utf8");
-		for (const dir of [".superpowers", ".codex", ".claude", ".clio-benchmark"]) {
+		for (const dir of [".superpowers", ".codex", ".claude", ".clio-coder-benchmark"]) {
 			mkdirSync(join(scratch, dir), { recursive: true });
 			writeFileSync(join(scratch, dir, "scratch.ts"), "export const scratch = 1;\n", "utf8");
 		}
@@ -1297,7 +1297,7 @@ describe("contracts/codewiki", () => {
 		ok(codewiki.files.some((file) => file.path === "src/real.ts"));
 		strictEqual(
 			codewiki.files.some((file) =>
-				[".superpowers/", ".codex/", ".claude/", ".clio-benchmark/"].some((prefix) => file.path.startsWith(prefix)),
+				[".superpowers/", ".codex/", ".claude/", ".clio-coder-benchmark/"].some((prefix) => file.path.startsWith(prefix)),
 			),
 			false,
 		);

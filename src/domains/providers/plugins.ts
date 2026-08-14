@@ -1,9 +1,9 @@
 /**
  * Loads out-of-tree runtime descriptors into the registry. Two surfaces:
  *
- *   1. `~/.clio/runtimes/`: any `.js` file whose default export is a valid
- *      RuntimeDescriptor. Resolved from `clioConfigDir()` so CLIO_HOME /
- *      CLIO_CONFIG_DIR overrides flow through.
+ *   1. `~/.clio-coder/runtimes/`: any `.js` file whose default export is a valid
+ *      RuntimeDescriptor. Resolved from `clioConfigDir()` so CLIO_CODER_HOME /
+ *      CLIO_CODER_CONFIG_DIR overrides flow through.
  *   2. npm packages listed under `settings.runtimePlugins` (optional field).
  *      Each package must export a `clioRuntimes: RuntimeDescriptor[]` array.
  *

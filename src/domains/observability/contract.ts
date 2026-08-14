@@ -142,7 +142,7 @@ export interface ObservabilityContract {
 	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;
 	/**
 	 * Mirror one fact about a turn the operator ran themselves into the trace
-	 * database, so `clio trace runs` lists the session's own turns beside the
+	 * database, so `clio-coder trace runs` lists the session's own turns beside the
 	 * runs it dispatched. The dispatch mirror hears only the dispatch bus
 	 * channels, and an interactive turn is not a dispatch, so without this the
 	 * only rows a session contributes are its workers'.

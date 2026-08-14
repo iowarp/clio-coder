@@ -430,7 +430,7 @@ export function openAuditWriter(opts?: { dateFn?: () => Date }): AuditWriter {
 		if (current !== null && current.date === date) return current;
 		if (current !== null) closeCurrent();
 		// Opening the day's file mkdirs `<state>/audit`, which rebuilds a state
-		// root that `clio uninstall` has already removed. A tool call in a session
+		// root that `clio-coder uninstall` has already removed. A tool call in a session
 		// outliving the uninstall must not resurrect it. See core/xdg.ts
 		// stateRootRemoved(). Rows are dropped silently for the same reason
 		// logAuditError is not called: the removal is the operator's instruction,

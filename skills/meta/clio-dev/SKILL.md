@@ -79,10 +79,10 @@ Follow in order for every change:
   adapter boundary, `src/tools/**` the model-visible action surface. A tool or
   contract change ripples into safety, dispatch, ACP, and telemetry: check the
   consumers, not just the file you edited.
-- `CLIO.md` is the audited constitution; codewiki and the `.clio/state.json`
+- `CLIO-CODER.md` is the audited constitution; codewiki and the `.clio-coder/state.json`
   fingerprint are mutable hints. Never trust a stale summary over source. If
   source topology changed, refresh via `/context-init` — but a regenerated
-  `CLIO.md` is contribution-adjacent; do not commit it without intent.
+  `CLIO-CODER.md` is contribution-adjacent; do not commit it without intent.
 
 ## Continuity
 

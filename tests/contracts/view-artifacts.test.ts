@@ -37,11 +37,11 @@ async function withIsolatedLedgerState<T>(fn: (stateDir: string) => Promise<T>):
 	const originalEnv = { ...process.env };
 	const root = await mkdtemp(join(tmpdir(), "clio-view-ledger-"));
 	const stateDir = join(root, "state");
-	process.env.CLIO_HOME = root;
-	process.env.CLIO_CONFIG_DIR = join(root, "config");
-	process.env.CLIO_DATA_DIR = join(root, "data");
-	process.env.CLIO_STATE_DIR = stateDir;
-	process.env.CLIO_CACHE_DIR = join(root, "cache");
+	process.env.CLIO_CODER_HOME = root;
+	process.env.CLIO_CODER_CONFIG_DIR = join(root, "config");
+	process.env.CLIO_CODER_DATA_DIR = join(root, "data");
+	process.env.CLIO_CODER_STATE_DIR = stateDir;
+	process.env.CLIO_CODER_CACHE_DIR = join(root, "cache");
 	resetXdgCache();
 	try {
 		return await fn(stateDir);

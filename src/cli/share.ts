@@ -10,18 +10,18 @@ import {
 } from "../domains/share/index.js";
 import { printError, printOk } from "./shared.js";
 
-const HELP = `clio share <command>
+const HELP = `clio-coder share <command>
 
 Export and import portable Clio project/resource archives.
 
 Commands:
-  clio share export --out <path> [--project|--user|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]
-  clio share import <path> [--dry-run] [--force] [--project|--user] [--json]
-  clio share inspect <path> [--json]
+  clio-coder share export --out <path> [--project|--user|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]
+  clio-coder share import <path> [--dry-run] [--force] [--project|--user] [--json]
+  clio-coder share inspect <path> [--json]
 
 Aliases:
-  clio export --out <path> ...
-  clio import <path> ...
+  clio-coder export --out <path> ...
+  clio-coder import <path> ...
 `;
 
 interface Parsed {
@@ -181,7 +181,7 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 	switch (parsed.command) {
 		case "export": {
 			if (!parsed.out) {
-				process.stderr.write("usage: clio share export --out <path>\n");
+				process.stderr.write("usage: clio-coder share export --out <path>\n");
 				return 2;
 			}
 			const archive = writeShareArchive(resolve(parsed.out), exportOptions(parsed));
@@ -192,7 +192,7 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 		case "import": {
 			const archivePath = parsed.positional[0];
 			if (!archivePath || parsed.positional.length !== 1) {
-				process.stderr.write("usage: clio share import <path> [--dry-run] [--force]\n");
+				process.stderr.write("usage: clio-coder share import <path> [--dry-run] [--force]\n");
 				return 2;
 			}
 			const options = {
@@ -210,7 +210,7 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 		case "inspect": {
 			const archivePath = parsed.positional[0];
 			if (!archivePath || parsed.positional.length !== 1) {
-				process.stderr.write("usage: clio share inspect <path>\n");
+				process.stderr.write("usage: clio-coder share inspect <path>\n");
 				return 2;
 			}
 			const plan = planShareImport(resolve(archivePath), { dryRun: true, force: true });

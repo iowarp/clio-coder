@@ -836,7 +836,7 @@ function readDirentsSafely(dir: string): Dirent[] {
 /**
  * Render the workspace message. Two lines and a listing, sent at every project
  * context tier because it is the run's own working directory rather than a
- * projection of CLIO.md: a read-only scout that cannot afford the handbook read
+ * projection of CLIO-CODER.md: a read-only scout that cannot afford the handbook read
  * still needs its first shell call to land in the right place.
  */
 export function renderWorkerWorkspaceContext(workspace: WorkspaceRootFacts): string {
@@ -928,12 +928,12 @@ function briefingProvenanceFor(req: DispatchRequest): RunBriefingProvenance | nu
  * from the rendered dynamic messages so the recorded chars/contentHash can
  * never disagree with what the worker actually received. `tier: "none"` is
  * recorded explicitly to distinguish policy from pre-provenance receipts;
- * bounded policy with no rendered message (no parseable CLIO.md) records
+ * bounded policy with no rendered message (no parseable CLIO-CODER.md) records
  * `chars: 0`.
  */
 /**
  * What this run's structured context actually was. `tier` stays the recipe's
- * CLIO.md projection policy; `chars`, `contentHash`, and `sections` describe
+ * CLIO-CODER.md projection policy; `chars`, `contentHash`, and `sections` describe
  * every structured message that was sent, which is why a `none`-tier run can
  * still report characters: it got the workspace root even though it got no
  * handbook. Before that message existed, every receipt in a nine-turn live
@@ -984,7 +984,7 @@ export interface WorkerDynamicContext {
 	autonomy?: AutonomyLevel | null;
 	/** Effective approval routing; defaults to deny for legacy direct callers. */
 	onPermission?: WorkerPermissionMode | null;
-	/** Structured CLIO.md fields; null when CLIO.md is absent or malformed. */
+	/** Structured CLIO-CODER.md fields; null when CLIO-CODER.md is absent or malformed. */
 	project?: ProjectStructuredContext | null;
 	/** The run's own working directory and top-level layout; sent at every tier. */
 	workspace?: WorkspaceRootFacts | null;
@@ -1438,7 +1438,7 @@ function resolveEffectiveWorkerBudget(input: {
 	allowedTools: ReadonlyArray<ToolName>;
 	settings: EffectiveSettings;
 }): WorkerBudget {
-	const rawEnvCap = process.env.CLIO_WORKER_TOOL_CALL_CAP?.trim();
+	const rawEnvCap = process.env.CLIO_CODER_WORKER_TOOL_CALL_CAP?.trim();
 	const parsedEnvCap = rawEnvCap && /^[1-9]\d*$/.test(rawEnvCap) ? Number(rawEnvCap) : Number.NaN;
 	const hardCap = Number.isSafeInteger(parsedEnvCap)
 		? parsedEnvCap
@@ -3104,7 +3104,7 @@ export function createDispatchBundle(
 		const systemPrompt = compiledWorkerPrompt.systemPrompt;
 		const budget = resolveEffectiveWorkerBudget({ declared: spec.budget, allowedTools: effectiveTools, settings });
 		// Fetch structured project context only for tiers that receive it, so
-		// read-only scouts never pay the CLIO.md read. The tier is spec policy
+		// read-only scouts never pay the CLIO-CODER.md read. The tier is spec policy
 		// (capability-class default, recipe frontmatter override).
 		const tier = spec.projectContextTier;
 		const project = projectContext && tier === "bounded" ? projectContext.projectStructuredContext(cwd) : null;
@@ -3493,7 +3493,7 @@ export function createDispatchBundle(
 				pid: acp.pid,
 				runtimeKind: "acp-delegation",
 			});
-			// One durable write at start so sibling processes (clio fleet status)
+			// One durable write at start so sibling processes (clio-coder fleet status)
 			// can observe the running row; finalization persists the terminal state.
 			await ledgerRef.persist();
 			context.bus.emit(BusChannels.DispatchEnqueued, {
@@ -3763,7 +3763,7 @@ export function createDispatchBundle(
 				sessionEntries: finishContractEntries,
 				assistantTurnId: finishContractAssistantTurnId,
 			});
-			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_RIGOR) });
+			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
 			try {
 				safety.audit.recordCompletionContract?.({
 					runId: envelope.id,
@@ -4465,7 +4465,7 @@ export function createDispatchBundle(
 				pid,
 				runtimeKind: lifecycle.runtimeKind,
 			});
-			// One durable write at start so sibling processes (clio fleet status)
+			// One durable write at start so sibling processes (clio-coder fleet status)
 			// can observe the running row; finalization persists the terminal state.
 			await ledgerRef.persist();
 
@@ -4811,7 +4811,7 @@ export function createDispatchBundle(
 				sessionEntries: finishContractEntries,
 				assistantTurnId: finishContractAssistantTurnId,
 			});
-			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_RIGOR) });
+			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
 			try {
 				safety.audit.recordCompletionContract?.({
 					runId: envelope.id,
@@ -5502,7 +5502,7 @@ export function createDispatchBundle(
 				const recovery = recoverOrphanReceipts(ledger);
 				if (recovery.recovered > 0 || recovery.corrupt > 0 || recovery.abandoned > 0) {
 					await ledger.persist();
-					if (process.env.CLIO_INTERACTIVE !== "1") {
+					if (process.env.CLIO_CODER_INTERACTIVE !== "1") {
 						process.stderr.write(
 							`[dispatch] ledger recovery: recovered=${recovery.recovered} corrupt=${recovery.corrupt} abandoned=${recovery.abandoned} skipped=${recovery.skipped}\n`,
 						);
@@ -5530,7 +5530,7 @@ export function createDispatchBundle(
 					},
 					settle: (assignmentId, terminalRunId, status) => settleStoredAssignment(assignmentId, terminalRunId, status),
 				});
-				if ((reconciled.recovered > 0 || reconciled.abandoned > 0) && process.env.CLIO_INTERACTIVE !== "1") {
+				if ((reconciled.recovered > 0 || reconciled.abandoned > 0) && process.env.CLIO_CODER_INTERACTIVE !== "1") {
 					process.stderr.write(
 						`[dispatch] assignment reconcile: recovered=${reconciled.recovered} abandoned=${reconciled.abandoned}\n`,
 					);

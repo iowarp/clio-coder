@@ -46,11 +46,13 @@ describe("contracts/antigravity subprocess permission gate", () => {
 		strictEqual(antigravitySubprocessConfigForAutonomy("auto-edit", {}).extraArgs.length, 0);
 		throws(() => antigravitySubprocessConfigForAutonomy("suggest", {}), /cannot enforce autonomy 'suggest'/);
 		throws(
-			() => antigravitySubprocessConfigForAutonomy("suggest", { CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1" }),
+			() => antigravitySubprocessConfigForAutonomy("suggest", { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }),
 			/cannot enforce autonomy 'suggest'/,
 		);
 
-		const fullAutoWithEnv = antigravitySubprocessConfigForAutonomy("full-auto", { CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1" });
+		const fullAutoWithEnv = antigravitySubprocessConfigForAutonomy("full-auto", {
+			CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1",
+		});
 		strictEqual(fullAutoWithEnv.dangerousBypass, true);
 		ok(fullAutoWithEnv.extraArgs.includes("--dangerously-skip-permissions"));
 		strictEqual(fullAutoWithEnv.externalMode, "bypassPermissions");

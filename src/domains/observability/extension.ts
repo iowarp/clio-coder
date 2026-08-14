@@ -163,7 +163,7 @@ export function createObservabilityBundle(
 	// and ledger are persisted (dispatch finalizers persist before emit), so a
 	// build that starts here reads durable state. We keep the bus handler
 	// non-blocking by not awaiting the build inline, but a headless one-shot
-	// `clio run` tears the process down right after the run, which would abandon
+	// `clio-coder run` tears the process down right after the run, which would abandon
 	// the build mid-flight. Tracking the promises lets stop() flush them so the
 	// bundle and index row reliably land on every path, not just long-lived
 	// interactive sessions.

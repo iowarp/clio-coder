@@ -12,7 +12,7 @@ export interface ProjectPromptContext {
 }
 
 /**
- * Structured CLIO.md fields for bounded injection into worker prompts.
+ * Structured CLIO-CODER.md fields for bounded injection into worker prompts.
  * Deliberately excludes the identity paragraph and any raw handbook prose.
  */
 export interface ProjectStructuredContext {
@@ -20,7 +20,7 @@ export interface ProjectStructuredContext {
 	conventions: ReadonlyArray<string>;
 	invariants: ReadonlyArray<string>;
 	/**
-	 * Body of the CLIO.md H2 section titled exactly "Verification expectations"
+	 * Body of the CLIO-CODER.md H2 section titled exactly "Verification expectations"
 	 * (case-insensitive). The only custom section ever projected to workers;
 	 * dispatch includes it for verification-class runs only. Absent when the
 	 * handbook has no such section.
@@ -37,16 +37,16 @@ export interface ContextContract extends DomainContract {
 	runBootstrap(input?: RunBootstrapInput): Promise<RunBootstrapResult>;
 	runContextClear(input?: RunContextClearInput): Promise<RunContextClearResult>;
 	/**
-	 * Rebuild the codewiki index and `.clio` state without touching CLIO.md.
+	 * Rebuild the codewiki index and `.clio-coder` state without touching CLIO-CODER.md.
 	 * Markdown wiki updates require the explicit refresh input flag.
-	 * Backs `/context refresh` and `clio context refresh`.
+	 * Backs `/context refresh` and `clio-coder context refresh`.
 	 */
 	runContextRefresh(input?: RunContextRefreshInput): Promise<RunContextRefreshResult>;
 	runWikiGenerate(input?: RunWikiGenerateInput): Promise<RunWikiGenerateResult>;
 	renderPromptContext(cwd: string): ProjectPromptContext;
 	/**
-	 * Parsed CLIO.md structured fields (project name, conventions, invariants)
-	 * or null when CLIO.md is absent or malformed. Never returns raw handbook
+	 * Parsed CLIO-CODER.md structured fields (project name, conventions, invariants)
+	 * or null when CLIO-CODER.md is absent or malformed. Never returns raw handbook
 	 * text; used by dispatch to give workers bounded project context.
 	 */
 	projectStructuredContext(cwd?: string): ProjectStructuredContext | null;

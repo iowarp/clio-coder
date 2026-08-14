@@ -308,7 +308,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			}
 
 			// The path policy runs regardless of project policy validity. When
-			// `.clio/safety.yaml` is invalid, the loader has already dropped every
+			// `.clio-coder/safety.yaml` is invalid, the loader has already dropped every
 			// project-authored path entry and forced `disableDefaultPathPolicy`
 			// off, so the compiled policy here carries exactly the built-in
 			// defaults. Evaluating it unconditionally keeps default credential
@@ -944,7 +944,7 @@ const CONTENT_BEARING_TOOLS: ReadonlySet<string> = new Set([ToolNames.Write, Too
  * command, which is a different question from whether the call *runs* one, and
  * the two are indistinguishable once the text is in the haystack.
  *
- * That cost a real feature. `clio context wiki` could not write its own
+ * That cost a real feature. `clio-coder context wiki` could not write its own
  * `domains/safety.md`: the page documents what the classifier blocks, so it
  * quotes `rm -rf /`, and the write was refused as `system_modify` with reason
  * `damage-control:rm-rf-root`. The same defect blocks writing a SQL migration

@@ -243,7 +243,7 @@ export function formatFleetOverlayBodyLines(
 		lines.push("");
 		lines.push(dim("No in-process dispatches are active."));
 		lines.push(dim("Cross-process live retry state is not attached to the TUI."));
-		lines.push(dim("Use `clio fleet status` for durable ledger-backed running rows."));
+		lines.push(dim("Use `clio-coder fleet status` for durable ledger-backed running rows."));
 		lines.push(dim("Rows from other Clio processes are not shown here."));
 	}
 	return lines;
@@ -337,7 +337,7 @@ export function formatFleetNodesBodyLines(
 	const lines: string[] = [listGroupHeader(clioTheme(), `nodes (${nodes.length})`), divider(width)];
 	if (nodes.length === 0) {
 		lines.push(dim("no fleet nodes configured; every dispatch runs on the local node"));
-		lines.push(dim("declare fleet.nodes in settings.yaml and run `clio doctor` to preflight them"));
+		lines.push(dim("declare fleet.nodes in settings.yaml and run `clio-coder doctor` to preflight them"));
 		return lines;
 	}
 	lines.push(nodesHeader(width));

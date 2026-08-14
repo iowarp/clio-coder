@@ -42,7 +42,7 @@ describe("contracts/cli-targets-contract", () => {
 	];
 
 	for (const args of missingTargetCases) {
-		it(`clio ${args.join(" ")} rejects the missing target instead of an empty listing`, async () => {
+		it(`clio-coder ${args.join(" ")} rejects the missing target instead of an empty listing`, async () => {
 			const result = await runCli(args, { env: scratch.env });
 			strictEqual(result.code, 2, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
@@ -51,7 +51,7 @@ describe("contracts/cli-targets-contract", () => {
 	}
 
 	// A configured target still lists in both modes.
-	it("clio targets --json --target local lists the configured target", async () => {
+	it("clio-coder targets --json --target local lists the configured target", async () => {
 		const result = await runCli(["targets", "--json", "--target", "local"], { env: scratch.env });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 		match(result.stdout, /"targets"/);
@@ -60,7 +60,7 @@ describe("contracts/cli-targets-contract", () => {
 	// One node orchestrating while another runs the workers is the documented
 	// fleet topology, and `targets use` used to force both onto one target with
 	// no flag able to separate them.
-	it("clio targets use local --fleet-target worker splits orchestrator from workers", async () => {
+	it("clio-coder targets use local --fleet-target worker splits orchestrator from workers", async () => {
 		const added = await runCli(
 			[
 				"configure",
@@ -91,7 +91,7 @@ describe("contracts/cli-targets-contract", () => {
 		strictEqual(workerModel, "worker-model");
 	});
 
-	it("clio targets use local --fleet-target missing rejects the unknown worker target", async () => {
+	it("clio-coder targets use local --fleet-target missing rejects the unknown worker target", async () => {
 		const result = await runCli(["targets", "use", "local", "--fleet-target", "missing"], { env: scratch.env });
 		strictEqual(result.code, 2, `stderr=${result.stderr}`);
 		match(result.stderr, /no target with id missing/i);

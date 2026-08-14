@@ -88,10 +88,10 @@ means revise and re-present.
 
 ## Phase 5 - Create
 
-Write `SKILL.md` under `.clio/skills/<approved-name>/`, following skill-craft
+Write `SKILL.md` under `.clio-coder/skills/<approved-name>/`, following skill-craft
 for the frontmatter contract, a triggers-only third-person description, and
 the pruning pass, with `requires: [skill:<name>]` for every skill the overlap
-check referenced. Confirm it loads with `clio skills validate`. Scope
+check referenced. Confirm it loads with `clio-coder skills validate`. Scope
 defaults to project; use the user skill store only when the user said the
 workflow crosses repositories. Placeholders replace every session-specific
 path, name, and value; distill the pattern, not the incident. Keep the
@@ -121,8 +121,8 @@ script, and verified row counts against the source, three sessions in a row.
 3. Overlap: the `context(scope="skills")` listing shows no fetch or CSV skill
    installed; no references.
 4. Gate: summary presented; user approves after tightening the description.
-5. Create: write `.clio/skills/csv-ingest/SKILL.md`, placeholders for the
-   export URL and column map; `clio skills validate` passes.
+5. Create: write `.clio-coder/skills/csv-ingest/SKILL.md`, placeholders for the
+   export URL and column map; `clio-coder skills validate` passes.
 6. Validate: scenario "ingest this month's export" must show fetch,
    normalize, count-verify, spot-check in that order; recorded in the body.
 

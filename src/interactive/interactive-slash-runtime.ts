@@ -258,7 +258,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripAnsiForExport);
 				const date = (deps.now?.() ?? new Date()).toISOString().slice(0, 10);
 				const target = resolve(
-					pathArg && pathArg.trim().length > 0 ? pathArg.trim() : join(".clio", "exports", `${sessionId}-${date}.md`),
+					pathArg && pathArg.trim().length > 0 ? pathArg.trim() : join(".clio-coder", "exports", `${sessionId}-${date}.md`),
 				);
 				mkdirSync(resolve(target, ".."), { recursive: true });
 				const header = [

@@ -23,7 +23,7 @@ Use one of these private channels:
 
 Include:
 
-- The affected version (`clio --version` output) or commit.
+- The affected version (`clio-coder --version` output) or commit.
 - A minimal reproduction or proof of concept.
 - The impact you observed: information disclosure, code execution, privilege
   escalation, credential exposure, or policy bypass.
@@ -43,7 +43,7 @@ Remove secrets from logs and screenshots before sending.
 
 In scope:
 
-- The `clio` CLI and its subcommands.
+- The `clio-coder` CLI and its subcommands.
 - The interactive TUI session and slash-command surface.
 - Credential storage and leakage.
 - Shell execution safety, the damage-control rule pack, and project safety

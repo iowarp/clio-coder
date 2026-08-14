@@ -10,11 +10,11 @@ import {
 } from "../domains/memory/index.js";
 import { printError, printOk } from "./shared.js";
 
-const HELP = `clio memory list
-clio memory propose --from-evidence <evidenceId>
-clio memory approve <memoryId>
-clio memory reject <memoryId>
-clio memory prune --stale
+const HELP = `clio-coder memory list
+clio-coder memory propose --from-evidence <evidenceId>
+clio-coder memory approve <memoryId>
+clio-coder memory reject <memoryId>
+clio-coder memory prune --stale
 
 Manage scoped, approved, evidence-linked local memory records.
 `;

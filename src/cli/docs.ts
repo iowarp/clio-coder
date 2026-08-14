@@ -17,7 +17,7 @@ import { printError, printHeader } from "./shared.js";
 
 const HOST = "127.0.0.1";
 
-const HELP = `clio docs [topic] [--no-open]
+const HELP = `clio-coder docs [topic] [--no-open]
 
 Serve Clio Coder's bundled HTML documentation locally and open it in a browser.
 The server binds an ephemeral port on 127.0.0.1 only; it keeps no state, runs no

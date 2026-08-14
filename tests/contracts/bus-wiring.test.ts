@@ -33,16 +33,19 @@ const EMIT_ALLOWLIST: Record<string, string> = {
 /** Channels with no direct subscribe site, and why that is correct today. */
 const SUBSCRIBE_ALLOWLIST: Record<string, string> = {
 	[BusChannels.ShutdownRequested]:
-		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_BUS_TRACE=1)",
+		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_CODER_BUS_TRACE=1)",
 	[BusChannels.ShutdownDrained]:
-		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_BUS_TRACE=1)",
+		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_CODER_BUS_TRACE=1)",
 	[BusChannels.ShutdownTerminated]:
-		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_BUS_TRACE=1)",
+		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_CODER_BUS_TRACE=1)",
 	[BusChannels.ShutdownPersisted]:
-		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_BUS_TRACE=1)",
-	[BusChannels.SessionEnd]: "subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_BUS_TRACE=1)",
-	[BusChannels.DomainLoaded]: "subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_BUS_TRACE=1)",
-	[BusChannels.DomainFailed]: "subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_BUS_TRACE=1)",
+		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_CODER_BUS_TRACE=1)",
+	[BusChannels.SessionEnd]:
+		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_CODER_BUS_TRACE=1)",
+	[BusChannels.DomainLoaded]:
+		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_CODER_BUS_TRACE=1)",
+	[BusChannels.DomainFailed]:
+		"subscribed through the TRACED_CHANNELS loop in src/core/bus-trace.ts (CLIO_CODER_BUS_TRACE=1)",
 	[BusChannels.SafetyAllowed]:
 		"audit-only emit kept subscriber-less by design: allows are operator-visible as normal tool execution and persist in the safety audit log (w2-05 Task 3 / w2-07 fix 3 scope)",
 };

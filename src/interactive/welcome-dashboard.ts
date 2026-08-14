@@ -43,7 +43,7 @@ export interface WelcomeDashboardDeps {
 
 /**
  * The part of the banner that costs subprocesses and disk reads rather than a
- * map lookup: CLIO.md presence, the codewiki, wiki staleness and completeness,
+ * map lookup: CLIO-CODER.md presence, the codewiki, wiki staleness and completeness,
  * and the handoff directory. None of it can change as a result of drawing a
  * frame, and re-deriving it per frame ran three `git` subprocesses and a full
  * codewiki parse inside the render timer.
@@ -184,10 +184,10 @@ function entryPointExcerpt(codewikiDigest: string): string[] {
 	return out.slice(0, 4);
 }
 
-const NO_WIKI_STATUS = "no wiki; run clio context wiki";
+const NO_WIKI_STATUS = "no wiki; run clio-coder context wiki";
 
 function clioMdStatusFor(cwd: string): string {
-	return existsSync(join(cwd, "CLIO.md")) ? "ok" : "none";
+	return existsSync(join(cwd, "CLIO-CODER.md")) ? "ok" : "none";
 }
 
 /** Shape the wiki rows from a staleness verdict the caller already paid for. */
@@ -211,7 +211,7 @@ function wikiFactsFrom(cwd: string, staleness: WikiStaleness): { wikiPageCount: 
 }
 
 function handoffFacts(cwd: string): { handoffCount: number; handoffFreshness: string } {
-	const handoffsDir = join(cwd, ".clio", "handoffs");
+	const handoffsDir = join(cwd, ".clio-coder", "handoffs");
 	if (!existsSync(handoffsDir)) return { handoffCount: 0, handoffFreshness: "none" };
 	try {
 		const files = readdirSync(handoffsDir).filter((f) => f.startsWith("handoff-") && f.endsWith(".md"));
@@ -248,7 +248,7 @@ export function readWelcomeRepositoryFacts(cwd: string): WelcomeRepositoryFacts 
  * of a multi-megabyte artifact plus up to four `git` subprocesses, measured at
  * 219 ms, and it used to run on the render call stack every ten seconds.
  */
-export async function readWelcomeRepositoryFactsAsync(cwd: string): Promise<WelcomeRepositoryFacts> {
+async function readWelcomeRepositoryFactsAsync(cwd: string): Promise<WelcomeRepositoryFacts> {
 	const codewiki = await readCodewikiAsync(cwd);
 	const wiki = codewiki
 		? wikiFactsFrom(cwd, await wikiStalenessAsync(cwd))
@@ -272,7 +272,7 @@ export async function readWelcomeRepositoryFactsAsync(cwd: string): Promise<Welc
 export function placeholderRepositoryFacts(cwd: string): WelcomeRepositoryFacts {
 	return {
 		clioMdStatus: clioMdStatusFor(cwd),
-		hasCodewiki: existsSync(join(cwd, ".clio", "codewiki.json")),
+		hasCodewiki: existsSync(join(cwd, ".clio-coder", "codewiki.json")),
 		codewikiCount: 0,
 		wikiPageCount: 0,
 		wikiStatus: NO_WIKI_STATUS,
@@ -404,13 +404,13 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	const targetVal = theme.fg("accent", formatTargetLabel(stats.targetLabel, stats.modelLabel));
 	const thinkVal = `think ${theme.fg("reason", stats.thinkingLevel)}`;
 
-	let clioMdStr = `CLIO.md ${stats.clioMdStatus}`;
+	let clioMdStr = `CLIO-CODER.md ${stats.clioMdStatus}`;
 	if (stats.clioMdStatus === "ok") {
-		clioMdStr = `${theme.fg("success", "CLIO.md ok")}`;
+		clioMdStr = `${theme.fg("success", "CLIO-CODER.md ok")}`;
 	} else if (stats.clioMdStatus === "stale") {
-		clioMdStr = `${theme.fg("warning", "CLIO.md stale")}`;
+		clioMdStr = `${theme.fg("warning", "CLIO-CODER.md stale")}`;
 	} else {
-		clioMdStr = `${theme.fg("dim", "CLIO.md none")}`;
+		clioMdStr = `${theme.fg("dim", "CLIO-CODER.md none")}`;
 	}
 
 	// While the probe is in flight these rows say "reading", not "none": a dim
@@ -561,7 +561,7 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.modelLabel,
 		stats.thinkingLevel,
 		stats.cwd,
-		w && `${w.branch}${w.dirty}${w.projectType}${w.isGit}${w.remoteUrl}`,
+		w && `${w.branch}\x01${w.dirty}\x01${w.projectType}\x01${w.isGit}\x01${w.remoteUrl}`,
 		stats.currentAvailable,
 		stats.targetHealthLabel,
 		stats.activeCapabilities.join(","),
@@ -577,9 +577,9 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.wikiDigestExcerpt.join(","),
 		stats.handoffCount,
 		stats.handoffFreshness,
-		stats.taskMemory && `${stats.taskMemory.enabled}${stats.taskMemory.tier}${stats.taskMemory.size}`,
+		stats.taskMemory && `${stats.taskMemory.enabled}\x01${stats.taskMemory.tier}\x01${stats.taskMemory.size}`,
 		stats.factsPending === true,
-	].join(" ");
+	].join("\0");
 }
 
 export class WelcomeDashboard implements Component {

@@ -2,7 +2,7 @@ import { runClioCommand } from "./clio.js";
 import { restoreStdout, takeOverStdout, writeRawStdout } from "./output-guard.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio acp
+const HELP = `clio-coder acp
 
 Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
 
@@ -19,7 +19,7 @@ export async function runAcpCommand(
 		return 0;
 	}
 	if (args.length > 0) {
-		printError(`unknown clio acp option: ${args[0] ?? ""}`);
+		printError(`unknown clio-coder acp option: ${args[0] ?? ""}`);
 		process.stdout.write(HELP);
 		return 2;
 	}

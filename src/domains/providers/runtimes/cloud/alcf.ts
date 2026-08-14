@@ -92,7 +92,7 @@ async function discover(target: TargetDescriptor, ctx: ProbeContext): Promise<Pr
 		return { ok: false, error: `cannot determine ALCF cluster from url ${target.url}` };
 	}
 	if (!ctx.authToken) {
-		return { ok: false, error: "ALCF requires Globus auth; run `clio auth login alcf`." };
+		return { ok: false, error: "ALCF requires Globus auth; run `clio-coder auth login alcf`." };
 	}
 
 	const framework = frameworkForCluster(cluster);
@@ -105,7 +105,7 @@ async function discover(target: TargetDescriptor, ctx: ProbeContext): Promise<Pr
 	});
 	if (!catalog.ok || !catalog.data) {
 		const reason = catalog.error ?? "unknown error";
-		const hint = reason.includes("401") ? " (token expired or rejected; run `clio auth login alcf` again)" : "";
+		const hint = reason.includes("401") ? " (token expired or rejected; run `clio-coder auth login alcf` again)" : "";
 		return {
 			ok: false,
 			error: `ALCF endpoint catalog unreachable: ${reason}${hint}`,

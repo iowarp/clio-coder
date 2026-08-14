@@ -125,7 +125,7 @@ describe("contracts/alcf-runtime", () => {
 		const result = await alcfRuntime.probe?.(sophiaTarget, ctx());
 		ok(result);
 		strictEqual(result.ok, false);
-		match(result.error ?? "", /clio auth login alcf/);
+		match(result.error ?? "", /clio-coder auth login alcf/);
 	});
 
 	it("discovers Sophia models over the vLLM framework using the bearer token", async () => {

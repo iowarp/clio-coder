@@ -10,7 +10,7 @@
  * tokens on disk.
  *
  * The fold itself is `ledgerUsageCalls` in the session domain, which owns the
- * ledger and serves `clio usage report` from the same function. This module is
+ * ledger and serves `clio-coder usage report` from the same function. This module is
  * only the sink wiring between that fold and the observability projection.
  */
 

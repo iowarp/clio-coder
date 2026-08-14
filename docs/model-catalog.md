@@ -13,7 +13,7 @@ Clio Coder treats a selectable model as the intersection of three sources:
 
 - `/targets`: `r` probes the selected target; `R` probes all targets.
 - `/model` or `/models`: `r` refreshes the selected row's target; `R` refreshes all targets.
-- `clio models`: probes live targets by default before printing the CLI model list. Use `--offline` to skip live probing. Former `--probe` and `--no-probe` flags are gone.
+- `clio-coder models`: probes live targets by default before printing the CLI model list. Use `--offline` to skip live probing. Former `--probe` and `--no-probe` flags are gone.
 
 Configured `wireModels` and a target `defaultModel` remain selectable before a
 live catalog is known; Clio labels those rows as `configured` or `default`.
@@ -39,7 +39,7 @@ worker spec and receipt are written.
 
 ## Benchmarking Models
 
-Model and config benchmark adapters ship under [benchmarks/community/](../benchmarks/community/). These adapters (such as `bench:swe`, `bench:scicode`, and the fleet benchmark `bench:tb`) drive Clio through the CLI or `clio eval`. 
+Model and config benchmark adapters ship under [benchmarks/community/](../benchmarks/community/). These adapters (such as `bench:swe`, `bench:scicode`, and the fleet benchmark `bench:tb`) drive Clio through the CLI or `clio-coder eval`. 
 
 For example, to run the fleet benchmark:
 ```sh
@@ -72,9 +72,9 @@ Overlay roots are loaded in this order, with later roots winning equally
 specific `matchPatterns`:
 
 1. Bundled Clio catalog: `src/domains/providers/models/**` or packaged `dist/providers-models`.
-2. User overlay: `$CLIO_CONFIG_DIR/model-catalog.d` or the platform config equivalent.
-3. Project overlay: `.clio/model-catalog.d` under the current working directory.
-4. Extra overlay roots from `CLIO_MODEL_CATALOG_DIRS`, separated by the platform path delimiter.
+2. User overlay: `$CLIO_CODER_CONFIG_DIR/model-catalog.d` or the platform config equivalent.
+3. Project overlay: `.clio-coder/model-catalog.d` under the current working directory.
+4. Extra overlay roots from `CLIO_CODER_MODEL_CATALOG_DIRS`, separated by the platform path delimiter.
 
 Longest matching pattern still wins across all roots. This means a broad project
 overlay such as `qwen` will not replace a more specific bundled entry such as
@@ -173,8 +173,8 @@ The Context Engine evaluates thinking mechanisms per model target and manages li
 
 Subscription models are registered and managed as standard HTTP/cloud targets:
 
-- **`openai-codex` (ChatGPT Plus/Pro OAuth):** Maps to catalog-backed Codex model ids surfaced by `clio configure --list` and `clio models` via a browser-minted subscription OAuth token, supporting complete chat, vision, and tool-use capabilities.
-- **`anthropic-max` (Claude Pro/Max OAuth):** Powers chat and workers using catalog-backed Claude model ids surfaced by `clio configure --list` and `clio models`. It relies on pi-ai's `anthropic` OAuth provider. During auth initialization, it alerts the operator to usage-terms caveat via:
+- **`openai-codex` (ChatGPT Plus/Pro OAuth):** Maps to catalog-backed Codex model ids surfaced by `clio-coder configure --list` and `clio-coder models` via a browser-minted subscription OAuth token, supporting complete chat, vision, and tool-use capabilities.
+- **`anthropic-max` (Claude Pro/Max OAuth):** Powers chat and workers using catalog-backed Claude model ids surfaced by `clio-coder configure --list` and `clio-coder models`. It relies on pi-ai's `anthropic` OAuth provider. During auth initialization, it alerts the operator to usage-terms caveat via:
   `Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). Using subscription credentials outside Anthropic's first-party apps may not align with their terms of service; enable at your own discretion.`
 
 ---

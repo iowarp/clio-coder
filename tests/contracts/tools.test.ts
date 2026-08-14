@@ -46,7 +46,7 @@ function scratchDir(): string {
 }
 
 function workspaceScratchDir(): string {
-	const parent = join(process.cwd(), ".clio", "test-scratch");
+	const parent = join(process.cwd(), ".clio-coder", "test-scratch");
 	mkdirSync(parent, { recursive: true });
 	const root = mkdtempSync(join(parent, "clio-tools-basic-"));
 	scratchRoots.push(root);
@@ -528,40 +528,40 @@ describe("contracts/tools basic happy paths", () => {
 	it("credential_present reports presence without exposing values", async () => {
 		const root = scratchDir();
 		const envPath = join(root, ".env");
-		writeFileSync(envPath, "CLIO_FILE_KEY=file-secret\nCLIO_BOTH_KEY=file-secret\n", "utf8");
-		const previousEnv = process.env.CLIO_ENV_KEY;
-		const previousBoth = process.env.CLIO_BOTH_KEY;
-		process.env.CLIO_ENV_KEY = "env-secret";
-		process.env.CLIO_BOTH_KEY = "env-secret";
+		writeFileSync(envPath, "CLIO_CODER_FILE_KEY=file-secret\nCLIO_CODER_BOTH_KEY=file-secret\n", "utf8");
+		const previousEnv = process.env.CLIO_CODER_ENV_KEY;
+		const previousBoth = process.env.CLIO_CODER_BOTH_KEY;
+		process.env.CLIO_CODER_ENV_KEY = "env-secret";
+		process.env.CLIO_CODER_BOTH_KEY = "env-secret";
 		try {
-			const envResult = await credentialPresentTool.run({ name: "CLIO_ENV_KEY", source: "environment" });
+			const envResult = await credentialPresentTool.run({ name: "CLIO_CODER_ENV_KEY", source: "environment" });
 			strictEqual(envResult.kind, "ok");
 			const envText = JSON.stringify(envResult);
 			ok(envText.includes('"present":true'));
 			ok(envText.includes('"source":"environment"'));
 			ok(!envText.includes("env-secret"));
 
-			const fileResult = await credentialPresentTool.run({ name: "CLIO_FILE_KEY", file: envPath, source: "file" });
+			const fileResult = await credentialPresentTool.run({ name: "CLIO_CODER_FILE_KEY", file: envPath, source: "file" });
 			strictEqual(fileResult.kind, "ok");
 			const fileText = JSON.stringify(fileResult);
 			ok(fileText.includes('"present":true'));
 			ok(fileText.includes('"source":"file"'));
 			ok(!fileText.includes("file-secret"));
 
-			const bothResult = await credentialPresentTool.run({ name: "CLIO_BOTH_KEY", file: envPath });
+			const bothResult = await credentialPresentTool.run({ name: "CLIO_CODER_BOTH_KEY", file: envPath });
 			strictEqual(bothResult.kind, "ok");
 			ok(JSON.stringify(bothResult).includes('"source":"both"'));
 
-			const absentResult = await credentialPresentTool.run({ name: "CLIO_ABSENT_KEY", file: envPath });
+			const absentResult = await credentialPresentTool.run({ name: "CLIO_CODER_ABSENT_KEY", file: envPath });
 			strictEqual(absentResult.kind, "ok");
 			const absentText = JSON.stringify(absentResult);
 			ok(absentText.includes('"present":false'));
 			ok(absentText.includes('"source":"none"'));
 		} finally {
-			if (previousEnv === undefined) delete process.env.CLIO_ENV_KEY;
-			else process.env.CLIO_ENV_KEY = previousEnv;
-			if (previousBoth === undefined) delete process.env.CLIO_BOTH_KEY;
-			else process.env.CLIO_BOTH_KEY = previousBoth;
+			if (previousEnv === undefined) delete process.env.CLIO_CODER_ENV_KEY;
+			else process.env.CLIO_CODER_ENV_KEY = previousEnv;
+			if (previousBoth === undefined) delete process.env.CLIO_CODER_BOTH_KEY;
+			else process.env.CLIO_CODER_BOTH_KEY = previousBoth;
 		}
 	});
 
@@ -679,14 +679,14 @@ describe("contracts/tools basic happy paths", () => {
 	it("grepTool skips ignored caches and binaries", async () => {
 		const root = scratchDir();
 		mkdirSync(join(root, "src"));
-		mkdirSync(join(root, ".clio"));
+		mkdirSync(join(root, ".clio-coder"));
 		writeFileSync(join(root, "src", "index.ts"), "export const thinkingBudget = 1;\n", "utf8");
-		writeFileSync(join(root, ".clio", "codewiki.json"), '{"text":"thinkingBudget"}\n', "utf8");
+		writeFileSync(join(root, ".clio-coder", "codewiki.json"), '{"text":"thinkingBudget"}\n', "utf8");
 
 		const result = await grepTool.run({ pattern: "thinkingBudget", path: root });
 		strictEqual(result.kind, "ok");
 		ok(result.output.includes("src/index.ts"));
-		ok(!result.output.includes(".clio/codewiki.json"));
+		ok(!result.output.includes(".clio-coder/codewiki.json"));
 	});
 });
 

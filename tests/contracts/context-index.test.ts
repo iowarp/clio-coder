@@ -60,7 +60,7 @@ function writeTypescriptProject(cwd: string): void {
 function writeLargeClioMd(cwd: string): void {
 	const longBody = "This section intentionally pushes the project context over the synopsis threshold.\n".repeat(140);
 	writeFileSync(
-		join(cwd, "CLIO.md"),
+		join(cwd, "CLIO-CODER.md"),
 		[
 			"# Large Prompt Fixture",
 			"",
@@ -150,9 +150,9 @@ describe("contracts/context-index", () => {
 		strictEqual(payload.indexedSourceFiles, 1);
 		strictEqual(payload.coverage, 1);
 		strictEqual(typeof payload.structuralHash, "string");
-		ok(existsSync(join(scratch, ".clio", "codewiki.json")));
-		ok(existsSync(join(scratch, ".clio", "state.json")));
-		strictEqual(existsSync(join(scratch, ".clio", "handoffs")), false);
+		ok(existsSync(join(scratch, ".clio-coder", "codewiki.json")));
+		ok(existsSync(join(scratch, ".clio-coder", "state.json")));
+		strictEqual(existsSync(join(scratch, ".clio-coder", "handoffs")), false);
 
 		const codewiki = readCodewiki(scratch);
 		ok(codewiki);
@@ -164,13 +164,13 @@ describe("contracts/context-index", () => {
 		strictEqual(state?.projectType, "python");
 		strictEqual(state?.codewikiVersion, 5);
 		strictEqual(typeof state?.lastIndexedAt, "string");
-		ok(readFileSync(join(scratch, ".clio", "codewiki.json"), "utf8").includes('"version":5'));
+		ok(readFileSync(join(scratch, ".clio-coder", "codewiki.json"), "utf8").includes('"version":5'));
 	});
 
 	it("loads legacy state without codewikiVersion", () => {
-		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 		writeFileSync(
-			join(scratch, ".clio", "state.json"),
+			join(scratch, ".clio-coder", "state.json"),
 			JSON.stringify({
 				version: 1,
 				fingerprint: { treeHash: "0".repeat(64), gitHead: null, loc: 1 },
@@ -216,7 +216,7 @@ describe("contracts/context-index", () => {
 		ok(absentPrompt.systemPrompt.includes("<project-synopsis>"));
 		ok(
 			absentPrompt.systemPrompt.includes(
-				"Wiki: 1 pages at .clio/wiki (start: quickstart.md) (stale; run clio context wiki --update)",
+				"Wiki: 1 pages at .clio-coder/wiki (start: quickstart.md) (stale; run clio-coder context wiki --update)",
 			),
 		);
 
@@ -229,10 +229,14 @@ describe("contracts/context-index", () => {
 		const largePrompt = await compileProjectPrompt(largeClio);
 
 		strictEqual(largePrompt.projectPreload?.mode, "synopsis");
-		ok(largePrompt.systemPrompt.includes("CLIO.md: available; compact synopsis only because the handbook is too large"));
 		ok(
 			largePrompt.systemPrompt.includes(
-				"Wiki: 1 pages at .clio/wiki (start: quickstart.md) (stale; run clio context wiki --update)",
+				"CLIO-CODER.md: available; compact synopsis only because the handbook is too large",
+			),
+		);
+		ok(
+			largePrompt.systemPrompt.includes(
+				"Wiki: 1 pages at .clio-coder/wiki (start: quickstart.md) (stale; run clio-coder context wiki --update)",
 			),
 		);
 	});

@@ -88,7 +88,7 @@ export const WIDE_BATCH_DENIAL_FLOOR = 32;
 
 /**
  * Default lifetime tool-call cap for a worker run. Value and env override live
- * in core/guardrails.ts (`CLIO_WORKER_TOOL_CALL_CAP`); re-exported here for
+ * in core/guardrails.ts (`CLIO_CODER_WORKER_TOOL_CALL_CAP`); re-exported here for
  * tests and callers that reason about the guard's tuning in one place.
  */
 export const DEFAULT_WORKER_TOOL_CALL_CAP = GUARDRAIL_DEFAULTS.workerToolCallCap;
@@ -105,7 +105,7 @@ export const DEFAULT_WORKER_TOOL_CALL_CAP = GUARDRAIL_DEFAULTS.workerToolCallCap
  * DISTINCT unproductive calls. Legitimate deep work (a repo-wide audit runs
  * 25+ productive calls in one turn) must not be decapitated by it; mainstream
  * harnesses run 100+ calls per turn with no ceiling at all. Value and env
- * override (`CLIO_TURN_TOOL_CALL_BUDGET`) live in core/guardrails.ts.
+ * override (`CLIO_CODER_TURN_TOOL_CALL_BUDGET`) live in core/guardrails.ts.
  */
 export const DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET = GUARDRAIL_DEFAULTS.turnToolCallBudget;
 /**

@@ -76,7 +76,7 @@ Distinct from two things it is often confused with:
    already export-boundary redacted; never reconstruct a redacted value. Omit
    this section when no structured source was supplied.
 
-9. **Write** to `.clio/handoffs/handoff-YYYY-MM-DD[-slug].md`. `.clio/` is
+9. **Write** to `.clio-coder/handoffs/handoff-YYYY-MM-DD[-slug].md`. `.clio-coder/` is
    intentionally ignored by default unless the user force-adds something. Use
    `scripts/new-handoff.sh [slug]` (relative to this skill's base_dir) to
    resolve the date, ensure the directory exists, and print the target path.
@@ -123,4 +123,4 @@ Distinct from two things it is often confused with:
 ## Helper
 
 `scripts/new-handoff.sh [slug]` prints the resolved target path and creates
-`.clio/handoffs/` if needed. Write the document to the path it prints.
+`.clio-coder/handoffs/` if needed. Write the document to the path it prints.

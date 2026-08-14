@@ -30,7 +30,7 @@ describe("contracts/cli-json-contract", () => {
 	];
 
 	for (const args of usageErrorCases) {
-		it(`clio ${args.join(" ")} keeps stdout clean and diagnoses on stderr`, async () => {
+		it(`clio-coder ${args.join(" ")} keeps stdout clean and diagnoses on stderr`, async () => {
 			const result = await runCli(args, { env: scratch.env });
 			strictEqual(result.code, 2, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
@@ -46,7 +46,7 @@ describe("contracts/cli-json-contract", () => {
 	];
 
 	for (const args of ignoredFlagCases) {
-		it(`clio ${args.join(" ")} rejects the unknown flag instead of emitting JSON`, async () => {
+		it(`clio-coder ${args.join(" ")} rejects the unknown flag instead of emitting JSON`, async () => {
 			const result = await runCli(args, { env: scratch.env });
 			strictEqual(result.code, 2, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
@@ -97,7 +97,7 @@ describe("contracts/cli-json-contract null settings.yaml", () => {
 	// default. The strict readSettings gate must reject it with a root-shape error
 	// rather than booting on silent defaults.
 	it("targets --json rejects a null settings.yaml with a root-shape error", async () => {
-		const configDir = scratch.env.CLIO_CONFIG_DIR as string;
+		const configDir = scratch.env.CLIO_CODER_CONFIG_DIR as string;
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(join(configDir, "settings.yaml"), "null\n");
 		const result = await runCli(["targets", "--json"], { env: scratch.env });

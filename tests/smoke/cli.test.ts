@@ -149,8 +149,8 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		const result = await runCli(["--help"], { env: scratch.env });
 		strictEqual(result.code, 0);
 		match(result.stdout, /Usage:/);
-		match(result.stdout, /clio doctor/);
-		match(result.stdout, /clio run \[flags\] <task>/);
+		match(result.stdout, /clio-coder doctor/);
+		match(result.stdout, /clio-coder run \[flags\] <task>/);
 	});
 
 	it("shows the experimental warning in the bare CLI startup banner", async () => {
@@ -170,7 +170,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		const listing = await runCli(["dev", "--help"], { env: scratch.env });
 		strictEqual(listing.code, 0);
 		for (const name of ["components", "evolve", "share"]) {
-			match(listing.stdout, new RegExp(`clio dev ${name}`), `${name} must be listed under dev`);
+			match(listing.stdout, new RegExp(`clio-coder dev ${name}`), `${name} must be listed under dev`);
 
 			const prefixed = await runCli(["dev", name, "--help"], { env: scratch.env });
 			const bare = await runCli([name, "--help"], { env: scratch.env });
@@ -185,23 +185,23 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		strictEqual(brief.code, 0);
 		strictEqual(full.code, 0);
 		for (const name of ["components", "evolve", "share"]) {
-			strictEqual(brief.stdout.includes(`clio ${name} `), false, `${name} must not be in the default listing`);
-			match(full.stdout, new RegExp(`clio dev ${name}`), `${name} must be in --all`);
+			strictEqual(brief.stdout.includes(`clio-coder ${name} `), false, `${name} must not be in the default listing`);
+			match(full.stdout, new RegExp(`clio-coder dev ${name}`), `${name} must be in --all`);
 		}
-		match(brief.stdout, /clio dev <command>/);
+		match(brief.stdout, /clio-coder dev <command>/);
 	});
 
 	it("refuses an unknown dev command with the listing instead of forwarding it", async () => {
 		const result = await runCli(["dev", "definitely-not-a-dev-command"], { env: scratch.env });
 		strictEqual(result.code, 2);
 		match(result.stderr, /unknown dev command/);
-		// A bare `clio dev` is the listing the top-level help tells the user to run
-		// for ("harness instruments; run 'clio dev' for the list"), so printing it
+		// A bare `clio-coder dev` is the listing the top-level help tells the user to run
+		// for ("harness instruments; run 'clio-coder dev' for the list"), so printing it
 		// is the command succeeding. It used to print the listing and exit 2,
 		// contradicting the help that sent the user there.
 		const bare = await runCli(["dev"], { env: scratch.env });
 		strictEqual(bare.code, 0, `stderr=${bare.stderr}`);
-		match(bare.stdout, /clio dev components/);
+		match(bare.stdout, /clio-coder dev components/);
 		strictEqual(bare.stderr.trim(), "");
 	});
 
@@ -225,7 +225,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			const result = await runCli([alias, "--help"], { env: scratch.env });
 			strictEqual(result.code, 2, alias);
 			match(result.stderr, new RegExp(`unknown subcommand: ${alias}`));
-			match(result.stdout, /clio context init/);
+			match(result.stdout, /clio-coder context init/);
 		}
 	});
 
@@ -248,10 +248,10 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		const result = await runCli(["paths", "--json"], { env: scratch.env });
 		strictEqual(result.code, 0);
 		const dirs = JSON.parse(result.stdout) as { config: string; data: string; state: string; cache: string };
-		strictEqual(dirs.config, scratch.env.CLIO_CONFIG_DIR);
-		strictEqual(dirs.data, scratch.env.CLIO_DATA_DIR);
-		strictEqual(dirs.state, scratch.env.CLIO_STATE_DIR);
-		strictEqual(dirs.cache, scratch.env.CLIO_CACHE_DIR);
+		strictEqual(dirs.config, scratch.env.CLIO_CODER_CONFIG_DIR);
+		strictEqual(dirs.data, scratch.env.CLIO_CODER_DATA_DIR);
+		strictEqual(dirs.state, scratch.env.CLIO_CODER_STATE_DIR);
+		strictEqual(dirs.cache, scratch.env.CLIO_CODER_CACHE_DIR);
 		// Read-only contract: asking for paths must not create them.
 		strictEqual(existsSync(dirs.config), false);
 		strictEqual(existsSync(dirs.data), false);
@@ -312,15 +312,15 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		}
 	});
 
-	it("uninstall --remove-binary preserves real files and removes only clio dist symlinks", async () => {
+	it("uninstall --remove-binary preserves real files and removes only clio-coder dist symlinks", async () => {
 		const binDir = join(scratch.dir, "bin");
-		const launcher = join(binDir, "clio");
+		const launcher = join(binDir, "clio-coder");
 		mkdirSync(binDir, { recursive: true });
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 
 		writeFileSync(launcher, "#!/bin/sh\nexit 0\n", { encoding: "utf8", mode: 0o755 });
 		const keepRealFile = await runCli(["uninstall", "--remove-binary", "--force"], {
-			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+			env: { ...scratch.env, CLIO_CODER_BIN_DIR: binDir },
 		});
 		strictEqual(keepRealFile.code, 0, `stderr=${keepRealFile.stderr}`);
 		match(keepRealFile.stdout, /binary\s+keep/);
@@ -330,7 +330,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		symlinkSync(CLI_ENTRY, launcher);
 		const removeSymlink = await runCli(["uninstall", "--remove-binary", "--force"], {
-			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+			env: { ...scratch.env, CLIO_CODER_BIN_DIR: binDir },
 		});
 		strictEqual(removeSymlink.code, 0, `stderr=${removeSymlink.stderr}`);
 		match(removeSymlink.stdout, /binary\s+remove/);
@@ -371,7 +371,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			],
 		});
 		try {
-			const env = { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const env = { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" };
 			const configured = await runCli(
 				[
 					"configure",
@@ -384,7 +384,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 					"--model",
 					"fixture-alpha",
 					"--api-key-env",
-					"CLIO_TEST_OPENAI_KEY",
+					"CLIO_CODER_TEST_OPENAI_KEY",
 					"--set-orchestrator",
 					"--orchestrator-model",
 					"fixture-alpha",
@@ -415,7 +415,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			strictEqual(configuredTarget.url, fixture.url);
 			strictEqual(configuredTarget.defaultModel, "fixture-alpha");
 			deepStrictEqual(configuredTarget.wireModels, ["fixture-alpha", "fixture-beta"]);
-			deepStrictEqual(configuredTarget.auth, { apiKeyEnvVar: "CLIO_TEST_OPENAI_KEY" });
+			deepStrictEqual(configuredTarget.auth, { apiKeyEnvVar: "CLIO_CODER_TEST_OPENAI_KEY" });
 			deepStrictEqual(configuredTarget.capabilities, {
 				contextWindow: 32768,
 				maxTokens: 2048,
@@ -457,7 +457,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			strictEqual(listedTarget.target.runtime, "openai-compat");
 			strictEqual(listedTarget.target.defaultModel, "fixture-alpha");
 			deepStrictEqual(listedTarget.target.wireModels, ["fixture-alpha", "fixture-beta"]);
-			strictEqual(listedTarget.target.auth?.apiKeyEnvVar, "CLIO_TEST_OPENAI_KEY");
+			strictEqual(listedTarget.target.auth?.apiKeyEnvVar, "CLIO_CODER_TEST_OPENAI_KEY");
 
 			const offlineModels = await runCli(["models", "--offline", "--json"], { env });
 			strictEqual(offlineModels.code, 0, `stderr=${offlineModels.stderr}`);
@@ -540,7 +540,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	it("skills list, inspect, and validate work in a scratch project", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		const project = join(scratch.dir, "project");
-		const skillFile = writeSkill(join(project, ".clio", "skills"), "smoke-skill", "Smoke test skill.");
+		const skillFile = writeSkill(join(project, ".clio-coder", "skills"), "smoke-skill", "Smoke test skill.");
 
 		const list = await runCli(["skills", "list", "--json", "--all"], { env: scratch.env, cwd: project });
 		strictEqual(list.code, 0, `stderr=${list.stderr}`);
@@ -571,7 +571,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
 			const result = await runCli(["--no-context-files", "run", "hello"], {
-				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 				timeoutMs: 20_000,
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
@@ -596,7 +596,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			sections: [{ title: "Transport evidence", body: groundedRule }],
 		});
 		const fixture = await startOpenAICompatFixture(bootstrapReply);
-		const env = { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" };
+		const env = { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" };
 		try {
 			seedBootstrapTransportTargets(join(scratch.dir, "config"), fixture.url);
 			const runBootstrap = async (target: string, projectDir: string) => {
@@ -628,7 +628,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 				strictEqual(output.generation?.mode, "model", `target=${target} stdout=${result.stdout}`);
 				strictEqual(output.generation?.run?.targetId, target);
 				strictEqual(output.generation?.run?.wireModelId, "mock-model");
-				ok(existsSync(join(projectDir, "CLIO.md")), `target=${target} did not write validated bootstrap output`);
+				ok(existsSync(join(projectDir, "CLIO-CODER.md")), `target=${target} did not write validated bootstrap output`);
 				return output;
 			};
 
@@ -668,7 +668,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
 			const result = await runCli(["--no-context-files", "run", "--json-events", "terminal", "hello"], {
-				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 				timeoutMs: 20_000,
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
@@ -700,7 +700,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
 			const result = await runCli(["--no-context-files", "run", "--json", "hello"], {
-				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 				timeoutMs: 20_000,
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
@@ -736,7 +736,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			const result = await runCli(
 				["--no-context-files", "--no-skills", "run", "--autonomy", "read-only", "report the autonomy level"],
 				{
-					env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+					env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 					timeoutMs: 20_000,
 				},
 			);
@@ -769,7 +769,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
 			seedOpenAICompatFleetDefault(join(scratch.dir, "config"));
 			const result = await runCli(["--no-context-files", "run", "--agent", "coder", "say hi"], {
-				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 				cwd: project,
 				timeoutMs: 30_000,
 			});
@@ -796,7 +796,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 				["--no-context-files", "--no-skills", "acp"],
 				{
 					...scratch.env,
-					CLIO_TEST_OPENAI_KEY: "sk-test",
+					CLIO_CODER_TEST_OPENAI_KEY: "sk-test",
 				},
 				project,
 			);
@@ -815,7 +815,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 				client.notifications.some((message) => JSON.stringify(message).includes("acp mock reply")),
 				`notifications=${JSON.stringify(client.notifications)}`,
 			);
-			// Every session/update a live `clio acp` process emits must use an ACP v1
+			// Every session/update a live `clio-coder acp` process emits must use an ACP v1
 			// SessionUpdate variant. A non-spec discriminator (e.g. the old "progress")
 			// would break strict serde clients such as Zed.
 			const validSessionUpdates = new Set([
@@ -860,7 +860,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			const result = await runCli(
 				["--no-context-files", "run", "--no-skills", "--skill", skillFile, "please use the skill named explicit-smoke"],
 				{
-					env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+					env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 					cwd: project,
 					timeoutMs: 20_000,
 				},
@@ -889,7 +889,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			const result = await runCli(
 				["--no-context-files", "--no-skills", "--skill", skillFile, "run", "please use the skill named explicit-smoke-top"],
 				{
-					env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+					env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 					cwd: project,
 					timeoutMs: 20_000,
 				},

@@ -1698,7 +1698,7 @@ async function runCompete(
 				const receipt = candidateRuns[index]?.receipt;
 				const failed = receipt !== undefined && isPipelineStepFailure(receipt);
 				if (failed) return "builder failed";
-				commitCandidateWork(worktree, `clio compete ${group} candidate ${worktree.index}`);
+				commitCandidateWork(worktree, `clio-coder compete ${group} candidate ${worktree.index}`);
 				return candidateDiffStat(root, worktree.branch);
 			});
 			if (candidateRuns.every((run) => isPipelineStepFailure(run.receipt))) {

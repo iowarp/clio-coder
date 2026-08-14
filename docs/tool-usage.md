@@ -11,7 +11,7 @@ In Clio Coder v0.3.0, `src/tools/agent-tools.ts` serves as the single agent-tool
 
 The six OBSERVE tools (read, grep, find, ls, code_nav, context) share one result envelope, implemented in `src/tools/observation.ts`.
 
-Per-call byte caps: read 50KB (env `CLIO_READ_MAX_BYTES`), grep 16KB for mode=content and 8KB for mode=files/count, find 8KB, ls 8KB, code_nav 16KB, context 16KB for scope=docs and 50KB for scope=skills/workspace.
+Per-call byte caps: read 50KB (env `CLIO_CODER_READ_MAX_BYTES`), grep 16KB for mode=content and 8KB for mode=files/count, find 8KB, ls 8KB, code_nav 16KB, context 16KB for scope=docs and 50KB for scope=skills/workspace.
 
 Truncated text results append exactly one notice line:
 
@@ -21,11 +21,11 @@ Truncated text results append exactly one notice line:
 
 Segments that do not apply are omitted. `<total>` renders as `N+` when the search stopped early at its item limit, so the true total was never counted. `next:` is an exact argument fragment (for example `limit=200` or `offset=451`); re-issue the same call with that argument changed to continue.
 
-Offload: when the byte cap cut content that was already collected, the complete rendering is written to `<clio state dir>/scratch/<sessionId>/<toolCallId>.txt` and the notice's `full:` segment names the path. Read it with `read` using offset/limit. Tools offload only when the byte cap cut collected content; a bare item-limit truncation continues via `next` and does not offload. `read` never offloads, because the source file is directly re-addressable via `offset`.
+Offload: when the byte cap cut content that was already collected, the complete rendering is written to `<clio-coder state dir>/scratch/<sessionId>/<toolCallId>.txt` and the notice's `full:` segment names the path. Read it with `read` using offset/limit. Tools offload only when the byte cap cut collected content; a bare item-limit truncation continues via `next` and does not offload. `read` never offloads, because the source file is directly re-addressable via `offset`.
 
 JSON-format results (code_nav, context scope=docs/workspace) never get an appended notice. An oversize JSON payload is replaced whole by the parseable stub `{"error":"result exceeded <cap>","offloadPath":"...","next":"..."}` so the model never receives JSON cut mid-document. Empty results are also valid JSON with empty arrays and `next` populated.
 
-Turn budget: all six OBSERVE tools draw from one shared pool of 192KB per turn (env `CLIO_OBSERVATION_TURN_BUDGET_BYTES`, keyed on `sessionId:turnId`). When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.
+Turn budget: all six OBSERVE tools draw from one shared pool of 192KB per turn (env `CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES`, keyed on `sessionId:turnId`). When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.
 
 ## read: page through a file with offset, limit, and tail
 
@@ -38,7 +38,7 @@ Arguments:
 - `limit` (optional). Max lines to return.
 - `tail` (optional). Return the last N lines (jump to EOF). Overrides offset/limit.
 
-Each call is capped at 2000 lines or 50KB, whichever hits first (`CLIO_READ_MAX_BYTES` overrides the byte cap; the per-turn observation budget can shrink it further). Files larger than 20MB error outright; use grep/find to locate the relevant region instead. A missing file errors with a hint to locate it via code_nav, find, or ls.
+Each call is capped at 2000 lines or 50KB, whichever hits first (`CLIO_CODER_READ_MAX_BYTES` overrides the byte cap; the per-turn observation budget can shrink it further). Files larger than 20MB error outright; use grep/find to locate the relevant region instead. A missing file errors with a hint to locate it via code_nav, find, or ls.
 
 Continuation: a truncated result's notice carries `next: offset=<first unshown line>`. read does not offload; the file itself is the continuation source. If a single line exceeds the byte cap, the result is that line's UTF-8 prefix plus an explanatory note suggesting grep with a narrower pattern or edit with exact surrounding text. An `offset` beyond EOF errors with the file's total line count.
 
@@ -90,7 +90,7 @@ Use write for new files or full regeneration. Use edit for surgical changes to a
 
 ```text
 write(path="src/tools/new-tool.ts", content="import { Type } from \"typebox\";\n...")
-write(path=".clio/notes/session.md", content="# Session notes\n\n...")
+write(path=".clio-coder/notes/session.md", content="# Session notes\n\n...")
 ```
 
 ## bash: run a shell command
@@ -131,7 +131,7 @@ Arguments:
 - `limit` (optional). Max matches; default 100.
 - `include_ignored` (optional boolean).
 
-Visibility follows the shared ignore policy (`src/tools/ignore-policy.ts`): `.gitignore` is honored natively, `.clio`/`.fallow`/`.git` are always excluded, and a fixed generated-dirs list (`node_modules`, `dist`, `build`, `coverage`, `target`, `.venv`, `.next`, `.cache`, `.pytest_cache`, `.turbo`) is force-excluded even when a project forgot to gitignore it. `include_ignored=true` lifts the gitignore and generated layers together; the clio-internal layer always stands. Pointing `path` directly inside an excluded directory searches it. grep and find answer visibility from the same policy, so `grep mode=files` and `find` never disagree about which paths exist.
+Visibility follows the shared ignore policy (`src/tools/ignore-policy.ts`): `.gitignore` is honored natively, `.clio-coder`/`.fallow`/`.git` are always excluded, and a fixed generated-dirs list (`node_modules`, `dist`, `build`, `coverage`, `target`, `.venv`, `.next`, `.cache`, `.pytest_cache`, `.turbo`) is force-excluded even when a project forgot to gitignore it. `include_ignored=true` lifts the gitignore and generated layers together; the clio-internal layer always stands. Pointing `path` directly inside an excluded directory searches it. grep and find answer visibility from the same policy, so `grep mode=files` and `find` never disagree about which paths exist.
 
 Rendering: match lines print as `path:line: text`, context lines as `path-line- text`. Lines longer than 500 characters are cut with a note suggesting read for the full line. No matches returns `No matches found`.
 
@@ -330,7 +330,7 @@ Arguments:
 
 `scope="workspace"` returns the session's git/project snapshot as JSON, probing and caching it on first call. When model-visible skills are installed, the payload carries a one-line `skills` pointer (count plus the suggest protocol) so orientation surfaces the catalog; the pointer never includes catalog entries and never changes the load gate. It requires a bound session; worker registries without one get a clean error. 50KB cap.
 
-`scope="docs"` runs deterministic, offline retrieval over Clio's bundled docs (every `docs/*.md` plus README.md, CHANGELOG.md, and CLIO.md), indexed as heading-delimited sections with light stemming, Clio vocabulary aliases, phrase boosts, and BM25-style body scoring. The JSON payload carries `corpus`, the expanded `terms`, and ranked `results` with `file`, `heading`, `breadcrumb`, `anchor`, `lines`, `snippet`, `score`, `coverage`, `matchedTerms`, and `signals`, plus an `omitted` count. Follow the `followUp` guidance: read the cited file and line range when you need the full section. Empty results are still valid JSON with `next` populated (the closest vocabulary expansion, or `query=overview`). 16KB cap; an oversize payload is replaced by the parseable JSON stub. The old `docs_search` `file` filter was dropped in the consolidation. Omitting `query` returns the corpus listing (the file set plus doc and section counts, the same `corpus` shape a search carries) so the model can pick a term without wasting a round on a `requires query` error.
+`scope="docs"` runs deterministic, offline retrieval over Clio's bundled docs (every `docs/*.md` plus README.md, CHANGELOG.md, and CLIO-CODER.md), indexed as heading-delimited sections with light stemming, Clio vocabulary aliases, phrase boosts, and BM25-style body scoring. The JSON payload carries `corpus`, the expanded `terms`, and ranked `results` with `file`, `heading`, `breadcrumb`, `anchor`, `lines`, `snippet`, `score`, `coverage`, `matchedTerms`, and `signals`, plus an `omitted` count. Follow the `followUp` guidance: read the cited file and line range when you need the full section. Empty results are still valid JSON with `next` populated (the closest vocabulary expansion, or `query=overview`). 16KB cap; an oversize payload is replaced by the parseable JSON stub. The old `docs_search` `file` filter was dropped in the consolidation. Omitting `query` returns the corpus listing (the file set plus doc and section counts, the same `corpus` shape a search carries) so the model can pick a term without wasting a round on a `requires query` error.
 
 `scope="skills"` with no `name` lists installed skills with descriptions; the listing asks the model to match the current task against the catalog and, on a fit, to open its reply with `Suggested skill: /skill:<name>` (a comma-separated sequence when skills compose) and wait for the operator. Loading a body is policy-gated: a skill loads only after an explicit operator request (a `/skill:<name>` or `/skill <name>` task, including one picked from the Skills Hub), and recipe-bound workers may load only their declared skills. A load attempt without a pending request is denied with the model's compliant next move spelled out: do not retry, open the reply with the `Suggested skill: /skill:<name>` line and wait for the operator, or continue without skills. On the first substantive turn of a session with model-visible skills installed, a once-per-session middleware reminder in the user message teaches the same protocol. A pending request's task text is surfaced with the body. Marketplace-installed skills are drift-checked against their pinned hash; a mismatch annotates the result with a `skill_drift` warning but never blocks. 50KB cap; a truncated body offloads in full.
 
@@ -343,7 +343,7 @@ context(scope="skills", name="context-prime", include_tree=true)
 
 ## code_nav: navigate the codewiki index
 
-Structural navigation over the persisted codewiki index (`.clio/codewiki.json`)
+Structural navigation over the persisted codewiki index (`.clio-coder/codewiki.json`)
 and the optional Markdown wiki metadata. The index is built by context init,
 refresh, or index commands and can be rebuilt/backfilled on tool demand. Source:
 `src/tools/codewiki/code-nav.ts`.
@@ -474,7 +474,7 @@ Dispatched runs link to the live board through the ledger's `activeRunIds` field
 ```text
 tasks(action="plan", title="Fix the flaky scheduler test", tasks=["reproduce the failure", "isolate the race", "fix and verify"])
 tasks(action="start", id="t1")
-tasks(action="done", id="t1", note="reproduced 3/3 with CLIO_SEED=7; failure in tests/contracts/scheduler.test.ts:88")
+tasks(action="done", id="t1", note="reproduced 3/3 with CLIO_CODER_SEED=7; failure in tests/contracts/scheduler.test.ts:88")
 tasks(action="block", id="t2", note="needs operator decision on the retry policy")
 tasks(action="list")
 ```
@@ -518,7 +518,7 @@ Arguments:
 
 `kind=plan|review|report` writes a Markdown document to PLAN.md, REVIEW.md, or REPORT.md at the project root by default; `path` may override the destination but must stay inside the workspace. When `content` does not already start with `#`, a non-empty `title` is prepended as an H1. These kinds are TERMINAL: writing the artifact completes the turn and the harness skips the follow-up model call, so the artifact body itself is the answer. Put everything the reader needs in `content`; there is no closing message after the write.
 
-Skills are not artifacts. A skill is a `SKILL.md` folder written with the ordinary write tool into `.clio/skills/<name>/` (or the user skill store) and validated by the skills loader; the `skill-craft` shipped skill documents the format and craft rules.
+Skills are not artifacts. A skill is a `SKILL.md` folder written with the ordinary write tool into `.clio-coder/skills/<name>/` (or the user skill store) and validated by the skills loader; the `skill-craft` shipped skill documents the format and craft rules.
 
 ```text
 artifact(kind="plan", content="# Migration plan\n\n## Step 1 ...")

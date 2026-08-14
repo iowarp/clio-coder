@@ -1606,12 +1606,12 @@ describe("orchestrator per-turn tool-call budget", () => {
 			readOrchTurnToolCallBudget({}).hard,
 			DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET + ORCH_TURN_TOOL_CALL_HARD_MARGIN,
 		);
-		const override = readOrchTurnToolCallBudget({ CLIO_TURN_TOOL_CALL_BUDGET: "8" });
+		const override = readOrchTurnToolCallBudget({ CLIO_CODER_TURN_TOOL_CALL_BUDGET: "8" });
 		strictEqual(override.soft, 8);
 		strictEqual(override.hard, 8 + ORCH_TURN_TOOL_CALL_HARD_MARGIN);
 		// Invalid values fall back to the default rather than throwing.
 		strictEqual(
-			readOrchTurnToolCallBudget({ CLIO_TURN_TOOL_CALL_BUDGET: "nope" }).soft,
+			readOrchTurnToolCallBudget({ CLIO_CODER_TURN_TOOL_CALL_BUDGET: "nope" }).soft,
 			DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET,
 		);
 	});
@@ -1624,7 +1624,11 @@ describe("orchestrator per-turn tool-call budget", () => {
 			strictEqual(resolveGuardrail("turnToolCallBudget", {}), 30, "settings beat the built-in default");
 			strictEqual(readOrchTurnToolCallBudget({}).soft, 30, "the loop guard reads the settings layer");
 			strictEqual(readWorkerToolCallCap({}), 20);
-			strictEqual(resolveGuardrail("turnToolCallBudget", { CLIO_TURN_TOOL_CALL_BUDGET: "7" }), 7, "env beats settings");
+			strictEqual(
+				resolveGuardrail("turnToolCallBudget", { CLIO_CODER_TURN_TOOL_CALL_BUDGET: "7" }),
+				7,
+				"env beats settings",
+			);
 			strictEqual(
 				resolveGuardrail("readMaxBytes", {}),
 				GUARDRAIL_DEFAULTS.readMaxBytes,

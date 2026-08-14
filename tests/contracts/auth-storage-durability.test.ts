@@ -3,7 +3,7 @@
  * view, and there is no backup. So the store must never serialize a view that
  * lost something on the way in.
  *
- * The failure this guards: two keys stored, the file corrupted, `clio auth
+ * The failure this guards: two keys stored, the file corrupted, `clio-coder auth
  * list` reporting both as "disconnected" (the same word it uses for never
  * logged in), and the obvious recovery of logging in again taking the file from
  * 211 bytes to 112 with only the new entry left.
@@ -115,12 +115,12 @@ describe("contracts/auth storage durability", () => {
 	/**
 	 * The exact bytes `initializeClioHome` scaffolds at src/core/init.ts:80. A
 	 * first guard at this shape called the product's own fresh file damaged, so a
-	 * brand-new install could not log in at all and `clio configure --api-key`
+	 * brand-new install could not log in at all and `clio-coder configure --api-key`
 	 * died with it. Pinned to the literal scaffold so a change to one side has to
 	 * be a change to both.
 	 */
 	it("accepts the credentials scaffold a fresh install ships", () => {
-		const scaffold = "# Managed via `clio auth`. Do not edit manually unless you know what you are doing.\n{}\n";
+		const scaffold = "# Managed via `clio-coder auth`. Do not edit manually unless you know what you are doing.\n{}\n";
 		writeFileSync(path, scaffold, "utf8");
 
 		strictEqual(open().damageReason(), null, "the shipped scaffold is an empty store, not a damaged one");
@@ -156,7 +156,7 @@ describe("contracts/auth storage durability", () => {
 	 * A write can fail for reasons the damage refusal never sees: a lock that
 	 * cannot be taken, a read-only config dir, a full disk. Those went into an
 	 * errors array with no consumer, so the store reported itself clean and
-	 * `clio auth status` and `clio doctor` both said the credential was there
+	 * `clio-coder auth status` and `clio-coder doctor` both said the credential was there
 	 * while disk held none of it. damageReason() is the channel they read.
 	 */
 	it("reports a write that never reached disk instead of holding the error where nothing reads it", () => {

@@ -198,7 +198,7 @@ describe("contracts/context-accounting", () => {
 	});
 
 	/**
-	 * A window nothing declared is a guess. `clio targets` already annotates the
+	 * A window nothing declared is a guess. `clio-coder targets` already annotates the
 	 * runtime-default case as unverified; the session path resolved the same
 	 * placeholder and reported it as settled fact, so a hosted target whose model
 	 * Clio has never heard of planned against a blanket number with no notice.

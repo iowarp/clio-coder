@@ -677,7 +677,7 @@
           <p>Architectural design and verification testing suite for Clio Coder's resource packaging, registries injection, and sharing archive subsystems.</p>
           <div class="meta-chips-row">
             <span class="chip">Source: docs/extensions-and-sharing.md</span>
-            <span class="chip chip-orange">clio docs extensions</span>
+            <span class="chip chip-orange">clio-coder docs extensions</span>
           </div>
         </div>
       </div>
@@ -727,13 +727,13 @@
               <td><span class="prec-30">1</span></td>
               <td><span class="badge badge-user">user</span></td>
               <td>Clio User Prompts Folder</td>
-              <td><code>~/.config/clio/prompts</code></td>
+              <td><code>~/.config/clio-coder/prompts</code></td>
             </tr>
             <tr>
               <td><span class="prec-50">2</span></td>
               <td><span class="badge badge-project">project</span></td>
               <td>Clio Project Local Prompts Folder</td>
-              <td><code>.clio/prompts</code></td>
+              <td><code>.clio-coder/prompts</code></td>
             </tr>
             <tr>
               <td><span class="prec-60">3</span></td>
@@ -775,7 +775,7 @@
               <td><span class="prec-30">30</span></td>
               <td><span class="badge badge-user">user</span></td>
               <td>Clio Native User</td>
-              <td><code>~/.config/clio/skills</code></td>
+              <td><code>~/.config/clio-coder/skills</code></td>
               <td>Visible</td>
             </tr>
             <tr>
@@ -789,7 +789,7 @@
               <td><span class="prec-50">50</span></td>
               <td><span class="badge badge-project">project</span></td>
               <td>Clio Native Project</td>
-              <td><code>.clio/skills</code></td>
+              <td><code>.clio-coder/skills</code></td>
               <td>Visible</td>
             </tr>
             <tr>
@@ -809,7 +809,7 @@
           <p style="margin-bottom: 1rem; font-size: 0.95rem;">Extension roots package reusable skills and prompts. The layout follows standard modular separation:</p>
           <pre class="code-pane" style="font-size:0.8rem;">
 clio-kit/                  # Ext package root
-  clio-extension.yaml      # Package manifest
+  clio-coder-extension.yaml      # Package manifest
   prompts/                 # Contributed prompt templates
     hdf5-fix.md
   skills/                  # Contributed custom skills
@@ -821,7 +821,7 @@ clio-kit/                  # Ext package root
         </div>
         <div class="glass-card">
           <h2>Diagnostics & Safety</h2>
-          <p style="margin-bottom: 0.75rem; font-size:0.95rem;"><strong>Untrusted project roots:</strong> Shared local project compatibility roots (like <code>.agents/skills</code>) are deactivated by default to prevent arbitrary code/instruction injections. Opt-in is configured via <code>skills.trustProjectCompatRoots: true</code> in <code>settings.yaml</code> or setting the environment variable <code>CLIO_TRUST_PROJECT_SKILLS=1</code>.</p>
+          <p style="margin-bottom: 0.75rem; font-size:0.95rem;"><strong>Untrusted project roots:</strong> Shared local project compatibility roots (like <code>.agents/skills</code>) are deactivated by default to prevent arbitrary code/instruction injections. Opt-in is configured via <code>skills.trustProjectCompatRoots: true</code> in <code>settings.yaml</code> or setting the environment variable <code>CLIO_CODER_TRUST_PROJECT_SKILLS=1</code>.</p>
           <p style="font-size:0.95rem;"><strong>Graceful Degradations:</strong> Only a missing <code>description</code> inside a skill frontmatter is a hard rejection. All other validation anomalies (consecutive hyphens in names, name-directory mismatches, frontmatter format failures) degrade to warnings, enabling the skill or template to still load with diagnostics.</p>
         </div>
       </div>
@@ -844,14 +844,14 @@ clio-kit/                  # Ext package root
           <g class="svg-node" id="node-res-scan" onclick="_showFlowInfo('resolution', 'scan')">
             <rect x="30" y="70" width="160" height="60" rx="8" fill="rgba(17,24,39,0.9)" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />
             <text x="110" y="95" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Scan Extension Roots</text>
-            <text x="110" y="115" fill="var(--color-primary)" font-size="10" font-family="var(--font-mono)" text-anchor="middle">~/.config/ & .clio/</text>
+            <text x="110" y="115" fill="var(--color-primary)" font-size="10" font-family="var(--font-mono)" text-anchor="middle">~/.config/ & .clio-coder/</text>
           </g>
           
           <!-- Column 2: Manifest -->
           <g class="svg-node" id="node-res-manifest" onclick="_showFlowInfo('resolution', 'manifest')">
             <rect x="240" y="70" width="160" height="60" rx="8" fill="rgba(17,24,39,0.9)" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />
             <text x="320" y="95" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Parse manifests</text>
-            <text x="320" y="115" fill="#bd00ff" font-size="10" font-family="var(--font-mono)" text-anchor="middle">clio-extension.yaml</text>
+            <text x="320" y="115" fill="#bd00ff" font-size="10" font-family="var(--font-mono)" text-anchor="middle">clio-coder-extension.yaml</text>
           </g>
           
           <!-- Column 3: State check -->
@@ -1038,8 +1038,8 @@ clio-kit/                  # Ext package root
             <div class="form-group">
               <label>Output Format</label>
               <select id="mb-format" onchange="generateManifest()">
-                <option value="yaml">YAML Format (clio-extension.yaml)</option>
-                <option value="json">JSON Format (clio-extension.json)</option>
+                <option value="yaml">YAML Format (clio-coder-extension.yaml)</option>
+                <option value="json">JSON Format (clio-coder-extension.json)</option>
               </select>
             </div>
           </div>
@@ -1088,7 +1088,7 @@ clio-kit/                  # Ext package root
           <!-- Main: Content Editor -->
           <div class="vfile-editor-area">
             <div class="vfile-editor-header">
-              <span id="vfile-current-name">clio-extension.yaml</span>
+              <span id="vfile-current-name">clio-coder-extension.yaml</span>
               <span style="color: var(--text-dark); font-size:0.75rem;">Modify content below to trigger live compilation validation</span>
             </div>
             <textarea class="vfile-editor-textarea" id="vfile-editor-box" oninput="_updateCurrentVirtualFileContent()"></textarea>
@@ -1111,7 +1111,7 @@ clio-kit/                  # Ext package root
     <div id="tab-sharer" class="tab-content">
       <div class="glass-card">
         <h2>Sharing Archive Inspect & Dry-Run Planner</h2>
-        <p class="subtitle">Validates simulated <code>.clio-share.json</code> export structures and calculates import dry-runs mapping to native user/project file paths, including conflict detections.</p>
+        <p class="subtitle">Validates simulated <code>.clio-coder-share.json</code> export structures and calculates import dry-runs mapping to native user/project file paths, including conflict detections.</p>
         
         <div class="grid-2">
           <!-- Left: JSON representation -->
@@ -1132,8 +1132,8 @@ clio-kit/                  # Ext package root
       {
         "type": "project-context",
         "scope": "project",
-        "archivePath": "project/CLIO.md",
-        "relativePath": "CLIO.md",
+        "archivePath": "project/CLIO-CODER.md",
+        "relativePath": "CLIO-CODER.md",
         "sha256": "4b684bc5e171b3e945c92984534125aa30164c676643de5847e62a04873c3325",
         "size": 182
       },
@@ -1159,8 +1159,8 @@ clio-kit/                  # Ext package root
     {
       "type": "project-context",
       "scope": "project",
-      "archivePath": "project/CLIO.md",
-      "relativePath": "CLIO.md",
+      "archivePath": "project/CLIO-CODER.md",
+      "relativePath": "CLIO-CODER.md",
       "sha256": "4b684bc5e171b3e945c92984534125aa30164c676643de5847e62a04873c3325",
       "size": 182,
       "encoding": "base64",
@@ -1199,7 +1199,7 @@ clio-kit/                  # Ext package root
                 <select id="sh-scope">
                   <option value="default">Use Scope Configured In File</option>
                   <option value="user">Force User Scope (Global config)</option>
-                  <option value="project">Force Project Scope (.clio/ folder)</option>
+                  <option value="project">Force Project Scope (.clio-coder/ folder)</option>
                 </select>
               </div>
               <div class="form-group">
@@ -1216,7 +1216,7 @@ clio-kit/                  # Ext package root
               <label>Simulated Local Files Present on Disk (Check boxes to simulate conflict paths):</label>
               <div style="background:rgba(0,0,0,0.3); border: 1px solid var(--border-card); padding: 0.75rem; border-radius: 8px;">
                 <div style="margin-bottom:0.4rem; font-size:0.85rem;">
-                  <input type="checkbox" id="sim-disk-clio" checked> <label style="display:inline; color:var(--text-main);" for="sim-disk-clio">CLIO.md (at project root)</label>
+                  <input type="checkbox" id="sim-disk-clio" checked> <label style="display:inline; color:var(--text-main);" for="sim-disk-clio">CLIO-CODER.md (at project root)</label>
                 </div>
                 <div style="margin-bottom:0.4rem; font-size:0.85rem;">
                   <input type="checkbox" id="sim-disk-prompt"> <label style="display:inline; color:var(--text-main);" for="sim-disk-prompt">prompts/refactor.md (at user config)</label>
@@ -1258,8 +1258,8 @@ clio-kit/                  # Ext package root
     // SVG node info box hooks
     const flowDescriptions = {
       resolution: {
-        scan: "<strong>Scan Extension Roots:</strong> The loader queries user and project extensions directories (e.g. <code>~/.config/clio/extensions</code> and <code>.clio/extensions</code>) dynamically on startup. It identifies folders that contain extension manifests.",
-        manifest: "<strong>Parse Manifests:</strong> Inspects each directory for manifest files (<code>clio-extension.yaml</code>, <code>.yml</code>, or <code>.json</code>). Validates required version (must be 1), identity tags (ID, version), and parses custom prompts/skills resource path mapping keys.",
+        scan: "<strong>Scan Extension Roots:</strong> The loader queries user and project extensions directories (e.g. <code>~/.config/clio-coder/extensions</code> and <code>.clio-coder/extensions</code>) dynamically on startup. It identifies folders that contain extension manifests.",
+        manifest: "<strong>Parse Manifests:</strong> Inspects each directory for manifest files (<code>clio-coder-extension.yaml</code>, <code>.yml</code>, or <code>.json</code>). Validates required version (must be 1), identity tags (ID, version), and parses custom prompts/skills resource path mapping keys.",
         state: "<strong>Status Filter Check:</strong> Resolves states using <code>state.json</code> located in each scope's extension base. If an extension's ID is registered in the <code>disabled</code> array, it is excluded from effective execution.",
         shadow: "<strong>Deduplicate & Override:</strong> When an extension ID is found in both project and user-level scopes, Clio ranks scopes (Project = 2, User = 1). The project-scoped extension shadows (overrides) the user-scoped package. The user package is flagged as <code>effective: false</code> and <code>overriddenBy: 'project'</code>.",
         inject: "<strong>Resource Path Injection:</strong> The paths of enabled, effective extension resources are injected into global loaders. E.g. skill directories are fed into the <code>skills()</code> registry as scope <code>package</code> roots, resolving to source: <code>extension:&lt;scope&gt;:&lt;id&gt;</code>."
@@ -1456,7 +1456,7 @@ clio-kit/                  # Ext package root
     const templates = {
       hpc: [
         {
-          path: 'clio-extension.yaml',
+          path: 'clio-coder-extension.yaml',
           content: `manifestVersion: 1
 id: scientist-pack
 name: Scientific Computing Pack
@@ -1493,7 +1493,7 @@ When MPI deadlock is suspected:
       ],
       invalid: [
         {
-          path: 'clio-extension.yaml',
+          path: 'clio-coder-extension.yaml',
           content: `manifestVersion: 1
 id: BAD-NAME-Pack!
 version: ""
@@ -1522,7 +1522,7 @@ My body content is here, but wait, where is the description key inside the front
       ],
       collision: [
         {
-          path: 'clio-extension.yaml',
+          path: 'clio-coder-extension.yaml',
           content: `manifestVersion: 1
 id: colliders
 version: 1.0.0
@@ -1641,13 +1641,13 @@ Provide advanced custom guidance on MPI bindings.`
         
         // Find manifest file
         const manifestFile = virtualFiles.find(f => 
-          f.path === 'clio-extension.yaml' || 
-          f.path === 'clio-extension.json' || 
-          f.path === 'clio-extension.yml'
+          f.path === 'clio-coder-extension.yaml' || 
+          f.path === 'clio-coder-extension.json' || 
+          f.path === 'clio-coder-extension.yml'
         );
 
         if (!manifestFile) {
-          diagOutput.innerHTML += `<div class="diagnostic-entry error">[ERROR] extension manifest (clio-extension.yaml) not found. Loader aborted.</div>`;
+          diagOutput.innerHTML += `<div class="diagnostic-entry error">[ERROR] extension manifest (clio-coder-extension.yaml) not found. Loader aborted.</div>`;
           return;
         }
 
@@ -1899,7 +1899,7 @@ Provide advanced custom guidance on MPI bindings.`
         let scope = 'user';
         if (f.path.startsWith('prompts/')) { type = 'prompt'; scope = 'project'; }
         else if (f.path.startsWith('skills/')) { type = 'skill'; scope = 'project'; }
-        else if (f.path.startsWith('clio-extension')) { type = 'extension'; scope = 'project'; }
+        else if (f.path.startsWith('clio-coder-extension')) { type = 'extension'; scope = 'project'; }
         else if (f.path.startsWith('user-skills/')) { type = 'skill'; scope = 'user'; }
 
         const hash = mockSha256(f.content);
@@ -2013,18 +2013,18 @@ Provide advanced custom guidance on MPI bindings.`
           // Mapping paths logic
           if (file.type === 'project-context') {
             mappedPath = `./${file.relativePath}`;
-            fileExistsOnDisk = (file.relativePath === 'CLIO.md' && simDiskClioExists);
+            fileExistsOnDisk = (file.relativePath === 'CLIO-CODER.md' && simDiskClioExists);
           } else if (file.type === 'prompt') {
-            mappedPath = resolvedScope === 'user' ? `~/.config/clio/prompts/${file.relativePath}` : `.clio/prompts/${file.relativePath}`;
+            mappedPath = resolvedScope === 'user' ? `~/.config/clio-coder/prompts/${file.relativePath}` : `.clio-coder/prompts/${file.relativePath}`;
             fileExistsOnDisk = (file.relativePath === 'refactor.md' && resolvedScope === 'user' && simDiskPromptExists);
           } else if (file.type === 'skill') {
-            mappedPath = resolvedScope === 'user' ? `~/.config/clio/skills/${file.relativePath}` : `.clio/skills/${file.relativePath}`;
+            mappedPath = resolvedScope === 'user' ? `~/.config/clio-coder/skills/${file.relativePath}` : `.clio-coder/skills/${file.relativePath}`;
             fileExistsOnDisk = false;
           } else if (file.type === 'settings') {
-            mappedPath = `~/.config/clio/settings.yaml`;
+            mappedPath = `~/.config/clio-coder/settings.yaml`;
             fileExistsOnDisk = simDiskSettingsExists;
           } else if (file.type === 'extension') {
-            mappedPath = resolvedScope === 'user' ? `~/.config/clio/extensions/${file.relativePath}` : `.clio/extensions/${file.relativePath}`;
+            mappedPath = resolvedScope === 'user' ? `~/.config/clio-coder/extensions/${file.relativePath}` : `.clio-coder/extensions/${file.relativePath}`;
             fileExistsOnDisk = false;
           }
 

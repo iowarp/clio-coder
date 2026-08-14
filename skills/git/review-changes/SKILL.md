@@ -36,7 +36,7 @@ Style nitpicks a formatter or linter would catch are not findings.
 ## Step 1 — Load the project's bar
 
 Read the standards the diff will be judged against: the project instruction
-file (`CLIO.md`, `AGENTS.md`, `CLAUDE.md`), README, and documented standards
+file (`CLIO-CODER.md`, `AGENTS.md`, `CLAUDE.md`), README, and documented standards
 under `docs/`. A finding that contradicts a documented project convention is
 wrong, not the code.
 
@@ -76,7 +76,7 @@ the reason, or dropped when the check proved it wrong.
 
 ## Step 5 — Report
 
-Write `.clio/reviews/<YYYY-MM-DD>-<slug>.md` (`.clio/` is local and
+Write `.clio-coder/reviews/<YYYY-MM-DD>-<slug>.md` (`.clio-coder/` is local and
 ignored). Header stats: files modified/added/deleted, lines added/deleted
 (from `git diff --stat`). Then each finding:
 

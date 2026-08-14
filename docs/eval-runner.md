@@ -11,15 +11,15 @@ Source of truth: [src/domains/eval/](../src/domains/eval/) and [src/cli/eval.ts]
 
 ## CLI Commands
 
-The CLI commands under `clio eval` support running, validating, reporting, comparing, and gating evaluation suites.
+The CLI commands under `clio-coder eval` support running, validating, reporting, comparing, and gating evaluation suites.
 
 ```bash
-clio eval validate --suite <suite.yaml>
-clio eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-entry <path>]
-clio eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-entry <path>]
-clio eval report <evalId> --format text|json|md|swe-jsonl|junit
-clio eval compare <baselineEvalId> <candidateEvalId>
-clio eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
+clio-coder eval validate --suite <suite.yaml>
+clio-coder eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-entry <path>]
+clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-entry <path>]
+clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
+clio-coder eval compare <baselineEvalId> <candidateEvalId>
+clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
 ```
 
 ### Command Roles
@@ -121,7 +121,7 @@ tasks:
 ## Runner Kinds
 * **`clio-run`**: Invokes the main Clio Coder agent loop with the task's prompt, tracing all tools.
 * **`context-index`**: Triggers the context engine to build index structures (`codewiki`).
-* **`context-init`**: Initializes workspace files (such as generating `CLIO.md`).
+* **`context-init`**: Initializes workspace files (such as generating `CLIO-CODER.md`).
 * **`external-command`**: Spawns an external command or sequence of commands in the task workspace.
 
 ---
@@ -158,7 +158,7 @@ Evaluation tasks may fail with one of the following classes:
 
 Version 1 task files can still be run directly via:
 ```bash
-clio eval run --task-file tasks.yaml [--repeat <n>]
+clio-coder eval run --task-file tasks.yaml [--repeat <n>]
 ```
 Under the hood, these are parsed and wrapped into a Suite v2 adapter with:
 * Workspace kind: `local` (using task `cwd` as workspace path)
@@ -172,7 +172,7 @@ Under the hood, these are parsed and wrapped into a Suite v2 adapter with:
 
 Clio maintains two distinct token accounting streams with different provenances. These accounts are never merged, reconciled, or treated as interchangeable:
 
-1. **`tokens.*` (Wire Streaming)**: Folded live off stdout from assistant `message_end` events watched by `token-stream.ts` / `createStreamInvariantFold`. This represents usage reported by the provider for assistant messages watched over the wire. On surfaces without stdout streaming (such as `clio fleet run --json`), `tokens.measured` is `false`.
+1. **`tokens.*` (Wire Streaming)**: Folded live off stdout from assistant `message_end` events watched by `token-stream.ts` / `createStreamInvariantFold`. This represents usage reported by the provider for assistant messages watched over the wire. On surfaces without stdout streaming (such as `clio-coder fleet run --json`), `tokens.measured` is `false`.
 2. **`receiptUsage.*` (Journal Receipts)**: Summed from an evaluation item's run journal. Every attempt writes a receipt carrying token counts and USD cost authenticated against its own ledger envelope.
 
 ### Fail-Closed Reporting

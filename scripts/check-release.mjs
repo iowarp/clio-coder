@@ -31,7 +31,7 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 // model catalogs, and the prompt fragments.
 //
 // docs/html was briefly dropped from the package to buy headroom, which broke
-// `clio docs` in every installed copy: src/cli/docs.ts serves that directory
+// `clio-coder docs` in every installed copy: src/cli/docs.ts serves that directory
 // from resolvePackageRoot(). Shrinking it instead was measured and rejected.
 // Roughly 250 KB is duplicated inline <style> boilerplate across twenty
 // hand-authored pages and 17% is source indentation, but 16 pages carry <pre>

@@ -65,7 +65,7 @@ const SYSTEM_WRITE_ROOT_PREFIXES: ReadonlyArray<string> = ["/etc", "/usr", "/var
  * `/var/folders` is macOS's per-user temp tree, and both are where an operator
  * or a harness puts a throwaway workspace. Classifying them as system_modify
  * made every mutating call from a workspace there require a confirmation, which
- * headless runs answer with a denial: a `clio run` in a `/var/tmp` sandbox
+ * headless runs answer with a denial: a `clio-coder run` in a `/var/tmp` sandbox
  * could not write one byte, and the model's recovery was to report work it had
  * not done. The exemption is a carve-out rather than an enumeration of the
  * system directories under `/var` on purpose: `/var/log`, `/var/lib`,

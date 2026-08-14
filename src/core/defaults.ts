@@ -189,7 +189,7 @@ export type FleetNodeResidency = "observe" | "manage";
 /**
  * One SSH-reachable worker node. The implicit `local` node always exists and
  * is never declared here. Nodes become dispatch-eligible only after the
- * doctor fleet preflight verifies reachability, a version-matched clio, and
+ * doctor fleet preflight verifies reachability, a version-matched clio-coder, and
  * path parity for the project root (shared-filesystem assumption).
  */
 export interface FleetNodeSettings {
@@ -200,7 +200,7 @@ export interface FleetNodeSettings {
 	user?: string;
 	port?: number;
 	identityFile?: string;
-	/** Remote worker-entry invocation; defaults to `clio worker` on the remote PATH. */
+	/** Remote worker-entry invocation; defaults to `clio-coder worker` on the remote PATH. */
 	clioEntry?: string;
 	/** Advisory routing labels (e.g. gpu, high-memory). */
 	labels?: string[];
@@ -361,40 +361,40 @@ export type DefaultSettings = typeof DEFAULT_SETTINGS;
  * first programmatic write.
  */
 export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on first install.
-# The file is machine-owned: \`clio configure\`, \`clio targets\`, and the TUI
+# The file is machine-owned: \`clio-coder configure\`, \`clio-coder targets\`, and the TUI
 # rewrite it whole, and comments (including these) do not survive that write.
 # Docs: https://github.com/iowarp/clio-coder
 #
 # Default location:
-#   Linux:   ~/.config/clio/settings.yaml
-#   macOS:   ~/Library/Application Support/clio/config/settings.yaml
-#   Windows: %APPDATA%/clio/config/settings.yaml
-# Set CLIO_HOME for a single-tree install, or CLIO_CONFIG_DIR / CLIO_DATA_DIR /
-# CLIO_STATE_DIR / CLIO_CACHE_DIR to override each directory separately.
+#   Linux:   ~/.config/clio-coder/settings.yaml
+#   macOS:   ~/Library/Application Support/clio-coder/config/settings.yaml
+#   Windows: %APPDATA%/clio-coder/config/settings.yaml
+# Set CLIO_CODER_HOME for a single-tree install, or CLIO_CODER_CONFIG_DIR / CLIO_CODER_DATA_DIR /
+# CLIO_CODER_STATE_DIR / CLIO_CODER_CACHE_DIR to override each directory separately.
 #
 # Common first run after installation:
-#   1. Repair/create local state: clio doctor --fix
-#   2. List runtimes: clio configure --list
+#   1. Repair/create local state: clio-coder doctor --fix
+#   2. List runtimes: clio-coder configure --list
 #   3. Configure one target with your runtime/model (examples below).
-#   4. Select and probe it: clio targets use <id> && clio targets --probe
-#   5. Launch: clio
+#   4. Select and probe it: clio-coder targets use <id> && clio-coder targets --probe
+#   5. Launch: clio-coder
 
 version: 1
 identity: clio
 autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto
 
 # Inference targets. Each entry becomes selectable for chat and workers.
-# Add entries via \`clio configure\` or \`clio targets add\`
+# Add entries via \`clio-coder configure\` or \`clio-coder targets add\`
 # or hand-edit. \`runtime\` must match an id registered in the runtime registry
 # (cloud APIs, local HTTP engines, or third-party plugins in the \`runtimes/\`
 # directory next to this file).
 targets: []
 # Local runtime examples (uncomment/adapt one; replace your-model-id):
-#   clio configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model-id --set-orchestrator --set-fleet-default
-#   clio configure --id local-ollama --runtime ollama-native --url http://localhost:11434 --model your-model-id --set-orchestrator --set-fleet-default
-#   clio configure --id local-llamacpp --runtime llamacpp --url http://127.0.0.1:8080 --model your-model-id --set-orchestrator --set-fleet-default
-#   clio configure --id local-vllm --runtime vllm --url http://localhost:8000 --model your-model-id --set-orchestrator --set-fleet-default
-#   clio configure --id local-sglang --runtime sglang --url http://localhost:30000 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio-coder configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio-coder configure --id local-ollama --runtime ollama-native --url http://localhost:11434 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio-coder configure --id local-llamacpp --runtime llamacpp --url http://127.0.0.1:8080 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio-coder configure --id local-vllm --runtime vllm --url http://localhost:8000 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio-coder configure --id local-sglang --runtime sglang --url http://localhost:30000 --model your-model-id --set-orchestrator --set-fleet-default
 # Add --context-window <tokens>, --max-tokens <tokens>, or --reasoning true
 # only when you have runtime/model-specific values to override probe results.
 #
@@ -467,7 +467,7 @@ workers:
 
 # Fleet worker nodes reachable over SSH. The implicit \`local\` node always
 # exists and is never declared. A node becomes dispatch-eligible only after
-# \`clio doctor\` verifies SSH reachability, a version-matched clio, path
+# \`clio-coder doctor\` verifies SSH reachability, a version-matched clio-coder, path
 # parity for the project root (shared filesystem), and a writable state dir.
 # residency defaults to observe: remote workers never evict models resident
 # on their node (set manage per node to opt into the reconciler).
@@ -528,7 +528,7 @@ terminal:
 # Skills are local prompt resources. Project-local compatibility roots such as
 # .agents/skills, .claude/skills, .codex/skills, .github/skills, and
 # .opencode/skills stay hidden from model invocation unless this is true or
-# CLIO_TRUST_PROJECT_SKILLS=1 is set for the process.
+# CLIO_CODER_TRUST_PROJECT_SKILLS=1 is set for the process.
 skills:
   trustProjectCompatRoots: false
 
@@ -586,7 +586,7 @@ compaction:
   threshold: 0.8
   excludeLastTurns: 6
   # model: provider/summary-model-id
-  # systemPrompt: ~/.config/clio/prompts/compaction.md
+  # systemPrompt: ~/.config/clio-coder/prompts/compaction.md
 
 # Transient provider/stream retry controls for interactive chat.
 # Retryable errors include overloads, rate limits, 5xx responses, network
@@ -609,9 +609,9 @@ retry:
 #   observationTurnBudgetBytes  shared per-turn byte pool for observation tools.
 #   internalDispatchTimeoutMs   wall-clock cap for one internal generator
 #                               dispatch (wiki documenter, bootstrap scout).
-# Each value also has a per-process env override (CLIO_TURN_TOOL_CALL_BUDGET,
-# CLIO_WORKER_TOOL_CALL_CAP, CLIO_MAX_RUNS, CLIO_READ_MAX_BYTES,
-# CLIO_OBSERVATION_TURN_BUDGET_BYTES, CLIO_INTERNAL_DISPATCH_TIMEOUT_MS) meant
+# Each value also has a per-process env override (CLIO_CODER_TURN_TOOL_CALL_BUDGET,
+# CLIO_CODER_WORKER_TOOL_CALL_CAP, CLIO_CODER_MAX_RUNS, CLIO_CODER_READ_MAX_BYTES,
+# CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES, CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS) meant
 # for CI and one-off experiments.
 guardrails:
   turnToolCallBudget: 60

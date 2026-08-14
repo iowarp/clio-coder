@@ -143,7 +143,7 @@ function seedToolCapableOrchestrator(configDir: string, url: string): void {
 				`    url: ${url}`,
 				"    defaultModel: mock-model",
 				"    auth:",
-				"      apiKeyEnvVar: CLIO_TEST_OPENAI_KEY",
+				"      apiKeyEnvVar: CLIO_CODER_TEST_OPENAI_KEY",
 				"    capabilities:",
 				"      chat: true",
 				"      tools: true",
@@ -196,7 +196,7 @@ describe("smoke/SIGINT kills running tool children", { concurrency: false, skip:
 			[CLI_ENTRY, "--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", "run the shell command"],
 			{
 				cwd: workRepo,
-				env: { ...process.env, ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				env: { ...process.env, ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 				stdio: ["ignore", "pipe", "pipe"],
 			},
 		);

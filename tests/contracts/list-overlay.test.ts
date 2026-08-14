@@ -245,7 +245,7 @@ describe("contracts/list-overlay", () => {
 	// a narrow pane instead of being cut with an ellipsis.
 	it("shows the caller's empty message only for an empty list, wrapped to the pane", () => {
 		const emptyMessage =
-			"no skills installed and no local marketplace configured. install one with `clio skills install <path>`.";
+			"no skills installed and no local marketplace configured. install one with `clio-coder skills install <path>`.";
 		const empty = new ListOverlayView(
 			{ title: "Test", items: [], filterable: true, emptyMessage, onClose: () => {} },
 			() => {},

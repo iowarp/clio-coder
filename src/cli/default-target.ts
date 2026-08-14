@@ -12,7 +12,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
  * full "How will you connect Clio to a model?" wizard. Three of the four
  * causes below are genuinely a target-selection problem and belong there. The
  * fourth is not. A declared, present, orchestrator-eligible target whose
- * credential is merely unresolved is one `clio auth login` away, and for a
+ * credential is merely unresolved is one `clio-coder auth login` away, and for a
  * local runtime that ignores keys it is not broken at all: a live LM Studio
  * target in exactly this state answers turns normally. Restarting runtime
  * selection for it told the operator their working installation was

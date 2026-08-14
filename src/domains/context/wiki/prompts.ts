@@ -39,7 +39,7 @@ const REPOSITORY_GUIDANCE_CANDIDATES = [
 	".claude/CLAUDE.md",
 	"AGENTS.md",
 	"CLAUDE.md",
-	"CLIO.md",
+	"CLIO-CODER.md",
 	"CODEX.md",
 	".codex/AGENTS.md",
 	"GEMINI.md",

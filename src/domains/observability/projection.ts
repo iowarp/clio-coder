@@ -175,7 +175,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 	function scheduleFlush(): void {
 		if (flushTimer !== null) return;
 		flushTimer = setTimeout(flush, PROJECTION_FLUSH_DEBOUNCE_MS);
-		// A pending flush must never keep a one-shot `clio run` process alive.
+		// A pending flush must never keep a one-shot `clio-coder run` process alive.
 		flushTimer.unref?.();
 	}
 

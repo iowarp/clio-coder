@@ -84,10 +84,10 @@ To prevent leaked leases when workers or orchestrators crash:
 
 The fleet can be drained for maintenance without terminating running jobs:
 
-- **Drain Command**: `clio fleet drain` sets `draining` in `dispatch-admission.json`.
+- **Drain Command**: `clio-coder fleet drain` sets `draining` in `dispatch-admission.json`.
 - **Drain Invariant**: When draining is active, existing runs continue to completion, but all new dispatch admissions are refused with a drain notice.
 - **Auto-Expiry**: To prevent an unmanaged lockup if a draining operator disconnects, the drain state automatically expires after `DEFAULT_CAPACITY_DRAIN_TTL_MS` (1 hour).
-- **Resume Command**: `clio fleet resume` clears the drain state immediately.
+- **Resume Command**: `clio-coder fleet resume` clears the drain state immediately.
 
 ---
 

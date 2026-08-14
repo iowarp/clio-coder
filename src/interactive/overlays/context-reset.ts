@@ -33,12 +33,12 @@ export function buildContextResetItems(): SelectItem[] {
 	return [
 		{
 			value: "preserve-clio-md",
-			label: "Preserve CLIO.md",
+			label: "Preserve CLIO-CODER.md",
 			description: "remove generated context and keep the project handbook",
 		},
 		{
 			value: "delete-clio-md",
-			label: "Delete CLIO.md",
+			label: "Delete CLIO-CODER.md",
 			description: "remove generated context and the project handbook",
 		},
 		{

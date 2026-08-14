@@ -994,7 +994,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 		ok(sub && apiKey);
 		if (!sub || !apiKey) return;
 
-		// Runtime-only login/status (e.g. `clio auth login anthropic-max`) keys on "anthropic".
+		// Runtime-only login/status (e.g. `clio-coder auth login anthropic-max`) keys on "anthropic".
 		strictEqual(resolveRuntimeAuthTarget(sub).providerId, "anthropic");
 		// The api-key runtime still keys on its own id.
 		strictEqual(resolveRuntimeAuthTarget(apiKey).providerId, "anthropic");
@@ -1055,7 +1055,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 
 /**
  * Every OpenAI-compatible client documents its base URL as the `/v1` mount
- * point, so `http://host:8080/v1` is what users type and what `clio configure`
+ * point, so `http://host:8080/v1` is what users type and what `clio-coder configure`
  * accepts. Runtimes whose own request paths already carry `/v1` composed the
  * two into `/v1/v1/chat/completions`, and llama.cpp aliases `/v1/health` and
  * nothing else, so the probe passed while every other read silently returned

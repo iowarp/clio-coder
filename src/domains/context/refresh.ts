@@ -11,8 +11,8 @@ import { readWikiMeta } from "./wiki/meta.js";
 import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
 
 /**
- * `/context refresh` and `clio context refresh`: rebuild the codewiki index and
- * `.clio` state, then re-derive the handbook sections the index owns. Authoring
+ * `/context refresh` and `clio-coder context refresh`: rebuild the codewiki index and
+ * `.clio-coder` state, then re-derive the handbook sections the index owns. Authoring
  * handbook prose stays with `/context init`.
  */
 
@@ -32,7 +32,7 @@ export interface RunContextRefreshInput {
 }
 
 /**
- * What refresh did to CLIO.md. "absent" covers no handbook and an unparseable
+ * What refresh did to CLIO-CODER.md. "absent" covers no handbook and an unparseable
  * one alike: a missing or broken handbook is never an error here, because a
  * repository must stay fully usable without one.
  */
@@ -72,7 +72,7 @@ function curateClioMd(cwd: string, codewiki: Codewiki): ClioMdCuration {
 		// canonical rendering, which is a diff the author never asked for.
 		if (!changed) return "unchanged";
 		writeFileSync(
-			join(cwd, "CLIO.md"),
+			join(cwd, "CLIO-CODER.md"),
 			serializeClioMd({
 				projectName: handbook.projectName,
 				identity: handbook.identity,
@@ -94,13 +94,14 @@ function indexedSourceFileCount(codewiki: Codewiki): number {
 	return codewiki.files.filter((file) => file.lang !== "config").length;
 }
 
-const STALE_WIKI_REFRESH_HINT = "wiki is stale; run clio context refresh --wiki or clio context wiki --update";
-const NO_WIKI_HINT = "no wiki exists, so --wiki had nothing to update; run clio context wiki to build one";
+const STALE_WIKI_REFRESH_HINT =
+	"wiki is stale; run clio-coder context refresh --wiki or clio-coder context wiki --update";
+const NO_WIKI_HINT = "no wiki exists, so --wiki had nothing to update; run clio-coder context wiki to build one";
 
 function incompleteWikiHint(cwd: string): string | undefined {
 	const completeness = wikiCompleteness(cwd);
 	if (!completeness || completeness.owed === 0) return undefined;
-	return `wiki is incomplete: ${completeness.pagesWritten} of ${completeness.pagesPlanned} planned pages written, ${completeness.owed} owed; run clio context wiki --update to resume`;
+	return `wiki is incomplete: ${completeness.pagesWritten} of ${completeness.pagesPlanned} planned pages written, ${completeness.owed} owed; run clio-coder context wiki --update to resume`;
 }
 
 export async function runContextRefresh(input: RunContextRefreshInput = {}): Promise<RunContextRefreshResult> {
@@ -153,9 +154,9 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 		hint = incompleteWikiHint(cwd) ?? (wikiStaleness(cwd).state === "stale" ? STALE_WIKI_REFRESH_HINT : undefined);
 	}
 
-	const handbookNote = clioMd === "updated" ? "; CLIO.md index sections updated" : "";
+	const handbookNote = clioMd === "updated" ? "; CLIO-CODER.md index sections updated" : "";
 	input.io?.stdout(
-		`clio context refresh: codewiki rebuilt (${entries} source file${entries === 1 ? "" : "s"})${handbookNote}\n`,
+		`clio-coder context refresh: codewiki rebuilt (${entries} source file${entries === 1 ? "" : "s"})${handbookNote}\n`,
 	);
 	input.onProgress?.({ phase: "done", status: "completed", message: "context refreshed" });
 	return {

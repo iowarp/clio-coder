@@ -20,8 +20,8 @@ const DOC_PATH = join(REPO_ROOT, "docs", "environment-variables.md");
  * Every member still has to be reachable from the row that covers it.
  */
 const DOCUMENTED_FAMILIES: ReadonlyArray<RegExp> = [
-	/^CLIO_WORKER_FAUX(_[A-Z_]+)?$/, // documented as `CLIO_WORKER_FAUX` (+ suffixes)
-	/^CLIO_HOOK_BUDGET_[A-Z_]+_MS$/, // documented as `CLIO_HOOK_BUDGET_<PHASE>_MS`
+	/^CLIO_CODER_WORKER_FAUX(_[A-Z_]+)?$/, // documented as `CLIO_CODER_WORKER_FAUX` (+ suffixes)
+	/^CLIO_CODER_HOOK_BUDGET_[A-Z_]+_MS$/, // documented as `CLIO_CODER_HOOK_BUDGET_<PHASE>_MS`
 ];
 
 function sourceFiles(dir: string): string[] {
@@ -75,12 +75,12 @@ describe("contracts/environment variable inventory", () => {
 		// Both were read as on/off toggles because they sit beside seven that are.
 		// Setting either to `1` writes a file called `1` in the working directory.
 		ok(doc.includes("These two take a path, not `1`"), "the exception to the toggle convention is stated");
-		ok(doc.includes("CLIO_RENDER_TRACE") && doc.includes("CLIO_MEMORY_TRACE"));
+		ok(doc.includes("CLIO_CODER_RENDER_TRACE") && doc.includes("CLIO_CODER_MEMORY_TRACE"));
 	});
 
 	it("warns that the memory trace carries conversation text", () => {
 		const doc = readFileSync(DOC_PATH, "utf8");
-		const row = doc.split("\n").find((line) => line.includes("`CLIO_MEMORY_TRACE`"));
+		const row = doc.split("\n").find((line) => line.includes("`CLIO_CODER_MEMORY_TRACE`"));
 		ok(row !== undefined, "the memory trace has a row");
 		ok(row?.includes("content-bearing"), `the row states what the file contains: ${row}`);
 	});

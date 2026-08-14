@@ -67,7 +67,7 @@ export function setupSteerChannel(filePath: string, onLine: (line: string) => vo
 		}
 	} catch (err) {
 		process.stderr.write(
-			`clio run: failed to setup steer channel: ${err instanceof Error ? err.message : String(err)}\n`,
+			`clio-coder run: failed to setup steer channel: ${err instanceof Error ? err.message : String(err)}\n`,
 		);
 	}
 

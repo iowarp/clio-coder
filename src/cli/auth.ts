@@ -23,10 +23,10 @@ import {
 } from "./shared.js";
 import { terminalColumns, wrapPlain } from "./text-layout.js";
 
-const USAGE = `usage: clio auth list
-       clio auth status [target-or-runtime]
-       clio auth login [target-or-runtime] [--api-key <value>]
-       clio auth logout [target-or-runtime]
+const USAGE = `usage: clio-coder auth list
+       clio-coder auth status [target-or-runtime]
+       clio-coder auth login [target-or-runtime] [--api-key <value>]
+       clio-coder auth logout [target-or-runtime]
 `;
 
 interface ParsedAuthTargetArgs {
@@ -141,7 +141,7 @@ async function promptForLoginTarget(rows: ReadonlyArray<ConnectableProviderRow>)
 				`    ${String(index + 1).padStart(2)}. ${row.entry.runtimeId.padEnd(22)} ${status.padEnd(18)} targets=${row.targetCount}\n`,
 			);
 		}
-		// The picker is where a runtime id copied off `clio configure --list` gets
+		// The picker is where a runtime id copied off `clio-coder configure --list` gets
 		// typed, so it says here which runtimes it can accept.
 		for (const line of wrapPlain(CONNECTABLE_LIST_CAPTION, terminalColumns())) {
 			process.stdout.write(`${line}\n`);
@@ -296,13 +296,13 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	if (resolved.runtime.auth !== "api-key") {
-		// Where a runtime id copied off `clio configure --list` lands when it is
+		// Where a runtime id copied off `clio-coder configure --list` lands when it is
 		// one of the ones this command cannot log into. Saying only that it is
 		// unsupported leaves the user holding a name that another Clio screen
 		// showed them as connectable.
 		printError(`runtime ${resolved.runtime.id} does not support interactive auth login`);
 		process.stderr.write(
-			`  it authenticates as '${resolved.runtime.auth}', outside clio: \`clio auth status ${resolved.runtime.id}\` reports its state, and \`clio configure --list\` shows how it is registered\n`,
+			`  it authenticates as '${resolved.runtime.auth}', outside clio: \`clio-coder auth status ${resolved.runtime.id}\` reports its state, and \`clio-coder configure --list\` shows how it is registered\n`,
 		);
 		return 1;
 	}

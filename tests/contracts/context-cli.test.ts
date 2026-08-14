@@ -22,13 +22,13 @@ function runHandler(
 	const exportName = handler === "context" ? "runContextCommand" : "runInitCommand";
 	const script = [
 		`const mod = await import(${JSON.stringify(moduleUrl)});`,
-		`const code = await mod.${exportName}(JSON.parse(process.env.CLIO_TEST_ARGS ?? "[]"));`,
+		`const code = await mod.${exportName}(JSON.parse(process.env.CLIO_CODER_TEST_ARGS ?? "[]"));`,
 		"process.exitCode = code;",
 	].join("\n");
 	const child = spawnSync(process.execPath, ["--import", TSX_LOADER, "--eval", script], {
 		cwd,
 		encoding: "utf8",
-		env: { ...process.env, ...env, CLIO_TEST_ARGS: JSON.stringify(args) },
+		env: { ...process.env, ...env, CLIO_CODER_TEST_ARGS: JSON.stringify(args) },
 	});
 	if (child.error) throw child.error;
 	return { status: child.status ?? 0, stdout: child.stdout, stderr: child.stderr };
@@ -50,18 +50,18 @@ describe("contracts/context cli router", () => {
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
-	it("prints project context status and exits 0 for bare clio context", () => {
+	it("prints project context status and exits 0 for bare clio-coder context", () => {
 		const result = runHandler(scratch, "context", []);
 
 		strictEqual(result.status, 0);
 		strictEqual(result.stderr, "");
-		match(result.stdout, /^CLIO\.md: none$/m);
+		match(result.stdout, /^CLIO-CODER\.md: none$/m);
 		match(result.stdout, /^preload: /m);
 		match(result.stdout, /^codewiki: absent \(0 entries\)$/m);
 		match(result.stdout, /^adoption: 0 sources, up to date$/m);
 	});
 
-	it("routes clio context init through the shared init handler", () => {
+	it("routes clio-coder context init through the shared init handler", () => {
 		const args = ["--preview", "--heuristic", "--yes"];
 		const direct = runHandler(scratch, "init", args);
 		const routed = runHandler(scratch, "context", ["init", ...args]);
@@ -103,20 +103,20 @@ describe("contracts/context cli router", () => {
 	it("rejects unknown context verbs and refresh flags with usage", () => {
 		const bogus = runHandler(scratch, "context", ["bogus"]);
 		strictEqual(bogus.status, 2);
-		match(bogus.stderr, /clio context: unknown subcommand bogus/);
+		match(bogus.stderr, /clio-coder context: unknown subcommand bogus/);
 		match(bogus.stdout, /Usage:/);
 
 		const refresh = runHandler(scratch, "context", ["refresh", "--bogus"]);
 		strictEqual(refresh.status, 2);
-		match(refresh.stderr, /clio context refresh: unknown flag --bogus/);
+		match(refresh.stderr, /clio-coder context refresh: unknown flag --bogus/);
 		match(refresh.stdout, /Usage:/);
 	});
 
 	/**
-	 * `--rewrite` asks for a draft that ignores the current CLIO.md. When the
+	 * `--rewrite` asks for a draft that ignores the current CLIO-CODER.md. When the
 	 * model pass cannot run, the fallback rebuilds the handbook from that exact
 	 * file and the write is announced as a refresh, so the command used to print
-	 * "refreshed CLIO.md" and exit 0 on a rewrite that never happened. The
+	 * "refreshed CLIO-CODER.md" and exit 0 on a rewrite that never happened. The
 	 * unroutable target here fails admission without touching the network.
 	 */
 	it("refuses to report success for a --rewrite that fell back to the existing handbook", () => {
@@ -126,7 +126,7 @@ describe("contracts/context cli router", () => {
 
 		const result = runHandler(scratch, "init", ["--rewrite", "--yes", "--target", "no-such-target"], {
 			HOME: isolatedHome,
-			CLIO_HOME: join(isolatedHome, ".clio"),
+			CLIO_CODER_HOME: join(isolatedHome, ".clio-coder"),
 			XDG_CONFIG_HOME: join(isolatedHome, "config"),
 			XDG_DATA_HOME: join(isolatedHome, "data"),
 			XDG_STATE_HOME: join(isolatedHome, "state"),
@@ -134,15 +134,15 @@ describe("contracts/context cli router", () => {
 		});
 
 		strictEqual(result.status, 1, `${result.stdout}\n${result.stderr}`);
-		match(result.stderr, /--rewrite did not rewrite CLIO\.md/);
+		match(result.stderr, /--rewrite did not rewrite CLIO-CODER\.md/);
 		match(result.stderr, /--rewrite --heuristic/);
 	});
 
-	it("accepts clio context refresh --wiki without a model call when no wiki exists", () => {
+	it("accepts clio-coder context refresh --wiki without a model call when no wiki exists", () => {
 		const result = runHandler(scratch, "context", ["refresh", "--wiki"]);
 
 		strictEqual(result.status, 0);
 		strictEqual(result.stderr, "");
-		match(result.stdout, /clio context refresh: codewiki rebuilt/);
+		match(result.stdout, /clio-coder context refresh: codewiki rebuilt/);
 	});
 });

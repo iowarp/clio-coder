@@ -137,21 +137,21 @@ describe("contracts/tool-hardening bash cwd pinning (W5)", () => {
 
 describe("contracts/tool-hardening bash spawn env and shell freshness (W5)", () => {
 	afterEach(() => {
-		Reflect.deleteProperty(process.env, "CLIO_INTERACTIVE");
-		Reflect.deleteProperty(process.env, "CLIO_TEST_BLEED");
+		Reflect.deleteProperty(process.env, "CLIO_CODER_INTERACTIVE");
+		Reflect.deleteProperty(process.env, "CLIO_CODER_TEST_BLEED");
 	});
 
 	it("strips the CLIO control keys from the child environment", async () => {
-		process.env.CLIO_INTERACTIVE = "1";
-		const result = await runBashCommand("printenv CLIO_INTERACTIVE || printf unset");
+		process.env.CLIO_CODER_INTERACTIVE = "1";
+		const result = await runBashCommand("printenv CLIO_CODER_INTERACTIVE || printf unset");
 		strictEqual(result.exitCode, 0);
 		strictEqual(result.stdout, "unset");
 	});
 
 	it("gives every call a fresh shell: no state bleed between commands", async () => {
-		const first = await runBashCommand("export CLIO_TEST_BLEED=leaked; cd /tmp; umask 077");
+		const first = await runBashCommand("export CLIO_CODER_TEST_BLEED=leaked; cd /tmp; umask 077");
 		strictEqual(first.exitCode, 0);
-		const second = await runBashCommand('printenv CLIO_TEST_BLEED || printf clean; printf ":"; pwd');
+		const second = await runBashCommand('printenv CLIO_CODER_TEST_BLEED || printf clean; printf ":"; pwd');
 		strictEqual(second.exitCode, 0);
 		ok(second.stdout.startsWith("clean:"), `shell state must not bleed: ${second.stdout}`);
 		ok(!second.stdout.includes("/tmp"), `cwd must reset per call: ${second.stdout}`);
@@ -300,25 +300,25 @@ describe("contracts/tool-hardening find/grep gitignore visibility", () => {
 	it("grep and find answer tree visibility from one shared ignore policy", () => {
 		// Layer 1 (clio-internal) and layer 3 (generated dirs) are force-excluded.
 		const rg = rgIgnoreArgs(scratch, false);
-		for (const excluded of ["!**/.clio/**", "!**/.git/**", "!**/node_modules/**", "!**/dist/**"]) {
+		for (const excluded of ["!**/.clio-coder/**", "!**/.git/**", "!**/node_modules/**", "!**/dist/**"]) {
 			ok(rg.includes(excluded), `rg must exclude ${excluded}: ${rg.join(" ")}`);
 		}
 
 		// include_ignored disables gitignore + generated layers; layer 1 stands.
 		const revealed = rgIgnoreArgs(scratch, true);
 		ok(revealed.includes("--no-ignore"));
-		ok(revealed.includes("!**/.clio/**"));
+		ok(revealed.includes("!**/.clio-coder/**"));
 		ok(!revealed.includes("!**/dist/**"), "include_ignored must lift the generated-dirs layer");
 
 		// Targeting an excluded dir directly must not suppress it.
 		const targeted = rgIgnoreArgs(join(scratch, "node_modules", "pkg"), false);
 		ok(!targeted.includes("!**/node_modules/**"), "explicit node_modules target must stay visible");
-		ok(targeted.includes("!**/.clio/**"));
+		ok(targeted.includes("!**/.clio-coder/**"));
 
 		// fd mirrors the same exclusions through its own argv dialect.
 		const fd = fdIgnoreArgs(scratch, false);
 		ok(fd.includes("--exclude"));
-		for (const dir of [".clio", "node_modules", "dist"]) {
+		for (const dir of [".clio-coder", "node_modules", "dist"]) {
 			ok(fd.includes(dir), `fd must exclude ${dir}: ${fd.join(" ")}`);
 		}
 	});

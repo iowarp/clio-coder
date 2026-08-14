@@ -17,7 +17,7 @@ import { after, describe, it } from "node:test";
 // Deliberately inside a workspace, which is the case the journal exclusion is
 // about: an operator may put the Clio state directory in the repository.
 const JOURNAL_ROOT = mkdtempSync(join(tmpdir(), "clio-writes-journal-"));
-process.env.CLIO_STATE_DIR = join(JOURNAL_ROOT, ".state");
+process.env.CLIO_CODER_STATE_DIR = join(JOURNAL_ROOT, ".state");
 
 import {
 	type FleetContract,
@@ -73,7 +73,7 @@ function repo(files: Record<string, string>): string {
 	roots.push(root);
 	git(root, ["init", "-q", "-b", "main"]);
 	git(root, ["config", "user.email", "fleet@clio.test"]);
-	git(root, ["config", "user.name", "clio fleet"]);
+	git(root, ["config", "user.name", "clio-coder fleet"]);
 	git(root, ["config", "commit.gpgsign", "false"]);
 	for (const [path, contents] of Object.entries(files)) write(root, path, contents);
 	git(root, ["add", "-A"]);
@@ -426,7 +426,7 @@ describe("contracts/write-boundary enforcement", () => {
 	it("does not blame a step for the orchestrator's own journal inside the workspace", () => {
 		git(JOURNAL_ROOT, ["init", "-q", "-b", "main"]);
 		git(JOURNAL_ROOT, ["config", "user.email", "fleet@clio.test"]);
-		git(JOURNAL_ROOT, ["config", "user.name", "clio fleet"]);
+		git(JOURNAL_ROOT, ["config", "user.name", "clio-coder fleet"]);
 		write(JOURNAL_ROOT, "src/a.ts", "a\n");
 		git(JOURNAL_ROOT, ["add", "-A"]);
 		git(JOURNAL_ROOT, ["commit", "-q", "-m", "baseline"]);

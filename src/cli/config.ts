@@ -1,7 +1,7 @@
 import { buildCustomizationGraph, type CustomizationEntry } from "./config-inspect.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio config inspect [--json]
+const HELP = `clio-coder config inspect [--json]
 
 Print the effective-customization graph: what settings, context files, rules,
 skills, prompts, agents, extensions, safety, memory, hooks, and the operator

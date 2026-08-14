@@ -102,7 +102,7 @@ describe("smoke/memory repository scope integration", { concurrency: false }, ()
 		]);
 	}
 
-	it("passes only global and active-repository memory through clio run --agent dispatch", async () => {
+	it("passes only global and active-repository memory through clio-coder run --agent dispatch", async () => {
 		const bootstrap = await runCli(["doctor", "--fix"], { env: scratch.env });
 		strictEqual(bootstrap.code, 0, `stderr=${bootstrap.stderr}`);
 		const repositoryA = join(scratch.dir, "repository-a");
@@ -123,7 +123,7 @@ describe("smoke/memory repository scope integration", { concurrency: false }, ()
 			const result = await runCli(
 				["--no-context-files", "--no-skills", "run", "--agent", "coder", "verify repository memory"],
 				{
-					env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+					env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 					cwd: repositoryB,
 					timeoutMs: 30_000,
 				},
@@ -156,7 +156,7 @@ describe("smoke/memory repository scope integration", { concurrency: false }, ()
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
 			const result = await runCli(["--no-context-files", "--no-skills", "run", "verify repository memory"], {
-				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 				cwd: repositoryB,
 				timeoutMs: 30_000,
 			});

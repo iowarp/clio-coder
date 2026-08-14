@@ -8,7 +8,7 @@ Source implementations: `src/engine/acp/` and `src/cli/acp.ts`.
 
 ## 1. Overview & Protocol Specification
 
-Clio Coder provides a native ACP server via the `clio acp` command. The server implements the open Agent Client Protocol specification (ACP v1 / schema 0.4.5) over standard I/O JSON-RPC 2.0 transport (`src/engine/acp/transport.ts`).
+Clio Coder provides a native ACP server via the `clio-coder acp` command. The server implements the open Agent Client Protocol specification (ACP v1 / schema 0.4.5) over standard I/O JSON-RPC 2.0 transport (`src/engine/acp/transport.ts`).
 
 The ACP server allows external IDEs, editors (such as Zed), and automated orchestration engines to drive Clio Coder sessions over a structured protocol.
 
@@ -27,7 +27,7 @@ graph LR
 The server is invoked via:
 
 ```bash
-clio acp [--cwd PATH] [--permission-timeout MS]
+clio-coder acp [--cwd PATH] [--permission-timeout MS]
 ```
 
 - `--cwd PATH`: Sets the initial workspace root directory for ACP sessions.

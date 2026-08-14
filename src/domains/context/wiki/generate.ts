@@ -53,7 +53,7 @@ export interface WikiGenerateInput {
 	mode: WikiGenerateMode;
 	/**
 	 * Absolute staging directory the writers must target. The harness assembles
-	 * and promotes what it finds here; no writer ever touches .clio/wiki.
+	 * and promotes what it finds here; no writer ever touches .clio-coder/wiki.
 	 */
 	outputDir: string;
 	codewiki: Codewiki;
@@ -145,7 +145,7 @@ const WIKI_PREV_DIR = "wiki-prev";
 const WIKI_LOCK_FILE = "wiki.lock";
 
 function clioDir(cwd: string): string {
-	return join(cwd, ".clio");
+	return join(cwd, ".clio-coder");
 }
 
 /**
@@ -174,7 +174,7 @@ function readLockPid(lockPath: string): number | null {
 type WikiLock = { ok: true; release: () => void } | { ok: false; problem: string };
 
 /**
- * Single-flight lock at .clio/wiki.lock. The file is created with the O_EXCL
+ * Single-flight lock at .clio-coder/wiki.lock. The file is created with the O_EXCL
  * `wx` flag and carries the holder's pid. A live holder blocks the run; a lock
  * left by a crashed run (dead pid) is taken over.
  */
@@ -291,7 +291,7 @@ type PromoteResult = { ok: true } | { ok: false; problems: string[] };
 
 /**
  * Atomically swap staging into place: move the current wiki aside to
- * .clio/wiki-prev, rename staging to .clio/wiki, then write meta.json. On any
+ * .clio-coder/wiki-prev, rename staging to .clio-coder/wiki, then write meta.json. On any
  * failure after the old wiki is moved aside, restore it; if the restore fails,
  * the recovered content is left at wiki-prev and its path is surfaced.
  */
@@ -543,7 +543,7 @@ export async function runWikiGenerate(
 		});
 
 		// The staged content decides the outcome, never whatever raced into
-		// .clio/wiki: only what the harness staged and assembled is trusted. When
+		// .clio-coder/wiki: only what the harness staged and assembled is trusted. When
 		// the assembled tree matches the live wiki byte for byte there is nothing
 		// to swap, so metadata is refreshed in place.
 		if (afterHash === beforeHash && computeWikiContentHash(cwd) === beforeHash && existingMeta) {
@@ -579,7 +579,7 @@ export async function runWikiGenerate(
 			message: pendingCount > 0 ? "wiki partially generated" : "wiki generated",
 			...(pendingCount > 0
 				? {
-						detail: `${pendingCount} page${pendingCount === 1 ? "" : "s"} remain; run \`clio context wiki --update\` to finish`,
+						detail: `${pendingCount} page${pendingCount === 1 ? "" : "s"} remain; run \`clio-coder context wiki --update\` to finish`,
 					}
 				: {}),
 		});

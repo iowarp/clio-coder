@@ -11,24 +11,24 @@ import { type ThinkingLevel, VALID_THINKING_LEVELS } from "../domains/providers/
 import { modelBootstrapGenerate } from "./bootstrap-generate.js";
 
 const HELP = `Usage:
-  clio context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
+  clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
                     [--target <id> [--model <id>] [--thinking <level>]]
 
-Explore the repository and bootstrap the project context in one pass: CLIO.md,
-the codewiki index, and the .clio state. The configured Clio
-target drafts CLIO.md grounded in the existing handbook, codewiki structure, and
-sibling agent context. Existing CLIO.md files are preserved by default; use
+Explore the repository and bootstrap the project context in one pass: CLIO-CODER.md,
+the codewiki index, and the .clio-coder state. The configured Clio
+target drafts CLIO-CODER.md grounded in the existing handbook, codewiki structure, and
+sibling agent context. Existing CLIO-CODER.md files are preserved by default; use
 --propose for an ignored draft, --apply to update the handbook using it as source,
-or --rewrite to replace it with a fresh draft that ignores the current CLIO.md.
+or --rewrite to replace it with a fresh draft that ignores the current CLIO-CODER.md.
 
 Options:
   --preview        show the plan without writing any files
   --heuristic      skip model exploration; use the deterministic generator (offline)
   --adopt          refresh only the managed Imported agent context section
   --global         include global sibling agent context from user home directory
-  --propose        write an ignored .clio/proposals/CLIO-*.md draft when CLIO.md exists
-  --apply          replace an existing CLIO.md with a draft grounded in the existing handbook
-  --rewrite        replace an existing CLIO.md with a fresh draft that ignores it as source
+  --propose        write an ignored .clio-coder/proposals/CLIO-CODER-*.md draft when CLIO-CODER.md exists
+  --apply          replace an existing CLIO-CODER.md with a draft grounded in the existing handbook
+  --rewrite        replace an existing CLIO-CODER.md with a fresh draft that ignores it as source
   --json           emit one machine-readable result object on stdout
   --yes, -y        update .gitignore without prompting
   --target <id>    override the configured Scout target for this noninteractive run
@@ -119,7 +119,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 	const assumeYes = hasFlag(args, "--yes") || hasFlag(args, "-y");
 	const parsed = parseContextInitArgs(args);
 	if (parsed.error) {
-		process.stderr.write(`clio context init: ${parsed.error}\n`);
+		process.stderr.write(`clio-coder context init: ${parsed.error}\n`);
 		process.stdout.write(HELP);
 		return 2;
 	}
@@ -166,7 +166,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 								: {}),
 							onFallback: (err, mode) =>
 								process.stderr.write(
-									`clio context init: model exploration unavailable, using ${mode === "existing" ? "existing CLIO.md" : "heuristic"} (${err.message})\n`,
+									`clio-coder context init: model exploration unavailable, using ${mode === "existing" ? "existing CLIO-CODER.md" : "heuristic"} (${err.message})\n`,
 								),
 						}),
 						modelId: "configured-clio-target",
@@ -197,7 +197,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 				})}\n`,
 			);
 		}
-		// `--rewrite` asks for a draft that ignores the current CLIO.md. When the
+		// `--rewrite` asks for a draft that ignores the current CLIO-CODER.md. When the
 		// model pass fails, the fallback rebuilds the handbook from that very
 		// file and the write is reported as a refresh, so a caller scripting the
 		// exit code is told a rewrite happened that did not. Name what was
@@ -206,14 +206,14 @@ export async function runInitCommand(args: string[]): Promise<number> {
 		// warning line above already names it.
 		if (parsed.options.rewriteClioMd === true && result.telemetry.generation.mode === "existing") {
 			process.stderr.write(
-				"clio context init: --rewrite did not rewrite CLIO.md; the model draft failed and the fallback rebuilt the handbook from the existing file.\n" +
-					"  rerun `clio context init --rewrite` once the bootstrap target answers, or `clio context init --rewrite --heuristic` to replace it with the deterministic draft.\n",
+				"clio-coder context init: --rewrite did not rewrite CLIO-CODER.md; the model draft failed and the fallback rebuilt the handbook from the existing file.\n" +
+					"  rerun `clio-coder context init --rewrite` once the bootstrap target answers, or `clio-coder context init --rewrite --heuristic` to replace it with the deterministic draft.\n",
 			);
 			return 1;
 		}
 		return 0;
 	} catch (err) {
-		process.stderr.write(`clio context init failed: ${err instanceof Error ? err.message : String(err)}\n`);
+		process.stderr.write(`clio-coder context init failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
 	}
 }

@@ -183,7 +183,7 @@ describe("contracts/overlay width — hint elision keeps the keys that act", () 
 /**
  * The in-flow context island is 40 columns wide on a narrow terminal, where its
  * phase trail and progress message both outrun the body. `padAnsi` defaults to
- * an empty marker, so both used to stop mid-word: `… › CLIO.md › sta`.
+ * an empty marker, so both used to stop mid-word: `… › CLIO-CODER.md › sta`.
  */
 describe("contracts/overlay width — context activity island", () => {
 	const activity = {
@@ -467,7 +467,7 @@ describe("contracts/overlay — model selector Esc hierarchy", () => {
 
 /**
  * The CLI's empty states all name the command that fills them
- * ("no targets configured. run `clio configure` ..."), and so do the TUI's
+ * ("no targets configured. run `clio-coder configure` ..."), and so do the TUI's
  * `/tasks` and Fleet Runs overlays. `/prompts` and `/extensions` just said no.
  */
 describe("contracts/empty states name the next step", () => {
@@ -478,7 +478,10 @@ describe("contracts/empty states name the next step", () => {
 		it(`${surface} names how to make one exist`, () => {
 			ok(/^[a-z]/.test(message), `${surface} empty state opens in the product's voice: ${message}`);
 			ok(message.length > 40, `${surface} empty state says more than "none": ${message}`);
-			ok(/\.clio\/|clio [a-z]+ [a-z]+/.test(message), `${surface} empty state names a command or a path: ${message}`);
+			ok(
+				/\.clio-coder\/|clio-coder [a-z]+ [a-z]+/.test(message),
+				`${surface} empty state names a command or a path: ${message}`,
+			);
 		});
 	}
 });

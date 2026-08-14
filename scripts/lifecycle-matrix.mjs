@@ -119,7 +119,7 @@ function isolatedEnv(home, extra = {}) {
 		XDG_STATE_HOME: join(home, ".local", "state"),
 		XDG_CACHE_HOME: join(home, ".cache"),
 		// Never manage residency on any node from a lifecycle test.
-		CLIO_RESIDENCY: "observe",
+		CLIO_CODER_RESIDENCY: "observe",
 		npm_config_update_notifier: "false",
 		...extra,
 	};
@@ -232,7 +232,7 @@ function freshHome(name) {
  * to exercise.
  */
 const PREFIX = () => child("prefix");
-const LAUNCHER = () => join(PREFIX(), "bin", "clio");
+const LAUNCHER = () => join(PREFIX(), "bin", "clio-coder");
 
 function installPackage(env) {
 	mkdirSync(PREFIX(), { recursive: true });
@@ -335,7 +335,7 @@ testCase(3, "first --version and --help from the packaged launcher", () => {
 			["--version prints no v0.2.x string", !/\b0\.2\.\d+/.test(version.stdout)],
 			["--help exits 0", help.exitCode === 0],
 			["--help lists configure", help.stdout.includes("configure")],
-			["--help states global-flag position", help.stdout.includes("clio --no-context-files")],
+			["--help states global-flag position", help.stdout.includes("clio-coder --no-context-files")],
 		],
 	};
 });
@@ -355,9 +355,9 @@ testCase(4, "empty-state non-TTY launch", () => {
 			["exits 0 without a TTY", result.exitCode === 0],
 			["does not open a prompt", !result.stdout.includes("Selection [")],
 			["says no target is configured", /no model target configured/i.test(result.stdout)],
-			["names the command that fixes it", result.stdout.includes("clio configure")],
+			["names the command that fixes it", result.stdout.includes("clio-coder configure")],
 			["does not claim to be ready", !/·\s*ready/.test(result.stdout)],
-			["creates its config root", existsSync(join(home, ".config", "clio"))],
+			["creates its config root", existsSync(join(home, ".config", "clio-coder"))],
 		],
 	};
 });
@@ -382,7 +382,7 @@ testCase(5, "empty-state interactive onboarding, cancel, and completion", async 
 		],
 	});
 	const cancelledText = stripAnsi(cancelled.output);
-	const cancelledSettings = join(cancelHome, ".config", "clio", "settings.yaml");
+	const cancelledSettings = join(cancelHome, ".config", "clio-coder", "settings.yaml");
 	const cancelledWroteTarget = existsSync(cancelledSettings)
 		? /targets:\s*\n\s+- /.test(readFileSync(cancelledSettings, "utf8"))
 		: false;
@@ -408,11 +408,11 @@ testCase(5, "empty-state interactive onboarding, cancel, and completion", async 
 		],
 		{ env: doneEnv },
 	);
-	const doneSettings = join(doneHome, ".config", "clio", "settings.yaml");
+	const doneSettings = join(doneHome, ".config", "clio-coder", "settings.yaml");
 	const doneText = existsSync(doneSettings) ? readFileSync(doneSettings, "utf8") : "";
 
 	return {
-		command: "clio configure (pty, Ctrl-C) ; clio configure --id onboarded …",
+		command: "clio-coder configure (pty, Ctrl-C) ; clio-coder configure --id onboarded …",
 		exitCode: completed.exitCode,
 		stdout: `${cancelledText}\n---\n${completed.stdout}`,
 		stderr: completed.stderr,
@@ -460,7 +460,7 @@ testCase(6, "scripted non-interactive configuration", () => {
 		],
 		{ env, input: "" },
 	);
-	const settingsPath = join(home, ".config", "clio", "settings.yaml");
+	const settingsPath = join(home, ".config", "clio-coder", "settings.yaml");
 	const settings = existsSync(settingsPath) ? readFileSync(settingsPath, "utf8") : "";
 	const targets = run(launcher, ["targets"], { env });
 	return {
@@ -471,7 +471,7 @@ testCase(6, "scripted non-interactive configuration", () => {
 			["exits 0", result.exitCode === 0],
 			["opened no prompt", !result.stdout.includes("Selection")],
 			["wrote the target", settings.includes("id: scripted")],
-			["clio targets lists it", targets.stdout.includes("scripted")],
+			["clio-coder targets lists it", targets.stdout.includes("scripted")],
 			["settings.yaml is owner-writable", (lstatSync(settingsPath).mode & 0o200) !== 0],
 		],
 	};
@@ -482,7 +482,7 @@ testCase(7, "invalid settings and permission failures", () => {
 	const env = isolatedEnv(home);
 	const launcher = LAUNCHER();
 	run(launcher, ["doctor", "--fix"], { env });
-	const settingsPath = join(home, ".config", "clio", "settings.yaml");
+	const settingsPath = join(home, ".config", "clio-coder", "settings.yaml");
 
 	writeFileSync(settingsPath, "version: 1\nidentity: clio\ntypoKey: 3\n", "utf8");
 	const unknownKey = run(launcher, ["doctor"], { env });
@@ -493,7 +493,7 @@ testCase(7, "invalid settings and permission failures", () => {
 	const parseRows = parseError.stdout.trimEnd().split("\n");
 
 	// An unwritable config root, restored before the case returns.
-	const configRoot = assertInRoot(join(home, ".config", "clio"), "unwritable config root");
+	const configRoot = assertInRoot(join(home, ".config", "clio-coder"), "unwritable config root");
 	const originalMode = lstatSync(configRoot).mode & 0o777;
 	let unwritable = { exitCode: null, stdout: "", stderr: "", command: "" };
 	try {
@@ -507,17 +507,17 @@ testCase(7, "invalid settings and permission failures", () => {
 	const afterRecovery = run(launcher, ["doctor"], { env });
 
 	return {
-		command: "clio doctor / targets against an invalid settings.yaml, then an unwritable config root",
+		command: "clio-coder doctor / targets against an invalid settings.yaml, then an unwritable config root",
 		exitCode: unknownKey.exitCode,
 		stdout: `${unknownKey.stdout}\n---\n${parseError.stdout}\n---\n${unwritable.stdout}`,
 		stderr: `${loader.stderr}\n---\n${unwritable.stderr}`,
 		checks: [
 			["an unknown key fails doctor", unknownKey.exitCode === 1],
 			["the unknown key is named", unknownKey.stdout.includes("typoKey")],
-			["the remedy is a command that works", unknownKey.stdout.includes("clio reset --config --force")],
+			["the remedy is a command that works", unknownKey.stdout.includes("clio-coder reset --config --force")],
 			["the loader names the file", /settings\.yaml/.test(loader.stderr)],
 			["the loader says --fix never rewrites settings", /never rewrites settings/.test(loader.stderr)],
-			["the loader names the remedy that works", /clio reset --config --force/.test(loader.stderr)],
+			["the loader names the remedy that works", /clio-coder reset --config --force/.test(loader.stderr)],
 			["a YAML parse error stays one row per finding", parseRows.every((row) => /^(OK|WARN|!!)/.test(row))],
 			["an unwritable config root fails rather than half-succeeding", unwritable.exitCode !== 0],
 			["the unwritable failure names a path", /clio/.test(`${unwritable.stdout}${unwritable.stderr}`)],
@@ -539,7 +539,7 @@ testCase(8, "local target discovery and doctor verification", () => {
 		exitCode: report.exitCode,
 		stdout: `${report.stdout}\n---\n${list.stdout}\n---\n${models.stdout}`,
 		stderr: `${report.stderr}${models.stderr}`,
-		after: snapshot(join(home, ".config", "clio")),
+		after: snapshot(join(home, ".config", "clio-coder")),
 		checks: [
 			["doctor --fix exits 0 on a fresh install", fixed.exitCode === 0],
 			["doctor exits 0 on a fresh install", report.exitCode === 0],
@@ -564,22 +564,22 @@ testCase(8, "local target discovery and doctor verification", () => {
 testCase(9, "a first useful main-agent turn from the packaged install", () => {
 	if (!LIVE) {
 		return {
-			command: 'clio run "…"  (not run)',
+			command: 'clio-coder run "…"  (not run)',
 			exitCode: null,
 			status: "not-run",
 			notes:
 				"Requires a reachable target whose model is already loaded. Every target in the operator's " +
 				"settings names a model that is not currently resident, and loading one is out of scope for " +
-				"this script. Re-run with --live and CLIO_LIFECYCLE_TARGET / CLIO_LIFECYCLE_MODEL once a " +
+				"this script. Re-run with --live and CLIO_CODER_LIFECYCLE_TARGET / CLIO_CODER_LIFECYCLE_MODEL once a " +
 				"suitable target is resident.",
 			checks: [],
 		};
 	}
-	const targetUrl = process.env.CLIO_LIFECYCLE_URL;
-	const model = process.env.CLIO_LIFECYCLE_MODEL;
-	const runtime = process.env.CLIO_LIFECYCLE_RUNTIME ?? "openai-compat";
+	const targetUrl = process.env.CLIO_CODER_LIFECYCLE_URL;
+	const model = process.env.CLIO_CODER_LIFECYCLE_MODEL;
+	const runtime = process.env.CLIO_CODER_LIFECYCLE_RUNTIME ?? "openai-compat";
 	if (!targetUrl || !model) {
-		throw new Error("--live needs CLIO_LIFECYCLE_URL and CLIO_LIFECYCLE_MODEL");
+		throw new Error("--live needs CLIO_CODER_LIFECYCLE_URL and CLIO_CODER_LIFECYCLE_MODEL");
 	}
 	const home = freshHome("live-turn");
 	const env = isolatedEnv(home);
@@ -643,14 +643,14 @@ testCase(10, "reinstall over healthy state", () => {
 		],
 		{ env },
 	);
-	const credentials = join(home, ".config", "clio", "credentials.yaml");
+	const credentials = join(home, ".config", "clio-coder", "credentials.yaml");
 	writeFileSync(credentials, "version: 1\nentries: {}\n# sentinel-preserved\n", "utf8");
 	chmodSync(credentials, 0o600);
-	const before = snapshot(join(home, ".config", "clio"));
+	const before = snapshot(join(home, ".config", "clio-coder"));
 
 	const second = installPackage(env);
-	const after = snapshot(join(home, ".config", "clio"));
-	const settings = readFileSync(join(home, ".config", "clio", "settings.yaml"), "utf8");
+	const after = snapshot(join(home, ".config", "clio-coder"));
+	const settings = readFileSync(join(home, ".config", "clio-coder", "settings.yaml"), "utf8");
 	const creds = readFileSync(credentials, "utf8");
 	const doctor = run(launcher, ["doctor"], { env });
 	return {
@@ -732,8 +732,8 @@ testCase(13, "selective reset", () => {
 	const env = isolatedEnv(home);
 	const launcher = LAUNCHER();
 	run(launcher, ["doctor", "--fix"], { env });
-	const dataRoot = join(home, ".local", "share", "clio");
-	const stateRoot = join(home, ".local", "state", "clio");
+	const dataRoot = join(home, ".local", "share", "clio-coder");
+	const stateRoot = join(home, ".local", "state", "clio-coder");
 	mkdirSync(dataRoot, { recursive: true });
 	mkdirSync(stateRoot, { recursive: true });
 	writeFileSync(join(dataRoot, "durable.txt"), "durable product\n", "utf8");
@@ -749,7 +749,7 @@ testCase(13, "selective reset", () => {
 			["exits 0", result.exitCode === 0],
 			["the state file is gone", !existsSync(join(stateRoot, "ephemeral.txt"))],
 			["the data file survives", existsSync(join(dataRoot, "durable.txt"))],
-			["settings.yaml survives", existsSync(join(home, ".config", "clio", "settings.yaml"))],
+			["settings.yaml survives", existsSync(join(home, ".config", "clio-coder", "settings.yaml"))],
 			["the state root is rebuilt", existsSync(stateRoot)],
 		],
 	};
@@ -770,7 +770,7 @@ testCase(14, "uninstall preserving the binary", () => {
 		after,
 		checks: [
 			["exits 0", result.exitCode === 0],
-			["the config root is gone", !existsSync(join(home, ".config", "clio", "settings.yaml"))],
+			["the config root is gone", !existsSync(join(home, ".config", "clio-coder", "settings.yaml"))],
 			["the launcher is untouched", existsSync(launcher)],
 			["the launcher still runs", stillRuns.exitCode === 0],
 		],
@@ -781,9 +781,9 @@ testCase(15, "uninstall including an owned launcher symlink", () => {
 	const home = freshHome("uninstall-with-bin");
 	const binDir = child("bin-owned");
 	mkdirSync(binDir, { recursive: true });
-	const env = isolatedEnv(home, { CLIO_BIN_DIR: binDir });
+	const env = isolatedEnv(home, { CLIO_CODER_BIN_DIR: binDir });
 	const launcher = LAUNCHER();
-	const link = join(binDir, "clio");
+	const link = join(binDir, "clio-coder");
 	symlinkSync(join(PREFIX(), "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js"), link);
 	run(launcher, ["doctor", "--fix"], { env });
 	const before = snapshot(binDir);
@@ -795,9 +795,9 @@ testCase(15, "uninstall including an owned launcher symlink", () => {
 		after,
 		checks: [
 			["exits 0", result.exitCode === 0],
-			["the owned link is removed", !existsSync(link) && !after.entries.some((e) => e.path === "clio")],
+			["the owned link is removed", !existsSync(link) && !after.entries.some((e) => e.path === "clio-coder")],
 			["the removal is reported", /clio/.test(result.stdout)],
-			["the config root is gone", !existsSync(join(home, ".config", "clio", "settings.yaml"))],
+			["the config root is gone", !existsSync(join(home, ".config", "clio-coder", "settings.yaml"))],
 		],
 	};
 });
@@ -806,22 +806,22 @@ testCase(16, "refusal to delete an unowned real file or a link elsewhere", () =>
 	const home = freshHome("unowned");
 	const binDir = child("bin-unowned");
 	mkdirSync(binDir, { recursive: true });
-	const env = isolatedEnv(home, { CLIO_BIN_DIR: binDir });
+	const env = isolatedEnv(home, { CLIO_CODER_BIN_DIR: binDir });
 	const launcher = LAUNCHER();
 	run(launcher, ["doctor", "--fix"], { env });
 
 	// A real file called clio that Clio did not create.
-	const realFile = join(binDir, "clio");
-	writeFileSync(realFile, "#!/bin/sh\necho not clio\n", "utf8");
+	const realFile = join(binDir, "clio-coder");
+	writeFileSync(realFile, "#!/bin/sh\necho not clio-coder\n", "utf8");
 	chmodSync(realFile, 0o755);
 	const keptFile = run(launcher, ["uninstall", "--remove-binary", "--force"], { env });
-	const fileSurvived = existsSync(realFile) && readFileSync(realFile, "utf8").includes("not clio");
+	const fileSurvived = existsSync(realFile) && readFileSync(realFile, "utf8").includes("not clio-coder");
 
 	// A link into a different clio installation.
 	removeUnderRoot(realFile, "unowned real file");
-	const otherInstall = child("other-clio", "dist", "cli");
+	const otherInstall = child("other-clio-coder", "dist", "cli");
 	mkdirSync(otherInstall, { recursive: true });
-	writeFileSync(join(otherInstall, "index.js"), "// a different clio installation\n", "utf8");
+	writeFileSync(join(otherInstall, "index.js"), "// a different clio-coder installation\n", "utf8");
 	symlinkSync(join(otherInstall, "index.js"), realFile);
 	run(launcher, ["doctor", "--fix"], { env });
 	const keptLink = run(launcher, ["uninstall", "--remove-binary", "--force"], { env });
@@ -835,7 +835,7 @@ testCase(16, "refusal to delete an unowned real file or a link elsewhere", () =>
 	const danglingRemoved = !lstatSyncSafe(realFile);
 
 	return {
-		command: "clio uninstall --remove-binary --force against a real file, a foreign link, and a dangling link",
+		command: "clio-coder uninstall --remove-binary --force against a real file, a foreign link, and a dangling link",
 		exitCode: keptFile.exitCode,
 		stdout: `${keptFile.stdout}\n---\n${keptLink.stdout}\n---\n${dangling.stdout}`,
 		stderr: `${keptFile.stderr}\n---\n${keptLink.stderr}\n---\n${dangling.stderr}`,
@@ -844,7 +844,7 @@ testCase(16, "refusal to delete an unowned real file or a link elsewhere", () =>
 			["preserving it is reported, not silent", /clio/.test(`${keptFile.stdout}${keptFile.stderr}`)],
 			["a link into another installation is preserved", linkSurvived],
 			["preserving that is reported too", /clio/.test(`${keptLink.stdout}${keptLink.stderr}`)],
-			["a dangling clio link is removed", danglingRemoved],
+			["a dangling clio-coder link is removed", danglingRemoved],
 		],
 	};
 });
@@ -863,7 +863,7 @@ testCase(17, "reinstall after uninstall", () => {
 	const launcher = LAUNCHER();
 	run(launcher, ["doctor", "--fix"], { env });
 	const removed = run(launcher, ["uninstall", "--force"], { env });
-	const gone = !existsSync(join(home, ".config", "clio", "settings.yaml"));
+	const gone = !existsSync(join(home, ".config", "clio-coder", "settings.yaml"));
 	const again = installPackage(env);
 	const rebuilt = run(launcher, ["doctor", "--fix"], { env });
 	const doctor = run(launcher, ["doctor"], { env });
@@ -872,7 +872,7 @@ testCase(17, "reinstall after uninstall", () => {
 		exitCode: doctor.exitCode,
 		stdout: `${removed.stdout}\n---\n${doctor.stdout}`,
 		stderr: `${removed.stderr}${again.stderr}`,
-		after: snapshot(join(home, ".config", "clio")),
+		after: snapshot(join(home, ".config", "clio-coder")),
 		checks: [
 			["uninstall exits 0", removed.exitCode === 0],
 			["state is actually gone", gone],
@@ -935,7 +935,7 @@ testCase(18, "TUI task journeys at narrow, normal, and wide sizes", async () => 
 		checks.push([`${cols}x${rows} opens /help`, /help|command/i.test(lines.join("\n"))]);
 	}
 	return {
-		command: "clio (pty) at 40x12, 80x24, 160x50 with /help and Escape",
+		command: "clio-coder (pty) at 40x12, 80x24, 160x50 with /help and Escape",
 		exitCode: 0,
 		stdout: clip(transcripts.join("\n\n")),
 		stderr: "",
@@ -994,7 +994,7 @@ testCase(19, "NO_COLOR, non-TTY, SIGINT, and terminal teardown", async () => {
 	const count = (text, needle) => text.split(needle).length - 1;
 
 	return {
-		command: "clio (pty) with and without NO_COLOR, then piped",
+		command: "clio-coder (pty) with and without NO_COLOR, then piped",
 		exitCode: colored.exitCode,
 		stdout: clip(`non-tty:\n${nonTty.stdout}`),
 		stderr: nonTty.stderr,
@@ -1018,13 +1018,13 @@ testCase(20, "docs and help commands executed exactly as written", () => {
 	const launcher = LAUNCHER();
 	run(launcher, ["doctor", "--fix"], { env });
 
-	// Every fenced `clio …` invocation in the README and the lifecycle doc that
+	// Every fenced `clio-coder …` invocation in the README and the lifecycle doc that
 	// is safe to execute: no network, no destructive flag, no placeholder.
 	const sources = ["README.md", join("docs", "installation-and-lifecycle.md"), join("docs", "commands-and-modes.md")];
 	const commands = new Set();
 	for (const source of sources) {
 		const text = readFileSync(join(REPO_ROOT, source), "utf8");
-		for (const match of text.matchAll(/^\s*(?:\$\s*)?(clio [^\n`|>&$]*)$/gm)) {
+		for (const match of text.matchAll(/^\s*(?:\$\s*)?(clio-coder [^\n`|>&$]*)$/gm)) {
 			const raw = (match[1] ?? "").trim().replace(/\s+#.*$/, "");
 			if (raw.length === 0) continue;
 			if (/[<>[\]{}]|\.\.\.|YOUR|PATH|\.\.\./.test(raw)) continue;
@@ -1055,7 +1055,7 @@ testCase(20, "docs and help commands executed exactly as written", () => {
 			// Some print a `usage:` line and some open with the invocation form.
 			// Either is help; what matters is that it lands on stdout, names the
 			// subcommand, and does not go out as an error.
-			onStdout: result.stdout.includes(`clio ${topic}`),
+			onStdout: result.stdout.includes(`clio-coder ${topic}`),
 			quiet: result.stderr.trim().length === 0,
 		};
 	});

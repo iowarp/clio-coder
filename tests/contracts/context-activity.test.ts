@@ -69,8 +69,8 @@ describe("context activity island", () => {
 
 		const rendered = stripAnsi(formatContextActivityIslandLines(current, CONTEXT_ISLAND_WIDTH, 2000, 1).join("\n"));
 		ok(rendered.includes("Context Wiki"), rendered);
-		// A wiki run never reaches the CLIO.md phase, so the trail must not offer it.
-		strictEqual(rendered.includes("CLIO.md"), false, rendered);
+		// A wiki run never reaches the CLIO-CODER.md phase, so the trail must not offer it.
+		strictEqual(rendered.includes("CLIO-CODER.md"), false, rendered);
 		ok(rendered.includes("pages"), rendered);
 	});
 
@@ -84,7 +84,7 @@ describe("context activity island", () => {
 	it("labels the generation phase neutrally for Scout and heuristic drafts", () => {
 		const rendered = stripAnsi(
 			formatContextActivityIslandLines(
-				makeActivity({ phase: "generate", message: "drafting CLIO.md with heuristic" }),
+				makeActivity({ phase: "generate", message: "drafting CLIO-CODER.md with heuristic" }),
 				CONTEXT_ISLAND_WIDTH,
 				2000,
 				1,

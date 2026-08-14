@@ -12,14 +12,14 @@ Source of truth: `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/ev
 ## Evidence CLI
 
 ```bash
-clio evidence build --run <runId>
-clio evidence build --session <sessionId>
-clio evidence build --eval <evalId>
-clio evidence inspect <evidenceId>
-clio evidence list
+clio-coder evidence build --run <runId>
+clio-coder evidence build --session <sessionId>
+clio-coder evidence build --eval <evalId>
+clio-coder evidence inspect <evidenceId>
+clio-coder evidence list
 ```
 
-`clio evidence inspect <id>` requires a valid evidence artifact ID. If the requested artifact does not exist on disk, it outputs `error: evidence artifact not found: <id> (see clio evidence list)` and exits with code 1.
+`clio-coder evidence inspect <id>` requires a valid evidence artifact ID. If the requested artifact does not exist on disk, it outputs `error: evidence artifact not found: <id> (see clio-coder evidence list)` and exits with code 1.
 
 Evidence IDs are deterministic:
 
@@ -70,7 +70,7 @@ Eval evidence adds `eval-result.json` and uses empty receipt/protected-artifact 
 | `protected-artifacts.json` | Protected artifact state/events. |
 | `findings.json` / `findings.md` | Structured and readable findings. |
 
-When a run was chained (pipeline), composed with a persona override, or escalated for a permission, `transcript.md` and `trace.cleaned.jsonl` surface the receipt's provenance field sets, and `clio evidence inspect` prints them as a `provenance <runId>:` block. The field paths, types, and stability labels are documented in the [receipt provenance schema](./observability.md#receipt-fields-for-dispatch-provenance).
+When a run was chained (pipeline), composed with a persona override, or escalated for a permission, `transcript.md` and `trace.cleaned.jsonl` surface the receipt's provenance field sets, and `clio-coder evidence inspect` prints them as a `provenance <runId>:` block. The field paths, types, and stability labels are documented in the [receipt provenance schema](./observability.md#receipt-fields-for-dispatch-provenance).
 
 ---
 
@@ -165,11 +165,11 @@ Mutation-report receipts are grounded directly against observed tool events reco
 ## Memory CLI
 
 ```bash
-clio memory list
-clio memory propose --from-evidence <evidenceId>
-clio memory approve <memoryId>
-clio memory reject <memoryId>
-clio memory prune --stale
+clio-coder memory list
+clio-coder memory propose --from-evidence <evidenceId>
+clio-coder memory approve <memoryId>
+clio-coder memory reject <memoryId>
+clio-coder memory prune --stale
 ```
 
 Memory records live in:
@@ -218,7 +218,7 @@ Rendered memory lines always cite record ID, scope, lesson, and evidence IDs. Th
 
 ### Repository-scoped identity
 
-Repository memory is selected by an exact canonical absolute-path identity. The interactive orchestrator and `clio run --agent` compute that identity from the active working directory; symlink aliases collapse to the same key. A repository move, a different Git worktree path, a subdirectory launch, a malformed identity, or a missing identity does not inherit another repository's memory. Global records are unaffected.
+Repository memory is selected by an exact canonical absolute-path identity. The interactive orchestrator and `clio-coder run --agent` compute that identity from the active working directory; symlink aliases collapse to the same key. A repository move, a different Git worktree path, a subdirectory launch, a malformed identity, or a missing identity does not inherit another repository's memory. Global records are unaffected.
 
 Every `scope: "repo"` record must carry:
 

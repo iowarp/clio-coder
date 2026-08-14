@@ -211,11 +211,11 @@ async function drainEvents(events: AsyncIterableIterator<unknown>): Promise<unkn
 function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promise<T> {
 	const originalEnv = { ...process.env };
 	const scratch = mkdtempSync(join(tmpdir(), "clio-dispatch-"));
-	process.env.CLIO_HOME = scratch;
-	process.env.CLIO_DATA_DIR = join(scratch, "data");
-	process.env.CLIO_CONFIG_DIR = join(scratch, "config");
-	process.env.CLIO_STATE_DIR = join(scratch, "state");
-	process.env.CLIO_CACHE_DIR = join(scratch, "cache");
+	process.env.CLIO_CODER_HOME = scratch;
+	process.env.CLIO_CODER_DATA_DIR = join(scratch, "data");
+	process.env.CLIO_CODER_CONFIG_DIR = join(scratch, "config");
+	process.env.CLIO_CODER_STATE_DIR = join(scratch, "state");
+	process.env.CLIO_CODER_CACHE_DIR = join(scratch, "cache");
 	resetXdgCache();
 	return Promise.resolve()
 		.then(() => fn(scratch))
@@ -425,9 +425,9 @@ async function receiptForRuntime(input: {
 	const configContract = context.getContract<ConfigContract>("config");
 	const settings = configContract?.get() as { autonomy: TestAutonomy } | undefined;
 	if (settings) settings.autonomy = input.autonomy;
-	const originalGate = process.env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS;
-	if (input.allowExternalFullAccess === true) process.env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS = "1";
-	else Reflect.deleteProperty(process.env, "CLIO_ALLOW_EXTERNAL_FULL_ACCESS");
+	const originalGate = process.env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS;
+	if (input.allowExternalFullAccess === true) process.env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS = "1";
+	else Reflect.deleteProperty(process.env, "CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS");
 	let capturedSpec: WorkerSpec | null = null;
 	const bundle = makeDispatchBundle(context, {
 		spawnWorker: (spec) => {
@@ -452,8 +452,8 @@ async function receiptForRuntime(input: {
 		return { autonomyEnforcement: receipt.autonomyEnforcement, spec: capturedSpec };
 	} finally {
 		await bundle.extension.stop?.();
-		if (originalGate === undefined) Reflect.deleteProperty(process.env, "CLIO_ALLOW_EXTERNAL_FULL_ACCESS");
-		else process.env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS = originalGate;
+		if (originalGate === undefined) Reflect.deleteProperty(process.env, "CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS");
+		else process.env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS = originalGate;
 	}
 }
 
@@ -1921,7 +1921,7 @@ describe("contracts/dispatch", () => {
 			);
 		}
 
-		// Missing CLIO.md (null project): no project message either.
+		// Missing CLIO-CODER.md (null project): no project message either.
 		const withoutProject = buildDynamicPromptMessages(req, {
 			capabilityClass: "workspace-edit",
 			projectContextTier: "bounded",
@@ -2195,7 +2195,7 @@ describe("contracts/dispatch", () => {
 			// tools, so it normalizes to read-only → none), so evidence can
 			// distinguish policy from pre-provenance receipts. A none-tier run
 			// still gets the workspace root, and the provenance says so: `tier`
-			// is the CLIO.md policy, `chars`/`sections` are what was sent.
+			// is the CLIO-CODER.md policy, `chars`/`sections` are what was sent.
 			const provenance = (receipt as { projectContext?: { tier: string; chars?: number; sections?: string[] } })
 				.projectContext;
 			strictEqual(provenance?.tier, "none");
@@ -5929,8 +5929,8 @@ describe("contracts/dispatch tool activity honesty", () => {
 			status: { capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true } },
 		});
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
-		const originalRigor = process.env.CLIO_RIGOR;
-		process.env.CLIO_RIGOR = "high";
+		const originalRigor = process.env.CLIO_CODER_RIGOR;
+		process.env.CLIO_CODER_RIGOR = "high";
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => ({
 				pid: 8103,
@@ -5979,8 +5979,8 @@ describe("contracts/dispatch tool activity honesty", () => {
 			strictEqual(receipt.outcome, "failed");
 			strictEqual(receipt.exitCode, 1);
 		} finally {
-			if (originalRigor === undefined) delete process.env.CLIO_RIGOR;
-			else process.env.CLIO_RIGOR = originalRigor;
+			if (originalRigor === undefined) delete process.env.CLIO_CODER_RIGOR;
+			else process.env.CLIO_CODER_RIGOR = originalRigor;
 			await bundle.extension.stop?.();
 		}
 	});
@@ -5993,8 +5993,8 @@ describe("contracts/dispatch tool activity honesty", () => {
 			status: { capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true } },
 		});
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
-		const originalRigor = process.env.CLIO_RIGOR;
-		process.env.CLIO_RIGOR = "high";
+		const originalRigor = process.env.CLIO_CODER_RIGOR;
+		process.env.CLIO_CODER_RIGOR = "high";
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => ({
 				pid: 8104,
@@ -6051,8 +6051,8 @@ describe("contracts/dispatch tool activity honesty", () => {
 			strictEqual(receipt.exitCode, 0);
 			deepStrictEqual(receipt.verification, { state: "verified", basis: "validation-tool" });
 		} finally {
-			if (originalRigor === undefined) delete process.env.CLIO_RIGOR;
-			else process.env.CLIO_RIGOR = originalRigor;
+			if (originalRigor === undefined) delete process.env.CLIO_CODER_RIGOR;
+			else process.env.CLIO_CODER_RIGOR = originalRigor;
 			await bundle.extension.stop?.();
 		}
 	});

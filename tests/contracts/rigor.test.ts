@@ -1,6 +1,6 @@
 /**
  * Slice 4: rigor resolution. Rigor is one attribute, orthogonal to autonomy.
- * These contracts pin the override grammar (`CLIO_RIGOR` parsing), the
+ * These contracts pin the override grammar (`CLIO_CODER_RIGOR` parsing), the
  * repo-derived default keyed off a validation-contract file at the workspace
  * root, and the precedence of an explicit override over the repo default.
  */
@@ -48,9 +48,9 @@ describe("contracts/rigor resolveRigor", () => {
 		strictEqual(resolveRigor({ cwd: dir }), "high");
 	});
 
-	it("recognizes the .clio/validation.yaml convention too", () => {
-		mkdirSync(path.join(dir, ".clio"), { recursive: true });
-		writeFileSync(path.join(dir, ".clio", "validation.yaml"), "rules: []\n");
+	it("recognizes the .clio-coder/validation.yaml convention too", () => {
+		mkdirSync(path.join(dir, ".clio-coder"), { recursive: true });
+		writeFileSync(path.join(dir, ".clio-coder", "validation.yaml"), "rules: []\n");
 		strictEqual(resolveRigor({ cwd: dir }), "high");
 	});
 

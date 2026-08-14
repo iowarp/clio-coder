@@ -7,7 +7,7 @@
  * - `high`: an unvalidated completion claim re-prompts the model to run
  *   validation or state a limitation before the turn settles.
  *
- * Rigor resolves from a per-session / per-dispatch override (the `CLIO_RIGOR`
+ * Rigor resolves from a per-session / per-dispatch override (the `CLIO_CODER_RIGOR`
  * env var today) layered over a repo-derived default. The repo-derived default
  * is `high` when the workspace declares a scientific-validation contract by the
  * documented path convention below, and `normal` otherwise. This keeps the
@@ -27,8 +27,8 @@ export type Rigor = "normal" | "high";
  * evidence bar by committing a validation contract at its root.
  */
 const VALIDATION_CONTRACT_FILES: ReadonlyArray<string> = [
-	path.join(".clio", "validation.yaml"),
-	path.join(".clio", "validation.yml"),
+	path.join(".clio-coder", "validation.yaml"),
+	path.join(".clio-coder", "validation.yml"),
 	"validation.yaml",
 	"validation.yml",
 	"VALIDATION.md",
@@ -46,7 +46,7 @@ export function resolveRigor(options: { cwd?: string; override?: Rigor | null })
 }
 
 /**
- * Parse a rigor override string (e.g. from the `CLIO_RIGOR` env var). Accepts
+ * Parse a rigor override string (e.g. from the `CLIO_CODER_RIGOR` env var). Accepts
  * `"high"` or `"normal"` case-insensitively after trimming; anything else
  * yields `null` (no override).
  */

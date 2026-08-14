@@ -58,7 +58,7 @@ export function startSession(input: {
 
 export function persistSessionMeta(state: SessionManagerState): void {
 	// The other meta.json writer. `sessionPaths` mkdirs on the way, so a metadata
-	// update landing after `clio uninstall` rebuilds the state root the same way
+	// update landing after `clio-coder uninstall` rebuilds the state root the same way
 	// the shutdown checkpoint did. See core/xdg.ts stateRootRemoved().
 	if (stateRootRemoved()) return;
 	atomicWrite(sessionPaths(state.meta).meta, JSON.stringify(state.meta, null, 2));

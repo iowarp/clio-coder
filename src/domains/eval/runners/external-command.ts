@@ -77,7 +77,7 @@ export async function runExternalCommandRunner(
 	let stdout = "";
 	let stderr = "";
 	let wallTimeMs = 0;
-	// An external command is an opaque subprocess: it may be a `clio run --json`
+	// An external command is an opaque subprocess: it may be a `clio-coder run --json`
 	// whose usage events cross this stdout, or a harness script that runs Clio
 	// out of sight. Usage observed on the stream is reported; nothing observed
 	// is reported as unmeasured, never as zero cost.

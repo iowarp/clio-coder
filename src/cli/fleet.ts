@@ -1,12 +1,12 @@
 /**
- * `clio fleet` operator surface.
+ * `clio-coder fleet` operator surface.
  *
- *   clio fleet list                      enumerate .clio/fleets/*.md with validity
- *   clio fleet run <name> --var k=v ...  preflight + execute a fleet contract
- *   clio fleet status [--json]           runtime snapshot from the durable ledger
- *   clio fleet drain|resume [--json]      close or reopen durable dispatch admission
+ *   clio-coder fleet list                      enumerate .clio-coder/fleets/*.md with validity
+ *   clio-coder fleet run <name> --var k=v ...  preflight + execute a fleet contract
+ *   clio-coder fleet status [--json]           runtime snapshot from the durable ledger
+ *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
  *
- * Fleet contracts are repo-owned policy (.clio/fleets/<name>.md). Preflight
+ * Fleet contracts are repo-owned policy (.clio-coder/fleets/<name>.md). Preflight
  * fails with zero side effects: nothing is dispatched until the contract
  * parses, every agent resolves, every step scope passes the orchestrator
  * subset check, and the budget gate is open.
@@ -76,12 +76,12 @@ import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 
-const HELP = `clio fleet <subcommand>
+const HELP = `clio-coder fleet <subcommand>
 
 Repo-owned fleet contracts and the dispatch status surface.
 
 Subcommands:
-  list                          list .clio/fleets/*.md contracts with validation status
+  list                          list .clio-coder/fleets/*.md contracts with validation status
   run <name> [--var k=v ...]    preflight and execute a fleet contract
        [--json]                 emit step receipts as JSON
   status [--json]               show running, retrying, and total dispatch state
@@ -97,7 +97,7 @@ Notes:
 `;
 
 function fail(message: string): number {
-	process.stderr.write(`clio fleet: ${message}\n`);
+	process.stderr.write(`clio-coder fleet: ${message}\n`);
 	return 2;
 }
 
@@ -165,7 +165,7 @@ function listingLine(entry: FleetContractListing, state: string, detail: string)
 function runList(): number {
 	const listings = listFleetContracts(process.cwd());
 	if (listings.length === 0) {
-		process.stdout.write("no fleet contracts found (.clio/fleets/*.md)\n");
+		process.stdout.write("no fleet contracts found (.clio-coder/fleets/*.md)\n");
 		return 0;
 	}
 	for (const entry of listings) {
@@ -222,7 +222,7 @@ function contractAgents(
 function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): string | null {
 	for (const step of contractAgents(contract)) {
 		if (!deps.agents.get(step.agent)) {
-			return `unknown agent '${step.agent}' (step '${step.id}' must name a recipe from 'clio agents')`;
+			return `unknown agent '${step.agent}' (step '${step.id}' must name a recipe from 'clio-coder agents')`;
 		}
 		const requested = step.scope === "readonly" ? deps.safety.scopes.readonly : deps.safety.scopes.workspace;
 		if (!deps.safety.isSubset(requested, deps.safety.scopes.workspace)) {
@@ -249,7 +249,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	if (error !== undefined) return fail(error);
 	const json = rest.includes("--json");
 	const name = rest.find((arg) => !arg.startsWith("-"));
-	if (!name) return fail("usage: clio fleet run <name> [--var key=value ...] [--json]");
+	if (!name) return fail("usage: clio-coder fleet run <name> [--var key=value ...] [--json]");
 
 	// Phase 1: zero-side-effect validation. Parse and render strictly before
 	// any domain boots or any process spawns.
@@ -266,7 +266,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		// The listing calls this state `setup` and says how to leave it; the run
 		// path is where a user meets it with intent, so it says the same thing.
 		if (err instanceof FleetCommandRegistryMissingError) {
-			process.stderr.write(`clio fleet: ${err.message}\n  ${FLEET_COMMANDS_REMEDY}\n`);
+			process.stderr.write(`clio-coder fleet: ${err.message}\n  ${FLEET_COMMANDS_REMEDY}\n`);
 			return 2;
 		}
 		return fail(err instanceof Error ? err.message : String(err));
@@ -820,7 +820,7 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 		case "resume":
 			return runAdmissionControl("resume", args.slice(1));
 		default:
-			process.stderr.write(`clio fleet: unknown subcommand '${sub}'\n`);
+			process.stderr.write(`clio-coder fleet: unknown subcommand '${sub}'\n`);
 			process.stderr.write(HELP);
 			return 2;
 	}

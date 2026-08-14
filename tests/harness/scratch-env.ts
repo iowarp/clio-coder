@@ -1,7 +1,7 @@
 /**
  * One home for Clio state isolation in tests. Every test that touches Clio state
- * needs a throwaway `CLIO_HOME` with the five per-root `CLIO_*_DIR` vars pointing
- * inside it (per-root vars beat `CLIO_HOME`, so they must move in lockstep), and
+ * needs a throwaway `CLIO_CODER_HOME` with the five per-root `CLIO_CODER_*_DIR` vars pointing
+ * inside it (per-root vars beat `CLIO_CODER_HOME`, so they must move in lockstep), and
  * in-process tests must also reset the XDG cache so `src/` re-resolves the scratch
  * dirs. This module is the single implementation the harness and contract tests
  * delegate to, in three flavors matching the three call sites:
@@ -18,20 +18,20 @@ import { join } from "node:path";
 import { resetXdgCache } from "../../src/core/xdg.js";
 
 export interface ScratchClioEnvOptions {
-	/** Set CLIO_REQUIRE_HOME_PREFIX=1 (child-process/binary isolation wants this; in-process tests do not). */
+	/** Set CLIO_CODER_REQUIRE_HOME_PREFIX=1 (child-process/binary isolation wants this; in-process tests do not). */
 	requireHomePrefix?: boolean;
 }
 
 /** The CLIO_* env vars that isolate all Clio state under `dir`. */
 export function scratchClioEnvVars(dir: string, options: ScratchClioEnvOptions = {}): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {
-		CLIO_HOME: dir,
-		CLIO_DATA_DIR: join(dir, "data"),
-		CLIO_CONFIG_DIR: join(dir, "config"),
-		CLIO_STATE_DIR: join(dir, "state"),
-		CLIO_CACHE_DIR: join(dir, "cache"),
+		CLIO_CODER_HOME: dir,
+		CLIO_CODER_DATA_DIR: join(dir, "data"),
+		CLIO_CODER_CONFIG_DIR: join(dir, "config"),
+		CLIO_CODER_STATE_DIR: join(dir, "state"),
+		CLIO_CODER_CACHE_DIR: join(dir, "cache"),
 	};
-	if (options.requireHomePrefix) env.CLIO_REQUIRE_HOME_PREFIX = "1";
+	if (options.requireHomePrefix) env.CLIO_CODER_REQUIRE_HOME_PREFIX = "1";
 	return env;
 }
 
@@ -43,7 +43,7 @@ export interface ScratchHome {
 
 /**
  * Child-process isolation: make a fresh scratch home and return its dir, the
- * CLIO_* env to hand a spawned binary (including CLIO_REQUIRE_HOME_PREFIX), and a
+ * CLIO_* env to hand a spawned binary (including CLIO_CODER_REQUIRE_HOME_PREFIX), and a
  * cleanup. Does not touch process.env — the child reads env fresh.
  */
 export function makeScratchHome(prefix = "clio-e2e-"): ScratchHome {

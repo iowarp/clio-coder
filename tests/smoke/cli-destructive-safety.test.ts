@@ -1,5 +1,5 @@
 /**
- * Destructive-transition safety for `clio reset` and `clio uninstall`.
+ * Destructive-transition safety for `clio-coder reset` and `clio-coder uninstall`.
  *
  * Every case here begins after something has already gone wrong: a path that
  * will not delete, or a launcher symlink that belongs to somebody else. None
@@ -77,7 +77,7 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		match(result.stderr, /did not remove everything/);
 		match(result.stderr, /1 path\(s\) could not be removed/);
 		match(result.stderr, /data\s+.*data/);
-		match(result.stderr, /clio reset --data --cache --force/);
+		match(result.stderr, /clio-coder reset --data --cache --force/);
 		ok(existsSync(locked), "the path that refused to delete is still named as surviving");
 		strictEqual(existsSync(cacheMarker), false, "a later root is still attempted after an earlier one fails");
 		ok(existsSync(join(scratch.dir, "cache")), "the skeleton is rebuilt even after a partial failure");
@@ -112,9 +112,9 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		strictEqual(added.length, 0, `a side-effect-free preview wrote: ${added.join(", ")}`);
 	});
 
-	it("keeps a launcher symlink that points at a different clio installation", async () => {
+	it("keeps a launcher symlink that points at a different clio-coder installation", async () => {
 		const binDir = join(scratch.dir, "bin");
-		const launcher = join(binDir, "clio");
+		const launcher = join(binDir, "clio-coder");
 		const foreign = join(scratch.dir, "other-clio", "dist", "cli", "index.js");
 		mkdirSync(binDir, { recursive: true });
 		mkdirSync(join(scratch.dir, "other-clio", "dist", "cli"), { recursive: true });
@@ -123,7 +123,7 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		symlinkSync(foreign, launcher);
 
 		const result = await runCli(["uninstall", "--remove-binary", "--force"], {
-			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+			env: { ...scratch.env, CLIO_CODER_BIN_DIR: binDir },
 		});
 
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
@@ -134,9 +134,9 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		ok(existsSync(foreign), "and so does the installation it points at");
 	});
 
-	it("keeps a launcher symlink whose target is a directory named like a clio entry", async () => {
+	it("keeps a launcher symlink whose target is a directory named like a clio-coder entry", async () => {
 		const binDir = join(scratch.dir, "bin");
-		const launcher = join(binDir, "clio");
+		const launcher = join(binDir, "clio-coder");
 		// The old ownership test was a suffix match on the target path, so a
 		// directory carrying the entry's name passed it and was unlinked.
 		const trap = join(scratch.dir, "trap", "dist", "cli", "index.js");
@@ -146,7 +146,7 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		symlinkSync(trap, launcher);
 
 		const result = await runCli(["uninstall", "--remove-binary", "--force"], {
-			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+			env: { ...scratch.env, CLIO_CODER_BIN_DIR: binDir },
 		});
 
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
@@ -154,15 +154,15 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		ok(existsSync(launcher), "a symlink to a directory is never a launcher this installation owns");
 	});
 
-	it("removes a dangling launcher symlink that names a clio entry", async () => {
+	it("removes a dangling launcher symlink that names a clio-coder entry", async () => {
 		const binDir = join(scratch.dir, "bin");
-		const launcher = join(binDir, "clio");
+		const launcher = join(binDir, "clio-coder");
 		mkdirSync(binDir, { recursive: true });
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		symlinkSync(join(scratch.dir, "removed-install", "dist", "cli", "index.js"), launcher);
 
 		const result = await runCli(["uninstall", "--remove-binary", "--force"], {
-			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+			env: { ...scratch.env, CLIO_CODER_BIN_DIR: binDir },
 		});
 
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
@@ -171,11 +171,15 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		// lstat, not exists: `rmSync` with `force: true` stats through the link,
 		// sees ENOENT, and returns as though the path were already gone, so the
 		// link stayed on PATH while the command reported removing it.
-		strictEqual(linkPresent(join(binDir, "clio")), false, "a broken clio launcher does not survive uninstall");
+		strictEqual(
+			linkPresent(join(binDir, "clio-coder")),
+			false,
+			"a broken clio-coder launcher does not survive uninstall",
+		);
 	});
 
 	/**
-	 * A bare `clio reset` selects `--state` and takes every transcript on the
+	 * A bare `clio-coder reset` selects `--state` and takes every transcript on the
 	 * machine. The preview for that was one line naming the root, and the note
 	 * explaining the cost was attached to `--data`, the scope nobody gets by
 	 * accident.
@@ -200,15 +204,15 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 
 	/**
 	 * Uninstall removes four roots under the home directory, so every per-project
-	 * `.clio/` survived it unlisted, and `--remove-binary` removed the binary that
-	 * runs `clio context reset --all` before naming it.
+	 * `.clio-coder/` survived it unlisted, and `--remove-binary` removed the binary that
+	 * runs `clio-coder context reset --all` before naming it.
 	 */
 	it("lists the project directories it is not removing, and names the cleaner before the binary", async () => {
 		const binDir = join(scratch.dir, "bin");
-		const launcher = join(binDir, "clio");
+		const launcher = join(binDir, "clio-coder");
 		const project = join(scratch.dir, "a-project");
 		mkdirSync(binDir, { recursive: true });
-		mkdirSync(join(project, ".clio"), { recursive: true });
+		mkdirSync(join(project, ".clio-coder"), { recursive: true });
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		const sessionDir = join(scratch.dir, "state", "sessions", "hash-a", "session-1");
 		mkdirSync(sessionDir, { recursive: true });
@@ -220,35 +224,35 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		symlinkSync(CLI_ENTRY, launcher);
 
 		const preview = await runCli(["uninstall", "--remove-binary", "--dry-run"], {
-			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+			env: { ...scratch.env, CLIO_CODER_BIN_DIR: binDir },
 		});
 		strictEqual(preview.code, 0, `stderr=${preview.stderr}`);
-		ok(preview.stdout.includes(join(project, ".clio")), `preview lists the project: ${preview.stdout}`);
-		ok(preview.stdout.includes("clio context reset --all"), preview.stdout);
-		ok(existsSync(join(project, ".clio")), "and the preview removes none of it");
+		ok(preview.stdout.includes(join(project, ".clio-coder")), `preview lists the project: ${preview.stdout}`);
+		ok(preview.stdout.includes("clio-coder context reset --all"), preview.stdout);
+		ok(existsSync(join(project, ".clio-coder")), "and the preview removes none of it");
 
 		const result = await runCli(["uninstall", "--remove-binary", "--force"], {
-			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+			env: { ...scratch.env, CLIO_CODER_BIN_DIR: binDir },
 		});
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
-		const cleaner = result.stdout.indexOf("clio context reset --all");
+		const cleaner = result.stdout.indexOf("clio-coder context reset --all");
 		const binary = result.stdout.search(/binary\s+remove/);
 		ok(cleaner >= 0 && binary >= 0, result.stdout);
 		ok(cleaner < binary, "the cleaner is named while the binary that runs it is still there");
 		// Reading the record is this command's job; deleting the project's is not.
-		ok(existsSync(join(project, ".clio")), "uninstall never removes project data itself");
+		ok(existsSync(join(project, ".clio-coder")), "uninstall never removes project data itself");
 		strictEqual(existsSync(launcher), false);
 	});
 
 	it("removes the launcher symlink that points at this installation", async () => {
 		const binDir = join(scratch.dir, "bin");
-		const launcher = join(binDir, "clio");
+		const launcher = join(binDir, "clio-coder");
 		mkdirSync(binDir, { recursive: true });
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		symlinkSync(CLI_ENTRY, launcher);
 
 		const result = await runCli(["uninstall", "--remove-binary", "--force"], {
-			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+			env: { ...scratch.env, CLIO_CODER_BIN_DIR: binDir },
 		});
 
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
@@ -256,7 +260,7 @@ describe("clio destructive-transition safety", { concurrency: false }, () => {
 		strictEqual(existsSync(launcher), false);
 		// The flag it just honored is not offered again as a remaining step.
 		ok(
-			!result.stdout.includes("source symlink:  clio uninstall --remove-binary --force"),
+			!result.stdout.includes("source symlink:  clio-coder uninstall --remove-binary --force"),
 			"guidance must not re-suggest the flag that already ran",
 		);
 	});

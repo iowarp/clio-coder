@@ -4,10 +4,10 @@
  * Four surfaces used to print node:fs verbatim: `ENOENT: no such file or
  * directory, open '<store path>'`. That names a path the operator never typed
  * (they typed an id), it does not name what kind of thing was missing, and it
- * names no remedy. The sibling surfaces that own their wording (`clio memory
- * approve`, `clio skills inspect`, `clio extensions install`) all say
+ * names no remedy. The sibling surfaces that own their wording (`clio-coder memory
+ * approve`, `clio-coder skills inspect`, `clio-coder extensions install`) all say
  * `<artifact> not found: <what the user typed>`, and that is the shape pinned
- * here. Where a listing command actually exists, the miss names it; `clio eval`
+ * here. Where a listing command actually exists, the miss names it; `clio-coder eval`
  * has no list subcommand, so its message invents nothing.
  */
 import { match, ok, strictEqual } from "node:assert/strict";
@@ -59,7 +59,7 @@ describe("contracts/cli not-found voice", () => {
 
 	it("evidence inspect names the listing command, and that command runs", async () => {
 		const missing = await runCli(["evidence", "inspect", "nosuch"], { env: scratch.env });
-		match(missing.stderr, /run `clio evidence list` to see local bundles/);
+		match(missing.stderr, /run `clio-coder evidence list` to see local bundles/);
 
 		// The named remedy has to be a command that exists and exits clean.
 		const listed = await runCli(["evidence", "list"], { env: scratch.env });
@@ -67,12 +67,12 @@ describe("contracts/cli not-found voice", () => {
 		match(listed.stdout, /evidence artifacts/);
 	});
 
-	it("eval report invents no listing command, because clio eval has none", async () => {
+	it("eval report invents no listing command, because clio-coder eval has none", async () => {
 		const result = await runCli(["eval", "report", "nosuchid"], { env: scratch.env });
 		ok(!/eval list/.test(result.stderr), `no such subcommand may be advertised: ${result.stderr}`);
 
 		const bogus = await runCli(["eval", "list"], { env: scratch.env });
-		strictEqual(bogus.code, 2, "clio eval list is still not a command");
+		strictEqual(bogus.code, 2, "clio-coder eval list is still not a command");
 	});
 
 	it("separates a bundle that is absent from one that is incomplete", async () => {

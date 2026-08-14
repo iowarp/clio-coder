@@ -2,14 +2,14 @@ import { existsSync } from "node:fs";
 import { resolveClioDirs } from "../core/xdg.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio paths [--json]
+const HELP = `clio-coder paths [--json]
 
 Print the resolved Clio Coder directories. Read-only: nothing is created.
 This is the single source of truth for scripts; parse the --json form instead
 of re-implementing the resolution rules.
 
-Resolution order per directory: CLIO_CONFIG_DIR / CLIO_DATA_DIR /
-CLIO_STATE_DIR / CLIO_CACHE_DIR beat CLIO_HOME, which beats the platform
+Resolution order per directory: CLIO_CODER_CONFIG_DIR / CLIO_CODER_DATA_DIR /
+CLIO_CODER_STATE_DIR / CLIO_CODER_CACHE_DIR beat CLIO_CODER_HOME, which beats the platform
 defaults (XDG base dirs on Linux).
 `;
 

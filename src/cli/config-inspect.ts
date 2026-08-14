@@ -1,5 +1,5 @@
 /**
- * The effective-customization graph behind `clio config inspect`. This is the
+ * The effective-customization graph behind `clio-coder config inspect`. This is the
  * "why is Clio behaving this way" surface: it answers what settings, context
  * files, rules, skills, prompts, agents, extensions, safety, memory, hooks, and
  * the operator profile loaded, from where, with what precedence, and what each
@@ -105,7 +105,7 @@ function inspectSettings(cwd: string, graph: CustomizationGraph): void {
 }
 
 function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
-	const path = join(cwd, "CLIO.md");
+	const path = join(cwd, "CLIO-CODER.md");
 	if (!existsSync(path)) return;
 	try {
 		const text = readFileSync(path, "utf8");
@@ -113,7 +113,7 @@ function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
 		const preload = classifyProjectPreload({ hasClioMd: promptContext.clioMd !== null, text: promptContext.text });
 		graph.entries.push({
 			category: "clio-md",
-			id: "CLIO.md",
+			id: "CLIO-CODER.md",
 			scope: "project",
 			sourcePath: path,
 			hash: shortHash(text),

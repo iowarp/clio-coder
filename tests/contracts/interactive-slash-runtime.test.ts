@@ -151,20 +151,20 @@ describe("contracts/interactive slash runtime", () => {
 		};
 		const runtime = createInteractiveSlashRuntime(harness.deps);
 
-		runtime.dispatchCommand("/share import --dry-run /tmp/preview.clio-share.json");
-		runtime.dispatchCommand("/share import --dry-rnu /tmp/typo.clio-share.json");
-		runtime.dispatchCommand("/share import /tmp/extra.clio-share.json unexpected");
-		runtime.dispatchCommand("/share import --force /tmp/apply.clio-share.json");
+		runtime.dispatchCommand("/share import --dry-run /tmp/preview.clio-coder-share.json");
+		runtime.dispatchCommand("/share import --dry-rnu /tmp/typo.clio-coder-share.json");
+		runtime.dispatchCommand("/share import /tmp/extra.clio-coder-share.json unexpected");
+		runtime.dispatchCommand("/share import --force /tmp/apply.clio-coder-share.json");
 
 		deepStrictEqual(planned, [
 			{
-				path: "/tmp/preview.clio-share.json",
+				path: "/tmp/preview.clio-coder-share.json",
 				options: { dryRun: true },
 			},
 		]);
 		deepStrictEqual(imported, [
 			{
-				path: "/tmp/apply.clio-share.json",
+				path: "/tmp/apply.clio-coder-share.json",
 				options: { force: true },
 			},
 		]);

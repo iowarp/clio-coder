@@ -576,7 +576,7 @@
           <p>Execution-gated guardrails, autonomy mappings, and policy enforcement engine</p>
           <div class="meta-chips-row">
             <span class="chip">Source: docs/safety-model.md</span>
-            <span class="chip chip-orange">clio docs safety</span>
+            <span class="chip chip-orange">clio-coder docs safety</span>
           </div>
         </div>
       </div>
@@ -778,7 +778,7 @@
                 <label for="operatingPosture">Posture Mode</label>
                 <select id="operatingPosture" onchange="runSimulation()">
                   <option value="interactive">Interactive TUI</option>
-                  <option value="headless">Headless (clio run)</option>
+                  <option value="headless">Headless (clio-coder run)</option>
                 </select>
               </div>
             </div>
@@ -811,7 +811,7 @@
             </div>
 
             <div class="form-group">
-              <label for="projectPolicy">Simulated .clio/safety.yaml</label>
+              <label for="projectPolicy">Simulated .clio-coder/safety.yaml</label>
               <textarea id="projectPolicy" rows="6" oninput="runSimulation()">zeroAccessPaths:
   - secrets/
   - .env
@@ -875,12 +875,12 @@ commands:
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Bash recognition</h3>
         <p>The policy engine tags every bash command as recognized or unrecognized:</p>
         <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
-          <li style="margin-bottom: 0.5rem;"><strong>Recognized</strong>: a valid <code>.clio/safety.yaml</code> command entry, or the narrow built-in no-prompt set such as <code>pwd</code>, simple <code>ls</code>, <code>git status</code>, bounded <code>git diff/log</code>, common test/lint/build commands. Recognized commands run without prompting at <code>auto-edit</code> and <code>full-auto</code>.</li>
+          <li style="margin-bottom: 0.5rem;"><strong>Recognized</strong>: a valid <code>.clio-coder/safety.yaml</code> command entry, or the narrow built-in no-prompt set such as <code>pwd</code>, simple <code>ls</code>, <code>git status</code>, bounded <code>git diff/log</code>, common test/lint/build commands. Recognized commands run without prompting at <code>auto-edit</code> and <code>full-auto</code>.</li>
           <li style="margin-bottom: 0.5rem;"><strong>Unrecognized</strong>: anything else. Unrecognized bash asks for one-shot approval at <code>auto-edit</code> and runs at <code>full-auto</code>; at <code>suggest</code> it asks like every mutation, and at <code>read-only</code> it is denied.</li>
         </ul>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Project safety policy</h3>
-        <p>Clio searches upward from the current working directory for <code>.clio/safety.yaml</code>. Minimum schema is version-locked (v1) and parses into standard path boundaries (<code>zeroAccessPaths</code>, <code>readOnlyPaths</code>, <code>noDeletePaths</code>) and customized command sets.</p>
+        <p>Clio searches upward from the current working directory for <code>.clio-coder/safety.yaml</code>. Minimum schema is version-locked (v1) and parses into standard path boundaries (<code>zeroAccessPaths</code>, <code>readOnlyPaths</code>, <code>noDeletePaths</code>) and customized command sets.</p>
         
         <pre><code>version: 1
 zeroAccessPaths:
@@ -1347,7 +1347,7 @@ commands:
         if (posture === 'headless') {
           // Headless mode automatically denies asks deterministically
           finalVerdict = "DENY (HEADLESS)";
-          finalDetails = `clio run cannot confirm permission requests; rerun interactively to approve this action.`;
+          finalDetails = `clio-coder run cannot confirm permission requests; rerun interactively to approve this action.`;
           cardClass = "v-block";
           icon = "✕";
           logTrace(`Headless mode auto-denied interactive request. Final status: DENIED`, 'error');

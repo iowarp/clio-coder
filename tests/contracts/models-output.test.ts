@@ -1,5 +1,5 @@
 /**
- * `clio models` text-output contract (bt-05 findings 1 and 2): an empty
+ * `clio-coder models` text-output contract (bt-05 findings 1 and 2): an empty
  * search result must not claim no targets are configured when targets
  * exist, and long model ids must not run into the caps column.
  */
@@ -31,7 +31,10 @@ describe("contracts/models-output", () => {
 
 	it("keeps the true no-targets message when nothing is configured", () => {
 		const message = emptyModelsMessage({ search: "anything" }, 0, 0);
-		strictEqual(message, "no targets configured. run `clio configure` or `clio targets add` to register one.");
+		strictEqual(
+			message,
+			"no targets configured. run `clio-coder configure` or `clio-coder targets add` to register one.",
+		);
 	});
 
 	it("an unknown --target id is named instead of claiming no targets exist", () => {

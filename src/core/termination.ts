@@ -7,7 +7,7 @@
  *
  * Each registered hook runs under a per-hook timeout so a single slow or
  * hanging hook cannot block the TUI from exiting. The cap is 500ms by
- * default and can be overridden via CLIO_SHUTDOWN_HOOK_MS for tests.
+ * default and can be overridden via CLIO_CODER_SHUTDOWN_HOOK_MS for tests.
  * Timed-out hooks are logged and shutdown continues to the next hook.
  */
 
@@ -28,7 +28,7 @@ const SIGNAL_EXIT_CODES: Partial<Record<NodeJS.Signals, number>> = {
 };
 
 export function resolveShutdownHookBudgetMs(): number {
-	const raw = process.env.CLIO_SHUTDOWN_HOOK_MS;
+	const raw = process.env.CLIO_CODER_SHUTDOWN_HOOK_MS;
 	if (raw === undefined) return DEFAULT_SHUTDOWN_HOOK_MS;
 	const parsed = Number.parseInt(raw, 10);
 	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SHUTDOWN_HOOK_MS;
@@ -102,7 +102,7 @@ class TerminationCoordinator {
 		this.started = true;
 		this.exitCode = code;
 		const bus = getSharedBus();
-		const debug = process.env.CLIO_DEBUG_SHUTDOWN === "1";
+		const debug = process.env.CLIO_CODER_DEBUG_SHUTDOWN === "1";
 		const budgetMs = resolveShutdownHookBudgetMs();
 		const mark = debug ? process.hrtime.bigint() : 0n;
 		const log = (msg: string): void => {

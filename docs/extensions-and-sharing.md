@@ -19,7 +19,7 @@ Prompts use the three-tier precedence:
 | --- | --- | --- |
 | 0 | package | enabled extension resource roots |
 | 1 | user | `<configDir>/prompts` |
-| 2 | project | `.clio/prompts` |
+| 2 | project | `.clio-coder/prompts` |
 | 3 | cli | reserved for call-site injected resources |
 
 Skills add Agent Skills compatibility roots so that skills installed by other agents are usable without copying. The skill precedence, lowest to highest, is:
@@ -30,10 +30,10 @@ Skills add Agent Skills compatibility roots so that skills installed by other ag
 | 20 | user | agents / claude / codex / copilot / opencode | `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.copilot/skills`, `~/.config/opencode/skills` |
 | 30 | user | clio | `<configDir>/skills` |
 | 40 | project | agents / claude / codex / copilot / opencode | `.agents/skills`, `.claude/skills`, `.codex/skills`, `.github/skills`, `.opencode/skills` (untrusted by default) |
-| 50 | project | clio | `.clio/skills` |
+| 50 | project | clio | `.clio-coder/skills` |
 | 60 | cli | path | reserved for call-site injected resources |
 
-Clio-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. If multiple compatibility roots contain the same skill name at the same precedence, Clio resolves the collision deterministically by file path and records a diagnostic. If two roots resolve to the same canonical `SKILL.md` through a symlink, Clio keeps the higher-precedence entry and records a diagnostic.
+Clio-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio-coder/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. If multiple compatibility roots contain the same skill name at the same precedence, Clio resolves the collision deterministically by file path and records a diagnostic. If two roots resolve to the same canonical `SKILL.md` through a symlink, Clio keeps the higher-precedence entry and records a diagnostic.
 
 ---
 
@@ -41,7 +41,7 @@ Clio-native roots intentionally outrank shared compatibility roots at the same s
 
 Prompt templates are Markdown files under a prompt root. Filename is the command name.
 
-Example `.clio/prompts/bugfix.md`:
+Example `.clio-coder/prompts/bugfix.md`:
 
 ```md
 ---
@@ -72,7 +72,7 @@ Templates without frontmatter are accepted; Clio derives a fallback description 
 
 Skills follow the Agent Skills `SKILL.md` format. A skill is a directory containing `SKILL.md`, or a single Markdown file under a skill root. YAML frontmatter is required and must include a `description`. A missing description is the only hard rejection; every other validation issue degrades to a warning and the skill still loads.
 
-Example `.clio/skills/hdf5-review/SKILL.md`:
+Example `.clio-coder/skills/hdf5-review/SKILL.md`:
 
 ```md
 ---
@@ -98,7 +98,7 @@ Use in the TUI:
 /skill:hdf5-review review the output validation path
 ```
 
-`/skill` opens the Skills Hub with discovered project skills, user skills, and marketplace entries. `/skill:name args` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio run "/skill:name args"` matches the interactive behavior.
+`/skill` opens the Skills Hub with discovered project skills, user skills, and marketplace entries. `/skill:name args` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio-coder run "/skill:name args"` matches the interactive behavior.
 
 Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata, prompt diagnostics, and run receipts. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
 
@@ -118,25 +118,25 @@ Recognized frontmatter fields:
 
 Shared user roots are model-visible by default, like the Clio user root. Project-local compatibility roots are discovered but **untrusted by default**: they appear in `/skill` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded through `context`. This prevents an unreviewed project checkout from injecting skills the model will act on.
 
-Opt in to model-visible project compatibility roots by setting `skills.trustProjectCompatRoots: true` in `settings.yaml`. `CLIO_TRUST_PROJECT_SKILLS=1` remains an environment override. `.clio/skills` is always trusted as the Clio-native project root.
+Opt in to model-visible project compatibility roots by setting `skills.trustProjectCompatRoots: true` in `settings.yaml`. `CLIO_CODER_TRUST_PROJECT_SKILLS=1` remains an environment override. `.clio-coder/skills` is always trusted as the Clio-native project root.
 
 ### Loading with context, writing directly
 
 `context(scope="skills")` lists model-visible skills when called with no `name`, or loads a pending skill body by `name`. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, parsed tool policy fields, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` to list sibling files under the skill base directory, capped internally at 50 entries. The skills scope never executes bundled scripts and only resolves skills the model is allowed to see.
 
-Creating a skill is writing a `SKILL.md` file with the ordinary write tool: `.clio/skills/<name>/SKILL.md` for project scope, or the Clio config skills directory for user scope. The loader validates frontmatter on load (`clio skills validate` reports diagnostics), and the `skill-craft` shipped skill documents the frontmatter contract and craft rules.
+Creating a skill is writing a `SKILL.md` file with the ordinary write tool: `.clio-coder/skills/<name>/SKILL.md` for project scope, or the Clio config skills directory for user scope. The loader validates frontmatter on load (`clio-coder skills validate` reports diagnostics), and the `skill-craft` shipped skill documents the frontmatter contract and craft rules.
 
 ### Skills CLI
 
 ```bash
-clio skills list [--json] [--all]
-clio skills search <query> [--json]
-clio skills inspect <name> [--json]
-clio skills validate [path] [--json]
-clio skills install <name|path|github-url> [--user|--project] [--name <name>] [--force]
-clio skills update <name> | --all [--force]
-clio skills sync [--force]
-clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
+clio-coder skills list [--json] [--all]
+clio-coder skills search <query> [--json]
+clio-coder skills inspect <name> [--json]
+clio-coder skills validate [path] [--json]
+clio-coder skills install <name|path|github-url> [--user|--project] [--name <name>] [--force]
+clio-coder skills update <name> | --all [--force]
+clio-coder skills sync [--force]
+clio-coder skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
 ```
 
 `eval` (experimental) executes a skill's `evals.md` RED-GREEN scenarios with
@@ -160,7 +160,7 @@ Clio is local-first. Skills run from disk and no chat turn depends on network ac
 npx skills add <skill> -a codex   # installs into ~/.codex/skills
 ```
 
-Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are not enabled in this release. Clio does support local marketplace search plus `clio skills install <name|path|github-url>`: bare names resolve through the local marketplace, and explicit local paths or GitHub URLs install directly.
+Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are not enabled in this release. Clio does support local marketplace search plus `clio-coder skills install <name|path|github-url>`: bare names resolve through the local marketplace, and explicit local paths or GitHub URLs install directly.
 
 ### Prompt envelope and safety
 
@@ -170,7 +170,7 @@ Skill bodies never enter the prompt uninvited. The model discovers skills only t
 
 ## Extension package manifest
 
-An extension root contains `clio-extension.yaml`, `clio-extension.yml`, or `clio-extension.json`.
+An extension root contains `clio-coder-extension.yaml`, `clio-coder-extension.yml`, or `clio-coder-extension.json`.
 
 ```yaml
 manifestVersion: 1
@@ -195,12 +195,12 @@ IDs must be lowercase and may include numbers, dots, underscores, and hyphens; t
 ## Extension CLI
 
 ```bash
-clio extensions list [--all] [--json] [--user|--project]
-clio extensions discover <path> [--json]
-clio extensions install <path> [--user|--project] [--force] [--json]
-clio extensions enable <id> [--user|--project] [--json]
-clio extensions disable <id> [--user|--project] [--json]
-clio extensions remove <id> [--user|--project] [--json]
+clio-coder extensions list [--all] [--json] [--user|--project]
+clio-coder extensions discover <path> [--json]
+clio-coder extensions install <path> [--user|--project] [--force] [--json]
+clio-coder extensions enable <id> [--user|--project] [--json]
+clio-coder extensions disable <id> [--user|--project] [--json]
+clio-coder extensions remove <id> [--user|--project] [--json]
 ```
 
 Install locations:
@@ -208,19 +208,19 @@ Install locations:
 | Scope | Root |
 | --- | --- |
 | user | `<configDir>/extensions/<id>` |
-| project | `.clio/extensions/<id>` |
+| project | `.clio-coder/extensions/<id>` |
 
 Project extensions shadow user extensions with the same ID. Use `--all` to list shadowed/disabled entries.
 
 ### Skill pack distribution
 
-Clio Coder should not grow built-in skills in the harness. Distribute reusable Clio skills as extension packages instead. A future `iowarp/clio-kit` bundle can carry `clio-extension.yaml` plus a `skills/` directory, and users can install it with `clio extensions install <path> --user` or `--project`.
+Clio Coder should not grow built-in skills in the harness. Distribute reusable Clio skills as extension packages instead. A future `iowarp/clio-kit` bundle can carry `clio-coder-extension.yaml` plus a `skills/` directory, and users can install it with `clio-coder extensions install <path> --user` or `--project`.
 
 Recommended layout:
 
 ```text
 clio-kit/
-  clio-extension.yaml
+  clio-coder-extension.yaml
   skills/
     hpc-review/
       SKILL.md
@@ -257,8 +257,8 @@ Every file entry is base64 encoded and SHA-256 checked on import.
 ### Export
 
 ```bash
-clio share export --out project.clio-share.json --project
-clio share export --out all.clio-share.json --both --all
+clio-coder share export --out project.clio-coder-share.json --project
+clio-coder share export --out all.clio-coder-share.json --both --all
 ```
 
 Options:
@@ -268,7 +268,7 @@ Options:
 | `--project` | Export project resources only. Default scope. |
 | `--user` | Export user resources only. |
 | `--both` | Export both user and project resources. |
-| `--context` | Include project context files (`CLIO.md`, `AGENTS.md`, `CODEX.md`, `GEMINI.md`, `CLAUDE.md`). |
+| `--context` | Include project context files (`CLIO-CODER.md`, `AGENTS.md`, `CODEX.md`, `GEMINI.md`, `CLAUDE.md`). |
 | `--prompts` | Include prompt templates. |
 | `--skills` | Include skills. |
 | `--settings` | Include non-secret settings fragment. |
@@ -282,9 +282,9 @@ Settings fragments include non-secret UI/runtime preferences such as `autonomy`,
 ### Import and inspect
 
 ```bash
-clio share inspect project.clio-share.json
-clio share import project.clio-share.json --dry-run
-clio share import project.clio-share.json --force
+clio-coder share inspect project.clio-coder-share.json
+clio-coder share import project.clio-coder-share.json --dry-run
+clio-coder share import project.clio-coder-share.json --force
 ```
 
 Dry-run imports produce a plan and report conflicts without writing. Without `--force`, conflicting destination files block writes. With `--force`, conflicting files are overwritten and supported settings-fragment keys are merged into the current settings file.
@@ -292,8 +292,8 @@ Dry-run imports produce a plan and report conflicts without writing. Without `--
 Aliases:
 
 ```bash
-clio export --out project.clio-share.json
-clio import project.clio-share.json --dry-run
+clio-coder export --out project.clio-coder-share.json
+clio-coder import project.clio-coder-share.json --dry-run
 ```
 
 ---

@@ -75,7 +75,7 @@ export interface ProvidersContract {
 
 	/**
 	 * Runtime descriptor by id. Null when the runtime is not registered (neither
-	 * built-in nor loaded from ~/.clio/runtimes/ nor an npm plugin).
+	 * built-in nor loaded from ~/.clio-coder/runtimes/ nor an npm plugin).
 	 */
 	getRuntime(id: string): RuntimeDescriptor | null;
 

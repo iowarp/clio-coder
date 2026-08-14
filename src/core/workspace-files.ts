@@ -120,7 +120,7 @@ export const WORKSPACE_EXCLUDED_DIRS: ReadonlySet<string> = new Set([
 	".git",
 	".hg",
 	".svn",
-	".clio",
+	".clio-coder",
 	"node_modules",
 	"dist",
 	"build",
@@ -133,7 +133,7 @@ export const WORKSPACE_EXCLUDED_DIRS: ReadonlySet<string> = new Set([
 	".superpowers",
 	".codex",
 	".claude",
-	".clio-benchmark",
+	".clio-coder-benchmark",
 ]);
 
 function comparePaths(a: string, b: string): number {

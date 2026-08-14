@@ -299,8 +299,8 @@ target and wire model can fill the background role. Before enabling it, use the
 real target surfaces to verify the route:
 
 ```bash
-clio targets --probe
-clio models --target zbook
+clio-coder targets --probe
+clio-coder models --target zbook
 clio
 ```
 
@@ -355,7 +355,7 @@ shipped settings.
 The bank normally dies with the session. When `context-handoff` is explicitly
 requested, Clio supplies the skill a redacted `clio-task-memory` fenced snapshot
 containing knowledge and procedural entries only. Ordinary turns receive no
-snapshot. The handoff artifact remains under ignored `.clio/handoffs/`; private
+snapshot. The handoff artifact remains under ignored `.clio-coder/handoffs/`; private
 status and secret-shaped values do not cross the export boundary.
 
 After `/resume`, Clio checks only the newest handoff and offers `/memory seed` if
@@ -372,7 +372,7 @@ Each completed memory step appends one content-free record to:
 <stateDir>/memory/steps.jsonl
 ```
 
-Use `clio paths --json` to resolve the state directory (the `"state"` property). The log rotates after 1 MiB and
+Use `clio-coder paths --json` to resolve the state directory (the `"state"` property). The log rotates after 1 MiB and
 keeps one previous generation as `steps.jsonl.1`. Every exact-schema record has:
 
 - timestamp and schema version;

@@ -20,22 +20,22 @@ import { OFFLOAD_POINTER_NOTE, shapeToolResult } from "../../src/tools/result-sh
 
 const roots: string[] = [];
 const savedEnv = {
-	CLIO_HOME: process.env.CLIO_HOME,
-	CLIO_DATA_DIR: process.env.CLIO_DATA_DIR,
-	CLIO_CONFIG_DIR: process.env.CLIO_CONFIG_DIR,
-	CLIO_STATE_DIR: process.env.CLIO_STATE_DIR,
-	CLIO_CACHE_DIR: process.env.CLIO_CACHE_DIR,
+	CLIO_CODER_HOME: process.env.CLIO_CODER_HOME,
+	CLIO_CODER_DATA_DIR: process.env.CLIO_CODER_DATA_DIR,
+	CLIO_CODER_CONFIG_DIR: process.env.CLIO_CODER_CONFIG_DIR,
+	CLIO_CODER_STATE_DIR: process.env.CLIO_CODER_STATE_DIR,
+	CLIO_CODER_CACHE_DIR: process.env.CLIO_CODER_CACHE_DIR,
 };
 
 afterEach(() => {
 	for (const root of roots.splice(0)) {
 		rmSync(root, { recursive: true, force: true });
 	}
-	restoreEnv("CLIO_HOME", savedEnv.CLIO_HOME);
-	restoreEnv("CLIO_DATA_DIR", savedEnv.CLIO_DATA_DIR);
-	restoreEnv("CLIO_CONFIG_DIR", savedEnv.CLIO_CONFIG_DIR);
-	restoreEnv("CLIO_STATE_DIR", savedEnv.CLIO_STATE_DIR);
-	restoreEnv("CLIO_CACHE_DIR", savedEnv.CLIO_CACHE_DIR);
+	restoreEnv("CLIO_CODER_HOME", savedEnv.CLIO_CODER_HOME);
+	restoreEnv("CLIO_CODER_DATA_DIR", savedEnv.CLIO_CODER_DATA_DIR);
+	restoreEnv("CLIO_CODER_CONFIG_DIR", savedEnv.CLIO_CODER_CONFIG_DIR);
+	restoreEnv("CLIO_CODER_STATE_DIR", savedEnv.CLIO_CODER_STATE_DIR);
+	restoreEnv("CLIO_CODER_CACHE_DIR", savedEnv.CLIO_CODER_CACHE_DIR);
 	resetXdgCache();
 });
 
@@ -47,13 +47,13 @@ function restoreEnv(key: keyof typeof savedEnv, value: string | undefined): void
 function useStateDir(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-result-shaping-"));
 	roots.push(root);
-	process.env.CLIO_HOME = root;
-	process.env.CLIO_DATA_DIR = join(root, "data");
-	process.env.CLIO_CONFIG_DIR = join(root, "config");
-	process.env.CLIO_STATE_DIR = join(root, "state");
-	process.env.CLIO_CACHE_DIR = join(root, "cache");
+	process.env.CLIO_CODER_HOME = root;
+	process.env.CLIO_CODER_DATA_DIR = join(root, "data");
+	process.env.CLIO_CODER_CONFIG_DIR = join(root, "config");
+	process.env.CLIO_CODER_STATE_DIR = join(root, "state");
+	process.env.CLIO_CODER_CACHE_DIR = join(root, "cache");
 	resetXdgCache();
-	return process.env.CLIO_STATE_DIR;
+	return process.env.CLIO_CODER_STATE_DIR;
 }
 
 function mockToolSpec(name: ToolName, maxBytes: number): ToolSpec {
@@ -208,6 +208,8 @@ describe("contracts/result-shaping offload", () => {
 		const path = offloadPath(shaped);
 		const saved = readFileSync(path, "utf8");
 		ok(statSync(path).size <= maxDumpBytes);
-		ok(saved.endsWith(`[clio scratch output truncated at ${maxDumpBytes} bytes; original size ${text.length} bytes]`));
+		ok(
+			saved.endsWith(`[clio-coder scratch output truncated at ${maxDumpBytes} bytes; original size ${text.length} bytes]`),
+		);
 	});
 });

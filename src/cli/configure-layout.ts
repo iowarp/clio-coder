@@ -1,5 +1,5 @@
 /**
- * Row builders for the plain-stdout `clio configure` surfaces.
+ * Row builders for the plain-stdout `clio-coder configure` surfaces.
  *
  * These are pure so the width behavior can be asserted at the sizes users
  * actually run. The wizard and `--list` were the first screens a new user sees

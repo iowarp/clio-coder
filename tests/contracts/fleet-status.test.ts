@@ -1,5 +1,5 @@
 /**
- * `clio fleet status` projection contract: the totals built from the durable
+ * `clio-coder fleet status` projection contract: the totals built from the durable
  * ledger must carry the input/output token split the receipts record, both
  * for rows finalized after the ledger learned the split and for pre-split
  * rows whose only source of truth is the receipt artifact (bt-02 finding 2).

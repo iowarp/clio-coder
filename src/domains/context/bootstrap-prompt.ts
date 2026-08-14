@@ -5,14 +5,14 @@ import { renderCodewikiDigest } from "./codewiki/digest.js";
 import type { Codewiki } from "./codewiki/indexer.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 
-export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your job is to write the custom sections of CLIO.md for the project at <cwd>. CLIO.md is a lean, project-specific handbook that the clio-coder coding agent loads on every session, so write for an experienced engineer who has never seen this repository and is about to change it.
+export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your job is to write the custom sections of CLIO-CODER.md for the project at <cwd>. CLIO-CODER.md is a lean, project-specific handbook that the clio-coder coding agent loads on every session, so write for an experienced engineer who has never seen this repository and is about to change it.
 
 Read the repository before you answer: start with code_nav (modes symbol, path, entries, outline, deps, dependents, wiki) against the index Clio just built, then read the specific files that decide behavior. Do not write files, run tests, or use external sources.
 
 You will be given:
 - The repository-derived project name. Return it exactly as projectName; do not substitute a path or invent a brand.
 - The detected project type.
-- The existing CLIO.md when one is present. Treat it as evidence; Clio preserves its human-owned fields outside your response.
+- The existing CLIO-CODER.md when one is present. Treat it as evidence; Clio preserves its human-owned fields outside your response.
 - A structural digest from the codewiki index: module count, entry points, and top directories.
 - A sanitized adoption scan of project-local agent configs, including Claude Code context files and skills (CLAUDE.md, .claude/CLAUDE.md, project settings/commands/agents/skills), Codex (AGENTS.md, CODEX.md, .codex/AGENTS.md, .codex/skills), Gemini (GEMINI.md, .gemini/GEMINI.md, .gemini config/rules), Cursor (.cursor/rules/*.mdc and *.md), OpenCode (.opencode/skills), and GitHub Copilot (.github/copilot-instructions.md, .github/skills).
 - Global user preferences only when the user explicitly opted in.

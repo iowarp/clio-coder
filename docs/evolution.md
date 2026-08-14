@@ -3,7 +3,7 @@
 > [!TIP]
 > **Interactive Spec Available:** An interactive change manifest editor, authority risk assessor, and checklist workspace is located at [docs/html/evolution_blueprint.html](html/evolution_blueprint.html) (Version: 0.3.0).
 
-Clio Coder uses change manifests to make harness changes reviewable, falsifiable, and rollback-friendly. CLIO stands for Context Layer for Input/Output, named for the Greek muse of history. A manifest is JSON, generated or checked with `clio evolve manifest`, and should describe what changed, why, what evidence supports it, what could regress, how to validate it, and how to roll it back.
+Clio Coder uses change manifests to make harness changes reviewable, falsifiable, and rollback-friendly. CLIO stands for Context Layer for Input/Output, named for the Greek muse of history. A manifest is JSON, generated or checked with `clio-coder evolve manifest`, and should describe what changed, why, what evidence supports it, what could regress, how to validate it, and how to roll it back.
 
 Source of truth: `src/domains/evolution/manifest.ts`, `src/domains/evolution/validate.ts`, and `src/cli/evolve.ts`.
 
@@ -12,9 +12,9 @@ Source of truth: `src/domains/evolution/manifest.ts`, `src/domains/evolution/val
 ## CLI
 
 ```bash
-clio evolve manifest init > change-manifest.json
-clio evolve manifest validate change-manifest.json
-clio evolve manifest summarize change-manifest.json
+clio-coder evolve manifest init > change-manifest.json
+clio-coder evolve manifest validate change-manifest.json
+clio-coder evolve manifest summarize change-manifest.json
 ```
 
 `init` prints a template. `validate` exits non-zero and reports JSON paths when fields are missing or invalid. In `v0.2.9`, it additionally resolves each non-empty `evidenceRefs` entry (which must match `run-<id>` or `session-<id>` formatting) against the local evidence store, failing validation if a referenced bundle is not found. `summarize` prints the iteration id, base SHA, authority levels, components, files, predicted regressions, validation-step count, and reports evidence refs resolution.
@@ -32,8 +32,8 @@ clio evolve manifest summarize change-manifest.json
   "changes": [
     {
       "id": "change-1",
-      "componentIds": ["context-file:CLIO.md"],
-      "filesChanged": ["CLIO.md"],
+      "componentIds": ["context-file:CLIO-CODER.md"],
+      "filesChanged": ["CLIO-CODER.md"],
       "authorityLevel": "prompt",
       "evidenceRefs": [],
       "rootCause": "First exploratory iteration; no evidence corpus exists yet.",
@@ -54,7 +54,7 @@ Only the first exploratory iteration (`iterationId: "exploratory-1"`) is permitt
 
 ### Evidence-Linked Validation (Slice 5a)
 
-During `clio evolve manifest validate` and `summarize` commands, Clio Coder validates the referenced evidence bundles:
+During `clio-coder evolve manifest validate` and `summarize` commands, Clio Coder validates the referenced evidence bundles:
 - **Format Verification**: Every reference in the `evidenceRefs` array must follow the format `run-<id>` or `session-<id>`.
 - **Durable Store Resolution**: Each reference must correspond to a folder that actually exists under `<dataDir>/evidence/`. If any referenced bundle is missing, validation fails and reports a dangling reference issue.
 - **Engine Boundaries**: To maintain domain boundaries (`check:boundaries`), the validation function `validateChangeManifest` is completely decoupled. It accepts a `resolveEvidenceRef` predicate option. The CLI passes a resolver connected to the evidence store, keeping the evolution domain from directly importing the evidence domain.
@@ -133,11 +133,11 @@ Optional budget deltas:
 ## Recommended workflow
 
 1. Capture the current commit: `git rev-parse HEAD`.
-2. Run `clio components snapshot --out before.json` if the change affects prompts, tools, runtimes, safety, schemas, or recipes.
+2. Run `clio-coder components snapshot --out before.json` if the change affects prompts, tools, runtimes, safety, schemas, or recipes.
 3. Draft the change manifest.
 4. Implement the smallest change set.
 5. Run the validation plan and update `evidenceRefs` with resolved evidence bundle IDs such as `run-<id>` or `session-<id>` where available.
-6. Run `clio evolve manifest validate` and include the manifest in review notes.
+6. Run `clio-coder evolve manifest validate` and include the manifest in review notes.
 7. If the change fails, use `rollbackPlan` rather than ad hoc cleanup.
 
 Change manifests are especially useful for experimental CLIO work because they separate evidence-backed claims from plans, hypotheses, and future milestones.

@@ -126,7 +126,7 @@ export function resolveModelReference(rawPattern: string, providers: ProvidersCo
 	const { base, thinkingLevel } = splitThinkingSuffix(trimmed);
 	const candidates = collectCandidates(providers);
 	if (candidates.length === 0) {
-		return { ref: null, error: "no targets configured; add one with `clio configure` or `clio targets add`" };
+		return { ref: null, error: "no targets configured; add one with `clio-coder configure` or `clio-coder targets add`" };
 	}
 
 	const lower = base.toLowerCase();

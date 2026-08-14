@@ -102,7 +102,7 @@ export function evaluateRouteFacts(
 		if (requirement.mode === "shadow") return { ok: true, unknowns };
 		return {
 			ok: false,
-			reason: `no probe fact for target '${requirement.targetId}' on node '${requirement.nodeId}'; run 'clio doctor'`,
+			reason: `no probe fact for target '${requirement.targetId}' on node '${requirement.nodeId}'; run 'clio-coder doctor'`,
 			unknowns,
 		};
 	}

@@ -11,7 +11,7 @@ import { toPosixPath } from "./path-utils.js";
  * The policy has three layers:
  *   1. ALWAYS excluded: clio-internal state and .git. Never searchable unless
  *      the search root itself sits inside one of them (pointing a tool at
- *      .clio explicitly means the caller wants those paths).
+ *      .clio-coder explicitly means the caller wants those paths).
  *   2. .gitignore: honored natively by rg/fd. Outside a git repo the binaries
  *      get --no-require-git so plain .gitignore/.ignore files still apply;
  *      inside a repo the default git-aware behavior keeps parent ignore rules
@@ -23,7 +23,7 @@ import { toPosixPath } from "./path-utils.js";
  * layer 1 always stands.
  */
 
-const ALWAYS_EXCLUDED_DIRS: ReadonlyArray<string> = [".clio", ".fallow", ".git"];
+const ALWAYS_EXCLUDED_DIRS: ReadonlyArray<string> = [".clio-coder", ".fallow", ".git"];
 
 const GENERATED_DIRS: ReadonlyArray<string> = [
 	".cache",
@@ -54,7 +54,7 @@ function isInsideGitRepo(startPath: string): boolean {
 
 /**
  * Directories to force-exclude for a given search root, skipping any dir the
- * root itself sits inside: pointing a tool at node_modules (or .clio) means
+ * root itself sits inside: pointing a tool at node_modules (or .clio-coder) means
  * the caller wants those matches, so the exclude must not suppress them.
  */
 function excludedDirsFor(searchPath: string, includeIgnored: boolean): string[] {

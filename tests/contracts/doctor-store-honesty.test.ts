@@ -1,9 +1,9 @@
 /**
- * `clio doctor` reported on the roots and the install metadata and then stopped,
+ * `clio-coder doctor` reported on the roots and the install metadata and then stopped,
  * so the two stores that hold everything a user would lose were unchecked.
  *
- * The failures these cover: `rm -rf $CLIO_STATE_DIR/sessions` left a green
- * report and exit 0 while `clio resume` found nothing; a ledger with an
+ * The failures these cover: `rm -rf $CLIO_CODER_STATE_DIR/sessions` left a green
+ * report and exit 0 while `clio-coder resume` found nothing; a ledger with an
  * unparseable line was reported by no row at all, only by a warning on stderr
  * during some later command; and a credentials file this version cannot parse
  * printed `OK credentials 600` while every provider in it read as disconnected.
@@ -55,7 +55,7 @@ describe("contracts/doctor store honesty", { concurrency: false }, () => {
 
 		const row = rowFor("session store");
 		strictEqual(row.ok, false, "a store that no longer exists is not a healthy install");
-		match(row.detail, /sessions missing \(run `clio doctor --fix`\)/u);
+		match(row.detail, /sessions missing \(run `clio-coder doctor --fix`\)/u);
 	});
 
 	it("names the ledger and the line a damaged transcript loses", () => {
@@ -143,7 +143,7 @@ describe("contracts/doctor store honesty", { concurrency: false }, () => {
 			strictEqual(row.ok, false);
 			ok(!row.detail.startsWith("Error:"), `a raw thrown error is not a row: ${row.detail}`);
 			ok(row.detail.includes(creds), "the file that cannot be read is named");
-			match(row.detail, /\(run `clio doctor --fix`\)$/u, "the row names the command that repairs it");
+			match(row.detail, /\(run `clio-coder doctor --fix`\)$/u, "the row names the command that repairs it");
 		} finally {
 			chmodSync(creds, 0o600);
 		}

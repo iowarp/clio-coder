@@ -459,7 +459,7 @@
     <main class="tab-pane" id="pane-reference">
       <div class="glass-card">
         <h2>Clio Coder Change Manifest Specifications</h2>
-        <p>Change manifests are JSON structures generated or validated using the <code>clio evolve manifest</code> command to support reviewable and falsifiable harness changes.</p>
+        <p>Change manifests are JSON structures generated or validated using the <code>clio-coder evolve manifest</code> command to support reviewable and falsifiable harness changes.</p>
         
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Change Manifest Schema</h3>
         <p>Every change must satisfy specific verification keys:</p>
@@ -530,8 +530,8 @@
   "changes": [
     {
       "id": "change-1",
-      "componentIds": ["context-file:CLIO.md"],
-      "filesChanged": ["CLIO.md"],
+      "componentIds": ["context-file:CLIO-CODER.md"],
+      "filesChanged": ["CLIO-CODER.md"],
       "authorityLevel": "prompt",
       "evidenceRefs": [],
       "rootCause": "Exploratory setup.",
@@ -539,7 +539,7 @@
       "predictedFixes": ["First setup."],
       "predictedRegressions": [],
       "validationPlan": ["npm run test"],
-      "rollbackPlan": "git checkout CLIO.md"
+      "rollbackPlan": "git checkout CLIO-CODER.md"
     }
   ]
 }`,

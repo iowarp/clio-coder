@@ -16,7 +16,7 @@ afterEach(() => {
 function scratch(): { cwd: string; userPath: string } {
 	const cwd = mkdtempSync(join(tmpdir(), "clio-cust-"));
 	roots.push(cwd);
-	mkdirSync(join(cwd, ".clio"), { recursive: true });
+	mkdirSync(join(cwd, ".clio-coder"), { recursive: true });
 	return { cwd, userPath: join(cwd, "user-settings.yaml") };
 }
 
@@ -29,8 +29,8 @@ describe("contracts/3a scoped settings layering", () => {
 	it("applies built-in < user < project < project.local precedence with per-key sources", () => {
 		const { cwd, userPath } = scratch();
 		write(userPath, "identity: user-id\nmodelSelector:\n  recentLimit: 5\n");
-		write(join(cwd, ".clio", "settings.yaml"), "identity: project-id\nbudget:\n  sessionCeilingUsd: 10\n");
-		write(join(cwd, ".clio", "settings.local.yaml"), "theme: midnight\n");
+		write(join(cwd, ".clio-coder", "settings.yaml"), "identity: project-id\nbudget:\n  sessionCeilingUsd: 10\n");
+		write(join(cwd, ".clio-coder", "settings.local.yaml"), "theme: midnight\n");
 
 		const result = readLayeredSettings(cwd, { userPath });
 		strictEqual(result.settings.identity, "project-id");
@@ -50,7 +50,7 @@ describe("contracts/3a scoped settings layering", () => {
 		const { cwd, userPath } = scratch();
 		write(userPath, "identity: user-id\n");
 		write(
-			join(cwd, ".clio", "settings.yaml"),
+			join(cwd, ".clio-coder", "settings.yaml"),
 			"targets:\n  - id: t\n    runtime: ollama\n    auth:\n      apiKey: SUPER_SECRET\n",
 		);
 		const result = readLayeredSettings(cwd, { userPath });
@@ -64,7 +64,7 @@ describe("contracts/3a scoped settings layering", () => {
 	it("degrades a malformed project layer to the lower layers with an issue", () => {
 		const { cwd, userPath } = scratch();
 		write(userPath, "identity: user-id\n");
-		write(join(cwd, ".clio", "settings.yaml"), ":\n  - [bad yaml");
+		write(join(cwd, ".clio-coder", "settings.yaml"), ":\n  - [bad yaml");
 		const result = readLayeredSettings(cwd, { userPath });
 		strictEqual(result.settings.identity, "user-id");
 		ok(result.issues.length >= 1);
@@ -73,7 +73,7 @@ describe("contracts/3a scoped settings layering", () => {
 	it("attributes project validation failures to the project layer", () => {
 		const { cwd, userPath } = scratch();
 		write(userPath, "identity: user-id\n");
-		write(join(cwd, ".clio", "settings.yaml"), "targets:\n  - id: 7\n    runtime: ollama\n");
+		write(join(cwd, ".clio-coder", "settings.yaml"), "targets:\n  - id: 7\n    runtime: ollama\n");
 		const result = readLayeredSettings(cwd, { userPath });
 		ok(result.issues.some((issue) => issue.origin === "project" && issue.path === "targets[0].id"));
 	});
@@ -82,9 +82,9 @@ describe("contracts/3a scoped settings layering", () => {
 describe("contracts/3b path-scoped rules", () => {
 	it("loads unconditional and path-scoped rules with hash and token accounting", () => {
 		const { cwd } = scratch();
-		write(join(cwd, ".clio", "rules", "always.md"), "# Always\nUse tabs.\n");
+		write(join(cwd, ".clio-coder", "rules", "always.md"), "# Always\nUse tabs.\n");
 		write(
-			join(cwd, ".clio", "rules", "python.md"),
+			join(cwd, ".clio-coder", "rules", "python.md"),
 			"---\npaths:\n  - '**/*.py'\nexcludes:\n  - '**/*.lock'\n---\n# Python\nType-hint everything.\n",
 		);
 		const loaded = loadProjectRules(cwd);
@@ -116,15 +116,15 @@ describe("contracts/3b path-scoped rules", () => {
 
 	it("never activates a disabled rule", () => {
 		const { cwd } = scratch();
-		write(join(cwd, ".clio", "rules", "off.md"), "---\nenabled: false\n---\n# Off\n");
+		write(join(cwd, ".clio-coder", "rules", "off.md"), "---\nenabled: false\n---\n# Off\n");
 		const loaded = loadProjectRules(cwd);
 		strictEqual(selectActiveRules(loaded.rules, []).length, 0);
 	});
 
 	it("skips malformed frontmatter instead of loading it unconditionally", () => {
 		const { cwd } = scratch();
-		write(join(cwd, ".clio", "rules", "bad.md"), "---\npaths: '**/*.ts'\n---\n# Bad\nDo not load this.\n");
-		write(join(cwd, ".clio", "rules", "unclosed.md"), "---\npaths:\n  - '**/*.ts'\n# Missing close\n");
+		write(join(cwd, ".clio-coder", "rules", "bad.md"), "---\npaths: '**/*.ts'\n---\n# Bad\nDo not load this.\n");
+		write(join(cwd, ".clio-coder", "rules", "unclosed.md"), "---\npaths:\n  - '**/*.ts'\n# Missing close\n");
 		const loaded = loadProjectRules(cwd);
 		strictEqual(loaded.rules.length, 0);
 		ok(loaded.issues.some((issue) => issue.includes("frontmatter paths")));
@@ -136,7 +136,7 @@ describe("contracts/3c operator profile", () => {
 	it("merges user and project profiles and caps the rendered section", () => {
 		const { cwd, userPath } = scratch();
 		write(userPath, "responsePosture: thorough\nvalidationPreference: manual\n");
-		write(join(cwd, ".clio", "profile.yaml"), "responsePosture: concise\ncommitMessageStyle: conventional\n");
+		write(join(cwd, ".clio-coder", "profile.yaml"), "responsePosture: concise\ncommitMessageStyle: conventional\n");
 		const loaded = loadOperatorProfile(cwd, { userPath });
 		strictEqual(loaded.origin, "project");
 		strictEqual(loaded.profile.responsePosture, "concise");
@@ -164,10 +164,10 @@ describe("contracts/3c operator profile", () => {
 describe("contracts/3d config inspect graph", () => {
 	it("reports project rules, profile, hooks, and settings sources in the JSON contract", () => {
 		const { cwd } = scratch();
-		write(join(cwd, ".clio", "settings.yaml"), "identity: graph-project\n");
-		write(join(cwd, ".clio", "rules", "r.md"), "# Rule\nbody\n");
-		write(join(cwd, ".clio", "profile.yaml"), "responsePosture: concise\n");
-		write(join(cwd, ".clio", "hooks.yaml"), "- on: turn_start\n  kind: prompt\n  message: hi\n");
+		write(join(cwd, ".clio-coder", "settings.yaml"), "identity: graph-project\n");
+		write(join(cwd, ".clio-coder", "rules", "r.md"), "# Rule\nbody\n");
+		write(join(cwd, ".clio-coder", "profile.yaml"), "responsePosture: concise\n");
+		write(join(cwd, ".clio-coder", "hooks.yaml"), "- on: turn_start\n  kind: prompt\n  message: hi\n");
 
 		const graph = buildCustomizationGraph(cwd);
 		// Serializable contract.

@@ -38,7 +38,7 @@ describe("contracts/eval context-init metrics", () => {
 				entry,
 				[
 					'import { writeFileSync } from "node:fs";',
-					`writeFileSync("CLIO.md", ${JSON.stringify("# Eval\n\nMeasured context.\n")}, "utf8");`,
+					`writeFileSync("CLIO-CODER.md", ${JSON.stringify("# Eval\n\nMeasured context.\n")}, "utf8");`,
 					`process.stdout.write(${JSON.stringify(JSON.stringify(payload))});`,
 					"process.stderr.write(JSON.stringify(process.argv.slice(2)));",
 				].join("\n"),
@@ -84,7 +84,7 @@ describe("contracts/eval context-init metrics", () => {
 					outputBytes: 512,
 				},
 			);
-			strictEqual(output.metrics["context.clioMdBytes"], Buffer.byteLength(readFileSync(join(root, "CLIO.md"))));
+			strictEqual(output.metrics["context.clioMdBytes"], Buffer.byteLength(readFileSync(join(root, "CLIO-CODER.md"))));
 			const invokedArgs = JSON.parse(output.stderr) as string[];
 			ok(invokedArgs.includes("--json"));
 			ok(invokedArgs.includes("--heuristic"));

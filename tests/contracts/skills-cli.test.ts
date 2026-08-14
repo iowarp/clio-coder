@@ -63,7 +63,7 @@ describe("contracts/skills-cli install by marketplace name", () => {
 
 	function seedMarketplace(): NodeJS.ProcessEnv {
 		const catalog = seedCatalog(join(scratch.dir, "catalog"), { "demo-skill/SKILL.md": catalogBody });
-		return { ...scratch.env, CLIO_SKILL_CATALOG_DIR: catalog };
+		return { ...scratch.env, CLIO_CODER_SKILL_CATALOG_DIR: catalog };
 	}
 
 	it("resolves a bare name through the local marketplace into the project scope", async () => {
@@ -72,7 +72,7 @@ describe("contracts/skills-cli install by marketplace name", () => {
 
 		const result = await runCli(["skills", "install", "demo-skill"], { env: seedMarketplace(), cwd: project });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
-		const installed = readFileSync(join(project, ".clio", "skills", "demo-skill", "SKILL.md"), "utf8");
+		const installed = readFileSync(join(project, ".clio-coder", "skills", "demo-skill", "SKILL.md"), "utf8");
 		ok(installed.includes("demo skill from the catalog"), "installed copy must come from the catalog entry");
 	});
 
@@ -96,7 +96,7 @@ describe("contracts/skills-cli install by marketplace name", () => {
 
 		const result = await runCli(["skills", "install", "demo-skill"], { env: seedMarketplace(), cwd: project });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
-		const installed = readFileSync(join(project, ".clio", "skills", "demo-skill", "SKILL.md"), "utf8");
+		const installed = readFileSync(join(project, ".clio-coder", "skills", "demo-skill", "SKILL.md"), "utf8");
 		ok(installed.includes("demo skill from the local path"), "a local path must win over the marketplace entry");
 	});
 
@@ -128,7 +128,7 @@ describe("contracts/skills-cli search diagnostics", () => {
 		const project = join(scratch.dir, "project");
 		mkdirSync(project, { recursive: true });
 		return {
-			env: { ...scratch.env, CLIO_SKILL_CATALOG_DIR: catalog, CLIO_SKILL_MARKETPLACE_INDEX: brokenIndex },
+			env: { ...scratch.env, CLIO_CODER_SKILL_CATALOG_DIR: catalog, CLIO_CODER_SKILL_MARKETPLACE_INDEX: brokenIndex },
 			project,
 		};
 	}
@@ -171,16 +171,20 @@ describe("contracts/skills-cli bundle install", () => {
 		});
 		const project = join(scratch.dir, `grouped-project-${label}`);
 		mkdirSync(project, { recursive: true });
-		return { env: { ...scratch.env, CLIO_SKILL_CATALOG_DIR: catalog }, project };
+		return { env: { ...scratch.env, CLIO_CODER_SKILL_CATALOG_DIR: catalog }, project };
 	}
 
 	it("installs one catalog group and leaves the other groups alone", async () => {
 		const { env, project } = seedGrouped("category");
 		const result = await runCli(["skills", "install", "--category", "git"], { env, cwd: project });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
-		ok(readFileSync(join(project, ".clio", "skills", "alpha", "SKILL.md"), "utf8").includes("Body for alpha"));
-		ok(readFileSync(join(project, ".clio", "skills", "beta", "SKILL.md"), "utf8").includes("Body for beta"));
-		strictEqual(existsSync(join(project, ".clio", "skills", "gamma")), false, "research group must not be installed");
+		ok(readFileSync(join(project, ".clio-coder", "skills", "alpha", "SKILL.md"), "utf8").includes("Body for alpha"));
+		ok(readFileSync(join(project, ".clio-coder", "skills", "beta", "SKILL.md"), "utf8").includes("Body for beta"));
+		strictEqual(
+			existsSync(join(project, ".clio-coder", "skills", "gamma")),
+			false,
+			"research group must not be installed",
+		);
 	});
 
 	it("reports an empty category rather than silently installing nothing", async () => {
@@ -194,13 +198,13 @@ describe("contracts/skills-cli bundle install", () => {
 		const { env, project } = seedGrouped("multi");
 		const ok2 = await runCli(["skills", "install", "alpha", "gamma"], { env, cwd: project });
 		strictEqual(ok2.code, 0, `stderr=${ok2.stderr}`);
-		ok(existsSync(join(project, ".clio", "skills", "alpha")));
-		ok(existsSync(join(project, ".clio", "skills", "gamma")));
+		ok(existsSync(join(project, ".clio-coder", "skills", "alpha")));
+		ok(existsSync(join(project, ".clio-coder", "skills", "gamma")));
 
 		// alpha is already there; beta is not. A partial install must not exit 0.
 		const partial = await runCli(["skills", "install", "alpha", "beta"], { env, cwd: project });
 		strictEqual(partial.code, 1, `stdout=${partial.stdout}`);
-		ok(existsSync(join(project, ".clio", "skills", "beta")), "the installable one must still be installed");
+		ok(existsSync(join(project, ".clio-coder", "skills", "beta")), "the installable one must still be installed");
 	});
 
 	it("refuses --name for a multi-skill install instead of stacking them on one directory", async () => {
@@ -208,7 +212,7 @@ describe("contracts/skills-cli bundle install", () => {
 		const result = await runCli(["skills", "install", "alpha", "beta", "--name", "merged"], { env, cwd: project });
 		strictEqual(result.code, 2);
 		ok(result.stderr.includes("--name applies to a single skill"), `stderr=${result.stderr}`);
-		strictEqual(existsSync(join(project, ".clio", "skills", "merged")), false);
+		strictEqual(existsSync(join(project, ".clio-coder", "skills", "merged")), false);
 	});
 
 	it("finds a catalog group by its category name, the same word --category takes", async () => {
@@ -229,7 +233,7 @@ describe("contracts/skills-cli bundle install", () => {
 		const uninstalled = await runCli(["skills", "inspect", "alpha"], { env, cwd: project });
 		strictEqual(uninstalled.code, 1);
 		ok(uninstalled.stderr.includes("skill not installed: alpha"), `stderr=${uninstalled.stderr}`);
-		ok(uninstalled.stderr.includes("clio skills install alpha"), `stderr=${uninstalled.stderr}`);
+		ok(uninstalled.stderr.includes("clio-coder skills install alpha"), `stderr=${uninstalled.stderr}`);
 
 		const absent = await runCli(["skills", "inspect", "no-such-skill"], { env, cwd: project });
 		strictEqual(absent.code, 1);

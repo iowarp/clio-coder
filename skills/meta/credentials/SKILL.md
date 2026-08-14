@@ -1,6 +1,6 @@
 ---
 name: credentials
-description: Use before running any tool or script that needs an API key, token, or other credential, when a command fails with an auth error, when the user must supply a new secret, or when a secret may have leaked into output. Covers facility surfaces such as kerberos tickets, globus and scheduler tokens, ssh agents, and netrc. Triggers on "API key", "credential", "token", "auth error", "permission denied", "add a secret", "leaked". Not for provider target configuration; use clio auth and target settings.
+description: Use before running any tool or script that needs an API key, token, or other credential, when a command fails with an auth error, when the user must supply a new secret, or when a secret may have leaked into output. Covers facility surfaces such as kerberos tickets, globus and scheduler tokens, ssh agents, and netrc. Triggers on "API key", "credential", "token", "auth error", "permission denied", "add a secret", "leaked". Not for provider target configuration; use clio-coder auth and target settings.
 version: 0.1.2
 license: Apache-2.0
 allowed-tools:
@@ -70,7 +70,7 @@ Use `credential_present` for that re-check when it is available.
 - Never embed tokens in scheduler job scripts; scheduler logs and evidence
   archives outlive the job.
 - Provider keys that Clio manages live in the auth store: route those through
-  `clio auth` and target settings, not env files.
+  `clio-coder auth` and target settings, not env files.
 
 ## Facility and HPC Surfaces
 

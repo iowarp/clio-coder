@@ -55,7 +55,7 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 		const report = await runCli(["doctor"], { env: scratch.env });
 		strictEqual(report.code, 1);
 		match(report.stdout, /typoKey: unknown key/);
-		match(report.stdout, /clio reset --config --force/);
+		match(report.stdout, /clio-coder reset --config --force/);
 		ok(
 			!/remove unrecognized keys or update them to current settings key names/.test(report.stdout),
 			"the one-size remedy that did not fit range errors is gone",
@@ -67,7 +67,7 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 		strictEqual(loader.code, 1);
 		match(loader.stderr, /Fix the keys above in .*settings\.yaml/);
 		match(loader.stderr, /never rewrites settings/);
-		match(loader.stderr, /clio reset --config --force/);
+		match(loader.stderr, /clio-coder reset --config --force/);
 
 		const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
 		strictEqual(fixed.code, 1, "--fix cannot repair settings content and must keep saying so");
@@ -97,7 +97,7 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 		ok(settingsRow?.includes("not valid YAML:"), `expected a parse-error row, got ${settingsRow}`);
 		ok(!settingsRow?.includes("unreadable:"), `a readable file must not be called unreadable: ${settingsRow}`);
 		ok(settingsRow?.includes("fix the YAML in"), `the parse-error row names the repair that fits: ${settingsRow}`);
-		ok(settingsRow?.includes("clio reset --config --force"), "the parse-error row carries a remedy too");
+		ok(settingsRow?.includes("clio-coder reset --config --force"), "the parse-error row carries a remedy too");
 	});
 
 	it("turns a missing command chunk into a reinstall instruction", async () => {
@@ -124,17 +124,17 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 	});
 
 	it("says what the bannered boot is actually configured for", async () => {
-		// The whole of what a piped or CI invocation of bare `clio` shows. It
+		// The whole of what a piped or CI invocation of bare `clio-coder` shows. It
 		// used to end in a hardcoded `ready` that a machine with no target at
 		// all printed just as happily.
 		const fresh = await runCli([], { env: scratch.env });
 		strictEqual(fresh.code, 0, `stderr=${fresh.stderr}`);
 		match(fresh.stdout, /EXPERIMENTAL/);
 		match(fresh.stdout, /no model target configured/);
-		match(fresh.stdout, /clio configure/);
+		match(fresh.stdout, /clio-coder configure/);
 		ok(!/· ready/.test(fresh.stdout), "an unconfigured install may not describe itself as ready");
 
-		// Written directly rather than through `clio configure`, which probes the
+		// Written directly rather than through `clio-coder configure`, which probes the
 		// endpoint; the banner is what is under test, not target registration.
 		const settings = readFileSync(join(scratch.dir, "config", "settings.yaml"), "utf8");
 		writeFileSync(
@@ -168,7 +168,7 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 });
 
 /**
- * What `clio configure` says about a target it could not reach, and about one
+ * What `clio-coder configure` says about a target it could not reach, and about one
  * it reached without learning anything.
  *
  * Both were found by configuring a target by hand and then trying to take a
@@ -179,7 +179,7 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
  * could not serve a completion was blessed at configure time and the user
  * found out from a raw 404 on their first turn.
  */
-describe("clio configure probe reporting", { concurrency: false }, () => {
+describe("clio-coder configure probe reporting", { concurrency: false }, () => {
 	let scratch: ReturnType<typeof makeScratchHome>;
 
 	beforeEach(() => {
@@ -211,7 +211,7 @@ describe("clio configure probe reporting", { concurrency: false }, () => {
 		match(result.stdout, new RegExp(`http://127\\.0\\.0\\.1:${port}`), "the address it tried is named");
 		match(result.stdout, /ECONNREFUSED/, "the reason is the errno, not undici's wrapper");
 		ok(!/probe failed[^\n]*fetch failed/.test(result.stdout), "the bare wrapper is not the whole message");
-		match(result.stdout, /clio configure --id down --url/, "and it names the command that changes the outcome");
+		match(result.stdout, /clio-coder configure --id down --url/, "and it names the command that changes the outcome");
 	});
 
 	it("does not report a probe that read nothing as an unqualified probe ok", async () => {
@@ -238,7 +238,7 @@ describe("clio configure probe reporting", { concurrency: false }, () => {
 			match(result.stdout, /probe reachable/, "reachable is not the same claim as ok");
 			ok(!/probe ok/.test(result.stdout), "a probe that read nothing must not read as a full one");
 			match(result.stdout, /no model list and no version/, "it says which reads came back empty");
-			match(result.stdout, /clio targets --probe/, "and names the command that retries them");
+			match(result.stdout, /clio-coder targets --probe/, "and names the command that retries them");
 		} finally {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
@@ -275,11 +275,11 @@ describe("clio configure probe reporting", { concurrency: false }, () => {
 });
 
 /**
- * Every failing row in `clio doctor` names the command that repairs it, which
+ * Every failing row in `clio-coder doctor` names the command that repairs it, which
  * is the whole reason the report is worth reading from a broken machine.
  * `state metadata` was the one row that said only what was wrong.
  */
-describe("clio doctor remedies", { concurrency: false }, () => {
+describe("clio-coder doctor remedies", { concurrency: false }, () => {
 	let scratch: ReturnType<typeof makeScratchHome>;
 
 	beforeEach(() => {
@@ -299,7 +299,7 @@ describe("clio doctor remedies", { concurrency: false }, () => {
 		const broken = await runCli(["doctor"], { env: scratch.env });
 		const row = broken.stdout.split("\n").find((line) => line.includes("state metadata")) ?? "";
 		match(row, /missing/, "the row still says what is wrong");
-		match(row, /clio doctor --fix/, "and now says what repairs it");
+		match(row, /clio-coder doctor --fix/, "and now says what repairs it");
 
 		// The named command has to actually repair it.
 		const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });

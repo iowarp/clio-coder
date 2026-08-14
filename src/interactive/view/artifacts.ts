@@ -245,7 +245,7 @@ function readRunLedger(stateDir: string): RunEnvelope[] {
 
 function listRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {
 	// The in-process dispatch ledger only sees runs created by this process.
-	// A headless `clio run` in another process writes runs.json and receipts/
+	// A headless `clio-coder run` in another process writes runs.json and receipts/
 	// directly, so every listing re-reads the disk ledger and merges runs the
 	// in-memory mirror has not hydrated.
 	let fromMemory: RunEnvelope[] = [];

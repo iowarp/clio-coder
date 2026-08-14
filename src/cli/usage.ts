@@ -14,7 +14,7 @@ import {
 import { cwdHash } from "../engine/session.js";
 import { formatColumns, printError } from "./shared.js";
 
-const HELP = `clio usage report [--repo <path>] [--days <n>] [--json]
+const HELP = `clio-coder usage report [--repo <path>] [--days <n>] [--json]
 
 Cross-session usage analyzer (experimental, read-only). Reads the local usage
 archive (receipts, session ledgers, audit rows, evidence index, memory store)
@@ -377,7 +377,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		if (memoryMentions(memoryRecords, tag)) continue;
 		opportunities.push({
 			kind: "memory",
-			suggestion: `failure tag "${tag}" recurs with no memory record; consider: clio memory propose --from-evidence ${info.latestEvidenceId}`,
+			suggestion: `failure tag "${tag}" recurs with no memory record; consider: clio-coder memory propose --from-evidence ${info.latestEvidenceId}`,
 			evidence: `${info.count} evidence rows in window, latest ${info.latestEvidenceId} at ${info.latestAt}`,
 		});
 	}
@@ -392,7 +392,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	if (diagnostics.malformedAuditRows > 0)
 		diagParts.push(`${diagnostics.malformedAuditRows} malformed audit row(s) skipped`);
 	for (const note of diagnostics.notes) diagParts.push(note);
-	if (diagParts.length > 0) process.stderr.write(`clio usage: ${diagParts.join("; ")}\n`);
+	if (diagParts.length > 0) process.stderr.write(`clio-coder usage: ${diagParts.join("; ")}\n`);
 
 	const windowFrom = new Date(windowStart).toISOString();
 	const windowTo = new Date(now).toISOString();
@@ -641,7 +641,7 @@ async function readReceipts(
 		withTimes.sort((a, b) => b.mtimeMs - a.mtimeMs);
 		const kept = withTimes.slice(0, RECEIPT_CAP);
 		process.stderr.write(
-			`clio usage: receipt cap: reading newest ${RECEIPT_CAP} of ${files.length} receipts; oldest ${files.length - RECEIPT_CAP} truncated\n`,
+			`clio-coder usage: receipt cap: reading newest ${RECEIPT_CAP} of ${files.length} receipts; oldest ${files.length - RECEIPT_CAP} truncated\n`,
 		);
 		files = kept.map((entry) => entry.name);
 	}

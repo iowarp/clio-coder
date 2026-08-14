@@ -2,7 +2,7 @@
  * Repo-owned deterministic command registry for fleet code steps.
  *
  * A code step names a command id; it never authors a shell string. The binding
- * from id to argv lives in the repository at `.clio/fleets/commands.yaml`,
+ * from id to argv lives in the repository at `.clio-coder/fleets/commands.yaml`,
  * beside the fleet contracts that reference it. Two properties follow:
  *
  *   - A model cannot invent an invocation. The worst a contract can do is name
@@ -81,7 +81,7 @@ const COMMAND_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]*$/u;
 
 export function fleetCommandsPath(cwd: string): string {
-	return join(cwd, ".clio", "fleets", "commands.yaml");
+	return join(cwd, ".clio-coder", "fleets", "commands.yaml");
 }
 
 function firstSchemaError(value: unknown): string | null {

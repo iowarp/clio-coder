@@ -1,8 +1,8 @@
 /**
  * The README install block ran `npm run install:local`, then `hash -r`, then
- * `clio --version`. On a machine where `~/.local/bin` is not on PATH, which is
+ * `clio-coder --version`. On a machine where `~/.local/bin` is not on PATH, which is
  * the case the installer itself checks for and warns about, that sequence ends
- * in `clio: command not found` on the last line of the documented install.
+ * in `clio-coder: command not found` on the last line of the documented install.
  *
  * The installer already prints the line that fixes it. The README has to carry
  * the same line, spelled the same way, or the two drift and the printed advice
@@ -18,7 +18,7 @@ import { describe, it } from "node:test";
 /** The default bin dir the installer links into, read from the installer itself. */
 function installerBinDir(): string {
 	const script = readFileSync("scripts/install-local.sh", "utf8");
-	const binDir = script.match(/^bin_dir=.*\$\{CLIO_BIN_DIR:-(?<fallback>[^}]+)\}/mu)?.groups?.fallback;
+	const binDir = script.match(/^bin_dir=.*\$\{CLIO_CODER_BIN_DIR:-(?<fallback>[^}]+)\}/mu)?.groups?.fallback;
 	ok(binDir, "the installer still has a default bin dir");
 	return binDir;
 }
@@ -103,17 +103,17 @@ describe("contracts/readme install block", () => {
 	});
 
 	/**
-	 * A bare `clio` resolves through PATH and can answer for an older install
+	 * A bare `clio-coder` resolves through PATH and can answer for an older install
 	 * earlier on it, which verifies that one rather than the one just installed.
 	 * The installer warns about exactly that shadowing; the README's own
 	 * verification step must not walk into it.
 	 */
-	it("verifies with the launcher's own path, not a bare clio", () => {
+	it("verifies with the launcher's own path, not a bare clio-coder", () => {
 		const block = readmeInstallBlock();
 		const verify = block.find((line) => line.includes("--version"));
 		ok(verify, "the block still verifies the install");
 		ok(
-			verify?.includes("/clio") && !/^clio --version/u.test(verify.trim()),
+			verify?.includes("/clio") && !/^clio-coder --version/u.test(verify.trim()),
 			`verification must name the installed launcher by path: ${verify}`,
 		);
 		const binDir = installerBinDir();
@@ -121,7 +121,7 @@ describe("contracts/readme install block", () => {
 	});
 
 	/**
-	 * The README told the reader to keep using the bare name once `clio
+	 * The README told the reader to keep using the bare name once `clio-coder
 	 * --version` and the launcher's own `--version` agreed. Two installs of the
 	 * same release print the same version, so that check passes while shadowed:
 	 * it compares the answer instead of asking who answered.
@@ -129,9 +129,9 @@ describe("contracts/readme install block", () => {
 	it("resolves the bare name by path rather than comparing versions", () => {
 		const readme = readFileSync("README.md", "utf8");
 		const section = readme.slice(readme.indexOf("## Install"), readme.indexOf("To remove it"));
-		ok(section.includes("command -v clio"), "the README asks which file the bare name reaches");
+		ok(section.includes("command -v clio-coder"), "the README asks which file the bare name reaches");
 		ok(
-			!/`clio --version` and\s+`[^`]*\/clio" --version` agree/u.test(section),
+			!/`clio-coder --version` and\s+`[^`]*\/clio" --version` agree/u.test(section),
 			"and no longer treats agreeing versions as proof the name resolves to this install",
 		);
 	});
@@ -139,27 +139,27 @@ describe("contracts/readme install block", () => {
 	/**
 	 * The paragraph above promises the installer warns about a shadowing clio.
 	 * It is a promise about a program, so it is checked by running the program:
-	 * a stub `clio` earlier on PATH, an install into a bin dir that is not, and
+	 * a stub `clio-coder` earlier on PATH, an install into a bin dir that is not, and
 	 * the dry run that changes nothing.
 	 */
-	it("backs the shadowing claim: the installer names the other clio on PATH", () => {
-		const scratch = mkdtempSync(join(tmpdir(), "clio-install-shadow-"));
+	it("backs the shadowing claim: the installer names the other clio-coder on PATH", () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-coder-install-shadow-"));
 		try {
 			const shadowDir = join(scratch, "shadow");
 			const binDir = join(scratch, "bin");
 			mkdirSync(shadowDir);
 			mkdirSync(binDir);
-			const shadow = join(shadowDir, "clio");
-			writeFileSync(shadow, '#!/bin/sh\necho "clio 0.0.0-other"\n');
+			const shadow = join(shadowDir, "clio-coder");
+			writeFileSync(shadow, '#!/bin/sh\necho "clio-coder 0.0.0-other"\n');
 			chmodSync(shadow, 0o755);
 
 			const run = spawnSync("bash", ["scripts/install-local.sh", "--dry-run", "--skip-deps", "--no-build"], {
 				encoding: "utf8",
-				env: { ...process.env, PATH: `${shadowDir}:${process.env.PATH ?? ""}`, CLIO_BIN_DIR: binDir },
+				env: { ...process.env, PATH: `${shadowDir}:${process.env.PATH ?? ""}`, CLIO_CODER_BIN_DIR: binDir },
 			});
 			strictEqual(run.status, 0, `dry run should succeed: ${run.stderr}`);
 			const output = `${run.stdout}${run.stderr}`;
-			ok(output.includes(`another clio is on your PATH at ${shadow}`), `installer names it: ${output}`);
+			ok(output.includes(`another clio-coder is on your PATH at ${shadow}`), `installer names it: ${output}`);
 			ok(output.includes(`check it with: ${shadow} --version`), `and says how to identify it: ${output}`);
 
 			// The same stub, reached through a link into the launcher this run is
@@ -167,14 +167,14 @@ describe("contracts/readme install block", () => {
 			// the raw paths said it was.
 			const linked = join(scratch, "linked");
 			mkdirSync(linked);
-			symlinkSync(resolve("scripts/install-local.sh"), join(binDir, "clio"));
-			symlinkSync(join(binDir, "clio"), join(linked, "clio"));
+			symlinkSync(resolve("scripts/install-local.sh"), join(binDir, "clio-coder"));
+			symlinkSync(join(binDir, "clio-coder"), join(linked, "clio-coder"));
 			const sameInstall = spawnSync("bash", ["scripts/install-local.sh", "--dry-run", "--skip-deps", "--no-build"], {
 				encoding: "utf8",
-				env: { ...process.env, PATH: `${linked}:${process.env.PATH ?? ""}`, CLIO_BIN_DIR: binDir },
+				env: { ...process.env, PATH: `${linked}:${process.env.PATH ?? ""}`, CLIO_CODER_BIN_DIR: binDir },
 			});
 			ok(
-				!`${sameInstall.stdout}${sameInstall.stderr}`.includes("another clio is on your PATH"),
+				!`${sameInstall.stdout}${sameInstall.stderr}`.includes("another clio-coder is on your PATH"),
 				"a name that resolves through to this launcher is not a second installation",
 			);
 		} finally {

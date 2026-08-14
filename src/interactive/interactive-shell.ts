@@ -105,7 +105,7 @@ export function createInteractiveShell<TTerminal extends Terminal, TTui extends 
 }
 
 /**
- * Trace for the current process, created once when CLIO_RENDER_TRACE names a
+ * Trace for the current process, created once when CLIO_CODER_RENDER_TRACE names a
  * file. The panel wires its render metrics into the same instance, so the
  * frame rows carry both the build cost and the write cost.
  */

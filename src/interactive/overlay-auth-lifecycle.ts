@@ -67,7 +67,7 @@ const maybeOpenExternalUrl = (url: string): void => {
  * and keeps serving the credential from memory, so the probe that follows
  * succeeds and the dialog reports a connection that will be gone at the next
  * start. Throwing puts this on the flow's own error path, which is what stops
- * `probeTarget()` from running and notifies with the reason. `clio auth login`
+ * `probeTarget()` from running and notifies with the reason. `clio-coder auth login`
  * refuses the same way; see cli/shared.ts credentialWriteFailed().
  */
 function assertCredentialStored(auth: AuthProviders["auth"], providerId: string): void {
@@ -118,7 +118,7 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 		if (!resolved?.target) {
 			deps.notify(
 				"warning",
-				`connect: unknown target ${reference}. Add it with clio targets add.`,
+				`connect: unknown target ${reference}. Add it with clio-coder targets add.`,
 				`connect:${reference}`,
 			);
 			return;

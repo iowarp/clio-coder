@@ -14,10 +14,10 @@ import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
 
 /**
  * Render the project prompt context for `cwd`: the project-type marker, the
- * CLIO.md fragment when a parseable handbook exists, the codewiki availability
+ * CLIO-CODER.md fragment when a parseable handbook exists, the codewiki availability
  * marker, and the Markdown wiki marker when a valid wiki exists. Shared by the
  * prompts extension (session compile),
- * context-init preload reporting, and `clio config inspect`, so every surface
+ * context-init preload reporting, and `clio-coder config inspect`, so every surface
  * measures the same text the session prompt would preload.
  */
 export function renderPromptContext(cwd: string): ProjectPromptContext {
@@ -30,7 +30,7 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 		clioMd = clio.value;
 		pieces.push(renderProjectContextFragment(clio.value));
 	}
-	if (clio && !clio.ok) warnings.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
+	if (clio && !clio.ok) warnings.push(`clio: malformed CLIO-CODER.md ignored: ${clio.error}`);
 	const codewiki = readCodewiki(cwd);
 	if (codewiki) {
 		const state = readClioState(cwd);
@@ -55,8 +55,8 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 			);
 		}
 		if (staleness.state === "stale") notes.push("stale");
-		const suffix = notes.length > 0 ? ` (${notes.join("; ")}; run clio context wiki --update)` : "";
-		pieces.push(`<wiki>${pages.length} pages at .clio/wiki (start: quickstart.md)${suffix}</wiki>`);
+		const suffix = notes.length > 0 ? ` (${notes.join("; ")}; run clio-coder context wiki --update)` : "";
+		pieces.push(`<wiki>${pages.length} pages at .clio-coder/wiki (start: quickstart.md)${suffix}</wiki>`);
 	}
 	return { text: pieces.join("\n\n"), clioMd, warnings };
 }

@@ -278,7 +278,7 @@ describe("contracts/bootstrap model generation", () => {
 
 	// Bootstrap used to throw when no binding existed, which made it the only
 	// internal dispatch that could not run off workers.default. A fresh install
-	// with a working default therefore never produced a model-driven CLIO.md.
+	// with a working default therefore never produced a model-driven CLIO-CODER.md.
 	it("falls back to workers.default when no bootstrap binding is configured", () => {
 		const unbound = structuredClone(DEFAULT_SETTINGS);
 		unbound.workers.default = { target: "dynamo", model: "qwopus-coder", thinkingLevel: "off" };

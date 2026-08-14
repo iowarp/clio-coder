@@ -115,7 +115,7 @@ describe("contracts/pin-skills script", () => {
 		const pin = await runPinScript(["--dir", catalog]);
 		strictEqual(pin.code, 0);
 
-		// Stamp lifecycle fields the way `clio skills install` does (nested in
+		// Stamp lifecycle fields the way `clio-coder skills install` does (nested in
 		// the clio: block); the pinned hash must not change.
 		const raw = readFileSync(file, "utf8");
 		writeFileSync(

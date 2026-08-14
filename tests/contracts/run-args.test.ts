@@ -110,7 +110,7 @@ describe("contracts/run CLI args", () => {
 
 	it("documents resource and steer flags in run help and restores run overrides", async () => {
 		// Pre-existing run overrides in scope (e.g. a caller already inside
-		// withRunOverrides) must survive a nested clio run invocation untouched.
+		// withRunOverrides) must survive a nested clio-coder run invocation untouched.
 		const previous = process.env[RUN_OVERRIDES_ENV];
 		process.env[RUN_OVERRIDES_ENV] = JSON.stringify({ maxContextTokens: 111, kvCacheMode: "q4_0" });
 		try {

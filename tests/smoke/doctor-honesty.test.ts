@@ -1,9 +1,9 @@
 /**
- * `clio doctor` is the command a user runs to find out whether anything is
+ * `clio-coder doctor` is the command a user runs to find out whether anything is
  * wrong, so a green row it cannot back up is worse than no row at all.
  *
- * The failures these cover: `touch $CLIO_CACHE_DIR` produced `OK cache dir` and
- * exit 0, then `clio doctor --fix` one command later died on "Expected
+ * The failures these cover: `touch $CLIO_CODER_CACHE_DIR` produced `OK cache dir` and
+ * exit 0, then `clio-coder doctor --fix` one command later died on "Expected
  * directory" and printed no report; a mode-000 state root also read `OK`; and
  * the metadata row said "missing" about an install.json that was present and
  * merely unreadable, pointing at a `--fix` that fails the same way.
@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
-describe("clio doctor honesty about its own roots", { concurrency: false }, () => {
+describe("clio-coder doctor honesty about its own roots", { concurrency: false }, () => {
 	let scratch: ReturnType<typeof makeScratchHome>;
 
 	beforeEach(() => {
@@ -110,7 +110,7 @@ describe("clio doctor honesty about its own roots", { concurrency: false }, () =
 		rmSync(installJson);
 		const absent = await runCli(["doctor"], { env: scratch.env });
 		strictEqual(absent.code, 1);
-		match(rowFor(absent.stdout, "state metadata"), /missing \(run `clio doctor --fix`\)/u);
+		match(rowFor(absent.stdout, "state metadata"), /missing \(run `clio-coder doctor --fix`\)/u);
 	});
 
 	it("still reports every root OK on a healthy install", async () => {

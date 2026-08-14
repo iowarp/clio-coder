@@ -14,9 +14,9 @@ import { loadSkills, type Skill } from "./loader.js";
  * Local skill marketplace. Entries come from two real sources only:
  *
  *  1. A catalog directory of actual SKILL.md packages (for example the
- *     repo-level skills/ folder, or CLIO_SKILL_CATALOG_DIR). Metadata is read
+ *     repo-level skills/ folder, or CLIO_CODER_SKILL_CATALOG_DIR). Metadata is read
  *     from the packages themselves via the normal skill loader.
- *  2. A JSON index file (CLIO_SKILL_MARKETPLACE_INDEX or
+ *  2. A JSON index file (CLIO_CODER_SKILL_MARKETPLACE_INDEX or
  *     <config>/skill-marketplace.json) whose entries point at installable
  *     sources.
  *
@@ -36,7 +36,7 @@ export const MARKETPLACE_UNCONFIGURED = "no local skill marketplace catalog or i
 export interface MarketplaceSkill {
 	name: string;
 	description: string;
-	/** Local path or URL accepted by `clio skills install`. */
+	/** Local path or URL accepted by `clio-coder skills install`. */
 	sourceUrl: string;
 	version?: string;
 	audit?: "pass" | "warn" | "fail" | "unknown";
@@ -151,7 +151,7 @@ function looksLikeSkillCatalog(dir: string): boolean {
 function resolveCatalogDir(options: DiscoverMarketplaceOptions): string | null {
 	if (options.catalogDir === null) return null;
 	if (options.catalogDir) return path.resolve(options.catalogDir);
-	const fromEnv = process.env.CLIO_SKILL_CATALOG_DIR;
+	const fromEnv = process.env.CLIO_CODER_SKILL_CATALOG_DIR;
 	if (fromEnv && fromEnv.trim().length > 0) return path.resolve(fromEnv.trim());
 	const repoCatalog = path.join(options.cwd ?? process.cwd(), "skills");
 	return looksLikeSkillCatalog(repoCatalog) ? repoCatalog : null;
@@ -207,7 +207,7 @@ export function discoverMarketplaceSkills(options: DiscoverMarketplaceOptions = 
 	}
 
 	const indexPath =
-		options.indexPath === null ? null : (options.indexPath ?? process.env.CLIO_SKILL_MARKETPLACE_INDEX ?? null);
+		options.indexPath === null ? null : (options.indexPath ?? process.env.CLIO_CODER_SKILL_MARKETPLACE_INDEX ?? null);
 	const resolvedIndexPath = indexPath ?? defaultIndexPath();
 	if (options.indexPath !== null && resolvedIndexPath && existsSync(resolvedIndexPath)) {
 		for (const skill of indexSkills(resolvedIndexPath, diagnostics)) {

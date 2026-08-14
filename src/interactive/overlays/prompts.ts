@@ -5,7 +5,7 @@ import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 /** @internal exported for contract tests */
 export const PROMPTS_EMPTY =
-	"no prompt templates found. add a markdown file to .clio/prompts/ in this project or prompts/ in your clio config dir, and it becomes a slash command named after the file.";
+	"no prompt templates found. add a markdown file to .clio-coder/prompts/ in this project or prompts/ in your clio-coder config dir, and it becomes a slash command named after the file.";
 
 export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
 	const promptsList = ctx.listPrompts();

@@ -7,7 +7,7 @@
  *
  * The ledger holds an in-memory mirror of runs.json. `create()` and `update()`
  * mutate memory only; `persist()` writes the bounded ring (default 1000, env
- * override `CLIO_MAX_RUNS`) atomically via engine.atomicWrite.
+ * override `CLIO_CODER_MAX_RUNS`) atomically via engine.atomicWrite.
  *
  * No worker spawning, no domain wire-up, no SafeEventBus emission yet. Those
  * land in P6S3 and P6S5. This slice is a pure persistence primitive.
@@ -86,7 +86,7 @@ function readRuns(): RunEnvelope[] {
 
 function resolveMaxRuns(opt?: number | undefined): number {
 	if (opt !== undefined && opt > 0) return Math.floor(opt);
-	// env (CLIO_MAX_RUNS) > settings guardrails > default; see core/guardrails.ts.
+	// env (CLIO_CODER_MAX_RUNS) > settings guardrails > default; see core/guardrails.ts.
 	return resolveGuardrail("maxDispatchRuns");
 }
 

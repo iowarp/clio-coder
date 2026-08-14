@@ -499,7 +499,7 @@ describe("contracts/safety damage-control scan surface", () => {
 	/**
 	 * Every rule in the pack is a command pattern. Matching them against a
 	 * file's contents asks whether the file mentions a dangerous command, which
-	 * is not the question. `clio context wiki` could not write its own
+	 * is not the question. `clio-coder context wiki` could not write its own
 	 * `domains/safety.md` because the page documents what the classifier blocks
 	 * and therefore quotes `rm -rf /`; the write was refused as system_modify
 	 * with reason damage-control:rm-rf-root.
@@ -513,7 +513,7 @@ describe("contracts/safety damage-control scan surface", () => {
 		].join("\n");
 		const decision = contract().evaluate({
 			tool: ToolNames.Write,
-			args: { path: ".clio/wiki/domains/safety.md", content: page },
+			args: { path: ".clio-coder/wiki/domains/safety.md", content: page },
 		});
 		strictEqual(decision.kind, "allow", JSON.stringify(decision));
 	});

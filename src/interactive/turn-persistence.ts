@@ -317,7 +317,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				payload,
 			});
 			state.lastTurnId = turn.id;
-			// Same event row as the call, completed in place: `clio trace tail`
+			// Same event row as the call, completed in place: `clio-coder trace tail`
 			// shows one line per tool call carrying the E14 verdict fields, which
 			// is what "what did this turn actually execute" means.
 			const endedAt = traceNow();

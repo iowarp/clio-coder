@@ -41,13 +41,13 @@ function runContextHandler(
 	const moduleUrl = pathToFileURL(join(REPO_ROOT, "src/cli/context.ts")).href;
 	const script = [
 		`const mod = await import(${JSON.stringify(moduleUrl)});`,
-		`const code = await mod.runContextCommand(JSON.parse(process.env.CLIO_TEST_ARGS ?? "[]"));`,
+		`const code = await mod.runContextCommand(JSON.parse(process.env.CLIO_CODER_TEST_ARGS ?? "[]"));`,
 		"process.exitCode = code;",
 	].join("\n");
 	const child = spawnSync(process.execPath, ["--import", TSX_LOADER, "--eval", script], {
 		cwd,
 		encoding: "utf8",
-		env: { ...process.env, CLIO_TEST_ARGS: JSON.stringify(args) },
+		env: { ...process.env, CLIO_CODER_TEST_ARGS: JSON.stringify(args) },
 	});
 	if (child.error) throw child.error;
 	return { status: child.status ?? 0, stdout: child.stdout, stderr: child.stderr };
@@ -65,7 +65,7 @@ function writeWikiPage(cwd: string, name: string, text: string): void {
 }
 
 // Writers target the harness-provided staging directory, mirroring how a page
-// dispatch writes into input.outputDir rather than into .clio/wiki directly.
+// dispatch writes into input.outputDir rather than into .clio-coder/wiki directly.
 function writeStagingPage(outputDir: string, name: string, text: string): void {
 	const target = join(outputDir, name);
 	mkdirSync(dirname(target), { recursive: true });
@@ -81,7 +81,7 @@ function completePlan(input: WikiGenerateInput): void {
 }
 
 function clioEntryNames(cwd: string): string[] {
-	return readdirSync(join(cwd, ".clio"));
+	return readdirSync(join(cwd, ".clio-coder"));
 }
 
 function stagingDirs(cwd: string): string[] {
@@ -512,7 +512,7 @@ describe("contracts/wiki", () => {
 		it("rewrites only the pages whose recorded sources changed", async () => {
 			writeProjectFile(scratch);
 			writeFileSync(join(scratch, "src", "other.ts"), "export const other = true;\n", "utf8");
-			writeFileSync(join(scratch, ".gitignore"), ".clio/\n", "utf8");
+			writeFileSync(join(scratch, ".gitignore"), ".clio-coder/\n", "utf8");
 			writeWikiPage(scratch, "a.md", '---\ntitle: "A"\nsources: ["src/index.ts"]\n---\n\n# A\n\nBody.\n');
 			writeWikiPage(scratch, "b.md", '---\ntitle: "B"\nsources: ["src/other.ts"]\n---\n\n# B\n\nBody.\n');
 			const head = initGitRepo(scratch);
@@ -645,7 +645,7 @@ describe("contracts/wiki", () => {
 		it("puts the repository-wide payload in the plan prompt only", () => {
 			writeProjectFile(scratch);
 			writeFileSync(join(scratch, "AGENTS.md"), "# Instructions\n\nUse docs/TRUTH.md as the authority.\n", "utf8");
-			const outputDir = join(scratch, ".clio", "wiki-staging-xyz");
+			const outputDir = join(scratch, ".clio-coder", "wiki-staging-xyz");
 			const codewiki = promptCodewiki();
 			const generation = planWikiGeneration(codewiki, "simple");
 
@@ -678,16 +678,16 @@ describe("contracts/wiki", () => {
 
 		it("skips an empty repository instruction file instead of asking for a read that returns nothing", () => {
 			writeProjectFile(scratch);
-			writeFileSync(join(scratch, "CLIO.md"), "", "utf8");
+			writeFileSync(join(scratch, "CLIO-CODER.md"), "", "utf8");
 			const codewiki = promptCodewiki();
 			const prompt = buildWikiPlanPrompt({
 				cwd: scratch,
 				mode: "init",
 				codewiki,
 				generation: planWikiGeneration(codewiki, "simple"),
-				outputDir: join(scratch, ".clio", "wiki-staging-xyz"),
+				outputDir: join(scratch, ".clio-coder", "wiki-staging-xyz"),
 			});
-			ok(!prompt.includes("- CLIO.md"), prompt.slice(0, 400));
+			ok(!prompt.includes("- CLIO-CODER.md"), prompt.slice(0, 400));
 		});
 
 		it("surfaces safe instruction aliases and dirty working-tree paths", () => {
@@ -704,7 +704,7 @@ describe("contracts/wiki", () => {
 				mode: "init",
 				codewiki,
 				generation: planWikiGeneration(codewiki, "simple"),
-				outputDir: join(scratch, ".clio", "wiki-staging-xyz"),
+				outputDir: join(scratch, ".clio-coder", "wiki-staging-xyz"),
 			});
 
 			ok(prompt.includes("- .claude/CLAUDE.md"));
@@ -762,7 +762,7 @@ describe("contracts/wiki", () => {
 
 		it("counts a path changed in history and the working tree only once", () => {
 			writeProjectFile(scratch);
-			writeFileSync(join(scratch, ".gitignore"), ".clio/\n", "utf8");
+			writeFileSync(join(scratch, ".gitignore"), ".clio-coder/\n", "utf8");
 			writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
 			const head = initGitRepo(scratch);
 			writeWikiMeta(scratch, {
@@ -897,7 +897,7 @@ describe("contracts/wiki", () => {
 				cwd: scratch,
 				model: "test-model",
 				generate: (input) => {
-					// Bypass outputDir and write directly into .clio/wiki. Only the
+					// Bypass outputDir and write directly into .clio-coder/wiki. Only the
 					// staged copy is trusted, so the tainted live wiki is overwritten.
 					writeWikiPage(scratch, "garbage.md", "# Garbage\n\nuntrusted direct write\n");
 					completePlan(input);
@@ -990,7 +990,7 @@ describe("contracts/wiki", () => {
 			strictEqual(third.status, "generated");
 
 			// A leftover lock left by a crashed run (dead pid) is reclaimed.
-			writeFileSync(join(scratch, ".clio", "wiki.lock"), "999999999", "utf8");
+			writeFileSync(join(scratch, ".clio-coder", "wiki.lock"), "999999999", "utf8");
 			const fourth = await runWikiGenerate({
 				cwd: scratch,
 				model: "test-model",

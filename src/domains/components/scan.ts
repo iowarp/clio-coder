@@ -99,7 +99,7 @@ const RECEIPT_SCHEMA_FILES: ReadonlyArray<string> = [
 	"src/domains/dispatch/receipt-integrity.ts",
 ];
 
-const CONTEXT_FILES: ReadonlyArray<string> = ["CLIO.md", "CONTRIBUTING.md", "SECURITY.md"];
+const CONTEXT_FILES: ReadonlyArray<string> = ["CLIO-CODER.md", "CONTRIBUTING.md", "SECURITY.md"];
 
 interface RawSafetyPack {
 	id: string;

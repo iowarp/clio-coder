@@ -5,7 +5,7 @@
  * pass proved, over the node's real SSH channel: reachability, a
  * version-matched clio on the remote invocation path, path parity for the
  * project root (shared-filesystem assumption), and a writable remote state
- * dir. Results persist under the state dir so `clio doctor` (a separate
+ * dir. Results persist under the state dir so `clio-coder doctor` (a separate
  * process) can grant eligibility that dispatch admission later checks; a
  * record is invalidated by a different host, project root, or local clio
  * version.
@@ -52,7 +52,7 @@ export interface FleetPreflightRecord {
 	projectRoot: string;
 	ok: boolean;
 	checkedAt: string;
-	/** Local clio version at check time; a different local version invalidates the record. */
+	/** Local clio-coder version at check time; a different local version invalidates the record. */
 	localVersion: string;
 	remoteVersion: string | null;
 	detail: string | null;
@@ -120,25 +120,25 @@ export function fleetPreflightVerdict(
 	if (!record) {
 		return {
 			ok: false,
-			reason: `node '${node.id}' has not passed the fleet preflight for ${projectRoot}; run 'clio doctor'`,
+			reason: `node '${node.id}' has not passed the fleet preflight for ${projectRoot}; run 'clio-coder doctor'`,
 		};
 	}
 	if (record.host !== node.host) {
 		return {
 			ok: false,
-			reason: `node '${node.id}' preflight was recorded for host '${record.host}' but the node now points at '${node.host}'; run 'clio doctor'`,
+			reason: `node '${node.id}' preflight was recorded for host '${record.host}' but the node now points at '${node.host}'; run 'clio-coder doctor'`,
 		};
 	}
 	if (record.localVersion !== readClioVersion()) {
 		return {
 			ok: false,
-			reason: `node '${node.id}' preflight predates a local clio upgrade (${record.localVersion} -> ${readClioVersion()}); run 'clio doctor'`,
+			reason: `node '${node.id}' preflight predates a local clio-coder upgrade (${record.localVersion} -> ${readClioVersion()}); run 'clio-coder doctor'`,
 		};
 	}
 	if (!record.ok) {
 		return {
 			ok: false,
-			reason: `node '${node.id}' failed its last fleet preflight: ${record.detail ?? "see clio doctor"}`,
+			reason: `node '${node.id}' failed its last fleet preflight: ${record.detail ?? "see clio-coder doctor"}`,
 		};
 	}
 	return { ok: true, reason: null };
@@ -169,7 +169,7 @@ const DEFAULT_PREFLIGHT_TIMEOUT_MS = 20_000;
 /**
  * One remote probe script, one SSH round trip. Marker lines keep parsing
  * order-independent and tolerant of login-shell noise. XDG_STATE_HOME
- * mirrors the local xdg resolution's Linux default; per-node CLIO_* dir
+ * mirrors the local xdg resolution's Linux default; per-node CLIO_CODER_* dir
  * overrides are not visible over this channel and are unsupported.
  */
 function buildPreflightScript(
@@ -177,7 +177,8 @@ function buildPreflightScript(
 	projectRoot: string,
 	targets: ReadonlyArray<FleetPreflightTarget> = [],
 ): string {
-	const entry = node.clioEntry !== undefined && node.clioEntry.trim().length > 0 ? node.clioEntry.trim() : "clio worker";
+	const entry =
+		node.clioEntry !== undefined && node.clioEntry.trim().length > 0 ? node.clioEntry.trim() : "clio-coder worker";
 	// Version-check the CLI the worker invocation resolves to: strip the
 	// trailing `worker` subcommand to get the base CLI invocation.
 	const cliBase = entry.endsWith(" worker") ? entry.slice(0, -" worker".length) : null;
@@ -189,7 +190,7 @@ function buildPreflightScript(
 		`echo ${shellQuote(PREFLIGHT_MARKER)}`,
 		`if cd ${shellQuote(projectRoot)} 2>/dev/null; then echo cwd=ok; else echo cwd=missing; fi`,
 		versionProbe,
-		`d="\${XDG_STATE_HOME:-$HOME/.local/state}/clio"; if mkdir -p "$d" 2>/dev/null && [ -w "$d" ]; then echo state=ok; else echo state=fail; fi`,
+		`d="\${XDG_STATE_HOME:-$HOME/.local/state}/clio-coder"; if mkdir -p "$d" 2>/dev/null && [ -w "$d" ]; then echo state=ok; else echo state=fail; fi`,
 		// Resource observation runs on the node. A node without nvidia-smi reports
 		// unknown; it never reports zero GPUs, which a fit requirement would read
 		// as a proven absence rather than an absence of evidence.
@@ -374,13 +375,14 @@ export async function runFleetNodePreflight(
 	const failures: string[] = [];
 	if (!checks.pathParity)
 		failures.push(`project root ${projectRoot} missing on node (disjoint filesystems are unsupported)`);
-	if (!checks.clioPresent) failures.push("clio not found on remote PATH (set fleet.nodes[].clioEntry or install clio)");
+	if (!checks.clioPresent)
+		failures.push("clio-coder not found on remote PATH (set fleet.nodes[].clioEntry or install clio-coder)");
 	else if (!checks.versionMatch) {
 		failures.push(
-			`clio version mismatch (local ${parseSemver(localVersion) ?? localVersion}, remote ${record.remoteVersion ?? "unknown"})`,
+			`clio-coder version mismatch (local ${parseSemver(localVersion) ?? localVersion}, remote ${record.remoteVersion ?? "unknown"})`,
 		);
 	}
-	if (!checks.stateDirWritable) failures.push("remote clio state dir is not writable");
+	if (!checks.stateDirWritable) failures.push("remote clio-coder state dir is not writable");
 	record.ok = failures.length === 0;
 	record.detail = failures.length > 0 ? failures.join("; ") : null;
 	return record;

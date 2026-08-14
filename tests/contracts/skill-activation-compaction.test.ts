@@ -22,7 +22,7 @@ describe("contracts/skill activation compaction protection", () => {
 				timestamp: "2026-06-06T00:00:01.000Z",
 				activation: {
 					name: "active-skill",
-					filePath: "/repo/.clio/skills/active-skill/SKILL.md",
+					filePath: "/repo/.clio-coder/skills/active-skill/SKILL.md",
 					hash: "a".repeat(64),
 					source: "clio",
 					triggeredBy: "slash-command",

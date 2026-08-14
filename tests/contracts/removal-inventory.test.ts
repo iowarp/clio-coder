@@ -1,14 +1,14 @@
 /**
  * What the two destructive commands say about what they are removing.
  *
- * `clio reset` with no scope selects `--state` and takes every transcript on the
+ * `clio-coder reset` with no scope selects `--state` and takes every transcript on the
  * machine. Its help described that root as "sessions, audit, receipts, runs,
  * install metadata", a remembered list that omitted `interviews/`, `scratch/`,
  * and every dispatch artifact added since it was written, and the default scope
  * carried none of the explanatory note `--data` carried.
  *
- * `clio uninstall` removes four roots under the home directory, so every
- * per-project `.clio/` it ever wrote survived it with no inventory, and
+ * `clio-coder uninstall` removes four roots under the home directory, so every
+ * per-project `.clio-coder/` it ever wrote survived it with no inventory, and
  * `--remove-binary` then removed the binary that runs the cleaner.
  *
  * Both fixes read from something real rather than from a second hand-written
@@ -59,11 +59,11 @@ describe("contracts/removal inventory", () => {
 		deepStrictEqual(rootContents(file), []);
 	});
 
-	it("names every project dir the session metas recorded that still has a .clio/", () => {
+	it("names every project dir the session metas recorded that still has a .clio-coder/", () => {
 		const state = join(scratch, "uninstall-state");
 		const kept = join(scratch, "project-kept");
 		const cleaned = join(scratch, "project-cleaned");
-		mkdirSync(join(kept, ".clio"), { recursive: true });
+		mkdirSync(join(kept, ".clio-coder"), { recursive: true });
 		mkdirSync(cleaned, { recursive: true });
 
 		const record = (hash: string, session: string, cwd: string): void => {
@@ -83,13 +83,13 @@ describe("contracts/removal inventory", () => {
 		const inventory = projectContextInventory(state);
 		strictEqual(inventory.storeAbsent, false);
 		strictEqual(inventory.recorded, 2, "one project per cwd hash, however many sessions it holds");
-		// The project whose .clio/ is already gone has nothing to clean, so it is
+		// The project whose .clio-coder/ is already gone has nothing to clean, so it is
 		// not listed; the one that still has it is.
 		deepStrictEqual(inventory.dirs, [kept]);
 	});
 
 	it("says the store was absent rather than reporting an empty inventory", () => {
-		// An absent session store and a store that records no surviving .clio/ are
+		// An absent session store and a store that records no surviving .clio-coder/ are
 		// different facts with different remedies, and both used to print nothing.
 		const inventory = projectContextInventory(join(scratch, "no-state-here"));
 		deepStrictEqual(inventory, { recorded: 0, dirs: [], storeAbsent: true });

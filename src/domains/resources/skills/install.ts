@@ -242,8 +242,8 @@ let skillSwapSequence = 0;
  */
 function swapSkillDir(stage: (stagingDir: string) => void, dest: string): void {
 	const suffix = `${process.pid}-${++skillSwapSequence}`;
-	const staging = `${dest}.clio-staging-${suffix}`;
-	const backup = `${dest}.clio-backup-${suffix}`;
+	const staging = `${dest}.clio-coder-staging-${suffix}`;
+	const backup = `${dest}.clio-coder-backup-${suffix}`;
 	rmSync(staging, { recursive: true, force: true });
 	try {
 		stage(staging);
@@ -265,7 +265,7 @@ function swapSkillDir(stage: (stagingDir: string) => void, dest: string): void {
 }
 
 function destinationRoot(scope: "user" | "project", cwd: string, configDir?: string): string {
-	return scope === "user" ? path.join(configDir ?? clioConfigDir(), "skills") : path.join(cwd, ".clio", "skills");
+	return scope === "user" ? path.join(configDir ?? clioConfigDir(), "skills") : path.join(cwd, ".clio-coder", "skills");
 }
 
 /** Validate a fetched skill directory and return its single loaded skill. */

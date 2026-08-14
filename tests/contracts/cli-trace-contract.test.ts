@@ -1,5 +1,5 @@
 /**
- * `clio trace` on an install where nothing has dispatched yet.
+ * `clio-coder trace` on an install where nothing has dispatched yet.
  *
  * Every read subcommand handed the absent `trace.sqlite` straight to
  * node:sqlite, so a fresh install got `trace database: unable to open database
@@ -28,7 +28,7 @@ describe("contracts/cli-trace", () => {
 	after(() => scratch.cleanup());
 
 	for (const args of READ_SUBCOMMANDS) {
-		it(`clio ${args.join(" ")} names the empty state and the absolute path it read`, async () => {
+		it(`clio-coder ${args.join(" ")} names the empty state and the absolute path it read`, async () => {
 			const result = await runCli(args, { env: scratch.env });
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			match(result.stdout, /^no trace database yet at /);

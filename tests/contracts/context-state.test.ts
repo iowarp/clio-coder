@@ -38,7 +38,7 @@ afterEach(() => {
 function scratchProject(): string {
 	const cwd = mkdtempSync(join(tmpdir(), "clio-context-state-"));
 	scratchRoots.push(cwd);
-	mkdirSync(join(cwd, ".clio"), { recursive: true });
+	mkdirSync(join(cwd, ".clio-coder"), { recursive: true });
 	return cwd;
 }
 
@@ -64,7 +64,7 @@ describe("contracts/context-state", () => {
 		deepStrictEqual(readClioState(cwd)?.lastBootstrap, completeBootstrapState);
 	});
 
-	// lastBootstrap describes how the CLIO.md on disk was produced. A run that
+	// lastBootstrap describes how the CLIO-CODER.md on disk was produced. A run that
 	// generates nothing leaves the handbook untouched, so it must not downgrade a
 	// recorded scout provenance to "existing" and erase the run id, target, and
 	// token counts that let an operator audit where the handbook came from.
@@ -72,7 +72,7 @@ describe("contracts/context-state", () => {
 		const cwd = scratchProject();
 		writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "provenance-fixture", type: "module" }), "utf8");
 		writeFileSync(
-			join(cwd, "CLIO.md"),
+			join(cwd, "CLIO-CODER.md"),
 			"# Provenance Fixture\n\nProvenance Fixture is a TypeScript project used as a bootstrap fixture.\n",
 			"utf8",
 		);

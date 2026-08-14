@@ -41,7 +41,7 @@ export interface BootstrapIo {
 }
 
 /**
- * Input handed to a CLIO.md generator. Carries the adoption scan plus the freshly
+ * Input handed to a CLIO-CODER.md generator. Carries the adoption scan plus the freshly
  * built codewiki so generators can ground their output in the real repository
  * structure (entry points, key modules) instead of guessing from prose alone.
  */
@@ -294,7 +294,7 @@ function resolveDefaultIdentity(
 }
 
 /**
- * Identity precedence for a stabilized handbook, below an existing `CLIO.md`
+ * Identity precedence for a stabilized handbook, below an existing `CLIO-CODER.md`
  * identity, which always wins. The deterministic sentence is evidence read off
  * the repository, so it outranks anything the model wrote. The single exception
  * is the bare case: with no `package.json` description and no `README.md`
@@ -659,7 +659,7 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
 			title: "Agent context interop",
 			body: [
 				`Bootstrap scanned ${input.adoption.sources.length} sibling context source${input.adoption.sources.length === 1 ? "" : "s"}: ${sourceNames}${input.adoption.sources.length > 8 ? ", ..." : ""}.`,
-				"Run `clio context init --adopt` to refresh the managed provenance section when those sources change.",
+				"Run `clio-coder context init --adopt` to refresh the managed provenance section when those sources change.",
 			].join(" "),
 		});
 	}
@@ -667,7 +667,7 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
 }
 
 /**
- * Deterministic CLIO.md generator. Distills identity, conventions, and invariants
+ * Deterministic CLIO-CODER.md generator. Distills identity, conventions, and invariants
  * from sibling agent-context files and package metadata without a model. Used as
  * the offline path and as the fallback when model-driven generation is
  * unavailable or fails.
@@ -714,7 +714,7 @@ export function fallbackBootstrapOutput(input: BootstrapGenerateInput): Bootstra
 
 function readExistingClioMdText(cwd: string): string | null {
 	try {
-		return readFileSync(join(cwd, "CLIO.md"), "utf8");
+		return readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 	} catch {
 		return null;
 	}
@@ -789,7 +789,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	if (summary.action === "previewed") {
 		const adoptionLine = formatAdoptionLine(summary);
 		return [
-			"clio context init preview",
+			"clio-coder context init preview",
 			`  ${contextLine}; codewiki would index ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; ${dirtyLine}; no files written`,
 			...(adoptionLine ? [adoptionLine] : []),
 			"",
@@ -799,35 +799,39 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	const proposalLine = summary.proposalPath ? `  proposal written ${summary.proposalPath}` : null;
 	if (summary.action === "preserved") {
 		return [
-			"clio context init preserved CLIO.md",
+			"clio-coder context init preserved CLIO-CODER.md",
 			`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
-			"  CLIO.md is treated as human-owned. Use --apply to replace it with a generated draft, --propose to write an ignored proposal, or --adopt to refresh only imported agent context.",
+			"  CLIO-CODER.md is treated as human-owned. Use --apply to replace it with a generated draft, --propose to write an ignored proposal, or --adopt to refresh only imported agent context.",
 			...(adoptionLine ? [adoptionLine] : []),
 			"",
 		].join("\n");
 	}
 	if (summary.action === "proposed") {
 		return [
-			"clio context init proposed CLIO.md",
+			"clio-coder context init proposed CLIO-CODER.md",
 			`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 			...(proposalLine ? [proposalLine] : []),
-			"  CLIO.md was not changed. Re-run with --apply only after reviewing the proposal.",
+			"  CLIO-CODER.md was not changed. Re-run with --apply only after reviewing the proposal.",
 			...(adoptionLine ? [adoptionLine] : []),
 			"",
 		].join("\n");
 	}
 	return [
-		`clio context init ${summary.action} CLIO.md`,
+		`clio-coder context init ${summary.action} CLIO-CODER.md`,
 		`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
-		"  git policy: .clio/ stays ignored by default; CLIO.md stays versioned and human-owned. Force-add .clio assets only when you explicitly intend to share them.",
+		"  git policy: .clio-coder/ stays ignored by default; CLIO-CODER.md stays versioned and human-owned. Force-add .clio-coder assets only when you explicitly intend to share them.",
 		...(proposalLine ? [proposalLine] : []),
 		...(adoptionLine ? [adoptionLine] : []),
 		"",
 	].join("\n");
 }
 
-const CLIO_GITIGNORE_LINE = ".clio/";
-const CLIO_GITIGNORE_DYNAMIC_LINES = new Set<string>([".clio/codewiki.json", ".clio/state.json", ".clio/handoffs/"]);
+const CLIO_GITIGNORE_LINE = ".clio-coder/";
+const CLIO_GITIGNORE_DYNAMIC_LINES = new Set<string>([
+	".clio-coder/codewiki.json",
+	".clio-coder/state.json",
+	".clio-coder/handoffs/",
+]);
 
 function normalizedGitignoreLines(content: string): string[] {
 	return content.split(/\r?\n/).map((line) => line.trim());
@@ -839,7 +843,7 @@ function hasBlanketClioIgnore(content: string): boolean {
 
 function isBlanketClioIgnoreLine(line: string): boolean {
 	if (line.length === 0 || line.startsWith("#") || line.startsWith("!")) return false;
-	return /^(?:\/|\*\*\/)?\.clio(?:\/|\/\*|\/\*\*)?$/.test(line);
+	return /^(?:\/|\*\*\/)?\.clio-coder(?:\/|\/\*|\/\*\*)?$/.test(line);
 }
 
 function hasDynamicOnlyClioIgnore(content: string): boolean {
@@ -883,7 +887,7 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 		// nor the line, leaving the operator to guess the pattern Clio writes.
 		warn(
 			input.io,
-			"clio context init: .gitignore does not ignore .clio/; local context, skills, agents, and handoffs may leak into commits.\n" +
+			"clio-coder context init: .gitignore does not ignore .clio-coder/; local context, skills, agents, and handoffs may leak into commits.\n" +
 				`  rerun with --yes to append '${CLIO_GITIGNORE_LINE}' to .gitignore without prompting, or add that line yourself.\n`,
 		);
 		return;
@@ -896,11 +900,11 @@ function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
 }
 
 function writeClioMdFile(cwd: string, output: BootstrapStructuredOutput): string {
-	const clioMdPath = join(cwd, "CLIO.md");
+	const clioMdPath = join(cwd, "CLIO-CODER.md");
 	mkdirSync(dirname(clioMdPath), { recursive: true });
 	const serialized = serializeBootstrapOutput(output);
 	const parsed = parseClioMd(serialized);
-	if (!parsed.ok) throw new Error(`bootstrap produced invalid CLIO.md: ${parsed.errors.join("; ")}`);
+	if (!parsed.ok) throw new Error(`bootstrap produced invalid CLIO-CODER.md: ${parsed.errors.join("; ")}`);
 	writeFileSync(clioMdPath, serialized, "utf8");
 	return clioMdPath;
 }
@@ -913,9 +917,9 @@ function timestampForPath(now: Date): string {
 }
 
 function writeClioMdProposal(cwd: string, now: Date, output: BootstrapStructuredOutput): string {
-	const dir = join(cwd, ".clio", "proposals");
+	const dir = join(cwd, ".clio-coder", "proposals");
 	mkdirSync(dir, { recursive: true });
-	const proposalPath = join(dir, `CLIO-${timestampForPath(now)}.md`);
+	const proposalPath = join(dir, `CLIO-CODER-${timestampForPath(now)}.md`);
 	writeFileSync(proposalPath, serializeBootstrapOutput(output), "utf8");
 	return proposalPath;
 }
@@ -978,7 +982,7 @@ function writeProjectState(
 	const finalFingerprint = computeFingerprint(cwd);
 	const statePath = resolveStatePath(cwd);
 	const prev = readClioState(cwd);
-	// lastBootstrap describes how the CLIO.md on disk was produced, not what the
+	// lastBootstrap describes how the CLIO-CODER.md on disk was produced, not what the
 	// most recent run happened to do. A run that generated nothing leaves the
 	// handbook untouched, so overwriting a recorded `model` provenance with
 	// `existing` would claim the handbook has no model authorship behind it.
@@ -1006,7 +1010,7 @@ function writeProjectState(
  * Publish the deterministic index before Scout runs so a worker-side code_nav
  * call reuses this build instead of demand-building the same repository again.
  * This is an index checkpoint, not a completed init: lastInitAt remains unchanged
- * until CLIO.md handling succeeds below.
+ * until CLIO-CODER.md handling succeeds below.
  */
 function persistCodewikiForGeneration(
 	cwd: string,
@@ -1104,7 +1108,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	});
 	const now = input.now?.() ?? new Date();
 	const indexedAt = now.toISOString();
-	// Index the repository before generation so the generator can ground CLIO.md
+	// Index the repository before generation so the generator can ground CLIO-CODER.md
 	// in the real structure (entry points, key modules), not just sibling prose.
 	progress(input, { phase: "codewiki", status: "started", message: "building codewiki index" });
 	const codewiki = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
@@ -1120,7 +1124,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		await ensureGitignore(cwd, input);
 		persistCodewikiForGeneration(cwd, projectType, indexedAt, codewiki);
 	}
-	const hadClioMd = existsSync(join(cwd, "CLIO.md"));
+	const hadClioMd = existsSync(join(cwd, "CLIO-CODER.md"));
 	const useExistingClioMdAsSource = hadClioMd && input.rewriteClioMd !== true;
 	const existingClioMdText = useExistingClioMdAsSource ? readExistingClioMdText(cwd) : null;
 	const existingClioMd = useExistingClioMdAsSource ? tryReadClioMd(cwd) : null;
@@ -1136,13 +1140,13 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	) {
 		const detail = existingClioMd && !existingClioMd.ok ? ` (${existingClioMd.error})` : "";
 		throw new Error(
-			`cannot refresh Imported agent context because CLIO.md is malformed${detail}; use --apply or --rewrite after reviewing the handbook`,
+			`cannot refresh Imported agent context because CLIO-CODER.md is malformed${detail}; use --apply or --rewrite after reviewing the handbook`,
 		);
 	}
 	// A supplied generator *is* the request to generate: both entry points
 	// withhold `generate` for --heuristic and --preview and supply it otherwise.
-	// An existing CLIO.md used to suppress generation entirely, so a plain
-	// `clio context init` on an initialized repository dispatched nothing, wrote
+	// An existing CLIO-CODER.md used to suppress generation entirely, so a plain
+	// `clio-coder context init` on an initialized repository dispatched nothing, wrote
 	// `lastBootstrap.mode: "existing"`, and looked identical to a run that had no
 	// route at all. The handbook still reaches the generator as source (see
 	// `useExistingClioMdAsSource`), so this refreshes rather than replaces.
@@ -1160,7 +1164,9 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		progress(input, {
 			phase: "generate",
 			status: "started",
-			message: input.generate ? "drafting CLIO.md with the bootstrap agent" : "drafting CLIO.md with heuristic",
+			message: input.generate
+				? "drafting CLIO-CODER.md with the bootstrap agent"
+				: "drafting CLIO-CODER.md with heuristic",
 		});
 		output = await (input.generate ?? heuristicBootstrapOutput)({
 			cwd,
@@ -1213,7 +1219,9 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		progress(input, {
 			phase: "generate",
 			status: "completed",
-			message: hadClioMd ? "preserving existing CLIO.md; no generated rewrite requested" : "using heuristic CLIO.md draft",
+			message: hadClioMd
+				? "preserving existing CLIO-CODER.md; no generated rewrite requested"
+				: "using heuristic CLIO-CODER.md draft",
 		});
 	}
 	if (input.adopt === true) {
@@ -1233,7 +1241,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		};
 		out(input.io, formatBootstrapSummary(summary));
 		return {
-			clioMdPath: join(cwd, "CLIO.md"),
+			clioMdPath: join(cwd, "CLIO-CODER.md"),
 			statePath: resolveStatePath(cwd),
 			siblingFiles,
 			output,
@@ -1245,13 +1253,13 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		};
 	}
 
-	let clioMdPath = join(cwd, "CLIO.md");
+	let clioMdPath = join(cwd, "CLIO-CODER.md");
 	let proposalPath: string | undefined;
 	let action: RunBootstrapSummary["action"] = "preserved";
 	progress(input, {
 		phase: "clio-md",
 		status: "started",
-		message: hadClioMd ? "preserving CLIO.md" : "writing CLIO.md",
+		message: hadClioMd ? "preserving CLIO-CODER.md" : "writing CLIO-CODER.md",
 	});
 	if (!hadClioMd) {
 		clioMdPath = writeClioMdFile(cwd, output);
@@ -1271,12 +1279,12 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		status: "completed",
 		message:
 			action === "wrote"
-				? "CLIO.md written"
+				? "CLIO-CODER.md written"
 				: action === "refreshed"
-					? "CLIO.md refreshed"
+					? "CLIO-CODER.md refreshed"
 					: action === "proposed"
-						? "CLIO.md proposal written"
-						: "CLIO.md preserved",
+						? "CLIO-CODER.md proposal written"
+						: "CLIO-CODER.md preserved",
 		detail: proposalPath ?? clioMdPath,
 	});
 	const adoptionApplied = input.adopt === true && (action === "wrote" || action === "refreshed");
@@ -1320,7 +1328,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	progress(input, {
 		phase: "done",
 		status: "completed",
-		message: `${summary.action} CLIO.md; ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}; preload: ${preload.label}`,
+		message: `${summary.action} CLIO-CODER.md; ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}; preload: ${preload.label}`,
 	});
 	return {
 		clioMdPath,

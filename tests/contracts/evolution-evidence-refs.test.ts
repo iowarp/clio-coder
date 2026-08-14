@@ -35,8 +35,8 @@ function buildManifest(overrides: { iterationId: string; evidenceRefs: string[] 
 		changes: [
 			{
 				id: "change-1",
-				componentIds: ["context-file:CLIO.md"],
-				filesChanged: ["CLIO.md"],
+				componentIds: ["context-file:CLIO-CODER.md"],
+				filesChanged: ["CLIO-CODER.md"],
 				authorityLevel: "prompt",
 				evidenceRefs: overrides.evidenceRefs,
 				rootCause: "Observed defect with linked evidence.",

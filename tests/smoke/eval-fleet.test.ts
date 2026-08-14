@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
-describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
+describe("clio-coder eval and fleet smoke tests", { concurrency: false }, () => {
 	let scratch: ReturnType<typeof makeScratchHome>;
 
 	beforeEach(() => {
@@ -16,8 +16,8 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 	});
 
 	it("eval report renders text and SWE JSONL from a current stored artifact", async () => {
-		const dataDir = scratch.env.CLIO_DATA_DIR;
-		if (dataDir === undefined) throw new Error("scratch CLIO_DATA_DIR missing");
+		const dataDir = scratch.env.CLIO_CODER_DATA_DIR;
+		if (dataDir === undefined) throw new Error("scratch CLIO_CODER_DATA_DIR missing");
 		const evalDir = join(dataDir, "evals");
 		mkdirSync(evalDir, { recursive: true });
 		writeFileSync(
@@ -72,8 +72,8 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 	});
 
 	it("eval run --task-file stores provenance and redacted command output", async () => {
-		const dataDir = scratch.env.CLIO_DATA_DIR;
-		if (dataDir === undefined) throw new Error("scratch CLIO_DATA_DIR missing");
+		const dataDir = scratch.env.CLIO_CODER_DATA_DIR;
+		if (dataDir === undefined) throw new Error("scratch CLIO_CODER_DATA_DIR missing");
 		const taskFile = join(scratch.dir, "provenance.yaml");
 		const command = `${process.execPath} -e ${JSON.stringify(
 			"console.log(process.env.HOME + '/artifact-path'); console.error('Authorization: Bearer secretsecretsecret')",

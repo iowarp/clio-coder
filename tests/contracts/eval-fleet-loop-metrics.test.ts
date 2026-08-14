@@ -15,7 +15,7 @@ interface LoopLine {
 	reason: string;
 }
 
-/** The one summary line `clio fleet run --json` writes at the end of a run. */
+/** The one summary line `clio-coder fleet run --json` writes at the end of a run. */
 function fleetSummary(loops: LoopLine[], extra: Record<string, unknown> = {}): string {
 	return `${JSON.stringify({
 		fleet: "bounded-repair",

@@ -16,7 +16,7 @@ describe("contracts/safety ordering: hard blocks win over the ask rail", () => {
 
 	beforeEach(() => {
 		scratch = mkdtempSync(join(tmpdir(), "clio-safety-ordering-"));
-		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 	});
 
 	afterEach(() => {
@@ -54,7 +54,7 @@ describe("contracts/safety ordering: hard blocks win over the ask rail", () => {
 	});
 
 	it("fails an ask-rule-matched execution command closed under an invalid project policy", () => {
-		writeFileSync(join(scratch, ".clio", "safety.yaml"), INVALID_POLICY_YAML, "utf8");
+		writeFileSync(join(scratch, ".clio-coder", "safety.yaml"), INVALID_POLICY_YAML, "utf8");
 		const loaded = loadProjectSafetyPolicy(scratch);
 		strictEqual(loaded.valid, false);
 		const engine = createSafetyPolicyEngine({ cwd: scratch, projectPolicy: loaded });
@@ -86,7 +86,7 @@ describe("contracts/safety ordering: default path policy survives an invalid con
 
 	beforeEach(() => {
 		scratch = mkdtempSync(join(tmpdir(), "clio-safety-invalid-policy-"));
-		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 	});
 
 	afterEach(() => {
@@ -94,7 +94,7 @@ describe("contracts/safety ordering: default path policy survives an invalid con
 	});
 
 	it("blocks typed access to default zero-access paths under an invalid policy", () => {
-		writeFileSync(join(scratch, ".clio", "safety.yaml"), INVALID_POLICY_YAML, "utf8");
+		writeFileSync(join(scratch, ".clio-coder", "safety.yaml"), INVALID_POLICY_YAML, "utf8");
 		const loaded = loadProjectSafetyPolicy(scratch);
 		strictEqual(loaded.valid, false);
 		const engine = createSafetyPolicyEngine({ cwd: scratch, projectPolicy: loaded });
@@ -124,7 +124,7 @@ describe("contracts/safety ordering: default path policy survives an invalid con
 		strictEqual(absent.evaluate({ tool: ToolNames.Read, args: { path: "notes.txt" } }).kind, "allow");
 
 		writeFileSync(
-			join(scratch, ".clio", "safety.yaml"),
+			join(scratch, ".clio-coder", "safety.yaml"),
 			["version: 1", "zeroAccessPaths:", "  - secrets", ""].join("\n"),
 			"utf8",
 		);

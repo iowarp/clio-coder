@@ -9,7 +9,7 @@
 import type { RunReceipt } from "../../dispatch/types.js";
 
 /**
- * Extract the sealed RunReceipt that `clio run --agent … --json` prints after
+ * Extract the sealed RunReceipt that `clio-coder run --agent … --json` prints after
  * its single-line JSONL event stream. The receipt is the only multi-line,
  * pretty-printed JSON block in that output, so the last parseable block that
  * carries the receipt's load-bearing fields wins. Returns null (never throws)
@@ -66,7 +66,7 @@ export function evidenceMetricsFromReceipt(receipt: RunReceipt): Record<string, 
 }
 
 /**
- * Count terminal dispatch tool calls in a `clio run --json` stream: the
+ * Count terminal dispatch tool calls in a `clio-coder run --json` stream: the
  * decomposition checkpoint. Mirrors the dedup rules of the tool-call metric
  * fold (canonical clio finishes win over pi execution ends when both exist).
  * An absent or eventless stream counts zero.

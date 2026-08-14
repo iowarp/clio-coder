@@ -33,7 +33,7 @@ export interface AntigravitySubprocessConfig {
  * an agent execution mode and a terminal sandbox, but no per-tool callback or
  * allowlist Clio can mediate.
  *
- *  - `full-auto` + `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` opens the dangerous
+ *  - `full-auto` + `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1` opens the dangerous
  *    bypass (`--dangerously-skip-permissions`); nothing else does.
  *  - `read-only` runs `--mode plan --sandbox`: plan prevents agent edits and
  *    sandbox independently restricts terminal execution.
@@ -45,7 +45,7 @@ export function antigravitySubprocessConfigForAutonomy(
 	level: AutonomyLevel | undefined,
 	env: NodeJS.ProcessEnv = process.env,
 ): AntigravitySubprocessConfig {
-	if (level === "full-auto" && env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
+	if (level === "full-auto" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
 		return {
 			extraArgs: ["--dangerously-skip-permissions"],
 			dangerousBypass: true,

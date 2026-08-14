@@ -7,7 +7,7 @@ bundler, WebSocket, or network dependency is involved.
 From a source checkout:
 
 ```sh
-clio trace ui --db /path/to/trace.sqlite
+clio-coder trace ui --db /path/to/trace.sqlite
 # or
 npm run trace:ui -- --db /path/to/trace.sqlite --port 4600
 ```

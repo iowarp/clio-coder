@@ -32,7 +32,7 @@ function scratchProject(): string {
 
 function writeClioMd(cwd: string): void {
 	writeFileSync(
-		join(cwd, "CLIO.md"),
+		join(cwd, "CLIO-CODER.md"),
 		serializeClioMd({
 			projectName: "S5 Fixture",
 			identity: "S5 Fixture is a TypeScript project used to verify project-context suppression.",
@@ -107,7 +107,7 @@ describe("contracts/resources context-file loader deletion (S5)", () => {
 		strictEqual(typeof loader.skills, "function");
 	});
 
-	it("without --no-context-files the compiled prompt injects CLIO.md project context", async () => {
+	it("without --no-context-files the compiled prompt injects CLIO-CODER.md project context", async () => {
 		const cwd = scratchProject();
 		writeClioMd(cwd);
 		const prompt = await compileProjectPrompt(cwd, false);
@@ -115,7 +115,7 @@ describe("contracts/resources context-file loader deletion (S5)", () => {
 		ok(prompt.includes("Keep prompt context compact."));
 	});
 
-	it("clio --no-context-files still suppresses CLIO.md project-context injection", async () => {
+	it("clio-coder --no-context-files still suppresses CLIO-CODER.md project-context injection", async () => {
 		const cwd = scratchProject();
 		writeClioMd(cwd);
 		const prompt = await compileProjectPrompt(cwd, true);

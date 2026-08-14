@@ -115,7 +115,7 @@ describe("contracts/artifact-id-boundary", () => {
 	const scratch = makeScratchHome("clio-artifact-id-");
 	before(() => {
 		// `../../outside-*` from `<data>/evidence` and `<data>/evals` resolves to
-		// `<CLIO_HOME>/outside-*`, so seed valid artifacts there.
+		// `<CLIO_CODER_HOME>/outside-*`, so seed valid artifacts there.
 		seedEvidence(join(scratch.dir, "outside-evidence"), "outside-evidence");
 		mkdirSync(join(scratch.dir, "outside-evals"), { recursive: true });
 		seedEval(join(scratch.dir, "outside-evals", "outside-eval.json"), "outside-eval");
@@ -129,7 +129,7 @@ describe("contracts/artifact-id-boundary", () => {
 	];
 
 	for (const args of traversalCases) {
-		it(`clio ${args.join(" ")} rejects the traversal id before reading outside the store`, async () => {
+		it(`clio-coder ${args.join(" ")} rejects the traversal id before reading outside the store`, async () => {
 			const result = await runCli(args, { env: scratch.env });
 			strictEqual(result.code, 2, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);

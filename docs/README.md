@@ -34,7 +34,7 @@ current source, tests, and `CHANGELOG.md`.
 | Runtime model refresh, catalog sources, local/cloud model quirks, and benchmarking notes | [model-catalog.md](model-catalog.md) ([Interactive Blueprint](html/models_blueprint.html)) |
 | Active component snapshots and the experimental middleware hook/effect contract | [middleware-and-components.md](middleware-and-components.md) ([Interactive Blueprint](html/middleware_blueprint.html)) |
 | Advisory validation-contract patterns for scientific artifacts and HPC assumptions | [scientific-validation.md](scientific-validation.md) ([Interactive Blueprint](html/validation_blueprint.html)) |
-| Falsifiable Change Manifest JSON templates, auditability, and `clio evolve` | [evolution.md](evolution.md) ([Interactive Blueprint](html/evolution_blueprint.html)) |
+| Falsifiable Change Manifest JSON templates, auditability, and `clio-coder evolve` | [evolution.md](evolution.md) ([Interactive Blueprint](html/evolution_blueprint.html)) |
 | Source-first docs workflow, mapping matrix, and alpha wording guidance | [documentation-guide.md](documentation-guide.md) ([Interactive Blueprint](html/documentation_blueprint.html)) |
 | Interface layout, colors palette, Unicode character vocabulary, and drawing choreography | [tui-design.md](tui-design.md) ([Interactive Blueprint](html/tui_design_blueprint.html)) |
 | NDJSON parent-child socket protocols, watchdog timers, and exit status mapping | [worker-dispatch-mechanics.md](worker-dispatch-mechanics.md) ([Interactive Blueprint](html/worker_dispatch_blueprint.html)) |
@@ -53,9 +53,9 @@ current source, tests, and `CHANGELOG.md`.
 | Private context index determinism, target smoke matrices, and Clio machinery soak benchmark suite | [evals-internal.md](evals-internal.md) ([Blueprints: evals_internal](html/evals_internal_blueprint.html), [soak](html/soak_blueprint.html)) |
 | Point-in-time inventory of legacy environment variables (Historical Appendix) | [config-knobs-audit.md](config-knobs-audit.md) ([Interactive Blueprint](html/config_knobs_audit_blueprint.html)) |
 
-Every project Clio works in gets its context from a checked-in `CLIO.md`,
-bootstrapped and maintained by `clio context init`. The root
-[CLIO.md](../CLIO.md) of this repository is the maintained reference example
+Every project Clio works in gets its context from a checked-in `CLIO-CODER.md`,
+bootstrapped and maintained by `clio-coder context init`. The root
+[CLIO-CODER.md](../CLIO-CODER.md) of this repository is the maintained reference example
 of the format.
 
 ## Developer Quick Start
@@ -65,7 +65,7 @@ git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
 hash -r
-clio --version
+clio-coder --version
 ```
 
 The local symlink executes `dist/cli/index.js`. If you edit TypeScript files

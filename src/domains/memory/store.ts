@@ -59,7 +59,7 @@ function parseAndValidate(raw: string, source: string): MemoryRecord[] {
 export async function writeMemoryRecords(dataDir: string, records: ReadonlyArray<MemoryRecord>): Promise<string> {
 	const sorted = sortMemoryRecords(records);
 	if (sorted.length > MEMORY_STORE_MAX_RECORDS) {
-		throw new Error(`memory store limit reached (${MEMORY_STORE_MAX_RECORDS}); run clio memory prune --stale`);
+		throw new Error(`memory store limit reached (${MEMORY_STORE_MAX_RECORDS}); run clio-coder memory prune --stale`);
 	}
 	const store: MemoryStoreFile = { version: MEMORY_VERSION, records: sorted };
 	const path = memoryStorePath(dataDir);

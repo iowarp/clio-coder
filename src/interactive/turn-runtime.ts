@@ -310,7 +310,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		context.emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
 		if (!deps.knownTargets().has(target.target.id)) {
 			throw new Error(
-				`[Clio Coder] orchestrator target=${target.target.id} unknown. Run \`clio targets\` to see configured targets.`,
+				`[Clio Coder] orchestrator target=${target.target.id} unknown. Run \`clio-coder targets\` to see configured targets.`,
 			);
 		}
 		if (

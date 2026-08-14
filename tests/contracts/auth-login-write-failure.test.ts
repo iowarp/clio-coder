@@ -1,5 +1,5 @@
 /**
- * `clio auth login` against a config directory it cannot write printed
+ * `clio-coder auth login` against a config directory it cannot write printed
  * `ok: authenticated <provider>`, exited 0, warned about the unencrypted key it
  * had just stored, and left the credentials file byte-identical. The refusal was
  * already recorded (AuthStorage.persist() puts it in damageReason()); the login

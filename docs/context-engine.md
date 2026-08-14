@@ -37,7 +37,7 @@ Marker format:
 
 Already-compacted entries are not masked again. Recent turns keep their full observations and thinking. If masking drops pressure below the threshold, Clio sends the request without an LLM summary. If pressure remains above the threshold, Clio runs the summary compaction path, appends a compaction summary entry, refreshes replay messages from the session, and continues.
 
-Manual `/context compact`, `CLIO_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly. The overflow guard runs before the user turn is committed, so a blocked oversized request does not leave an unanswered user entry in the ledger.
+Manual `/context compact`, `CLIO_CODER_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly. The overflow guard runs before the user turn is committed, so a blocked oversized request does not leave an unanswered user entry in the ledger.
 
 ## Cache-divergence honesty
 
@@ -57,34 +57,34 @@ compaction:
   threshold: 0.8
   excludeLastTurns: 6
   # model: provider/summary-model-id
-  # systemPrompt: ~/.config/clio/prompts/compaction.md
+  # systemPrompt: ~/.config/clio-coder/prompts/compaction.md
 ```
 
 `auto` controls the pre-request trigger. Manual `/context compact` still runs when `auto` is false. `model` optionally selects a dedicated summarization model. `systemPrompt` optionally points at a prompt override file for compaction.
 
-Settings validation is strict: an older file still carrying the removed `compaction.thresholds` block fails to load with the exact key path during normal startup. Edit removed or unknown keys deliberately; `clio doctor --fix` does not transform settings into the current schema.
+Settings validation is strict: an older file still carrying the removed `compaction.thresholds` block fails to load with the exact key path during normal startup. Edit removed or unknown keys deliberately; `clio-coder doctor --fix` does not transform settings into the current schema.
 
 ---
 
 ## Project-context preload class
 
-The compiled session prompt preloads the full rendered project context (the `CLIO.md` fragment plus project-type and codewiki markers) only when a parseable `CLIO.md` exists and the rendered text stays within 8000 characters and 220 lines; otherwise it preloads a compact synopsis. The rule lives in `src/domains/prompts/preload.ts` and every reporting surface classifies with it:
+The compiled session prompt preloads the full rendered project context (the `CLIO-CODER.md` fragment plus project-type and codewiki markers) only when a parseable `CLIO-CODER.md` exists and the rendered text stays within 8000 characters and 220 lines; otherwise it preloads a compact synopsis. The rule lives in `src/domains/prompts/preload.ts` and every reporting surface classifies with it:
 
-- `/context init` and `clio context init` print `preload: full (N.NkB, N lines)` or `preload: synopsis (reason: size|lines)` after the summary, and warn when a full preload is within 10% of either limit.
-- `clio config inspect` shows the preload class in the `CLIO.md` entry's detail.
+- `/context init` and `clio-coder context init` print `preload: full (N.NkB, N lines)` or `preload: synopsis (reason: size|lines)` after the summary, and warn when a full preload is within 10% of either limit.
+- `clio-coder config inspect` shows the preload class in the `CLIO-CODER.md` entry's detail.
 - The `/context` overlay shows a `project preload:` line under the category legend once a session prompt has compiled.
 
 ## Context refresh
 
-`/context refresh` and `clio context refresh` rebuild the structural codewiki
-and restamp `.clio/state.json` without reading or writing `CLIO.md`. The CLI
+`/context refresh` and `clio-coder context refresh` rebuild the structural codewiki
+and restamp `.clio-coder/state.json` without reading or writing `CLIO-CODER.md`. The CLI
 flag `--wiki` is the only refresh path that may update the Markdown wiki, and
 it only runs when an existing wiki metadata file is present. Regenerating or
 updating handbook prose stays with `/context init`.
 
-`clio context init` is model-driven by default. The `--heuristic` flag is the sole deterministic flag for offline handbook generation. The `--propose` flag writes ignored drafts to `.clio/proposals/`, `--apply` updates from the existing handbook, and `--rewrite` generates a fresh handbook.
+`clio-coder context init` is model-driven by default. The `--heuristic` flag is the sole deterministic flag for offline handbook generation. The `--propose` flag writes ignored drafts to `.clio-coder/proposals/`, `--apply` updates from the existing handbook, and `--rewrite` generates a fresh handbook.
 
-When bootstrapping across local runtimes such as `llamacpp` where strict grammar/schema enforcement might be rejected by the endpoint, generator logic retries automatically using a bounded prompt-parser fallback. If `--rewrite` was requested but the model generation fails to produce a valid handbook rewrite, `clio context init` prints a notice and exits with code 1 rather than leaving an inconsistent state.
+When bootstrapping across local runtimes such as `llamacpp` where strict grammar/schema enforcement might be rejected by the endpoint, generator logic retries automatically using a bounded prompt-parser fallback. If `--rewrite` was requested but the model generation fails to produce a valid handbook rewrite, `clio-coder context init` prints a notice and exits with code 1 rather than leaving an inconsistent state.
 
 
 ---
@@ -97,12 +97,12 @@ when the operator explicitly asks for it.
 
 | Layer | Artifact | Producer | Model use | Prompt surfacing |
 | --- | --- | --- | --- | --- |
-| Structural codewiki | `.clio/codewiki.json` plus `.clio/state.json` | `context init`, `context refresh`, `context index`, session freshness checks, and incremental mutation observers | None | `<codewiki>available...; use code_nav</codewiki>` |
-| Markdown wiki | `.clio/wiki/**/*.md` plus `.clio/wiki/meta.json` | `clio context wiki` or `clio context refresh --wiki` | Yes, one planning dispatch plus one dispatch per page | `<wiki>N pages at .clio/wiki (start: quickstart.md)...</wiki>` |
+| Structural codewiki | `.clio-coder/codewiki.json` plus `.clio-coder/state.json` | `context init`, `context refresh`, `context index`, session freshness checks, and incremental mutation observers | None | `<codewiki>available...; use code_nav</codewiki>` |
+| Markdown wiki | `.clio-coder/wiki/**/*.md` plus `.clio-coder/wiki/meta.json` | `clio-coder context wiki` or `clio-coder context refresh --wiki` | Yes, one planning dispatch plus one dispatch per page | `<wiki>N pages at .clio-coder/wiki (start: quickstart.md)...</wiki>` |
 
 ### Structural Index
 
-`.clio/codewiki.json` uses schema v5 and is written as compact JSON. File
+`.clio-coder/codewiki.json` uses schema v5 and is written as compact JSON. File
 records contain a stable id, path, language, line count, role, per-file content
 hash, extracted import specifiers, and an optional first docstring/JSDoc
 summary. Symbol records store declaration-level symbols only (such as classes, interfaces, types, global functions, and methods) and intentionally skip function-local symbols. Each record stores name, kind, file id, line, and optional signature. Edges are built from imports and record either an internal file id target or an external module string.
@@ -111,7 +111,7 @@ In Git workspaces, the indexer uses the same visible file set across full builds
 incremental updates, fingerprints, and project profiles: tracked files plus
 untracked, unignored work in progress. It excludes symlinks, submodule gitlinks,
 generated output, scratch space, and local-state directories such as `.git`,
-`.clio`, `.superpowers`, `.codex`, `.claude`, `.clio-benchmark`, `node_modules`,
+`.clio-coder`, `.superpowers`, `.codex`, `.claude`, `.clio-coder-benchmark`, `node_modules`,
 `dist`, `build`, `coverage`, virtualenvs, `target`, and `vendor`. Non-Git
 workspaces use a bounded filesystem walk with the same directory exclusions.
 Source coverage spans TypeScript, JavaScript, Python, Rust, Go, C, C++, CUDA
@@ -138,7 +138,7 @@ paths are no-ops.
 
 ### Markdown Wiki & `code_nav` Resolution
 
-The wiki lives under `.clio/wiki/` as a nested tree and is written by the
+The wiki lives under `.clio-coder/wiki/` as a nested tree and is written by the
 `wiki-writer` agent. Model agents resolve pages dynamically through `code_nav`
 with `mode: "wiki"`; an optional query resolves a page id or title, where the id
 is the page's path without its extension (`domains/dispatch`), and returns its
@@ -177,22 +177,22 @@ one of the sources its own front matter claims.
 `meta.json` records `updatedAt`, `gitHead`, the indexed source-tree hash, the
 model label, a content hash over the page tree, the page list, and the plan.
 `generation.pagesPlanned` and `generation.pagesWritten` say whether a run
-finished; when they differ, `clio context wiki --update` completes the rest.
+finished; when they differ, `clio-coder context wiki --update` completes the rest.
 
-`clio context wiki` creates a wiki when no metadata exists and updates one when metadata is present. During wiki generation, Clio automatically refreshes a stale codewiki index before grounding the model run. The decision to write new pages and update metadata is a no-op if the newly generated content's hash matches the existing content hash. `clio context wiki --update` requests update mode explicitly. `clio context wiki --status` only reads metadata and does not run a model. `clio context refresh --wiki` first rebuilds the structural codewiki and then updates an existing wiki when `.clio/wiki/meta.json` exists; when no wiki metadata exists, it performs no wiki generation.
+`clio-coder context wiki` creates a wiki when no metadata exists and updates one when metadata is present. During wiki generation, Clio automatically refreshes a stale codewiki index before grounding the model run. The decision to write new pages and update metadata is a no-op if the newly generated content's hash matches the existing content hash. `clio-coder context wiki --update` requests update mode explicitly. `clio-coder context wiki --status` only reads metadata and does not run a model. `clio-coder context refresh --wiki` first rebuilds the structural codewiki and then updates an existing wiki when `.clio-coder/wiki/meta.json` exists; when no wiki metadata exists, it performs no wiki generation.
 
 ### Lifecycle Matrix
 
 | Event | Structural codewiki behavior | Markdown wiki behavior |
 | --- | --- | --- |
-| Session start | If state or `.clio/codewiki.json` already exists, Clio checks freshness best-effort and performs a full rebuild when the index is stale, missing, unreadable, or needs v5 backfill. Never-indexed directories are skipped. | No generation or update. Existing wiki status may surface in the welcome dashboard. |
+| Session start | If state or `.clio-coder/codewiki.json` already exists, Clio checks freshness best-effort and performs a full rebuild when the index is stale, missing, unreadable, or needs v5 backfill. Never-indexed directories are skipped. | No generation or update. Existing wiki status may surface in the welcome dashboard. |
 | In-session edits | Successful file mutations enqueue changed paths for incremental `updateCodewikiPaths`; the queue is serialized and best-effort. | No automatic update. |
 | Session stop | Drains the incremental queue, then rebuilds only when state is stale, the index is missing, or v5 backfill is needed. State records `lastSessionAt`, `lastIndexedAt` when applicable, and `codewikiVersion`. | No automatic update. |
-| `/context init` or `clio context init` | Performs a full codewiki rebuild before generating, preserving, proposing, or previewing `CLIO.md`; writes state with the fingerprint and codewiki version when it writes state. | No wiki generation. |
-| `/context refresh` or `clio context refresh` | Performs a full codewiki rebuild and writes state. Does not touch `CLIO.md`. | If an existing wiki is stale and `--wiki` was not passed on the CLI, prints a hint to run `clio context refresh --wiki` or `clio context wiki --update`. |
-| `clio context refresh --wiki` | Performs the same full codewiki rebuild and state write. | Updates an existing wiki through the model-backed page dispatches. No wiki metadata means no wiki model call. |
-| `clio context wiki` | Automatically refreshes the codewiki index if stale before composing the wiki prompt. | Plans, then writes each owed page in its own dispatch, assembles and promotes whatever landed (no-op if content hashes match), and records any pages still owed. |
-| `clio context wiki --status` | No index rebuild. | Reads metadata and reports page count, update time, recorded git head, git-head drift, and how many planned pages remain unwritten. |
+| `/context init` or `clio-coder context init` | Performs a full codewiki rebuild before generating, preserving, proposing, or previewing `CLIO-CODER.md`; writes state with the fingerprint and codewiki version when it writes state. | No wiki generation. |
+| `/context refresh` or `clio-coder context refresh` | Performs a full codewiki rebuild and writes state. Does not touch `CLIO-CODER.md`. | If an existing wiki is stale and `--wiki` was not passed on the CLI, prints a hint to run `clio-coder context refresh --wiki` or `clio-coder context wiki --update`. |
+| `clio-coder context refresh --wiki` | Performs the same full codewiki rebuild and state write. | Updates an existing wiki through the model-backed page dispatches. No wiki metadata means no wiki model call. |
+| `clio-coder context wiki` | Automatically refreshes the codewiki index if stale before composing the wiki prompt. | Plans, then writes each owed page in its own dispatch, assembles and promotes whatever landed (no-op if content hashes match), and records any pages still owed. |
+| `clio-coder context wiki --status` | No index rebuild. | Reads metadata and reports page count, update time, recorded git head, git-head drift, and how many planned pages remain unwritten. |
 
 ### Staleness
 
@@ -205,13 +205,13 @@ file size, and floored `mtimeMs`. The fingerprint also records `gitHead` and
 line count over source extensions. Those fields are reporting data, not the
 stale predicate.
 
-`.clio/state.json` stores the fingerprint and optional `codewikiVersion`.
+`.clio-coder/state.json` stores the fingerprint and optional `codewikiVersion`.
 Legacy v2/v3/v4 codewiki files can still be read as degraded v5 artifacts, but
 their missing or deliberately invalidated per-file hashes make `codewikiNeedsBackfill` true. The
 next session freshness check, `code_nav` demand load, wiki generation, or
 explicit refresh rebuilds them into full v5.
 
-Wiki staleness is separate. New `.clio/wiki/meta.json` files record both the git
+Wiki staleness is separate. New `.clio-coder/wiki/meta.json` files record both the git
 head and the indexed source-tree hash used when the wiki content last changed.
 Clio reports drift at the same git head when tracked or untracked source files
 change, and combines committed and working-tree evidence in its changed-file
@@ -225,9 +225,9 @@ The compiled prompt surfaces only markers, never the codewiki JSON or wiki page
 contents. Fresh codewiki renders as `<codewiki>available; use code_nav</codewiki>`.
 A stale codewiki marker adds `(stale; run /context refresh)`. A valid wiki marker
 names the page count and `quickstart.md`; a stale wiki marker adds `(stale; run
-clio context wiki --update)`.
+clio-coder context wiki --update)`.
 
-`clio context` prints a structural digest from `renderCodewikiDigest`: schema
+`clio-coder context` prints a structural digest from `renderCodewikiDigest`: schema
 version, project language, file/config/symbol/edge counts, language and role
 counts, top areas, entry points, key symbols, and dependency samples. The
 welcome dashboard shows module count, wiki page count and freshness, and a

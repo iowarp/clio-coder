@@ -24,20 +24,20 @@ skills:
   - name: context-handoff
     path: context/context-handoff
     version: 0.3.1
-    sha256: b8e23eeb1132fed1852e12cf73ca86201c9f1ba796cdb64c086fb532e57ee50f
+    sha256: 281e33a6c0919d82821d9831f052077ac368488754a1836ba9e1580b2d1401f7
   - name: context-prime
     path: context/context-prime
     version: 0.2.2
-    sha256: ae2decbdc6371b46ab915c5bca130b9af10eae7b5e2517052c5ab346ba64f402
+    sha256: 1228302e03b86bcf829ac0016441f408f78b05c4658085d65628cf05fd282f8b
   # ── git ──
   - name: commit-crafting
     path: git/commit-crafting
     version: 0.2.0
-    sha256: 80a80c2543711a10bee8221732ab85736ad9a93e6b29d419933068269345e5e8
+    sha256: b634c602e3433504c5c0f8e6803b05a85819eb99e44844a5bee63b2d5f3d4a93
   - name: create-pr
     path: git/create-pr
     version: 0.2.0
-    sha256: 663ee5a2afdb27ca57b288ca4a2d67bdd9432a385b292e1a9a16ba7f708c9385
+    sha256: 8baa650a83bda09338bc1c52e40a3eb4f3de832464c51e2679295b4ac8414253
   - name: investigate-issue
     path: git/investigate-issue
     version: 0.2.0
@@ -49,7 +49,7 @@ skills:
   - name: review-changes
     path: git/review-changes
     version: 0.2.0
-    sha256: 54b8ed6361ce396748a945448ecd604ed88710d1170b1c887ef36e743d40db22
+    sha256: a3fb3538132df310becce85584af0d05feceae9bc003e41c6a23da44efb2475b
   - name: worktree-create
     path: git/worktree-create
     version: 0.2.0
@@ -62,27 +62,27 @@ skills:
   - name: clio-dev
     path: meta/clio-dev
     version: 0.2.0
-    sha256: e990c3de452f6a09f407e2e88cdb205e63a4a2451e2367df233c2260fdd039f8
+    sha256: 386ebfdac9379ebf5630fa7a9af259bb45f473f7d3d679b0a7ef4164f5fc4dea
   - name: clio-test
     path: meta/clio-test
     version: 0.1.3
-    sha256: d7fe83a364982d59391d18542ecc95786698aff3413c916ca4016dfecd2cfc5a
+    sha256: 681aa0c087e6bf97cca3d8023966fd0f09d086f983d3db75276551a822570977
   - name: credentials
     path: meta/credentials
     version: 0.1.2
-    sha256: 9524e76f9d772e2a983c7449ab34553f7c06b8d35f145b4c54dd043d65d8fb82
+    sha256: 3730d1492742922981c87643c878b36e927d8745080d3cb99dfa2c0374322c91
   - name: find-skills
     path: meta/find-skills
     version: 0.1.1
-    sha256: 519d37ec57f78409d94cf98ee3248f9d4a4dc129653c9ecd55346204be875186
+    sha256: c0be6f4198f490930d9370d3a778ae6e64fed0250720f0ff66c08a0e41e838cc
   - name: herdr
     path: meta/herdr
     version: 0.1.0
-    sha256: 2e55d60dc397d60d35a95749e240bd06e3b4c0880128ec8c82feaeef655664bf
+    sha256: 147ddba47c4bd99844a896858b5ec483aa3df46fbcfadf8226115ba4bf51456b
   - name: skill-craft
     path: meta/skill-craft
     version: 0.1.1
-    sha256: e3a72020e833c95f0e1323ec1f1f57fb35cb378c9d0230e643f065b8f26ff017
+    sha256: ec67b2dd6c4684886eed3c0c2204cba783b1d7b691f2234ebad5e9ab58caf754
   # ── planning ──
   - name: architecture
     path: planning/architecture
@@ -112,15 +112,15 @@ skills:
   - name: experiment-protocol
     path: research/experiment-protocol
     version: 0.1.2
-    sha256: 82e0f26874299cef357fa7444fb47d795aa21ec79ff135e452583dce30736da0
+    sha256: 3af25cbcbd1adc37e3a1290cb975e0c2441f347c03148512b38c4f987f3c9c8e
   - name: scientific-debugging
     path: research/scientific-debugging
     version: 0.1.2
-    sha256: 0d574de54a689271a58d77cf8bc21c217f7ed3fda654dbdc91b8cfb780832344
+    sha256: a9d7e2153c18ec93b00c5b58fd1842201de3c75f7cbea051ae2faac777055520
   - name: scientific-modernization
     path: research/scientific-modernization
     version: 0.2.0
-    sha256: 0f86d258ee80a2535cfae97cc7547bd2dc57af39f1f68a80ee6c6efb797e6cd9
+    sha256: df5aa24fd478c10faac65d0cc9623cfd55ef2405e8f16d3c2d2fee799cf57226
   # ── workflow ──
   - name: cut-it
     path: workflow/cut-it
@@ -137,4 +137,4 @@ skills:
   - name: workflow-distiller
     path: workflow/workflow-distiller
     version: 0.2.1
-    sha256: 1356a94ef5b9f07ebdd5c1351a6a0e49bba0b196b79c8be297f631f9e5c0c513
+    sha256: 48238593de4877a7b3a4d63e982f9eca84e47f8ec41654dab97da72e9b590ad5

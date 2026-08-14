@@ -212,7 +212,7 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 		"How a worker resolves an approval ask: deny the call, fail the run, or escalate to this session.",
 	"delegation.defaults.toolGovernance": "Tool policy for delegated external agents.",
 	"skills.trustProjectCompatRoots": "Whether third-party project skill roots are loaded.",
-	safetyNet: "Always-on rails; tuned in .clio/safety.yaml.",
+	safetyNet: "Always-on rails; tuned in .clio-coder/safety.yaml.",
 	"orchestrator.thinkingLevel": "Reasoning budget for the chat loop.",
 	"orchestrator.target": "Active chat target id.",
 	"orchestrator.model": "Active chat wire model id.",
@@ -287,7 +287,7 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 		"read-only": "observe and answer only; never edits files or runs commands",
 		suggest: "propose every edit and command for your approval",
 		"auto-edit":
-			"edits and dispatches run; recognized commands (tests, lint, build, .clio/safety.yaml entries) run; other commands ask",
+			"edits and dispatches run; recognized commands (tests, lint, build, .clio-coder/safety.yaml entries) run; other commands ask",
 		"full-auto":
 			"runs without approval prompts except command substitution and system-level changes; hard blocks always apply",
 	},
@@ -626,7 +626,7 @@ export function buildSettingItems(
 			values: ["false", "true"],
 		}),
 		settingItem("safetyNet", "always on", {
-			affordance: "tuned in .clio/safety.yaml",
+			affordance: "tuned in .clio-coder/safety.yaml",
 			readOnly: true,
 		}),
 		settingItem("orchestrator.thinkingLevel", orchestratorThinking.display, {
@@ -737,7 +737,7 @@ export function buildSettingItems(
 			values: ["minimal", "default", "verbose"],
 		}),
 		settingItem("theme", settings.theme, {
-			affordance: "single clio palette",
+			affordance: "single clio-coder palette",
 			readOnly: true,
 		}),
 		settingItem("identity", settings.identity, {

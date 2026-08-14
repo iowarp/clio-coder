@@ -5,7 +5,7 @@
 
 Scientific software development cannot treat simple file presence as proof of correctness. A simulation script that crashes on rank 48, or writes out NetCDF arrays filled with `NaN`s, may still successfully write a file to the disk. 
 
-Clio Coder recognizes **scientific validation contract files** as an opt-in signal for a higher evidence bar. In v0.3.0, core Clio does not parse or enforce a scientific contract schema. The presence of `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md` at the workspace root raises the default rigor level to `high`; the file contents are advisory material for developers, project agents, and external validators.
+Clio Coder recognizes **scientific validation contract files** as an opt-in signal for a higher evidence bar. In v0.3.0, core Clio does not parse or enforce a scientific contract schema. The presence of `.clio-coder/validation.yaml`, `.clio-coder/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md` at the workspace root raises the default rigor level to `high`; the file contents are advisory material for developers, project agents, and external validators.
 
 The convention below is a recommended shape for scientific projects that need to document expected dimensions, attributes, numerical tolerances, scheduler context, and verification commands for scientific artifacts. Developed at the [Gnosis Research Center (GRC)](https://grc.iit.edu) at Illinois Tech as part of the NSF-funded scientific-software context (NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318)), this convention links execution metadata with physical output checks without claiming that the current harness executes those checks automatically.
 
@@ -13,7 +13,7 @@ The convention below is a recommended shape for scientific projects that need to
 
 ## Validation Contract Convention
 
-A validation contract can be stored as YAML or Markdown. A custom or project-level agent (such as a local `scientific-validator` agent example under `.clio/agents/`) or the developer can draft these files and commit them next to the research code. Clio core currently checks only for the documented filenames at the workspace root.
+A validation contract can be stored as YAML or Markdown. A custom or project-level agent (such as a local `scientific-validator` agent example under `.clio-coder/agents/`) or the developer can draft these files and commit them next to the research code. Clio core currently checks only for the documented filenames at the workspace root.
 
 ### Example netCDF / Slurm validation contract:
 ```yaml
@@ -99,7 +99,7 @@ Scheduler-driven runs require distinct validation handling compared to local uni
 ### How a Validation Contract Raises Session Rigor
 
 Clio Coder integrates scientific validation contracts directly into its safety model to raise the evidence standard automatically:
-- **Automatic Escalation**: At startup, Clio scans the workspace root. The presence of any validation contract (e.g. `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md`) automatically escalates the session's rigor level from `normal` to `high`.
+- **Automatic Escalation**: At startup, Clio scans the workspace root. The presence of any validation contract (e.g. `.clio-coder/validation.yaml`, `.clio-coder/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md`) automatically escalates the session's rigor level from `normal` to `high`.
 - **High-Rigor Gate Requirements**: Once the rigor is raised to `high`, the finish gate is active. It engages on a settled `turn_end` only when the recent window contains successful workspace mutation evidence and no validation evidence or explicit limitation. The window is entries since the last user message, capped at 80 entries:
   - Clio issues a `request_continuation` middleware effect to keep the session running.
   - Clio injects a dynamic warning reminder (`HIGH_RIGOR_REVALIDATION_MESSAGE`) instructing the agent to run a verification command or to declare a limitation before it can conclude the turn.

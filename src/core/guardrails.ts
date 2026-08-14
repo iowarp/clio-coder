@@ -68,12 +68,12 @@ export const GUARDRAIL_DEFAULTS: GuardrailValues = {
 
 /** Per-process env overrides, one per guardrail. */
 export const GUARDRAIL_ENV_VARS: Readonly<Record<keyof GuardrailValues, string>> = {
-	turnToolCallBudget: "CLIO_TURN_TOOL_CALL_BUDGET",
-	workerToolCallCap: "CLIO_WORKER_TOOL_CALL_CAP",
-	maxDispatchRuns: "CLIO_MAX_RUNS",
-	readMaxBytes: "CLIO_READ_MAX_BYTES",
-	observationTurnBudgetBytes: "CLIO_OBSERVATION_TURN_BUDGET_BYTES",
-	internalDispatchTimeoutMs: "CLIO_INTERNAL_DISPATCH_TIMEOUT_MS",
+	turnToolCallBudget: "CLIO_CODER_TURN_TOOL_CALL_BUDGET",
+	workerToolCallCap: "CLIO_CODER_WORKER_TOOL_CALL_CAP",
+	maxDispatchRuns: "CLIO_CODER_MAX_RUNS",
+	readMaxBytes: "CLIO_CODER_READ_MAX_BYTES",
+	observationTurnBudgetBytes: "CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES",
+	internalDispatchTimeoutMs: "CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS",
 };
 
 /**

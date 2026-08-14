@@ -9,7 +9,7 @@ export const PromptsDomainModule: DomainModule = {
 
 /**
  * Build a `PromptsDomainModule` with bundle options closed over the factory
- * call. Used by the orchestrator and `clio run` to thread the global
+ * call. Used by the orchestrator and `clio-coder run` to thread the global
  * `--no-context-files` startup flag into the prompts domain without
  * restructuring the domain loader.
  */

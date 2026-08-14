@@ -6,7 +6,7 @@ import {
 } from "../domains/lifecycle/doctor.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio doctor [--fix] [--json]
+const HELP = `clio-coder doctor [--fix] [--json]
 
 Diagnose Clio Coder state without creating files. Use --fix to repair structure:
 missing directories, missing template files, and credential permissions.

@@ -525,9 +525,9 @@ describe("builtin SDLC fleets", () => {
 	it("a registry that exists and does not bind the ids is an error, not unfinished setup", () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-fleets-"));
 		try {
-			execFileSync("mkdir", ["-p", join(root, ".clio", "fleets")]);
+			execFileSync("mkdir", ["-p", join(root, ".clio-coder", "fleets")]);
 			writeFileSync(
-				join(root, ".clio", "fleets", "commands.yaml"),
+				join(root, ".clio-coder", "fleets", "commands.yaml"),
 				["version: 1", "commands:", "  lint:", '    argv: ["true"]'].join("\n"),
 			);
 			const sdlc = listFleetContracts(root).find((entry) => entry.name === "sdlc");
@@ -566,9 +566,9 @@ describe("builtin SDLC fleets", () => {
 	it("the full chain compiles to plan, build, bounded loops, and three commits", () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-fleets-"));
 		try {
-			execFileSync("mkdir", ["-p", join(root, ".clio", "fleets")]);
+			execFileSync("mkdir", ["-p", join(root, ".clio-coder", "fleets")]);
 			writeFileSync(
-				join(root, ".clio", "fleets", "commands.yaml"),
+				join(root, ".clio-coder", "fleets", "commands.yaml"),
 				[
 					"version: 1",
 					"commands:",
@@ -609,9 +609,9 @@ describe("builtin SDLC fleets", () => {
 	it("a full sdlc run with a red first suite commits plan, code, and docs in order", async () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-fleets-"));
 		try {
-			execFileSync("mkdir", ["-p", join(root, ".clio", "fleets")]);
+			execFileSync("mkdir", ["-p", join(root, ".clio-coder", "fleets")]);
 			writeFileSync(
-				join(root, ".clio", "fleets", "commands.yaml"),
+				join(root, ".clio-coder", "fleets", "commands.yaml"),
 				["version: 1", "commands:", "  test:", '    argv: ["true"]', "  commit:", '    argv: ["true"]'].join("\n"),
 			);
 			const sdlc = listFleetContracts(root).find((entry) => entry.name === "sdlc")?.contract;

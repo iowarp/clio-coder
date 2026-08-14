@@ -521,7 +521,7 @@ function formatCompaction(facts: ContextEngineFacts): string | null {
 
 function sourceState(theme: ClioTheme, facts: ContextEngineFacts): string {
 	return joinChips(theme, [
-		theme.fg("muted", facts.clioMd ?? "CLIO.md none"),
+		theme.fg("muted", facts.clioMd ?? "CLIO-CODER.md none"),
 		theme.fg("muted", facts.memory ?? "mem none"),
 	]);
 }

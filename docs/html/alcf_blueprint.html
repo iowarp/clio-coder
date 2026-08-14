@@ -93,7 +93,7 @@
           <p>Argonne Sophia and Metis gateway configuration backed by Globus OAuth</p>
           <div class="meta-chips-row">
             <span class="chip">Source: docs/alcf-provider.md</span>
-            <span class="chip chip-orange">clio docs alcf</span>
+            <span class="chip chip-orange">clio-coder docs alcf</span>
           </div>
         </div>
       </div>
@@ -176,9 +176,9 @@
                 <h3>Generated Configuration Commands</h3>
                 <p>Run these commands inside your Clio Coder session to login and save the target profile:</p>
                 
-                <pre><code id="generatedCommand1">clio auth login alcf</code></pre>
-                <pre><code id="generatedCommand2">clio configure ...</code></pre>
-                <pre><code id="generatedCommand3">clio targets use alcf-sophia</code></pre>
+                <pre><code id="generatedCommand1">clio-coder auth login alcf</code></pre>
+                <pre><code id="generatedCommand2">clio-coder configure ...</code></pre>
+                <pre><code id="generatedCommand3">clio-coder targets use alcf-sophia</code></pre>
               </div>
             </div>
           </div>
@@ -195,7 +195,7 @@
                 <span class="step-number">1</span>
                 <div class="step-details">
                   <h4>Launch Authentication Command</h4>
-                  <p>Operator executes: <code>clio auth login alcf</code></p>
+                  <p>Operator executes: <code>clio-coder auth login alcf</code></p>
                 </div>
               </div>
               <div class="flow-step" id="step2">
@@ -289,8 +289,8 @@
         ? "https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1"
         : "https://inference-api.alcf.anl.gov/resource_server/metis/api/v1";
 
-      document.getElementById("generatedCommand2").innerText = `clio configure \\\n  --id ${targetId} \\\n  --runtime alcf \\\n  --url ${url} \\\n  --model ${modelId} \\\n  --max-tokens ${tokens}`;
-      document.getElementById("generatedCommand3").innerText = `clio targets use ${targetId}`;
+      document.getElementById("generatedCommand2").innerText = `clio-coder configure \\\n  --id ${targetId} \\\n  --runtime alcf \\\n  --url ${url} \\\n  --model ${modelId} \\\n  --max-tokens ${tokens}`;
+      document.getElementById("generatedCommand3").innerText = `clio-coder targets use ${targetId}`;
       
       // Update TOC just in case
       if (window.initTableOfContents) window.initTableOfContents();

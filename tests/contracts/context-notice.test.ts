@@ -32,7 +32,7 @@ function context(): DomainContext {
 }
 
 describe("contracts/context startup notice", () => {
-	it("suppresses the missing CLIO.md notice when context files are disabled", async () => {
+	it("suppresses the missing CLIO-CODER.md notice when context files are disabled", async () => {
 		const scratchHome = newScratchClioHome("clio-context-notice-");
 		const cwd = mkdtempSync(join(tmpdir(), "clio-context-project-"));
 		const previousCwd = process.cwd();
@@ -46,7 +46,7 @@ describe("contracts/context startup notice", () => {
 				noContext.bus.emit(BusChannels.SessionStart, { at: Date.now() });
 				await bundle.extension.stop?.();
 			});
-			strictEqual(suppressed.includes("No CLIO.md detected"), false);
+			strictEqual(suppressed.includes("No CLIO-CODER.md detected"), false);
 
 			const withContext = context();
 			const visible = await captureStderr(async () => {
@@ -55,7 +55,7 @@ describe("contracts/context startup notice", () => {
 				withContext.bus.emit(BusChannels.SessionStart, { at: Date.now() });
 				await bundle.extension.stop?.();
 			});
-			strictEqual(visible.includes("No CLIO.md detected"), true);
+			strictEqual(visible.includes("No CLIO-CODER.md detected"), true);
 			strictEqual(visible.includes("Run /context init to explore the repo and bootstrap context."), true);
 			strictEqual(visible.includes("/context-init"), false);
 		} finally {

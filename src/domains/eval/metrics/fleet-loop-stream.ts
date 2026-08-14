@@ -1,5 +1,5 @@
 /**
- * Fold a `clio fleet run --json` summary off a runner's stdout.
+ * Fold a `clio-coder fleet run --json` summary off a runner's stdout.
  *
  * A bounded loop's whole subject is what the machinery did across attempts, and
  * that is reported on one line at the end of the run. Folding it live rather

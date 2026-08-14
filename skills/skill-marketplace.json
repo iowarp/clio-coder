@@ -123,7 +123,7 @@
 		},
 		{
 			"name": "credentials",
-			"description": "Use before running any tool or script that needs an API key, token, or other credential, when a command fails with an auth error, when the user must supply a new secret, or when a secret may have leaked into output. Covers facility surfaces such as kerberos tickets, globus and scheduler tokens, ssh agents, and netrc. Triggers on \"API key\", \"credential\", \"token\", \"auth error\", \"permission denied\", \"add a secret\", \"leaked\". Not for provider target configuration; use clio auth and target settings.",
+			"description": "Use before running any tool or script that needs an API key, token, or other credential, when a command fails with an auth error, when the user must supply a new secret, or when a secret may have leaked into output. Covers facility surfaces such as kerberos tickets, globus and scheduler tokens, ssh agents, and netrc. Triggers on \"API key\", \"credential\", \"token\", \"auth error\", \"permission denied\", \"add a secret\", \"leaked\". Not for provider target configuration; use clio-coder auth and target settings.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/credentials",
 			"version": "0.1.2",
 			"audit": "pass",
@@ -131,7 +131,7 @@
 		},
 		{
 			"name": "find-skills",
-			"description": "Use when the user asks \"is there a skill for X\", \"find a skill\", \"install a skill\", \"add a skill\", asks whether a capability exists as an installable skill, or wants to extend the agent with functionality that might already be published. Searches with `clio skills search`, browses the ecosystem read-only, and installs only through `clio skills install`. Not for authoring a new skill; use skill-craft.",
+			"description": "Use when the user asks \"is there a skill for X\", \"find a skill\", \"install a skill\", \"add a skill\", asks whether a capability exists as an installable skill, or wants to extend the agent with functionality that might already be published. Searches with `clio-coder skills search`, browses the ecosystem read-only, and installs only through `clio-coder skills install`. Not for authoring a new skill; use skill-craft.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/meta/find-skills",
 			"version": "0.1.1",
 			"audit": "pass",

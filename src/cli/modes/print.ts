@@ -399,7 +399,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			terminal,
 			stats: receiptStats,
 		}).catch((error: unknown) => {
-			process.stderr.write(`clio run: receipt write failed: ${error instanceof Error ? error.message : String(error)}\n`);
+			process.stderr.write(
+				`clio-coder run: receipt write failed: ${error instanceof Error ? error.message : String(error)}\n`,
+			);
 		});
 		return sealed;
 	};
@@ -412,7 +414,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		exitCode: termination.getExitCode(),
 		outcome: "canceled",
 		status: "interrupted",
-		failureMessage: result.abortReason ?? "clio run: interrupted before the turn completed",
+		failureMessage: result.abortReason ?? "clio-coder run: interrupted before the turn completed",
 	});
 	// Registered after the composition root's chat drain hook, which disposes
 	// the loop and awaits settlement, so the stats folded below are final by
@@ -452,7 +454,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		const sessionId = chat.getSessionId();
 		if (sessionId === null) return;
 		textSessionIdWritten = true;
-		process.stderr.write(`clio run: session ${sessionId}\n`);
+		process.stderr.write(`clio-coder run: session ${sessionId}\n`);
 	};
 	const unsubscribe = chat.onEvent((event) => {
 		writeTextSessionId();
@@ -544,8 +546,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
 		const failureMessage =
 			result.lastNotice !== null
-				? `clio run: no assistant response (${result.lastNotice})`
-				: "clio run: no assistant response";
+				? `clio-coder run: no assistant response (${result.lastNotice})`
+				: "clio-coder run: no assistant response";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
 	} else if (mode === "text") {

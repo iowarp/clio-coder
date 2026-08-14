@@ -123,7 +123,7 @@ function scratchProject(): string {
 
 function writeClioMd(cwd: string): void {
 	writeFileSync(
-		join(cwd, "CLIO.md"),
+		join(cwd, "CLIO-CODER.md"),
 		serializeClioMd({
 			projectName: "Prompt Fixture",
 			identity: "Prompt Fixture is a TypeScript project used to test prompt context selection.",
@@ -883,7 +883,7 @@ describe("contracts/prompts compiler logic", () => {
 	it("summarizes project context across missing, CLIO-only, fresh codewiki, and stale codewiki states", async () => {
 		const empty = scratchProject();
 		let result = await compileProjectPrompt(empty);
-		strictEqual(result.systemPrompt.includes("CLIO.md: available"), false);
+		strictEqual(result.systemPrompt.includes("CLIO-CODER.md: available"), false);
 		strictEqual(result.systemPrompt.includes("Codewiki: available"), false);
 		strictEqual(result.systemPrompt.includes("promptFixtureSymbol"), false);
 
@@ -912,9 +912,9 @@ describe("contracts/prompts compiler logic", () => {
 
 		const staleWiki = scratchProject();
 		writeClioMd(staleWiki);
-		mkdirSync(join(staleWiki, ".clio"), { recursive: true });
+		mkdirSync(join(staleWiki, ".clio-coder"), { recursive: true });
 		writeFileSync(
-			join(staleWiki, ".clio", "codewiki.json"),
+			join(staleWiki, ".clio-coder", "codewiki.json"),
 			JSON.stringify({
 				version: 1,
 				generatedAt,
@@ -924,7 +924,7 @@ describe("contracts/prompts compiler logic", () => {
 			"utf8",
 		);
 		result = await compileProjectPrompt(staleWiki);
-		ok(existsSync(join(staleWiki, ".clio", "codewiki.json")));
+		ok(existsSync(join(staleWiki, ".clio-coder", "codewiki.json")));
 		strictEqual(result.systemPrompt.includes("Codewiki: available"), false);
 		strictEqual(result.systemPrompt.includes("legacySymbol"), false);
 	});
@@ -955,7 +955,7 @@ describe("contracts/prompts compiler logic", () => {
 		writePromptWiki(fresh, freshHead);
 		const freshText = renderPromptContext(fresh).text;
 		ok(freshText.includes("<codewiki>available; use code_nav</codewiki>"));
-		ok(freshText.includes("<wiki>1 pages at .clio/wiki (start: quickstart.md)</wiki>"));
+		ok(freshText.includes("<wiki>1 pages at .clio-coder/wiki (start: quickstart.md)</wiki>"));
 		ok(freshText.indexOf("<codewiki>") < freshText.indexOf("<wiki>"));
 
 		const stale = scratchProject();
@@ -974,7 +974,7 @@ describe("contracts/prompts compiler logic", () => {
 		git(stale, ["commit", "-m", "add extra"]);
 		ok(
 			renderPromptContext(stale).text.includes(
-				"<wiki>1 pages at .clio/wiki (start: quickstart.md) (stale; run clio context wiki --update)</wiki>",
+				"<wiki>1 pages at .clio-coder/wiki (start: quickstart.md) (stale; run clio-coder context wiki --update)</wiki>",
 			),
 		);
 	});
@@ -1014,10 +1014,10 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 			strictEqual(second.systemPrompt, first.systemPrompt);
 			strictEqual(second.systemPromptHash, first.systemPromptHash);
 
-			// A changed CLIO.md is reflected in the next compile (the chat-loop
+			// A changed CLIO-CODER.md is reflected in the next compile (the chat-loop
 			// decides when to recompile; the compiler never caches stale context).
 			writeFileSync(
-				join(cwd, "CLIO.md"),
+				join(cwd, "CLIO-CODER.md"),
 				serializeClioMd({
 					projectName: "Prompt Fixture",
 					identity: "Prompt Fixture is a TypeScript project used to test prompt context selection.",
@@ -1052,10 +1052,10 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 
 	it("activates path-scoped project rules from prompt working paths", async () => {
 		const cwd = scratchProject();
-		mkdirSync(join(cwd, ".clio", "rules"), { recursive: true });
-		writeFileSync(join(cwd, ".clio", "rules", "always.md"), "# Always\nKeep generated files small.\n", "utf8");
+		mkdirSync(join(cwd, ".clio-coder", "rules"), { recursive: true });
+		writeFileSync(join(cwd, ".clio-coder", "rules", "always.md"), "# Always\nKeep generated files small.\n", "utf8");
 		writeFileSync(
-			join(cwd, ".clio", "rules", "typescript.md"),
+			join(cwd, ".clio-coder", "rules", "typescript.md"),
 			"---\npaths:\n  - 'src/**/*.ts'\n---\n# TypeScript\nPrefer explicit exports for fixture modules.\n",
 			"utf8",
 		);

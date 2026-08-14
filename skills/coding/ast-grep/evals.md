@@ -42,7 +42,7 @@ Expected:
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. NOT SMOKED: ast-grep binary absent on the eval host (2026-08-13). Needs the binary, then a re-run.
 
 Follow-up (2026-08-13): the durable fix considered here was a typed read-only

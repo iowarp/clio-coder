@@ -62,7 +62,7 @@ describe("contracts/task-memory handoff", () => {
 	it("reads only the newest handoff and never falls back to an older snapshot", () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-memory-handoff-"));
 		scratchRoots.push(root);
-		const directory = join(root, ".clio", "handoffs");
+		const directory = join(root, ".clio-coder", "handoffs");
 		mkdirSync(directory, { recursive: true });
 		const bank = new TaskMemoryBank();
 		bank.saveKnowledge("older structured memory");

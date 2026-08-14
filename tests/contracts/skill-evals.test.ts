@@ -192,7 +192,7 @@ describe("contracts/skill-evals parser", () => {
 
 	it("parses every catalog skill's evals.md into at least one scenario", () => {
 		// The catalog is the production input; a parser that regresses against it
-		// would silently turn `clio skills eval` into a no-op.
+		// would silently turn `clio-coder skills eval` into a no-op.
 		const catalog = join(process.cwd(), "skills");
 		for (const entry of readdirSync(catalog, { withFileTypes: true })) {
 			if (!entry.isDirectory()) continue;
@@ -305,7 +305,7 @@ describe("contracts/skill-evals CLI argument contract", () => {
 	it("rejects eval without a skill name (exit 2)", async () => {
 		const { result, stderr } = await captureStderr(() => runSkillsCommand(["eval"]));
 		strictEqual(result, 2);
-		ok(stderr.includes("usage: clio skills eval"));
+		ok(stderr.includes("usage: clio-coder skills eval"));
 	});
 
 	it("rejects an unknown skill name before any run (exit 2)", async () => {
@@ -384,7 +384,7 @@ describe("contracts/skill-evals CLI argument contract", () => {
 			'{"bullets":[{"index":1,"pass":true,"reason":"fixture marker observed"}]}',
 		);
 		try {
-			const env = { ...scratch.env, HOME: scratch.dir, CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const env = { ...scratch.env, HOME: scratch.dir, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" };
 			const doctor = await runCli(["doctor", "--fix"], { cwd: scratch.dir, env, timeoutMs: 30_000 });
 			strictEqual(doctor.code, 0, doctor.stderr);
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
@@ -489,7 +489,7 @@ describe("contracts/skill evals report an unscored scenario as unmeasured", () =
 		const scratch = makeScratchHome("clio-skill-eval-unmeasured-");
 		const fixture = await startOpenAICompatFixture(TRUNCATED_JUDGE);
 		try {
-			const env = { ...scratch.env, HOME: scratch.dir, CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const env = { ...scratch.env, HOME: scratch.dir, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" };
 			const doctor = await runCli(["doctor", "--fix"], { cwd: scratch.dir, env, timeoutMs: 30_000 });
 			strictEqual(doctor.code, 0, doctor.stderr);
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
@@ -565,7 +565,7 @@ describe("contracts/skill evals report an unscored scenario as unmeasured", () =
 
 describe("contracts/skill evals run their acting arms unattended", () => {
 	// F3 of the 3b sweep: the arms carried no --autonomy flag, so they ran at the
-	// settings default auto-edit, every git call in both arms came back "clio run
+	// settings default auto-edit, every git call in both arms came back "clio-coder run
 	// cannot confirm permission requests", and the harness printed 0/4 with exit
 	// 1. The same skill, model and target at full-auto completed the whole
 	// workflow. HARNESS-NOTES.md item 4 carries the operator approval.
@@ -640,7 +640,7 @@ describe("contracts/skill evals run their acting arms unattended", () => {
 		const scratch = makeScratchHome("clio-skill-eval-walled-");
 		const fixture = await startOpenAICompatFixture(HEADLESS_PERMISSION_DENIED_REASON);
 		try {
-			const env = { ...scratch.env, HOME: scratch.dir, CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const env = { ...scratch.env, HOME: scratch.dir, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" };
 			const doctor = await runCli(["doctor", "--fix"], { cwd: scratch.dir, env, timeoutMs: 30_000 });
 			strictEqual(doctor.code, 0, doctor.stderr);
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
@@ -699,10 +699,10 @@ describe("contracts/skill evals select the copy an activation would select", () 
 		// resolve to, so the eval measured an artifact the agent would never
 		// load and said nothing about which copy it ran.
 		writeSkill(join(workspace, "skills", "review"), "review", "THE CATALOG COPY");
-		writeSkill(join(workspace, ".clio", "skills", "review"), "review", "THE INSTALLED COPY");
+		writeSkill(join(workspace, ".clio-coder", "skills", "review"), "review", "THE INSTALLED COPY");
 
 		const resolved = resolveSkillBaseDir("review", workspace);
-		strictEqual(resolved.baseDir, join(workspace, ".clio", "skills", "review"));
+		strictEqual(resolved.baseDir, join(workspace, ".clio-coder", "skills", "review"));
 		strictEqual(resolved.origin, "clio/project");
 		ok(readFileSync(join(String(resolved.baseDir), "SKILL.md"), "utf8").includes("THE INSTALLED COPY"));
 	});
@@ -780,7 +780,7 @@ describe("contracts/skill evals run hermetic", () => {
 		const scratch = makeScratchHome("clio-eval-hermetic-");
 		const fixture = await startOpenAICompatFixture("done");
 		try {
-			const env = { ...scratch.env, HOME: scratch.dir, CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const env = { ...scratch.env, HOME: scratch.dir, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" };
 			const doctor = await runCli(["doctor", "--fix"], { cwd: scratch.dir, env, timeoutMs: 30_000 });
 			strictEqual(doctor.code, 0, doctor.stderr);
 			const configDir = join(scratch.dir, "config");

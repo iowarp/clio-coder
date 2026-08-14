@@ -178,8 +178,8 @@ describe("contracts/skills-hub marketplace rows", () => {
 			.join(" ");
 
 		ok(body.includes("no skills installed and no local marketplace configured"), body);
-		ok(body.includes("clio skills install"), body);
-		ok(body.includes("CLIO_SKILL_CATALOG_DIR"), body);
+		ok(body.includes("clio-coder skills install"), body);
+		ok(body.includes("CLIO_CODER_SKILL_CATALOG_DIR"), body);
 		ok(!body.includes("…"), `the remedy must not be cut: ${body}`);
 	});
 });

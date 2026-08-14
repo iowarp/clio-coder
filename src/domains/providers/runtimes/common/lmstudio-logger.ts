@@ -5,7 +5,7 @@
  * (WebSocket reconnect errors, channel teardown warnings) straight over the
  * interactive TUI frame. Real failures still reach the operator as thrown
  * errors through Clio's own error rendering, so SDK logging stays silent
- * unless CLIO_DEBUG_LMSTUDIO=1 routes it to stderr for diagnosis.
+ * unless CLIO_CODER_DEBUG_LMSTUDIO=1 routes it to stderr for diagnosis.
  */
 import type { LoggerInterface } from "@lmstudio/sdk";
 
@@ -20,7 +20,7 @@ function formatMessage(message: unknown): string {
 }
 
 function write(level: string, messages: ReadonlyArray<unknown>): void {
-	if (process.env.CLIO_DEBUG_LMSTUDIO !== "1") return;
+	if (process.env.CLIO_CODER_DEBUG_LMSTUDIO !== "1") return;
 	process.stderr.write(`[clio:lmstudio] ${level} ${messages.map(formatMessage).join(" ")}\n`);
 }
 

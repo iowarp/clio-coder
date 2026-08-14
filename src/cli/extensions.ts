@@ -12,17 +12,17 @@ import {
 } from "../domains/extensions/index.js";
 import { formatColumns, printError, printOk } from "./shared.js";
 
-const HELP = `clio extensions <command>
+const HELP = `clio-coder extensions <command>
 
 Manage Clio extension packages.
 
 Commands:
-  clio extensions list [--all] [--json] [--user|--project]
-  clio extensions discover <path> [--json]
-  clio extensions install <path> [--user|--project] [--force] [--json]
-  clio extensions enable <id> [--user|--project] [--json]
-  clio extensions disable <id> [--user|--project] [--json]
-  clio extensions remove <id> [--user|--project] [--json]
+  clio-coder extensions list [--all] [--json] [--user|--project]
+  clio-coder extensions discover <path> [--json]
+  clio-coder extensions install <path> [--user|--project] [--force] [--json]
+  clio-coder extensions enable <id> [--user|--project] [--json]
+  clio-coder extensions disable <id> [--user|--project] [--json]
+  clio-coder extensions remove <id> [--user|--project] [--json]
 `;
 
 interface Parsed {
@@ -140,7 +140,7 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
 		case "discover": {
 			const root = parsed.positional[0];
 			if (!root || parsed.positional.length !== 1) {
-				process.stderr.write("usage: clio extensions discover <path>\n");
+				process.stderr.write("usage: clio-coder extensions discover <path>\n");
 				return 2;
 			}
 			const candidates = discoverExtensionPackages(resolve(root));
@@ -157,7 +157,7 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
 		case "install": {
 			const root = parsed.positional[0];
 			if (!root || parsed.positional.length !== 1) {
-				process.stderr.write("usage: clio extensions install <path> [--user|--project] [--force]\n");
+				process.stderr.write("usage: clio-coder extensions install <path> [--user|--project] [--force]\n");
 				return 2;
 			}
 			const result = installExtension(resolve(root), { ...scopeOptions, force: parsed.force });
@@ -172,7 +172,7 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
 		case "disable": {
 			const id = parsed.positional[0];
 			if (!id || parsed.positional.length !== 1) {
-				process.stderr.write(`usage: clio extensions ${parsed.command} <id> [--user|--project]\n`);
+				process.stderr.write(`usage: clio-coder extensions ${parsed.command} <id> [--user|--project]\n`);
 				return 2;
 			}
 			const result = parsed.command === "enable" ? enableExtension(id, scopeOptions) : disableExtension(id, scopeOptions);
@@ -186,7 +186,7 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
 		case "remove": {
 			const id = parsed.positional[0];
 			if (!id || parsed.positional.length !== 1) {
-				process.stderr.write("usage: clio extensions remove <id> [--user|--project]\n");
+				process.stderr.write("usage: clio-coder extensions remove <id> [--user|--project]\n");
 				return 2;
 			}
 			const result = removeExtension(id, scopeOptions);

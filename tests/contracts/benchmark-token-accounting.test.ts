@@ -12,7 +12,7 @@ const SWEBENCH = join(REPO_ROOT, "benchmarks", "community", "swe-bench-lite", "s
 const PYTHON = process.env.PYTHON ?? "python3";
 
 /**
- * A stand-in for `clio run --json` that emits the events a real headless turn
+ * A stand-in for `clio-coder run --json` that emits the events a real headless turn
  * emits: two completed assistant messages plus the republished `turn_end` and
  * `agent_end` forms that must not be counted a second time.
  */
@@ -34,7 +34,7 @@ function writeFakeClio(path: string, messageTotals: number[]): void {
 		}),
 		JSON.stringify({ type: "agent_end", messageCount: messageTotals.length, usage: { totalTokens: 999_999 } }),
 	];
-	writeFileSync(path, `#!/bin/sh\ncat <<'CLIO_EVENTS'\n${events.join("\n")}\nCLIO_EVENTS\n`, "utf8");
+	writeFileSync(path, `#!/bin/sh\ncat <<'CLIO_CODER_EVENTS'\n${events.join("\n")}\nCLIO_CODER_EVENTS\n`, "utf8");
 	chmodSync(path, 0o755);
 }
 
@@ -101,7 +101,7 @@ describe("contracts/benchmark adapter token accounting", () => {
 			{
 				cwd: REPO_ROOT,
 				encoding: "utf8",
-				env: { ...process.env, CLIO_BIN: fakeClio, SCICODE_DATA_DIR: join(scratch, "absent") },
+				env: { ...process.env, CLIO_CODER_BIN: fakeClio, SCICODE_DATA_DIR: join(scratch, "absent") },
 			},
 		);
 		strictEqual(result.status, 0, result.stderr);
@@ -156,7 +156,7 @@ describe("contracts/benchmark adapter token accounting", () => {
 			{
 				cwd: REPO_ROOT,
 				encoding: "utf8",
-				env: { ...process.env, CLIO_BIN: silentClio, SCICODE_DATA_DIR: join(scratch, "absent") },
+				env: { ...process.env, CLIO_CODER_BIN: silentClio, SCICODE_DATA_DIR: join(scratch, "absent") },
 			},
 		);
 		strictEqual(result.status, 0, result.stderr);
@@ -193,7 +193,7 @@ describe("contracts/benchmark adapter token accounting", () => {
 			{
 				cwd: REPO_ROOT,
 				encoding: "utf8",
-				env: { ...process.env, CLIO_BIN: fakeClio, SCICODE_DATA_DIR: join(scratch, "absent") },
+				env: { ...process.env, CLIO_CODER_BIN: fakeClio, SCICODE_DATA_DIR: join(scratch, "absent") },
 			},
 		);
 		strictEqual(result.status, 0, result.stderr);
@@ -258,7 +258,7 @@ describe("contracts/benchmark adapter token accounting", () => {
 				encoding: "utf8",
 				// An isolated state dir is the point: receipt accounting must follow
 				// the Clio that just ran, not whatever lives under the real $HOME.
-				env: { ...process.env, CLIO_BIN: clioBin, CLIO_STATE_DIR: join(root, "state") },
+				env: { ...process.env, CLIO_CODER_BIN: clioBin, CLIO_CODER_STATE_DIR: join(root, "state") },
 			},
 		);
 	}

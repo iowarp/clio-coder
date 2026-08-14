@@ -1,5 +1,5 @@
 /**
- * Path-scoped project rules under `.clio/rules/**\/*.md`. A rule is a markdown
+ * Path-scoped project rules under `.clio-coder/rules/**\/*.md`. A rule is a markdown
  * file with optional YAML frontmatter:
  *
  *   - `paths:`    activation globs. When present the rule is path-scoped and
@@ -11,7 +11,7 @@
  *   - `description:` one-line summary for the inspector.
  *
  * Loading is deterministic and cache-stable: rules sort by id (their path under
- * `.clio/rules`), so the prompt prefix a local model caches does not reorder
+ * `.clio-coder/rules`), so the prompt prefix a local model caches does not reorder
  * between runs. Every rule carries a content hash and a token estimate so an
  * activated rule can be accounted in the context ledger. Reads are best-effort:
  * a malformed file is reported and skipped.
@@ -25,7 +25,7 @@ import { compileGlobRegex, normalizeGlobInput } from "../../tools/ignore-policy.
 import { ceilChars } from "../session/context-accounting.js";
 
 export interface ProjectRule {
-	/** Stable id: the rule's posix path under `.clio/rules`. */
+	/** Stable id: the rule's posix path under `.clio-coder/rules`. */
 	id: string;
 	sourcePath: string;
 	hash: string;
@@ -162,7 +162,7 @@ function parseRule(filePath: string, root: string, issues: string[]): { rule?: P
 	const hash = createHash("sha256").update(trimmedBody).digest("hex").slice(0, 16);
 	const rule: ProjectRule = {
 		id,
-		sourcePath: join(".clio", "rules", id),
+		sourcePath: join(".clio-coder", "rules", id),
 		hash,
 		tokenEstimate: ceilChars(trimmedBody.length),
 		enabled,
@@ -174,11 +174,11 @@ function parseRule(filePath: string, root: string, issues: string[]): { rule?: P
 }
 
 /**
- * Load every rule under `.clio/rules`, deterministically ordered by id. Returns
+ * Load every rule under `.clio-coder/rules`, deterministically ordered by id. Returns
  * the rules, the aggregated exclude set, and any per-file issues.
  */
 export function loadProjectRules(cwd: string): ProjectRulesLoad {
-	const root = join(cwd, ".clio", "rules");
+	const root = join(cwd, ".clio-coder", "rules");
 	const issues: string[] = [];
 	const files: string[] = [];
 	walkMarkdown(root, root, files);

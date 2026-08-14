@@ -30,7 +30,7 @@ export function printPlaintextCredentialWarning(): void {
 	process.stderr.write(
 		`${chalk.yellow("warning:")} API key stored unencrypted at ${authStoragePath()} (mode 0600).\n` +
 			"  It is readable by any process running as you. To keep the key off disk, configure the\n" +
-			"  target with an environment variable instead: clio configure ... --api-key-env <VAR>.\n",
+			"  target with an environment variable instead: clio-coder configure ... --api-key-env <VAR>.\n",
 	);
 }
 

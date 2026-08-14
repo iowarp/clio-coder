@@ -36,14 +36,14 @@ async function generatorInput(): Promise<BootstrapGenerateInput> {
 
 /**
  * The navigation vocabulary Clio teaches has to stay current, but this used to
- * be asserted against the repository's own CLIO.md. That file is generated
+ * be asserted against the repository's own CLIO-CODER.md. That file is generated
  * context, and commit b8fbd6ca deliberately emptied the committed copy, so the
  * assertion only passed when a local bootstrap happened to have rewritten the
  * working tree. It tested the freshness of an artifact, not a contract.
  *
  * The contract lives in the two generators that author handbooks: the
  * deterministic heuristic and the prompt handed to Scout. Whatever they teach
- * is what every generated CLIO.md will say, in this repository and every other.
+ * is what every generated CLIO-CODER.md will say, in this repository and every other.
  */
 describe("contracts/clio-md hygiene", () => {
 	it("the heuristic handbook teaches code_nav and no obsolete navigation tools", async () => {

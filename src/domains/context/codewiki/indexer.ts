@@ -1218,7 +1218,7 @@ export async function syncCodewiki(
 }
 
 export function codewikiPath(cwd: string): string {
-	return join(cwd, ".clio", "codewiki.json");
+	return join(cwd, ".clio-coder", "codewiki.json");
 }
 
 export function serializeCodewiki(codewiki: Codewiki): string {

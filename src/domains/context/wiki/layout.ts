@@ -4,7 +4,7 @@
  * The tree is nested: `quickstart.md` is the root entrypoint, content pages
  * live at paths like `domains/dispatch.md`, and every directory carries a
  * generated `index.md`. Page identity is the POSIX-relative path inside
- * `.clio/wiki`, which is what `code_nav mode=wiki` resolves and what
+ * `.clio-coder/wiki`, which is what `code_nav mode=wiki` resolves and what
  * `meta.json` records.
  *
  * This module only finds and names pages. Nothing here can fail a run:
@@ -45,7 +45,7 @@ function compareStrings(a: string, b: string): number {
 }
 
 export function wikiDir(cwd: string): string {
-	return join(cwd, ".clio", "wiki");
+	return join(cwd, ".clio-coder", "wiki");
 }
 
 /**

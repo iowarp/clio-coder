@@ -97,7 +97,7 @@ export async function loadDomains(modules: ReadonlyArray<DomainModule>): Promise
 	}
 
 	const stop = async (): Promise<void> => {
-		const debug = process.env.CLIO_DEBUG_SHUTDOWN === "1";
+		const debug = process.env.CLIO_CODER_DEBUG_SHUTDOWN === "1";
 		const budgetMs = resolveShutdownHookBudgetMs();
 		for (const name of [...loaded].reverse()) {
 			const ext = extensions.get(name);

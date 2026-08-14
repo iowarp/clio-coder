@@ -5,7 +5,7 @@ import { resolveClioDirs } from "../../core/xdg.js";
 import type { KnowledgeBaseRoot } from "./types/knowledge-base.js";
 
 export const MODEL_CATALOG_OVERLAY_DIR = "model-catalog.d";
-export const MODEL_CATALOG_DIRS_ENV = "CLIO_MODEL_CATALOG_DIRS";
+export const MODEL_CATALOG_DIRS_ENV = "CLIO_CODER_MODEL_CATALOG_DIRS";
 
 export interface ProviderModelCatalogDirs {
 	/** Bundled curated catalog shipped with Clio, when present. */
@@ -80,7 +80,7 @@ export function resolveProviderModelCatalogDirs(
 	const cwd = options.cwd ?? process.cwd();
 	const overlays = uniqueExistingDirs([
 		join(resolveClioDirs().config, MODEL_CATALOG_OVERLAY_DIR),
-		join(cwd, ".clio", MODEL_CATALOG_OVERLAY_DIR),
+		join(cwd, ".clio-coder", MODEL_CATALOG_OVERLAY_DIR),
 		...envOverlayDirs(),
 	]);
 	return {

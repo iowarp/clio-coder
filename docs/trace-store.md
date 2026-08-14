@@ -83,24 +83,24 @@ writes before slower evidence builds.
 
 ## CLI Commands
 
-The `clio trace` command surfaces 6 subcommands for inspecting and querying the SQLite trace mirror:
+The `clio-coder trace` command surfaces 6 subcommands for inspecting and querying the SQLite trace mirror:
 
 ```bash
-clio trace runs [--db PATH] [--limit N]
-clio trace phases <runId> [--db PATH]
-clio trace tail <runId> [--follow] [--db PATH]
-clio trace procs <runId> [--db PATH]
-clio trace sql <SELECT query> [--db PATH]
-clio trace ui [--db PATH] [--port N]
+clio-coder trace runs [--db PATH] [--limit N]
+clio-coder trace phases <runId> [--db PATH]
+clio-coder trace tail <runId> [--follow] [--db PATH]
+clio-coder trace procs <runId> [--db PATH]
+clio-coder trace sql <SELECT query> [--db PATH]
+clio-coder trace ui [--db PATH] [--port N]
 ```
 
-`clio trace --help` and every subcommand `--help` print usage and exit with code 0.
+`clio-coder trace --help` and every subcommand `--help` print usage and exit with code 0.
 
 ### Database Resolution and Error Handling
 
 When resolving the SQLite database path:
-- **Default Database Path:** If `--db` is omitted and no database has been created yet, `clio trace` prints an informational notice (`no trace database yet at <path>`) and exits cleanly with code 0.
-- **Explicit Database Path:** If an explicit `--db <path>` is specified but does not exist, `clio trace` prints `error: trace database not found: <path>` and exits with code 1.
+- **Default Database Path:** If `--db` is omitted and no database has been created yet, `clio-coder trace` prints an informational notice (`no trace database yet at <path>`) and exits cleanly with code 0.
+- **Explicit Database Path:** If an explicit `--db <path>` is specified but does not exist, `clio-coder trace` prints `error: trace database not found: <path>` and exits with code 1.
 
 ### Subcommand Specifications
 
@@ -127,6 +127,6 @@ The viewer binds to `127.0.0.1` only and serves a read-only JSON API beside the 
 | `GET /api/runs/:runId/processes` | `processes`. |
 | `GET /api/runs/:runId/receipt` | Sidecars beside the database: `<stateDir>/receipts/<runId>.json` and the matching `<stateDir>/evidence-index.json` row. |
 
-The receipt endpoint derives `<stateDir>` from the directory holding the trace database, since `clio trace ui` reads `<stateDir>/trace.sqlite`. A mirror copied away from its state directory has no sidecars, so a missing, unreadable, or malformed file yields a `null` half with HTTP 200 rather than an error. The response drops `output`, `upstreamResponses`, `routeDecision`, `briefing`, and `steering`: the panel renders provenance, not transcripts.
+The receipt endpoint derives `<stateDir>` from the directory holding the trace database, since `clio-coder trace ui` reads `<stateDir>/trace.sqlite`. A mirror copied away from its state directory has no sidecars, so a missing, unreadable, or malformed file yields a `null` half with HTTP 200 rather than an error. The response drops `output`, `upstreamResponses`, `routeDecision`, `briefing`, and `steering`: the panel renders provenance, not transcripts.
 
 The run page renders the task request, wall-clock duration, phase description, failure reason and retry count, a chronological log of every event type with its payload, gate verdicts and violations, the run's processes, and a receipt panel covering outcome, verification state and basis, spend, per-tool call statistics, safety counters, findings, and build provenance. Fields the harness never sealed read as absent rather than as zero.

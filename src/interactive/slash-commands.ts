@@ -235,7 +235,7 @@ export interface SlashCommandContext {
 	exportTranscript: (path?: string) => void;
 	runContextClear: (options: ContextClearCommandOptions) => void;
 	/**
-	 * Re-index the codewiki and refresh `.clio` state without touching CLIO.md.
+	 * Re-index the codewiki and refresh `.clio-coder` state without touching CLIO-CODER.md.
 	 * Optional until the host wires onContextRefresh.
 	 */
 	runContextRefresh?: () => void;

@@ -13,7 +13,7 @@ import { printError, printHeader, printOk } from "./shared.js";
 const CHANNELS = ["latest", "beta", "dev"] as const;
 type Channel = (typeof CHANNELS)[number];
 
-const HELP = `clio upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
+const HELP = `clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
 
 Refresh state metadata and apply pending data-dir migrations. An npm-installed
 binary is also reinstalled via npm; a source-checkout install instead prints
@@ -111,15 +111,15 @@ async function runNpmInstall(channel: Channel): Promise<void> {
 
 async function runDoctorFixAfterInstall(): Promise<void> {
 	const args = ["doctor", "--fix"];
-	process.stdout.write(`[upgrade] clio ${args.join(" ")}\n`);
+	process.stdout.write(`[upgrade] clio-coder ${args.join(" ")}\n`);
 	await new Promise<void>((resolve, reject) => {
-		const child = spawn("clio", args, { stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn("clio-coder", args, { stdio: ["ignore", "pipe", "pipe"] });
 		streamPrefixed(child.stdout, process.stdout);
 		streamPrefixed(child.stderr, process.stderr);
 		child.on("error", reject);
 		child.on("exit", (code) => {
 			if (code === 0) resolve();
-			else reject(new Error(`clio doctor --fix exited with code ${code ?? -1}`));
+			else reject(new Error(`clio-coder doctor --fix exited with code ${code ?? -1}`));
 		});
 	});
 }
@@ -127,15 +127,15 @@ async function runDoctorFixAfterInstall(): Promise<void> {
 async function runPostInstallUpgrade(opts: UpgradeOptions): Promise<void> {
 	const args = ["upgrade", "--post-install", `--channel=${opts.channel}`];
 	if (opts.skipMigrations) args.push("--skip-migrations");
-	process.stdout.write(`[upgrade] clio ${args.join(" ")}\n`);
+	process.stdout.write(`[upgrade] clio-coder ${args.join(" ")}\n`);
 	await new Promise<void>((resolve, reject) => {
-		const child = spawn("clio", args, { stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn("clio-coder", args, { stdio: ["ignore", "pipe", "pipe"] });
 		streamPrefixed(child.stdout, process.stdout);
 		streamPrefixed(child.stderr, process.stderr);
 		child.on("error", reject);
 		child.on("exit", (code) => {
 			if (code === 0) resolve();
-			else reject(new Error(`clio upgrade --post-install exited with code ${code ?? -1}`));
+			else reject(new Error(`clio-coder upgrade --post-install exited with code ${code ?? -1}`));
 		});
 	});
 }
@@ -162,7 +162,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	process.stdout.write(`current     ${before}\n`);
 	process.stdout.write(`state dir   ${stateDir}\n`);
 
-	const noNetwork = Boolean(process.env.CLIO_TEST_UPGRADE_NO_NETWORK);
+	const noNetwork = Boolean(process.env.CLIO_CODER_TEST_UPGRADE_NO_NETWORK);
 	const migrations = listMigrations();
 	const migrationIds = migrations.map((m) => m.id);
 
@@ -188,7 +188,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	} else if (method === "source") {
 		process.stdout.write("[upgrade] source checkout install detected; skipping npm install\n");
 	} else if (noNetwork) {
-		process.stdout.write("[upgrade] CLIO_TEST_UPGRADE_NO_NETWORK set, skipping npm install\n");
+		process.stdout.write("[upgrade] CLIO_CODER_TEST_UPGRADE_NO_NETWORK set, skipping npm install\n");
 	} else {
 		try {
 			await runNpmInstall(opts.channel);

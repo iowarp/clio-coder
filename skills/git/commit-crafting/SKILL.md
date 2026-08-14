@@ -32,7 +32,7 @@ Never push, tag, or open a PR from this skill.
 
 ## Step 1 — Project conventions win
 
-Check the project instruction file (`CLIO.md`, `AGENTS.md`, or `CLAUDE.md`)
+Check the project instruction file (`CLIO-CODER.md`, `AGENTS.md`, or `CLAUDE.md`)
 for commit-message rules: format, tags, scope conventions, sign-off. Whatever
 it specifies overrides the defaults below.
 
@@ -67,7 +67,7 @@ Done when `git log -1 --stat` shows the commit and you have printed:
 
 - **What changed**: 3-6 sentences for a developer skimming the log — the
   problem solved and the key touch points.
-- **Agent-layer changes**: only if files under `.claude/`, `.clio/`,
+- **Agent-layer changes**: only if files under `.claude/`, `.clio-coder/`,
   `skills/`, or the project instruction files changed — one line per file on
   what evolved. Omit the section entirely otherwise.
 

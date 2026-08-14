@@ -2,7 +2,7 @@
  * Width-aware layout for the plain-stdout CLI surfaces.
  *
  * The TUI measures the terminal on every frame; the command-line surfaces did
- * not measure it at all. `clio configure --list` and the first-run runtime
+ * not measure it at all. `clio-coder configure --list` and the first-run runtime
  * menu wrote fixed-width rows assuming roughly 88 columns, so at 80, the
  * oldest default there is, the model column ran past the edge and the terminal
  * wrapped it into a second line that no longer lined up with anything. The

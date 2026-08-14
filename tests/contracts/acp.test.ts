@@ -1344,7 +1344,7 @@ setInterval(() => {}, 1000);
 		ok(!("streaming" in caps), "streaming is not an ACP v1 field");
 		ok(!("tools" in caps), "tools is not an ACP v1 field");
 		// Clio advertises optional session/close support via the _meta extension slot.
-		ok(isRecord(caps._meta), "clio extensions belong in agentCapabilities._meta");
+		ok(isRecord(caps._meta), "clio-coder extensions belong in agentCapabilities._meta");
 
 		strictEqual(typeof session.sessionId, "string");
 

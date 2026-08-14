@@ -14,24 +14,24 @@ Clio Coder follows standard platform specifications for user configurations, dat
 ### Platform Defaults
 | Operating System | Config (`configDir`) | Data (`dataDir`) | State (`stateDir`) | Cache (`cacheDir`) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Linux / Unix** | `~/.config/clio` | `~/.local/share/clio` | `~/.local/state/clio` | `~/.cache/clio` |
-| **macOS** | `~/Library/Application Support/clio/config` | `~/Library/Application Support/clio/data` | `~/Library/Application Support/clio/state` | `~/Library/Caches/clio` |
-| **Windows** | `%APPDATA%\clio\config` | `%APPDATA%\clio\data` | `%LOCALAPPDATA%\clio\state` | `%LOCALAPPDATA%\clio\cache` |
+| **Linux / Unix** | `~/.config/clio-coder` | `~/.local/share/clio-coder` | `~/.local/state/clio-coder` | `~/.cache/clio-coder` |
+| **macOS** | `~/Library/Application Support/clio-coder/config` | `~/Library/Application Support/clio-coder/data` | `~/Library/Application Support/clio-coder/state` | `~/Library/Caches/clio-coder` |
+| **Windows** | `%APPDATA%\clio-coder\config` | `%APPDATA%\clio-coder\data` | `%LOCALAPPDATA%\clio-coder\state` | `%LOCALAPPDATA%\clio-coder\cache` |
 
-Run `clio paths [--json]` to print the resolved table for the current environment.
+Run `clio-coder paths [--json]` to print the resolved table for the current environment.
 
 ### Environment Overrides
 You can redirect Clio Coder's folders using environment variables:
-*   `CLIO_HOME`: Sets a symmetric tree: `$CLIO_HOME/config`, `$CLIO_HOME/data`, `$CLIO_HOME/state`, and `$CLIO_HOME/cache`.
-*   `CLIO_CONFIG_DIR`: Overrides the configuration directory only (takes precedence over `CLIO_HOME`).
-*   `CLIO_DATA_DIR`: Overrides the data directory only (takes precedence over `CLIO_HOME`).
-*   `CLIO_STATE_DIR`: Overrides the state directory only (takes precedence over `CLIO_HOME`).
-*   `CLIO_CACHE_DIR`: Overrides the cache directory only (takes precedence over `CLIO_HOME`).
+*   `CLIO_CODER_HOME`: Sets a symmetric tree: `$CLIO_CODER_HOME/config`, `$CLIO_CODER_HOME/data`, `$CLIO_CODER_HOME/state`, and `$CLIO_CODER_HOME/cache`.
+*   `CLIO_CODER_CONFIG_DIR`: Overrides the configuration directory only (takes precedence over `CLIO_CODER_HOME`).
+*   `CLIO_CODER_DATA_DIR`: Overrides the data directory only (takes precedence over `CLIO_CODER_HOME`).
+*   `CLIO_CODER_STATE_DIR`: Overrides the state directory only (takes precedence over `CLIO_CODER_HOME`).
+*   `CLIO_CODER_CACHE_DIR`: Overrides the cache directory only (takes precedence over `CLIO_CODER_HOME`).
 
-### The Project `.clio/` Directory
+### The Project `.clio-coder/` Directory
 
 The tables above cover the per-user roots. A repository Clio works in also grows a
-`.clio/` directory, and everything in it falls into one of three kinds:
+`.clio-coder/` directory, and everything in it falls into one of three kinds:
 
 *   **Operator input.** You wrote it. Clio only reads it. Deleting it removes a
     behavior you configured and nothing else.
@@ -42,30 +42,30 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 
 | Path | Kind | What it is | Safe to delete? | `context reset` |
 | :--- | :--- | :--- | :--- | :--- |
-| `.clio/settings.yaml`, `.clio/settings.local.yaml` | Operator input | Project settings layered over the user's `settings.yaml`. Precedence is built-in < user < project < project-local. | Yes; the user-level settings apply again. | Kept |
-| `.clio/safety.yaml` | Operator input | Per-repository command allowlist consulted before execute actions. | Yes; approvals return to per-action prompting. | Kept |
-| `.clio/hooks.yaml`, `.clio/hooks.local.yaml` | Operator input | Project-declared hooks. | Yes. | Kept |
-| `.clio/rules/**/*.md` | Operator input | Path-scoped project rules injected into the prompt. | Yes. | Kept |
-| `.clio/profile.yaml` | Operator input | Operator profile; closed enums and bounded path lists. | Yes. | Kept |
-| `.clio/fleets/*.md`, `.clio/fleets/commands.yaml` | Overlay | Fleet contracts and their command registry. Adds to the fleets shipped under `src/domains/agents/fleets/`. | Yes; shipped fleets remain. | Kept |
-| `.clio/agents/*.md` | Overlay | Project agent recipes. Composes with shipped builtins and the user's `~/.config/clio/agents`; a project recipe reusing a builtin id is **ignored**, not applied, with a note on stderr. | Yes; shipped agents remain. | Kept, and named |
-| `.clio/skills/**` | Overlay | Project skills, trusted as repository-local. Composes with skills Clio ships. | Yes; shipped skills remain. | Kept, and named |
-| `CLIO.md` (repository root) | Runtime state | The generated project handbook. Human-reviewable, but written by `context init`. | Yes; regenerate with `clio context init`. | Kept unless `--all` |
-| `.clio/codewiki.json` | Runtime state | Structural index, schema v5. | Yes; rebuilt by `clio context index`. | **Removed** |
-| `.clio/state.json` | Runtime state | Index fingerprint and freshness stamps. | Yes; forces a rebuild. | **Removed** |
-| `.clio/proposals/` | Runtime state | Ignored handbook drafts from `context init --propose`. | Yes. | **Removed** |
-| `.clio/handoffs/` | Runtime state | Session handoff notes. | Yes. | **Removed** |
-| `.clio/wiki/` | Runtime state | The generated Markdown wiki plus `meta.json`. The most expensive artifact here: one model dispatch per page. | Yes, but regenerating costs a full `clio context wiki` run. | Kept, and named |
-| `.clio/wiki-prev/` | Runtime state | Previous wiki, retained for rollback during generation. | Yes. | Kept, not named |
-| `.clio/worktrees/` | Runtime state | Git worktrees for `compete` candidate groups. | Prefer `git worktree remove`; a plain delete leaves git metadata behind. | Kept, not named |
+| `.clio-coder/settings.yaml`, `.clio-coder/settings.local.yaml` | Operator input | Project settings layered over the user's `settings.yaml`. Precedence is built-in < user < project < project-local. | Yes; the user-level settings apply again. | Kept |
+| `.clio-coder/safety.yaml` | Operator input | Per-repository command allowlist consulted before execute actions. | Yes; approvals return to per-action prompting. | Kept |
+| `.clio-coder/hooks.yaml`, `.clio-coder/hooks.local.yaml` | Operator input | Project-declared hooks. | Yes. | Kept |
+| `.clio-coder/rules/**/*.md` | Operator input | Path-scoped project rules injected into the prompt. | Yes. | Kept |
+| `.clio-coder/profile.yaml` | Operator input | Operator profile; closed enums and bounded path lists. | Yes. | Kept |
+| `.clio-coder/fleets/*.md`, `.clio-coder/fleets/commands.yaml` | Overlay | Fleet contracts and their command registry. Adds to the fleets shipped under `src/domains/agents/fleets/`. | Yes; shipped fleets remain. | Kept |
+| `.clio-coder/agents/*.md` | Overlay | Project agent recipes. Composes with shipped builtins and the user's `~/.config/clio-coder/agents`; a project recipe reusing a builtin id is **ignored**, not applied, with a note on stderr. | Yes; shipped agents remain. | Kept, and named |
+| `.clio-coder/skills/**` | Overlay | Project skills, trusted as repository-local. Composes with skills Clio ships. | Yes; shipped skills remain. | Kept, and named |
+| `CLIO-CODER.md` (repository root) | Runtime state | The generated project handbook. Human-reviewable, but written by `context init`. | Yes; regenerate with `clio-coder context init`. | Kept unless `--all` |
+| `.clio-coder/codewiki.json` | Runtime state | Structural index, schema v5. | Yes; rebuilt by `clio-coder context index`. | **Removed** |
+| `.clio-coder/state.json` | Runtime state | Index fingerprint and freshness stamps. | Yes; forces a rebuild. | **Removed** |
+| `.clio-coder/proposals/` | Runtime state | Ignored handbook drafts from `context init --propose`. | Yes. | **Removed** |
+| `.clio-coder/handoffs/` | Runtime state | Session handoff notes. | Yes. | **Removed** |
+| `.clio-coder/wiki/` | Runtime state | The generated Markdown wiki plus `meta.json`. The most expensive artifact here: one model dispatch per page. | Yes, but regenerating costs a full `clio-coder context wiki` run. | Kept, and named |
+| `.clio-coder/wiki-prev/` | Runtime state | Previous wiki, retained for rollback during generation. | Yes. | Kept, not named |
+| `.clio-coder/worktrees/` | Runtime state | Git worktrees for `compete` candidate groups. | Prefer `git worktree remove`; a plain delete leaves git metadata behind. | Kept, not named |
 
-`~/.clio/runtimes/` is a separate, user-level directory for third-party runtime
+`~/.clio-coder/runtimes/` is a separate, user-level directory for third-party runtime
 plugins. It is not part of any repository.
 
-None of `.clio/` is published by Clio's own package. The directories Clio ships
+None of `.clio-coder/` is published by Clio's own package. The directories Clio ships
 (`src/domains/agents/builtins/`, `src/domains/agents/fleets/`, `skills/workflow/cut-it/`, `skills/git/`,
 `src/domains/prompts/fragments/`, `src/domains/providers/models/`) are read from
-the installed package root; the `.clio/` entries above compose with them and never
+the installed package root; the `.clio-coder/` entries above compose with them and never
 replace them on disk.
 
 ---
@@ -77,7 +77,7 @@ The core files are created automatically during the first run. `credentials.yaml
 | Directory | File Path | Purpose | Permissions | Lifecycle Action |
 | :--- | :--- | :--- | :--- | :--- |
 | **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --config`. |
-| **Config** | `credentials.yaml` | Private keys and tokens managed via `clio auth`. | `0o600` (rw-------) | Removed by uninstall / `reset --auth`. |
+| **Config** | `credentials.yaml` | Private keys and tokens managed via `clio-coder auth`. | `0o600` (rw-------) | Removed by uninstall / `reset --auth`. |
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
 | **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install), and `upgradedAt` (stamped on upgrade). | Writer/umask default | Removed by uninstall / `reset --state`. |
 | **State** | `migrations.json` | Log of successfully applied schema/state migrations. | Writer/umask default | Removed by uninstall / `reset --state`. |
@@ -106,7 +106,7 @@ git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
 hash -r
-clio --version
+clio-coder --version
 ```
 
 `scripts/install-local.sh` is idempotent and auditable:
@@ -115,68 +115,68 @@ clio --version
 - runs `npm ci` unless `node_modules` satisfies the lockfile or `--skip-deps` is passed;
 - runs `npm run build` unless `--no-build` is passed;
 - verifies `dist/cli/index.js` exists and is executable;
-- creates `${CLIO_BIN_DIR:-$HOME/.local/bin}` and links `clio` there;
-- warns if that bin dir is not on `PATH`, and warns when another `clio`
+- creates `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}` and links `clio-coder` there;
+- warns if that bin dir is not on `PATH`, and warns when another `clio-coder`
   earlier on `PATH` shadows the freshly linked one;
 - runs the installed CLI's structure repair (`node dist/cli/index.js doctor
   --fix` with the caller's environment), so a fresh install passes plain
-  `clio doctor` with no manual steps.
+  `clio-coder doctor` with no manual steps.
 
-On a machine where Clio has never run, plain `clio doctor` reports the
+On a machine where Clio has never run, plain `clio-coder doctor` reports the
 missing config structure and exits nonzero by design (it is a read-only
-diagnosis); `clio doctor --fix`, the installer above, or simply launching
-`clio` creates everything.
+diagnosis); `clio-coder doctor --fix`, the installer above, or simply launching
+`clio-coder` creates everything.
 
 First-run target setup after install:
 
 **Option A: Local Model / API Key Target**
 ```bash
-clio configure --list
-clio configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model --set-orchestrator --set-fleet-default
-clio targets use local-lmstudio
-clio targets --probe
-clio
+clio-coder configure --list
+clio-coder configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model --set-orchestrator --set-fleet-default
+clio-coder targets use local-lmstudio
+clio-coder targets --probe
+clio-coder
 ```
 
 **Option B: Subscription Target (OAuth / Claude Code)**
 ```bash
 # Authenticate ChatGPT Plus/Pro or Claude Pro/Max subscription
-clio auth login openai-codex
-clio auth login anthropic-max
+clio-coder auth login openai-codex
+clio-coder auth login anthropic-max
 
 # Authenticate Claude CLI for worker targets
 claude auth login
 
 # Configure OAuth subscription target
-clio configure --id claude-sub --runtime anthropic-max --model your-claude-model --set-orchestrator
+clio-coder configure --id claude-sub --runtime anthropic-max --model your-claude-model --set-orchestrator
 
 # Configure Claude Code SDK worker target
-clio configure --id claude-sdk-worker --runtime claude-sdk --model your-claude-model --set-fleet-default
+clio-coder configure --id claude-sdk-worker --runtime claude-sdk --model your-claude-model --set-fleet-default
 
-clio targets use claude-sub
-clio targets --probe
-clio
+clio-coder targets use claude-sub
+clio-coder targets --probe
+clio-coder
 ```
 
-If a shell still tries an old removed path such as `~/.local/bin/clio`, clear
+If a shell still tries an old removed path such as `~/.local/bin/clio-coder`, clear
 its command cache with `hash -r` in Bash or `rehash` in Zsh.
 
 ## 5. Lifecycle Commands
 
 Clio Coder provides CLI utilities to manage operations safely. For a complete catalog of operational errors, permission denial handling, and remediation procedures, see [troubleshooting.md](troubleshooting.md).
 
-### A. Integrity Diagnostics (`clio doctor`)
+### A. Integrity Diagnostics (`clio-coder doctor`)
 Runs a series of health sweeps across the environment:
 *   Validates `settings.yaml` against the strict schema, reporting exact key paths, read-only.
 *   Asserts owner-only permissions on credentials (`0o600`).
 *   Reports the installed Clio, Node, platform, and engine package readiness.
 *   Checks config, data, state, cache, and state metadata freshness. It also warns when an OpenAI-compatible or Anthropic-compatible target appears to be a native LM Studio or Ollama server that should be converted.
-*   *Recovery:* Run `clio doctor --fix` to create missing directories and templates, repair credential permissions, and refresh install metadata. Settings are always validated against the current schema; `--fix` does not rewrite removed keys or migrate an older settings file, so the operator must correct every reported path deliberately.
+*   *Recovery:* Run `clio-coder doctor --fix` to create missing directories and templates, repair credential permissions, and refresh install metadata. Settings are always validated against the current schema; `--fix` does not rewrite removed keys or migrate an older settings file, so the operator must correct every reported path deliberately.
 
-### B. Upgrades (`clio upgrade`)
+### B. Upgrades (`clio-coder upgrade`)
 Refreshes state metadata and applies pending data-dir migrations.
 ```bash
-clio upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
+clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
 ```
 The command detects the install method from the running binary. On a source
 checkout it never runs `npm install -g`: it performs its safe local duties
@@ -184,10 +184,10 @@ checkout it never runs `npm install -g`: it performs its safe local duties
 `git pull`, `npm run install:local`, `hash -r`. The npm reinstall path applies
 only to a genuinely npm-installed binary, once the package is published.
 
-### C. System Resets (`clio reset`)
+### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:
 ```bash
-clio reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]
+clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]
 ```
 Levels are combinable except `--all`. Each level clears exactly the root or file it names and nothing else, then bootstraps the missing structure again unless `--dry-run` is present. `--force` is required only for destructive execution.
 
@@ -197,26 +197,26 @@ listing. That listing, not this page and not `--help`, is the authoritative
 inventory of what a level covers, because a remembered list drifts as soon as a
 new artifact is written into a root.
 
-*   `--state` *(Default)*: Deletes the state root only. It holds every session transcript and the audit trail beside it, so a reset is the end of `resume`, `/view`, and their history. This is the level a bare `clio reset` selects, and it carries that note in its preview.
+*   `--state` *(Default)*: Deletes the state root only. It holds every session transcript and the audit trail beside it, so a reset is the end of `resume`, `/view`, and their history. This is the level a bare `clio-coder reset` selects, and it carries that note in its preview.
 *   `--data`: Deletes the data root only: memory, evidence, evals (durable products).
 *   `--cache`: Deletes the cache root only.
 *   `--auth`: Deletes `credentials.yaml`. Removes all saved keys.
 *   `--config`: Deletes `settings.yaml` to revert preferences to default.
 *   `--all`: Wipes all four roots (config, data, state, cache) and automatically reinitializes a fresh environment.
 
-### D. Uninstallation (`clio uninstall`)
-`clio uninstall` is the single uninstall path for every install method. It
+### D. Uninstallation (`clio-coder uninstall`)
+`clio-coder uninstall` is the single uninstall path for every install method. It
 removes all four roots (config, data, state, cache):
 
 ```bash
-clio uninstall [--remove-binary] [--dry-run] [--force]
+clio-coder uninstall [--remove-binary] [--dry-run] [--force]
 ```
 
 Preview first, then remove:
 
 ```bash
-clio uninstall --dry-run
-clio uninstall --remove-binary --force
+clio-coder uninstall --dry-run
+clio-coder uninstall --remove-binary --force
 hash -r
 ```
 
@@ -225,26 +225,26 @@ anything, and enumerates the same resolved absolute paths the real run would
 remove. It prints binary-removal guidance for the active launcher, npm-global
 installs, npm links, and the local source symlink.
 
-#### Per-project `.clio/` directories
+#### Per-project `.clio-coder/` directories
 
-Uninstall removes the four roots under your home directory. The `.clio/`
+Uninstall removes the four roots under your home directory. The `.clio-coder/`
 directory Clio writes inside each repository it runs in is not one of them and
 is never removed here. Every project is recorded in the session metadata under
 the state root, so both the real run and `--dry-run` list the surviving
-`.clio/` directories and name the command that clears one:
+`.clio-coder/` directories and name the command that clears one:
 
 ```bash
-clio context reset --all
+clio-coder context reset --all
 ```
 
 That command works on the current directory, so run it from inside each listed
 project. The listing is printed before the roots are removed, because the record
 it reads lives in one of them, and before `--remove-binary` unlinks the launcher,
-because `clio context reset` needs the binary that is about to go. With
+because `clio-coder context reset` needs the binary that is about to go. With
 `--remove-binary` the listing says so and tells you to clear the projects first,
 then re-run the uninstall. Neither the preview nor the real run deletes project
 data. To wipe state selectively
-while keeping settings or credentials, use `clio reset` instead of
+while keeping settings or credentials, use `clio-coder reset` instead of
 uninstalling. If the launcher is already gone but state remains, run the built
 CLI directly from the checkout: `node dist/cli/index.js uninstall --force`.
 
@@ -253,17 +253,17 @@ CLI directly from the checkout: `node dist/cli/index.js uninstall --force`.
 Ownership is identity, not shape. The launcher is removed only when it resolves
 to *this* installation's own `dist/cli/index.js`. A path test on the target's
 spelling was three ways too broad: it matched a live symlink into a different
-clio checkout, and it matched a target that is not even a file, so an uninstall
+clio-coder checkout, and it matched a target that is not even a file, so an uninstall
 from one installation could unlink another one's launcher and leave that
 installation on disk with no way to start it.
 
-| At `$CLIO_BIN_DIR/clio` | Outcome |
+| At `$CLIO_CODER_BIN_DIR/clio-coder` | Outcome |
 | --- | --- |
 | A symlink resolving to this installation's entry | Removed |
-| A symlink resolving to a different clio installation | Kept, with the path it points at and the exact `rm` that removes it |
+| A symlink resolving to a different clio-coder installation | Kept, with the path it points at and the exact `rm` that removes it |
 | A symlink to a directory named `index.js` | Kept, because a directory is not an entry |
 | A real file | Kept, with a note to remove it through the package manager that put it there |
-| A dangling symlink naming a clio entry | Removed, and reported as dangling. Leaving it would put a broken `clio` on PATH after an uninstall that claimed to finish |
+| A dangling symlink naming a clio-coder entry | Removed, and reported as dangling. Leaving it would put a broken `clio-coder` on PATH after an uninstall that claimed to finish |
 | A dangling symlink naming anything else | Kept, with the exact `rm` |
 
 #### Partial failure
@@ -284,17 +284,17 @@ whatever is left. A partial delete never reports global success.
 If you are removing Clio Coder completely from your system, verify that all categories of residues are removed:
 
 1.  **System Roots**:
-    *   `~/.config/clio`
-    *   `~/.local/share/clio`
-    *   `~/.local/state/clio`
-    *   `~/.cache/clio`
+    *   `~/.config/clio-coder`
+    *   `~/.local/share/clio-coder`
+    *   `~/.local/state/clio-coder`
+    *   `~/.cache/clio-coder`
 2.  **Local Source Bin Link**:
-    *   `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`
+    *   `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`
 3.  **Global Bin Links**:
-    *   `clio` executable in your global npm path (for source checkouts, avoid this path unless intentionally debugging npm link behavior).
+    *   `clio-coder` executable in your global npm path (for source checkouts, avoid this path unless intentionally debugging npm link behavior).
 4.  **Per-Repository State**:
-    *   `.clio/` in every repository Clio has worked in, and the generated `CLIO.md` beside it. See [The Project `.clio/` Directory](#the-project-clio-directory) for what each entry is before deleting.
-    *   Remove `.clio/worktrees/` with `git worktree remove` rather than `rm -rf`, so git does not keep stale worktree metadata.
+    *   `.clio-coder/` in every repository Clio has worked in, and the generated `CLIO-CODER.md` beside it. See [The Project `.clio-coder/` Directory](#the-project-clio-directory) for what each entry is before deleting.
+    *   Remove `.clio-coder/worktrees/` with `git worktree remove` rather than `rm -rf`, so git does not keep stale worktree metadata.
 
 ---
 
@@ -302,7 +302,7 @@ If you are removing Clio Coder completely from your system, verify that all cate
 
 Clio Coder supports headless operation for automation and continuous integration.
 
-When executing tasks headlessly using `clio run`, interactive permission prompting is unavailable. The engine resolves permission requests using a deterministic model:
-- **Main-agent auto-denial:** Any main-agent tool call that parks for operator authorization is denied with `clio run cannot confirm permission requests; rerun interactively to approve this action.` The parked call is cancelled with that reason, and the headless turn finishes according to the resulting assistant outcome.
+When executing tasks headlessly using `clio-coder run`, interactive permission prompting is unavailable. The engine resolves permission requests using a deterministic model:
+- **Main-agent auto-denial:** Any main-agent tool call that parks for operator authorization is denied with `clio-coder run cannot confirm permission requests; rerun interactively to approve this action.` The parked call is cancelled with that reason, and the headless turn finishes according to the resulting assistant outcome.
 - **Worker non-stall policy:** Dispatched workers use `workers.onPermission`. The default `deny` turns a permission ask into a structured tool denial and lets the worker continue. `fail` aborts the worker and records the dispatch outcome as `failed/permission_required`.
 - **CI behavior:** Neither path waits for an interactive prompt. Exit status still reflects the final headless or dispatch result rather than the mere fact that a permission ask occurred.

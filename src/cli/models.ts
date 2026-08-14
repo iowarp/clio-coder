@@ -21,7 +21,7 @@ export interface ModelRow {
 	state: string;
 }
 
-const HELP = `clio models [search] [--target <id>] [--json] [--offline]
+const HELP = `clio-coder models [search] [--target <id>] [--json] [--offline]
 
 List live-discovered models for configured targets.
 
@@ -194,7 +194,7 @@ export function emptyModelsMessage(
 	matchedTargets: number,
 ): string {
 	if (configuredTargets === 0) {
-		return "no targets configured. run `clio configure` or `clio targets add` to register one.";
+		return "no targets configured. run `clio-coder configure` or `clio-coder targets add` to register one.";
 	}
 	if (args.target !== undefined && matchedTargets === 0) {
 		return `no target with id ${args.target}. ${targetCount(configuredTargets)} configured.`;

@@ -27,7 +27,7 @@ export const CONTEXT_ISLAND_WIDTH = 52;
 const PHASES: ReadonlyArray<ContextActivityPhase> = ["scan", "codewiki", "generate", "clio-md", "state", "done"];
 /**
  * A wiki run only ever emits codewiki, generate, state, and done. Trailing the
- * bootstrap phases it never reaches would leave `scan` and `CLIO.md` dimmed for
+ * bootstrap phases it never reaches would leave `scan` and `CLIO-CODER.md` dimmed for
  * the whole run and would stretch the progress bar across steps that cannot
  * happen.
  */
@@ -38,7 +38,7 @@ const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 	// `context-wiki` runs made the old label ambiguous with the Markdown wiki.
 	codewiki: "index",
 	generate: "draft",
-	"clio-md": "CLIO.md",
+	"clio-md": "CLIO-CODER.md",
 	state: "state",
 	done: "done",
 };

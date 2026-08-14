@@ -341,7 +341,7 @@ export function formatTargetsHubBodyLines(
 		lines.push("");
 	}
 	if (statuses.length === 0) {
-		lines.push(theme.fg("muted", "no targets configured (run clio configure)"));
+		lines.push(theme.fg("muted", "no targets configured (run clio-coder configure)"));
 		return lines;
 	}
 	const activeTargetId = options.activeTargetId ?? null;

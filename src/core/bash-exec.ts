@@ -11,7 +11,7 @@ export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
 // (failing assertion, compiler error, exit summary) must survive.
 export const BASH_HARD_CAP_BYTES = 16 * 1024 * 1024;
 
-const CLIO_CONTROL_ENV_KEYS = ["CLIO_INTERACTIVE", "CLIO_RESUME_SESSION_ID"] as const;
+const CLIO_CONTROL_ENV_KEYS = ["CLIO_CODER_INTERACTIVE", "CLIO_CODER_RESUME_SESSION_ID"] as const;
 
 export interface BashCommandResult {
 	error: NodeJS.ErrnoException | null;

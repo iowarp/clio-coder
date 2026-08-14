@@ -1,7 +1,7 @@
 /**
  * Bus tracer (observability scaffolding).
  *
- * When `CLIO_BUS_TRACE=1` is set in the environment, subscribe once to the
+ * When `CLIO_CODER_BUS_TRACE=1` is set in the environment, subscribe once to the
  * shutdown-phase channels, `session.end`, and the domain lifecycle channels
  * (`domain.loaded`/`domain.failed`, suffixed with the domain name), emitting a
  * single prefixed line per event to stderr. Off by default; local debugging can
@@ -42,7 +42,7 @@ let installed = false;
 
 export function installBusTracer(): void {
 	if (installed) return;
-	if (process.env.CLIO_BUS_TRACE !== "1") return;
+	if (process.env.CLIO_CODER_BUS_TRACE !== "1") return;
 	installed = true;
 	const bus = getSharedBus();
 	for (const channel of TRACED_CHANNELS) {

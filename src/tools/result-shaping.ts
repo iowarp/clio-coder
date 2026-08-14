@@ -67,7 +67,7 @@ function timestampSegment(): string {
 
 function offloadBody(text: string, bytes: number, maxBytes: number): string {
 	if (bytes <= maxBytes) return text;
-	const notice = `\n[clio scratch output truncated at ${maxBytes} bytes; original size ${bytes} bytes]`;
+	const notice = `\n[clio-coder scratch output truncated at ${maxBytes} bytes; original size ${bytes} bytes]`;
 	const prefixBudget = maxBytes - byteLength(notice);
 	return `${truncateUtf8(text, Math.max(0, prefixBudget), "")}${notice}`;
 }

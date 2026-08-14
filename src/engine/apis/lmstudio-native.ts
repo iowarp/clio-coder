@@ -441,7 +441,7 @@ export function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelCo
 		if (kvCache.vQuant !== undefined && kvCache.vQuant !== false) config.llamaVCacheQuantizationType = kvCache.vQuant;
 		if (kvCache.useFp16 !== undefined) config.useFp16ForKVCache = kvCache.useFp16;
 	}
-	// One-run CLI override (clio run --kv-cache-mode), delivered over the
+	// One-run CLI override (clio-coder run --kv-cache-mode), delivered over the
 	// run-overrides transport; see core/run-overrides.ts.
 	const kvCacheModeOverride = runOverrides().kvCacheMode;
 	if (kvCacheModeOverride) {
@@ -617,10 +617,10 @@ function describeLoadFailure(
  * OpenAI-compatible port honours `reasoning_effort: "none"` and suppresses
  * reasoning outright. Predictions therefore run over HTTP, and the SDK keeps
  * the work it is the only surface for: listing, loading, and unloading models.
- * Set CLIO_LMSTUDIO_SDK_PREDICT=1 to send predictions over the SDK again.
+ * Set CLIO_CODER_LMSTUDIO_SDK_PREDICT=1 to send predictions over the SDK again.
  */
 function sdkPredictionEnabled(): boolean {
-	return process.env.CLIO_LMSTUDIO_SDK_PREDICT === "1";
+	return process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT === "1";
 }
 
 /**
@@ -740,7 +740,7 @@ export function runStream(
 			if (passkey) clientOpts.clientPasskey = passkey;
 			const client = deps.createClient(clientOpts);
 			const metadata = runtimeMetadata(model);
-			const verbose = process.env.CLIO_RUNTIME_VERBOSE === "1";
+			const verbose = process.env.CLIO_CODER_RUNTIME_VERBOSE === "1";
 			const loadedContextWindow = await deps.discoverLoadedContext(baseUrl, model.id, controller.signal);
 			const budgetLimits = loadedContextWindow !== undefined ? { contextWindow: loadedContextWindow } : undefined;
 			const requestedMaxTokens = remainingContextMaxTokens(model, context, options, budgetLimits);

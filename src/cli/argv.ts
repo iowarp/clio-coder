@@ -74,7 +74,7 @@ const ROOT_FLAG_TOKENS = new Set(["--help", "-h", "--all", "--version", "-v"]);
 /**
  * Startup flags a subcommand parser will never accept, mapped to the form the
  * hint should show. `--no-skills` and `--skill` are deliberately absent: both
- * are also `clio run` options, so either position works and no hint is owed.
+ * are also `clio-coder run` options, so either position works and no hint is owed.
  */
 const GLOBAL_ONLY_FLAGS: ReadonlyMap<string, string> = new Map([
 	["--api-key", "--api-key <key>"],
@@ -84,14 +84,14 @@ const GLOBAL_ONLY_FLAGS: ReadonlyMap<string, string> = new Map([
 
 /**
  * Explain the ordering rule when a rejected option is a global one in the
- * wrong position. `clio run --no-context-files` failed with nothing but
- * "unknown option" while `clio --no-context-files run` worked, which leaves the
+ * wrong position. `clio-coder run --no-context-files` failed with nothing but
+ * "unknown option" while `clio-coder --no-context-files run` worked, which leaves the
  * user guessing at a rule the help text states only by where it lists the flag.
  */
 export function globalFlagPositionHint(arg: string, command: string): string | null {
 	const usage = GLOBAL_ONLY_FLAGS.get(arg);
 	if (usage === undefined) return null;
-	return `${arg} is a global option and must come before the subcommand: clio ${usage} ${command} ...`;
+	return `${arg} is a global option and must come before the subcommand: clio-coder ${usage} ${command} ...`;
 }
 
 /**

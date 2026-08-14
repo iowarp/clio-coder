@@ -3,7 +3,7 @@
  *
  * Two concerns every dispatch test shares:
  *   - State isolation. extension.start() opens the run ledger and scans the
- *     receipts directory under CLIO_STATE_DIR, and run completion records a
+ *     receipts directory under CLIO_CODER_STATE_DIR, and run completion records a
  *     receipt and persists runs.json. Without isolation a test reads, locks,
  *     and rewrites the developer's real multi-megabyte ledger (a state leak,
  *     and the dominant cost of the contracts lane).

@@ -117,7 +117,7 @@ Expected:
 
 ## Observed gap closure
 
-S1 run 2026-07-01, headless `clio run` against a scratch git fixture (an
+S1 run 2026-07-01, headless `clio-coder run` against a scratch git fixture (an
 order-sensitive summation whose refactor replaced `math.fsum` with a plain
 accumulation loop; regression check fails by 1.474e-4).
 
@@ -134,5 +134,5 @@ accumulation loop; regression check fails by 1.474e-4).
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS. Judge 6/6 on the seeded numerical fixture; cleanest research run.

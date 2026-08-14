@@ -19,7 +19,7 @@ export interface StateInfoRead {
 	/**
 	 * Why the metadata could not be read, or null when it is absent or fine.
 	 * Absent and unreadable are different problems with different remedies, and
-	 * collapsing both to null had `clio doctor` report "state metadata missing"
+	 * collapsing both to null had `clio-coder doctor` report "state metadata missing"
 	 * for an install.json that was present and merely mode 000, then send the
 	 * user to a `--fix` that dies on EACCES.
 	 */

@@ -17,11 +17,11 @@ Clio resolves four directories (config, data, state, cache) from platform defaul
 
 | Variable | Effect |
 | --- | --- |
-| `CLIO_HOME` | Single-tree override: all four roots become `$CLIO_HOME/config`, `$CLIO_HOME/data`, `$CLIO_HOME/state`, and `$CLIO_HOME/cache`. |
-| `CLIO_CONFIG_DIR` | Overrides the config directory only (beats `CLIO_HOME`). |
-| `CLIO_DATA_DIR` | Overrides the data directory only (beats `CLIO_HOME`). |
-| `CLIO_STATE_DIR` | Overrides the state directory only (beats `CLIO_HOME`). |
-| `CLIO_CACHE_DIR` | Overrides the cache directory only (beats `CLIO_HOME`). |
+| `CLIO_CODER_HOME` | Single-tree override: all four roots become `$CLIO_CODER_HOME/config`, `$CLIO_CODER_HOME/data`, `$CLIO_CODER_HOME/state`, and `$CLIO_CODER_HOME/cache`. |
+| `CLIO_CODER_CONFIG_DIR` | Overrides the config directory only (beats `CLIO_CODER_HOME`). |
+| `CLIO_CODER_DATA_DIR` | Overrides the data directory only (beats `CLIO_CODER_HOME`). |
+| `CLIO_CODER_STATE_DIR` | Overrides the state directory only (beats `CLIO_CODER_HOME`). |
+| `CLIO_CODER_CACHE_DIR` | Overrides the cache directory only (beats `CLIO_CODER_HOME`). |
 
 Default config file:
 
@@ -31,7 +31,7 @@ Default config file:
 
 Role contents: config holds user-authored files (settings, credentials, agents, skills, prompts, extensions, runtimes); data holds durable artifacts (memory, evidence, evals); state holds machine-produced session state (sessions, audit, receipts, runs.json, recent-models.json, install.json, interviews, scratch); cache holds disposable derived files.
 
-`clio paths --json` prints the resolved directories and is the single source of truth for scripts.
+`clio-coder paths --json` prints the resolved directories and is the single source of truth for scripts.
 
 ---
 
@@ -44,15 +44,15 @@ git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
 hash -r
-clio --version
+clio-coder --version
 ```
 
 Then start from the repository you want Clio to work on:
 
 ```bash
 cd /path/to/your/repo
-clio doctor --fix
-clio configure --list
+clio-coder doctor --fix
+clio-coder configure --list
 ```
 
 Start one local runtime and register exactly one target first. Clio integrates with popular local inference engines:
@@ -76,7 +76,7 @@ Common local runtime IDs and default URLs are:
 Example registration:
 
 ```bash
-clio configure \
+clio-coder configure \
   --id local-lmstudio \
   --runtime lmstudio-native \
   --url http://127.0.0.1:1234 \
@@ -88,9 +88,9 @@ clio configure \
 Use the id you chose, probe it, then launch the TUI:
 
 ```bash
-clio targets use local-lmstudio
-clio targets --probe
-clio models --target local-lmstudio
+clio-coder targets use local-lmstudio
+clio-coder targets --probe
+clio-coder models --target local-lmstudio
 clio
 ```
 
@@ -209,7 +209,7 @@ compaction:
   threshold: 0.8
   excludeLastTurns: 6
   # model: provider/summary-model-id
-  # systemPrompt: ~/.config/clio/prompts/compaction.md
+  # systemPrompt: ~/.config/clio-coder/prompts/compaction.md
 retry:
   enabled: true
   maxRetries: 3
@@ -283,7 +283,7 @@ Settings validation is strict. Unknown keys and type violations report exact
 paths and stop startup so stale configuration does not silently change runtime
 behavior.
 
-Plain `clio doctor` is read-only. `clio doctor --fix` creates missing
+Plain `clio-coder doctor` is read-only. `clio-coder doctor --fix` creates missing
 directories and template files, repairs credential permissions, and refreshes
 install metadata. It validates `settings.yaml` directly against the current
 schema but never rewrites removed keys or migrates an old settings shape. Any
@@ -297,7 +297,7 @@ deliberately.
 The routing keys in `settings.yaml` (`orchestrator.*`, `background.*`, `workers.default.*`, `scope`) are **defaults**, not a live control surface. Each interactive session seeds its routing from them at launch and owns it from then on:
 
 - Interactive changes (`/model`, Alt+L, `/settings`, Shift+Tab, `/thinking`, Alt+J / Alt+K, `/scoped-models`) apply to the current session immediately and are written back as the defaults for sessions launched later.
-- Writes from other processes, such as a second Clio session, `clio targets use`, `clio configure`, or a manual edit, update the defaults and the shared target catalog. These writes never redirect a running session's chat or fleet routing. The running session shows a notice when the saved defaults diverge from its active routing.
+- Writes from other processes, such as a second Clio session, `clio-coder targets use`, `clio-coder configure`, or a manual edit, update the defaults and the shared target catalog. These writes never redirect a running session's chat or fleet routing. The running session shows a notice when the saved defaults diverge from its active routing.
 - Non-routing settings (theme, keybindings, autonomy level, retry, compaction, target catalog entries) still hot-reload into running sessions as before.
 - `/resume` and `/new` switch sessions, not routing: the terminal keeps its active target/model/thinking across session switches.
 
@@ -305,10 +305,10 @@ This is what makes several concurrent Clio terminals safe: each one routes throu
 
 Supporting mechanics:
 
-- **The `/settings` Center tracks live state.** Every editable row re-derives from the session's effective settings after each committed edit and whenever the shared snapshot reloads while the Center is open. Changing `orchestrator.target` rebases `orchestrator.model` on the new target's default model, matching Alt+L and `clio targets use`, and the `orchestrator.thinkingLevel` row immediately offers the levels the new model supports. Cursor position and any open submenu are preserved across refreshes.
-- **Saved-default writes are serialized across processes.** Every settings writer (interactive write-throughs, `clio targets`, `clio configure`) performs its read-modify-write under an advisory lock file (`settings.yaml.lock`) and lands the result via an atomic temp-file + rename. Two processes saving defaults at the same time can no longer drop each other's patches, readers never block and never see partial files, and a lock left behind by a dead process is taken over after a few seconds.
+- **The `/settings` Center tracks live state.** Every editable row re-derives from the session's effective settings after each committed edit and whenever the shared snapshot reloads while the Center is open. Changing `orchestrator.target` rebases `orchestrator.model` on the new target's default model, matching Alt+L and `clio-coder targets use`, and the `orchestrator.thinkingLevel` row immediately offers the levels the new model supports. Cursor position and any open submenu are preserved across refreshes.
+- **Saved-default writes are serialized across processes.** Every settings writer (interactive write-throughs, `clio-coder targets`, `clio-coder configure`) performs its read-modify-write under an advisory lock file (`settings.yaml.lock`) and lands the result via an atomic temp-file + rename. Two processes saving defaults at the same time can no longer drop each other's patches, readers never block and never see partial files, and a lock left behind by a dead process is taken over after a few seconds.
 - **Recently selected models are runtime state, not configuration.** They live in the state dir (`recent-models.json`), so an Alt+L pick never rewrites `settings.yaml` and never pings the config watcher in other running sessions. Settings validation is strict: a `state.recentModels` key in `settings.yaml` is an unknown-key error during normal startup and must be removed deliberately. `modelSelector.favorites` stays in `settings.yaml` because favorites are deliberate user configuration.
-- **ACP sessions get the notices through the session ledger.** Sessions served over the Agent Client Protocol (`clio` in ACP mode) have the same routing isolation, but ACP v1 offers no agent-initiated advisory channel: its `session/update` union only carries prompt-turn content, and out-of-turn updates would break strict clients. The external-divergence and target-removed notices are therefore recorded as `custom` session-ledger entries (`customType: "clio.routing-notice"`), visible to `/resume` and session tooling.
+- **ACP sessions get the notices through the session ledger.** Sessions served over the Agent Client Protocol (`clio-coder` in ACP mode) have the same routing isolation, but ACP v1 offers no agent-initiated advisory channel: its `session/update` union only carries prompt-turn content, and out-of-turn updates would break strict clients. The external-divergence and target-removed notices are therefore recorded as `custom` session-ledger entries (`customType: "clio.routing-notice"`), visible to `/resume` and session tooling.
 
 ---
 
@@ -472,24 +472,24 @@ Recently selected models are runtime state and live in `recent-models.json` unde
 Interactive wizard:
 
 ```bash
-clio configure
+clio-coder configure
 ```
 
 List runtimes:
 
 ```bash
-clio configure --list
-clio configure --list --all
+clio-coder configure --list
+clio-coder configure --list --all
 ```
 
-`clio configure --list` outputs every registered runtime across all categories (local, cloud, subscription, worker-only) along with its auth type and catalog status. For catalog-backed runtimes, it reports the catalog size (for example, `models=38 in pi-ai catalog`). It also includes a reference to `clio auth list` for runtimes that require authentication.
+`clio-coder configure --list` outputs every registered runtime across all categories (local, cloud, subscription, worker-only) along with its auth type and catalog status. For catalog-backed runtimes, it reports the catalog size (for example, `models=38 in pi-ai catalog`). It also includes a reference to `clio-coder auth list` for runtimes that require authentication.
 
-When configuring a catalog-backed runtime non-interactively, `clio configure` requires the `--model` flag to specify an explicit model from the catalog; it will not silently seed a generic default model.
+When configuring a catalog-backed runtime non-interactively, `clio-coder configure` requires the `--model` flag to specify an explicit model from the catalog; it will not silently seed a generic default model.
 
 Register non-interactively:
 
 ```bash
-clio configure \
+clio-coder configure \
   --id local-llamacpp \
   --runtime llamacpp \
   --url http://127.0.0.1:8080 \
@@ -511,39 +511,39 @@ These runtimes use your personal subscription credentials via OAuth, minting tok
 
 - **`openai-codex`**: Powers the orchestrator or workers using a ChatGPT Plus/Pro subscription.
 - **`anthropic-max`**: Powers the orchestrator or workers using a Claude Pro/Max subscription.
-  - *Terms of Service Caveat:* During login (`clio auth login anthropic-max`), Clio displays this warning notice:
+  - *Terms of Service Caveat:* During login (`clio-coder auth login anthropic-max`), Clio displays this warning notice:
     > [!WARNING]
     > Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). Using subscription credentials outside Anthropic's first-party apps may not align with their terms of service; enable at your own discretion.
 
 **Login and Configuration Examples:**
 ```bash
 # Authenticate
-clio auth login openai-codex
-clio auth login anthropic-max
+clio-coder auth login openai-codex
+clio-coder auth login anthropic-max
 
 # Configure orchestrator targets
-clio configure --id chatgpt-sub --runtime openai-codex --model your-codex-model --set-orchestrator
-clio configure --id claude-sub --runtime anthropic-max --model claude-sonnet-5 --set-orchestrator
+clio-coder configure --id chatgpt-sub --runtime openai-codex --model your-codex-model --set-orchestrator
+clio-coder configure --id claude-sub --runtime anthropic-max --model claude-sonnet-5 --set-orchestrator
 ```
 
-Choose model ids from `clio configure --list` or from `clio models --target <id>` after login.
+Choose model ids from `clio-coder configure --list` or from `clio-coder models --target <id>` after login.
 
 ### 2. ALCF Globus Runtime (Orchestrator + Worker)
 
-The `alcf` runtime targets the inference gateway of the [Argonne Leadership Computing Facility (ALCF)](https://www.alcf.anl.gov), specifically accessing the Sophia and Metis clusters. Sophia runs vLLM on NVIDIA A100 GPU nodes while Metis serves model requests using SambaNova SN40L hardware. The authentication flow uses [Globus Auth](https://www.globus.org) PKCE OAuth. It is a scientific cloud target rather than a consumer subscription, but it uses the same `clio auth login <runtime>` workflow:
+The `alcf` runtime targets the inference gateway of the [Argonne Leadership Computing Facility (ALCF)](https://www.alcf.anl.gov), specifically accessing the Sophia and Metis clusters. Sophia runs vLLM on NVIDIA A100 GPU nodes while Metis serves model requests using SambaNova SN40L hardware. The authentication flow uses [Globus Auth](https://www.globus.org) PKCE OAuth. It is a scientific cloud target rather than a consumer subscription, but it uses the same `clio-coder auth login <runtime>` workflow:
 
 
 ```bash
-clio auth login alcf
+clio-coder auth login alcf
 
-clio configure \
+clio-coder configure \
   --id alcf-sophia \
   --runtime alcf \
   --url https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1 \
   --model openai/gpt-oss-120b \
   --max-tokens 4096
 
-clio configure \
+clio-coder configure \
   --id alcf-metis \
   --runtime alcf \
   --url https://inference-api.alcf.anl.gov/resource_server/metis/api/v1 \
@@ -568,10 +568,10 @@ These runtimes drive your local `claude` installation to execute subagent tasks.
 claude auth login
 
 # 2. Configure the SDK worker target (enforced safety)
-clio configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
+clio-coder configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
 
 # 3. Configure the subprocess worker target (advisory/permission-mode gating)
-clio configure --id claude-code-worker --runtime claude-code --model sonnet
+clio-coder configure --id claude-code-worker --runtime claude-code --model sonnet
 ```
 
 ### 4. Claude Code over ACP (Delegation-Only)
@@ -593,13 +593,13 @@ Then invoke it using `/delegate claude-code <task>`.
 
 The `antigravity-code` runtime drives your local Google Antigravity CLI (`agy`) installation to execute subagent tasks. It runs the CLI as a subprocess using the `agy --print` command and maps Clio autonomy levels onto the CLI's permission flags.
 
-Google Antigravity supports a context window of up to 1,000,000 tokens and is suitable for large-context codebase reasoning. Because `agy` emits plain text without structured events, Clio cannot perform fine-grained tool call interception. Gating is applied coarsely: read-only runs pass both `--mode plan` (the no-change agent posture) and `--sandbox` (terminal restrictions). Full-auto passes `--dangerously-skip-permissions` only when the environment variable `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` is explicitly set.
+Google Antigravity supports a context window of up to 1,000,000 tokens and is suitable for large-context codebase reasoning. Because `agy` emits plain text without structured events, Clio cannot perform fine-grained tool call interception. Gating is applied coarsely: read-only runs pass both `--mode plan` (the no-change agent posture) and `--sandbox` (terminal restrictions). Full-auto passes `--dangerously-skip-permissions` only when the environment variable `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1` is explicitly set.
 
 Configured targets use your existing local `agy` login and credentials. Supported model names include `Gemini 3.5 Flash (High)` as the default tier, `Gemini 3.5 Flash (Medium)`, `Gemini 3.5 Flash (Low)`, `Gemini 3.1 Pro (High)`, `Gemini 3.1 Pro (Low)`, `Claude Sonnet 4.6 (Thinking)`, `Claude Opus 4.6 (Thinking)`, and `GPT-OSS 120B (Medium)`.
 
 **Configuration Example:**
 ```bash
-clio configure --id agy-worker --runtime antigravity-code --model "Gemini 3.5 Flash (High)"
+clio-coder configure --id agy-worker --runtime antigravity-code --model "Gemini 3.5 Flash (High)"
 ```
 
 
@@ -632,43 +632,43 @@ Useful flags:
 ## Target management
 
 ```bash
-clio targets [--json] [--probe] [--target <id>]
-clio targets add [configure flags]
-clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
+clio-coder targets [--json] [--probe] [--target <id>]
+clio-coder targets add [configure flags]
+clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
                       [--fleet-target <id>] [--fleet-model <id>]
-clio targets fleet [--json]
-clio targets profile list [--json]
-clio targets profile set <name> <id> [--model <id>] [--thinking <level>]
-clio targets profile <name> <id> [--model <id>] [--thinking <level>]
-clio targets profile remove <name> [--force]
-clio targets profile rename <old> <new>
-clio targets profile bind <agentId> <profileName>
-clio targets profile unbind <agentId>
-clio targets profile bindings [--json]
-clio targets convert <id> --runtime <runtimeId>
-clio targets remove <id>
-clio targets rename <old> <new>
+clio-coder targets fleet [--json]
+clio-coder targets profile list [--json]
+clio-coder targets profile set <name> <id> [--model <id>] [--thinking <level>]
+clio-coder targets profile <name> <id> [--model <id>] [--thinking <level>]
+clio-coder targets profile remove <name> [--force]
+clio-coder targets profile rename <old> <new>
+clio-coder targets profile bind <agentId> <profileName>
+clio-coder targets profile unbind <agentId>
+clio-coder targets profile bindings [--json]
+clio-coder targets convert <id> --runtime <runtimeId>
+clio-coder targets remove <id>
+clio-coder targets rename <old> <new>
 ```
 
-`clio targets use <id>` sets the orchestrator target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat.
+`clio-coder targets use <id>` sets the orchestrator target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat.
 
-Without `--fleet-target` the default fleet target follows the orchestrator, which is the single-node case. Pass `--fleet-target <id>` to keep them apart when one node orchestrates and another runs the fleet. The fleet target is validated for fleet dispatch through the same check a fleet profile uses, so it can be a worker-only runtime such as `claude-sdk`, `claude-code`, or `antigravity-code`. Its model defaults to that target's own default rather than the orchestrator's, because a model id resolved against one target means nothing on another; `--fleet-model <id>` names it explicitly. `clio configure --set-fleet-default` and `clio targets profile` remain the routes for per-agent fleet routing.
+Without `--fleet-target` the default fleet target follows the orchestrator, which is the single-node case. Pass `--fleet-target <id>` to keep them apart when one node orchestrates and another runs the fleet. The fleet target is validated for fleet dispatch through the same check a fleet profile uses, so it can be a worker-only runtime such as `claude-sdk`, `claude-code`, or `antigravity-code`. Its model defaults to that target's own default rather than the orchestrator's, because a model id resolved against one target means nothing on another; `--fleet-model <id>` names it explicitly. `clio-coder configure --set-fleet-default` and `clio-coder targets profile` remain the routes for per-agent fleet routing.
 
 `--worker-target` and `--worker-model` are accepted as aliases of `--fleet-target` and `--fleet-model`, carried over from before the worker/fleet rename.
 
 ### Target-Profile Subcommands
 
-The command `clio targets profile` supports several subcommands to manage fleet worker profiles and agent bindings:
+The command `clio-coder targets profile` supports several subcommands to manage fleet worker profiles and agent bindings:
 
-- **list**: Show configured fleet profiles. Use `clio targets profile list [--json]` to output details in JSON format.
-- **set**: Create or update a named fleet profile. Use `clio targets profile set <name> <id> [--model <id>] [--thinking <level>]`; the compatibility form `clio targets profile <name> <id> ...` is also accepted.
-- **remove**: Remove a profile from settings. Use `clio targets profile remove <name> [--force]`. The `--force` flag is required if the profile has active agent bindings.
-- **rename**: Rename a fleet profile. Use `clio targets profile rename <old> <new>`. Active agent bindings are updated to point to the new profile name automatically.
-- **bind**: Bind an agent to a fleet profile. Use `clio targets profile bind <agentId> <profileName>`. Active ACP delegation agents are rejected.
-- **unbind**: Unbind an agent from its profile. Use `clio targets profile unbind <agentId>`.
-- **bindings**: List active agent-to-profile bindings. Use `clio targets profile bindings [--json]` to output details in JSON format.
+- **list**: Show configured fleet profiles. Use `clio-coder targets profile list [--json]` to output details in JSON format.
+- **set**: Create or update a named fleet profile. Use `clio-coder targets profile set <name> <id> [--model <id>] [--thinking <level>]`; the compatibility form `clio-coder targets profile <name> <id> ...` is also accepted.
+- **remove**: Remove a profile from settings. Use `clio-coder targets profile remove <name> [--force]`. The `--force` flag is required if the profile has active agent bindings.
+- **rename**: Rename a fleet profile. Use `clio-coder targets profile rename <old> <new>`. Active agent bindings are updated to point to the new profile name automatically.
+- **bind**: Bind an agent to a fleet profile. Use `clio-coder targets profile bind <agentId> <profileName>`. Active ACP delegation agents are rejected.
+- **unbind**: Unbind an agent from its profile. Use `clio-coder targets profile unbind <agentId>`.
+- **bindings**: List active agent-to-profile bindings. Use `clio-coder targets profile bindings [--json]` to output details in JSON format.
 
-Inside the TUI, `/targets` is the target management surface. The hub lists health, auth, runtime, model, capabilities, ready or unavailable reason, URL, and discovered models. Press `u` on a row to switch the active orchestrator target; the model is rebased to that target's default, matching `/settings` and `clio targets use`. Press `f` to set the selected target as the fleet default. Press `c` on a row for the same API-key, OAuth, or no-auth connection flow used by the auth system.
+Inside the TUI, `/targets` is the target management surface. The hub lists health, auth, runtime, model, capabilities, ready or unavailable reason, URL, and discovered models. Press `u` on a row to switch the active orchestrator target; the model is rebased to that target's default, matching `/settings` and `clio-coder targets use`. Press `f` to set the selected target as the fleet default. Press `c` on a row for the same API-key, OAuth, or no-auth connection flow used by the auth system.
 
 ### Context-Window Provenance
 
@@ -678,13 +678,13 @@ Target status resolution tracks provenance explicitly in `TargetStatus.contextWi
 - `catalog`: Resolved from the model catalog knowledge base.
 - `runtime-default`: Unanswered placeholder fall-back provided by the runtime descriptor.
 
-When a probed target reports no context window, Clio uses the runtime descriptor default as an unverified guess. In `clio targets` text output, this renders as `ctx <N> (unverified runtime default)`. In JSON output, `contextWindowProvenance` is set to `"runtime-default"`. During target creation via `clio configure`, Clio emits a warning: `warning: the target reported no context window; Clio will use the runtime default as a guess. Set one with --context-window.`. This design ensures that a number the operator never chose and the server never claimed will not read like a verified capability.
+When a probed target reports no context window, Clio uses the runtime descriptor default as an unverified guess. In `clio-coder targets` text output, this renders as `ctx <N> (unverified runtime default)`. In JSON output, `contextWindowProvenance` is set to `"runtime-default"`. During target creation via `clio-coder configure`, Clio emits a warning: `warning: the target reported no context window; Clio will use the runtime default as a guess. Set one with --context-window.`. This design ensures that a number the operator never chose and the server never claimed will not read like a verified capability.
 
 ---
 
 ## Local Model Quirks
 
-Local models often require specific engine configurations to perform optimally. Clio parses local model quirks from catalog entries and applies them during target execution. Keep target inventory in `settings.yaml` (`wireModels`, `defaultModel`, URL/auth), and keep per-model semantics in catalog YAML. For local experiments, use `$CLIO_CONFIG_DIR/model-catalog.d` or `.clio/model-catalog.d`; promote entries into the bundled source catalog only after the model family is verified for broader Clio use.
+Local models often require specific engine configurations to perform optimally. Clio parses local model quirks from catalog entries and applies them during target execution. Keep target inventory in `settings.yaml` (`wireModels`, `defaultModel`, URL/auth), and keep per-model semantics in catalog YAML. For local experiments, use `$CLIO_CODER_CONFIG_DIR/model-catalog.d` or `.clio-coder/model-catalog.d`; promote entries into the bundled source catalog only after the model family is verified for broader Clio use.
 
 ### 1. KV-Cache Quantization
 You can optimize the GPU memory usage of the key and value caches for local inference engines. Quirks parameters include:
@@ -722,7 +722,7 @@ traces.
 ## Model listing and refresh
 
 ```bash
-clio models [search] [--target <id>] [--json] [--offline]
+clio-coder models [search] [--target <id>] [--json] [--offline]
 ```
 
 Model rows combine:
@@ -756,7 +756,7 @@ Representative built-in runtime IDs:
 | Subscription and worker harnesses | `openai-codex` for ChatGPT OAuth, `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers, and `antigravity-code` for `agy --print` subprocess workers |
 | Local native | `llamacpp`, `lmstudio-native`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
 
-Some hidden aliases exist for backward compatibility or special surfaces; use `clio configure --list --all` to see them.
+Some hidden aliases exist for backward compatibility or special surfaces; use `clio-coder configure --list --all` to see them.
 
 > [!NOTE]
 > Chat and print targets are HTTP/native/pi-ai-backed adapters. Dispatch workers also admit the sanctioned subscription worker runtimes: `claude-sdk`, `claude-code`, and `antigravity-code`.
@@ -768,13 +768,13 @@ Some hidden aliases exist for backward compatibility or special surfaces; use `c
 Auth state is exposed via `providers.auth` and persisted through `openAuthStorage()`.
 
 ```bash
-clio auth list
-clio auth status [target-or-runtime]
-clio auth login [target-or-runtime] [--api-key <value>]
-clio auth logout [target-or-runtime]
+clio-coder auth list
+clio-coder auth status [target-or-runtime]
+clio-coder auth login [target-or-runtime] [--api-key <value>]
+clio-coder auth logout [target-or-runtime]
 ```
 
-`clio auth list` lists the specific runtimes that Clio authenticates itself (runtimes using API keys, OAuth, AWS SDK, or Vertex ADC), alongside their authentication status and credential sources. For the complete list of all registered runtime adapters (including local and unauthenticated runtimes), see `clio configure --list`.
+`clio-coder auth list` lists the specific runtimes that Clio authenticates itself (runtimes using API keys, OAuth, AWS SDK, or Vertex ADC), alongside their authentication status and credential sources. For the complete list of all registered runtime adapters (including local and unauthenticated runtimes), see `clio-coder configure --list`.
 
 
 Auth types come from runtime descriptors:
@@ -791,22 +791,22 @@ Auth types come from runtime descriptors:
 
 You have two ways to give Clio an API key:
 
-- **Environment variable** (`--api-key-env <VAR>`, or the env choice in `clio configure`). Clio stores nothing and reads `$VAR` at call time. This is the recommended default. The wizard suggests it for new credentials and offers `keep` first when a stored credential already exists.
-- **Stored credential** (`--api-key <literal>`, or `clio auth login`). The key is written to `credentials.yaml` (see directory locations) as **plaintext**, protected only by file mode `0600`. There is no encryption and no OS-keychain integration. Any process running as your user, plus backups and dotfile sync, can read it. Clio prints a warning whenever it writes a literal key for this reason.
+- **Environment variable** (`--api-key-env <VAR>`, or the env choice in `clio-coder configure`). Clio stores nothing and reads `$VAR` at call time. This is the recommended default. The wizard suggests it for new credentials and offers `keep` first when a stored credential already exists.
+- **Stored credential** (`--api-key <literal>`, or `clio-coder auth login`). The key is written to `credentials.yaml` (see directory locations) as **plaintext**, protected only by file mode `0600`. There is no encryption and no OS-keychain integration. Any process running as your user, plus backups and dotfile sync, can read it. Clio prints a warning whenever it writes a literal key for this reason.
 
-Prefer `--api-key-env` for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by `clio auth status`, `clio targets`, or `clio configure`; only the source (env var name or `stored-api-key`) is shown.
+Prefer `--api-key-env` for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by `clio-coder auth status`, `clio-coder targets`, or `clio-coder configure`; only the source (env var name or `stored-api-key`) is shown.
 
-For interactive auth, open `/targets`, select the row, and press `c`. For a stored credential cleanup, use `clio auth logout <target-or-runtime>`.
+For interactive auth, open `/targets`, select the row, and press `c`. For a stored credential cleanup, use `clio-coder auth logout <target-or-runtime>`.
 
 ---
 
 ## Troubleshooting checklist
 
 ```bash
-clio doctor --json
-clio targets --probe
-clio models --target <id>
-clio auth status <target-or-runtime>
+clio-coder doctor --json
+clio-coder targets --probe
+clio-coder models --target <id>
+clio-coder auth status <target-or-runtime>
 ```
 
 When opening issues, include the Clio version, Node version, target id/runtime, model id, whether the live model listing succeeds (or the target probe result), and a redacted receipt or command transcript.

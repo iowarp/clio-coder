@@ -635,7 +635,7 @@ describe("compete dispatch", () => {
 			ok(result.kind === "error");
 			match(result.message, /injected candidate 2 creation failure/);
 			strictEqual(fabric.spawns.length, 0);
-			strictEqual(existsSync(join(repo, ".clio", "worktrees")), false);
+			strictEqual(existsSync(join(repo, ".clio-coder", "worktrees")), false);
 			deepStrictEqual(
 				branches().filter((branch) => branch.startsWith("clio/compete/")),
 				[],
@@ -666,7 +666,7 @@ describe("compete dispatch", () => {
 			deepStrictEqual(fake.abortAttempts, ["candidate-run-1", "candidate-run-3"]);
 			deepStrictEqual(fake.settled, ["candidate-run-1", "candidate-run-3"]);
 			deepStrictEqual(fake.pathPresentAtSettlement, [true, true]);
-			strictEqual(existsSync(join(repo, ".clio", "worktrees")), false);
+			strictEqual(existsSync(join(repo, ".clio-coder", "worktrees")), false);
 			deepStrictEqual(
 				branches().filter((branch) => branch.startsWith("clio/compete/")),
 				[],
@@ -694,7 +694,7 @@ describe("compete dispatch", () => {
 			deepStrictEqual(fake.abortAttempts, ["candidate-run-1", "candidate-run-3"]);
 			deepStrictEqual(fake.settled, ["candidate-run-1", "candidate-run-3"]);
 			deepStrictEqual(fake.pathPresentAtSettlement, [true, true]);
-			strictEqual(existsSync(join(repo, ".clio", "worktrees")), false);
+			strictEqual(existsSync(join(repo, ".clio-coder", "worktrees")), false);
 		} finally {
 			rmSync(repo, { recursive: true, force: true });
 		}
@@ -723,7 +723,7 @@ describe("compete dispatch", () => {
 			ok(result.kind === "error");
 			match(result.message, /injected cleanup crash/);
 
-			const parent = join(repo, ".clio", "worktrees");
+			const parent = join(repo, ".clio-coder", "worktrees");
 			const groups = readdirSync(parent);
 			strictEqual(groups.length, 1);
 			const group = groups[0];
@@ -764,7 +764,7 @@ describe("compete dispatch", () => {
 
 			longer = markCompeteGroupCleanupReady(longer);
 			cleanupCompeteGroup(longer);
-			strictEqual(existsSync(join(repo, ".clio", "worktrees")), false);
+			strictEqual(existsSync(join(repo, ".clio-coder", "worktrees")), false);
 		} finally {
 			rmSync(repo, { recursive: true, force: true });
 		}
@@ -776,7 +776,7 @@ describe("compete dispatch", () => {
 		cleanupReady = markCompeteGroupCleanupReady(cleanupReady);
 		let active = claimCompeteGroup(repo, "crashed-while-active");
 		const activeCandidate = createCandidateWorktree(active, 1, "HEAD");
-		const unproven = join(repo, ".clio", "worktrees", "missing-manifest");
+		const unproven = join(repo, ".clio-coder", "worktrees", "missing-manifest");
 		mkdirSync(unproven);
 		try {
 			const recovery = recoverCleanupReadyCompeteGroups(repo);
@@ -804,7 +804,7 @@ describe("compete dispatch", () => {
 				createCandidateWorktree,
 				registerCompeteGroupRun,
 			} from "./src/tools/compete-worktrees.ts";
-			const root = process.env.CLIO_TEST_COMPETE_ROOT;
+			const root = process.env.CLIO_CODER_TEST_COMPETE_ROOT;
 			if (!root) throw new Error("missing recovery root");
 			const ownership = claimCompeteGroup(root, "hard-crash-active");
 			createCandidateWorktree(ownership, 1, "HEAD");
@@ -826,7 +826,7 @@ describe("compete dispatch", () => {
 			const raw = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
 				cwd: process.cwd(),
 				encoding: "utf8",
-				env: { ...process.env, CLIO_TEST_COMPETE_ROOT: repo },
+				env: { ...process.env, CLIO_CODER_TEST_COMPETE_ROOT: repo },
 				timeout: 15_000,
 			});
 			const claimed = JSON.parse(raw) as { pid: number; group: string };
@@ -836,7 +836,7 @@ describe("compete dispatch", () => {
 			const recovery = recoverCleanupReadyCompeteGroups(repo);
 			deepStrictEqual(recovery.cleaned, [claimed.group]);
 			deepStrictEqual(recovery.failed, []);
-			strictEqual(existsSync(join(repo, ".clio", "worktrees")), false);
+			strictEqual(existsSync(join(repo, ".clio-coder", "worktrees")), false);
 			deepStrictEqual(
 				branches().filter((branch) => branch.startsWith("clio/compete/")),
 				[],
@@ -883,7 +883,7 @@ describe("compete dispatch", () => {
 					claimCompeteGroup,
 					createCandidateWorktree,
 				} from "./src/tools/compete-worktrees.ts";
-				const root = process.env.CLIO_TEST_COMPETE_ROOT;
+				const root = process.env.CLIO_CODER_TEST_COMPETE_ROOT;
 				if (!root) throw new Error("missing recovery root");
 				const ownership = claimCompeteGroup(root, "restart-judge-winner");
 				createCandidateWorktree(ownership, 1, "HEAD");
@@ -894,7 +894,7 @@ describe("compete dispatch", () => {
 				execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
 					cwd: process.cwd(),
 					encoding: "utf8",
-					env: { ...process.env, CLIO_TEST_COMPETE_ROOT: repo },
+					env: { ...process.env, CLIO_CODER_TEST_COMPETE_ROOT: repo },
 					timeout: 15_000,
 				}),
 			) as { group: string };
@@ -933,7 +933,7 @@ describe("compete dispatch", () => {
 				claimCompeteGroup,
 				createCandidateWorktree,
 			} from "./src/tools/compete-worktrees.ts";
-			const root = process.env.CLIO_TEST_COMPETE_ROOT;
+			const root = process.env.CLIO_CODER_TEST_COMPETE_ROOT;
 			if (!root) throw new Error("missing recovery root");
 			function stage(group) {
 				const ownership = claimCompeteGroup(root, group);
@@ -950,7 +950,7 @@ describe("compete dispatch", () => {
 			execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
 				cwd: process.cwd(),
 				encoding: "utf8",
-				env: { ...process.env, CLIO_TEST_COMPETE_ROOT: repo },
+				env: { ...process.env, CLIO_CODER_TEST_COMPETE_ROOT: repo },
 				timeout: 15_000,
 			}),
 		) as { validGroup: string; conflictingGroup: string };
@@ -1035,7 +1035,7 @@ describe("compete dispatch", () => {
 				claimCompeteGroup,
 				createCandidateWorktree,
 			} from "./src/tools/compete-worktrees.ts";
-			const root = process.env.CLIO_TEST_COMPETE_ROOT;
+			const root = process.env.CLIO_CODER_TEST_COMPETE_ROOT;
 			if (!root) throw new Error("missing recovery root");
 			const ownership = claimCompeteGroup(root, "restart-missing-receipt");
 			createCandidateWorktree(ownership, 1, "HEAD");
@@ -1046,7 +1046,7 @@ describe("compete dispatch", () => {
 			execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
 				cwd: process.cwd(),
 				encoding: "utf8",
-				env: { ...process.env, CLIO_TEST_COMPETE_ROOT: repo },
+				env: { ...process.env, CLIO_CODER_TEST_COMPETE_ROOT: repo },
 				timeout: 15_000,
 			}),
 		) as { group: string };
@@ -1114,7 +1114,7 @@ describe("compete dispatch", () => {
 			const applied = readFileSync(join(repo, "answer.txt"), "utf8");
 			match(applied, /candidate-2/);
 			// Losers and winner scaffolding are both gone after an applied pick.
-			strictEqual(existsSync(join(repo, ".clio", "worktrees")), false);
+			strictEqual(existsSync(join(repo, ".clio-coder", "worktrees")), false);
 			deepStrictEqual(
 				branches().filter((branch) => branch.startsWith("clio/compete/")),
 				[],
@@ -1341,7 +1341,7 @@ describe("compete dispatch", () => {
 				branches().filter((branch) => branch.startsWith("clio/compete/")),
 				[],
 			);
-			strictEqual(existsSync(join(repo, ".clio", "worktrees")), false);
+			strictEqual(existsSync(join(repo, ".clio-coder", "worktrees")), false);
 		} finally {
 			await bundle.extension.stop?.();
 			rmSync(repo, { recursive: true, force: true });
@@ -1414,7 +1414,7 @@ describe("compete dispatch", () => {
 			match(result.message, /compete needs an operator decision/);
 			const compete = result.details?.compete as { group: string };
 			deepStrictEqual(decisionOutcomes(compete.group), ["no-winner"]);
-			strictEqual(existsSync(join(repo, ".clio", "worktrees")), false);
+			strictEqual(existsSync(join(repo, ".clio-coder", "worktrees")), false);
 			deepStrictEqual(
 				branches().filter((branch) => branch.startsWith("clio/compete/")),
 				[],

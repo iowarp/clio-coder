@@ -98,7 +98,7 @@ export const CANONICAL_METRICS = [
 	// Receipt-derived accounting. A different observation from `tokens.*` above,
 	// with a different provenance: what Clio sealed and authenticated, rather
 	// than what a provider was watched reporting on the runner's own stdout. A
-	// surface that publishes no usage stream (`clio fleet run --json` drains its
+	// surface that publishes no usage stream (`clio-coder fleet run --json` drains its
 	// workers' events) still seals the cost, so this is how a bounded loop's cost
 	// is read. The two are never merged, and this family never enters
 	// `summary.tokens`. Counts appear only beside `measured: true`; an
@@ -176,7 +176,7 @@ export interface EvalRunnerV2 {
 	prompt?: string;
 	/**
 	 * Fleet agent recipe id for the clio-run runner. When set the runner
-	 * invokes `clio run --agent <id> --json`, whose stream ends with the full
+	 * invokes `clio-coder run --agent <id> --json`, whose stream ends with the full
 	 * sealed RunReceipt, so receipt-derived evidence metrics resolve. Without
 	 * it the main-agent headless path runs and emits no receipt.
 	 */
