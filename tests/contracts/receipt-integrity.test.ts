@@ -352,6 +352,18 @@ describe("contracts/receipt-integrity", () => {
 				],
 			},
 			findingsSummary: sampleSummary,
+			validationGrounding: {
+				claimed: 1,
+				grounded: 0,
+				ungrounded: ["npm run typecheck"],
+				basis: "no-command-executed" as const,
+			},
+			capabilityMismatch: {
+				agentId: "verifier",
+				capabilityClass: "verification",
+				taskType: "debug",
+				suggestedAgentId: "coder",
+			},
 			routeDecision: decideRoute({
 				mode: "shadow",
 				posture: "balanced",

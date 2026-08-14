@@ -2190,8 +2190,14 @@ describe("contracts/dispatch", () => {
 			// Effective project-context provenance is recorded on every receipt,
 			// explicitly even for tier "none" (the harness coder recipe has no
 			// tools, so it normalizes to read-only → none), so evidence can
-			// distinguish policy from pre-provenance receipts.
-			deepStrictEqual((receipt as { projectContext?: { tier: string } }).projectContext, { tier: "none" });
+			// distinguish policy from pre-provenance receipts. A none-tier run
+			// still gets the workspace root, and the provenance says so: `tier`
+			// is the CLIO.md policy, `chars`/`sections` are what was sent.
+			const provenance = (receipt as { projectContext?: { tier: string; chars?: number; sections?: string[] } })
+				.projectContext;
+			strictEqual(provenance?.tier, "none");
+			deepStrictEqual(provenance?.sections, ["workspace-root"]);
+			ok((provenance?.chars ?? 0) > 0, "the workspace message was sent");
 		} finally {
 			await bundle.extension.stop?.();
 		}

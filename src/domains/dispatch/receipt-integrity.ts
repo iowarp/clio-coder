@@ -130,6 +130,11 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	runtimeResolution: true,
 	delegation: true,
 	findingsSummary: true,
+	// Both are optional and absent unless the run produced the condition they
+	// name, so a receipt that carries neither digests exactly as it did before
+	// they existed and the integrity version stays where it is.
+	validationGrounding: true,
+	capabilityMismatch: true,
 	sessionId: true,
 	briefing: true,
 	outcomeCode: true,

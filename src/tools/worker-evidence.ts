@@ -48,6 +48,39 @@ function isMutationClassRun(receipt: RunReceipt, verification: RunReceiptVerific
 }
 
 /**
+ * Facts the harness knew before or independently of the worker's account of
+ * itself: the capability/task pairing it was admitted under, and how many of
+ * its passing validation claims correspond to a command it actually ran. Both
+ * exist because a live verifier run sealed `exit=0 ... failed=0` on a
+ * fabricated `npm run typecheck` for a script that does not exist, and neither
+ * honest signal reached the line the orchestrator reads.
+ */
+function receiptAdmissionLabels(receipt: RunReceipt): string[] {
+	const labels: string[] = [];
+	const mismatch = receipt.capabilityMismatch;
+	if (mismatch !== undefined) {
+		labels.push(
+			`capability_mismatch=${mismatch.capabilityClass}/${mismatch.taskType}${
+				mismatch.suggestedAgentId === null ? "" : ` suggested:${mismatch.suggestedAgentId}`
+			}`,
+		);
+	}
+	const grounding = receipt.validationGrounding;
+	if (grounding !== undefined) {
+		labels.push(
+			`validations=claimed:${grounding.claimed} grounded:${grounding.grounded}${
+				grounding.ungrounded.length > 0
+					? ` ${grounding.basis === "no-command-executed" ? "unverifiable" : "unmatched"}:${grounding.ungrounded
+							.map((name) => JSON.stringify(name))
+							.join(",")}`
+					: ""
+			}`,
+		);
+	}
+	return labels;
+}
+
+/**
  * Sealed work facts for the run line. `exit=0` alone has proven to be a
  * misleading headline: a worker that never executed a call, or whose every
  * mutating call was blocked, still exits 0 and still claims in prose that it
@@ -92,16 +125,16 @@ export function receiptEvidenceLabels(
 			? "briefing=none"
 			: `briefing=bytes:${receipt.briefing.bytes} sha256:${receipt.briefing.contentHash}`;
 	let projectContext = "project_context=absent";
-	if (receipt.projectContext?.tier === "none") {
-		projectContext = "project_context=none";
-	} else if (receipt.projectContext?.tier === "bounded") {
-		projectContext = `project_context=bounded chars:${receipt.projectContext.chars ?? 0}${
-			receipt.projectContext.contentHash !== undefined ? ` sha256:${receipt.projectContext.contentHash}` : ""
-		}`;
+	if (receipt.projectContext !== undefined) {
+		const sections = receipt.projectContext.sections ?? [];
+		projectContext = `project_context=${receipt.projectContext.tier} chars:${receipt.projectContext.chars ?? 0}${
+			sections.length > 0 ? ` sections:${[...sections].sort().join(",")}` : ""
+		}${receipt.projectContext.contentHash !== undefined ? ` sha256:${receipt.projectContext.contentHash}` : ""}`;
 	}
 	return [
 		`receipt_integrity=verified/v${receipt.integrity.version}/${receipt.integrity.algorithm}`,
 		`evidence_verification=${verification.state}/${verification.basis}`,
+		...receiptAdmissionLabels(receipt),
 		...receiptActivityLabels(receipt, verification),
 		briefing,
 		projectContext,
@@ -157,6 +190,20 @@ export function workerTextNonEvidenceNotices(
 		// only because it independently diffed the tree; say so on the line.
 		notices.push(
 			"non-evidence: this run was dispatched as work that changes the tree, but no mutating tool call succeeded. Nothing was written. Confirm with a diff before repeating any claim that something was fixed.",
+		);
+	}
+	const grounding = receipt.validationGrounding;
+	if (grounding !== undefined && grounding.ungrounded.length > 0) {
+		const named = grounding.ungrounded.map((name) => JSON.stringify(name)).join(", ");
+		notices.push(
+			grounding.basis === "no-command-executed"
+				? `non-evidence: this run reported ${named} as passing and executed no command at all. Re-run the check yourself before repeating the claim.`
+				: `non-evidence: this run reported ${named} as passing through a command the harness cannot identify as that check. Re-run it before repeating the claim.`,
+		);
+	}
+	if (receipt.capabilityMismatch !== undefined) {
+		notices.push(
+			`non-evidence: '${receipt.capabilityMismatch.agentId}' is a ${receipt.capabilityMismatch.capabilityClass} recipe and cannot write to the workspace, but this task classified as ${receipt.capabilityMismatch.taskType}. Nothing it reports as changed can have been changed by it.`,
 		);
 	}
 	if (!failedRun && verification.state === "not_applicable" && answerText.length > 0 && !hasSourceCitation(answerText)) {

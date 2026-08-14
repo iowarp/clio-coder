@@ -10,7 +10,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import { DEFAULT_SETTINGS, type DelegationToolGovernance } from "../../core/defaults.js";
@@ -119,6 +119,7 @@ import {
 	registerDetachedBatch,
 } from "./batch-store.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
+import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
 import { capacityLeaseUsage, createNodeLeaseUsageReader } from "./capacity-lease.js";
 import type {
 	DispatchAdmissionObserver,
@@ -227,6 +228,7 @@ import {
 	type RunReceiptUpstreamResponse,
 	type RunStatus,
 	type RunSteeringProvenance,
+	type RunValidationGrounding,
 	runKindSupportsLiveSteering,
 	type SafetyBlockedAttempt,
 	type ToolCallStat,
@@ -237,6 +239,7 @@ import {
 	type PipelineInput,
 	validateJobSpec,
 } from "./validation.js";
+import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
 import { computeSettingsFingerprint, endpointIdentityHash, receiptAttestationFields } from "./worker-protocol.js";
 import { type SpawnedWorker, type SpawnedWorkerResult, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
@@ -752,6 +755,82 @@ const WORKER_PROJECT_CONTEXT_MAX_CHARS = 1500;
  */
 const WORKER_VERIFICATION_SECTION_MAX_CHARS = 600;
 
+/**
+ * Successful calls through a channel that could have run a check. It is the
+ * denominator that separates "claimed a check and executed nothing" from
+ * "executed something the canonical validation detector does not enumerate",
+ * and only the first is grounds for taking a sealed quality label away.
+ */
+function countCheckingCalls(stats: Map<string, ToolCallStat>): number {
+	let total = 0;
+	for (const stat of stats.values()) {
+		if (stat.tool === ToolNames.Bash || stat.tool === ToolNames.Verify) total += stat.ok;
+	}
+	return total;
+}
+
+/** Top-level entries named in the workspace message, and its total body cap. */
+const WORKER_WORKSPACE_ENTRY_LIMIT = 24;
+const WORKER_WORKSPACE_MAX_CHARS = 600;
+
+/** Directory names never worth a worker's attention in a top-level listing. */
+const WORKSPACE_LAYOUT_SKIP: ReadonlySet<string> = new Set(["node_modules", "dist", "build", "target", "__pycache__"]);
+
+export interface WorkspaceRootFacts {
+	/** Absolute directory the worker process starts in. */
+	root: string;
+	/** Top-level names, directories suffixed with "/", sorted, bounded. */
+	entries: ReadonlyArray<string>;
+	/** True when the listing was cut at the entry limit. */
+	truncated: boolean;
+}
+
+/**
+ * One readdir of the run's cwd. Live receipts showed workers spending six of
+ * twenty budgeted calls finding the repository: `find . -name "*.test.*"` under
+ * `/workspace`, `ls /workspace`, `pwd && ls`, then a mistyped path that a
+ * claimed `npm test` then "validated" in 4ms. None of that is a model failure.
+ * The harness knows the cwd exactly and was sending it nowhere.
+ */
+export function readWorkspaceRootFacts(
+	cwd: string,
+	readEntries: (dir: string) => Dirent[] = readDirentsSafely,
+): WorkspaceRootFacts {
+	const names = readEntries(cwd)
+		.filter((entry) => !entry.name.startsWith(".") && !WORKSPACE_LAYOUT_SKIP.has(entry.name))
+		.map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
+		.sort((left, right) => left.localeCompare(right, "en"));
+	return {
+		root: cwd,
+		entries: names.slice(0, WORKER_WORKSPACE_ENTRY_LIMIT),
+		truncated: names.length > WORKER_WORKSPACE_ENTRY_LIMIT,
+	};
+}
+
+function readDirentsSafely(dir: string): Dirent[] {
+	try {
+		return readdirSync(dir, { withFileTypes: true });
+	} catch {
+		// An unreadable cwd is the spawn's problem to report, not this message's.
+		return [];
+	}
+}
+
+/**
+ * Render the workspace message. Two lines and a listing, sent at every project
+ * context tier because it is the run's own working directory rather than a
+ * projection of CLIO.md: a read-only scout that cannot afford the handbook read
+ * still needs its first shell call to land in the right place.
+ */
+export function renderWorkerWorkspaceContext(workspace: WorkspaceRootFacts): string {
+	const lines = ["# Workspace", `Root: ${workspace.root}`, "Your process starts here; relative paths resolve from it."];
+	if (workspace.entries.length > 0) {
+		lines.push(`Top level: ${workspace.entries.join(", ")}${workspace.truncated ? ", …" : ""}`);
+	}
+	const body = lines.join("\n");
+	return body.length > WORKER_WORKSPACE_MAX_CHARS ? body.slice(0, WORKER_WORKSPACE_MAX_CHARS) : body;
+}
+
 /** Cap on threaded pipeline input, applied at render time via truncateUtf8. */
 export const PIPELINE_INPUT_MAX_CHARS = 12_000;
 const PIPELINE_INPUT_TRUNCATION_MARKER = "\n[pipeline input truncated]";
@@ -835,18 +914,33 @@ function briefingProvenanceFor(req: DispatchRequest): RunBriefingProvenance | nu
  * bounded policy with no rendered message (no parseable CLIO.md) records
  * `chars: 0`.
  */
+/**
+ * What this run's structured context actually was. `tier` stays the recipe's
+ * CLIO.md projection policy; `chars`, `contentHash`, and `sections` describe
+ * every structured message that was sent, which is why a `none`-tier run can
+ * still report characters: it got the workspace root even though it got no
+ * handbook. Before that message existed, every receipt in a nine-turn live
+ * drive read `bounded chars:0` while its worker hunted for the repository.
+ */
 function projectContextProvenanceFor(
 	tier: AgentProjectContextTier,
 	messages: ReadonlyArray<WorkerPromptMessage>,
 ): RunProjectContextProvenance {
-	if (tier !== "bounded") return { tier: "none" };
-	const message = messages.find((entry) => entry.id === "dispatch-project-context");
-	if (!message) return { tier: "bounded", chars: 0 };
+	const sections: string[] = [];
+	const workspace = messages.find((entry) => entry.id === "dispatch-workspace");
+	if (workspace) sections.push("workspace-root");
+	const project = tier === "bounded" ? messages.find((entry) => entry.id === "dispatch-project-context") : undefined;
+	if (project) {
+		sections.push("clio-md");
+		if (workerProjectContextIncludesVerification(project.body)) sections.push("verification-expectations");
+	}
+	const sent = [workspace, project].filter((entry) => entry !== undefined);
+	const chars = sent.reduce((total, entry) => total + entry.body.length, 0);
 	return {
-		tier: "bounded",
-		chars: message.body.length,
-		contentHash: message.contentHash,
-		...(workerProjectContextIncludesVerification(message.body) ? { sections: ["verification-expectations"] } : {}),
+		tier: tier === "bounded" ? "bounded" : "none",
+		chars,
+		...(sent.length > 0 ? { contentHash: sha256(sent.map((entry) => entry.contentHash).join("\n")) } : {}),
+		...(sections.length > 0 ? { sections } : {}),
 	};
 }
 
@@ -875,6 +969,8 @@ export interface WorkerDynamicContext {
 	onPermission?: WorkerPermissionMode | null;
 	/** Structured CLIO.md fields; null when CLIO.md is absent or malformed. */
 	project?: ProjectStructuredContext | null;
+	/** The run's own working directory and top-level layout; sent at every tier. */
+	workspace?: WorkspaceRootFacts | null;
 }
 
 /**
@@ -932,6 +1028,10 @@ export function buildDynamicPromptMessages(
 	dynamicContext: WorkerDynamicContext = {},
 ): WorkerPromptMessage[] {
 	const messages: WorkerPromptMessage[] = [];
+	if (dynamicContext.workspace) {
+		const body = renderWorkerWorkspaceContext(dynamicContext.workspace);
+		messages.push({ id: "dispatch-workspace", body, contentHash: sha256(body) });
+	}
 	if (dynamicContext.project && dynamicContext.projectContextTier === "bounded") {
 		const body = renderWorkerProjectContext(dynamicContext.project, {
 			includeVerification: dynamicContext.capabilityClass === "verification",
@@ -1083,6 +1183,8 @@ interface DispatchLifecycleStage {
 	briefing: RunBriefingProvenance | null;
 	personaOverride: RunPersonaOverride | null;
 	projectContext: RunProjectContextProvenance;
+	/** Read-only recipe admitted against a mutating task; null when the pairing was sound. */
+	capabilityMismatch: CapabilityMismatch | null;
 	effectiveAutonomy: AutonomyLevel;
 	budget: WorkerBudget;
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
@@ -2868,6 +2970,25 @@ export function createDispatchBundle(
 		if (hasPersonaOverride(req) && (spec.audience === "shadow" || spec.audience === "internal")) {
 			throw new Error(`dispatch: persona overrides are not allowed for ${spec.audience} agent '${req.agentId}'`);
 		}
+		// A read-only recipe pointed at a mutating task is knowable here and costs
+		// a full worker run to discover afterwards. Refuse the pairing the caller
+		// chose on purpose; flag the one the classifier may have misread.
+		//
+		// Gate runs are exempt outright. A reviewer or judge carries the builder's
+		// task text so it knows what it is judging, so "document the module" on a
+		// verifier is the gate working exactly as designed, not a mismatch.
+		const capabilityMismatch =
+			req.gate !== undefined
+				? null
+				: assessCapabilityMismatch({
+						agentId: req.agentId,
+						capabilityClass: spec.capabilityClass,
+						task: req.task,
+						autoSelected: req.agentSelection?.mode === "auto",
+						resultContractKind: spec.resultContract.kind,
+						specs: agents.listSpecs(),
+					});
+		if (capabilityMismatch?.verdict === "refuse") throw new Error(capabilityMismatch.detail);
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
 		const targets = readWorkerTargets(settings);
 		const target = resolveDispatchTarget(
@@ -2931,6 +3052,7 @@ export function createDispatchBundle(
 			autonomy: effectiveAutonomy,
 			onPermission: settings?.workers.onPermission ?? "deny",
 			project,
+			workspace: readWorkspaceRootFacts(cwd),
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
@@ -2974,6 +3096,7 @@ export function createDispatchBundle(
 			briefing: briefingProvenanceFor(req),
 			personaOverride,
 			projectContext: projectContextProvenance,
+			capabilityMismatch,
 			effectiveAutonomy,
 			budget,
 			...(settings ? { settings } : {}),
@@ -3035,6 +3158,7 @@ export function createDispatchBundle(
 			projectContextTier: tier,
 			autonomy,
 			project,
+			workspace: readWorkspaceRootFacts(cwd),
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
@@ -4375,6 +4499,7 @@ export function createDispatchBundle(
 			capturedOutput: RunReceiptOutput | undefined,
 			steering: ReadonlyArray<RunSteeringProvenance>,
 			resultContract: RunReceiptResultContractFact | null,
+			validationGrounding: RunValidationGrounding | null,
 		): RunReceiptDraft => {
 			// A canceled run seals status "interrupted" and must not report exit 0:
 			// the terminal state disagrees with a success code. This mirrors the ACP
@@ -4437,6 +4562,17 @@ export function createDispatchBundle(
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
+				...(validationGrounding !== null ? { validationGrounding } : {}),
+				...(lifecycle.capabilityMismatch !== null
+					? {
+							capabilityMismatch: {
+								agentId: lifecycle.capabilityMismatch.agentId,
+								capabilityClass: lifecycle.capabilityMismatch.capabilityClass,
+								taskType: lifecycle.capabilityMismatch.taskType,
+								suggestedAgentId: lifecycle.capabilityMismatch.suggestedAgentId,
+							},
+						}
+					: {}),
 				startedAt,
 				endedAt,
 				exitCode: receiptExitCode,
@@ -4645,13 +4781,17 @@ export function createDispatchBundle(
 				// acknowledgement after the bounded drain cannot race the sealed facts.
 				const steering = snapshotSteeringProvenance();
 				const capturedOutput = outputCapture.snapshot();
+				const observedRunEffects = runEffects.snapshot();
+				const appliedResultContract = appliesRecipeResultContract(req.gate?.role)
+					? (lifecycle.recipe?.resultContract ?? null)
+					: null;
 				const resultContract = validateRecipeResult({
-					contract: appliesRecipeResultContract(req.gate?.role) ? (lifecycle.recipe?.resultContract ?? null) : null,
+					contract: appliedResultContract,
 					reachedTerminalResult: resultContractWasDue(finalOutcome, outcomeCode),
 					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
 					cwd: lifecycle.cwd,
 					networkAllowed: lifecycle.admission.allowedTools.includes(ToolNames.WebFetch),
-					observedRunEffects: runEffects.snapshot(),
+					observedRunEffects,
 					filesystem: {
 						readFile(filePath) {
 							try {
@@ -4677,6 +4817,29 @@ export function createDispatchBundle(
 					finalDetail = `result contract failed: ${resultValidation.reason ?? "invalid result"}`;
 					failureMessage = finalDetail;
 				}
+				// Same grounding E7 applied to mutatedPaths, one field over. The
+				// typed validators derive quality from the report's own words: the
+				// verifier's from its verdict alone, the mutation report's from
+				// whether *any* command ran rather than the named one. A claim with
+				// no matching execution is not correctness evidence, so it seals
+				// unmeasured and says which claim it was.
+				const validationGrounding = groundClaimedValidations({
+					contractKind: appliedResultContract?.kind ?? null,
+					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
+					executedCommands: observedRunEffects.validationCommands,
+					executedCheckingCalls: countCheckingCalls(toolStats),
+				});
+				const sealedResultContractFact: RunReceiptResultContractFact | null =
+					resultContract === null
+						? null
+						: validationGrounding !== null &&
+								invalidatesQuality(validationGrounding) &&
+								resultContract.fact.quality === "pass"
+							? { ...resultContract.fact, quality: "unmeasured" }
+							: resultContract.fact;
+				if (validationGrounding !== null && validationGrounding.ungrounded.length > 0) {
+					finalDetail = [finalDetail, describeUngroundedValidations(validationGrounding)].filter(Boolean).join("; ");
+				}
 				const hasTerminalArtifact =
 					lifecycle.recipe?.resultContract.kind === "architect-plan" && resultValidation?.conformance === "pass";
 				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput) && !hasTerminalArtifact) {
@@ -4695,7 +4858,8 @@ export function createDispatchBundle(
 					finalDetail,
 					capturedOutput,
 					steering,
-					resultContract?.fact ?? null,
+					sealedResultContractFact,
+					validationGrounding === null ? null : { ...validationGrounding, ungrounded: [...validationGrounding.ungrounded] },
 				);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
