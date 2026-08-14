@@ -1,0 +1,77 @@
+# Development Pipeline
+
+How a change to Clio Coder moves from "we noticed something" to a published
+release. This is the process the maintainers follow and the process Clio
+herself follows when dogfooding: every stage is a marketplace skill, so any
+harness that loads the skills (Clio, Claude Code, Codex) runs the same
+pipeline. One-shot reactive prompting is the anti-pattern this page retires:
+work that is not traceable to an issue does not merge.
+
+## The lifecycle
+
+Three stages. A skill earns a stage only when it encodes repo policy a
+model cannot guess or an irreversibility gate a small model will skip
+under pressure; git mechanics alone never justify a stage.
+
+| Stage | Skill | Output |
+| --- | --- | --- |
+| 1. File | [`file-ticket`](../skills/git/file-ticket/) | A labeled GitHub issue with evidence and acceptance criteria |
+| 2. Fix | `fix-issue` (planned; today: [`investigate-issue`](../skills/git/investigate-issue/) when the cause is unknown, then [`tdd`](../skills/coding/tdd/) + [`review-changes`](../skills/git/review-changes/)) | A branch where failing tests preceded the fix, self-reviewed against the issue's acceptance criteria |
+| 3. Ship | `ship` (planned; today: [`commit-crafting`](../skills/git/commit-crafting/) + [`create-pr`](../skills/git/create-pr/)) | Atomic conventional commits referencing the issue (`fixes #N`) and an open PR; merge is a human decision |
+
+Releases follow [release-cut-checklist.md](release-cut-checklist.md) as a
+human-gated checklist, not a skill. Worktrees
+([`worktree-create`](../skills/git/worktree-create/),
+[`worktree-merge`](../skills/git/worktree-merge/)),
+[`resolve-merge-conflicts`](../skills/git/resolve-merge-conflicts/), and
+[`tdd`](../skills/coding/tdd/) are à-la-carte tools reached for when the
+situation calls for them, not stages every change passes through. An RCA
+document (`docs/issues/issue-<id>.md`, `rca` label) is an artifact of hard
+bugs, not a mandatory toll booth. Batch ticket creation from a PRD
+bypasses stage 1 and uses [`backlog`](../skills/planning/backlog/)
+instead; everything downstream is identical.
+
+## Issue conventions
+
+- **Title**: conventional tag plus imperative summary (`fix: memory overlay
+  cannot scroll`), matching `.github/ISSUE_TEMPLATE/` prefixes.
+- **Body**: Problem, Reproduce, Evidence with `file:line` pointers,
+  Acceptance criteria as a verifiable checklist, Links.
+- **Labels**: exactly one type label (`bug`, `enhancement`,
+  `documentation`, `question`) plus applicable `area:*` labels.
+- **Milestone**: the open release milestone when the work is committed to
+  it; unassigned issues carry `needs-triage` until a human places them.
+
+### Label taxonomy
+
+| Kind | Labels | Meaning |
+| --- | --- | --- |
+| Type | `bug`, `enhancement`, `documentation`, `question` | What the issue is; exactly one |
+| Area | `area:tui`, `area:engine`, `area:memory`, `area:dispatch`, `area:skills`, `area:cli`, `area:api`, `area:docs` | Which subsystem; one or more |
+| Status | `needs-triage`, `rca`, `blocked` | Where in the lifecycle |
+| Community | `good first issue`, `help wanted`, `duplicate`, `invalid`, `wontfix` | GitHub defaults, unchanged |
+
+New `area:*` labels are proposed in an issue, not created ad hoc.
+
+## Milestones are releases
+
+Each open milestone is the next version (`v0.3.1`, `v0.4.0`). Triage means
+assigning an issue to a milestone or explicitly leaving it in the backlog.
+A release cut (stage 7) requires every issue in its milestone to be closed
+or bumped; the milestone closes when the tag is published.
+
+## Dogfooding setup
+
+The marketplace copy under `skills/git/` is the committed source of truth,
+pinned in `skills/registry.yaml` by `npm run skills:pin`. Runtime roots are
+gitignored, so each developer installs locally:
+
+```bash
+cp -r skills/git/file-ticket .clio-coder/skills/   # Clio Coder
+cp -r skills/git/file-ticket .claude/skills/       # Claude Code
+```
+
+The other pipeline skills are model-invoked from the marketplace catalog the
+same way. When a skill changes, re-run `npm run skills:pin` and re-copy;
+drift between an installed copy and the pinned hash surfaces a warning at
+activation.
