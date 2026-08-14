@@ -42,6 +42,11 @@ export const GLYPH = {
 	phaseRetry: "↻",
 	phaseCompact: "♻",
 	phaseDispatch: "⇲",
+	// Marks a run that Clio started for itself (a shadow worker or an internal
+	// harness run) so internal activity reads as a sub-process of the current
+	// turn. It replaces the old `sh:`/`in:` agent-name prefixes; the two
+	// audiences are told apart by tone, not by a second glyph.
+	subProcess: "↳",
 	ellipsis: "…",
 	favorite: "★",
 } as const;

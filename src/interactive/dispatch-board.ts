@@ -96,6 +96,14 @@ export interface DispatchBoardRow {
 	currentTool?: string | null;
 	/** Recently finished tools, newest first, bounded. */
 	recentTools?: ReadonlyArray<string>;
+	/**
+	 * Id of the receipt sealed for this run (`receipts/<runId>.json`, the id
+	 * `clio-coder trace` takes). Set only once a terminal dispatch event has
+	 * been published, which the dispatch domain does after recordReceipt, so a
+	 * running row carries no receipt id and never implies evidence that does
+	 * not exist yet.
+	 */
+	receiptId?: string;
 	/** Waiting retry projected from the live dispatch snapshot. */
 	retry?: DispatchRetryPresentation;
 	/** Most recent worker delivery acknowledgement for an operator steer. */
@@ -167,10 +175,39 @@ const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 };
 const MAX_DISPATCH_BOARD_ROWS = 50;
 
+/**
+ * The agent's own name, unadorned. Audience is carried by
+ * {@link agentAudiencePresentation}, never by a name prefix: `sh:scout` reads
+ * as an agent literally called "sh:scout", and an operator cannot tell a
+ * prefix apart from user data at a glance.
+ */
 export function agentDisplayLabel(row: Pick<DispatchBoardRow, "agentId" | "agentAudience">): string {
-	if (row.agentAudience === "shadow") return `sh:${row.agentId}`;
-	if (row.agentAudience === "internal") return `in:${row.agentId}`;
 	return row.agentId;
+}
+
+export interface AgentAudiencePresentation {
+	glyph: string;
+	token: ClioToken;
+}
+
+/**
+ * Visual treatment for a run Clio started for itself: the sub-process glyph in
+ * a muted tone for a shadow worker, the same glyph dimmed for internal harness
+ * machinery. Returns null for base/custom agents, which the operator asked for
+ * directly and which therefore render like any other row.
+ */
+export function agentAudiencePresentation(
+	row: Pick<DispatchBoardRow, "agentAudience">,
+): AgentAudiencePresentation | null {
+	if (row.agentAudience === "shadow") return { glyph: GLYPH.subProcess, token: "muted" };
+	if (row.agentAudience === "internal") return { glyph: GLYPH.subProcess, token: "dim" };
+	return null;
+}
+
+/** The audience glyph as a styled, space-terminated prefix; empty for operator-facing agents. */
+export function agentAudiencePrefix(theme: ClioTheme, row: Pick<DispatchBoardRow, "agentAudience">): string {
+	const audience = agentAudiencePresentation(row);
+	return audience === null ? "" : `${theme.fg(audience.token, audience.glyph)} `;
 }
 
 export interface DispatchStatusPresentation {
@@ -383,10 +420,14 @@ export function renderDispatchCard(
 	// are user data); clamp it so the title plus the elapsed meta never pushes
 	// the right corner past the card width.
 	const selectionWidth = options.selected === true ? visibleWidth(GLYPH.cursor) + 1 : 0;
-	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10 - selectionWidth);
+	const audiencePrefix = agentAudiencePrefix(theme, row);
+	const audienceWidth = audiencePrefix.length > 0 ? visibleWidth(GLYPH.subProcess) + 1 : 0;
+	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10 - selectionWidth - audienceWidth);
 	const clampedLabel = truncateToWidth(agentLabel, labelBudget, GLYPH.ellipsis, false);
 	const cardTitle =
-		options.selected === true ? `${theme.fg("accent", GLYPH.cursor)} ${screenTitle(theme, clampedLabel)}` : clampedLabel;
+		options.selected === true
+			? `${theme.fg("accent", GLYPH.cursor)} ${audiencePrefix}${screenTitle(theme, clampedLabel)}`
+			: `${audiencePrefix}${clampedLabel}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
@@ -490,13 +531,21 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 
 	// Reserve the glyph, separators, status word, and elapsed so a long agent
 	// label is clipped with a `…` marker rather than shoved off the row unmarked.
+	const audiencePrefix = agentAudiencePrefix(theme, row);
+	const audienceWidth = audiencePrefix.length > 0 ? visibleWidth(GLYPH.subProcess) + 1 : 0;
 	const labelChrome =
-		visibleWidth(presentation.glyph) + 1 + 3 + visibleWidth(presentation.label) + 3 + visibleWidth(elapsed);
+		visibleWidth(presentation.glyph) +
+		1 +
+		audienceWidth +
+		3 +
+		visibleWidth(presentation.label) +
+		3 +
+		visibleWidth(elapsed);
 	const clampedLabel = truncateToWidth(agentLabel, Math.max(1, width - labelChrome), "…", false);
 
 	// The agent label drops its accent color for plain bold; the status word is
 	// the only status-colored element on the row, with dim middot separators.
-	const line1 = `${glyph} ${theme.paint(clampedLabel, { bold: true })}${dot}${statusStr}${dot}${theme.fg("muted", elapsed)}`;
+	const line1 = `${glyph} ${audiencePrefix}${theme.paint(clampedLabel, { bold: true })}${dot}${statusStr}${dot}${theme.fg("muted", elapsed)}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
@@ -857,6 +906,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
 		lastContextTokens: entry.lastContextTokens,
+		...(entry.receiptId !== undefined ? { receiptId: entry.receiptId } : {}),
 		currentTool: retry ? null : entry.currentTool,
 		recentTools: [...entry.recentTools],
 		...(retry ? { retry: { ...retry } } : {}),
@@ -946,6 +996,7 @@ export function createDispatchBoardStore(
 			...(rerouteCount !== undefined ? { rerouteCount } : {}),
 			...(contextWindow !== undefined ? { contextWindow } : {}),
 			lastContextTokens: previous?.lastContextTokens ?? 0,
+			...(previous?.receiptId !== undefined ? { receiptId: previous.receiptId } : {}),
 			currentTool: previous?.currentTool ?? null,
 			recentTools: previous?.recentTools ?? [],
 			...(previous?.retry ? { retry: { ...previous.retry } } : {}),
@@ -983,6 +1034,9 @@ export function createDispatchBoardStore(
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = null;
 			entry.currentTool = null;
+			// A terminal dispatch event is published only after the run's receipt is
+			// sealed at receipts/<runId>.json, so the run id is the receipt id here.
+			entry.receiptId = entry.runId;
 			delete entry.retry;
 			if (typeof payload.inputTokenCount === "number") {
 				entry.inputTokens = payload.inputTokenCount + parseFiniteNumberOrZero(payload.cacheReadTokenCount);
@@ -1008,6 +1062,9 @@ export function createDispatchBoardStore(
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = resolveFailureDetail(payload, entry.outcomeDetail);
 			entry.currentTool = null;
+			// A denied retry never reached a run, so no receipt was sealed for it;
+			// every other failure finalized through recordReceipt like a success.
+			if (payload.reason !== "retry_denied") entry.receiptId = entry.runId;
 			delete entry.retry;
 			if (typeof payload.inputTokenCount === "number") {
 				entry.inputTokens = payload.inputTokenCount + parseFiniteNumberOrZero(payload.cacheReadTokenCount);

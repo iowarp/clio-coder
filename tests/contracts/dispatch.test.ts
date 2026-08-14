@@ -63,7 +63,8 @@ import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
-import { agentDisplayLabel } from "../../src/interactive/dispatch-board.js";
+import { agentAudiencePresentation, agentDisplayLabel } from "../../src/interactive/dispatch-board.js";
+import { GLYPH } from "../../src/interactive/theme/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -1849,8 +1850,12 @@ describe("contracts/dispatch", () => {
 	});
 
 	it("marks shadow dispatch rows distinctly for the TUI", () => {
-		strictEqual(agentDisplayLabel({ agentId: "scout", agentAudience: "shadow" }), "sh:scout");
+		// Audience is a visual treatment, not a name prefix: the label is always
+		// the agent's own id. See dispatch-worker-panel.test.ts for the glyph.
+		strictEqual(agentDisplayLabel({ agentId: "scout", agentAudience: "shadow" }), "scout");
 		strictEqual(agentDisplayLabel({ agentId: "coder", agentAudience: "base" }), "coder");
+		strictEqual(agentAudiencePresentation({ agentAudience: "shadow" })?.glyph, GLYPH.subProcess);
+		strictEqual(agentAudiencePresentation({ agentAudience: "base" }), null);
 	});
 
 	it("injects declared skills as compact prompt guidance", () => {
