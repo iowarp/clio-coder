@@ -339,6 +339,38 @@ export interface RunReceiptResultContractFact {
 }
 
 /**
+ * A terminal result's passing validation claims, measured against the commands
+ * the run's own tool calls show it ran. Present only when the result carried at
+ * least one passing claim under a contract kind that can be grounded, so a
+ * receipt that claims nothing digests exactly as it did before this landed.
+ */
+export interface RunValidationGrounding {
+	claimed: number;
+	grounded: number;
+	/** Claim names with no matching execution, stably ordered and bounded. */
+	ungrounded: string[];
+	/**
+	 * `no-command-executed` is the hard case: the run claimed a passing check and
+	 * ran nothing that could have produced one, so the quality label does not
+	 * rest on it. `unmatched-command` means it ran commands the canonical
+	 * detector does not enumerate, which is reported and nothing more.
+	 */
+	basis: "no-command-executed" | "unmatched-command";
+}
+
+/**
+ * The pairing of a read-only recipe with a task that needs a write, decided at
+ * admission. Present only on a run the harness admitted with the mismatch
+ * flagged; a refused pairing never becomes a run at all.
+ */
+export interface RunCapabilityMismatch {
+	agentId: string;
+	capabilityClass: string;
+	taskType: string;
+	suggestedAgentId: string | null;
+}
+
+/**
  * Required run-local quality facts. Later gate and evaluation artifacts link to
  * the sealed receipt digest rather than mutating this block after finalization.
  */
@@ -712,6 +744,10 @@ export interface RunReceipt {
 	delegation?: RunReceiptDelegation;
 	/** Compact findings summary; absent on receipts written before v3 integrity. */
 	findingsSummary?: RunReceiptFindingsSummary;
+	/** Passing validation claims measured against executed commands; absent when none were claimed. */
+	validationGrounding?: RunValidationGrounding;
+	/** Read-only recipe admitted against a mutating task; absent when the pairing was sound. */
+	capabilityMismatch?: RunCapabilityMismatch;
 	/**
 	 * Sealed route decision: the candidates, their estimates, the hard filters
 	 * that rejected some of them, and the tuple selected by the routing policy.
