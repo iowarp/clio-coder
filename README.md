@@ -33,7 +33,7 @@ ever seen.
 You bring the model. A local llama.cpp, Ollama, LM Studio, vLLM, or SGLang
 server; a cloud API; your ChatGPT or Claude subscription; or an Argonne
 Leadership Computing Facility inference gateway. Clio brings the harness
-around it: a terminal UI, nineteen typed tools instead of an unrestricted
+around it: a terminal UI, twenty typed tools instead of an unrestricted
 shell, a fleet of bounded worker agents that can run across your whole
 cluster over SSH, durable sessions, and an integrity-sealed receipt for every run.
 
@@ -58,7 +58,7 @@ different bet: the harness should be strong enough that a 20B model running on
 your own GPU is useful, and honest enough that you can reconstruct every
 decision afterward.
 
-**The model never gets a shell by default.** The tool surface is nineteen
+**The model never gets a shell by default.** The tool surface is twenty
 typed tools organized into seven policy planes. Bash is default-deny, filtered
 through [damage-control rules](damage-control-rules.yaml) and per-project
 policy. Reads are bounded, writes are queued and reviewable, and every
@@ -106,6 +106,15 @@ experiment-protocol guides.
   subscription login, an ALCF Globus account, or an installed `claude` command
 
 ## Install
+
+From npm:
+
+```bash
+npm install -g @iowarp/clio-coder
+clio --version
+```
+
+From source, pinned to this release:
 
 ```bash
 git clone --branch v0.3.0 https://github.com/iowarp/clio-coder.git
@@ -472,7 +481,7 @@ the project-specific invariants and traps that are not obvious from the source.
 
 ## The tool surface
 
-Nineteen tools in seven planes. Each plane is one policy unit covering action
+Twenty tools in seven planes. Each plane is one policy unit covering action
 class, size posture, result schema, and concurrency rule.
 
 | Plane | Tools | Posture |
@@ -480,7 +489,7 @@ class, size posture, result schema, and concurrency rule.
 | OBSERVE | `read`, `grep`, `find`, `ls`, `code_nav`, `context`, `credential_present` | Read class, parallel, bounded by a truncation envelope |
 | MUTATE | `write`, `edit` | Write class, sequential, queued through the file-mutation queue |
 | EXECUTE | `bash`, `git`, `verify` | Containment posture; `bash` is default-deny, `git` is read-only inspection |
-| ORCHESTRATE | `dispatch`, `monitor`, `steer`, `tasks` | Dispatch class, sequential except read-only `monitor` |
+| ORCHESTRATE | `dispatch`, `monitor`, `steer`, `tasks`, `ledger` | Dispatch class, sequential except read-only `monitor` |
 | RETRIEVE | `web_fetch` | Network read, parallel |
 | INTERACT | `ask_user` | Host-owned operator interview |
 | ARTIFACT | `artifact` | Plans, reviews, and reports as durable artifacts |
@@ -598,7 +607,7 @@ while using it on your own research code.
 flowchart TB
   CLI["src/cli"] --> ENG["src/engine"]
   TUI["src/interactive"] --> ENG
-  ENG --> TOOLS["src/tools<br/>19 typed tools, 7 planes"]
+  ENG --> TOOLS["src/tools<br/>20 typed tools, 7 planes"]
   ENG --> DOM["src/domains"]
   DOM --> DISP["dispatch<br/>plans, leases, routing, receipts"]
   DOM --> CTX["context<br/>codewiki, compaction, CLIO.md"]
