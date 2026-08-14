@@ -27,6 +27,7 @@ current source, tests, and `CHANGELOG.md`.
 | Developer guide to implementing custom model runtimes and inference server integrations | [provider-adapter-cookbook.md](provider-adapter-cookbook.md) ([Interactive Blueprint](html/provider_adapter_blueprint.html)) |
 | Built-in agent recipes, discovery roots, frontmatter schema, and dispatch admission | [built-in-agents.md](built-in-agents.md) ([Interactive Blueprint](html/agents_blueprint.html)) |
 | Artifact browsing, receipt verification, dispatch diagnostics, and observability routing | [observability.md](observability.md) ([Interactive Blueprint](html/observability_blueprint.html)) |
+| Where every generated file lands: the working tree, `.clio-coder/`, and the XDG dirs, by audience | [artifact-placement.md](artifact-placement.md) |
 | Evidence directory structures, findings, and operator-approved memory retrieval | [evidence-and-memory.md](evidence-and-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |
 | Local YAML eval suites, reports, comparisons, and command evidence | [eval-runner.md](eval-runner.md) ([Interactive Blueprint](html/eval_blueprint.html)) |
 | Prompt and skill resources, extension manifests, and portable share archives | [extensions-and-sharing.md](extensions-and-sharing.md) ([Interactive Blueprint](html/extensions_blueprint.html)) |

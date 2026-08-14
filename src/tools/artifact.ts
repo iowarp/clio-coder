@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
+import { artifactDefaultPath, CLIO_ARTIFACT_DIR } from "../core/artifact-paths.js";
 import { ToolNames } from "../core/tool-names.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
@@ -8,10 +9,18 @@ import type { ToolResult, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
 
 /**
- * The artifact tool: terminal document writers. kind=plan|review|report
- * writes a Markdown artifact (default PLAN.md / REVIEW.md / REPORT.md at the
- * project root) and terminates the turn: writing the artifact IS the answer,
- * so pi-agent-core skips the follow-up LLM call that would only summarize it.
+ * The artifact tool: terminal document writers. kind=plan|review|report writes
+ * a Markdown artifact and terminates the turn: writing the artifact IS the
+ * answer, so pi-agent-core skips the follow-up LLM call that would only
+ * summarize it.
+ *
+ * A pathless call lands under `.clio-coder/artifacts/`, not in the repo working
+ * tree. A turn nobody asked for a file from used to drop REPORT.md into the
+ * project root, which the operator then had to notice and delete; the working
+ * tree holds files a human asked for, and everything Clio generates on its own
+ * belongs in the gitignored project directory. An explicit `path` still writes
+ * wherever the caller says, inside the workspace. See core/artifact-paths.ts
+ * and docs/artifact-placement.md.
  *
  * Skills are not artifacts: a skill is a SKILL.md folder written with the
  * ordinary write tool and validated by the skills loader on load. The
@@ -20,12 +29,6 @@ import { stringEnum } from "./string-enum.js";
 
 const ARTIFACT_KINDS = ["plan", "review", "report"] as const;
 type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
-
-const KIND_PATHS: Record<ArtifactKind, string> = {
-	plan: "PLAN.md",
-	review: "REVIEW.md",
-	report: "REPORT.md",
-};
 
 export interface ArtifactToolDeps {
 	getCwd?: () => string;
@@ -47,7 +50,8 @@ async function writeTerminalArtifact(
 ): Promise<ToolResult> {
 	const content = typeof args.content === "string" ? args.content : "";
 	if (content.length === 0) return { kind: "error", message: `artifact: kind=${kind} requires non-empty content` };
-	const rawPath = typeof args.path === "string" && args.path.trim().length > 0 ? args.path.trim() : KIND_PATHS[kind];
+	const rawPath =
+		typeof args.path === "string" && args.path.trim().length > 0 ? args.path.trim() : artifactDefaultPath(kind);
 	const target = resolveToCwd(rawPath, cwd);
 	if (!insideWorkspace(target, cwd)) {
 		return { kind: "error", message: `artifact: path escapes workspace root: ${target}` };
@@ -76,8 +80,7 @@ async function writeTerminalArtifact(
 export function createArtifactTool(deps: ArtifactToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.Artifact,
-		description:
-			"Write a named artifact: kind=plan|review|report writes a terminal Markdown document (default PLAN.md/REVIEW.md/REPORT.md) and completes the turn.",
+		description: `Write a named artifact: kind=plan|review|report writes a terminal Markdown document and completes the turn. Without an explicit path it lands in ${CLIO_ARTIFACT_DIR}/ (PLAN.md, REVIEW.md, REPORT.md); pass path only when the user asked for a file at a specific place.`,
 		parameters: Type.Object({
 			kind: stringEnum(ARTIFACT_KINDS, "Artifact kind."),
 			content: Type.String({ description: "Full Markdown body." }),

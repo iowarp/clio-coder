@@ -71,8 +71,8 @@ describe("contracts/write-roots", () => {
 	});
 
 	it("blocks an artifact write outside the root", () => {
-		// artifact resolves REPORT.md/PLAN.md/REVIEW.md against the worker cwd,
-		// which is outside the staging root here.
+		// artifact resolves its default .clio-coder/artifacts/ path against the
+		// worker cwd, which is outside the staging root here.
 		const decision = safety.evaluate({ tool: ToolNames.Artifact, args: { kind: "report" } });
 		strictEqual(decision.kind, "block");
 		strictEqual(decision.policy?.reasonCode, "write-root");
