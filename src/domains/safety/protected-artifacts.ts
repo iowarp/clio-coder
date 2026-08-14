@@ -45,6 +45,29 @@ export type DestructiveCommandClassification =
 
 export type ValidationCommandDetection = { kind: "validation"; matched: string } | { kind: "none" };
 
+/**
+ * Which vocabulary of checking commands a caller wants recognized.
+ *
+ * `finish-contract` is the strict set: commands that assert something about
+ * correctness and fail loudly when it does not hold. It is the default because
+ * the consumers that spend it are gates. The finish contract counts a match as
+ * a validating turn, and the mutation-report validator counts one as the
+ * difference between `pass` and `unmeasured`. A turn whose only command was
+ * `git diff` has validated nothing, so admitting read-verification here would
+ * hand both gates a way to be satisfied by inspection alone.
+ *
+ * `grounding` is the wider set: everything strict plus the read-verification
+ * and ad-hoc shapes agents actually reach for (`git diff`, `node -e`,
+ * `npx vitest`, `tsc --noEmit`). Its consumer, dispatch validation grounding,
+ * spends a match on nothing. An unmatched claim there is reported and never
+ * downgrades a quality label, so the cost of a miss is noise in the receipt
+ * rather than a gate opening. Observed live this session: S3 workers claimed
+ * "git diff verification" and grounded 0/1, and a slice-2 coder verified its
+ * own fix with `node -e "import(...)"`. Both are real work the strict set
+ * cannot name.
+ */
+export type ValidationCommandScope = "finish-contract" | "grounding";
+
 interface NormalizedArtifact {
 	key: string;
 	artifact: ProtectedArtifact;
@@ -195,14 +218,18 @@ function classifyDestructiveCommand(
 	return { kind: "benign", matches: [] };
 }
 
-export function detectValidationCommand(command: string): ValidationCommandDetection {
+export function detectValidationCommand(
+	command: string,
+	scope: ValidationCommandScope = "finish-contract",
+): ValidationCommandDetection {
 	const tokens = tokenizeShellLike(command);
 	for (const segment of splitSegments(tokens)) {
 		const commandIndex = commandTokenIndex(segment);
 		if (commandIndex === null) continue;
 		const executable = basenameToken(segment[commandIndex]);
 		const args = segment.slice(commandIndex + 1);
-		const matched = validationMatch(executable, args);
+		const matched =
+			validationMatch(executable, args) ?? (scope === "grounding" ? groundingMatch(executable, args) : null);
 		if (matched !== null) return { kind: "validation", matched };
 	}
 	return { kind: "none" };
@@ -638,6 +665,70 @@ function validationMatch(executable: string, args: ReadonlyArray<string>): strin
 	if (executable === "ninja" && args[0] === "test") return "ninja test";
 	if (executable === "mvn" && args[0] === "test") return "mvn test";
 	if ((executable === "gradle" || executable === "gradlew") && args[0] === "test") return "gradle test";
+	return null;
+}
+
+/**
+ * The `grounding`-only half of the vocabulary. Every rule here is an exact
+ * leading-command match on a canonicalized executable, never a substring guess,
+ * so a command that merely mentions `tsc` or `diff` in an argument stays
+ * unrecognized. Failing to match is the safe direction for this scope.
+ */
+function groundingMatch(executable: string, args: ReadonlyArray<string>): string | null {
+	if (executable === "git") {
+		if (args[0] === "diff") return "git diff";
+		if (args[0] === "status") return "git status";
+		return null;
+	}
+	if (executable === "node") {
+		if (args.includes("--test")) return "node --test";
+		if (args.includes("-e") || args.includes("--eval")) return "node -e";
+		return null;
+	}
+	if (executable === "tsc") return typescriptCheckMatch(args);
+	if (executable === "npx") {
+		const inner = npxInvocation(args);
+		return inner === null ? null : npxRunnerMatch(inner.executable, inner.args);
+	}
+	return null;
+}
+
+/** Test runners recognized behind `npx`, where the runner name is the whole claim. */
+const NPX_TEST_RUNNERS: ReadonlySet<string> = new Set(["vitest", "jest", "mocha"]);
+
+function npxRunnerMatch(executable: string, args: ReadonlyArray<string>): string | null {
+	if (NPX_TEST_RUNNERS.has(executable)) return `npx ${executable}`;
+	if (executable === "tsx" && args.includes("--test")) return "npx tsx --test";
+	if (executable === "tsc") return typescriptCheckMatch(args);
+	return null;
+}
+
+/** `tsc --noEmit` is a typecheck; a bare `tsc` is a build that also typechecks. */
+function typescriptCheckMatch(args: ReadonlyArray<string>): string {
+	return args.some((arg) => arg.toLowerCase() === "--noemit") ? "tsc --noEmit" : "tsc";
+}
+
+/**
+ * The command `npx` would run, with npx's own flags consumed. Flags that take a
+ * separate value (`-p react`, `--package=x` is self-contained) must not be
+ * mistaken for the command name.
+ */
+function npxInvocation(args: ReadonlyArray<string>): { executable: string; args: ReadonlyArray<string> } | null {
+	const VALUE_FLAGS = new Set(["-p", "--package", "-c", "--call", "--shell"]);
+	let index = 0;
+	while (index < args.length) {
+		const token = args[index];
+		if (token === undefined) return null;
+		if (VALUE_FLAGS.has(token)) {
+			index += 2;
+			continue;
+		}
+		if (token.startsWith("-")) {
+			index += 1;
+			continue;
+		}
+		return { executable: basenameToken(token), args: args.slice(index + 1) };
+	}
 	return null;
 }
 

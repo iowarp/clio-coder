@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { MiddlewareRuleDefinition } from "../../src/domains/middleware/runtime.js";
-import type { ProtectedArtifactState } from "../../src/domains/safety/protected-artifacts.js";
+import { detectValidationCommand, type ProtectedArtifactState } from "../../src/domains/safety/protected-artifacts.js";
 import {
 	createProtectedArtifactsRegistration,
 	type ProtectedArtifactProtectEvent,
@@ -426,5 +426,51 @@ describe("protected-artifacts registration", () => {
 		strictEqual(blocked.policy?.reasonCode, "protected-artifact");
 		const allowed = safety.evaluate({ tool: ToolNames.Write, args: { path: "/repo/other.md" } }, "operating");
 		ok(allowed.kind !== "block", "an unrelated write follows the ordinary autonomy policy");
+	});
+});
+
+describe("validation command scopes", () => {
+	function matched(command: string, scope?: "finish-contract" | "grounding"): string | null {
+		const detected = scope === undefined ? detectValidationCommand(command) : detectValidationCommand(command, scope);
+		return detected.kind === "validation" ? detected.matched : null;
+	}
+
+	it("keeps the strict vocabulary for the finish contract and widens it only for grounding", () => {
+		// Read verification and ad-hoc checks are what agents actually run, and
+		// what the grounding layer has to be able to name. Neither asserts
+		// correctness, so neither may satisfy the finish contract.
+		for (const command of ["git diff", "git status --short", "node -e \"import('./src/sum.js')\""]) {
+			strictEqual(matched(command), null, command);
+			ok(matched(command, "grounding") !== null, command);
+		}
+		strictEqual(matched("git diff", "grounding"), "git diff");
+		strictEqual(matched("git status --short", "grounding"), "git status");
+		strictEqual(matched("node -e \"import('./src/sum.js')\"", "grounding"), "node -e");
+	});
+
+	it("recognizes typecheck and runner shapes under grounding, canonically", () => {
+		strictEqual(matched("tsc --noEmit", "grounding"), "tsc --noEmit");
+		strictEqual(matched("npx tsc --noemit", "grounding"), "tsc --noEmit");
+		strictEqual(matched("tsc -p tsconfig.json", "grounding"), "tsc");
+		strictEqual(matched("npx vitest run", "grounding"), "npx vitest");
+		strictEqual(matched("npx -y jest --coverage", "grounding"), "npx jest");
+		strictEqual(matched("npx tsx --test tests/unit.ts", "grounding"), "npx tsx --test");
+		strictEqual(matched("node --test tests/", "grounding"), "node --test");
+	});
+
+	it("matches leading commands only, never a mention in an argument", () => {
+		strictEqual(matched("echo tsc --noEmit", "grounding"), null);
+		strictEqual(matched("git log --stat", "grounding"), null);
+		strictEqual(matched("node server.js", "grounding"), null);
+		strictEqual(matched("npx prettier --write .", "grounding"), null);
+		strictEqual(matched("npx -p typescript some-other-tool", "grounding"), null);
+	});
+
+	it("leaves the shared strict vocabulary identical under both scopes", () => {
+		for (const command of ["npm test", "npm run typecheck", "pytest -q", "cargo test", "go test ./..."]) {
+			const strict = matched(command);
+			ok(strict !== null, command);
+			strictEqual(matched(command, "grounding"), strict, command);
+		}
 	});
 });
