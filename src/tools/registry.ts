@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { TSchema } from "typebox";
 import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
+import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
 import {
 	evaluateSkillToolSurface,
 	type PendingSkillToolPolicy,
@@ -846,6 +847,39 @@ function guardBlockedVerdict(
 }
 
 /**
+ * Longest guidance sentence carried into a headless denial. The model-facing
+ * composer caps a line at 300 characters and interpolates policy text verbatim,
+ * so bound it here too and leave room for the elision marker.
+ */
+const HEADLESS_GUIDANCE_MAX_CHARS = 240;
+
+/**
+ * The recovery guidance a headless denial should repeat, or null when the
+ * parked decision has none.
+ *
+ * A headless run answers every ask with one sentence: nobody can confirm, rerun
+ * interactively. That says nothing about what would have run, so a headless
+ * model that hits an unrecognized-bash rail retries the same shape until the run
+ * ends. An unrecognized execution decision carries the working form in its
+ * reasons, and those reasons reach the audit record and the interactive approval
+ * overlay but not the model. The first reason states the axis the denial already
+ * implies, so only the reasons after it are candidates, and only the first of
+ * those, bounded: this is a nudge toward the recognized spelling, not a dump of
+ * the policy's reason list.
+ */
+function headlessDenialGuidance(decision: SafetyDecision, reason: string): string | null {
+	// Interactive denials are left exactly as they were: the operator saw the
+	// reasons in the approval overlay before answering.
+	if (!reason.startsWith(HEADLESS_PERMISSION_DENIED_MARKER)) return null;
+	const policy = decision.policy;
+	if (policy?.execRecognition !== "unrecognized") return null;
+	const guidance = policy.reasons.slice(1).find((entry) => entry.trim().length > 0);
+	if (guidance === undefined) return null;
+	const trimmed = guidance.trim();
+	return trimmed.length > HEADLESS_GUIDANCE_MAX_CHARS ? `${trimmed.slice(0, HEADLESS_GUIDANCE_MAX_CHARS)}…` : trimmed;
+}
+
+/**
  * Terminal blocked verdict for a parked call that has been answered: denied at
  * the confirmation prompt, cancelled with the turn, or settled by an abort.
  *
@@ -855,18 +889,24 @@ function guardBlockedVerdict(
  * reason had already stated, followed by four approval hints for an approval
  * that is not coming. The answer is the whole message; the composer still closes
  * it with the standing pivot instruction.
+ *
+ * A headless answer is the exception: nobody will ever approve it, so the detail
+ * carries one line of recovery guidance after the denial sentence. The sentence
+ * stays the detail's prefix, which the skill-eval permission-wall recognizer
+ * depends on.
  */
 function parkAnsweredBlockedVerdict(
 	decision: SafetyDecision,
 	tool: string,
 	reason: string,
 ): Extract<RegistryVerdict, { kind: "blocked" }> {
+	const guidance = headlessDenialGuidance(decision, reason);
 	const blocked: SafetyDecision = {
 		kind: "block",
 		classification: decision.classification,
 		rejection: {
 			short: `${tool} blocked: ${decision.classification.actionClass} was not approved`,
-			detail: reason,
+			detail: guidance === null ? reason : `${reason}\n${guidance}`,
 			hints: [],
 		},
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
