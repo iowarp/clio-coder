@@ -16,6 +16,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { validateRecipeResult } from "../../src/domains/agents/result-contract.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
@@ -31,6 +32,7 @@ import {
 	groundClaimedValidations,
 	invalidatesQuality,
 } from "../../src/domains/dispatch/validation-grounding.js";
+import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { receiptEvidenceLabels, workerTextNonEvidenceNotices } from "../../src/tools/worker-evidence.js";
 
 function spec(id: string, capabilityClass: AgentSpec["capabilityClass"]): AgentSpec {
@@ -234,6 +236,68 @@ describe("contracts/dispatch validation grounding", () => {
 			executedCheckingCalls: 2,
 		});
 		deepStrictEqual(grounding, { claimed: 2, grounded: 2, ungrounded: [], basis: "unmatched-command" });
+	});
+
+	it("grounds a git diff claim against the run that executed git diff", () => {
+		// End to end over the two sides the split threads together: the recorder
+		// reads the executed command under the grounding scope, and the claim side
+		// canonicalizes to the same identity. Before the second set existed this
+		// claim stayed ungrounded no matter how well either side canonicalized,
+		// because run-effects only recorded the strict vocabulary.
+		const recorder = createRunEffectsRecorder("/repo");
+		recorder.start("call-1", "bash", { command: "git diff -- src/sum.ts" });
+		recorder.finish("call-1", false);
+		const effects = recorder.snapshot();
+		strictEqual(effects.validationCommands.size, 0);
+		const grounding = groundClaimedValidations({
+			contractKind: "verifier-report",
+			output: JSON.stringify({
+				verdict: "pass",
+				checks: [{ name: "git diff verification", passed: true, evidence: "the off-by-one hunk is applied" }],
+			}),
+			executedCommands: effects.verificationCommands,
+			executedCheckingCalls: 1,
+		});
+		deepStrictEqual(grounding, { claimed: 1, grounded: 1, ungrounded: [], basis: "unmatched-command" });
+	});
+
+	it("still seals a mutation report whose only command was git diff as unmeasured", () => {
+		// The other half of the split. Grounding is satisfied by the inspection,
+		// and the measured gate is not: `git diff` never enters the strict set, so
+		// the report's own validation claim buys it nothing.
+		const recorder = createRunEffectsRecorder("/repo");
+		recorder.start("call-1", "write", { path: "src/sum.ts", content: "fixed" });
+		recorder.finish("call-1", false);
+		recorder.start("call-2", "bash", { command: "git diff" });
+		recorder.finish("call-2", false);
+		const effects = recorder.snapshot();
+		const output = JSON.stringify({
+			mutatedPaths: ["src/sum.ts"],
+			validations: [{ name: "git diff", passed: true, evidence: "the hunk is applied" }],
+		});
+		const outcome = validateRecipeResult({
+			contract: { kind: "mutation-report" },
+			reachedTerminalResult: true,
+			output,
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem: { readFile: () => null, pathExists: () => true },
+			observedRunEffects: effects,
+		});
+		ok(outcome !== null);
+		ok(outcome.applicable);
+		strictEqual(outcome.fact.conformance, "pass");
+		strictEqual(outcome.fact.quality, "unmeasured");
+		// The claim is grounded, so the receipt says nothing about it either way.
+		strictEqual(
+			groundClaimedValidations({
+				contractKind: "mutation-report",
+				output,
+				executedCommands: effects.verificationCommands,
+				executedCheckingCalls: 1,
+			})?.ungrounded.length,
+			0,
+		);
 	});
 
 	it("never accuses a self-reported failure or an ungroundable contract", () => {

@@ -7,6 +7,7 @@ import {
 	extractCommandWriteTargets,
 	tokenizeShellLike,
 	toolMutationPaths,
+	type ValidationCommandScope,
 } from "./protected-artifacts.js";
 
 /**
@@ -38,6 +39,23 @@ export interface RunEffects {
 	failedMutationPaths: ReadonlySet<string>;
 	/** Canonical validation commands the run ran to a clean exit. */
 	validationCommands: ReadonlySet<string>;
+	/**
+	 * The same commands read under the wider `grounding` vocabulary, which adds
+	 * read verification (`git diff`), ad-hoc checks (`node -e`) and the runners
+	 * the strict set omits (`npx vitest`, `tsc --noEmit`). Always a superset of
+	 * `validationCommands`, because the grounding scope falls back to the strict
+	 * matcher first.
+	 *
+	 * The two sets exist because their readers pay different prices for a match.
+	 * `validationCommands` opens a gate: `result-contract.ts` reads
+	 * `validationCommands.size > 0` as the difference between a mutation report
+	 * sealing `pass` and sealing `unmeasured`, and a run whose only command was
+	 * `git diff` has asserted nothing about correctness. `verificationCommands`
+	 * only decides whether a receipt prints `unmatched validation: ...`, where a
+	 * miss and a false match both cost one line of noise, so it can afford the
+	 * wider set.
+	 */
+	verificationCommands: ReadonlySet<string>;
 }
 
 export interface RunEffectsRecorder {
@@ -51,6 +69,7 @@ export interface RunEffectsRecorder {
 interface PendingEffects {
 	paths: ReadonlyArray<string>;
 	validationCommand: string | null;
+	verificationCommand: string | null;
 }
 
 /**
@@ -108,11 +127,20 @@ function mutationTargets(toolName: string, args: Record<string, unknown> | undef
 	return [...extractCommandWriteTargets(command), ...extractCommandDeleteTargets(command), ...gitPathOperands(command)];
 }
 
-function validationCommandOf(toolName: string, args: Record<string, unknown> | undefined): string | null {
+/**
+ * The canonical identity of a call's check under one scope. A typed
+ * verification tool carries the same identity under both scopes: the scope only
+ * widens which bash spellings are recognized as a check at all.
+ */
+function validationCommandOf(
+	toolName: string,
+	args: Record<string, unknown> | undefined,
+	scope: ValidationCommandScope,
+): string | null {
 	if (toolName === ToolNames.Bash) {
 		const command = commandOf(args);
 		if (command === null) return null;
-		const detected = detectValidationCommand(command);
+		const detected = detectValidationCommand(command, scope);
 		return detected.kind === "validation" ? detected.matched : null;
 	}
 	return typedValidationSummary(toolName, { args: args ?? {} });
@@ -128,16 +156,19 @@ export function createRunEffectsRecorder(cwd: string): RunEffectsRecorder {
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
+	const verificationCommands = new Set<string>();
 	return {
 		start(toolCallId, toolName, args) {
 			const paths = mutationTargets(toolName, args);
-			const validationCommand = validationCommandOf(toolName, args);
-			if (paths.length === 0 && validationCommand === null) return;
+			const validationCommand = validationCommandOf(toolName, args, "finish-contract");
+			const verificationCommand = validationCommandOf(toolName, args, "grounding");
+			if (paths.length === 0 && validationCommand === null && verificationCommand === null) return;
 			// A bash call may re-base its relative paths with its own cwd argument.
 			const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
 			pending.set(toolCallId, {
 				paths: paths.map((target) => path.resolve(base, target)),
 				validationCommand,
+				verificationCommand,
 			});
 		},
 		finish(toolCallId, failed) {
@@ -150,6 +181,7 @@ export function createRunEffectsRecorder(cwd: string): RunEffectsRecorder {
 			}
 			for (const target of effects.paths) mutatedPaths.add(target);
 			if (effects.validationCommand !== null) validationCommands.add(effects.validationCommand);
+			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
 		},
 		snapshot() {
 			// A path written after an earlier attempt was refused is written, so
@@ -158,6 +190,7 @@ export function createRunEffectsRecorder(cwd: string): RunEffectsRecorder {
 				mutatedPaths: new Set(mutatedPaths),
 				failedMutationPaths: new Set([...failedMutationPaths].filter((target) => !mutatedPaths.has(target))),
 				validationCommands: new Set(validationCommands),
+				verificationCommands: new Set(verificationCommands),
 			};
 		},
 	};
