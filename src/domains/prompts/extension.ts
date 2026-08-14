@@ -3,6 +3,8 @@ import { BusChannels } from "../../core/bus-events.js";
 import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { renderFleetPromptSection } from "../agents/catalog.js";
+import type { AgentsContract } from "../agents/contract.js";
 import type { ConfigContract } from "../config/contract.js";
 import {
 	type ContextContract,
@@ -39,6 +41,20 @@ export function createPromptsBundle(
 
 	function contextDomain(): ContextContract | undefined {
 		return context.getContract<ContextContract>("context");
+	}
+
+	function agentsDomain(): AgentsContract | undefined {
+		return context.getContract<AgentsContract>("agents");
+	}
+
+	/**
+	 * The roster is compiled into the prompt, so a session that starts before
+	 * the agents domain is available renders no Fleet section rather than a
+	 * partial one that would churn the prompt prefix on the next compile.
+	 */
+	function fleetRoster(): string {
+		const specs = agentsDomain()?.listSpecs() ?? [];
+		return specs.length > 0 ? renderFleetPromptSection(specs) : "";
 	}
 
 	function reload(): void {
@@ -82,9 +98,11 @@ export function createPromptsBundle(
 				}
 				for (const warning of projectContext?.warnings ?? []) process.stderr.write(`${warning}\n`);
 			}
+			const roster = fleetRoster();
 			const sessionInputs = {
 				...input.sessionInputs,
 				...(contextFiles.length > 0 ? { contextFiles } : {}),
+				...(roster.length > 0 ? { fleetRoster: roster } : {}),
 			};
 			const compiled = compile(table, {
 				identity: "identity.clio",

@@ -1,6 +1,7 @@
 /** Pure model-argument parsing; every returned DispatchRequest has a concrete agent id. */
 
 import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
+import { type AgentTaskType, classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
@@ -8,7 +9,52 @@ import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/d
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 
 const DEFAULT_AGENT_ID = "coder";
-const AUTO_BASELINE_AGENT_ID = "scout";
+
+/**
+ * Baseline recipe per task shape for `agent:"auto"`.
+ *
+ * The active router is supposed to upgrade this baseline, but it only engages
+ * with an approved failover, an active posture, and enough quality labels to
+ * score a candidate; a default install has none of those, so the baseline IS
+ * the executed route. A single hard-coded baseline therefore has to be right
+ * for every task shape, and `scout` (read-only reconnaissance) was wrong for
+ * every mutation: "fix the bug in cache.ts" came back as findings, twice,
+ * because no worker on that route may edit a file.
+ *
+ * The mapping keeps capability class ahead of specialization: anything that
+ * has to change the tree baselines to a workspace-edit recipe, read-shaped
+ * work to the read-only specialist that exists for it.
+ */
+const AUTO_BASELINE_BY_TASK_TYPE: Readonly<Record<AgentTaskType, string>> = {
+	// Mutating shapes: capability class first, specialization second.
+	code_write: "coder",
+	debug: "coder",
+	refactor: "coder",
+	config: "coder",
+	test: "tester",
+	docs: "documenter",
+	// Read-only shapes.
+	code_review: "verifier",
+	research: "researcher",
+	code_read: "scout",
+	unknown: "scout",
+};
+
+/** Last-resort baseline when the mapped recipe is not installed. */
+const AUTO_BASELINE_FALLBACK_AGENT_ID = "scout";
+
+/**
+ * Resolve the `agent:"auto"` baseline from the task text. Falls back whenever
+ * the mapped recipe is not present in this install, so a trimmed recipe set
+ * can never produce a dispatch against an agent id that does not resolve.
+ */
+export function autoBaselineAgentId(task: string, hasAgent?: (id: string) => boolean): string {
+	const mapped = AUTO_BASELINE_BY_TASK_TYPE[classifyAgentTask(task).taskType] ?? AUTO_BASELINE_FALLBACK_AGENT_ID;
+	if (hasAgent === undefined) return mapped;
+	if (hasAgent(mapped)) return mapped;
+	if (hasAgent(AUTO_BASELINE_FALLBACK_AGENT_ID)) return AUTO_BASELINE_FALLBACK_AGENT_ID;
+	return mapped;
+}
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
 const PERSONA_MAX_CHARS = 8_000;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -16,6 +62,8 @@ const VALID_THINKING = new Set<JobThinkingLevel>(THINKING_LEVELS);
 
 export interface DispatchArgumentParserOptions {
 	resolveFacts?: AgentRoleFactsResolver;
+	/** Installed recipe ids, so an `auto` baseline never names an agent this install lacks. */
+	hasAgent?: (id: string) => boolean;
 	auto: {
 		approvedAuthorities: ReadonlyArray<AgentAutomationAuthority>;
 		authorityBasis: "operator-plan-approval" | "full-auto-policy";
@@ -53,7 +101,7 @@ function dispatchRequestFromArgs(
 	if (Object.hasOwn(args, "agent_id")) return { ok: false, message: "agent_id is unsupported; use agent" };
 	const requestedAgent = stringArg(args, "agent") ?? DEFAULT_AGENT_ID;
 	const auto = requestedAgent === "auto";
-	const agentId = auto ? AUTO_BASELINE_AGENT_ID : requestedAgent;
+	const agentId = auto ? autoBaselineAgentId(task, options.hasAgent) : requestedAgent;
 	const request: DispatchRequest = {
 		agentId,
 		executionRole: requestExecutionRole({
@@ -66,7 +114,7 @@ function dispatchRequestFromArgs(
 					agentSelection: {
 						version: 1 as const,
 						mode: "auto" as const,
-						baselineAgentId: AUTO_BASELINE_AGENT_ID,
+						baselineAgentId: agentId,
 						approvedAuthorities: [...options.auto.approvedAuthorities],
 						authorityBasis: options.auto.authorityBasis,
 					},

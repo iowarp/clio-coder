@@ -1953,6 +1953,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 	const parseRequests = (args: Record<string, unknown>) =>
 		dispatchRequestsFromArgs(args, {
 			...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
+			hasAgent: (id) => deps.getAgentSpecs().some((spec) => spec.id === id),
 			auto: {
 				approvedAuthorities: ["read-only", "verification", "artifact-write", "workspace-edit"],
 				authorityBasis: deps.getAutonomy?.() === "full-auto" ? "full-auto-policy" : "operator-plan-approval",
