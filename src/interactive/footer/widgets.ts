@@ -11,7 +11,12 @@ import type { ContextLedger, ContextLedgerCategory } from "../../domains/session
 import { type TaskBoardSnapshot, taskBoardCounts } from "../../domains/session/task-board.js";
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { CONTEXT_CATEGORY_TOKEN, contextCategorySwatch, renderContextMeterBar } from "../context-meter.js";
-import { agentDisplayLabel, type DispatchBoardRow, dispatchStatusPresentation } from "../dispatch-board.js";
+import {
+	agentAudiencePrefix,
+	agentDisplayLabel,
+	type DispatchBoardRow,
+	dispatchStatusPresentation,
+} from "../dispatch-board.js";
 import { buildSegmentedContextBar, CONTEXT_BAR_LABEL_WIDTH, formatFooterTokens } from "../footer-panel.js";
 import { type AgentStatus, spinnerFrame, type TurnSummary } from "../status/index.js";
 import {
@@ -690,10 +695,23 @@ export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
 	return parts.join(theme.fg("dim", " · "));
 }
 
-function workerLine(theme: ClioTheme, row: DispatchBoardRow): string {
+/**
+ * One row per live worker: the sub-process glyph when Clio started the run for
+ * itself, the agent's own name, the fleet node it landed on, its status glyph,
+ * elapsed, and the receipt id once the run has sealed one. Units are fitted
+ * whole, so a narrow quadrant closes on a dim ellipsis rather than clipping a
+ * receipt id into a string that still reads like a valid trace argument.
+ */
+function workerLine(theme: ClioTheme, row: DispatchBoardRow, width: number): string {
 	const presentation = dispatchStatusPresentation(row.status, { compact: true });
-	const glyph = theme.fg(presentation.token, presentation.glyph);
-	return `${glyph} ${theme.fg("muted", agentDisplayLabel(row))} ${theme.fg("dim", `${presentation.label} ${formatCompactMs(row.elapsedMs)}`)}`;
+	const units = [
+		theme.fg("muted", agentDisplayLabel(row)),
+		theme.fg("dim", row.node ?? "local"),
+		theme.fg(presentation.token, presentation.glyph),
+		theme.fg("dim", formatCompactMs(row.elapsedMs)),
+		...(row.receiptId !== undefined ? [theme.fg("dim", row.receiptId)] : []),
+	];
+	return fitUnits(theme, agentAudiencePrefix(theme, row), units, Math.max(1, Math.floor(width)));
 }
 
 interface ActivityQuadrantOptions extends ExpandedQuadrantOptions {
@@ -863,7 +881,13 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	rows.push(
 		kv("fleet", fleetValue(facts.dispatchSummary, facts.dispatchRows), facts.dispatchSummary ? "action" : "dim"),
 	);
-	for (const row of facts.dispatchRows.slice(0, maxWorkers)) rows.push(statusRow(workerLine(theme, row)));
+	// Every worker up to the panel bound gets its own row; what the bound cuts is
+	// counted out loud instead of vanishing, so the row count an operator sees
+	// always reconciles with the `fleet` line above it.
+	const workerWidth = options.width !== undefined && Number.isFinite(options.width) ? options.width : 48;
+	for (const row of facts.dispatchRows.slice(0, maxWorkers)) rows.push(statusRow(workerLine(theme, row, workerWidth)));
+	const hiddenWorkers = facts.dispatchRows.length - maxWorkers;
+	if (hiddenWorkers > 0) rows.push(statusRow(theme.fg("dim", `+${hiddenWorkers} more`)));
 	if (facts.taskBoard && facts.taskBoard.tasks.length > 0) {
 		rows.push(styledKv("tasks", taskBoardValue(theme, facts.taskBoard)));
 		rows.push(statusRow(activeTaskLine(theme, facts.taskBoard)));
