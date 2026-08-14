@@ -1,4 +1,5 @@
 import path from "node:path";
+import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { extractCommandCdTargets, extractCommandWriteTargets } from "./protected-artifacts.js";
@@ -183,19 +184,15 @@ function writePathClass(pathArg: string, baseCwd?: string): { cls: "system_modif
  * a classifier that only reads the path argument saw no target at all and
  * returned plain write for a call that writes into whatever the cwd is. The
  * live evidence: in a `/var/tmp` workspace where write, edit and every bash
- * redirect were refused as system_modify, `artifact(kind:"report")` wrote
- * REPORT.md into that same directory. The policy engine's write-root check
- * already resolves these defaults; this keeps the two in agreement.
+ * redirect were refused as system_modify, `artifact(kind:"report")` wrote a
+ * report into that same directory. The default now resolves through
+ * core/artifact-paths.ts, the one place the tool, the write-root check, and the
+ * protected-artifacts guard all read, so the four can never disagree.
  */
-function artifactDefaultPath(args: Record<string, unknown> | undefined): string {
-	const kind = args?.kind;
-	return kind === "review" ? "REVIEW.md" : kind === "report" ? "REPORT.md" : "PLAN.md";
-}
-
 function extractWritePath(tool: string, args: Record<string, unknown> | undefined): string | null {
 	const candidate = args?.path ?? args?.file_path ?? args?.filePath;
 	if (typeof candidate === "string" && candidate.length > 0) return candidate;
-	return tool === ToolNames.Artifact ? artifactDefaultPath(args) : null;
+	return tool === ToolNames.Artifact ? artifactDefaultPath(args?.kind) : null;
 }
 
 export function classify(call: ClassifierCall): Classification {

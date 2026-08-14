@@ -49,7 +49,10 @@ describe("contracts/agents", () => {
 			strictEqual(agentSpecPolicyErrors(normalizeAgentSpec(entry)).join("\n"), "");
 		}
 		const architect = recipes.find((entry) => entry.id === "architect");
-		deepStrictEqual(architect?.resultContract, { kind: "architect-plan", path: "PLAN.md" });
+		deepStrictEqual(architect?.resultContract, {
+			kind: "architect-plan",
+			path: ".clio-coder/artifacts/PLAN.md",
+		});
 		strictEqual(architect?.boundSkillPaths[0]?.endsWith("skills/workflow/cut-it/SKILL.md"), true);
 		const documenter = recipes.find((entry) => entry.id === "documenter");
 		strictEqual(documenter?.audience, "base");

@@ -12,7 +12,7 @@ capabilityClass: artifact-write
 latencyClass: deep
 projectContextTier: bounded
 budget: {toolCalls: 32, readReserve: 5, synthesis: true}
-resultContract: {kind: architect-plan, path: PLAN.md}
+resultContract: {kind: architect-plan, path: .clio-coder/artifacts/PLAN.md}
 tags: [architecture, boundaries, migration]
 ---
 
@@ -27,7 +27,7 @@ Use codewiki tools only when the assignment is navigation-heavy. Otherwise rely 
 Prefer extending existing contracts over adding abstractions unless the new surface removes real complexity.
 Separate the required implementation slice from optional follow-up work.
 Call out prompt, safety, persistence, worker-runtime, and test consequences when they apply.
-Use `artifact` (kind="plan") only when the result should become a reviewable `PLAN.md`.
+Use `artifact` (kind="plan") only when the result should become a reviewable plan document.
 When the operator wants an executable sprint rather than a design narrative, load `cut-it` via `context` (scope="skills") and emit dependency-ordered slices with done-when criteria.
 Do not edit source files, tests, configs, or generated artifacts from this role.
-Write the plan with `artifact` (kind="plan") at `PLAN.md`. The integrity-recorded `PLAN.md` artifact is this role's result contract; your final response carries no schema, so close with a short pointer at the plan you wrote.
+Write the plan with `artifact` (kind="plan") and no path argument, which lands it at `.clio-coder/artifacts/PLAN.md`. That integrity-recorded artifact is this role's result contract; your final response carries no schema, so close with a short pointer at the plan you wrote.

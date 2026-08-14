@@ -514,9 +514,9 @@ Arguments:
 - `kind` (required). `plan`, `review`, or `report`.
 - `content` (required). Full Markdown body.
 - `title` (optional). Document title.
-- `path` (optional). Override the default artifact path.
+- `path` (optional). Override the default path under `.clio-coder/artifacts/`.
 
-`kind=plan|review|report` writes a Markdown document to PLAN.md, REVIEW.md, or REPORT.md at the project root by default; `path` may override the destination but must stay inside the workspace. When `content` does not already start with `#`, a non-empty `title` is prepended as an H1. These kinds are TERMINAL: writing the artifact completes the turn and the harness skips the follow-up model call, so the artifact body itself is the answer. Put everything the reader needs in `content`; there is no closing message after the write.
+`kind=plan|review|report` writes a Markdown document to `.clio-coder/artifacts/PLAN.md`, `REVIEW.md`, or `REPORT.md` by default, so a turn nobody asked a file from never litters the working tree; `path` may override the destination but must stay inside the workspace. See [artifact-placement.md](artifact-placement.md) for the full contract. When `content` does not already start with `#`, a non-empty `title` is prepended as an H1. These kinds are TERMINAL: writing the artifact completes the turn and the harness skips the follow-up model call, so the artifact body itself is the answer. Put everything the reader needs in `content`; there is no closing message after the write.
 
 Skills are not artifacts. A skill is a `SKILL.md` folder written with the ordinary write tool into `.clio-coder/skills/<name>/` (or the user skill store) and validated by the skills loader; the `skill-craft` shipped skill documents the format and craft rules.
 

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
@@ -84,7 +85,7 @@ const SHELL_WRAPPERS = new Set(["command", "builtin", "sudo", "doas"]);
  */
 export function toolMutationPaths(toolName: string, args: Record<string, unknown> | undefined): string[] {
 	if (toolName === ToolNames.Artifact) {
-		return [mutationPathArg(args) ?? artifactDefaultPath(args)];
+		return [mutationPathArg(args) ?? artifactDefaultPath(args?.kind)];
 	}
 	if (toolName === ToolNames.Write || toolName === ToolNames.Edit) {
 		const candidate = mutationPathArg(args);
@@ -117,12 +118,6 @@ export function protectedArtifactMutationBlockReason(
 	if (classification.kind === "benign") return null;
 	const affected = classification.matches.map((match) => match.artifactPath).join(", ");
 	return `protected artifact blocked: ${classification.operation} would affect ${affected}`;
-}
-
-function artifactDefaultPath(args: Record<string, unknown> | undefined): string {
-	if (args?.kind === "review") return "REVIEW.md";
-	if (args?.kind === "report") return "REPORT.md";
-	return "PLAN.md";
 }
 
 function mutationPathArg(args: Record<string, unknown> | undefined): string | null {

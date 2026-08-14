@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
@@ -155,10 +156,7 @@ function writeRootTargetPath(call: ClassifierCall): string | null {
 	if (!WRITE_ROOT_TOOLS.has(call.tool)) return null;
 	const target = pathArg(call.args);
 	if (target !== null) return target;
-	if (call.tool === ToolNames.Artifact) {
-		const kind = call.args?.kind;
-		return kind === "review" ? "REVIEW.md" : kind === "report" ? "REPORT.md" : "PLAN.md";
-	}
+	if (call.tool === ToolNames.Artifact) return artifactDefaultPath(call.args?.kind);
 	return null;
 }
 
@@ -533,10 +531,8 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 			const target = pathArg(args);
 			return target === null ? [] : [{ operation: "write", path: target }];
 		}
-		case ToolNames.Artifact: {
-			const fallback = args?.kind === "review" ? "REVIEW.md" : args?.kind === "report" ? "REPORT.md" : "PLAN.md";
-			return [{ operation: "write", path: pathArg(args) ?? fallback }];
-		}
+		case ToolNames.Artifact:
+			return [{ operation: "write", path: pathArg(args) ?? artifactDefaultPath(args?.kind) }];
 		case ToolNames.CredentialPresent:
 			// Sanctioned typed presence check: it may inspect secret-shaped paths
 			// internally, but its tool contract can return only boolean metadata.
