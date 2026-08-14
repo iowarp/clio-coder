@@ -1,5 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
-import { DEFAULT_SETTINGS } from "../../core/defaults.js";
+import { DEFAULT_SETTINGS, THINKING_LEVELS } from "../../core/defaults.js";
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import {
@@ -32,10 +32,13 @@ export const SETTINGS_OVERLAY_MARGIN = { top: 1, right: 2, bottom: 1, left: 2 } 
 const SECTION_LANE_WIDTH = 24;
 /**
  * The width at which the live description earns its own column instead of a
- * footer strip. The overlay is `100%`, so this is the terminal's own width less
- * the frame's four columns.
+ * footer strip. Same arithmetic as WIDE_LAYOUT_MIN_WIDTH below: two nested
+ * frames sit above this body, each costing a border and a pad, so the body is
+ * the terminal width less eight. A 120-column terminal renders at 112 and a
+ * 119-column one at 111, so 112 is the floor that makes three columns start at
+ * a real 120-column terminal.
  */
-const ULTRAWIDE_LAYOUT_MIN_WIDTH = 116;
+const ULTRAWIDE_LAYOUT_MIN_WIDTH = 112;
 /**
  * The design's degradation matrix wants the two-column layout at an 80-column
  * terminal. Two nested frames sit above this body (the application frame and
@@ -48,7 +51,8 @@ const ULTRAWIDE_LAYOUT_MIN_WIDTH = 116;
  */
 const WIDE_LAYOUT_MIN_WIDTH = 72;
 const DROP_PATH_COLUMN_WIDTH = 52;
-const FALLBACK_THINKING_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh"];
+/** Shown when no runtime is resolvable, so it offers the full vocabulary. */
+const FALLBACK_THINKING_VALUES: ReadonlyArray<string> = THINKING_LEVELS;
 const ROW_GAP = "  ";
 /**
  * The product's cut marker, as the help center and every list overlay use it.

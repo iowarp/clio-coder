@@ -1,4 +1,9 @@
-import type { ActiveAgentRole, ActiveRoutingPosture, ActiveRoutingRole } from "../../core/defaults.js";
+import {
+	type ActiveAgentRole,
+	type ActiveRoutingPosture,
+	type ActiveRoutingRole,
+	THINKING_LEVELS,
+} from "../../core/defaults.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 import {
 	type AssignmentAttemptStartEvent,
@@ -106,7 +111,7 @@ export function applyActiveRouteSelection(req: DispatchRequest, decision: RouteD
 	};
 	if (decision.selected.thinkingLevel === undefined) {
 		delete selected.thinkingLevel;
-	} else if (!["off", "minimal", "low", "medium", "high", "xhigh"].includes(decision.selected.thinkingLevel)) {
+	} else if (!(THINKING_LEVELS as ReadonlyArray<string>).includes(decision.selected.thinkingLevel)) {
 		throw new Error(`dispatch: active route selected unsupported thinking level '${decision.selected.thinkingLevel}'`);
 	} else {
 		selected.thinkingLevel = decision.selected.thinkingLevel as NonNullable<DispatchRequest["thinkingLevel"]>;

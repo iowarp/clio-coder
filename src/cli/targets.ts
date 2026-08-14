@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { type ClioSettings, readSettings, updateSettings } from "../core/config.js";
+import { THINKING_LEVELS, type ThinkingLevel } from "../core/defaults.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
@@ -83,9 +84,9 @@ interface UseArgs {
 	workerTarget?: string;
 }
 
-type WorkerThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type WorkerThinkingLevel = ThinkingLevel;
 
-const VALID_THINKING = new Set<WorkerThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const VALID_THINKING = new Set<WorkerThinkingLevel>(THINKING_LEVELS);
 
 interface WorkerProfileArgs {
 	name: string;

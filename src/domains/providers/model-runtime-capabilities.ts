@@ -10,7 +10,12 @@ import {
 	thinkingBudgetFromMap,
 	thinkingEffortFromMap,
 } from "./thinking-control-policy.js";
-import { availableThinkingLevels, type CapabilityFlags, type ThinkingLevel } from "./types/capability-flags.js";
+import {
+	availableThinkingLevels,
+	type CapabilityFlags,
+	type ThinkingLevel,
+	VALID_THINKING_LEVELS,
+} from "./types/capability-flags.js";
 import type { KnowledgeBase, KnowledgeBaseHit } from "./types/knowledge-base.js";
 import {
 	extractLocalModelQuirks,
@@ -123,7 +128,8 @@ interface ClioRuntimeMetadata {
 const LEVELS_ON_OFF: ReadonlyArray<ThinkingLevel> = ["off", "low"];
 const LEVELS_ALWAYS_ON: ReadonlyArray<ThinkingLevel> = ["high"];
 const LEVELS_NONE: ReadonlyArray<ThinkingLevel> = ["off"];
-const LEVEL_ORDER: ReadonlyArray<ThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
+/** Ascending intensity. VALID_THINKING_LEVELS is already declared in that order. */
+const LEVEL_ORDER: ReadonlyArray<ThinkingLevel> = VALID_THINKING_LEVELS;
 const HARMONY_LEVELS: ReadonlyArray<ThinkingLevel> = ["low", "medium", "high"];
 
 function effortFor(
