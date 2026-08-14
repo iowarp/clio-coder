@@ -24,6 +24,31 @@ export function runtimeSpeaksResponseSchemaDialect(runtime: { id: string; kind: 
 }
 
 /**
+ * Whether a response schema and a tool surface can constrain the same
+ * completion on this runtime.
+ *
+ * llama-server compiles `response_format.schema` into a sampler grammar. A
+ * request that also carries `tools` needs the tool-call grammar over that same
+ * completion, and the server refuses to build both: it answers HTTP 400
+ * `Failed to initialize samplers: failed to parse grammar` before generating a
+ * token. Schema alone succeeds and schema plus one tool fails, so this is a
+ * property of the wire dialect rather than of the target or the model, and no
+ * capability probe reports it. `structuredOutputs: "json-schema"` stays
+ * truthful for the schema-only request it describes.
+ *
+ * A caller that admits runs decides here instead of paying the round trip. A
+ * request carrying both earns the same {@link UnsupportedResponseSchemaError}
+ * a target with no schema support at all would earn, which arms the same
+ * prompt-parser fallback with nothing spent.
+ */
+export function responseSchemaConflictsWithTools(
+	runtime: { id: string; kind: string; apiFamily: string },
+	toolCount: number,
+): boolean {
+	return toolCount > 0 && runtimeSpeaksResponseSchemaDialect(runtime);
+}
+
+/**
  * Admission-time signal that the resolved worker runtime cannot enforce a
  * response schema. A caller that treats native enforcement as an optimization
  * may retry without the schema only after receiving this exact error type.
