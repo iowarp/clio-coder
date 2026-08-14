@@ -10,7 +10,13 @@ import {
 	type ResidentModelEntry,
 	runStream,
 } from "../../src/engine/apis/lmstudio-native.js";
-import { reconcileResidency, resetResidencyState, setResidencyNoticeSink } from "../../src/engine/apis/residency.js";
+import { CO_RESIDENT_CONTEXT_CEILING } from "../../src/engine/apis/lmstudio-residency.js";
+import {
+	type ResidencyNotice,
+	reconcileResidency,
+	resetResidencyState,
+	setResidencyNoticeSink,
+} from "../../src/engine/apis/residency.js";
 
 interface ClioModel extends Model<"lmstudio-native"> {
 	clio?: {
@@ -49,6 +55,11 @@ function model(quirks?: LocalModelQuirks, opts?: { reasoning?: boolean }): Model
 				}),
 	};
 	return fixture;
+}
+
+function wideModel(): Model<"lmstudio-native"> {
+	const fixture = model() as ClioModel;
+	return { ...fixture, contextWindow: 262_144, maxTokens: 32_768 };
 }
 
 function withKvCacheMode<T>(value: string, fn: () => T): T {
@@ -408,6 +419,186 @@ describe("contracts/lmstudio-native co-resident residency", () => {
 
 		const error = events.find((event) => event.type === "error");
 		ok(error?.error?.errorMessage?.includes("could not load"), error?.error?.errorMessage);
+	});
+});
+
+describe("contracts/lmstudio-native residency at the load seam", () => {
+	let previousSdkPredict: string | undefined;
+	let notices: ResidencyNotice[] = [];
+
+	beforeEach(() => {
+		resetResidencyState();
+		notices = [];
+		setResidencyNoticeSink((notice) => notices.push(notice));
+		previousSdkPredict = process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT;
+		process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT = "1";
+	});
+
+	afterEach(() => {
+		setResidencyNoticeSink(null);
+		resetResidencyState();
+		if (previousSdkPredict === undefined) delete process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT;
+		else process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT = previousSdkPredict;
+	});
+
+	interface FakeInstance {
+		modelKey: string;
+		identifier: string;
+	}
+
+	interface OpenedModel {
+		modelId: string;
+		hasConfig: boolean;
+		contextLength?: number;
+	}
+
+	/**
+	 * A stand-in LM Studio server that keeps instance state across turns, so a
+	 * second turn on the same target sees what the first one left behind. That is
+	 * the seam the regression is about: residency decisions read the live
+	 * instance list, not a per-turn assumption.
+	 */
+	function fakeServer(initial: ReadonlyArray<FakeInstance>): {
+		deps: LmStudioRunDeps;
+		instances: FakeInstance[];
+		opened: OpenedModel[];
+		unloaded: string[];
+	} {
+		const instances: FakeInstance[] = [...initial];
+		const opened: OpenedModel[] = [];
+		const unloaded: string[] = [];
+		const deps: LmStudioRunDeps = {
+			createClient: () =>
+				({
+					files: {
+						prepareImageBase64: async () => {
+							throw new Error("image preparation not expected");
+						},
+					},
+					llm: {
+						listLoaded: async (): Promise<ResidentModelEntry[]> =>
+							instances.map((instance) => ({
+								modelKey: instance.modelKey,
+								identifier: instance.identifier,
+								unload: async () => {
+									unloaded.push(instance.identifier);
+									const index = instances.indexOf(instance);
+									if (index >= 0) instances.splice(index, 1);
+								},
+							})),
+						model: async (modelId: string, opts: { config?: { contextLength?: number } }) => {
+							opened.push({
+								modelId,
+								hasConfig: opts.config !== undefined,
+								...(opts.config?.contextLength !== undefined ? { contextLength: opts.config.contextLength } : {}),
+							});
+							if (!instances.some((instance) => instance.modelKey === modelId)) {
+								instances.push({ modelKey: modelId, identifier: modelId });
+							}
+							return {
+								respond: () => ({
+									result: async () => ({
+										stats: {
+											promptTokensCount: 3,
+											predictedTokensCount: 2,
+											totalTokensCount: 5,
+											stopReason: "eosFound" as const,
+										},
+									}),
+								}),
+							};
+						},
+					},
+				}) as ReturnType<LmStudioRunDeps["createClient"]>,
+			reconcile: reconcileResidency,
+			discoverLoadedContext: async (_baseUrl: string, modelId: string) =>
+				instances.some((instance) => instance.modelKey === modelId) ? 131_072 : undefined,
+			lock: async <T>(_targetKey: string, fn: () => Promise<T>) => fn(),
+		};
+		return { deps, instances, opened, unloaded };
+	}
+
+	const context = {
+		messages: [{ role: "user", content: "hello", timestamp: 0 }],
+	} as Parameters<typeof runStream>[1];
+
+	async function drain(target: Model<"lmstudio-native">, deps: LmStudioRunDeps): Promise<void> {
+		for await (const _event of runStream(target, context, undefined, deps, { thinkingLevel: "off" })) {
+			// draining the stream is what drives the load and the prediction
+		}
+	}
+
+	/**
+	 * The defect this pins: the second load of a model already resident on the
+	 * target opened it with a load config again, which LM Studio answers with a
+	 * duplicate instance (`model:2`) holding a second copy of the weights and KV
+	 * cache. A resident model is reused as loaded.
+	 */
+	it("load-after-load on one target reuses the resident instance and loads nothing twice", async () => {
+		const server = fakeServer([{ modelKey: "memory-model", identifier: "memory-model" }]);
+
+		await drain(model(), server.deps);
+		strictEqual(server.opened[0]?.hasConfig, true, "the first load configures the window it wants");
+		deepStrictEqual(server.unloaded, [], "a fitting co-resident load evicts nothing");
+
+		// A later turn, past the reconcile TTL: the target still holds both models.
+		resetResidencyState();
+		await drain(model(), server.deps);
+
+		strictEqual(server.opened[1]?.hasConfig, false, "an already-resident model is opened without a load config");
+		deepStrictEqual(server.unloaded, [], "reusing a resident model unloads nothing");
+		deepStrictEqual(
+			server.instances.map((instance) => instance.identifier).sort(),
+			["local-model", "memory-model"],
+			"exactly one instance per model survives the second load",
+		);
+	});
+
+	it("releases a duplicate instance of the requested model before predicting", async () => {
+		const server = fakeServer([
+			{ modelKey: "local-model", identifier: "local-model" },
+			{ modelKey: "local-model", identifier: "local-model:2" },
+			{ modelKey: "memory-model", identifier: "memory-model" },
+		]);
+
+		await drain(model(), server.deps);
+
+		deepStrictEqual(server.unloaded, ["local-model:2"], "only the duplicate instance is released");
+		deepStrictEqual(server.instances.map((instance) => instance.identifier).sort(), ["local-model", "memory-model"]);
+		strictEqual(
+			notices.some((notice) => notice.message.includes("instances of 'local-model'")),
+			true,
+			JSON.stringify(notices),
+		);
+	});
+
+	/**
+	 * The defect this pins: a 262,144-token load beside a resident model
+	 * overflowed the card, LM Studio capped GPU offload instead of failing, and
+	 * the turn crawled on CPU with no indication of why.
+	 */
+	it("clamps the load context while another model is resident and says so before the turn", async () => {
+		const server = fakeServer([{ modelKey: "memory-model", identifier: "memory-model" }]);
+
+		await drain(wideModel(), server.deps);
+
+		strictEqual(server.opened[0]?.contextLength, CO_RESIDENT_CONTEXT_CEILING);
+		deepStrictEqual(server.unloaded, [], "the co-resident model is left alone");
+		const clamp = notices.find((notice) => notice.message.includes("context clamped"));
+		strictEqual(clamp?.level, "warning", JSON.stringify(notices));
+		strictEqual(clamp?.detail?.loadContext, CO_RESIDENT_CONTEXT_CEILING);
+	});
+
+	it("loads the full window when it is the only model on the target", async () => {
+		const server = fakeServer([]);
+
+		await drain(wideModel(), server.deps);
+
+		strictEqual(server.opened[0]?.contextLength, 262_144);
+		strictEqual(
+			notices.some((notice) => notice.message.includes("context clamped")),
+			false,
+		);
 	});
 });
 

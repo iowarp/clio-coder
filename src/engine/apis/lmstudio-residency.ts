@@ -1,0 +1,92 @@
+/**
+ * LM Studio-specific residency arithmetic, kept pure so the fit and duplicate
+ * rules are testable without a server or an SDK socket.
+ *
+ * LM Studio exposes no VRAM telemetry: neither the SDK nor `/api/v1/models`
+ * reports total or free GPU memory, and `gpuStrictVramCap` caps GPU offload
+ * rather than failing an oversized load, so a request that does not fit is
+ * served from CPU at a fraction of the speed instead of erroring. Fit therefore
+ * cannot be computed from memory arithmetic; it is bounded by evidence.
+ *
+ * The evidence rule: while another model is resident on the same server, a
+ * just-in-time load is capped at {@link CO_RESIDENT_CONTEXT_CEILING} tokens.
+ * The KV cache of a long context is what actually overflows the card (measured
+ * on an RTX 5090: a 27B Q4 model loaded at its 262,144-token default beside a
+ * resident 26B model produced 25 tokens in 2m18s, and the same model at 131,072
+ * answered a 9,019-token prompt in 9.7s). Operators who know their card holds
+ * more raise the ceiling with CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT; a target
+ * serving one model alone is never clamped.
+ */
+
+/**
+ * Largest automatic load context Clio requests while another model is resident
+ * on the same LM Studio server.
+ */
+export const CO_RESIDENT_CONTEXT_CEILING = 131_072;
+
+/** Operator override for {@link CO_RESIDENT_CONTEXT_CEILING}; 0 or `off` disables clamping. */
+export function coResidentContextCeiling(env: NodeJS.ProcessEnv = process.env): number | undefined {
+	const raw = (env.CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT ?? "").trim().toLowerCase();
+	if (raw.length === 0) return CO_RESIDENT_CONTEXT_CEILING;
+	if (raw === "off" || raw === "0" || raw === "false") return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) return CO_RESIDENT_CONTEXT_CEILING;
+	return parsed;
+}
+
+/** One loaded instance as LM Studio reports it: a model key plus its instance identity. */
+export interface LmStudioResidentInstance {
+	modelKey: string;
+	/** Per-instance identifier. Two instances of one model key differ here. */
+	identifier?: string;
+	sizeBytes?: number;
+}
+
+export interface ContextFitInput {
+	/** Context length the load would otherwise request. */
+	requested: number;
+	/** Instances already resident on the target, including the requested model. */
+	resident: ReadonlyArray<LmStudioResidentInstance>;
+	/** Requested model's wire id, so its own instances are not counted as neighbours. */
+	keepModelId: string;
+	ceiling?: number | undefined;
+}
+
+export interface ContextFitResult {
+	/** Context length to load with. */
+	contextLength: number;
+	/** Set when the ceiling lowered the request; carries the original value. */
+	clampedFrom?: number;
+	/** Model keys resident alongside the requested model. */
+	neighbours: string[];
+}
+
+/**
+ * Clamp a just-in-time load's context length to what the target has evidence of
+ * holding. Only co-residency triggers the clamp: a server with nothing else
+ * loaded gets the full requested window.
+ */
+export function fitLoadContextLength(input: ContextFitInput): ContextFitResult {
+	const neighbours = [...new Set(input.resident.filter((e) => e.modelKey !== input.keepModelId).map((e) => e.modelKey))];
+	const ceiling = input.ceiling;
+	if (neighbours.length === 0 || ceiling === undefined || input.requested <= ceiling) {
+		return { contextLength: input.requested, neighbours };
+	}
+	return { contextLength: ceiling, clampedFrom: input.requested, neighbours };
+}
+
+/**
+ * Instances of `keepModelId` beyond the one Clio will use. LM Studio's load path
+ * happily creates a second instance of an already-resident model key (observed:
+ * `google/gemma-4-26b-a4b-qat:2`), and each instance holds a full weight copy
+ * and KV cache. The extras are the same model, so releasing them never takes a
+ * role's model away: whatever pointed at that key is still served by the
+ * survivor.
+ */
+export function duplicateInstances<T extends LmStudioResidentInstance>(
+	resident: ReadonlyArray<T>,
+	keepModelId: string,
+): T[] {
+	const instances = resident.filter((entry) => entry.modelKey === keepModelId);
+	return instances.slice(1);
+}

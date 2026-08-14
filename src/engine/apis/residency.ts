@@ -15,14 +15,14 @@
  * exception, taken only when a slot must be freed, and it never selects a
  * protected resident while an unprotected one is available.
  *
- * Protection is symmetric. Residents tagged `pinned:true` or `role:scout` by
- * the server operator are never evicted. Residents referenced by the
- * operator's own Clio configuration (orchestrator model, worker default and
- * profile models, target default models; see
- * {@link setProtectedModelsProvider}) are never evicted by another Clio
- * stream while an unprotected candidate exists, and only with a loud warning
- * when capacity is exhausted. No Clio profile silently evicts another
- * profile's model.
+ * Protection is symmetric and role-aware. Residents tagged `pinned:true` or
+ * `role:scout` by the server operator are never evicted. Residents referenced
+ * by the operator's own Clio configuration (see
+ * {@link setProtectedModelsProvider}) carry the role they serve (chat, memory,
+ * worker, target default) and are never evicted by another Clio stream while an
+ * unprotected candidate exists, and only with a loud warning naming the role
+ * when capacity is exhausted. No Clio profile silently evicts another profile's
+ * model, and no chat switch silently unloads the memory plane.
  *
  * The reconciler is best-effort and non-blocking. A slow or unreachable
  * server, or a malformed resident listing, degrades to observe-only and never
@@ -36,6 +36,7 @@
  */
 
 import { BusChannels, type RuntimeNoticeKind, type RuntimeNoticePayload } from "../../core/bus-events.js";
+import type { ProtectedModelRef, ResidencyRole } from "../../core/residency-protection.js";
 import { getSharedBus } from "../../core/shared-bus.js";
 import { withResidencyLock } from "./residency-lock.js";
 import { type ResidentModelInfo, residentMatchesKeep } from "./resident-models.js";
@@ -74,24 +75,34 @@ export function emitResidencyNotice(notice: ResidencyNotice): void {
 
 // --- configured-model protection ---------------------------------------------
 
-// Wire model ids the operator's own configuration references (orchestrator
-// model, worker default/profile models, target default models). The provider
-// is installed by the composition root: the orchestrator entry derives it from
-// the live effective settings, and the worker entry from the protectedModels
-// list carried on its WorkerSpec, so every process protects the same set.
-let protectedModelsProvider: (() => ReadonlyArray<string>) | null = null;
+// Wire model ids the operator's own configuration references, with the role
+// each one serves (chat, memory, worker, target default). The provider is
+// installed by the composition root: the orchestrator entry derives it from the
+// live effective settings, and the worker entry from the protectedModels list
+// carried on its WorkerSpec, so every process protects the same set. A bare
+// string is accepted for an id whose role the caller does not know.
+export type ProtectedModelEntry = string | ProtectedModelRef;
 
-export function setProtectedModelsProvider(provider: (() => ReadonlyArray<string>) | null): void {
+let protectedModelsProvider: (() => ReadonlyArray<ProtectedModelEntry>) | null = null;
+
+export function setProtectedModelsProvider(provider: (() => ReadonlyArray<ProtectedModelEntry>) | null): void {
 	protectedModelsProvider = provider;
 }
 
-function configProtectedIds(): ReadonlySet<string> {
+/** Configured model ids mapped to the role that references them, when known. */
+function configProtectedRoles(): ReadonlyMap<string, ResidencyRole | undefined> {
+	const roles = new Map<string, ResidencyRole | undefined>();
 	try {
-		const ids = protectedModelsProvider?.() ?? [];
-		return new Set(ids.map((id) => id.trim()).filter((id) => id.length > 0));
+		for (const entry of protectedModelsProvider?.() ?? []) {
+			const modelId = (typeof entry === "string" ? entry : entry.modelId).trim();
+			if (modelId.length === 0) continue;
+			const role = typeof entry === "string" ? undefined : entry.role;
+			if (!roles.has(modelId) || roles.get(modelId) === undefined) roles.set(modelId, role);
+		}
 	} catch {
-		return new Set();
+		return new Map();
 	}
+	return roles;
 }
 
 /** True when the runtime tagged this resident as operator-pinned (llama.cpp router tags). */
@@ -168,6 +179,8 @@ export interface ResidentClassified extends ResidentModelInfo {
 	loadedByClio: boolean;
 	/** Set when the resident is protected from eviction (server tag or operator config). */
 	protection?: ResidencyProtection;
+	/** Which configured plane references this resident, when the protection came from config. */
+	role?: ResidencyRole;
 }
 
 export interface ResidencyFacts {
@@ -224,14 +237,23 @@ function clioLoadedFirst(entries: ReadonlyArray<ResidentClassified>): ResidentCl
 	return [...entries.filter((entry) => entry.loadedByClio), ...entries.filter((entry) => !entry.loadedByClio)];
 }
 
+/** `the memory model` / `the chat model` for a notice, or the bare id's article. */
+function describeRole(role: ResidencyRole | undefined): string {
+	if (role === "chat") return "the chat model";
+	if (role === "memory") return "the memory model";
+	if (role === "worker") return "a worker model";
+	if (role === "target-default") return "a target default model";
+	return "a configured model";
+}
+
 function evictionNotice(facts: ResidencyFacts, entry: ResidentClassified): ResidencyNotice {
 	if (entry.protection === "config") {
 		return makeNotice(
 			facts,
 			"swap",
 			"warning",
-			`evicting '${entry.modelId}' from '${facts.targetId}' to make room for '${facts.keepModelId}' even though settings still reference it: every slot is taken and no unprotected resident is left. Another profile pointed at it will reload it.`,
-			{ swappedOut: entry.modelId, configProtected: true },
+			`evicting '${entry.modelId}' from '${facts.targetId}' to make room for '${facts.keepModelId}' even though settings still reference it as ${describeRole(entry.role)}: every slot is taken and no unprotected resident is left. Another profile pointed at it will reload it.`,
+			{ swappedOut: entry.modelId, configProtected: true, ...(entry.role ? { role: entry.role } : {}) },
 		);
 	}
 	if (entry.loadedByClio) {
@@ -311,7 +333,7 @@ export function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 	// never silent, but a fitting co-residency is normal, not a defect.
 	if (keepResident) {
 		if (others.length > 0) {
-			const names = others.map((entry) => entry.modelId).join(", ");
+			const names = others.map((entry) => (entry.role ? `${entry.modelId} (${entry.role})` : entry.modelId)).join(", ");
 			if (facts.capacity !== undefined && facts.resident.length > facts.capacity) {
 				notices.push(
 					makeNotice(
@@ -472,18 +494,20 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 		}
 	}
 
-	const protectedIds = configProtectedIds();
+	const protectedRoles = configProtectedRoles();
 	const classified: ResidentClassified[] = resident.map((entry) => {
-		const configProtected = protectedIds.has(entry.modelId) || (entry.aliasIds ?? []).some((id) => protectedIds.has(id));
+		const configId = [entry.modelId, ...(entry.aliasIds ?? [])].find((id) => protectedRoles.has(id));
 		const protection: ResidencyProtection | undefined = residentTagProtected(entry.tags)
 			? "tag"
-			: configProtected
+			: configId !== undefined
 				? "config"
 				: undefined;
+		const role = configId === undefined ? undefined : protectedRoles.get(configId);
 		return {
 			...entry,
 			loadedByClio: isClioLoaded(adapter.targetKey, entry),
 			...(protection ? { protection } : {}),
+			...(role ? { role } : {}),
 		};
 	});
 

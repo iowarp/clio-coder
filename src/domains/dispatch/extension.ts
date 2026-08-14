@@ -18,7 +18,7 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import { GUARDRAIL_DEFAULTS } from "../../core/guardrails.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
-import { protectedResidencyModelIds } from "../../core/residency-protection.js";
+import { protectedResidencyModels } from "../../core/residency-protection.js";
 import {
 	responseSchemaConflictsWithTools,
 	runtimeSpeaksResponseSchemaDialect,
@@ -1705,9 +1705,10 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	if (product) spec.product = product;
 	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
-	// Configured model ids, so the worker's empty residency registry evicts nothing.
+	// Configured model ids with the role each serves, so the worker's empty
+	// residency registry evicts nothing and names what it must touch.
 	if (settings) {
-		const protectedModels = protectedResidencyModelIds(settings);
+		const protectedModels = protectedResidencyModels(settings);
 		if (protectedModels.length > 0) spec.protectedModels = protectedModels;
 	}
 	if (input.apiKey) spec.apiKey = input.apiKey;
