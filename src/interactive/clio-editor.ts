@@ -77,4 +77,24 @@ export class ClioEditor extends Editor {
 
 		return lines;
 	}
+
+	/**
+	 * pi-tui's bracketed-paste handling inserts pasted text (including a
+	 * trailing newline the paste carried) without submitting: a pasted
+	 * `/model\n` lands as two lines in the buffer and just sits there. Once
+	 * the base handler has applied a chunk that closed a paste, check whether
+	 * the buffer now reads as a completed slash command and, if so, submit it
+	 * through the same handler the typed-Enter path uses.
+	 */
+	override handleInput(data: string): void {
+		const closedPaste = data.includes("\x1b[201~");
+		super.handleInput(data);
+		if (!closedPaste) return;
+		const text = this.getText();
+		if (!text.endsWith("\n")) return;
+		const command = text.trimEnd();
+		if (!command.startsWith("/")) return;
+		this.setText("");
+		this.onSubmit?.(command);
+	}
 }
