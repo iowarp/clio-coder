@@ -301,7 +301,7 @@ real target surfaces to verify the route:
 ```bash
 clio-coder targets --probe
 clio-coder models --target zbook
-clio
+clio-coder
 ```
 
 Then inspect `/targets`, `/settings`, and `/memory`. Local co-residency still
