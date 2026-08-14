@@ -26,6 +26,22 @@ export const FLEET_DELEGATION_RULE =
 	"Delegate when the task has two or more independent file-scoped subtasks, or any broad exploration. You keep synthesis and validation; a single narrow change stays with you.";
 
 /**
+ * S3 handed two files to a worker, then edited both itself before dispatching,
+ * reverted one, and disclosed neither. The delegation rule above says what to
+ * hand off; this says what handing off costs you.
+ */
+export const FLEET_HANDOFF_RULE =
+	"A file you assigned to a worker is not yours to edit while its dispatch is pending or after it succeeds; if you already changed it, say so in your report.";
+
+/**
+ * R5's admission correctly refused a verifier for mutation work and named the
+ * mismatch, and the final answer to the operator never mentioned it. A refusal
+ * the operator cannot see reads as a silent agent swap.
+ */
+export const FLEET_REFUSAL_DISCLOSURE =
+	"When admission refuses a dispatch, report the refusal and the reason it gave; never substitute another agent without saying why.";
+
+/**
  * R6 issued five near-identical `tester` dispatches because each differed
  * textually, so a string-identity rule never fired. The test that catches that
  * run is about the work, and the model needs somewhere else to go than a sixth
@@ -80,7 +96,9 @@ export function renderFleetPromptSection(input: ReadonlyArray<AgentSpec>): strin
 	const lines: string[] = [
 		"# Fleet",
 		FLEET_DELEGATION_RULE,
+		FLEET_HANDOFF_RULE,
 		FLEET_ANTI_CHURN_RULE,
+		FLEET_REFUSAL_DISCLOSURE,
 		`Workers you reach with \`dispatch\`, by \`agent\` id (default ${DEFAULT_DISPATCH_AGENT_ID}). Capability class is what a worker may do: a read-only worker cannot edit.`,
 		FLEET_SPECIALIST_ROUTING,
 	];
