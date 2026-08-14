@@ -9,6 +9,7 @@ export const TRACE_SCHEMA_VERSION = 1;
 export const EVENT_LIMIT = 500;
 const root = dirname(fileURLToPath(import.meta.url));
 const publicRoot = join(root, "public");
+const assetRoot = resolve(root, "..", "..", "assets");
 
 export class ViewerDatabase {
 	constructor(path) {
@@ -64,7 +65,7 @@ export class ViewerDatabase {
 	}
 }
 
-export function createTraceViewerHandler(database, staticRoot = publicRoot) {
+export function createTraceViewerHandler(database, staticRoot = publicRoot, assetsRoot = assetRoot) {
 	return async (request, response) => {
 		try {
 			if (request.method !== "GET" && request.method !== "HEAD") {
@@ -110,6 +111,9 @@ export function createTraceViewerHandler(database, staticRoot = publicRoot) {
 				return json(response, 200, { events, cursor, hasMore: events.length === limit }, request.method === "HEAD");
 			}
 			if (url.pathname.startsWith("/api/")) return json(response, 404, { error: "not found" }, request.method === "HEAD");
+			if (url.pathname.startsWith("/assets/")) {
+				return serveStatic(url.pathname.slice("/assets".length), response, request.method === "HEAD", assetsRoot, false);
+			}
 			return serveStatic(url.pathname, response, request.method === "HEAD", staticRoot);
 		} catch (error) {
 			return json(
@@ -145,7 +149,7 @@ export async function startTraceViewer({ db, port = 0 }) {
 	};
 }
 
-async function serveStatic(pathname, response, head, staticRoot) {
+async function serveStatic(pathname, response, head, staticRoot, indexFallback = true) {
 	let decoded;
 	try {
 		decoded = decodeURIComponent(pathname);
@@ -161,6 +165,7 @@ async function serveStatic(pathname, response, head, staticRoot) {
 	try {
 		if (!(await stat(file)).isFile()) throw new Error("not a file");
 	} catch {
+		if (!indexFallback) return json(response, 404, { error: "not found" }, head);
 		file = join(staticRoot, "index.html");
 	}
 	response.statusCode = 200;
@@ -199,6 +204,8 @@ function contentType(extension) {
 	if (extension === ".js") return "text/javascript; charset=utf-8";
 	if (extension === ".css") return "text/css; charset=utf-8";
 	if (extension === ".svg") return "image/svg+xml";
+	if (extension === ".webp") return "image/webp";
+	if (extension === ".png") return "image/png";
 	return "text/html; charset=utf-8";
 }
 
