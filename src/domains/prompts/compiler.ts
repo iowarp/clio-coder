@@ -118,6 +118,19 @@ export const FLEET_ROUTING_GUIDANCE_MAX_BYTES = 320;
 export const FLEET_ROUTING_GUIDANCE =
 	'Fleet routing: pin the `agent` id from the Fleet section above; agent:"auto" baselines from the task text and is a fallback, not a router. Broad repo/codebase exploration goes to a worker before repo-wide reads. Give each dispatch a concrete handoff and synthesize its receipt.';
 
+/**
+ * Worker-side mirror of the parent's `SPOT_CHECK_GUIDANCE`. The parent sentence
+ * demonstrably works: in the E19 drive it is what caught a verifier reporting a
+ * quality pass on a typecheck script that does not exist. The same failure
+ * happens one level down, where a worker seals a fabricated report or a
+ * fabricated `npm test`, so the worker gets the mirror image of that rule. It
+ * lives in the shared worker scaffold rather than in each recipe: every
+ * dispatched persona inherits this block, and a rule copied into twelve files
+ * drifts in eleven of them.
+ */
+export const WORKER_CLAIM_GUIDANCE =
+	'Never claim a completion, a validation, or a file change that no tool call in this run supports. If you did not run it or write it here, say "not verified" and report what you did do.';
+
 function lookupFragment(table: FragmentTable, id: string, role: string): LoadedFragment {
 	const frag = table.byId.get(id);
 	if (!frag) {
@@ -276,6 +289,7 @@ function renderWorkerOperatingContract(operatingContract: LoadedFragment, inputs
 		"Do not invent a different task, source tree, file path, or implementation plan.",
 		"If the assigned task asks for an exact response, a direct answer, or no tool use, answer it directly without tool calls.",
 		"Use tools only when necessary for the assigned task and admitted by the worker tool contract.",
+		WORKER_CLAIM_GUIDANCE,
 	].join("\n\n");
 }
 

@@ -14,12 +14,19 @@ import { describe, it } from "node:test";
 import type { DomainContext, DomainContract } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
-import { renderFleetPromptSection } from "../../src/domains/agents/catalog.js";
+import {
+	FLEET_ANTI_CHURN_RULE,
+	FLEET_DELEGATION_RULE,
+	FLEET_SPECIALIST_ROUTING,
+	renderAgentCatalog,
+	renderFleetPromptSection,
+} from "../../src/domains/agents/catalog.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { type AgentSpec, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { RunReceipt, RunReceiptVerification } from "../../src/domains/dispatch/types.js";
-import { compile } from "../../src/domains/prompts/compiler.js";
+import { compile, compileWorker, WORKER_CLAIM_GUIDANCE } from "../../src/domains/prompts/compiler.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { PromptsManifest } from "../../src/domains/prompts/manifest.js";
@@ -32,9 +39,13 @@ const DISPATCH_HINT = {
 		"Call dispatch with list:true only when the operator asks about agents, workers, or the fleet; never use it to inventory direct tools.",
 };
 
-function builtinSpecs(): ReadonlyArray<AgentSpec> {
+function builtinRecipes(): ReadonlyArray<AgentRecipe> {
 	const dir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
-	return loadRecipesFromDir({ dir, source: "builtin" }).map(normalizeAgentSpec);
+	return loadRecipesFromDir({ dir, source: "builtin" });
+}
+
+function builtinSpecs(): ReadonlyArray<AgentSpec> {
+	return builtinRecipes().map(normalizeAgentSpec);
 }
 
 describe("contracts/orchestration fleet roster in the session prompt", () => {
@@ -55,11 +66,85 @@ describe("contracts/orchestration fleet roster in the session prompt", () => {
 
 	it("stays inside the prompt budget the roster has to earn", () => {
 		const section = renderFleetPromptSection(builtinSpecs());
-		// ceilChars() is the compiler's estimator: 4 chars per token.
+		// ceilChars() is the compiler's estimator: 4 chars per token. The roster
+		// alone was 326; the three routing rules above it cost 133 more, which is
+		// the price of the E19 finding that a visible menu without an evaluable
+		// rule still loses to inertia.
 		const tokens = Math.ceil(section.length / 4);
-		ok(tokens <= 400, `fleet section is ${tokens} tokens:\n${section}`);
+		ok(tokens <= 480, `fleet section is ${tokens} tokens:\n${section}`);
 		for (const line of section.split("\n")) {
 			ok(line.length <= 220, `roster line too long: ${line}`);
+		}
+	});
+
+	it("leads with a delegation rule the model can evaluate, not an incentive", () => {
+		const section = renderFleetPromptSection(builtinSpecs());
+		// Placement is the point: the rule competes badly buried mid-block in the
+		// 773-token tool contract, so it sits above the roster it routes into.
+		const lines = section.split("\n");
+		strictEqual(lines[0], "# Fleet");
+		strictEqual(lines[1], FLEET_DELEGATION_RULE);
+		ok(FLEET_DELEGATION_RULE.includes("two or more independent file-scoped subtasks"), FLEET_DELEGATION_RULE);
+		ok(FLEET_DELEGATION_RULE.includes("any broad exploration"), FLEET_DELEGATION_RULE);
+		ok(FLEET_DELEGATION_RULE.includes("You keep synthesis and validation"), FLEET_DELEGATION_RULE);
+		ok(section.indexOf(FLEET_DELEGATION_RULE) < section.indexOf("Operator-facing:"), section);
+	});
+
+	it("names the specialist for each job auto cannot route, against ids the roster carries", () => {
+		const section = renderFleetPromptSection(builtinSpecs());
+		for (const [job, agent] of [
+			["receipts, diffs, or telemetry", "provenance"],
+			["external docs", "researcher"],
+			["broad recon", "scout"],
+			["tests", "tester"],
+			["gates or review", "verifier"],
+		]) {
+			ok(FLEET_SPECIALIST_ROUTING.includes(`${job} -> ${agent}`), `${job} -> ${agent}: ${FLEET_SPECIALIST_ROUTING}`);
+			// A routing clause pointing at an id no roster line carries is a dead end.
+			ok(section.includes(`- ${agent} (`), `${agent} is routed to but not rostered`);
+		}
+		ok(section.includes(FLEET_SPECIALIST_ROUTING), section);
+	});
+
+	it("keys the anti-churn rule on target and goal instead of string identity", () => {
+		const section = renderFleetPromptSection(builtinSpecs());
+		// R6 issued five near-identical tester dispatches: each differed textually,
+		// so "do not repeat an identical dispatch" never fired once.
+		ok(FLEET_ANTI_CHURN_RULE.includes("same target files and the same goal"), FLEET_ANTI_CHURN_RULE);
+		ok(FLEET_ANTI_CHURN_RULE.includes("however differently you word it"), FLEET_ANTI_CHURN_RULE);
+		// A prohibition with no alternative is why the sixth dispatch happens.
+		ok(FLEET_ANTI_CHURN_RULE.includes("receipt"), FLEET_ANTI_CHURN_RULE);
+		ok(FLEET_ANTI_CHURN_RULE.includes("run the check yourself"), FLEET_ANTI_CHURN_RULE);
+		ok(section.includes(FLEET_ANTI_CHURN_RULE), section);
+		// The dispatch(list:true) catalog teaches the same rule, not a weaker one.
+		ok(renderAgentCatalog(builtinRecipes()).includes(FLEET_ANTI_CHURN_RULE));
+	});
+
+	it("mirrors the parent spot-check rule into every dispatched worker prompt", () => {
+		// SPOT_CHECK_GUIDANCE caught R5's fabricated typecheck at the parent. The
+		// worker that fabricated it needs the same rule pointed at itself, and it
+		// lives in the shared scaffold so all twelve recipes inherit one copy.
+		ok(WORKER_CLAIM_GUIDANCE.includes("no tool call in this run supports"), WORKER_CLAIM_GUIDANCE);
+		ok(WORKER_CLAIM_GUIDANCE.includes('say "not verified"'), WORKER_CLAIM_GUIDANCE);
+		const table = loadFragments();
+		for (const persona of builtinRecipes()) {
+			const compiled = compileWorker(table, {
+				autonomy: "auto-edit",
+				providerSupportsTools: true,
+				toolNames: ["read"],
+				toolPromptHints: [],
+				hasCanonicalContext: false,
+				hasBoundSkills: false,
+				onPermission: "deny",
+				persona: {
+					id: `agent.${persona.id}`,
+					relPath: `src/domains/agents/builtins/${persona.id}.md`,
+					body: persona.body,
+					contentHash: "test",
+					dynamic: false,
+				},
+			});
+			ok(compiled.systemPrompt.includes(WORKER_CLAIM_GUIDANCE), `${persona.id} lost the claim rule`);
 		}
 	});
 
@@ -316,7 +401,7 @@ describe("contracts/orchestration prompts domain wiring", () => {
 		ok(compiled.systemPrompt.includes("- provenance (read-only,"), compiled.systemPrompt);
 		const fleet = compiled.sections.find((section) => section.id === "fleet");
 		ok(fleet !== undefined);
-		ok(fleet.tokenEstimate <= 400, `fleet section is ${fleet.tokenEstimate} tokens`);
+		ok(fleet.tokenEstimate <= 480, `fleet section is ${fleet.tokenEstimate} tokens`);
 	});
 
 	it("compiles a fleet-free prompt when no agents domain is loaded", async () => {

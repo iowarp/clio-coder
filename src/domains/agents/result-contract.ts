@@ -174,6 +174,19 @@ export interface ScoutResult {
 	citations: ReadonlyArray<ScoutCitation>;
 	needsSplit: boolean;
 	proposedSubtasks: ReadonlyArray<ScoutSubtask>;
+	/**
+	 * Claims salvaged from a degraded result that carry no citation this run can
+	 * ground. They are leads, never evidence, and they exist so a small model's
+	 * observations survive a terminal shape it could not emit. Absent on a
+	 * strictly conforming result.
+	 */
+	ungroundedClaims?: ReadonlyArray<string>;
+	/**
+	 * The validator's own reason for accepting a degraded shape. Its presence is
+	 * the flag: any consumer that needs strict Scout data checks for it. Absent
+	 * on a strictly conforming result.
+	 */
+	degradedReason?: string;
 }
 
 /** Strict Scout-authored data. Every execution/control field is coordinator-owned. */
@@ -255,7 +268,7 @@ function success(
 	contract: ResultContract,
 	quality: ResultContractQuality,
 	value: unknown,
-	extra: Pick<ResultContractValidation, "scout" | "verifier"> = {},
+	extra: Pick<ResultContractValidation, "scout" | "verifier" | "reason"> = {},
 ): ResultContractValidation {
 	return {
 		conformance: "pass",
@@ -404,33 +417,96 @@ function validateContextHandbook(contract: ResultContract, output: string | null
 	return success(contract, "unmeasured", parsed.value);
 }
 
+/**
+ * Everything a degraded Scout result still carries: the claims themselves,
+ * split by whether a `path`/`line` came with them. Deliberately lenient where
+ * `parseFindings` is strict, because this runs only after the strict parse has
+ * already failed and the alternative to leniency is discarding the run.
+ */
+function salvageScoutClaims(value: unknown): { grounded: ScoutFinding[]; ungrounded: string[] } {
+	const grounded: ScoutFinding[] = [];
+	const ungrounded: string[] = [];
+	if (!Array.isArray(value)) return { grounded, ungrounded };
+	for (const entry of value) {
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+		const finding = entry as Record<string, unknown>;
+		if (!string(finding.claim)) continue;
+		const line = finding.line;
+		if (string(finding.path) && typeof line === "number" && Number.isSafeInteger(line) && line >= 1) {
+			grounded.push({ claim: finding.claim, path: finding.path, line });
+			continue;
+		}
+		ungrounded.push(finding.claim);
+	}
+	return { grounded, ungrounded };
+}
+
+/**
+ * A degraded acceptance. The strict contract is the goal, not the point: on a
+ * small local model the `{claim, path, line}` shape is close to a coin flip,
+ * and the E19 drive lost an entire 51k-token reconnaissance run because two
+ * bounded repair rounds could not land it. Nothing about the evidence was
+ * wrong; only the envelope was, and failing the run threw the evidence away
+ * with it.
+ *
+ * So a result that still carries usable claims conforms, and the claims reach
+ * the parent. Quality is `unmeasured`, never `pass`: a shape this validator had
+ * to repair is not correctness evidence, and routing statistics must not
+ * inherit one. `degradedReason` marks it for every consumer that needs the
+ * strict data, and `parseScoutResult` refuses it outright, so a degraded run
+ * can never become a `from_scout` continuation source.
+ */
+function degradedScout(
+	contract: ResultContract,
+	value: Record<string, unknown>,
+	reason: string,
+): ResultContractValidation | null {
+	const salvaged = salvageScoutClaims(value.findings);
+	if (salvaged.grounded.length === 0 && salvaged.ungrounded.length === 0) return null;
+	const degradedReason = `${reason} (accepted as a degraded reconnaissance result; findings are leads, not validation evidence)`;
+	// needsSplit is forced false and subtasks dropped: a subtask is control-plane
+	// data a coordinator acts on, so a malformed one is never repaired here.
+	const scout: ScoutResult = {
+		findings: salvaged.grounded,
+		citations: salvaged.grounded.map(({ path: citedPath, line }) => ({ path: citedPath, line })),
+		needsSplit: false,
+		proposedSubtasks: [],
+		ungroundedClaims: salvaged.ungrounded,
+		degradedReason,
+	};
+	return success(contract, "unmeasured", scout, { scout, reason: degradedReason });
+}
+
 function validateScout(contract: ResultContract, output: string | null): ResultContractValidation {
 	const parsed = parseJson(output);
+	// Nothing to salvage from bytes that are not a JSON object.
 	if (!parsed.ok) return failure(contract, "fail", parsed.reason);
 	const value = parsed.value;
+	// Every strict rejection below falls through to `degrade`, which returns the
+	// strict failure unchanged when the result carries no usable claim either.
+	const degrade = (reason: string): ResultContractValidation =>
+		degradedScout(contract, value, reason) ?? failure(contract, "fail", reason);
 	if (!hasOnlyKeys(value, ["findings", "needsSplit", "proposedSubtasks"])) {
-		return failure(contract, "fail", "Scout result has unknown fields");
+		return degrade("Scout result has unknown fields");
 	}
 	const findings = parseFindings(value.findings);
 	const proposedSubtasks = parseSubtasks(value.proposedSubtasks);
 	if (findings === null || typeof value.needsSplit !== "boolean" || proposedSubtasks === null) {
-		return failure(
-			contract,
-			"fail",
+		return degrade(
 			"Scout result must carry findings as {claim, path, line} objects, needsSplit, and 0..4 typed proposed subtasks",
 		);
 	}
 	if (value.needsSplit !== proposedSubtasks.length > 0) {
-		return failure(contract, "fail", "Scout needsSplit must agree with proposedSubtasks");
+		return degrade("Scout needsSplit must agree with proposedSubtasks");
 	}
 	// A grounded report needs at least one cited claim. A split recommendation
 	// is the explicit exception: it reports that the task did not fit, so it
 	// carries subtasks instead of findings.
 	if (findings.length === 0 && !value.needsSplit) {
-		return failure(contract, "fail", "Scout result must carry at least one cited finding, or set needsSplit");
+		return degrade("Scout result must carry at least one cited finding, or set needsSplit");
 	}
 	if (value.needsSplit && findings.length > 0) {
-		return failure(contract, "fail", "Scout split recommendations carry typed subtasks instead of findings");
+		return degrade("Scout split recommendations carry typed subtasks instead of findings");
 	}
 	const scout: ScoutResult = {
 		findings,
@@ -460,43 +536,100 @@ function parseChecks(value: unknown): VerifierCheck[] | null {
 	return checks;
 }
 
+type ScoutCitationEvidence = ScoutCitation & { contentDigest: string };
+
+/** One citation against the workspace and, where known, against this run's own reads. */
+function validateScoutCitation(
+	input: ResultContractValidationInput,
+	citation: ScoutCitation,
+): { ok: true; evidence: ScoutCitationEvidence } | { ok: false; reason: string } {
+	const cwd = path.resolve(input.cwd);
+	const citedPath = path.resolve(cwd, citation.path);
+	const relative = path.relative(cwd, citedPath);
+	if (relative === "" || relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) {
+		return { ok: false, reason: `Scout citation path escapes the workspace: ${citation.path}` };
+	}
+	const content = input.filesystem.readFile(citedPath);
+	if (content === null) return { ok: false, reason: `Scout citation cannot be read: ${citation.path}` };
+	const lineCount = content.split(/\r\n|\r|\n/u).length;
+	if (citation.line > lineCount) {
+		return { ok: false, reason: `Scout citation is past end of file: ${citation.path}:${citation.line}` };
+	}
+	// Grounding: a line that exists is not a line anyone looked at. Where the
+	// run's own read spans are known, the cited line has to fall inside one,
+	// so an approximated or inferred line number cannot pass as observation.
+	if (input.observedReadRanges !== undefined) {
+		const spans = input.observedReadRanges.get(citedPath) ?? [];
+		if (!spans.some(([start, end]) => citation.line >= start && citation.line <= end)) {
+			const observed =
+				spans.length === 0
+					? "this run never read that file"
+					: `this run read only ${spans.map(([start, end]) => `${start}-${end}`).join(", ")}`;
+			return {
+				ok: false,
+				reason: `Scout citation is not grounded in a live read: ${citation.path}:${citation.line} (${observed})`,
+			};
+		}
+	}
+	return {
+		ok: true,
+		evidence: { ...citation, contentDigest: createHash("sha256").update(content, "utf8").digest("hex") },
+	};
+}
+
+/**
+ * Every citation on a strictly conforming result has to ground. One that does
+ * not is a fabricated location on a report claiming `pass`, so it fails the
+ * whole result; this check is the only thing standing between an invented
+ * `path:line` and a quality label the router believes.
+ */
 function validateScoutCitations(
 	input: ResultContractValidationInput,
 	citations: ReadonlyArray<ScoutCitation>,
-): { ok: true; evidence: ReadonlyArray<ScoutCitation & { contentDigest: string }> } | { ok: false; reason: string } {
-	const cwd = path.resolve(input.cwd);
-	const evidence: Array<ScoutCitation & { contentDigest: string }> = [];
+): { ok: true; evidence: ReadonlyArray<ScoutCitationEvidence> } | { ok: false; reason: string } {
+	const evidence: ScoutCitationEvidence[] = [];
 	for (const citation of citations) {
-		const citedPath = path.resolve(cwd, citation.path);
-		const relative = path.relative(cwd, citedPath);
-		if (relative === "" || relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) {
-			return { ok: false, reason: `Scout citation path escapes the workspace: ${citation.path}` };
-		}
-		const content = input.filesystem.readFile(citedPath);
-		if (content === null) return { ok: false, reason: `Scout citation cannot be read: ${citation.path}` };
-		const lineCount = content.split(/\r\n|\r|\n/u).length;
-		if (citation.line > lineCount) {
-			return { ok: false, reason: `Scout citation is past end of file: ${citation.path}:${citation.line}` };
-		}
-		// Grounding: a line that exists is not a line anyone looked at. Where the
-		// run's own read spans are known, the cited line has to fall inside one,
-		// so an approximated or inferred line number cannot pass as observation.
-		if (input.observedReadRanges !== undefined) {
-			const spans = input.observedReadRanges.get(citedPath) ?? [];
-			if (!spans.some(([start, end]) => citation.line >= start && citation.line <= end)) {
-				const observed =
-					spans.length === 0
-						? "this run never read that file"
-						: `this run read only ${spans.map(([start, end]) => `${start}-${end}`).join(", ")}`;
-				return {
-					ok: false,
-					reason: `Scout citation is not grounded in a live read: ${citation.path}:${citation.line} (${observed})`,
-				};
-			}
-		}
-		evidence.push({ ...citation, contentDigest: createHash("sha256").update(content, "utf8").digest("hex") });
+		const checked = validateScoutCitation(input, citation);
+		if (!checked.ok) return checked;
+		evidence.push(checked.evidence);
 	}
 	return { ok: true, evidence };
+}
+
+/**
+ * Ground a degraded result without ever failing it. On a strict result an
+ * ungrounded citation is fabrication and fails the run; here the result already
+ * carries no correctness label, so a citation that does not ground is simply
+ * dropped and its claim demoted to an ungrounded lead. The parent gets what the
+ * run actually observed, correctly labeled, instead of nothing.
+ */
+function groundDegradedScout(
+	contract: ResultContract,
+	input: ResultContractValidationInput,
+	scout: ScoutResult,
+	degradedReason: string,
+): ResultContractValidation {
+	const grounded: ScoutFinding[] = [];
+	const evidence: ScoutCitationEvidence[] = [];
+	const demoted: string[] = [];
+	for (const finding of scout.findings) {
+		const checked = validateScoutCitation(input, { path: finding.path, line: finding.line });
+		if (checked.ok) {
+			grounded.push(finding);
+			evidence.push(checked.evidence);
+			continue;
+		}
+		demoted.push(finding.claim);
+	}
+	const degraded: ScoutResult = {
+		findings: grounded,
+		citations: grounded.map(({ path: citedPath, line }) => ({ path: citedPath, line })),
+		needsSplit: false,
+		proposedSubtasks: [],
+		ungroundedClaims: [...(scout.ungroundedClaims ?? []), ...demoted],
+		degradedReason,
+	};
+	return success(contract, "unmeasured", { scout: degraded, evidence }, { scout: degraded, reason: degradedReason });
 }
 
 function validateVerifier(contract: ResultContract, output: string | null): ResultContractValidation {
@@ -839,10 +972,17 @@ function validateArchitect(
  * Validate one terminal result under its recipe's typed contract. The caller
  * supplies filesystem access so this module stays deterministic and testable.
  */
-/** Parse the Scout structured result for model-facing task decomposition. */
+/**
+ * Parse the Scout structured result for model-facing task decomposition.
+ * Strict on purpose: this feeds the `from_scout` continuation, where a subtask
+ * becomes a real dispatch, so a degraded result is rejected here even though it
+ * conforms as a terminal result. Degraded reconnaissance is readable evidence,
+ * never a control-plane input.
+ */
 export function parseScoutResult(output: string): ScoutResult | null {
 	const validation = validateScout({ kind: "scout-report" }, output);
-	return validation.conformance === "pass" && validation.scout !== undefined ? validation.scout : null;
+	if (validation.conformance !== "pass" || validation.scout === undefined) return null;
+	return validation.scout.degradedReason === undefined ? validation.scout : null;
 }
 
 export function validateResultContract(input: ResultContractValidationInput): ResultContractValidation {
@@ -852,6 +992,10 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 		case "scout-report": {
 			const validation = validateScout(input.contract, input.output);
 			if (validation.scout === undefined) return validation;
+			const degradedReason = validation.scout.degradedReason;
+			if (degradedReason !== undefined) {
+				return groundDegradedScout(input.contract, input, validation.scout, degradedReason);
+			}
 			const citations = validateScoutCitations(input, validation.scout.citations);
 			return citations.ok
 				? success(
@@ -942,7 +1086,10 @@ function resultContractShape(contract: ResultContract): string {
 		case "architect-plan":
 			return `a plan artifact written to ${contract.path}, then optionally {"commitMessage":"...","summary":"..."} describing it`;
 		case "scout-report":
-			return '{"findings":[{"claim":"what you observed","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]} or {"findings":[],"needsSplit":true,"proposedSubtasks":[{"id":"inspect","task":"Inspect the boundary","dependencies":[],"expectedResultContract":"scout-report","requestedAuthority":"read-only"}]}';
+			// The third alternative is the floor this validator actually accepts.
+			// A repair round that only ever restates the strict shape is what the
+			// run already failed twice, so it is told the cheaper exit as well.
+			return '{"findings":[{"claim":"what you observed","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]} or {"findings":[],"needsSplit":true,"proposedSubtasks":[{"id":"inspect","task":"Inspect the boundary","dependencies":[],"expectedResultContract":"scout-report","requestedAuthority":"read-only"}]} or, if you cannot produce a citation you are sure of, at least {"findings":[{"claim":"what you observed"}]}, which is accepted as an ungrounded lead rather than losing the run';
 		case "verifier-report":
 			return '{"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]}';
 		case "debugger-report":
