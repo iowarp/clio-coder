@@ -48,6 +48,7 @@ current source, tests, and `CHANGELOG.md`.
 | Actionable error remediation and diagnostics keyed by exact user-facing messages | [troubleshooting.md](troubleshooting.md) |
 | Canonical definitions of 17 core architectural concepts mapped to `src/` types | [glossary.md](glossary.md) |
 | Complete source-to-documentation mapping matrix and subsystem coverage status | [documentation-coverage.md](documentation-coverage.md) |
+| Issue-driven development lifecycle: file-ticket through release, label taxonomy, and dogfooding setup | [development-pipeline.md](development-pipeline.md) |
 | Proactive task memory architecture, session task bank, intervention rules, and handoff carrying | [proactive-memory.md](proactive-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |
 | WAL SQLite trace mirror database schema, rowid cursor queries, rebuildability, and CLI trace subcommands | [trace-store.md](trace-store.md) ([Interactive Blueprint](html/trace_blueprint.html)) |
 | Private context index determinism, target smoke matrices, and Clio machinery soak benchmark suite | [evals-internal.md](evals-internal.md) ([Blueprints: evals_internal](html/evals_internal_blueprint.html), [soak](html/soak_blueprint.html)) |
