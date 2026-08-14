@@ -25,6 +25,7 @@ it("constructs the input runtime without a terminal and wires controller-owned a
 			onCycleThinking: () => events.push("thinking:cycle"),
 			cycleScopedModelForward: () => events.push("model:forward"),
 			cycleScopedModelBackward: () => events.push("model:backward"),
+			backgroundActiveDispatch: () => events.push("dispatch:background"),
 		},
 		overlay: {
 			getState: () => "closed",

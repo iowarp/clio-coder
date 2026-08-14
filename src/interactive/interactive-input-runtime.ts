@@ -20,6 +20,7 @@ export interface InteractiveInputKeyActionDeps {
 	requestShutdown: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
+	backgroundDispatch: () => void;
 	openModelSelector: () => void;
 	openTree: () => void;
 	cycleScopedModelForward: () => void;
@@ -47,6 +48,8 @@ export interface InteractiveInputRuntimeDeps {
 		onCycleThinking(): void;
 		cycleScopedModelForward(): void;
 		cycleScopedModelBackward(): void;
+		/** Convert the newest attached dispatch into a detached batch and notice the outcome. */
+		backgroundActiveDispatch(): void;
 	};
 	overlay: {
 		getState(): OverlayState;
@@ -130,6 +133,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		requestShutdown: () => void controller.shutdown(),
 		toggleStatus: deps.overlay.toggleFooterDashboardState,
 		toggleDispatchBoard: deps.overlay.toggleDispatchBoardOverlay,
+		backgroundDispatch: deps.actions.backgroundActiveDispatch,
 		openModelSelector: deps.overlay.openModelOverlayState,
 		openTree: deps.overlay.openTreeOverlayState,
 		cycleScopedModelForward: () => {
