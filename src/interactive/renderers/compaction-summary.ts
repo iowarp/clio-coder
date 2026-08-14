@@ -19,7 +19,7 @@
 
 import type { CompactionSummaryEntry } from "../../domains/session/entries.js";
 import { Markdown, type MarkdownTheme, wrapTextWithAnsi } from "../../engine/tui.js";
-import { clioTheme, markdownTheme } from "../theme/index.js";
+import { clioTheme, markdownTheme, screenTitle } from "../theme/index.js";
 
 const LABEL = "compaction summary";
 const BODY_INDENT = "  ";
@@ -63,7 +63,7 @@ export interface RenderCompactionSummaryOptions {
  * `renderCompactionSummaryEntry` when the body is included too.
  */
 function renderCompactionSummaryHeader(entry: CompactionSummaryEntry, width: number): string[] {
-	const label = theme.style("title", `[${LABEL}]`, { bold: true });
+	const label = screenTitle(theme, `[${LABEL}]`);
 	const tokens = Number.isFinite(entry.tokensBefore) ? entry.tokensBefore.toLocaleString() : "0";
 	const trigger = entry.trigger ? ` via ${entry.trigger}` : "";
 	const meta = theme.fg("dim", `~${tokens} tokens before, cont. at turn ${entry.firstKeptTurnId}${trigger}`);

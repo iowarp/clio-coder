@@ -14,7 +14,7 @@ import {
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
-import { clioTheme, fitUnits, rule } from "./theme/index.js";
+import { clioTheme, fitUnits, rule, screenTitle } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 84;
 const REFRESH_MS = 1_000;
@@ -41,7 +41,7 @@ function entryLines(entry: TaskMemoryEntry, width: number): string[] {
 
 function taskClassLines(label: string, entries: ReadonlyArray<TaskMemoryEntry>, width: number): string[] {
 	const theme = clioTheme();
-	const lines = [theme.style("title", `${label} (${entries.length})`, { bold: true })];
+	const lines = [screenTitle(theme, `${label} (${entries.length})`)];
 	if (entries.length === 0) return [...lines, theme.fg("dim", "  none")];
 	for (const entry of entries) lines.push(...entryLines(entry, width));
 	return lines;
@@ -50,7 +50,7 @@ function taskClassLines(label: string, entries: ReadonlyArray<TaskMemoryEntry>, 
 function approvedLessonLines(records: ReadonlyArray<MemoryRecord>, width: number): string[] {
 	const theme = clioTheme();
 	const approved = records.filter((record) => record.approved && record.rejectedAt === undefined);
-	const lines = [theme.style("title", `Approved lessons (${approved.length})`, { bold: true })];
+	const lines = [screenTitle(theme, `Approved lessons (${approved.length})`)];
 	if (approved.length === 0) return [...lines, theme.fg("dim", "  none")];
 	for (const record of approved) {
 		lines.push(fitLine(`${theme.fg("accent", record.id)} ${theme.fg("dim", `${record.scope}:${record.key}`)}`, width));
@@ -84,7 +84,7 @@ export function formatMemoryOverlayBodyLines(
 		rule(theme, width),
 		...approvedLessonLines(records, width),
 		"",
-		theme.style("title", `Task bank (${status.size})`, { bold: true }),
+		screenTitle(theme, `Task bank (${status.size})`),
 		...taskClassLines("status (private)", bank.status === null ? [] : [bank.status], width),
 		...taskClassLines("knowledge", bank.knowledge, width),
 		...taskClassLines("procedural", bank.procedural, width),
@@ -100,7 +100,7 @@ export function formatMemoryOverlayBodyLines(
  */
 function activityLines(status: TaskMemoryOperatorStatus, width: number): string[] {
 	const theme = clioTheme();
-	const lines = [theme.style("title", `Recent steps (${status.activity.length})`, { bold: true })];
+	const lines = [screenTitle(theme, `Recent steps (${status.activity.length})`)];
 	if (status.stepInFlight) lines.push(fitLine(theme.fg("reason", "  a background step is running"), width));
 	if (status.activity.length === 0) {
 		return [...lines, theme.fg("dim", status.stepInFlight ? "  no completed step yet" : "  none")];

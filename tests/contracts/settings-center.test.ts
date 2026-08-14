@@ -354,9 +354,22 @@ describe("contracts/settings center", () => {
 		ok(rendered.includes(SCOPE_NOTE), "footer states the live/global scope");
 	});
 
-	it("renders a stacked center at 80x20", () => {
+	// The two nested frames above this body each cost a border and a pad, so an
+	// 80-column terminal renders at 72 and a 76-column one at 68. Both cases
+	// below use the width the terminal they name actually produces.
+	it("renders two lanes at an 80-column terminal (72 inner columns)", () => {
 		const center = noopSettingsCenter(16);
 		const lines = center.render(72);
+		const rendered = stripAnsi(lines.join("\n"));
+		strictEqual(lines.length, 16);
+		ok(rendered.includes("Sections"));
+		ok(rendered.includes("Autonomy level"));
+		ok(rendered.includes("│"), "an 80-column terminal gets the two-lane layout");
+	});
+
+	it("renders a stacked center below the two-lane floor (76-column terminal)", () => {
+		const center = noopSettingsCenter(16);
+		const lines = center.render(68);
 		const rendered = stripAnsi(lines.join("\n"));
 		strictEqual(lines.length, 16);
 		ok(rendered.includes("Autonomy"));

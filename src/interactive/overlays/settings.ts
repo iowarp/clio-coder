@@ -36,7 +36,17 @@ const SECTION_LANE_WIDTH = 24;
  * the frame's four columns.
  */
 const ULTRAWIDE_LAYOUT_MIN_WIDTH = 116;
-const WIDE_LAYOUT_MIN_WIDTH = 96;
+/**
+ * The design's degradation matrix wants the two-column layout at an 80-column
+ * terminal. Two nested frames sit above this body (the application frame and
+ * the overlay's own), each costing a border and a pad, so the body is the
+ * terminal width less eight: 72 at an 80-column terminal, 68 at a 76-column
+ * one. 72 therefore keeps an 80-column terminal two-column (left lane 24 +
+ * divider + rows ~47, with the key-path column dropped below
+ * DROP_PATH_COLUMN_WIDTH) while anything narrower, where the value column
+ * would collapse into the labels, stays stacked.
+ */
+const WIDE_LAYOUT_MIN_WIDTH = 72;
 const DROP_PATH_COLUMN_WIDTH = 52;
 const FALLBACK_THINKING_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const ROW_GAP = "  ";
@@ -363,7 +373,7 @@ export class SubmenuWrapper implements Component {
 	render(width: number): string[] {
 		const theme = clioTheme();
 		const lines: string[] = [];
-		lines.push(theme.style("title", `  ${this.title}`, { bold: true }));
+		lines.push(screenTitle(theme, `  ${this.title}`));
 		if (this.note) {
 			for (const line of wrapTextWithAnsi(this.note, Math.max(1, width - 2))) {
 				lines.push(theme.fg("dim", `  ${line}`));

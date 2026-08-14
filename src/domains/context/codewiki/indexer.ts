@@ -4,7 +4,7 @@ import { readFile as readFileAsync } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { classifyCHeaderLanguage, isAmbiguousHeaderPath } from "../../../core/c-header-language.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
-import { enumerateWorkspaceFiles, filterWorkspaceFileCandidates } from "../../../core/workspace-files.js";
+import { enumerateWorkspaceFilesAsync, filterWorkspaceFileCandidates } from "../../../core/workspace-files.js";
 import type { ProjectType, SourceProjectType } from "../../session/workspace/project-type.js";
 import { EXCLUDED_DIRS } from "../excluded-dirs.js";
 import { extractCMake, isCMakePath } from "./cmake.js";
@@ -1095,8 +1095,11 @@ async function buildFromPaths(
 }
 
 export async function buildCodewiki(input: BuildCodewikiInput, options: CodewikiBuildOptions = {}): Promise<Codewiki> {
-	const files = enumerateWorkspaceFiles(input.cwd, EXCLUDED_DIRS).filter(isIndexablePath);
-	return buildFromPaths(input.cwd, input.language, files, options);
+	const slicer = options.slicer ?? createSlicer();
+	const files = (await enumerateWorkspaceFilesAsync(input.cwd, EXCLUDED_DIRS, undefined, slicer)).filter(
+		isIndexablePath,
+	);
+	return buildFromPaths(input.cwd, input.language, files, { ...options, slicer });
 }
 
 /**
@@ -1182,7 +1185,9 @@ export async function syncCodewiki(
 ): Promise<Codewiki> {
 	const slicer = options.slicer ?? createSlicer();
 	const readFile = options.readFile ?? defaultReadFile;
-	const currentPaths = enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath);
+	const currentPaths = (await enumerateWorkspaceFilesAsync(cwd, EXCLUDED_DIRS, undefined, slicer)).filter(
+		isIndexablePath,
+	);
 	const currentFiles = new Map<string, string>();
 	const currentTexts = new Map<string, string>();
 	for (const relPath of currentPaths) {

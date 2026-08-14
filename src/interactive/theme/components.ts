@@ -1,12 +1,13 @@
 import type { EditorTheme, MarkdownTheme, SelectListTheme, SettingsListTheme } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
+import { screenTitle } from "./segments.js";
 import type { ClioTheme } from "./tokens.js";
 
 const identity = (text: string): string => text;
 
 export function markdownTheme(theme: ClioTheme, highlightCode?: MarkdownTheme["highlightCode"]): MarkdownTheme {
 	return {
-		heading: (text) => theme.style("title", text, { bold: true }),
+		heading: (text) => screenTitle(theme, text),
 		link: (text) => theme.fg("info", text),
 		linkUrl: (text) => theme.fg("dim", text),
 		code: (text) => theme.fg("muted", text),

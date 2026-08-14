@@ -777,7 +777,29 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let cachedVerbosity: OutputVerbosity | undefined;
 	let cachedLiveToolOutput: boolean | undefined;
 	const entryRenderCache = new Map<TranscriptEntry, { key: string; lines: string[] }>();
-	const MAX_ENTRY_RENDER_CACHE = 256;
+	/**
+	 * The cache follows the transcript instead of stopping at a fixed 256
+	 * entries, which re-rendered everything past the cap on every dirty frame
+	 * (10 ms/frame at 800 entries). The ceiling bounds worst-case memory at
+	 * roughly 4096 rendered entries; past it, the excess only re-renders on
+	 * full-rebuild events (width change, expand-all), which the frozen prefix
+	 * below makes rare rather than per-frame.
+	 */
+	const MIN_ENTRY_RENDER_CACHE = 256;
+	const MAX_ENTRY_RENDER_CACHE = 4096;
+	const entryCacheCapacity = (): number =>
+		Math.max(MIN_ENTRY_RENDER_CACHE, Math.min(MAX_ENTRY_RENDER_CACHE, transcript.length));
+	/**
+	 * Windowed-tail build (F19 on pi-tui 0.83 terms): the lines of every settled
+	 * leading entry are baked into one frozen prefix, so a dirty frame re-renders
+	 * only the live tail and re-emits the prefix by reference. pi-tui still
+	 * receives the full line array, deliberately: the 0.83 renderer keeps every
+	 * line in `previousLines` and full-redraws (clearing scrollback) when the
+	 * head shrinks, so a real shrinking window needs the 0.84 ScrollView
+	 * architecture. The freeze is dropped whenever a frozen entry is invalidated
+	 * or the render key changes.
+	 */
+	let frozen: { lines: string[]; through: number; key: string } | null = null;
 	let thinkingExpanded = false;
 	let liveToolOutput = true;
 	const unboundedToolBodies = options.unboundedToolBodies === true;
@@ -787,6 +809,20 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 	const invalidateEntryCache = (entry: TranscriptEntry): void => {
 		entryRenderCache.delete(entry);
+		if (frozen !== null && transcript.indexOf(entry) < frozen.through) frozen = null;
+	};
+	/** Full drop of both render caches; used by the toggle paths that touch many entries. */
+	const clearRenderCaches = (): void => {
+		entryRenderCache.clear();
+		frozen = null;
+	};
+	/**
+	 * A mutation is about to land on the tail entry without an explicit
+	 * invalidation. If the freeze extends over the whole transcript, that tail
+	 * entry is frozen and the freeze must go.
+	 */
+	const unfreezeTail = (): void => {
+		if (frozen !== null && frozen.through >= transcript.length) frozen = null;
 	};
 
 	const resolveExpandKey = (): string | undefined => {
@@ -848,7 +884,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	const ensureAssistant = (): Extract<TranscriptEntry, { role: "assistant" }> => {
 		const last = transcript[transcript.length - 1];
-		if (last && last.role === "assistant") return last;
+		if (last && last.role === "assistant") {
+			// Callers mutate the returned entry (pending, thinking, segments)
+			// without always invalidating; a fully-frozen transcript would keep
+			// serving the settled render of this tail entry.
+			unfreezeTail();
+			return last;
+		}
 		const entry: Extract<TranscriptEntry, { role: "assistant" }> = {
 			role: "assistant",
 			segments: [],
@@ -928,6 +970,20 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		return null;
 	};
 
+	/** True when the entry owns the tool the expand hint currently points at. */
+	const entryContainsHint = (entry: TranscriptEntry, latestHintToolId: string | null): boolean =>
+		latestHintToolId !== null &&
+		entry.role === "assistant" &&
+		entry.segments.some((segment) => segment.kind === "tool" && segment.id === latestHintToolId);
+
+	/** Settled entries whose render is a pure function of the base key. */
+	const entryIsStable = (entry: TranscriptEntry): boolean =>
+		entry.role === "user" ||
+		entry.role === "replayBlock" ||
+		(entry.role === "assistant" &&
+			!entry.pending &&
+			!entry.segments.some((segment) => segment.kind === "tool" && !segment.finished));
+
 	const render = (width: number): string[] => {
 		const startedAt = performance.now();
 		const expandKey = resolveExpandKey();
@@ -946,49 +1002,65 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: true, entriesRendered: 0 });
 			return cachedLines;
 		}
-		const out: string[] = [];
 		const latestHintToolId = latestCollapsedFinishedToolId();
 		const nowMs = now();
-		// Loop-invariant: nothing in the key depends on the entry.
-		const cacheKey = `${width}|${expandKey ?? ""}|${latestHintToolId ?? ""}|${verbosity}|${liveToolOutput}`;
+		// The hint id is deliberately NOT part of the shared key: it changes on
+		// every finished collapsed tool, and keying every entry on it re-rendered
+		// the entire transcript per tool completion. Only the entry that contains
+		// the hint tool renders differently, so only that entry's key carries it.
+		const baseKey = `${width}|${expandKey ?? ""}|${verbosity}|${liveToolOutput}`;
+		const capacity = entryCacheCapacity();
+		if (frozen !== null && frozen.key !== baseKey) frozen = null;
+		const out: string[] = frozen === null ? [] : frozen.lines.slice();
+		const startIndex = frozen === null ? 0 : frozen.through;
+		// The freeze extends over the contiguous run of stable, hint-free leading
+		// entries; it is captured after the loop from what this frame rendered.
+		let freezeThrough = startIndex;
+		let freezeLineCount = out.length;
+		let freezeOpen = frozen !== null || startIndex === 0;
 		let entriesRendered = 0;
-		for (let i = 0; i < transcript.length; i += 1) {
+		for (let i = startIndex; i < transcript.length; i += 1) {
 			const entry = transcript[i];
 			if (!entry) continue;
 			if (i > 0) out.push("");
+			const containsHint = entryContainsHint(entry, latestHintToolId);
+			const entryKey = containsHint ? `${baseKey}|hint:${latestHintToolId}` : baseKey;
 			const cached = entryRenderCache.get(entry);
-			const cacheable =
-				i >= transcript.length - MAX_ENTRY_RENDER_CACHE &&
-				entry.role !== "replayBlock" &&
-				(entry.role !== "assistant" ||
-					(!entry.pending && !entry.segments.some((segment) => segment.kind === "tool" && !segment.finished)));
-			if (cacheable && cached?.key === cacheKey) {
+			const cacheable = i >= transcript.length - capacity && entry.role !== "replayBlock" && entryIsStable(entry);
+			if (cacheable && cached?.key === entryKey) {
 				// A spread here is slower than a loop for large arrays and blows the
 				// stack outright for a single entry that renders enough lines.
 				for (const line of cached.lines) out.push(line);
-				continue;
-			}
-			entriesRendered += 1;
-			const renderedEntry = renderEntryLines(
-				entry,
-				width,
-				expandKey,
-				latestHintToolId,
-				nowMs,
-				unboundedToolBodies,
-				verbosity,
-				liveToolOutput,
-			);
-			for (const line of renderedEntry) out.push(line);
-			if (cacheable) {
-				entryRenderCache.set(entry, { key: cacheKey, lines: renderedEntry });
-				while (entryRenderCache.size > MAX_ENTRY_RENDER_CACHE) {
-					const oldest = entryRenderCache.keys().next().value;
-					if (oldest === undefined) break;
-					entryRenderCache.delete(oldest);
+			} else {
+				entriesRendered += 1;
+				const renderedEntry = renderEntryLines(
+					entry,
+					width,
+					expandKey,
+					latestHintToolId,
+					nowMs,
+					unboundedToolBodies,
+					verbosity,
+					liveToolOutput,
+				);
+				for (const line of renderedEntry) out.push(line);
+				if (cacheable) {
+					entryRenderCache.set(entry, { key: entryKey, lines: renderedEntry });
+					while (entryRenderCache.size > capacity) {
+						const oldest = entryRenderCache.keys().next().value;
+						if (oldest === undefined) break;
+						entryRenderCache.delete(oldest);
+					}
 				}
 			}
+			if (freezeOpen && i === freezeThrough && entryIsStable(entry) && !containsHint) {
+				freezeThrough = i + 1;
+				freezeLineCount = out.length;
+			} else {
+				freezeOpen = false;
+			}
 		}
+		frozen = freezeThrough > 0 ? { lines: out.slice(0, freezeLineCount), through: freezeThrough, key: baseKey } : null;
 		cachedLines = out;
 		cachedWidth = width;
 		cachedExpandKey = expandKey;
@@ -1016,7 +1088,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					const seg = entry.segments[segIndex];
 					if (seg?.kind !== "tool") continue;
 					seg.expanded = !seg.expanded;
-					entryRenderCache.clear();
+					clearRenderCaches();
 					markDirty();
 					return true;
 				}
@@ -1034,7 +1106,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (tools.length === 0) return false;
 			const expand = tools.some((seg) => !seg.expanded);
 			for (const seg of tools) seg.expanded = expand;
-			entryRenderCache.clear();
+			clearRenderCaches();
 			markDirty();
 			return true;
 		},
@@ -1045,7 +1117,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					if (seg.kind === "tool") seg.expanded = false;
 				}
 			}
-			entryRenderCache.clear();
+			clearRenderCaches();
 			markDirty();
 		},
 		toggleLastThinking(): boolean {
@@ -1055,7 +1127,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (entry.thinking.length === 0) continue;
 				entry.expandedThinking = entry.expandedThinking !== true;
 				thinkingExpanded = entry.expandedThinking === true;
-				entryRenderCache.clear();
+				clearRenderCaches();
 				markDirty();
 				return true;
 			}
@@ -1074,7 +1146,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const expand = entries.some((entry) => entry.expandedThinking !== true);
 			for (const entry of entries) entry.expandedThinking = expand;
 			thinkingExpanded = expand;
-			entryRenderCache.clear();
+			clearRenderCaches();
 			markDirty();
 			return true;
 		},
@@ -1085,6 +1157,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		reset(): void {
 			transcript.length = 0;
+			clearRenderCaches();
 			markDirty();
 		},
 		applyEvent(event: ChatLoopEvent): void {
@@ -1100,6 +1173,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					role: "replayBlock",
 					renderBlock: (width) => wrapTextWithAnsi(styleTaggedNotice(text), width),
 				});
+				markDirty();
+				return;
+			}
+			if (event.type === "queued_user_turn") {
+				// A queued steer or follow-up the engine just injected. Rendering it
+				// here, at injection time, keeps the transcript in the order the
+				// model saw: enqueue time shows the text only in the queue panel.
+				transcript.push({ role: "user", text: event.text });
 				markDirty();
 				return;
 			}
@@ -1345,6 +1426,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			const last = transcript[transcript.length - 1];
 			if (last && last.role === "assistant") {
+				unfreezeTail();
 				last.statusLine = null;
 				markDirty();
 			}

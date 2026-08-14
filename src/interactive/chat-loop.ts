@@ -73,6 +73,19 @@ export interface QueueUpdateEvent {
 }
 
 /**
+ * A queued steer or follow-up the engine just injected into the run. Emitted
+ * at injection time (never at enqueue time) so the transcript shows the user
+ * turn exactly when the model sees it, mirroring the pi-coding-agent flow
+ * where a pending message leaves the queue panel and enters the chat in the
+ * same beat. Enqueue time shows the text only in the steering-queue panel.
+ */
+export interface QueuedUserTurnEvent {
+	type: "queued_user_turn";
+	text: string;
+	kind: QueuedChatMessage["kind"];
+}
+
+/**
  * First-class advisory event. `surface` says where the notice belongs:
  * "transcript" notices are turn-adjacent chat lines (cancellations,
  * compaction summaries, configuration errors) and "footer" notices are
@@ -109,6 +122,7 @@ export type ChatLoopEvent =
 	| AssistantDeltaEvent
 	| RetryStatusEvent
 	| QueueUpdateEvent
+	| QueuedUserTurnEvent
 	| ChatNoticeEvent
 	| AgentStatusEvent
 	| ToolApprovalStateEvent;
@@ -287,8 +301,6 @@ export interface CreateChatLoopDeps {
 	 * composition; the loop owns the buffer the reminder lands in.
 	 */
 	registerDeferredReminderSink?: (sink: (message: string) => void) => void;
-	/** True when an interactive TUI can handle Esc cancellation notices. */
-	interactiveTui?: boolean;
 }
 
 export function reloadProtectedArtifactsForSession(
@@ -352,8 +364,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const queues = createTurnQueues({
 		state,
 		emitQueueUpdateEvent: (messages) => emit({ type: "queue_update", messages }),
+		emitQueuedUserTurn: (entry) => emit({ type: "queued_user_turn", text: entry.text, kind: entry.kind }),
 		emitNotice,
-		interactiveTui: deps.interactiveTui !== false,
 		submit: (text, options) => api.submit(text, options),
 	});
 

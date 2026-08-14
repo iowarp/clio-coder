@@ -77,6 +77,39 @@ describe("chat-panel live thinking streaming", () => {
 	});
 });
 
+describe("chat-panel queued user turn injection", () => {
+	it("renders an injected steer as a user turn between assistant entries", () => {
+		const panel = createChatPanel();
+		panel.appendUser("start a long task");
+		panel.applyEvent({
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "working on it",
+			partialText: "working on it",
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "queued_user_turn",
+			text: "actually only list directories",
+			kind: "steer",
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "pivoting",
+			partialText: "pivoting",
+		} as ChatLoopEvent);
+		const rendered = panel.render(80).map(strip);
+		const joined = rendered.join("\n");
+		const userGlyphRows = rendered.filter((line) => line.startsWith(`${GLYPH.user} `));
+		strictEqual(userGlyphRows.length, 2, "both the prompt and the injected steer carry the user glyph");
+		const promptIndex = rendered.findIndex((line) => line.includes("start a long task"));
+		const steerIndex = rendered.findIndex((line) => line.includes("actually only list directories"));
+		const pivotIndex = rendered.findIndex((line) => line.includes("pivoting"));
+		ok(promptIndex < steerIndex, "the steer renders after the original prompt");
+		ok(steerIndex < pivotIndex, `the post-steer response renders below the injected turn:\n${joined}`);
+	});
+});
+
 describe("chat-panel tool-body export rendering", () => {
 	function feedLargeGrep(panel: ReturnType<typeof createChatPanel>): void {
 		panel.applyEvent({
@@ -931,5 +964,121 @@ describe("chat-panel render caching", () => {
 		} as ChatLoopEvent);
 		strictEqual(narrow, fresh.render(40).join("\n"));
 		ok(wide !== narrow, "the two widths must actually wrap differently for this test to mean anything");
+	});
+
+	it("serves settled history from the frozen prefix and re-renders only the live tail", () => {
+		const rendered: number[] = [];
+		const panel = createChatPanel({ onRenderMetrics: (metrics) => rendered.push(metrics.entriesRendered) });
+		settledTurns(panel, 30);
+		panel.render(80);
+
+		// A streaming delta dirties the panel; the 60 settled entries before the
+		// live one must come from the frozen prefix, not from per-entry renders.
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "streaming tail" } as ChatLoopEvent);
+		panel.render(80);
+		const dirtyRender = rendered.at(-1);
+		ok(
+			dirtyRender !== undefined && dirtyRender <= 2,
+			`a dirty frame over settled history re-rendered ${dirtyRender} entries; the frozen prefix should hold it at the live tail`,
+		);
+
+		// Byte identity against a from-scratch panel with the same transcript.
+		const fresh = createChatPanel();
+		settledTurns(fresh, 30);
+		fresh.applyEvent({ type: "text_delta", contentIndex: 0, delta: "streaming tail" } as ChatLoopEvent);
+		strictEqual(panel.render(80).join("\n"), fresh.render(80).join("\n"));
+	});
+
+	it("a finished tool moves the expand hint without re-rendering settled history", () => {
+		const rendered: number[] = [];
+		const panel = createChatPanel({ onRenderMetrics: (metrics) => rendered.push(metrics.entriesRendered) });
+		const toolTurn = (id: string): void => {
+			panel.appendUser(`run ${id}`);
+			panel.applyEvent({
+				type: "tool_execution_start",
+				toolCallId: id,
+				toolName: "bash",
+				args: { command: `echo ${id}` },
+			} as ChatLoopEvent);
+			panel.applyEvent({ type: "tool_execution_end", toolCallId: id, result: "ok", isError: false } as ChatLoopEvent);
+			panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		};
+		for (let i = 0; i < 20; i += 1) toolTurn(`tool-${i}`);
+		panel.render(80);
+
+		// The next finished tool moves the hint from tool-19 to tool-20. Under a
+		// shared hint-bearing key that re-rendered every entry in the transcript.
+		toolTurn("tool-20");
+		panel.render(80);
+		const dirtyRender = rendered.at(-1);
+		ok(
+			dirtyRender !== undefined && dirtyRender <= 3,
+			`the hint move re-rendered ${dirtyRender} entries; only the old and new hint owners should re-render`,
+		);
+
+		const fresh = createChatPanel();
+		const freshTurn = (id: string): void => {
+			fresh.appendUser(`run ${id}`);
+			fresh.applyEvent({
+				type: "tool_execution_start",
+				toolCallId: id,
+				toolName: "bash",
+				args: { command: `echo ${id}` },
+			} as ChatLoopEvent);
+			fresh.applyEvent({ type: "tool_execution_end", toolCallId: id, result: "ok", isError: false } as ChatLoopEvent);
+			fresh.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		};
+		for (let i = 0; i < 21; i += 1) freshTurn(`tool-${i}`);
+		strictEqual(panel.render(80).join("\n"), fresh.render(80).join("\n"));
+	});
+
+	it("expanding an old tool re-renders it correctly through the freeze drop", () => {
+		const toolBody = Array.from({ length: 8 }, (_, i) => `result row ${i}`).join("\n");
+		const buildPanel = (): ReturnType<typeof createChatPanel> => {
+			// Fixed clock: real elapsed time would stamp a wall-clock duration onto
+			// the tool row in whichever panel happened to run slower.
+			const built = createChatPanel({ now: () => 1000 });
+			built.appendUser("first");
+			built.applyEvent({
+				type: "tool_execution_start",
+				toolCallId: "old-tool",
+				toolName: "bash",
+				args: { command: "echo old" },
+			} as ChatLoopEvent);
+			built.applyEvent({
+				type: "tool_execution_end",
+				toolCallId: "old-tool",
+				result: toolBody,
+				isError: false,
+			} as ChatLoopEvent);
+			built.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+			built.appendUser("second");
+			built.applyEvent({
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: "settled answer" }] },
+			} as ChatLoopEvent);
+			built.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+			return built;
+		};
+
+		// The freeze forms over the settled transcript, then each toggle mutates a
+		// frozen entry; every drop must produce the same bytes a fresh panel does.
+		// Live tools auto-expand, so the first toggle collapses and the second
+		// re-expands.
+		const panel = buildPanel();
+		const expanded = panel.render(80).join("\n");
+		ok(expanded.includes("result row 7"), "the auto-expanded body must render before any toggle");
+		panel.toggleAllToolsExpanded();
+		const collapsed = panel.render(80).join("\n");
+		ok(!collapsed.includes("result row 7"), "the collapse toggle must drop the frozen expanded body");
+		panel.toggleAllToolsExpanded();
+		const reExpanded = panel.render(80).join("\n");
+		ok(reExpanded.includes("result row 7"), "the re-expand toggle must restore the body through the freeze drop");
+
+		const fresh = buildPanel();
+		fresh.toggleAllToolsExpanded();
+		strictEqual(collapsed, fresh.render(80).join("\n"));
+		fresh.toggleAllToolsExpanded();
+		strictEqual(reExpanded, fresh.render(80).join("\n"));
 	});
 });
