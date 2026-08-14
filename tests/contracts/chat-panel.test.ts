@@ -993,7 +993,10 @@ describe("chat-panel render caching", () => {
 		const rendered: number[] = [];
 		// Fixed clock: real elapsed time would stamp a wall-clock duration onto
 		// the tool row in whichever panel happened to run slower.
-		const panel = createChatPanel({ now: () => 1000, onRenderMetrics: (metrics) => rendered.push(metrics.entriesRendered) });
+		const panel = createChatPanel({
+			now: () => 1000,
+			onRenderMetrics: (metrics) => rendered.push(metrics.entriesRendered),
+		});
 		const toolTurn = (id: string): void => {
 			panel.appendUser(`run ${id}`);
 			panel.applyEvent({
