@@ -61,6 +61,15 @@ export class ListOverlayView implements Component {
 	private detailScrollOffset = 0;
 	private readonly input: Input;
 	/**
+	 * The live item set. Separate from `options.items` because a surface backed by
+	 * data that changes under the operator (the memory bank refreshes once a
+	 * second) replaces its rows without rebuilding the view, which is what keeps
+	 * the selection and the detail scroll where they were left.
+	 */
+	private items: ReadonlyArray<ListOverlayItem>;
+	/** Bumped by setItems; part of the render memo key so replaced rows never serve a stale frame. */
+	private itemsEpoch = 0;
+	/**
 	 * Filter memo: the item set is fixed at construction, so the fuzzy pass is a
 	 * pure function of the query. Re-scoring every item per frame defeated the
 	 * overlay frame's identity cache, since each frame returned a fresh array.
@@ -79,17 +88,40 @@ export class ListOverlayView implements Component {
 	) {
 		this.isFilterFocused = !!options.filterable;
 		this.filterText = options.initialFilter ?? "";
+		this.items = options.items;
 		this.input = new Input();
 		if (options.initialFilter) {
 			this.input.setValue(options.initialFilter);
 		}
 	}
 
+	/**
+	 * Replace the rows, keeping the operator's place.
+	 *
+	 * Selection is re-anchored on the selected row's id rather than its index,
+	 * because a refresh that prepends a row would otherwise slide the cursor onto
+	 * a different entry. The detail scroll survives only while the same id stays
+	 * selected; on any other row it is a position in a document that is gone.
+	 */
+	setItems(items: ReadonlyArray<ListOverlayItem>): void {
+		const selectedId = this.filteredItems()[this.selectedIndex]?.id;
+		this.items = items;
+		this.itemsEpoch += 1;
+		this.filterMemo = null;
+		this.renderMemo = null;
+		const nextIndex = selectedId === undefined ? -1 : this.filteredItems().findIndex((item) => item.id === selectedId);
+		if (nextIndex === -1) {
+			this.selectIndex(Math.max(0, Math.min(this.selectedIndex, this.filteredItems().length - 1)));
+			return;
+		}
+		this.selectedIndex = nextIndex;
+	}
+
 	private filteredItems(): ReadonlyArray<ListOverlayItem> {
 		const query = this.filterText.trim();
-		if (query.length === 0) return this.options.items;
+		if (query.length === 0) return this.items;
 		if (this.filterMemo?.query === query) return this.filterMemo.items;
-		const items = fuzzyFilter([...this.options.items], query, (item) => `${item.label} ${item.group ?? ""}`);
+		const items = fuzzyFilter([...this.items], query, (item) => `${item.label} ${item.group ?? ""}`);
 		this.filterMemo = { query, items };
 		return items;
 	}
@@ -117,7 +149,7 @@ export class ListOverlayView implements Component {
 	getHint(): string {
 		// A list with no rows has no row to select, invoke, or act on. Offering
 		// those keys anyway is the same lie the empty state exists to stop telling.
-		if (this.options.items.length === 0) return buildHint([], "close");
+		if (this.items.length === 0) return buildHint([], "close");
 
 		const hintEntries: HintEntry[] = [];
 		hintEntries.push({ key: "↑↓", verb: "select" });
@@ -125,7 +157,7 @@ export class ListOverlayView implements Component {
 			hintEntries.push(FILTER_HINT);
 		}
 
-		const hasDetail = this.options.items.some((item) => !!item.detail);
+		const hasDetail = this.items.some((item) => !!item.detail);
 		if (hasDetail) {
 			if (!this.options.onSelect) {
 				hintEntries.push({ key: "Enter/Tab", verb: "detail" });
@@ -158,7 +190,7 @@ export class ListOverlayView implements Component {
 		pad: boolean,
 	): string[] {
 		const lines: string[] = [];
-		const allItems = this.options.items;
+		const allItems = this.items;
 
 		const uniqueGroups: string[] = [];
 		const seenGroups = new Set<string>();
@@ -328,6 +360,7 @@ export class ListOverlayView implements Component {
 			this.listScrollOffset,
 			this.detailScrollOffset,
 			this.inputEpoch,
+			this.itemsEpoch,
 		].join("|");
 		if (this.renderMemo?.key === memoKey) return this.renderMemo.lines;
 
