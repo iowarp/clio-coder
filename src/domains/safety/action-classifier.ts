@@ -49,7 +49,37 @@ const SYSTEM_MODIFY_PATTERNS: ReadonlyArray<NamedPattern> = [
 	{ name: "chown", re: /\bchown\s+/i },
 ];
 
-const SYSTEM_WRITE_ROOT_PREFIXES: ReadonlyArray<string> = ["/etc", "/usr", "/var", "/bin", "/sbin"];
+/**
+ * `/run` is here because path resolution canonicalizes symlinks: on every
+ * systemd distribution `/var/run` is a symlink to `/run` and `/var/lock` to
+ * `/run/lock`, so a write aimed at either landed on a path no prefix covered
+ * and escaped the system-root rule whenever the workspace happened to sit
+ * under it. Found while auditing the `/var` subdirectories for the carve-out
+ * below.
+ */
+const SYSTEM_WRITE_ROOT_PREFIXES: ReadonlyArray<string> = ["/etc", "/usr", "/var", "/bin", "/sbin", "/run"];
+
+/**
+ * Temp trees that sit under a protected root but are ordinary scratch space,
+ * not system state. `/var/tmp` is the FHS's persistent temp directory and
+ * `/var/folders` is macOS's per-user temp tree, and both are where an operator
+ * or a harness puts a throwaway workspace. Classifying them as system_modify
+ * made every mutating call from a workspace there require a confirmation, which
+ * headless runs answer with a denial: a `clio run` in a `/var/tmp` sandbox
+ * could not write one byte, and the model's recovery was to report work it had
+ * not done. The exemption is a carve-out rather than an enumeration of the
+ * system directories under `/var` on purpose: `/var/log`, `/var/lib`,
+ * `/var/spool`, `/var/db` and every other subdirectory, including ones this
+ * list has never heard of, stay exactly as protected as before.
+ *
+ * `rm -rf` already reads the same line (SYSTEM_MODIFY_PATTERNS rm-rf-root
+ * exempts `/tmp` and `/var/tmp`), so the two checks now agree.
+ */
+const SYSTEM_WRITE_EXEMPT_PREFIXES: ReadonlyArray<string> = ["/var/tmp", "/var/folders"];
+
+function isUnderPrefix(abs: string, prefix: string): boolean {
+	return abs === prefix || abs.startsWith(`${prefix}/`);
+}
 
 function baseClassify(tool: string): ActionClass | null {
 	switch (tool) {
@@ -130,9 +160,12 @@ function writePathClass(pathArg: string, baseCwd?: string): { cls: "system_modif
 		return { cls: "system_modify", reason: `write-path-home-escape: ${pathArg}` };
 	}
 	const abs = resolveCandidate(pathArg, baseCwd);
-	for (const prefix of SYSTEM_WRITE_ROOT_PREFIXES) {
-		if (abs === prefix || abs.startsWith(`${prefix}/`)) {
-			return { cls: "system_modify", reason: `write-path-system-root: ${prefix}` };
+	const exempt = SYSTEM_WRITE_EXEMPT_PREFIXES.some((prefix) => isUnderPrefix(abs, prefix));
+	if (!exempt) {
+		for (const prefix of SYSTEM_WRITE_ROOT_PREFIXES) {
+			if (isUnderPrefix(abs, prefix)) {
+				return { cls: "system_modify", reason: `write-path-system-root: ${prefix}` };
+			}
 		}
 	}
 	if (!isInsideCwd(abs)) {
@@ -141,10 +174,24 @@ function writePathClass(pathArg: string, baseCwd?: string): { cls: "system_modif
 	return { cls: "write" };
 }
 
-function extractWritePath(args: Record<string, unknown> | undefined): string | null {
-	if (!args) return null;
-	const candidate = args.path ?? args.file_path ?? args.filePath;
-	return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+/**
+ * The artifact tool writes a default file name when the call names no path, so
+ * a classifier that only reads the path argument saw no target at all and
+ * returned plain write for a call that writes into whatever the cwd is. The
+ * live evidence: in a `/var/tmp` workspace where write, edit and every bash
+ * redirect were refused as system_modify, `artifact(kind:"report")` wrote
+ * REPORT.md into that same directory. The policy engine's write-root check
+ * already resolves these defaults; this keeps the two in agreement.
+ */
+function artifactDefaultPath(args: Record<string, unknown> | undefined): string {
+	const kind = args?.kind;
+	return kind === "review" ? "REVIEW.md" : kind === "report" ? "REPORT.md" : "PLAN.md";
+}
+
+function extractWritePath(tool: string, args: Record<string, unknown> | undefined): string | null {
+	const candidate = args?.path ?? args?.file_path ?? args?.filePath;
+	if (typeof candidate === "string" && candidate.length > 0) return candidate;
+	return tool === ToolNames.Artifact ? artifactDefaultPath(args) : null;
 }
 
 export function classify(call: ClassifierCall): Classification {
@@ -206,7 +253,7 @@ export function classify(call: ClassifierCall): Classification {
 	}
 
 	if (base === "write") {
-		const pathArg = extractWritePath(call.args);
+		const pathArg = extractWritePath(call.tool, call.args);
 		if (pathArg) {
 			const decision = writePathClass(pathArg);
 			if (decision.cls === "system_modify") {
