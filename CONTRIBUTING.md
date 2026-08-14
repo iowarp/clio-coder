@@ -76,9 +76,12 @@ workstation.
    match `package.json`'s version; the release workflow refuses mismatches.
 5. `.github/workflows/release.yml` verifies the tag against `package.json`,
    reruns the full gate, and creates the GitHub release with the tarball
-   attached. The npm publish step stays disabled until the first stable
-   v0.3.0; when it is re-enabled, the `NPM_TOKEN` repository secret must hold
-   an automation token that can publish `@iowarp` packages.
+   attached. The npm publish step runs only when the repository variable
+   `NPM_PUBLISH` is `true` and the `NPM_TOKEN` secret holds an automation
+   token that can publish `@iowarp` packages; with the variable unset the
+   step is skipped and the GitHub release is still created. A maintainer may
+   run the first publish manually (`npm login && npm publish`);
+   `prepublishOnly` runs the same `ci:release` gate either way.
 
 What `scripts/check-release.mjs` enforces, and how to respond when it fails:
 

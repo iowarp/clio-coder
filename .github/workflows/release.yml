@@ -5,12 +5,14 @@ name: release
 # integrity, and the package-content audit — runs once before the GitHub
 # release is created with the tarball attached.
 #
-# npm publishing is deferred until the first stable v0.3.0: the publish step
-# is disabled by its `if: false` guard. To re-enable, flip the guard, set the
-# `NPM_TOKEN` repository secret (a granular automation token with publish
-# rights for @iowarp), and update README's distribution note. Once the package
-# exists on npm, this can be switched to npm trusted publishing (OIDC) and the
-# secret removed.
+# npm publishing from CI is gated on the repository variable `NPM_PUBLISH`
+# being the string "true" AND the `NPM_TOKEN` secret (a granular automation
+# token with publish rights for @iowarp). With the variable unset the step is
+# skipped and the GitHub release is still created, so a tag push never breaks
+# on a missing secret. The first publish may instead be run manually by a
+# maintainer (`npm login && npm publish`); `prepublishOnly` runs the same
+# `ci:release` gate either way. Once the package exists on npm, switch this
+# step to npm trusted publishing (OIDC) and remove the secret.
 
 on:
   push:
@@ -55,8 +57,8 @@ jobs:
           fi
       - name: Run the release gate
         run: npm run ci:release
-      - name: Publish to npm (disabled until stable v0.3.0)
-        if: ${{ false }}
+      - name: Publish to npm (enable via repo variable NPM_PUBLISH=true)
+        if: ${{ vars.NPM_PUBLISH == 'true' }}
         run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

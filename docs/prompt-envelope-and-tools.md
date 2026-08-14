@@ -35,9 +35,9 @@ The compiler runs after target capability and tool-profile admission. Its canoni
 
 Project context, memory, bounded dispatch briefing, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. A briefing is a separately delimited message labeled as untrusted task context/data; it is never concatenated into the task or stable system prompt. Dynamic ordering is project, safety, memory, briefing, then pipeline input, with pipeline input last. These messages do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.
 
-## Seven planes, nineteen tools
+## Seven planes, twenty tools
 
-The builtin surface is 19 registered tools organized in seven planes. Each plane is one policy unit: its tools share an action class, a size posture, a details schema, and a concurrency rule. `src/tools/policy.ts` asserts these invariants at bootstrap, so drift between the plane design, the safety classifier, and the registered specs fails loudly instead of shipping a surface that behaves differently from what the policy engine assumes.
+The builtin surface is 20 registered tools organized in seven planes. Each plane is one policy unit: its tools share an action class, a size posture, a details schema, and a concurrency rule. `src/tools/policy.ts` asserts these invariants at bootstrap, so drift between the plane design, the safety classifier, and the registered specs fails loudly instead of shipping a surface that behaves differently from what the policy engine assumes.
 
 | Plane | Tools | Action class | Concurrency |
 | --- | --- | --- | --- |
@@ -48,11 +48,12 @@ The builtin surface is 19 registered tools organized in seven planes. Each plane
 | ORCHESTRATE | `dispatch`, `steer` | dispatch | sequential |
 | ORCHESTRATE | `monitor` | read | parallel |
 | ORCHESTRATE | `tasks` | read | sequential |
+| ORCHESTRATE | `ledger` | read | sequential |
 | RETRIEVE | `web_fetch` | read | parallel |
 | INTERACT | `ask_user` | read | sequential |
 | ARTIFACT | `artifact` | write | sequential |
 
-Three tools sit in a plane for containment rather than class. `git` is read-only inspection (op=status/diff/log) that runs on the safe-exec spine, so it lives in the EXECUTE plane with read-class safety disposition. `monitor` never mutates a run, so it stays read class and parallel inside the ORCHESTRATE plane. `tasks` orchestrates the agent's own work rather than workers: it mutates only the session's task ledger, never the workspace, so it keeps read class (never gated behind a confirmation) but runs sequential so two board mutations in one batch cannot interleave.
+Three tools sit in a plane for containment rather than class. `git` is read-only inspection (op=status/diff/log) that runs on the safe-exec spine, so it lives in the EXECUTE plane with read-class safety disposition. `monitor` never mutates a run, so it stays read class and parallel inside the ORCHESTRATE plane. `tasks` orchestrates the agent's own work rather than workers: it mutates only the session's task ledger, never the workspace, so it keeps read class (never gated behind a confirmation) but runs sequential so two board mutations in one batch cannot interleave. `ledger` is the agent ledger, the coordination board concurrent dispatch workers share: a post reaches a one-way control lane and a read answers from a local mirror, so it touches no workspace and stays read class, and reviewers and judges are pinned to read-only autonomy where a write class would block the peer review the board exists for.
 
 Registration is conditional on wiring: `context` gains its workspace scope only when a session contract is bound, `dispatch`/`monitor`/`steer` register only with a dispatch contract, and `ask_user` registers only when an interactive handler exists. Dispatch tool profiles narrow the surface for workers: `minimal-local` is `read`, `grep`, `find`, `ls`, `git`, `context`, `code_nav`; `science-local` adds `verify`; `full-agent` keeps everything.
 
