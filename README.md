@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/iowarp/clio-coder/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/tag/iowarp/clio-coder?sort=semver&label=release&color=00d4db&style=flat-square" /></a>
+  <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm" src="https://img.shields.io/npm/v/%40iowarp%2Fclio-coder?label=npm&color=cb3837&style=flat-square" /></a>
   <a href="https://github.com/iowarp/clio-coder/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/iowarp/clio-coder/ci.yml?branch=main&label=ci&style=flat-square" /></a>
   <a href="#requirements"><img alt="Node >=22.19" src="https://img.shields.io/badge/node-%3E%3D22.19-147366?style=flat-square" /></a>
   <a href="LICENSE"><img alt="License Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
@@ -437,8 +438,10 @@ list|propose|approve|reject|prune`. Design notes:
 
 ## Status
 
-Clio Coder is alpha software distributed from source. The current release is
-**v0.3.0**. Interfaces may still move between minor versions, and
+Clio Coder is experimental software in a soft beta. The current release is
+**v0.3.0**, installable from npm as
+[`@iowarp/clio-coder`](https://www.npmjs.com/package/@iowarp/clio-coder) or
+from source. Interfaces may still move between minor versions, and
 model-specific behavior varies by target.
 
 Release notes live in the [CHANGELOG](CHANGELOG.md), the implementation detail
