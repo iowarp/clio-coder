@@ -15,5 +15,5 @@ repositories, event JSONL, private fleet configs, and dataset mirrors are
 generated outside tracked results.
 
 Internal eval suites and private calibration artifacts are not tracked in this
-repository. Use `clio eval report` or the community adapters to produce public
+repository. Use `clio-coder eval report` or the community adapters to produce public
 manifests when a result is ready to share.

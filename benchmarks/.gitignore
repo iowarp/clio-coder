@@ -1,8 +1,8 @@
 # Ephemeral benchmark run outputs and caches (see results/README.md for the
-# tracked-vs-untracked convention). .clio-benchmark/ is also ignored repo-wide.
+# tracked-vs-untracked convention). .clio-coder-benchmark/ is also ignored repo-wide.
 .corpus-cache/
-.clio-benchmark/
-.clio-scicode/
+.clio-coder-benchmark/
+.clio-coder-scicode/
 data/
 community/fleet.json
 community/**/runs/

@@ -29,21 +29,21 @@ untracked.
 3. SciCode prompt generation and grading through `scicode/scicode_clio.py`.
 4. OpenAI HumanEval completion generation and grading through `human-eval/humaneval_clio.py`.
 
-Each adapter drives Clio through the installed CLI or `clio eval`; none of these
+Each adapter drives Clio through the installed CLI or `clio-coder eval`; none of these
 files is the eval engine itself.
 
 ## Fleet config
 
 Real fleet coordinates are private. `benchmarks/community/fleet.json` is
-gitignored, and `CLIO_FLEET` may point at any private JSON file with the same
+gitignored, and `CLIO_CODER_FLEET` may point at any private JSON file with the same
 shape as `benchmarks/community/fleet.example.json`.
 
-The adapter scripts also honor per-run overrides such as `CLIO_MAIN_URL`,
-`CLIO_MAIN_MODEL`, `CLIO_WORKER_URL`, `CLIO_WORKER_MODEL`, and the matching
+The adapter scripts also honor per-run overrides such as `CLIO_CODER_MAIN_URL`,
+`CLIO_CODER_MAIN_MODEL`, `CLIO_CODER_WORKER_URL`, `CLIO_CODER_WORKER_MODEL`, and the matching
 target and thinking variables.
 
 ```sh
-CLIO_FLEET=/path/to/private/fleet.json \
+CLIO_CODER_FLEET=/path/to/private/fleet.json \
   uv run --no-project python benchmarks/community/clio_fleet.py
 
 uv run --no-project --with datasets --with swebench \

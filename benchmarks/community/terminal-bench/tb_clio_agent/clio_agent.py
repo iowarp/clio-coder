@@ -1,6 +1,6 @@
 """Terminal-Bench 2.0 agent that wraps Clio Coder.
 
-Installs Clio into the task container and runs `clio run` headless against the
+Installs Clio into the task container and runs `clio-coder run` headless against the
 operator's configured fleet. Built on terminal_bench's AbstractInstalledAgent,
 the same base the bundled claude_code, codex, and aider agents use.
 
@@ -9,27 +9,27 @@ Run it:
      --agent-import-path "tb_clio_agent.clio_agent:ClioAgent"
 
 Live-smoke prerequisites:
-  1. The task container can reach CLIO_MAIN_URL and CLIO_WORKER_URL.
-  2. Clio is installable in-container. Clio is not published to npm, so the install
-     script fetches a tarball from CLIO_TARBALL_URL (the output of `npm pack`, served on
-     a URL the container can reach). Without that URL the install step fails fast with a
-     clear message instead of silently producing empty runs.
+  1. The task container can reach CLIO_CODER_MAIN_URL and CLIO_CODER_WORKER_URL.
+  2. Clio is installable in-container. The install script prefers a tarball from
+     CLIO_CODER_TARBALL_URL (the output of `npm pack`, served on a URL the container can
+     reach) so a run measures the working tree rather than the last published release,
+     and falls back to `npm i -g @iowarp/clio-coder` from the registry.
 
 Tunables via `--agent-kwarg key=value` or env:
-  main_target (CLIO_MAIN_TARGET), main_model (CLIO_MAIN_MODEL),
-  worker_model (CLIO_WORKER_MODEL), timeout_sec (CLIO_TASK_TIMEOUT),
-  CLIO_MAIN_URL, CLIO_WORKER_URL, CLIO_TARBALL_URL.
+  main_target (CLIO_CODER_MAIN_TARGET), main_model (CLIO_CODER_MAIN_MODEL),
+  worker_model (CLIO_CODER_WORKER_MODEL), timeout_sec (CLIO_CODER_TASK_TIMEOUT),
+  CLIO_CODER_MAIN_URL, CLIO_CODER_WORKER_URL, CLIO_CODER_TARBALL_URL.
 
 Token accounting: this agent deliberately uses none of `clio_usage.py`, and
 that is not an oversight. The HumanEval, SciCode, and SWE-bench adapters run
-`clio run --json` as their own child, keep the event stream in a file, and
-republish the usage they folded on their own stdout so a parent `clio eval`
+`clio-coder run --json` as their own child, keep the event stream in a file, and
+republish the usage they folded on their own stdout so a parent `clio-coder eval`
 observes it. This agent does neither half. `_run_agent_commands` returns a
 `TerminalCommand` that the terminal-bench harness executes inside the task
 container: the harness owns the process and its terminal, this agent never
 sees stdout, `--json` is not passed, and no event stream is written anywhere
 this process can read. There is no observed usage to fold, and no parent
-`clio eval` reads this module's stdout. Terminal-bench's own runner produces
+`clio-coder eval` reads this module's stdout. Terminal-bench's own runner produces
 the episode's scoring.
 
 Making usage measurable here means changing what terminal-bench executes and
@@ -81,22 +81,22 @@ class ClioAgent(AbstractInstalledAgent):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._main_target = kwargs.get("main_target", os.environ.get("CLIO_MAIN_TARGET", _DEF["main_target"]))
+        self._main_target = kwargs.get("main_target", os.environ.get("CLIO_CODER_MAIN_TARGET", _DEF["main_target"]))
         self._main_model = kwargs.get(
             "main_model",
-            os.environ.get("CLIO_MAIN_MODEL", _DEF["main_model"]),
+            os.environ.get("CLIO_CODER_MAIN_MODEL", _DEF["main_model"]),
         )
         self._worker_target = kwargs.get(
             "worker_target",
-            os.environ.get("CLIO_WORKER_TARGET", _DEF["worker_target"]),
+            os.environ.get("CLIO_CODER_WORKER_TARGET", _DEF["worker_target"]),
         )
         self._worker_model = kwargs.get(
-            "worker_model", os.environ.get("CLIO_WORKER_MODEL", _DEF["worker_model"])
+            "worker_model", os.environ.get("CLIO_CODER_WORKER_MODEL", _DEF["worker_model"])
         )
-        self._timeout_sec = int(kwargs.get("timeout_sec", os.environ.get("CLIO_TASK_TIMEOUT", "1800")))
+        self._timeout_sec = int(kwargs.get("timeout_sec", os.environ.get("CLIO_CODER_TASK_TIMEOUT", "1800")))
         self._result_dir = Path(
             os.environ.get(
-                "CLIO_TB_RESULT_DIR",
+                "CLIO_CODER_TB_RESULT_DIR",
                 str(Path(__file__).resolve().parents[1] / "runs" / "latest"),
             )
         )
@@ -105,19 +105,19 @@ class ClioAgent(AbstractInstalledAgent):
     def _env(self) -> dict[str, str]:
         # Written into the container; install-clio.sh renders settings.yaml from these.
         return {
-            "CLIO_AUTONOMY": os.environ.get("CLIO_AUTONOMY", "full-auto"),
-            "CLIO_MAIN_URL": os.environ.get("CLIO_MAIN_URL", ""),
-            "CLIO_MAIN_TARGET": self._main_target,
-            "CLIO_MAIN_MODEL": self._main_model,
-            "CLIO_WORKER_URL": os.environ.get("CLIO_WORKER_URL", ""),
-            "CLIO_WORKER_TARGET": self._worker_target,
-            "CLIO_WORKER_MODEL": self._worker_model,
-            "CLIO_TARBALL_URL": os.environ.get("CLIO_TARBALL_URL", ""),
+            "CLIO_CODER_AUTONOMY": os.environ.get("CLIO_CODER_AUTONOMY", "full-auto"),
+            "CLIO_CODER_MAIN_URL": os.environ.get("CLIO_CODER_MAIN_URL", ""),
+            "CLIO_CODER_MAIN_TARGET": self._main_target,
+            "CLIO_CODER_MAIN_MODEL": self._main_model,
+            "CLIO_CODER_WORKER_URL": os.environ.get("CLIO_CODER_WORKER_URL", ""),
+            "CLIO_CODER_WORKER_TARGET": self._worker_target,
+            "CLIO_CODER_WORKER_MODEL": self._worker_model,
+            "CLIO_CODER_TARBALL_URL": os.environ.get("CLIO_CODER_TARBALL_URL", ""),
             # Local llama.cpp / LM Studio ignore the key value, but Clio requires one to be
             # resolvable. A fresh in-container install has no stored credential, so provide a
             # dummy via env vars that the rendered settings.yaml references with apiKeyEnvVar.
-            "CLIO_LLAMACPP_KEY": os.environ.get("CLIO_LLAMACPP_KEY", "clio-local-target"),
-            "CLIO_LMSTUDIO_KEY": os.environ.get("CLIO_LMSTUDIO_KEY", "clio-local-target"),
+            "CLIO_CODER_LLAMACPP_KEY": os.environ.get("CLIO_CODER_LLAMACPP_KEY", "clio-local-target"),
+            "CLIO_CODER_LMSTUDIO_KEY": os.environ.get("CLIO_CODER_LMSTUDIO_KEY", "clio-local-target"),
         }
 
     @property
@@ -129,7 +129,7 @@ class ClioAgent(AbstractInstalledAgent):
         # filesystem; the model lives on the remote fleet.
         self._write_scheduled_manifest(instruction)
         cmd = (
-            f"clio run --target {shlex.quote(self._main_target)} "
+            f"clio-coder run --target {shlex.quote(self._main_target)} "
             f"--model {shlex.quote(self._main_model)} {shlex.quote(instruction)}"
         )
         return [
@@ -143,8 +143,8 @@ class ClioAgent(AbstractInstalledAgent):
     def _write_scheduled_manifest(self, instruction: str) -> None:
         summary = {
             "suite": "terminal-bench",
-            "dataset": os.environ.get("CLIO_TB_DATASET", "terminal-bench"),
-            "datasetSplit": os.environ.get("CLIO_TB_DATASET_SPLIT", "unspecified"),
+            "dataset": os.environ.get("CLIO_CODER_TB_DATASET", "terminal-bench"),
+            "datasetSplit": os.environ.get("CLIO_CODER_TB_DATASET_SPLIT", "unspecified"),
             "instances": 1,
             "resolved": 0,
             "errors": 0,

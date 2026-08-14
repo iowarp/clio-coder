@@ -1,6 +1,6 @@
 # SciCode Clio adapter
 
-`scicode_clio.py` connects SciCode to Clio's `clio eval` command. It is a task
+`scicode_clio.py` connects SciCode to Clio's `clio-coder eval` command. It is a task
 generator and grader, not a parallel eval framework.
 
 ## Data requirements
@@ -36,7 +36,7 @@ uv run --no-project python benchmarks/community/scicode/scicode_clio.py generate
   --out benchmarks/community/scicode/runs/tasks.yaml \
   --limit 3
 
-clio eval run --task-file benchmarks/community/scicode/runs/tasks.yaml
+clio-coder eval run --task-file benchmarks/community/scicode/runs/tasks.yaml
 ```
 
 Run or grade one problem directly:

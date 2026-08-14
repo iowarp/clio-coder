@@ -17,8 +17,8 @@ def utc_run_date() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def clio_version(clio_bin: str = "clio") -> str:
-    env_version = os.environ.get("CLIO_VERSION")
+def clio_version(clio_bin: str = "clio-coder") -> str:
+    env_version = os.environ.get("CLIO_CODER_VERSION")
     if env_version:
         return env_version
     try:
@@ -29,7 +29,7 @@ def clio_version(clio_bin: str = "clio") -> str:
 
 
 def clio_commit(repo_root: Path = REPO_ROOT) -> str | None:
-    env_commit = os.environ.get("CLIO_COMMIT")
+    env_commit = os.environ.get("CLIO_CODER_COMMIT")
     if env_commit:
         return env_commit
     try:
@@ -79,7 +79,7 @@ def write_result_manifest(
     artifact_paths: Iterable[Path],
     summary: dict[str, Any],
     notes: list[str] | None = None,
-    clio_bin: str = "clio",
+    clio_bin: str = "clio-coder",
 ) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest = {

@@ -3,27 +3,27 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // 1. Strict seed validation (integer string only, no partials)
-const seedRaw = process.env.CLIO_CHAOS_SEED;
+const seedRaw = process.env.CLIO_CODER_CHAOS_SEED;
 if (!seedRaw || !/^-?\d+$/u.test(seedRaw)) {
-	console.error(`[chaos-sigint-tool] Error: CLIO_CHAOS_SEED must be a strict integer, got "${seedRaw}"`);
+	console.error(`[chaos-sigint-tool] Error: CLIO_CODER_CHAOS_SEED must be a strict integer, got "${seedRaw}"`);
 	process.exit(1);
 }
 const seed = Number(seedRaw);
 if (!Number.isSafeInteger(seed)) {
-	console.error(`[chaos-sigint-tool] Error: CLIO_CHAOS_SEED is out of safe integer range: "${seedRaw}"`);
+	console.error(`[chaos-sigint-tool] Error: CLIO_CODER_CHAOS_SEED is out of safe integer range: "${seedRaw}"`);
 	process.exit(1);
 }
 
 // 2. Environment verification
-const clioEntry = process.env.CLIO_ENTRY;
+const clioEntry = process.env.CLIO_CODER_ENTRY;
 if (!clioEntry) {
-	console.error("[chaos-sigint-tool] Error: CLIO_ENTRY environment variable is required");
+	console.error("[chaos-sigint-tool] Error: CLIO_CODER_ENTRY environment variable is required");
 	process.exit(1);
 }
 
-const stateDir = process.env.CLIO_STATE_DIR;
+const stateDir = process.env.CLIO_CODER_STATE_DIR;
 if (!stateDir) {
-	console.error("[chaos-sigint-tool] Error: CLIO_STATE_DIR environment variable is required");
+	console.error("[chaos-sigint-tool] Error: CLIO_CODER_STATE_DIR environment variable is required");
 	process.exit(1);
 }
 
@@ -89,7 +89,7 @@ async function waitFor(predicate, timeoutMs, stepMs = 100) {
 	return await predicate();
 }
 
-// 4. Spawn node "$CLIO_ENTRY" with --no-context-files --no-skills run --autonomy full-auto --target mini --json
+// 4. Spawn node "$CLIO_CODER_ENTRY" with --no-context-files --no-skills run --autonomy full-auto --target mini --json
 let stderrBuffer = "";
 const child = spawn(
 	process.execPath,
@@ -106,7 +106,7 @@ const child = spawn(
 		prompt,
 	],
 	{
-		env: { ...process.env, CLIO_STATE_DIR: stateDir },
+		env: { ...process.env, CLIO_CODER_STATE_DIR: stateDir },
 		stdio: ["ignore", "pipe", "pipe"],
 	},
 );

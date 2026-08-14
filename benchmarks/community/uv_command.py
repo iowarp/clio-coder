@@ -1,6 +1,6 @@
 """Helpers for running benchmark Python commands through uv.
 
-Generated `clio eval` task files should not bake in a developer's current
+Generated `clio-coder eval` task files should not bake in a developer's current
 interpreter path. These helpers produce portable `uv run --no-project ...`
 commands and honor UV_BIN for operators that pin a uv executable.
 """
@@ -12,7 +12,7 @@ from collections.abc import Iterable
 
 
 def _env_packages() -> list[str]:
-    raw = os.environ.get("CLIO_BENCH_UV_WITH", "")
+    raw = os.environ.get("CLIO_CODER_BENCH_UV_WITH", "")
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 

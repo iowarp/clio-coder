@@ -3,7 +3,7 @@
 
 Per instance:
   1. Clone {repo}@{base_commit} into an isolated checkout (bare-repo cache + local clone).
-  2. Run `clio run --json "<issue>"` headless in the checkout, driving the configured fleet.
+  2. Run `clio-coder run --json "<issue>"` headless in the checkout, driving the configured fleet.
   3. `git diff` the working tree against base_commit -> model_patch.
   4. Append {instance_id, model_name_or_path, model_patch} to predictions.jsonl,
      and a richer row (wall_s, tokens, exit, timed_out) to metrics.jsonl.
@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 
 DATASET = "princeton-nlp/SWE-bench_Lite"
-CLIO = os.environ.get("CLIO_BIN", "clio")
+CLIO = os.environ.get("CLIO_CODER_BIN", "clio-coder")
 
 # Shared fleet config (benchmarks/community/clio_fleet.py) is the one
 # source of truth for fleet endpoints/model names. The import is guarded so the
@@ -42,7 +42,7 @@ try:
 except Exception:
     _FLEET = None
 
-DEFAULT_MODEL_NAME = os.environ.get("CLIO_PRED_MODEL") or (_FLEET or {}).get(
+DEFAULT_MODEL_NAME = os.environ.get("CLIO_CODER_PRED_MODEL") or (_FLEET or {}).get(
     "predictionModelName", "clio-coder-qwopus3.6-27b"
 )
 
@@ -114,13 +114,13 @@ def run_clio(checkout: Path, task: str, events_path: Path, timeout_s: int, targe
 def diff_against_base(checkout: Path) -> str:
     # The model_patch must be the agent's SOURCE edits only. Two sources of noise are
     # excluded: untracked build/test artifacts (git diff <commit> already ignores untracked
-    # files), and Clio's own `.clio/` index (codewiki.json is ~100k lines). Unstage first so
+    # files), and Clio's own `.clio-coder/` index (codewiki.json is ~100k lines). Unstage first so
     # any earlier staging does not leak in, then diff the working tree against base with
-    # `.clio` excluded.
+    # `.clio-coder` excluded.
     sh(["git", "-C", str(checkout), "reset", "-q"])
     r = sh([
         "git", "-C", str(checkout), "diff", "swebench_base", "--",
-        ".", ":(exclude).clio", ":(exclude).clio/**",
+        ".", ":(exclude).clio-coder", ":(exclude).clio-coder/**",
     ])
     return r.stdout
 
@@ -140,7 +140,7 @@ def generate_one(inst, workdir: Path, cache_dir: Path, model_name, timeout_s, ta
     patch = diff_against_base(checkout)
     run_id = run_id_from_events(events_path)
     observed_usage = fold_message_end_usage(events_path)
-    # The parent `clio eval` sees only this adapter's stdout, so the usage this
+    # The parent `clio-coder eval` sees only this adapter's stdout, so the usage this
     # adapter observed is republished there. Nothing is written when nothing was
     # observed: the eval must report unmeasured rather than a zero.
     emit_observed_usage(observed_usage)
@@ -199,8 +199,8 @@ def main():
     ap.add_argument("--smallest", action="store_true", help="prefer smallest gold patches")
     ap.add_argument("--all", action="store_true", help="run all 300 (gated)")
     ap.add_argument("--timeout", type=int, default=1800, help="per-instance clio wall cap (s)")
-    ap.add_argument("--target", default=None, help="clio --target override")
-    ap.add_argument("--model", default=None, help="clio --model override")
+    ap.add_argument("--target", default=None, help="clio-coder --target override")
+    ap.add_argument("--model", default=None, help="clio-coder --model override")
     ap.add_argument("--model-name", default=DEFAULT_MODEL_NAME, help="model_name_or_path in predictions")
     ap.add_argument(
         "--cache",
@@ -291,9 +291,9 @@ def main():
         model=args.model_name,
         profile=target_profile(
             profile=(_FLEET or {}).get("profile") if isinstance(_FLEET, dict) else None,
-            target=args.target or os.environ.get("CLIO_MAIN_TARGET"),
-            model=args.model or os.environ.get("CLIO_MAIN_MODEL"),
-            thinking=os.environ.get("CLIO_MAIN_THINKING"),
+            target=args.target or os.environ.get("CLIO_CODER_MAIN_TARGET"),
+            model=args.model or os.environ.get("CLIO_CODER_MAIN_MODEL"),
+            thinking=os.environ.get("CLIO_CODER_MAIN_THINKING"),
         ),
         instances=len(chosen),
         resolved=resolved,

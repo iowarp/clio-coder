@@ -51,7 +51,7 @@ tasks:
         # The step must fail. An enforcement that lets the violating step exit
         # zero has not enforced anything, so a zero exit here is the failure.
         - >-
-          node "$CLIO_ENTRY" fleet run boundary-leak --json; test $? -ne 0
+          node "$CLIO_CODER_ENTRY" fleet run boundary-leak --json; test $? -ne 0
       timeoutMs: 120000
     verify:
       # The metrics read the sealed verdict; this reads the tree that verdict
@@ -104,7 +104,7 @@ tasks:
       kind: external-command
       commands:
         - >-
-          node "$CLIO_ENTRY" fleet run boundary-dirty --json; test $? -ne 0
+          node "$CLIO_CODER_ENTRY" fleet run boundary-dirty --json; test $? -ne 0
       timeoutMs: 120000
     verify:
       commands:

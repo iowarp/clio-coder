@@ -17,13 +17,13 @@ community/
 ```
 
 `fleet.json` is intentionally gitignored. Keep real endpoints in that file or
-point `CLIO_FLEET` at another private file.
+point `CLIO_CODER_FLEET` at another private file.
 
 ## Python runner
 
 Run Python adapters with `uv run --no-project ...` so benchmark commands do not
-capture a local interpreter path. Generated `clio eval` task files also use uv.
-Set `UV_BIN` to pin a uv executable, or `CLIO_BENCH_UV_WITH` to inject extra
+capture a local interpreter path. Generated `clio-coder eval` task files also use uv.
+Set `UV_BIN` to pin a uv executable, or `CLIO_CODER_BENCH_UV_WITH` to inject extra
 comma-separated `uv --with` packages into generated verifier commands.
 
 ## Fleet setup
@@ -31,17 +31,17 @@ comma-separated `uv --with` packages into generated verifier commands.
 Inspect a private fleet file with:
 
 ```sh
-CLIO_FLEET=/path/to/private/fleet.json uv run --no-project python benchmarks/community/clio_fleet.py
+CLIO_CODER_FLEET=/path/to/private/fleet.json uv run --no-project python benchmarks/community/clio_fleet.py
 ```
 
 The same file shape is shown in `fleet.example.json`. Per-run environment
 overrides still work:
 
 ```sh
-CLIO_MAIN_URL=http://orchestrator.example:8080 \
-CLIO_MAIN_MODEL=example-orchestrator-model \
-CLIO_WORKER_URL=http://worker.example:1234 \
-CLIO_WORKER_MODEL=example-worker-model \
+CLIO_CODER_MAIN_URL=http://orchestrator.example:8080 \
+CLIO_CODER_MAIN_MODEL=example-orchestrator-model \
+CLIO_CODER_WORKER_URL=http://worker.example:1234 \
+CLIO_CODER_WORKER_MODEL=example-worker-model \
 uv run --no-project python benchmarks/community/clio_fleet.py
 ```
 
@@ -50,7 +50,7 @@ paths.
 
 ## SWE-bench Lite
 
-The SWE-bench adapter clones each selected instance, runs `clio run --json`
+The SWE-bench adapter clones each selected instance, runs `clio-coder run --json`
 with the issue text, and writes a source-only patch to `predictions.jsonl`.
 It also writes `manifest.json` and `summary.json` in the run directory.
 Evaluation with the official harness is a separate Docker workflow.
@@ -75,16 +75,16 @@ uv run --no-project python benchmarks/community/swe-bench-lite/recompute_patches
 When a Clio eval artifact is the source of truth, export SWE-style JSONL with:
 
 ```sh
-clio eval report <evalId> --format swe-jsonl > predictions.jsonl
+clio-coder eval report <evalId> --format swe-jsonl > predictions.jsonl
 ```
 
 ## Terminal-Bench
 
 `terminal-bench/tb_clio_agent/` implements a Terminal-Bench installed agent. The
-agent requires `CLIO_MAIN_URL` and `CLIO_WORKER_URL`; it has no endpoint
+agent requires `CLIO_CODER_MAIN_URL` and `CLIO_CODER_WORKER_URL`; it has no endpoint
 defaults. The adapter writes a scheduled-run `manifest.json` and `summary.json`
 under `benchmarks/community/terminal-bench/runs/latest` unless
-`CLIO_TB_RESULT_DIR` points elsewhere.
+`CLIO_CODER_TB_RESULT_DIR` points elsewhere.
 
 Build and serve a Clio tarball where the container can reach it, then run
 Terminal-Bench with the adapter import path:
@@ -93,11 +93,11 @@ Terminal-Bench with the adapter import path:
 npm run build
 # `npm pack` names the tarball after the current package version, so read the
 # name it printed rather than pinning one that goes stale on every release.
-CLIO_TARBALL=$(npm pack --pack-destination /tmp/clio-pack | tail -1)
+CLIO_CODER_TARBALL=$(npm pack --pack-destination /tmp/clio-pack | tail -1)
 
-CLIO_TARBALL_URL=http://host.docker.internal:8899/"$CLIO_TARBALL" \
-CLIO_MAIN_URL=http://orchestrator.example:8080 \
-CLIO_WORKER_URL=http://worker.example:1234 \
+CLIO_CODER_TARBALL_URL=http://host.docker.internal:8899/"$CLIO_CODER_TARBALL" \
+CLIO_CODER_MAIN_URL=http://orchestrator.example:8080 \
+CLIO_CODER_WORKER_URL=http://worker.example:1234 \
 PYTHONPATH=benchmarks/community/terminal-bench \
 tb run -d terminal-bench-core==0.1.1 --n-concurrent 1 \
   --agent-import-path "tb_clio_agent.clio_agent:ClioAgent" \
@@ -105,18 +105,18 @@ tb run -d terminal-bench-core==0.1.1 --n-concurrent 1 \
 ```
 
 Terminal-Bench reports no token usage, and the manifest says so rather than
-printing a zero. The other adapters run `clio run --json` as their own child,
+printing a zero. The other adapters run `clio-coder run --json` as their own child,
 keep the event stream in a file, and republish the usage they folded on their
 own stdout. This one hands the harness a `TerminalCommand` that runs inside the
 task container, so the harness owns the process and its terminal: no `--json`,
-no event stream this process can read, and no parent `clio eval` reading this
+no event stream this process can read, and no parent `clio-coder eval` reading this
 adapter's stdout. Measuring usage here requires changing what terminal-bench
 executes and where it deposits the stream, which is a harness-integration
 change rather than an accounting fix.
 
 ## SciCode
 
-`scicode/scicode_clio.py` generates normal `clio eval` task files and grades
+`scicode/scicode_clio.py` generates normal `clio-coder eval` task files and grades
 generated Python. Official scoring requires the SciCode target artifact and the
 upstream SciCode Python package, both supplied outside this repository.
 `run-problem` writes generated-attempt manifests, and `grade-problem` rewrites
@@ -132,7 +132,7 @@ uv run --no-project python benchmarks/community/scicode/scicode_clio.py generate
   --out benchmarks/community/scicode/runs/tasks.yaml \
   --limit 3
 
-clio eval run --task-file benchmarks/community/scicode/runs/tasks.yaml
+clio-coder eval run --task-file benchmarks/community/scicode/runs/tasks.yaml
 ```
 
 For CI fixtures, the SciCode grader also accepts a small JSON target manifest
@@ -142,7 +142,7 @@ SciCode scoring.
 ## HumanEval
 
 `human-eval/humaneval_clio.py` runs the OpenAI HumanEval Python completion
-suite. It can drive Clio directly or emit a `clio eval` task file. The public
+suite. It can drive Clio directly or emit a `clio-coder eval` task file. The public
 HumanEval JSONL is not tracked; either pass `--data`, install the upstream
 `human_eval` package, or download the JSONL.GZ into the adapter's ignored data
 directory.
@@ -161,7 +161,7 @@ uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py gen
   --out benchmarks/community/human-eval/runs/tasks.yaml \
   --run-root benchmarks/community/human-eval/runs/eval-smoke
 
-clio eval run --task-file benchmarks/community/human-eval/runs/tasks.yaml
+clio-coder eval run --task-file benchmarks/community/human-eval/runs/tasks.yaml
 ```
 
 HumanEval grading executes generated Python. Use a container or other sandbox

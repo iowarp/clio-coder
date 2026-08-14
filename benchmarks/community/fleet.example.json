@@ -1,5 +1,5 @@
 {
-	"description": "Example fleet config for public benchmark adapters. Keep the real fleet.json untracked or point CLIO_FLEET at a private file.",
+	"description": "Example fleet config for public benchmark adapters. Keep the real fleet.json untracked or point CLIO_CODER_FLEET at a private file.",
 	"default": "local-split",
 	"predictionModelName": "clio-coder-example",
 	"profiles": {

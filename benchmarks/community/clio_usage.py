@@ -1,7 +1,7 @@
 """Observed token accounting for the Clio benchmark adapters.
 
-An adapter runs `clio --no-context-files run --json` as its own child and keeps
-the event stream in a file, so a parent `clio eval` sees only the adapter's
+An adapter runs `clio-coder --no-context-files run --json` as its own child and keeps
+the event stream in a file, so a parent `clio-coder eval` sees only the adapter's
 stdout and observes no usage at all. These helpers fold the usage the adapter
 did observe and re-publish it on the adapter's stdout in the one shape the eval
 runner's fold understands, so the eval's accounting is measured rather than
@@ -134,17 +134,17 @@ def clio_state_dir() -> Path:
     """Resolve Clio's state directory the way Clio itself resolves it.
 
     An adapter that hardcodes ~/.local/state reads a different Clio's receipts
-    than the one it just ran whenever the run is isolated by CLIO_HOME.
+    than the one it just ran whenever the run is isolated by CLIO_CODER_HOME.
     """
-    explicit = os.environ.get("CLIO_STATE_DIR", "").strip()
+    explicit = os.environ.get("CLIO_CODER_STATE_DIR", "").strip()
     if explicit:
         return Path(explicit)
-    home = os.environ.get("CLIO_HOME", "").strip()
+    home = os.environ.get("CLIO_CODER_HOME", "").strip()
     if home:
         return Path(home) / "state"
     xdg = os.environ.get("XDG_STATE_HOME", "").strip()
     base = Path(xdg) if xdg else Path.home() / ".local" / "state"
-    return base / "clio"
+    return base / "clio-coder"
 
 
 def receipt_total_tokens(run_id: str | None) -> int | None:

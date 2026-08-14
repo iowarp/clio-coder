@@ -3,7 +3,7 @@
 A step that escapes its declared `writes` allowlist, made deterministic so the
 reading does not depend on talking a model into misbehaving.
 
-`.clio/fleets/commands.yaml` declares two registry commands. `leak` writes
+`.clio-coder/fleets/commands.yaml` declares two registry commands. `leak` writes
 `out/leak.txt`; `leak-dirty` overwrites `out/preexisting.txt`. Both fleet
 contracts declare `writes: ["src/"]` on the step that runs them, so every run
 violates the boundary and both commands exit 0: the step must fail because of

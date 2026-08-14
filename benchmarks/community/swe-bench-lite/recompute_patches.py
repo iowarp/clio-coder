@@ -1,8 +1,8 @@
 #!/usr/bin/env -S uv run --no-project python
 """Recompute clean predictions.jsonl from existing checkouts.
 
-The first generation run captured polluted diffs (git add -A staged .clio/ and artifacts).
-This rebuilds model_patch as a source-only diff vs swebench_base, excluding Clio's .clio/
+The first generation run captured polluted diffs (git add -A staged .clio-coder/ and artifacts).
+This rebuilds model_patch as a source-only diff vs swebench_base, excluding Clio's .clio-coder/
 index, without re-running the fleet. Reads checkouts under <out>/checkouts/<instance_id>.
 """
 import json
@@ -22,7 +22,14 @@ def sh(cmd, cwd=None):
 
 def clean_diff(co: Path) -> str:
     sh(["git", "reset", "-q"], cwd=co)
-    r = sh(["git", "diff", "swebench_base", "--", ".", ":(exclude).clio", ":(exclude).clio/**"], cwd=co)
+    # Both index directory names are excluded. This script repairs checkouts an
+    # earlier run produced, and a checkout older than the clio-coder rename
+    # carries the index under `.clio/`.
+    r = sh([
+        "git", "diff", "swebench_base", "--", ".",
+        ":(exclude).clio-coder", ":(exclude).clio-coder/**",
+        ":(exclude).clio", ":(exclude).clio/**",
+    ], cwd=co)
     return r.stdout
 
 

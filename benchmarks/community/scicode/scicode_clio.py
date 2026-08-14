@@ -3,7 +3,7 @@
 
 The adapter has three jobs:
   1. Inspect the local SciCode prompt corpus and report whether scoring data is present.
-  2. Generate a normal `clio eval` task file whose setup command runs Clio on a
+  2. Generate a normal `clio-coder eval` task file whose setup command runs Clio on a
      SciCode problem and whose verifier command grades the generated code.
   3. Grade a generated problem by executing each sub-step against official-style
      target values.
@@ -63,7 +63,7 @@ DEFAULT_TEMPLATE = Path(
         ADAPTER_DIR / "background_comment_template.txt",
     )
 )
-CLIO = os.environ.get("CLIO_BIN", "clio")
+CLIO = os.environ.get("CLIO_CODER_BIN", "clio-coder")
 # The official SciCode package is not published on PyPI, so the HDF5 scoring
 # path installs it from source. Grading through `--h5py-file` imports
 # `scicode.parse.parse`, and without this the graded subprocess dies on
@@ -101,14 +101,14 @@ def scicode_dataset_split() -> str:
 
 
 def scicode_model(model: str | None) -> str:
-    return model or os.environ.get("CLIO_MODEL") or os.environ.get("CLIO_MAIN_MODEL") or "unspecified"
+    return model or os.environ.get("CLIO_CODER_MODEL") or os.environ.get("CLIO_CODER_MAIN_MODEL") or "unspecified"
 
 
 def scicode_target_profile(target: str | None, model: str | None) -> dict[str, str]:
     return target_profile(
-        target=target or os.environ.get("CLIO_MAIN_TARGET"),
-        model=model or os.environ.get("CLIO_MAIN_MODEL"),
-        thinking=os.environ.get("CLIO_MAIN_THINKING"),
+        target=target or os.environ.get("CLIO_CODER_MAIN_TARGET"),
+        model=model or os.environ.get("CLIO_CODER_MAIN_MODEL"),
+        thinking=os.environ.get("CLIO_CODER_MAIN_THINKING"),
     )
 
 
@@ -333,7 +333,11 @@ def generate_tasks(args: argparse.Namespace) -> int:
                 f"      - {json.dumps(quote_command(setup))}",
                 "    verifier:",
                 f"      - {json.dumps(quote_command(verifier))}",
-                f"    timeoutMs: {int(args.timeout) * 1000}",
+                # `timeoutMs` is applied per command, and the setup command runs
+                # Clio once per sub-step with its own `--timeout`. Budgeting one
+                # step's timeout kills every multi-step problem partway through,
+                # which reads as a model failure rather than a harness cap.
+                f"    timeoutMs: {(int(args.timeout) * max(1, len(problem.get('sub_steps', []))) + 60) * 1000}",
                 "    tags:",
                 "      - scicode",
                 "      - science",
@@ -554,7 +558,7 @@ def run_problem(args: argparse.Namespace) -> int:
             if failures and not args.continue_on_error:
                 break
     (run_dir / "problem.json").write_text(json.dumps(problem, indent=2) + "\n", encoding="utf-8")
-    # A parent `clio eval` observes only this adapter's stdout, so the usage
+    # A parent `clio-coder eval` observes only this adapter's stdout, so the usage
     # summed across the problem's sub-step runs is republished there. A problem
     # whose steps reported no usage publishes nothing and stays unmeasured.
     emit_observed_usage(problem_usage)
@@ -862,10 +866,10 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--references", default=None, help="small JSON target manifest")
     inspect.set_defaults(func=inspect_data)
 
-    tasks = sub.add_parser("generate-tasks", help="write a clio eval YAML task file")
+    tasks = sub.add_parser("generate-tasks", help="write a clio-coder eval YAML task file")
     add_common_data_args(tasks)
     tasks.add_argument("--out", required=True)
-    tasks.add_argument("--run-root", default=".clio-scicode")
+    tasks.add_argument("--run-root", default=".clio-coder-scicode")
     tasks.add_argument("--problem-id", action="append", default=[])
     tasks.add_argument("--limit", type=int, default=0)
     tasks.add_argument("--timeout", type=int, default=1800)

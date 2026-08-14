@@ -2,7 +2,7 @@
 
 `humaneval_clio.py` runs the public OpenAI HumanEval tasks with Clio Coder and
 scores generated Python against the HumanEval checks. It supports direct suite
-runs and `clio eval` task-file generation for exercising the Clio eval harness.
+runs and `clio-coder eval` task-file generation for exercising the Clio eval harness.
 
 External data is not tracked. The adapter can load HumanEval from one of:
 
@@ -46,7 +46,7 @@ Useful options:
 - `--all` runs all 164 tasks.
 - `--samples-per-task N --pass-at 1 --pass-at 10` records multiple samples and
   reports pass@k estimates.
-- `--target` and `--model` are forwarded to `clio run`.
+- `--target` and `--model` are forwarded to `clio-coder run`.
 - `--evaluator auto|official|subprocess` defaults to the official evaluator when
   installed and otherwise uses the adapter's subprocess fallback.
 
@@ -63,7 +63,7 @@ uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py gen
   --out benchmarks/community/human-eval/runs/tasks.yaml \
   --run-root benchmarks/community/human-eval/runs/eval-smoke
 
-clio eval run --task-file benchmarks/community/human-eval/runs/tasks.yaml
+clio-coder eval run --task-file benchmarks/community/human-eval/runs/tasks.yaml
 ```
 
 Each generated task runs `run-task` during setup and `grade-task` as verifier.

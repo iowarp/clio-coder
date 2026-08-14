@@ -6,7 +6,7 @@ model's output, which is what makes it a soak fixture rather than a benchmark.
 Nothing here is scheduled. This file exists so the ideas are not re-derived.
 
 The existing fixtures under `fixtures/` are the shape to follow: a deterministic
-registry command in `.clio/fleets/commands.yaml` so the reading never depends on
+registry command in `.clio-coder/fleets/commands.yaml` so the reading never depends on
 talking a model into misbehaving, a `test/known-answers.test.mjs` that reads the
 tree the verdict claims to describe, and metrics that read the sealed verdict.
 

@@ -4,7 +4,7 @@
 This adapter intentionally stays thin: it loads the public HumanEval dataset,
 runs Clio once or more per task in isolated run directories, and grades the
 resulting completions against the HumanEval tests. It can run directly or emit a
-normal `clio eval` task file so the Clio eval harness is exercised too.
+normal `clio-coder eval` task file so the Clio eval harness is exercised too.
 
 External data is not vendored. Use `ensure-data`, pass `--data` pointing at a
 HumanEval.jsonl(.gz), or install OpenAI's `human-eval` package from
@@ -39,7 +39,7 @@ DEFAULT_RUN_ROOT = ADAPTER_DIR / "runs" / "eval-tasks"
 DATASET = "openai/human-eval"
 DATASET_SPLIT = "test"
 HUMANEVAL_URL = "https://raw.githubusercontent.com/openai/human-eval/master/data/HumanEval.jsonl.gz"
-CLIO = os.environ.get("CLIO_BIN", "clio")
+CLIO = os.environ.get("CLIO_CODER_BIN", "clio-coder")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from clio_usage import emit_observed_usage, fold_message_end_usage, receipt_total_tokens, run_id_from_events
@@ -63,9 +63,9 @@ class DataBlocked(RuntimeError):
 def humaneval_model(model: str | None) -> str:
     return (
         model
-        or os.environ.get("CLIO_PRED_MODEL")
-        or os.environ.get("CLIO_MODEL")
-        or os.environ.get("CLIO_MAIN_MODEL")
+        or os.environ.get("CLIO_CODER_PRED_MODEL")
+        or os.environ.get("CLIO_CODER_MODEL")
+        or os.environ.get("CLIO_CODER_MAIN_MODEL")
         or ((_FLEET or {}).get("predictionModelName") if isinstance(_FLEET, dict) else None)
         or "unspecified"
     )
@@ -74,9 +74,9 @@ def humaneval_model(model: str | None) -> str:
 def humaneval_target_profile(target: str | None, model: str | None) -> dict[str, str]:
     return target_profile(
         profile=(_FLEET or {}).get("profile") if isinstance(_FLEET, dict) else None,
-        target=target or os.environ.get("CLIO_MAIN_TARGET"),
-        model=model or os.environ.get("CLIO_MAIN_MODEL"),
-        thinking=os.environ.get("CLIO_MAIN_THINKING"),
+        target=target or os.environ.get("CLIO_CODER_MAIN_TARGET"),
+        model=model or os.environ.get("CLIO_CODER_MAIN_MODEL"),
+        thinking=os.environ.get("CLIO_CODER_MAIN_THINKING"),
     )
 
 
@@ -371,7 +371,7 @@ def generate_attempt(
     events_path = run_dir / "events" / "clio.jsonl"
     run_id = run_id_from_events(events_path)
     observed_usage = fold_message_end_usage(events_path)
-    # The parent `clio eval` sees only this adapter's stdout, so the usage this
+    # The parent `clio-coder eval` sees only this adapter's stdout, so the usage this
     # adapter observed is republished there. Nothing is written when nothing was
     # observed: the eval must report unmeasured rather than a zero.
     emit_observed_usage(observed_usage)
@@ -529,6 +529,7 @@ def suite_summary(
         for metric in metrics_rows
         if metric.get("error") or metric.get("timed_out") or metric.get("exit") not in (0, None) or metric.get("empty_completion")
     )
+    measured_rows = [metric for metric in metrics_rows if metric.get("tokens")]
     return {
         "suite": "human-eval",
         "dataset": DATASET,
@@ -551,9 +552,9 @@ def suite_summary(
         ),
         # Counted only over the attempts that actually reported usage, and
         # reported next to that coverage: a suite total of 0 across unobserved
-        # attempts would claim the work was free.
-        "tokens": sum(int(metric.get("tokens") or 0) for metric in metrics_rows if metric.get("tokens")),
-        "tokensMeasuredAttempts": sum(1 for metric in metrics_rows if metric.get("tokens")),
+        # attempts would claim the work was free, so absence stays absent.
+        "tokens": sum(int(metric.get("tokens") or 0) for metric in measured_rows) if measured_rows else None,
+        "tokensMeasuredAttempts": len(measured_rows),
         "tokensTotalAttempts": len(metrics_rows),
         "scoringRule": "HumanEval pass means the generated completion passes the task's check(entry_point).",
     }
@@ -865,8 +866,8 @@ def add_selection_args(parser: argparse.ArgumentParser) -> None:
 
 def add_clio_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--timeout", type=int, default=300, help="per-sample Clio wall-clock timeout in seconds")
-    parser.add_argument("--target", default=None, help="clio --target override")
-    parser.add_argument("--model", default=None, help="clio --model override")
+    parser.add_argument("--target", default=None, help="clio-coder --target override")
+    parser.add_argument("--model", default=None, help="clio-coder --model override")
     parser.add_argument("--force", action="store_true", help="replace existing run directories")
     parser.add_argument("--dry-run", action="store_true", help="render prompts and seed solution.py without calling Clio")
 
@@ -895,7 +896,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_data_arg(inspect)
     inspect.set_defaults(func=inspect_data)
 
-    tasks = sub.add_parser("generate-tasks", help="write a clio eval YAML task file")
+    tasks = sub.add_parser("generate-tasks", help="write a clio-coder eval YAML task file")
     add_data_arg(tasks)
     add_selection_args(tasks)
     tasks.add_argument("--out", required=True)

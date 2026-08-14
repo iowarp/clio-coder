@@ -1,7 +1,7 @@
 # SWE-bench Lite Clio adapter
 
 `swebench_clio.py` generates SWE-bench Lite prediction files by cloning each
-selected instance, running `clio run --json`, and extracting a source-only
+selected instance, running `clio-coder run --json`, and extracting a source-only
 patch from the checkout.
 
 ## Generate Predictions
@@ -43,10 +43,10 @@ This also refreshes `manifest.json` and `summary.json`.
 
 ## SWE JSONL From Eval Artifacts
 
-When a task is run through `clio eval`, export SWE-style JSONL with:
+When a task is run through `clio-coder eval`, export SWE-style JSONL with:
 
 ```sh
-clio eval report <evalId> --format swe-jsonl > predictions.jsonl
+clio-coder eval report <evalId> --format swe-jsonl > predictions.jsonl
 ```
 
 The JSONL records include `instance_id`, `model_name_or_path`, `model_patch`,

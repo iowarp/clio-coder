@@ -31,7 +31,7 @@ tasks:
       kind: external-command
       commands:
         - >-
-          CLIO_CHAOS_SEED=42 node chaos-sigint-tool.mjs
+          CLIO_CODER_CHAOS_SEED=42 node chaos-sigint-tool.mjs
       timeoutMs: 120000
     verify:
       assertions:

@@ -238,11 +238,11 @@ tasks:
       kind: external-command
       commands:
         - >-
-          node "$CLIO_ENTRY" run --target mini --json "Use the read tool to read planted-fact.txt. Do not modify any file."
+          node "$CLIO_CODER_ENTRY" run --target mini --json "Use the read tool to read planted-fact.txt. Do not modify any file."
         - >-
-          node "$CLIO_ENTRY" run --target mini --continue --json "Append one short continuity checkpoint. Do not modify any file."
+          node "$CLIO_CODER_ENTRY" run --target mini --continue --json "Append one short continuity checkpoint. Do not modify any file."
         - >-
-          CLIO_FORCE_COMPACT=1 node "$CLIO_ENTRY" run --target mini --continue --json "After compaction, use the read tool to read planted-fact.txt again. Do not modify any file."
+          CLIO_CODER_FORCE_COMPACT=1 node "$CLIO_CODER_ENTRY" run --target mini --continue --json "After compaction, use the read tool to read planted-fact.txt again. Do not modify any file."
       timeoutMs: 600000
     verify:
       measure:
