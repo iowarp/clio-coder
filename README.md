@@ -299,7 +299,10 @@ Notices name their mechanism so you always know who stopped a call:
 `[autonomy]` for read-only denials, and `[middleware]` for hook diagnostics.
 
 Workers can never exceed the orchestrator's authority. A dispatch request can
-only narrow it, and reviewers and judges always run read-only. Details:
+only narrow it, and reviewers and judges always run read-only. A `&&` chain is
+judged at its most restrictive recognized member and refused whole if any
+member is unrecognized, and `/tmp`, `/var/tmp`, and `/var/folders` are scratch
+while the rest of the system roots stay protected. Details:
 [docs/safety-model.md](docs/safety-model.md).
 
 ## The fleet: one machine or your whole cluster
@@ -429,9 +432,9 @@ Clio Coder is alpha software distributed from source. The current release is
 **v0.3.0**. Interfaces may still move between minor versions, and
 model-specific behavior varies by target.
 
-Release notes live in the [CHANGELOG](CHANGELOG.md), the detailed developer
-log lives in [DEVLOG.md](DEVLOG.md), and every release is gated by the
-deterministic `npm run ci:release` suite.
+Release notes live in the [CHANGELOG](CHANGELOG.md), the implementation detail
+behind each entry lives in the commit history, and every release is gated by
+the deterministic `npm run ci:release` suite.
 
 ## Troubleshooting
 
@@ -502,7 +505,15 @@ All topologies go through the same tool, admission chain, and autonomy matrix.
 
 Detached batches are durable, so collection survives session exit. Use
 `monitor` with `mode="collect"` as the authoritative terminal barrier over a
-batch, and collect every detached batch before final synthesis.
+batch, and collect every detached batch before final synthesis; `mode="tools"`
+reports what a run actually executed. `Alt+S` sends a running attached dispatch
+to the background as a detached batch, which review gates, compete, pipelines,
+and time-boxed calls refuse with a reason.
+
+Admission refuses a pairing it can prove impossible, such as a pinned read-only
+recipe aimed at mutation work, and flags the receipt where it is unsure rather
+than blocking. Claimed file changes and validation commands are checked against
+the run's own tool events, so a path the run never wrote cannot seal as done.
 
 ## Execution roles and typed results
 
@@ -526,10 +537,15 @@ contract, not its own recipe contract.
 ## The built-in fleet
 
 `architect`, `coder`, `tester`, `verifier`, `debugger`, `documenter`, `scout`,
-`researcher`, and `provenance`. Each is a versioned frontmatter recipe with an
-explicit tool profile, call and cost budget, and result contract. Malformed
-custom recipes are quarantined with a diagnostic; malformed builtins fail
-startup. Reference: [docs/built-in-agents.md](docs/built-in-agents.md).
+`researcher`, `provenance`, and `git-master`. Each is a versioned frontmatter
+recipe with an explicit tool profile, call and cost budget, and result
+contract. Malformed custom recipes are quarantined with a diagnostic; malformed
+builtins fail startup. Reference:
+[docs/built-in-agents.md](docs/built-in-agents.md).
+
+This roster is compiled into the session prompt whenever the dispatch tool is
+available, so pin an id from it. `agent: "auto"` baselines from task shape and
+is a fallback, not a router.
 
 ## Programmatic interfaces
 
@@ -562,6 +578,9 @@ A worker attests its protocol version, pid, process-group id, host, settings
 fingerprint, WorkerSpec digest, runtime, target, endpoint identity hash, wire
 model, effective tool signature, and bounded resource facts before any model
 call. Any drift from the approved identity kills the worker.
+
+`clio trace` reads the same store and now records interactive turns beside
+dispatched runs, one event per tool call with its verdict.
 
 Verify from the TUI with `/view verify <runId>`, or from the shell with `clio
 evidence inspect`. See [docs/observability.md](docs/observability.md).

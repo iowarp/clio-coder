@@ -51,6 +51,7 @@ User-facing agents visible in `clio agents` and `/agents`.
 | `coder` | read, write, edit, grep, find, ls, web_fetch, git, verify, code_nav | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
 | `debugger` | read, grep, find, ls, git, verify, code_nav | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
 | `documenter` | read, write, edit, grep, find, ls, git, verify, code_nav, context | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
+| `git-master` | read, write, edit, context, git, bash, grep, find, ls, code_nav | Executes bounded git operations: history, commits, worktrees, and PR prep. | `workspace-edit` | `balanced` |
 | `tester` | read, write, edit, grep, find, ls, git, verify, code_nav | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
 | `verifier` | read, grep, find, ls, git, verify, code_nav | Independently runs and reports test, lint, build, review, and release gates. | `verification` | `fast` |
 | `wiki-writer` | read, write, edit, grep, find, ls, code_nav, context | Plans one repository wiki, or researches and writes one wiki page. | `workspace-edit` | `balanced` |

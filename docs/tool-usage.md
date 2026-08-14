@@ -237,7 +237,7 @@ Arguments:
 - `node` (optional). Default fleet-node pin.
 - `failover` (optional). `none|approved|automatic`. Manual target/model/node pins default to `none`; `approved` requires `allowed_candidates`; `automatic` permits route-part-aware infrastructure failover.
 - `allowed_candidates` (optional). Ordered exact `{agent, target, model, node}` tuples. Valid only with `failover:"approved"`; retries cannot escape this envelope.
-- `thinking_level` (optional). One of `off|minimal|low|medium|high|xhigh`, applied to all items.
+- `thinking_level` (optional). One of `off|minimal|low|medium|high|xhigh|max`, applied to all items.
 - `cwd` (optional). Default agent working directory.
 - `timeout_ms` (optional). Aborts the whole dispatch; in sequential mode remaining tasks are skipped and the skip is reported.
 - `briefing` (optional string, top-level default or per-task override). Parent-composed context/data, not worker instructions: it cannot replace `task`. It is trimmed and omitted when blank, rejected above 12,000 UTF-8 bytes, sent as its own delimited untrusted dynamic message, and retained only as byte/hash provenance. The shared value applies to string tasks and object tasks without an override; an object-level briefing wins.
@@ -410,7 +410,7 @@ Read-only visibility into known synchronous and detached dispatched runs, built 
 Arguments:
 
 - `run_id` (optional). A run id from dispatch output or `monitor(mode="list")`.
-- `mode` (optional). `list`, `status`, `peek`, `receipt`, `wait`, or `collect`. Default is `status` when `run_id` is given, `list` otherwise.
+- `mode` (optional). `list`, `status`, `peek`, `receipt`, `wait`, `collect`, or `tools`. Default is `status` when `run_id` is given, `list` otherwise.
 
 Modes:
 
@@ -420,6 +420,7 @@ Modes:
 - `receipt`: the stored receipt JSON, truncated at 14KB with a note naming the receipt path so you can read the rest.
 - `wait`: bounded observation of one run until it becomes terminal or the timeout elapses; timeout never cancels the run.
 - `collect`: a non-blocking barrier snapshot for a detached `batch_id` or explicit `run_ids`, returning full results once all are terminal.
+- `tools`: what a run executed, from this process's bounded event buffer plus the integrity-verified receipt totals. The buffer records tool name and outcome, not command arguments, and the answer says so; a run from another process may have no buffer at all.
 
 Use monitor to check on detached parallel workers without interrupting them; pair with steer when a native run needs correction.
 
@@ -428,6 +429,7 @@ monitor(mode="list")
 monitor(run_id="run-01H...")
 monitor(run_id="run-01H...", mode="peek")
 monitor(run_id="run-01H...", mode="receipt")
+monitor(run_id="run-01H...", mode="tools")
 ```
 
 ## steer: guide or cancel a running worker

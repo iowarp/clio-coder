@@ -233,6 +233,7 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Alt+L` | Open the model and targets selector. |
 | `Alt+J` / `Alt+K` | Cycle through the scoped model set (when empty, displays a notice directing the operator to run `/scoped-models`). |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). |
+| `Alt+S` / `Ctrl+Alt+B` | Convert an active attached dispatch to a detached background batch. |
 | `Alt+O` | Toggle the latest tool segment between collapsed and full body. |
 | `Ctrl+Alt+O` / `Alt+Shift+O` | Toggle all tool segments between collapsed and full bodies. |
 | `Alt+P` | Toggle live partial tool output in expanded tool bodies. |
@@ -298,11 +299,14 @@ Fleet dispatch runs focused agent recipes through configured targets. The final 
 | `coder` | `implement` / `base` | Bounded implementation, repairs, and behavior-preserving refactors. |
 | `debugger` | `quality` / `base` | Explaining a failing run, test failure, or session evidence without edits. |
 | `documenter` | `implement` / `base` | Updating developer-facing docs, examples, and operational runbooks. |
+| `git-master` | `implement` / `base` | Bounded git repository operations, history, commits, worktrees, and PR preparation. |
 | `tester` | `quality` / `base` | Focused tests for regressions and verification gaps. |
 | `verifier` | `quality` / `base` | Independent test, lint, build, and quality gate reports. |
+| `wiki-writer` | `implement` / `base` | Planning one repository wiki or researching and writing one wiki page. |
 | `scout` | `explore` / `shadow` | Read-only repository exploration, symbol mapping, and context assembly. |
 | `researcher` | `research` / `shadow` | Documentation, literature, and web-grounded investigation. |
 | `provenance` | `operations` / `shadow` | Reading evidence files, receipts, diffs, and telemetry for handoffs. |
+| `context-bootstrap` | `internal` / `internal` | Bootstrap agent behind `clio context init` that inspects the repository and returns `CLIO.md`. |
 
 Examples:
 

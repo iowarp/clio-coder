@@ -118,14 +118,12 @@ Safety policy metadata records active rule IDs and hashes so receipts/evidence c
 
 The policy engine tags every bash command as recognized or unrecognized; the autonomy mapping decides what happens next:
 
-1. **Recognized**: a valid `.clio/safety.yaml` command entry, or the narrow built-in no-prompt set such as `pwd`, simple `ls`, `git status`, bounded `git diff/log`, common test/lint/build commands, `pytest`, `cargo test`, `go test`, or `make test`. Recognized commands run without prompting at `auto-edit` and `full-auto`.
+1. **Recognized**: a valid `.clio/safety.yaml` command entry, or the narrow built-in no-prompt set such as `pwd`, simple `ls`, `git status`, bounded `git diff/log`, common test/lint/build commands, `pytest`, `cargo test`, `go test`, or `make test`. In addition, compound `&&` chains where every segment is a recognized safe command (up to `CHAIN_MAX_SEGMENTS = 6`) are recognized. Commands wrapped inside `sh -c` are expanded up to depth 3 (`INNER_SHELL_MAX_DEPTH = 3`) and evaluated segment by segment. Recognized commands run without prompting at `auto-edit` and `full-auto`.
 2. **Unrecognized**: anything else. Unrecognized bash asks for one-shot approval at `auto-edit` and runs at `full-auto`; at `suggest` it asks like every mutation, and at `read-only` it is denied.
 
-Shell operators split two ways. Sequencing and redirection (`&&`, `||`, `;`, pipes, redirects, newlines) make a command unrecognized: it asks at `auto-edit` and runs at `full-auto`. Command substitution (`$(...)`, backticks) is a net confirm rail at every level, full-auto included, because the net cannot scan what it executes until runtime. The rule pack scans the full command string before either check, so a destructive verb behind an operator is caught regardless of level. Project policy entries reject both operator kinds unless the entry sets `shellOperators: allow`.
+Shell operators split two ways. Unrecognized sequencing and redirection (`||`, `;`, pipes, redirects, newlines, or `&&` chains with unapproved commands or more than 6 segments) make a command unrecognized: it asks at `auto-edit` and runs at `full-auto`. Command substitution (`$(...)`, backticks) is a net confirm rail at every level, full-auto included, because the net cannot scan what it executes until runtime. The rule pack scans the full command string before either check, so a destructive verb behind an operator is caught regardless of level. Project policy entries reject operator kinds unless the entry sets `shellOperators: allow`.
 
 Bash `cwd` is resolved under the workspace root. Escaping the workspace is blocked unless a reviewed project policy permits the exact command/cwd combination.
-
----
 
 ---
 
@@ -142,8 +140,8 @@ Every tool call entering the safety engine passes through a strict 10-step evalu
 5. **Path Policy Enforcement**: Evaluates `zeroAccessPaths`, `readOnlyPaths`, and `noDeletePaths`.
 6. **Bash Zero-Access Protocol**: Rejects shell commands attempting to read, exfiltrate, or redirect from protected credential files. A safe presence-check exception (`grep -sq "^NAME=" <file>`) is permitted for environment probing without exposing secrets.
 7. **Ask Rails**: Evaluates rules requiring confirmation (such as project `requireConfirmation` or unanalyzable command substitutions `$(...)`).
-8. **System Modify Checks**: Assesses operating-system level modification commands.
-9. **Bash Allowlist Recognition**: Checks whether the command matches the known safe command allowlist.
+8. **System Modify Checks**: Assesses operating-system level modification commands targeting system roots (`/etc`, `/usr`, `/var`, `/bin`, `/sbin`, `/run`), exempting temporary write paths (`/var/tmp`, `/var/folders`).
+9. **Bash Allowlist Recognition**: Checks whether the command matches the known safe command allowlist or compound `&&` chain.
 10. **Default Allow**: If no prior rule intervened, the action proceeds to autonomy-level evaluation.
 
 ---
