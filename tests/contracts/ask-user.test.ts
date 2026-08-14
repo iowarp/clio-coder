@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { agentSpecPolicyErrors, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
@@ -10,9 +11,14 @@ import {
 	type TUI,
 	visibleWidth,
 } from "../../src/engine/tui.js";
-import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
-import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
+import {
+	ASK_USER_DECISION_TITLE,
+	ASK_USER_DECISION_TONE,
+	openAskUserOverlay,
+} from "../../src/interactive/overlays/ask-user.js";
+import { clioTheme, fgSequence, GLYPH } from "../../src/interactive/theme/index.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
+import type { AskUserQuestion } from "../../src/tools/ask-user.js";
 import { createAskUserTool, normalizeAskUserCall } from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { type AskUserToolPolicy, createRegistry } from "../../src/tools/registry.js";
@@ -53,6 +59,7 @@ function askUserPolicy(maxCalls = 6): AskUserToolPolicy {
 function askOverlay(rows = 30): {
 	session: ReturnType<typeof openAskUserOverlay>;
 	child: () => Component;
+	frame: () => Component;
 } {
 	let mounted: Component | null = null;
 	const handle: OverlayHandle = {
@@ -77,6 +84,10 @@ function askOverlay(rows = 30): {
 		child: () => {
 			if (!mounted) throw new Error("ask-user overlay was not mounted");
 			return (mounted as unknown as { child: Component }).child;
+		},
+		frame: () => {
+			if (!mounted) throw new Error("ask-user overlay was not mounted");
+			return mounted;
 		},
 	};
 }
@@ -314,5 +325,116 @@ describe("contracts/ask-user overlay", () => {
 			textMounted.session.cancel();
 			await textPending;
 		}
+	});
+});
+
+/**
+ * A prompt that has taken the keyboard and is waiting on a person is not an
+ * informational panel, and it used to draw itself as one: the same teal frame,
+ * the same centered box, the same title treatment. The operator report is the
+ * whole case for this block — "it's centered and it's very hard for the human
+ * eyes to move away and find where the acceptance is".
+ */
+describe("contracts/ask-user decision visibility", () => {
+	const askDecision = async (
+		run: (mounted: ReturnType<typeof askOverlay>) => void,
+		question: AskUserQuestion = {
+			header: "Scope",
+			question: "Which implementation should Clio assume for this pass?",
+			options: [{ label: "Use the shared overlay frame" }, { label: "Build local chrome" }],
+		},
+	): Promise<void> => {
+		const mounted = askOverlay();
+		const pending = mounted.session.ask([question]);
+		try {
+			run(mounted);
+		} finally {
+			mounted.session.cancel();
+			await pending;
+		}
+	};
+
+	it("draws a pending decision in the decision tone, not the informational frame", async () => {
+		const idle = askOverlay();
+		const waiting = idle.frame().render(90);
+		const waitingBorder = waiting[0] ?? "";
+		ok(waitingBorder.includes(clioTheme().fgSequence("frame")), "an overlay with no decision keeps the frame token");
+		ok(!waitingBorder.includes(clioTheme().fgSequence(ASK_USER_DECISION_TONE)), "and does not claim the decision tone");
+
+		await askDecision((mounted) => {
+			const lines = mounted.frame().render(90);
+			const top = lines[0] ?? "";
+			const bottom = lines[lines.length - 1] ?? "";
+			const tone = clioTheme().fgSequence(ASK_USER_DECISION_TONE);
+
+			ok(top.includes(tone), `the top border carries the decision tone: ${JSON.stringify(top)}`);
+			ok(bottom.includes(tone), `so does the bottom border: ${JSON.stringify(bottom)}`);
+			ok(!top.includes(clioTheme().fgSequence("frame")), "and no informational frame token survives on it");
+			ok(stripAnsi(top).includes(ASK_USER_DECISION_TITLE), stripAnsi(top));
+			// The title is bold as well as toned, so a terminal with color off still
+			// separates a decision from a panel.
+			ok(top.includes(`[1;`) || top.includes("[1m"), `the title stays bold: ${JSON.stringify(top)}`);
+		});
+	});
+
+	it("takes the decision tone from a theme token rather than a written-out color", () => {
+		// The token is what makes the treatment follow the palette instead of one
+		// terminal's idea of orange, in truecolor and in the 256-color fallback.
+		strictEqual(fgSequence(ASK_USER_DECISION_TONE, true), "[38;2;255;126;41m");
+		strictEqual(fgSequence(ASK_USER_DECISION_TONE, false), "[38;5;208m");
+
+		const source = readFileSync("src/interactive/overlays/ask-user.ts", "utf8");
+		ok(!/\\u001b\[|\\x1b\[|38;[25];/u.test(source), "the overlay writes no escape sequence of its own");
+	});
+
+	it("makes the focused option dominant and names its key on the row", async () => {
+		await askDecision((mounted) => {
+			const lines = mounted.child().render(80);
+			const focused = lines.find((line) => stripAnsi(line).includes("Use the shared overlay frame")) ?? "";
+			const other = lines.find((line) => stripAnsi(line).includes("Build local chrome")) ?? "";
+
+			ok(focused.includes(clioTheme().fgSequence("accent")), "the focused row is accent");
+			ok(focused.includes("[1;") || focused.includes("[1m"), `and bold: ${JSON.stringify(focused)}`);
+			ok(stripAnsi(focused).includes("[Enter]"), `the accept key rides on the focused row: ${stripAnsi(focused)}`);
+			ok(!stripAnsi(other).includes("[Enter]"), `and on no other row: ${stripAnsi(other)}`);
+			for (const line of lines) strictEqual(visibleWidth(line) <= 80, true, `line overflows: ${stripAnsi(line)}`);
+		});
+	});
+
+	it("names the toggling key on the focused row of a multi-select", async () => {
+		await askDecision(
+			(mounted) => {
+				const focused =
+					mounted
+						.child()
+						.render(80)
+						.find((line) => stripAnsi(line).includes("Targeted contracts")) ?? "";
+				ok(stripAnsi(focused).includes("[Space]"), `a multi-select row toggles with Space: ${stripAnsi(focused)}`);
+			},
+			{
+				question: "Which checks should run before commit?",
+				multi_select: true,
+				options: [{ label: "Targeted contracts" }, { label: "Full suite" }],
+			},
+		);
+	});
+
+	it("names the exact keys for accepting and leaving the decision", async () => {
+		await askDecision((mounted) => {
+			const hint = (mounted.child() as unknown as { footerHint: () => string }).footerHint();
+			strictEqual(hint, "[Enter] accept · [Esc] close");
+		});
+
+		await askDecision(
+			(mounted) => {
+				const hint = (mounted.child() as unknown as { footerHint: () => string }).footerHint();
+				strictEqual(hint, "[Space] toggle · [Enter] accept · [Esc] close");
+			},
+			{
+				question: "Which checks should run before commit?",
+				multi_select: true,
+				options: [{ label: "Targeted contracts" }, { label: "Full suite" }],
+			},
+		);
 	});
 });
