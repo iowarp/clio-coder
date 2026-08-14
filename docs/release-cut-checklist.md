@@ -54,7 +54,6 @@ performing them.
     changes:
     - `package.json` (`version`)
     - `CHANGELOG.md` (the `## 0.3.0 - <date>` heading and its date)
-    - `DEVLOG.md` (the session headings for this release)
     - `docs/environment-variables.md` and `docs/tui-design.md` (the
       `(Version: 0.3.0)` markers on the interactive-blueprint tips)
     - `docs/html/*.html` (the `Blueprint (v0.3.0)` titles)

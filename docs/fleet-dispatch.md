@@ -190,12 +190,18 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 | Detached | `detach: true` | Return logical assignment ids and a batch id immediately; collect later. |
 | Review gate | `review: {reviewer?, max_cycles?}` | Builder, read-only reviewer verdict, bounded revise loop. |
 | Compete | `mode: "compete", candidates: 2..4` | N candidates in scratch worktrees, read-only judge, winner applied or preserved. |
-| Agent automation | `agent: "auto"` | Bounded hard-filtered agent candidates; advisory unless an exact agent/role pair is activated and ready. |
+| Agent automation | `agent: "auto"` | Baselines candidate agent from task shape via shared classifier (`coder`, `tester`, `documenter`, `verifier`, `researcher`, `scout`); advisory unless activated. |
 
-### Detached fan-out and collect
+### Detached fan-out, backgrounding, and collect
 
 `detach: true` validates, admits, and spawns every task, then returns. The
 reported id is the logical assignment id (also the first attempt's run id).
+For an in-flight attached dispatch, pressing `Alt+S` or `Ctrl+Alt+B` converts
+the running attached dispatch into a detached batch. Backgrounding checks
+against a refusal table: it refuses Scout dependency plans driving stages from
+the turn, compete judge gates, review cycle gates, multi-step pipelines,
+dispatches with explicit `timeout_ms`, or missing detached records.
+
 Attempts keep streaming into the board and immutable run ledger. The batch and
 assignment index are durable (`batches.json` and `assignments.json` under the
 state dir), so collection survives session exit. Gather results with the
@@ -494,6 +500,8 @@ include:
 - `resultContract`: the admitted contract identity and `valid`, `invalid`, or
   `not-reached` conformance state. Only a due correctness-bearing contract can
   label route quality.
+- `validationGrounding`: claimed versus grounded validations checked against canonical executed commands.
+- `capabilityMismatch`: capability class versus task shape verdict (`refuse` vs `flag`).
 - worker attestation identity: settings/WorkerSpec fingerprints, runtime,
   target, endpoint, model, tool surface, node, and bounded resource facts.
 

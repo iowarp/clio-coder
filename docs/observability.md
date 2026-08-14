@@ -160,6 +160,16 @@ The base provenance sets, steering, routing, quality, worker identity, and resul
 | `autonomyEnforcement.autonomy` | `string` | Always in v0.3.0 | The effective autonomy level name (e.g. auto-edit, suggest, read-only, full-auto) | experimental |
 | `autonomyEnforcement.externalMode` | `string` | When running external worker | The execution mode of the external worker runtime | experimental |
 | `autonomyEnforcement.dangerousBypass` | `boolean` | When running external worker | Whether a safety bypass was explicitly activated | experimental |
+| `validationGrounding.claimed` | `number` | Validation grounding evaluated | Count of validations claimed by worker | experimental |
+| `validationGrounding.grounded` | `number` | Validation grounding evaluated | Count of claimed validations matched against executed commands | experimental |
+| `validationGrounding.ungrounded` | `string[]` | Validation grounding evaluated | Claim names with no matching execution, stably ordered and bounded | experimental |
+| `validationGrounding.basis` | `"no-command-executed" \| "unmatched-command"` | Validation grounding evaluated | Why the unmatched claims are unmatched. Only `no-command-executed` takes a quality label away | experimental |
+| `capabilityMismatch.verdict` | `"refuse" \| "flag"` | Capability assessment evaluated | Mismatch verdict for agent capability class versus task shape | experimental |
+| `capabilityMismatch.agentId` | `string` | Capability assessment evaluated | Dispatched agent ID | experimental |
+| `capabilityMismatch.capabilityClass` | `string` | Capability assessment evaluated | Admitted agent capability class | experimental |
+| `capabilityMismatch.taskType` | `string` | Capability assessment evaluated | Classified task shape | experimental |
+| `capabilityMismatch.suggestedAgentId` | `string \| null` | Capability assessment evaluated | Installed recipe that can do this work, or null when none is installed | experimental |
+| `capabilityMismatch.detail` | `string` | Capability assessment evaluated | Human-readable explanation of the mismatch | experimental |
 
 Only Clio-owned native/SSH worker wrappers and the Claude SDK path may transport worker-authored outcome events. ACP and black-box subprocess output cannot self-assert an outcome code; Clio may still assign `worker_final_output_missing` at its trusted finalization seam.
 

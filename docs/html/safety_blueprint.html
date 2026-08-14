@@ -1107,7 +1107,12 @@ commands:
         actionClass = "read";
       } else if (tool === 'write') {
         // Path safety overrides classification
-        if (filepath.startsWith('/etc') || filepath.startsWith('/usr') || filepath.startsWith('/var') || filepath.startsWith('/bin')) {
+        const SYSTEM_ROOTS = ['/etc', '/usr', '/var', '/bin', '/sbin', '/run'];
+        const SCRATCH_EXEMPT = ['/var/tmp', '/var/folders'];
+        const underSystemRoot =
+          SYSTEM_ROOTS.some((root) => filepath === root || filepath.startsWith(root + '/')) &&
+          !SCRATCH_EXEMPT.some((root) => filepath === root || filepath.startsWith(root + '/'));
+        if (underSystemRoot) {
           actionClass = "system_modify";
           logTrace(`Path Escaping: file write path "${filepath}" is a system directory`, 'warn');
         } else if (filepath.startsWith('..') || filepath.startsWith('/') && !filepath.startsWith(cwd)) {
@@ -1157,9 +1162,24 @@ commands:
           } else {
             // Check if recognized
             let recognized = false;
-            const hasSequencing = /&&|\|\||[;|><\n]/.test(command);
-            if (hasSequencing) {
+            const hasOtherOperators = /\|\||[;|><\n]/.test(command);
+            const isChain = !hasOtherOperators && command.includes('&&');
+            if (hasOtherOperators) {
               logTrace(`Sequencing or redirection operator found. Command is unrecognized.`, 'warn');
+            } else if (isChain) {
+              // An && chain is recognized only when every member is, capped at
+              // six members, and it takes the most restrictive member's verdict.
+              const segments = command.split('&&').map((part) => part.trim()).filter(Boolean);
+              const memberRecognized = (segment) =>
+                BUILTIN_RECOGNIZED.some((rx) => rx.test(segment)) || segment === 'npm test' || /^cd\s+\S+$/.test(segment);
+              if (segments.length > 6) {
+                logTrace(`Chain of ${segments.length} members exceeds the six-member cap. Command is unrecognized.`, 'warn');
+              } else if (segments.every(memberRecognized)) {
+                recognized = true;
+                logTrace(`Every member of the && chain is recognized. Chain classified as execute (recognized).`, 'success');
+              } else {
+                logTrace(`One or more && chain members are unrecognized. Command is unrecognized.`, 'warn');
+              }
             } else {
               for (const rx of BUILTIN_RECOGNIZED) {
                 if (rx.test(command)) {

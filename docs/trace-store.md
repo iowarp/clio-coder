@@ -27,7 +27,8 @@ try to change it, because changing journal mode is a database write.
 
 The seven Clio trace tables are `runs`, `phases`, `events`, `envelopes`,
 `gate_results`, `agent_sessions`, and `processes`; `meta` carries the schema
-version. Runs use terminal run ids. A phase belongs to a run and carries its
+version. Runs use terminal run ids. Interactive session turns are also recorded
+as `runs` rows using `assignment_id = "session"`. A phase belongs to a run and carries its
 assignment/worker-facing name, kind, owner, attempt, timing, status, itemized
 token spend, optional itemized dollar spend, total dollar spend, and context
 occupancy. Missing historical or unavailable component costs are `NULL`, never
@@ -77,7 +78,7 @@ tool-span, attempt, and usage facts are retained; display-only progress may be
 dropped with a warning when the cap is full. SQLite work never runs in the
 worker event pump and never participates in receipt correctness.
 Write/open/schema failures emit one bounded `[clio:trace]` warning and degrade
-the mirror without failing the run. Domain shutdown prioritizes flushing trace
+the mirror without failing the run. The Node.js `node:sqlite` `ExperimentalWarning` is suppressed by default via a scoped listener filter, which can be carved out by passing `--trace-warnings`. Domain shutdown prioritizes flushing trace
 writes before slower evidence builds.
 
 ## CLI Commands
