@@ -8,7 +8,7 @@ import {
 	visibleWidth,
 } from "../../engine/tui.js";
 import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, GLYPH } from "../theme/index.js";
+import { clioTheme, GLYPH, screenTitle } from "../theme/index.js";
 
 export const AUTH_DIALOG_WIDTH = 88;
 const ELLIPSIS = "…";
@@ -114,7 +114,7 @@ function createAuthDialogController(
 	let rejecter: ((error: Error) => void) | undefined;
 	let currentHint = buildHint([]);
 
-	titleView.setText(clioTheme().style("title", title, { bold: true }));
+	titleView.setText(screenTitle(clioTheme(), title));
 	const box = new FocusBox([], {
 		onInput: (data) => {
 			if (promptLabel) input.handleInput(data);

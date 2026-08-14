@@ -13,7 +13,7 @@ import {
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { ASK_USER_OTHER_LABEL, cancelledAskUserResult } from "../../tools/ask-user.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, dotSep, GLYPH } from "../theme/index.js";
+import { clioTheme, dotSep, GLYPH, screenTitle } from "../theme/index.js";
 
 export const ASK_USER_OVERLAY_WIDTH = "94%";
 export const ASK_USER_OVERLAY_MIN_WIDTH = 72;
@@ -309,7 +309,7 @@ class AskUserOverlayView implements Component {
 	private renderWaiting(width: number, targetRows: number): string[] {
 		const theme = clioTheme();
 		const lines = [
-			theme.style("title", "Interview", { bold: true }),
+			screenTitle(theme, "Interview"),
 			"",
 			theme.fg(
 				"muted",
@@ -372,7 +372,7 @@ class AskUserOverlayView implements Component {
 	private renderQuestionHeader(question: AskUserQuestion, width: number): string {
 		const theme = clioTheme();
 		const parts = [theme.fg("dim", `Question ${this.index + 1}/${this.questions.length}`)];
-		if (question.header) parts.push(theme.style("title", question.header, { bold: true }));
+		if (question.header) parts.push(screenTitle(theme, question.header));
 		if (this.currentState()?.answer.trim()) parts.push(theme.fg("muted", "answered"));
 		return fitLine(parts.join(dotSep(theme)), width);
 	}
@@ -380,7 +380,7 @@ class AskUserOverlayView implements Component {
 	private renderQuestionStrip(width: number): string {
 		const theme = clioTheme();
 		const total = this.questions.length;
-		if (total <= 1) return fitLine(theme.style("title", "Interview", { bold: true }), width);
+		if (total <= 1) return fitLine(screenTitle(theme, "Interview"), width);
 		const gap = "  ";
 		const slotWidth = Math.max(10, Math.floor((width - visibleWidth(gap) * (total - 1)) / total));
 		const parts = this.questions.map((question, index) => {

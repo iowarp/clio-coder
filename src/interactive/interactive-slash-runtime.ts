@@ -47,7 +47,7 @@ export interface InteractiveSlashSubmitExpansion {
 	pendingSkillRequests: PendingSkillRequest[];
 }
 
-type SlashChat = Pick<ChatLoop, "getSessionId" | "submit">;
+type SlashChat = Pick<ChatLoop, "getSessionId" | "isStreaming" | "submit">;
 type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser">;
 type SlashResources = Pick<ResourcesContract, "prompts" | "reload">;
 type SlashExtensions = Pick<ExtensionsContract, "list">;
@@ -325,9 +325,15 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			const runSubmit = (sub: InteractiveSlashSubmitExpansion) => {
 				void (async () => {
 					try {
+						// Enter while streaming becomes a steer inside chat.submit. The
+						// queue panel shows it until the engine injects it, and the
+						// injection emits queued_user_turn, which is when the transcript
+						// renders it. Appending here too showed the text twice and at
+						// the wrong point in the turn's order.
+						const willQueue = deps.chat.isStreaming();
 						deps.recordSubmittedTurn();
 						deps.refreshFooter();
-						deps.chatPanel.appendUser(sub.text);
+						if (!willQueue) deps.chatPanel.appendUser(sub.text);
 						deps.requestRender();
 						await deps.chat.submit(sub.text, {
 							...(sub.images.length > 0 ? { images: sub.images } : {}),

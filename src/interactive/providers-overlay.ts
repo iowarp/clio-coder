@@ -24,7 +24,7 @@ import {
 } from "../engine/tui.js";
 import { buildHint, diagnosticSeverityToken, FocusBox, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
 import { applySettingChange } from "./overlays/settings.js";
-import { type ClioTheme, type ClioToken, clioTheme, GLYPH, padAnsi } from "./theme/index.js";
+import { type ClioTheme, type ClioToken, clioTheme, GLYPH, padAnsi, screenTitle } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const TARGET_COL_WIDTH = 20;
@@ -279,7 +279,7 @@ function formatCollapsedTargetRow(
 	const marker = options.selected ? theme.fg("accent", GLYPH.cursor) : " ";
 	const targetBudget = options.active ? Math.max(1, TARGET_COL_WIDTH - " active".length) : TARGET_COL_WIDTH;
 	const id = truncateToWidth(status.target.id, targetBudget, "", true);
-	const target = options.active ? `${theme.style("title", id, { bold: true })} ${theme.fg("success", "active")}` : id;
+	const target = options.active ? `${screenTitle(theme, id)} ${theme.fg("success", "active")}` : id;
 	const runtime = status.runtime?.displayName ?? status.target.runtime;
 	// Runtime, auth, and model are secondary values, so they read muted; the
 	// target id and the tokened health cell carry the row's brighter marks.

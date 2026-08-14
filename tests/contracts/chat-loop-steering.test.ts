@@ -284,8 +284,10 @@ describe("contracts/chat-loop steering queue routing", () => {
 			await agent.emit({ type: "agent_end", messages: [done] });
 		});
 		const queueEvents: QueuedChatMessage[][] = [];
+		const injectedTurns: Array<{ text: string; kind: string }> = [];
 		loop.onEvent((event: ChatLoopEvent) => {
 			if (event.type === "queue_update") queueEvents.push(event.messages);
+			if (event.type === "queued_user_turn") injectedTurns.push({ text: event.text, kind: event.kind });
 		});
 
 		const firstRun = loop.submit("start a long task");
@@ -300,11 +302,17 @@ describe("contracts/chat-loop steering queue routing", () => {
 			followUp: [],
 		});
 		deepStrictEqual(queueEvents.at(-1), [{ text: "actually only list directories", kind: "steer" }]);
+		deepStrictEqual(injectedTurns, [], "enqueue must not render a transcript turn yet");
 
 		runGate.release();
 		await firstRun;
 		deepStrictEqual(loop.queuedMessages(), { steer: [], followUp: [] });
 		deepStrictEqual(queueEvents.at(-1), [], "mirror empties when the engine injects the steer");
+		deepStrictEqual(
+			injectedTurns,
+			[{ text: "actually only list directories", kind: "steer" }],
+			"the transcript turn renders exactly at injection",
+		);
 		strictEqual(log.prompts.length, 1, "a consumed steer must not resubmit");
 	});
 
@@ -323,16 +331,27 @@ describe("contracts/chat-loop steering queue routing", () => {
 			await agent.emit({ type: "agent_end", messages: [done] });
 		});
 
+		const injectedTurns: Array<{ text: string; kind: string }> = [];
+		loop.onEvent((event: ChatLoopEvent) => {
+			if (event.type === "queued_user_turn") injectedTurns.push({ text: event.text, kind: event.kind });
+		});
+
 		const firstRun = loop.submit("start");
 		await settle();
 		strictEqual(loop.queueFollowUp("and then summarize"), true);
 		strictEqual(log.followedUp.length, 1, "alt+enter must ride the follow-up queue");
 		strictEqual(log.steered.length, 0);
 		deepStrictEqual(loop.queuedMessages(), { steer: [], followUp: ["and then summarize"] });
+		deepStrictEqual(injectedTurns, [], "a queued follow-up must not render before injection");
 
 		runGate.release();
 		await firstRun;
 		deepStrictEqual(loop.queuedMessages(), { steer: [], followUp: [] });
+		deepStrictEqual(
+			injectedTurns,
+			[{ text: "and then summarize", kind: "follow-up" }],
+			"the follow-up renders as a user turn when the engine injects it",
+		);
 	});
 
 	it("resubmits a stranded steer as a fresh prompt when the run ends without draining it", async () => {
@@ -353,6 +372,11 @@ describe("contracts/chat-loop steering queue routing", () => {
 			await agent.emit({ type: "agent_end", messages: [done] });
 		});
 
+		const injectedTurns: Array<{ text: string; kind: string }> = [];
+		loop.onEvent((event: ChatLoopEvent) => {
+			if (event.type === "queued_user_turn") injectedTurns.push({ text: event.text, kind: event.kind });
+		});
+
 		const firstRun = loop.submit("start");
 		await settle();
 		await loop.submit("too late correction");
@@ -363,6 +387,11 @@ describe("contracts/chat-loop steering queue routing", () => {
 		strictEqual(log.prompts.length, 2, "stranded steer must resubmit as a fresh prompt");
 		ok(log.prompts[1]?.includes("too late correction"), `second prompt carries the steer text: ${log.prompts[1]}`);
 		ok(log.clearSteeringCalls >= 1, "the engine steering queue is cleared before the resubmit");
+		deepStrictEqual(
+			injectedTurns,
+			[{ text: "too late correction", kind: "steer" }],
+			"the resubmitted steer renders exactly one transcript turn",
+		);
 		deepStrictEqual(loop.queuedMessages(), { steer: [], followUp: [] });
 	});
 
@@ -381,6 +410,11 @@ describe("contracts/chat-loop steering queue routing", () => {
 			await agent.emit({ type: "agent_end", messages: [aborted] });
 		});
 
+		const injectedTurns: string[] = [];
+		loop.onEvent((event: ChatLoopEvent) => {
+			if (event.type === "queued_user_turn") injectedTurns.push(event.text);
+		});
+
 		const firstRun = loop.submit("start");
 		await settle();
 		await loop.submit("steer me");
@@ -394,6 +428,7 @@ describe("contracts/chat-loop steering queue routing", () => {
 		runGate.release();
 		await firstRun;
 		strictEqual(log.prompts.length, 1, "a cancelled steer must not resubmit");
+		deepStrictEqual(injectedTurns, [], "a cancelled queue must not render transcript turns");
 	});
 
 	it("restores both kinds to the editor via clearQueuedFollowUps in enqueue order", async () => {

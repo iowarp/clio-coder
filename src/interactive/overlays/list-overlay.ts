@@ -60,6 +60,18 @@ export class ListOverlayView implements Component {
 	private listScrollOffset = 0;
 	private detailScrollOffset = 0;
 	private readonly input: Input;
+	/**
+	 * Filter memo: the item set is fixed at construction, so the fuzzy pass is a
+	 * pure function of the query. Re-scoring every item per frame defeated the
+	 * overlay frame's identity cache, since each frame returned a fresh array.
+	 */
+	private filterMemo: { query: string; items: ReadonlyArray<ListOverlayItem> } | null = null;
+	/** Detail pane memo: one Markdown render per (item, width), not per frame. */
+	private detailMemo: { item: ListOverlayItem; width: number; lines: string[] } | null = null;
+	/** Rendered-frame memo keyed on every render input, for frame-cache identity. */
+	private renderMemo: { key: string; lines: string[] } | null = null;
+	/** Bumped on every keystroke routed into the filter input; part of the memo key. */
+	private inputEpoch = 0;
 
 	constructor(
 		private readonly options: ListOverlayOptions,
@@ -71,6 +83,15 @@ export class ListOverlayView implements Component {
 		if (options.initialFilter) {
 			this.input.setValue(options.initialFilter);
 		}
+	}
+
+	private filteredItems(): ReadonlyArray<ListOverlayItem> {
+		const query = this.filterText.trim();
+		if (query.length === 0) return this.options.items;
+		if (this.filterMemo?.query === query) return this.filterMemo.items;
+		const items = fuzzyFilter([...this.options.items], query, (item) => `${item.label} ${item.group ?? ""}`);
+		this.filterMemo = { query, items };
+		return items;
 	}
 
 	private selectIndex(index: number): void {
@@ -263,10 +284,15 @@ export class ListOverlayView implements Component {
 		if (!selectedItem?.detail) {
 			return Array.from({ length: height }, () => " ".repeat(width));
 		}
-		const detailLines = selectedItem.detail(width);
-		const detailMarkdown = detailLines.join("\n");
-		const md = new Markdown(detailMarkdown, 0, 0, markdownTheme(clioTheme()));
-		const mdLines = md.render(width);
+		let mdLines: string[];
+		if (this.detailMemo && this.detailMemo.item === selectedItem && this.detailMemo.width === width) {
+			mdLines = this.detailMemo.lines;
+		} else {
+			const detailLines = selectedItem.detail(width);
+			const md = new Markdown(detailLines.join("\n"), 0, 0, markdownTheme(clioTheme()));
+			mdLines = md.render(width);
+			this.detailMemo = { item: selectedItem, width, lines: mdLines };
+		}
 
 		const maxScrollOffset = Math.max(0, mdLines.length - height);
 		this.detailScrollOffset = Math.max(0, Math.min(this.detailScrollOffset, maxScrollOffset));
@@ -285,15 +311,25 @@ export class ListOverlayView implements Component {
 	}
 
 	render(width: number): string[] {
-		const allItems = this.options.items;
-		const query = this.filterText.trim();
-		const filteredItems = query
-			? fuzzyFilter([...allItems], query, (item) => `${item.label} ${item.group ?? ""}`)
-			: allItems;
+		const filteredItems = this.filteredItems();
 
 		if (this.selectedIndex >= filteredItems.length) {
 			this.selectIndex(Math.max(0, filteredItems.length - 1));
 		}
+
+		// Frame memo: identical inputs return the identical array, which lets the
+		// overlay frame's childLines identity cache short-circuit the whole frame.
+		const memoKey = [
+			width,
+			this.filterText,
+			this.selectedIndex,
+			this.isFilterFocused,
+			this.showDetail,
+			this.listScrollOffset,
+			this.detailScrollOffset,
+			this.inputEpoch,
+		].join("|");
+		if (this.renderMemo?.key === memoKey) return this.renderMemo.lines;
 
 		const lines: string[] = [];
 
@@ -334,6 +370,7 @@ export class ListOverlayView implements Component {
 			}
 		}
 
+		this.renderMemo = { key: memoKey, lines };
 		return lines;
 	}
 
@@ -357,11 +394,7 @@ export class ListOverlayView implements Component {
 			}
 		}
 
-		const allItems = this.options.items;
-		const query = this.filterText.trim();
-		const filteredItems = query
-			? fuzzyFilter([...allItems], query, (item) => `${item.label} ${item.group ?? ""}`)
-			: allItems;
+		const filteredItems = this.filteredItems();
 
 		if (this.isFilterFocused) {
 			if (matchesKey(data, "up")) {
@@ -402,6 +435,7 @@ export class ListOverlayView implements Component {
 				return;
 			}
 
+			this.inputEpoch += 1;
 			this.input.handleInput(data);
 			const next = this.input.getValue();
 			if (next !== this.filterText) {
@@ -459,6 +493,7 @@ export class ListOverlayView implements Component {
 
 			if (this.options.filterable && matchesKey(data, "backspace")) {
 				this.isFilterFocused = true;
+				this.inputEpoch += 1;
 				this.input.handleInput(data);
 				this.filterText = this.input.getValue();
 				this.selectIndex(0);
@@ -468,6 +503,7 @@ export class ListOverlayView implements Component {
 
 			if (this.options.filterable && data.length === 1 && !matchesKey(data, "space")) {
 				this.isFilterFocused = true;
+				this.inputEpoch += 1;
 				this.input.handleInput(data);
 				this.filterText = this.input.getValue();
 				this.selectIndex(0);

@@ -29,6 +29,7 @@ function createHarness() {
 		providers: {} as ProvidersContract,
 		chat: {
 			getSessionId: () => null,
+			isStreaming: () => false,
 			submit: async (text) => {
 				events.push(`submit:${text}`);
 				await submitFinished;

@@ -31,7 +31,15 @@ import {
 } from "../footer-panel.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
-import { barSep, brandMark, clioTheme, collapseHomePath, formatTargetLabel, rule } from "../theme/index.js";
+import {
+	barSep,
+	brandMark,
+	clioTheme,
+	collapseHomePath,
+	formatTargetLabel,
+	rule,
+	screenTitle,
+} from "../theme/index.js";
 import {
 	formatNotificationBadge,
 	formatNotificationPanel,
@@ -315,7 +323,7 @@ function expandedPairWidths(width: number, sepWidth: number, priority: "session"
 
 function headerLine(session: SessionFacts, width: number): string {
 	const theme = clioTheme();
-	const left = `${brandMark(theme)} ${theme.style("title", "CLIO DASHBOARD", { bold: true })}`;
+	const left = `${brandMark(theme)} ${screenTitle(theme, "CLIO DASHBOARD")}`;
 	const right = theme.fg("dim", `v${session.version}`);
 	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
 	return fitDashboardLine(`${left}${" ".repeat(gap)}${right}`, width);

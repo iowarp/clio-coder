@@ -25,8 +25,14 @@ export interface QueuedMessagesSnapshot {
 export interface TurnQueuesDeps {
 	state: ChatTurnState;
 	emitQueueUpdateEvent: (messages: QueuedChatMessage[]) => void;
+	/**
+	 * Fired at injection time, when the engine drains a queued message into the
+	 * run (or the stranded-steer fallback resubmits it). The transcript renders
+	 * the user turn from this event; enqueue time shows the text only in the
+	 * queue panel, so the chat order matches what the model actually saw.
+	 */
+	emitQueuedUserTurn: (entry: QueuedChatMessage) => void;
 	emitNotice: (text: string) => void;
-	interactiveTui: boolean;
 	/** Late-bound `ChatLoop.submit`; wired by the loop after API construction. */
 	submit: (text: string, options?: { requestContinuation?: boolean }) => Promise<void>;
 }
@@ -55,14 +61,15 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	// a cancel clears the run.
 	const queuedMirror: QueuedChatMessage[] = [];
 	const persistedUserEchoes: string[] = [];
-	const steerNotice = deps.interactiveTui
-		? "[Clio Coder] steering the active run; lands before the next model turn. Press Esc to cancel."
-		: "[Clio Coder] steering the active run; lands before the next model turn.";
 
 	const emitQueueUpdate = (): void => {
 		deps.emitQueueUpdateEvent(queuedMirror.map((entry) => ({ ...entry })));
 	};
 
+	// Enqueue is silent in the transcript: the queue panel is the one signal
+	// that a message is pending, exactly as pi-coding-agent's pending container
+	// works. The former per-steer transcript notice duplicated the panel and
+	// left a permanent line for a transient state.
 	const enqueue = (text: string, kind: QueuedMessageKind): boolean => {
 		const trimmed = text.trim();
 		if (trimmed.length === 0 || !state.streaming || !state.runtime) return false;
@@ -78,7 +85,6 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			state.runtime.agent.followUp(message);
 		}
 		emitQueueUpdate();
-		if (kind === "steer") deps.emitNotice(steerNotice);
 		return true;
 	};
 
@@ -102,8 +108,11 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		removeQueuedMirrorEntry(text: string): void {
 			const idx = queuedMirror.findIndex((entry) => entry.text === text);
 			if (idx < 0) return;
-			queuedMirror.splice(idx, 1);
+			const [entry] = queuedMirror.splice(idx, 1);
 			emitQueueUpdate();
+			// The engine just injected this message into the run: this is the
+			// moment it moves from the queue panel into the transcript.
+			if (entry) deps.emitQueuedUserTurn({ ...entry });
 		},
 		consumePersistedEcho(text: string): boolean {
 			const idx = persistedUserEchoes.indexOf(text);
@@ -140,6 +149,9 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			state.runtime?.agent.clearSteeringQueue();
 			emitQueueUpdate();
 			deps.emitNotice("[Clio Coder] steering arrived as the run ended; resubmitting as a fresh prompt.");
+			// The resubmit's own user echo is suppressed (markPersistedUserEcho), so
+			// this is the only place the stranded texts can enter the transcript.
+			for (const entry of stranded) deps.emitQueuedUserTurn({ ...entry });
 			await deps.submit(stranded.map((entry) => entry.text).join("\n\n"));
 			return true;
 		},

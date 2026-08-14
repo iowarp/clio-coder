@@ -1,7 +1,32 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs, { type Dir } from "node:fs";
 import { join, sep } from "node:path";
 import { performance } from "node:perf_hooks";
+
+/**
+ * Cooperative-yield surface for the async enumeration forms. Structurally
+ * compatible with the context domain's CooperativeSlicer, so callers that
+ * already hold one pass it straight through; callers without one get a local
+ * time-budgeted default. Core cannot import the domain type, by boundary.
+ */
+export interface WorkspaceEnumerationTick {
+	tick(): Promise<void>;
+}
+
+const DEFAULT_YIELD_BUDGET_MS = 8;
+
+function createDefaultTick(budgetMs = DEFAULT_YIELD_BUDGET_MS): WorkspaceEnumerationTick {
+	let sliceStart = performance.now();
+	return {
+		async tick(): Promise<void> {
+			if (performance.now() - sliceStart < budgetMs) return;
+			await new Promise<void>((resolve) => {
+				setImmediate(resolve);
+			});
+			sliceStart = performance.now();
+		},
+	};
+}
 
 const GIT_OUTPUT_LIMIT_BYTES = 128 * 1024 * 1024;
 const MAX_ENUMERATION_DIAGNOSTIC_PATH_CHARS = 200;
@@ -165,12 +190,20 @@ function isRegularWorkspaceFile(cwd: string, relPath: string, requireCompleteSna
 	}
 }
 
-function gitVisibleFiles(cwd: string, candidates?: ReadonlyArray<string>): string[] | null {
+function gitVisibleFilesArgs(candidates?: ReadonlyArray<string>): string[] {
 	const args = ["--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard"];
 	if (candidates) args.push("--", ...candidates);
+	return args;
+}
+
+function splitGitPathOutput(output: string): string[] {
+	return output.split("\0").filter((path) => path.length > 0);
+}
+
+function gitVisibleFiles(cwd: string, candidates?: ReadonlyArray<string>): string[] | null {
 	let output: Buffer;
 	try {
-		output = execFileSync("git", args, {
+		output = execFileSync("git", gitVisibleFilesArgs(candidates), {
 			cwd,
 			maxBuffer: GIT_OUTPUT_LIMIT_BYTES,
 			stdio: ["ignore", "pipe", "ignore"],
@@ -178,10 +211,15 @@ function gitVisibleFiles(cwd: string, candidates?: ReadonlyArray<string>): strin
 	} catch {
 		return null;
 	}
-	return output
-		.toString("utf8")
-		.split("\0")
-		.filter((path) => path.length > 0);
+	return splitGitPathOutput(output.toString("utf8"));
+}
+
+function gitVisibleFilesAsync(cwd: string, candidates?: ReadonlyArray<string>): Promise<string[] | null> {
+	return new Promise((resolve) => {
+		execFile("git", gitVisibleFilesArgs(candidates), { cwd, maxBuffer: GIT_OUTPUT_LIMIT_BYTES }, (error, stdout) => {
+			resolve(error ? null : splitGitPathOutput(stdout));
+		});
+	});
 }
 
 function resolveFallbackLimits(overrides: Partial<WorkspaceFallbackLimits> | undefined): WorkspaceFallbackLimits {
@@ -229,13 +267,21 @@ function closeFrame(frame: WalkFrame): void {
 	}
 }
 
-function fallbackFiles(
+/**
+ * The bounded walk as a step generator: one yield per processed entry, so a
+ * synchronous driver drains it in place and the async driver interleaves a
+ * cooperative tick between steps. One body means the two forms cannot drift on
+ * limit enforcement, symlink policy, or failure classification. `elapsedMs`
+ * feeds the time limit: the sync driver passes wall time, the async driver
+ * passes accumulated walk time so event-loop turns spent elsewhere do not
+ * count against the walk's own budget.
+ */
+function* fallbackFilesWalk(
 	cwd: string,
 	excludedDirs: ReadonlySet<string>,
-	overrides?: Partial<WorkspaceFallbackLimits>,
-): string[] {
-	const limits = resolveFallbackLimits(overrides);
-	const startedAt = performance.now();
+	limits: WorkspaceFallbackLimits,
+	elapsedMs: () => number,
+): Generator<void, string[]> {
 	let visitedEntries = 0;
 	let pathBytes = 0;
 	let root: Dir;
@@ -248,7 +294,8 @@ function fallbackFiles(
 	const files: string[] = [];
 	try {
 		while (stack.length > 0) {
-			if (performance.now() - startedAt >= limits.maxDurationMs) {
+			yield;
+			if (elapsedMs() >= limits.maxDurationMs) {
 				throw new WorkspaceEnumerationLimitError("time", limits.maxDurationMs);
 			}
 			const frame = stack.at(-1);
@@ -303,14 +350,49 @@ function fallbackFiles(
 	}
 }
 
-function normalizeVisibleFiles(
+function fallbackFiles(
+	cwd: string,
+	excludedDirs: ReadonlySet<string>,
+	overrides?: Partial<WorkspaceFallbackLimits>,
+): string[] {
+	const limits = resolveFallbackLimits(overrides);
+	const startedAt = performance.now();
+	const walk = fallbackFilesWalk(cwd, excludedDirs, limits, () => performance.now() - startedAt);
+	let step = walk.next();
+	while (!step.done) step = walk.next();
+	return step.value;
+}
+
+async function fallbackFilesAsync(
+	cwd: string,
+	excludedDirs: ReadonlySet<string>,
+	overrides: Partial<WorkspaceFallbackLimits> | undefined,
+	cooperate: WorkspaceEnumerationTick,
+): Promise<string[]> {
+	const limits = resolveFallbackLimits(overrides);
+	let activeMs = 0;
+	let resumedAt = performance.now();
+	const walk = fallbackFilesWalk(cwd, excludedDirs, limits, () => activeMs + (performance.now() - resumedAt));
+	let step = walk.next();
+	while (!step.done) {
+		activeMs += performance.now() - resumedAt;
+		await cooperate.tick();
+		resumedAt = performance.now();
+		step = walk.next();
+	}
+	return step.value;
+}
+
+/** Visibility validation as steps; one yield per path so the async driver can breathe. */
+function* normalizeVisibleFilesSteps(
 	cwd: string,
 	paths: ReadonlyArray<string>,
 	excludedDirs: ReadonlySet<string>,
-	requireCompleteSnapshot = false,
-): string[] {
+	requireCompleteSnapshot: boolean,
+): Generator<void, string[]> {
 	const visible = new Set<string>();
 	for (const path of paths) {
+		yield;
 		const normalized = normalizeRelativePath(path);
 		if (!normalized) {
 			if (requireCompleteSnapshot) {
@@ -322,6 +404,34 @@ function normalizeVisibleFiles(
 		if (isRegularWorkspaceFile(cwd, normalized, requireCompleteSnapshot)) visible.add(normalized);
 	}
 	return [...visible].sort(comparePaths);
+}
+
+function normalizeVisibleFiles(
+	cwd: string,
+	paths: ReadonlyArray<string>,
+	excludedDirs: ReadonlySet<string>,
+	requireCompleteSnapshot = false,
+): string[] {
+	const steps = normalizeVisibleFilesSteps(cwd, paths, excludedDirs, requireCompleteSnapshot);
+	let step = steps.next();
+	while (!step.done) step = steps.next();
+	return step.value;
+}
+
+async function normalizeVisibleFilesAsync(
+	cwd: string,
+	paths: ReadonlyArray<string>,
+	excludedDirs: ReadonlySet<string>,
+	requireCompleteSnapshot: boolean,
+	cooperate: WorkspaceEnumerationTick,
+): Promise<string[]> {
+	const steps = normalizeVisibleFilesSteps(cwd, paths, excludedDirs, requireCompleteSnapshot);
+	let step = steps.next();
+	while (!step.done) {
+		await cooperate.tick();
+		step = steps.next();
+	}
+	return step.value;
 }
 
 /**
@@ -337,6 +447,26 @@ export function enumerateWorkspaceFiles(
 	const gitFiles = gitVisibleFiles(cwd);
 	if (gitFiles) return normalizeVisibleFiles(cwd, gitFiles, excludedDirs);
 	return normalizeVisibleFiles(cwd, fallbackFiles(cwd, excludedDirs, fallbackLimits), excludedDirs, true);
+}
+
+/**
+ * `enumerateWorkspaceFiles` without the synchronous floor: the `git ls-files`
+ * subprocess runs async, and both the per-path lstat validation and the
+ * non-Git fallback walk yield cooperatively. The bounded-walk contract is
+ * unchanged with one deliberate reading: the time limit meters the walk's own
+ * accumulated work rather than wall clock, so a busy event loop cannot fail an
+ * enumeration that did no more work than its budget allows.
+ */
+export async function enumerateWorkspaceFilesAsync(
+	cwd: string,
+	excludedDirs: ReadonlySet<string> = WORKSPACE_EXCLUDED_DIRS,
+	fallbackLimits?: Partial<WorkspaceFallbackLimits>,
+	cooperate: WorkspaceEnumerationTick = createDefaultTick(),
+): Promise<string[]> {
+	const gitFiles = await gitVisibleFilesAsync(cwd);
+	if (gitFiles) return normalizeVisibleFilesAsync(cwd, gitFiles, excludedDirs, false, cooperate);
+	const walked = await fallbackFilesAsync(cwd, excludedDirs, fallbackLimits, cooperate);
+	return normalizeVisibleFilesAsync(cwd, walked, excludedDirs, true, cooperate);
 }
 
 /** Apply the same visibility rules to one incremental batch without walking the tree. */

@@ -10,7 +10,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
-import { type ClioToken, clioTheme, padAnsi, selectListTheme, settingsListTheme } from "./theme/index.js";
+import { type ClioToken, clioTheme, padAnsi, screenTitle, selectListTheme, settingsListTheme } from "./theme/index.js";
 
 export const IDENTITY = (text: string): string => text;
 
@@ -55,7 +55,7 @@ function clioFrame(text: string): string {
 }
 
 function clioTitle(text: string): string {
-	return clioTheme().style("title", text, { bold: true });
+	return screenTitle(clioTheme(), text);
 }
 
 export function clioError(text: string): string {

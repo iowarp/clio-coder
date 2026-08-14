@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
+import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
 import { type CooperativeSlicer, createSlicer } from "./codewiki/cooperative.js";
 import { type Codewiki, isIndexablePath, readCodewiki, readCodewikiAsync } from "./codewiki/indexer.js";
 import { EXCLUDED_DIRS } from "./excluded-dirs.js";
@@ -145,8 +145,8 @@ export interface ComputeFingerprintAsyncOptions {
  * frame if it lands in one turn. Callers on a status-surface poll or on the
  * session-start path should use this; one-shot CLI paths need not bother.
  *
- * `enumerateWorkspaceFiles` still runs as a single synchronous turn. It lives in
- * src/core and has no sliced form, so it is the remaining floor here.
+ * The enumeration itself runs through `enumerateWorkspaceFilesAsync` on the
+ * same slicer, so the former 34 ms synchronous floor is gone too.
  */
 export async function computeFingerprintAsync(
 	cwd: string,
@@ -156,7 +156,7 @@ export async function computeFingerprintAsync(
 	const slicer = options.slicer ?? createSlicer();
 	const artifact = codewiki === undefined ? await readCodewikiAsync(cwd) : codewiki;
 	await slicer.tick();
-	const files = enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath);
+	const files = (await enumerateWorkspaceFilesAsync(cwd, EXCLUDED_DIRS, undefined, slicer)).filter(isIndexablePath);
 
 	const hash = createHash("sha256");
 	const artifactLoc = locFromCodewiki(artifact);

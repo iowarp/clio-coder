@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs, { type Dir, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
 	enumerateWorkspaceFiles,
+	enumerateWorkspaceFilesAsync,
 	filterWorkspaceFileCandidates,
 	WorkspaceEnumerationIncompleteError,
 	WorkspaceEnumerationLimitError,
@@ -349,5 +350,53 @@ describe("contracts/workspace-files", () => {
 			restored.files.map((file) => file.path),
 			["src/wip.ts"],
 		);
+	});
+
+	it("async enumeration returns the same file set as the sync form, on both the Git and fallback paths", async () => {
+		const gitCwd = scratchProject("clio-workspace-files-async-git-");
+		git(gitCwd, ["init"]);
+		mkdirSync(join(gitCwd, "src"), { recursive: true });
+		writeFileSync(join(gitCwd, "src", "a.ts"), "export const a = 1;\n", "utf8");
+		writeFileSync(join(gitCwd, "untracked.md"), "# wip\n", "utf8");
+		git(gitCwd, ["add", "src/a.ts"]);
+		deepStrictEqual(await enumerateWorkspaceFilesAsync(gitCwd), enumerateWorkspaceFiles(gitCwd));
+
+		const bareCwd = scratchProject("clio-workspace-files-async-bare-");
+		const external = scratchProject("clio-workspace-files-async-ext-");
+		mkdirSync(join(bareCwd, "src"), { recursive: true });
+		mkdirSync(join(bareCwd, "node_modules", "pkg"), { recursive: true });
+		writeFileSync(join(bareCwd, "src", "main.py"), "def main():\n    return 0\n", "utf8");
+		writeFileSync(join(bareCwd, "node_modules", "pkg", "ignored.py"), "ignored = True\n", "utf8");
+		writeFileSync(join(external, "outside.py"), "outside = True\n", "utf8");
+		symlinkSync(join(external, "outside.py"), join(bareCwd, "src", "linked.py"));
+		const asyncFiles = await enumerateWorkspaceFilesAsync(bareCwd);
+		deepStrictEqual(asyncFiles, enumerateWorkspaceFiles(bareCwd));
+		strictEqual(asyncFiles.includes("src/linked.py"), false, "the async walk must not follow symlinks either");
+	});
+
+	it("async enumeration keeps the bounded-walk contract and yields through the cooperate hook", async () => {
+		const cwd = scratchProject("clio-workspace-files-async-limits-");
+		mkdirSync(join(cwd, "src"), { recursive: true });
+		writeFileSync(join(cwd, "src", "main.ts"), "export const main = true;\n", "utf8");
+
+		await rejects(enumerateWorkspaceFilesAsync(cwd, undefined, { maxVisitedEntries: 0 }), (error: unknown) => {
+			ok(error instanceof WorkspaceEnumerationLimitError);
+			strictEqual(error.kind, "entries");
+			return true;
+		});
+		await rejects(enumerateWorkspaceFilesAsync(cwd, undefined, { maxDepth: 1 }), (error: unknown) => {
+			ok(error instanceof WorkspaceEnumerationLimitError);
+			strictEqual(error.kind, "depth");
+			return true;
+		});
+
+		let ticks = 0;
+		const files = await enumerateWorkspaceFilesAsync(cwd, undefined, undefined, {
+			tick: async () => {
+				ticks += 1;
+			},
+		});
+		deepStrictEqual(files, enumerateWorkspaceFiles(cwd));
+		ok(ticks > 0, "the walk must offer the cooperate hook at least one yield opportunity");
 	});
 });

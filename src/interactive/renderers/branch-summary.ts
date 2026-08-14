@@ -16,7 +16,7 @@
 
 import type { BranchSummaryEntry } from "../../domains/session/entries.js";
 import { Markdown, type MarkdownTheme, wrapTextWithAnsi } from "../../engine/tui.js";
-import { clioTheme, markdownTheme } from "../theme/index.js";
+import { clioTheme, markdownTheme, screenTitle } from "../theme/index.js";
 
 const LABEL = "branch summary";
 const BODY_INDENT = "  ";
@@ -37,7 +37,7 @@ export interface RenderBranchSummaryOptions {
  * lazily (future `Ctrl+O`-style expand).
  */
 function renderBranchSummaryHeader(entry: BranchSummaryEntry, width: number): string[] {
-	const label = theme.style("title", `[${LABEL}]`, { bold: true });
+	const label = screenTitle(theme, `[${LABEL}]`);
 	const meta = theme.fg("dim", `from turn ${entry.fromTurnId}`);
 	return wrapTextWithAnsi(`${label} ${meta}`, width);
 }

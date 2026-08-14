@@ -598,6 +598,14 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const { cancelSelectedDispatch, steerSelectedDispatch } = dispatchSteering;
 
 	const cancelActiveRun = (): void => {
+		// Esc must not eat typed work: queued steers and follow-ups return to the
+		// editor before the abort, the same restore the reference implementation
+		// performs. cancel() then finds both queues already empty.
+		const restored = deps.chat.clearQueuedFollowUps();
+		if (restored.length > 0) {
+			const current = editor.getText();
+			editor.setText([restored.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
+		}
 		deps.chat.cancel();
 		deps.toolRegistry?.cancelParkedCalls("run cancelled by operator");
 		footer.refresh();
