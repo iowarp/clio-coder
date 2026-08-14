@@ -1,4 +1,9 @@
-import { WORKER_STDIN_FRAME_MAX_BYTES, withinFrameBudget } from "./protocol.js";
+import {
+	type AgentLedgerEntry,
+	parseAgentLedgerEntry,
+	WORKER_STDIN_FRAME_MAX_BYTES,
+	withinFrameBudget,
+} from "./protocol.js";
 import { parseWorkerSpec, type WorkerSpec } from "./spec-contract.js";
 
 export interface WorkerStdinDemux {
@@ -22,6 +27,14 @@ export interface WorkerStdinDemux {
 	 * flushed. Single handler; a second registration replaces the first.
 	 */
 	onPermissionDecision(handler: (decision: { requestId: string; decision: "approve" | "deny" }) => void): void;
+	/**
+	 * Register the handler for agent-ledger delta lines
+	 * (`{"type":"ledger_delta","entries":[...]}`). The orchestrator replays the
+	 * full board on subscription, which can land before the runtime wires its
+	 * handler, so batches that arrive early are buffered in order and flushed.
+	 * Single handler; a second registration replaces the first.
+	 */
+	onLedgerDelta(handler: (entries: ReadonlyArray<AgentLedgerEntry>) => void): void;
 	/** Post-spec lines that were not valid steer or permission-decision messages. */
 	droppedLineCount(): number;
 	/**
@@ -85,6 +98,8 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 	const pendingSteers: WorkerSteerMessage[] = [];
 	let permissionHandler: ((decision: { requestId: string; decision: "approve" | "deny" }) => void) | null = null;
 	const pendingPermissionDecisions: Array<{ requestId: string; decision: "approve" | "deny" }> = [];
+	let ledgerDeltaHandler: ((entries: ReadonlyArray<AgentLedgerEntry>) => void) | null = null;
+	const pendingLedgerDeltas: Array<ReadonlyArray<AgentLedgerEntry>> = [];
 	let droppedLines = 0;
 	let channelCloseHandler: (() => void) | null = null;
 	let channelCloseDelivered = false;
@@ -122,6 +137,14 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 		pendingPermissionDecisions.push({ requestId, decision });
 	}
 
+	function deliverLedgerDelta(entries: ReadonlyArray<AgentLedgerEntry>): void {
+		if (ledgerDeltaHandler) {
+			ledgerDeltaHandler(entries);
+			return;
+		}
+		pendingLedgerDeltas.push(entries);
+	}
+
 	function processPostSpecLine(line: string): void {
 		let value: unknown;
 		try {
@@ -157,6 +180,24 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 				(value as { requestId: string }).requestId,
 				(value as { decision: "approve" | "deny" }).decision,
 			);
+			return;
+		}
+		if (typeof value === "object" && value !== null && (value as { type?: unknown }).type === "ledger_delta") {
+			const raw = (value as { entries?: unknown }).entries;
+			if (!Array.isArray(raw)) {
+				droppedLines += 1;
+				return;
+			}
+			const entries: AgentLedgerEntry[] = [];
+			for (const candidate of raw) {
+				const entry = parseAgentLedgerEntry(candidate);
+				if (entry !== null) entries.push(entry);
+			}
+			if (entries.length === 0) {
+				droppedLines += 1;
+				return;
+			}
+			deliverLedgerDelta(entries);
 			return;
 		}
 		droppedLines += 1;
@@ -255,6 +296,13 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			while (pendingPermissionDecisions.length > 0) {
 				const entry = pendingPermissionDecisions.shift();
 				if (entry !== undefined) handler(entry);
+			}
+		},
+		onLedgerDelta(handler: (entries: ReadonlyArray<AgentLedgerEntry>) => void): void {
+			ledgerDeltaHandler = handler;
+			while (pendingLedgerDeltas.length > 0) {
+				const batch = pendingLedgerDeltas.shift();
+				if (batch !== undefined) handler(batch);
 			}
 		},
 		droppedLineCount(): number {

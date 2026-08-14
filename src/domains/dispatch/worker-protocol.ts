@@ -24,17 +24,30 @@ import {
 import type { RunReceiptAttestation } from "./types.js";
 
 export type {
+	AgentLedgerBody,
+	AgentLedgerBodyParse,
+	AgentLedgerDeltaFrame,
+	AgentLedgerEntry,
+	AgentLedgerPort,
 	WorkerAttestation,
 	WorkerControlFrame,
 	WorkerResourceFacts,
 	WorkerResourceValue,
 } from "../../worker/protocol.js";
 export {
+	AGENT_LEDGER_CLAIM_MAX_CHARS,
+	AGENT_LEDGER_EVIDENCE_MAX_CHARS,
+	AGENT_LEDGER_INTENT_MAX_CHARS,
+	AGENT_LEDGER_PATH_MAX_CHARS,
+	AGENT_LEDGER_SCOPE_ENTRY_MAX_CHARS,
+	AGENT_LEDGER_SCOPE_MAX_ENTRIES,
 	CONTROL_FRAME_PREFIX,
 	encodeControlFrame,
 	endpointIdentityHash,
+	isAgentLedgerEntryId,
 	isControlLine,
 	isReceiptBearingFrame,
+	parseAgentLedgerBody,
 	parseBulkFrame,
 	parseControlFrame,
 	toolSignatureOf,
@@ -186,8 +199,8 @@ export function receiptAttestationFields(
  */
 export class WorkerChannelFailure extends Error {
 	readonly failureClass = "node-channel" as const;
-	readonly operation: "steer" | "permission_decision" | "spec";
-	constructor(operation: "steer" | "permission_decision" | "spec", detail: string) {
+	readonly operation: "steer" | "permission_decision" | "spec" | "ledger_delta";
+	constructor(operation: "steer" | "permission_decision" | "spec" | "ledger_delta", detail: string) {
 		super(`worker control channel failure during ${operation}: ${detail}`);
 		this.name = "WorkerChannelFailure";
 		this.operation = operation;

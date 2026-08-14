@@ -16,6 +16,7 @@ import { attestedToolSignature } from "../engine/worker-tools.js";
 import { emitControlFrame } from "./control-lane.js";
 import { projectWorkerEventForStdout } from "./event-projection.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
+import { createWorkerAgentLedgerPort } from "./ledger-mirror.js";
 import { drainStdout, emitEvent } from "./ndjson.js";
 import { endpointIdentityHash, WORKER_PROTOCOL_VERSION, workerSpecDigest } from "./protocol.js";
 import { observeHostIdentity, observeWorkerResourceFacts } from "./resource-facts.js";
@@ -122,6 +123,16 @@ async function main(): Promise<number> {
 		return 2;
 	}
 
+	// The agent ledger is push-fed: the orchestrator replays the board on
+	// subscription and pushes each admitted entry after it, so the port answers
+	// a read from this local mirror instead of stalling a tool call on a round
+	// trip. A run with no ledger still gets a port, and it reads null.
+	const ledgerPort = createWorkerAgentLedgerPort({
+		...(spec.ledger !== undefined ? { ledger: spec.ledger } : {}),
+		emitControlFrame,
+	});
+	demux.onLedgerDelta((entries) => ledgerPort.acceptDelta(entries));
+
 	const input: WorkerRunInput = {
 		systemPrompt: spec.systemPrompt,
 		dynamicPromptMessages: spec.dynamicPromptMessages ?? [],
@@ -152,6 +163,7 @@ async function main(): Promise<number> {
 		...(spec.responseSchema !== undefined ? { responseSchema: spec.responseSchema } : {}),
 		...(spec.resultContract !== undefined ? { resultContract: spec.resultContract } : {}),
 		...(spec.product !== undefined ? { product: spec.product } : {}),
+		agentLedger: ledgerPort,
 		cwd: process.cwd(),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;

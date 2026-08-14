@@ -54,6 +54,7 @@ import { createProtectedArtifactsRegistration } from "../domains/safety/protecte
 import { createRunEffectsRecorder } from "../domains/safety/run-effects.js";
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
 import type { ToolProfileName } from "../tools/profiles.js";
+import type { AgentLedgerPort } from "../worker/protocol.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
@@ -106,6 +107,11 @@ export interface WorkerRunInput {
 	resultContract?: ResultContract;
 	/** What this run delivers; decides which delivery tools the reserve keeps live. */
 	product?: AgentProduct;
+	/**
+	 * The run's agent-ledger port, present only when this run was dispatched
+	 * alongside concurrent peers. The ledger tool is registered either way.
+	 */
+	agentLedger?: AgentLedgerPort;
 	/** Workspace root the result contract resolves relative paths against. */
 	cwd?: string;
 	/** Tool ids the worker is allowed to expose for this run. */
@@ -494,6 +500,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		],
 		input.autonomy,
 		(effects) => middlewareToolChoice.apply(effects),
+		input.agentLedger,
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;

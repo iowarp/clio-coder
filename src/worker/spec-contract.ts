@@ -95,6 +95,12 @@ interface WorkerSpecFields {
 	 * than trusted as free text.
 	 */
 	product?: AgentProduct;
+	/**
+	 * The agent ledger this run coordinates on, present only when the dispatch
+	 * unit has more than one concurrent peer. `sequence` is the board watermark
+	 * at spawn, so a worker knows how far behind its mirror started.
+	 */
+	ledger?: { id: string; sequence: number };
 	/** Orchestrator-resolved effective runtime/capability decision for receipts and debugging. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	allowedTools: ReadonlyArray<ToolName>;
@@ -588,6 +594,13 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	if (spec.autonomy !== undefined) {
 		readEnum(spec.autonomy, "WorkerSpec.autonomy", SPEC_AUTONOMY_LEVELS);
+	}
+	if (spec.ledger !== undefined) {
+		const ledger = readRecord(spec.ledger, "WorkerSpec.ledger");
+		readString(ledger.id, "WorkerSpec.ledger.id");
+		if (typeof ledger.sequence !== "number" || !Number.isSafeInteger(ledger.sequence) || ledger.sequence < 0) {
+			throw new Error("WorkerSpec.ledger.sequence must be a non-negative safe integer");
+		}
 	}
 	if (spec.writeRoots !== undefined) {
 		const roots = readStringArray(spec.writeRoots, "WorkerSpec.writeRoots");

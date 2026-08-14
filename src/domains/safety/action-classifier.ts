@@ -97,6 +97,10 @@ function baseClassify(tool: string): ActionClass | null {
 		// tasks mutates only the session's task ledger, never the workspace,
 		// so it stays read class and is never gated behind a confirmation.
 		case ToolNames.Tasks:
+		// ledger posts a typed contribution to a coordination board and reads a
+		// local mirror. Neither touches the workspace, so it is never gated
+		// behind a confirmation.
+		case ToolNames.Ledger:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:

@@ -43,6 +43,12 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// (session-ledger bookkeeping, no workspace mutation), sequential so two
 	// board mutations in one batch never interleave.
 	[ToolNames.Tasks]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
+	// ledger reads a local mirror and posts over the one-way control lane, so it
+	// mutates no workspace and stays read class. Reviewers and judges run pinned
+	// to read-only autonomy, and a write class there would block exactly the peer
+	// review the board depends on. Sequential so two posts in one batch do not
+	// interleave against the local post cap.
+	[ToolNames.Ledger]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.WebFetch]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.AskUser]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Artifact]: { plane: "artifact", actionClass: "write", executionMode: "sequential" },

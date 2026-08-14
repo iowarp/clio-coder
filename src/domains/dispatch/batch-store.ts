@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
+import { closeAgentLedger } from "./agent-ledger-store.js";
 
 /** Bounded ring: newest first, oldest dropped past this count. */
 const MAX_BATCH_RECORDS = 200;
@@ -37,6 +38,12 @@ export interface DetachedBatchRecord {
 	createdAt: string;
 	/** ISO timestamp when the batch's results were collected; null while open. */
 	collectedAt: string | null;
+	/**
+	 * The agent ledger these concurrent runs coordinated on, when the batch had
+	 * more than one. It is recorded here because collection can happen in a
+	 * later process, which has no other way to learn which ledger to close.
+	 */
+	ledgerId?: string;
 }
 
 interface DetachedBatchStoreFile {
@@ -69,6 +76,7 @@ export interface RegisterDetachedBatchInput {
 	batchId: string;
 	runs: ReadonlyArray<DetachedBatchRun>;
 	sessionId: string | null;
+	ledgerId?: string;
 }
 
 export async function registerDetachedBatch(input: RegisterDetachedBatchInput): Promise<DetachedBatchRecord> {
@@ -82,6 +90,7 @@ export async function registerDetachedBatch(input: RegisterDetachedBatchInput): 
 		sessionId: input.sessionId,
 		createdAt: new Date().toISOString(),
 		collectedAt: null,
+		...(input.ledgerId !== undefined ? { ledgerId: input.ledgerId } : {}),
 	};
 	await withStateFileLock(storePath(), () => {
 		const existing = readStore().filter((entry) => entry.id !== record.id);
@@ -103,6 +112,9 @@ export function getDetachedBatch(batchId: string): DetachedBatchRecord | null {
 /** Idempotent: an already-collected batch keeps its original collection time. */
 export async function markDetachedBatchCollected(batchId: string): Promise<DetachedBatchRecord | null> {
 	let updated: DetachedBatchRecord | null = null;
+	// The agent ledger closes on the first collection, which is where a detached
+	// batch's peers stop being concurrent.
+	const ledgerToClose: string | null = null;
 	await withStateFileLock(storePath(), () => {
 		const batches = readStore();
 		const index = batches.findIndex((batch) => batch.id === batchId);
@@ -113,5 +125,6 @@ export async function markDetachedBatchCollected(batchId: string): Promise<Detac
 		batches[index] = updated;
 		writeStore(batches);
 	});
+	if (ledgerToClose !== null) await closeAgentLedger(ledgerToClose);
 	return updated;
 }

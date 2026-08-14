@@ -135,6 +135,9 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	// they existed and the integrity version stays where it is.
 	validationGrounding: true,
 	capabilityMismatch: true,
+	// Same reasoning: absent unless the run had an agent ledger, so a receipt
+	// without one digests byte-identically to one produced before it existed.
+	ledgerContribution: true,
 	sessionId: true,
 	briefing: true,
 	outcomeCode: true,

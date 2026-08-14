@@ -8,6 +8,7 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
+import type { AgentLedgerPort } from "../worker/protocol.js";
 import { createArtifactTool } from "./artifact.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
@@ -18,6 +19,7 @@ import { createDispatchRunEventRegistry, createDispatchTool, type DispatchBackgr
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
 import { grepTool } from "./grep.js";
+import { createLedgerTool } from "./ledger.js";
 import { lsTool } from "./ls.js";
 import { createMonitorTool } from "./monitor.js";
 import { networkToolsDisabled } from "./network-policy.js";
@@ -43,6 +45,14 @@ export interface ToolBootstrapDeps {
 	 * gets a private in-memory board without ledger persistence.
 	 */
 	taskBoard?: TaskBoardStore;
+	/**
+	 * The run's agent-ledger port. The ledger tool is registered unconditionally
+	 * because attestedToolSignature signs the names a bare registry produces and
+	 * a conditional registration would drift that signature; only the injected
+	 * port varies, and its absence is what makes the tool answer that this run
+	 * has no coordination ledger.
+	 */
+	agentLedger?: AgentLedgerPort;
 	/** Agent fleet catalog renderer for the dispatch tool's list action. */
 	getAgentCatalog?: () => string;
 	getAgentSpecs?: () => ReadonlyArray<AgentSpec>;
@@ -225,6 +235,19 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			'Mark one task active with "start" before working it, close it with "done" plus an evidence note ' +
 			'(what proves it works), and use "block" with a reason instead of silently stalling.',
 	},
+	[ToolNames.Ledger]: {
+		objective: "Coordinate with the peer workers of this dispatch through typed claims, findings, and reviews.",
+		uiLabel: "Ledger",
+		// A repeated post lands a second entry and spends another of the run's
+		// twenty posts, so the surface as a whole is not retry safe.
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 16_384,
+			followUpHint: 'Call ledger with action="read" and a since sequence to re-read only what is new.',
+		},
+		costLatency: "local_fast",
+	},
 	[ToolNames.Dispatch]: {
 		objective: "Dispatch bounded tasks to configured Clio workers.",
 		uiLabel: "Dispatch",
@@ -396,6 +419,12 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	});
 	registry.register({
 		...builtin(createArtifactTool({ getCwd: skillToolDeps.getCwd }), { path: "src/tools/artifact.ts", scope: "core" }),
+	});
+	registry.register({
+		...builtin(createLedgerTool(deps.agentLedger ? { agentLedger: deps.agentLedger } : {}), {
+			path: "src/tools/ledger.ts",
+			scope: "core",
+		}),
 	});
 	registry.register({
 		...builtin(createTasksTool({ board: deps.taskBoard ?? createTaskBoardStore() }), {
