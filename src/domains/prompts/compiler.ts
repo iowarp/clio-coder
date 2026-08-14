@@ -35,6 +35,13 @@ export interface SessionPromptInputs {
 	 * sorted by tool name so the compiled text is byte-stable per surface.
 	 */
 	toolPromptHints?: ReadonlyArray<ToolPromptHint>;
+	/**
+	 * Compact fleet roster (`renderFleetPromptSection`) for the sessions that
+	 * carry the dispatch tool. Rendered only when `dispatch` is on the frozen
+	 * surface: a roster without the tool to reach it is noise, and the tool
+	 * without the roster is a guess.
+	 */
+	fleetRoster?: string;
 	contextFiles?: string;
 	memorySection?: string;
 }
@@ -104,9 +111,12 @@ export interface CompiledSessionPrompt {
 	projectPreload?: ProjectPreloadClass | null;
 }
 
-export const FLEET_ROUTING_GUIDANCE_MAX_BYTES = 256;
+export const FLEET_ROUTING_GUIDANCE_MAX_BYTES = 320;
+// Points at the Fleet section rather than describing routing in the abstract:
+// `agent:"auto"` baselines by task shape and can still land on a worker whose
+// capability class is wrong for the job, so a pinned id is the reliable path.
 export const FLEET_ROUTING_GUIDANCE =
-	'Fleet routing: broad repo/codebase exploration -> agent:"auto" before repo-wide reads; external research, evidence, and bounded changes also use auto when agent choice is not pinned. Give each dispatch a concrete handoff and synthesize its receipt.';
+	'Fleet routing: pin the `agent` id from the Fleet section above; agent:"auto" baselines from the task text and is a fallback, not a router. Broad repo/codebase exploration goes to a worker before repo-wide reads. Give each dispatch a concrete handoff and synthesize its receipt.';
 
 function lookupFragment(table: FragmentTable, id: string, role: string): LoadedFragment {
 	const frag = table.byId.get(id);
@@ -159,6 +169,23 @@ function renderRuntimeBlock(inputs: SessionPromptInputs): string {
 	return lines.join("\n");
 }
 
+/**
+ * Whether the session's frozen surface can reach fleet workers. Read from the
+ * tool names and the registry's hints, never from settings: the Fleet section
+ * and the Tool Contract's dispatch clauses must appear together or not at all.
+ */
+function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
+	if (inputs.providerSupportsTools === false) return false;
+	const names = new Set((inputs.toolNames ?? []).map((name) => name.trim()));
+	const hinted = new Set((inputs.toolPromptHints ?? []).map((entry) => entry.tool.trim()));
+	return names.has("dispatch") || hinted.has("dispatch");
+}
+
+function renderFleetBlock(inputs: SessionPromptInputs): string {
+	if (!sessionCanDispatch(inputs)) return "";
+	return inputs.fleetRoster?.trim() ?? "";
+}
+
 function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	if (inputs.providerSupportsTools === false) {
 		return [
@@ -171,7 +198,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		...new Set((inputs.toolNames ?? []).map((name) => name.trim()).filter((name) => name.length > 0)),
 	].sort();
 	const hintedTools = new Set((inputs.toolPromptHints ?? []).map((entry) => entry.tool.trim()));
-	const canDispatch = names.includes("dispatch") || hintedTools.has("dispatch");
+	const canDispatch = sessionCanDispatch(inputs);
 	const canListSkills = names.includes("context") || hintedTools.has("context");
 	const inventoryGuidance = [
 		// Asked twice in one session which tools it had, a live model gave two
@@ -364,7 +391,7 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 	return [
 		"# Retrieval Hints",
 		"Compact CLIO.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
-		'For narrow questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. For explicit broad repository exploration, use dispatch agent:"auto" when it is available. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.',
+		"For narrow questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. For explicit broad repository exploration, hand the search to a reconnaissance worker with dispatch when it is available. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
 	].join("\n");
 }
 
@@ -410,6 +437,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	push("safety", renderSafetySection(safety, autonomyLevel));
 	push("runtime", renderRuntimeBlock(session));
 	push("tool-contract", renderToolContractBlock(session));
+	push("fleet", renderFleetBlock(session));
 	push("retrieval-hints", renderRetrievalHintsBlock(session));
 	push("memory", renderMemoryBlock(session.memorySection));
 	push("project-context", renderProjectBlock(session.contextFiles));

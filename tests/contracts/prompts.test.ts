@@ -752,9 +752,9 @@ describe("contracts/prompts compiler logic", () => {
 		});
 		ok(withDispatch.systemPrompt.includes(FLEET_ROUTING_GUIDANCE));
 		for (const route of [
-			'broad repo/codebase exploration -> agent:"auto" before repo-wide reads',
-			"external research, evidence, and bounded changes also use auto",
-			"when agent choice is not pinned",
+			"pin the `agent` id from the Fleet section above",
+			'agent:"auto" baselines from the task text and is a fallback, not a router',
+			"Broad repo/codebase exploration goes to a worker before repo-wide reads",
 			"Give each dispatch a concrete handoff and synthesize its receipt",
 		]) {
 			ok(withDispatch.systemPrompt.includes(route), route);
