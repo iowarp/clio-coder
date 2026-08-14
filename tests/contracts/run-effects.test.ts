@@ -87,5 +87,32 @@ describe("contracts/run-effects", () => {
 		const effects = recorder.snapshot();
 		deepStrictEqual([...effects.validationCommands].sort(), ["npm run typecheck", "npm test"]);
 		strictEqual(effects.mutatedPaths.size, 0);
+		// Everything the strict set holds is also a check under the wider scope.
+		deepStrictEqual([...effects.verificationCommands].sort(), ["npm run typecheck", "npm test"]);
+	});
+
+	it("records read verification and ad-hoc checks only in the grounding set", () => {
+		const recorder = createRunEffectsRecorder(CWD);
+		const commands = ["git diff -- src/sum.ts", "npx vitest run", "node -e \"import('./src/sum.js')\""];
+		commands.forEach((command, index) => {
+			recorder.start(`call-${index}`, "bash", { command });
+			recorder.finish(`call-${index}`, false);
+		});
+		const effects = recorder.snapshot();
+		// The strict set is what `result-contract.ts` spends on the measured gate,
+		// and a run that only looked at its own diff has asserted nothing about
+		// correctness. Widening that set would let inspection seal a mutation
+		// report as `pass`.
+		strictEqual(effects.validationCommands.size, 0);
+		deepStrictEqual([...effects.verificationCommands].sort(), ["git diff", "node -e", "npx vitest"]);
+	});
+
+	it("keeps a red grounding-scope command out of both sets", () => {
+		const recorder = createRunEffectsRecorder(CWD);
+		recorder.start("call-1", "bash", { command: "npx vitest run" });
+		recorder.finish("call-1", true);
+		const effects = recorder.snapshot();
+		strictEqual(effects.validationCommands.size, 0);
+		strictEqual(effects.verificationCommands.size, 0);
 	});
 });

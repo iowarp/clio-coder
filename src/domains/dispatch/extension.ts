@@ -4846,7 +4846,13 @@ export function createDispatchBundle(
 				const validationGrounding = groundClaimedValidations({
 					contractKind: appliedResultContract?.kind ?? null,
 					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
-					executedCommands: observedRunEffects.validationCommands,
+					// The wider set, matching the wider vocabulary the claim side reads
+					// under. A run that verified with `git diff` or `npx vitest` did
+					// check something, and calling that claim ungrounded is the same
+					// false-confidence defect pointed the other way. The strict set
+					// stays where a match opens a gate, in the result contract's
+					// measured judgement above.
+					executedCommands: observedRunEffects.verificationCommands,
 					executedCheckingCalls: countCheckingCalls(toolStats),
 				});
 				const sealedResultContractFact: RunReceiptResultContractFact | null =
