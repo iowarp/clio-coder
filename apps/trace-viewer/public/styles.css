@@ -47,21 +47,20 @@ body::before {
 	z-index: 5;
 }
 .brand {
+	display: flex;
+	align-items: center;
+	gap: 12px;
 	color: var(--dim);
 	text-decoration: none;
-	font:
-		600 18px ui-monospace,
-		SFMono-Regular,
-		monospace;
-	letter-spacing: 0.08em;
 }
-.brand strong {
-	color: var(--accent);
+.brand img {
+	width: 32px;
+	height: 32px;
+	display: block;
 }
 .brand span {
 	color: var(--text);
 	font: 700 12px system-ui;
-	margin-left: 14px;
 	letter-spacing: 0.18em;
 }
 .connection {
