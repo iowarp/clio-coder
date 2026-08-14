@@ -9,7 +9,7 @@ raw run outputs.
 1. `swe-bench-lite/swebench_clio.py` generates SWE-bench Lite predictions. It
    clones `repo@base_commit`, runs `clio-coder run --json`, extracts a source diff,
    and writes prediction and metric files in the selected run directory.
-2. `terminal-bench/tb_clio_agent/` provides a Terminal-Bench 2.0 installed
+2. `terminal-bench/tb_clio_coder/` provides a Terminal-Bench 2.0 installed
    agent. It installs Clio in the task container, renders settings from
    `CLIO_CODER_*` environment variables, and runs one headless episode per task.
 3. `scicode/scicode_clio.py` generates v1 `clio-coder eval` task files for SciCode

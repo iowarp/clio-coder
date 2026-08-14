@@ -6,7 +6,7 @@ the same base the bundled claude_code, codex, and aider agents use.
 
 Run it:
   tb run -d terminal-bench@2.0 -k 1 \
-     --agent-import-path "tb_clio_agent.clio_agent:ClioAgent"
+     --agent-import-path "tb_clio_coder.clio_coder:ClioCoder"
 
 Live-smoke prerequisites:
   1. The task container can reach CLIO_CODER_MAIN_URL and CLIO_CODER_WORKER_URL.
@@ -74,7 +74,7 @@ except Exception:
     }
 
 
-class ClioAgent(AbstractInstalledAgent):
+class ClioCoder(AbstractInstalledAgent):
     @staticmethod
     def name() -> str:
         return "clio-coder"
@@ -141,10 +141,12 @@ class ClioAgent(AbstractInstalledAgent):
         ]
 
     def _write_scheduled_manifest(self, instruction: str) -> None:
+        dataset = os.environ.get("CLIO_CODER_TB_DATASET", "terminal-bench")
+        dataset_split = os.environ.get("CLIO_CODER_TB_DATASET_SPLIT", "unspecified")
         summary = {
             "suite": "terminal-bench",
-            "dataset": os.environ.get("CLIO_CODER_TB_DATASET", "terminal-bench"),
-            "datasetSplit": os.environ.get("CLIO_CODER_TB_DATASET_SPLIT", "unspecified"),
+            "dataset": dataset,
+            "datasetSplit": dataset_split,
             "instances": 1,
             "resolved": 0,
             "errors": 0,
@@ -155,8 +157,8 @@ class ClioAgent(AbstractInstalledAgent):
         write_result_manifest(
             self._result_dir,
             suite="terminal-bench",
-            dataset=summary["dataset"],
-            dataset_split=summary["datasetSplit"],
+            dataset=dataset,
+            dataset_split=dataset_split,
             model=self._main_model,
             profile=target_profile(target=self._main_target, model=self._main_model),
             instances=1,

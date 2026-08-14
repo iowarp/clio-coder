@@ -80,7 +80,7 @@ clio-coder eval report <evalId> --format swe-jsonl > predictions.jsonl
 
 ## Terminal-Bench
 
-`terminal-bench/tb_clio_agent/` implements a Terminal-Bench installed agent. The
+`terminal-bench/tb_clio_coder/` implements a Terminal-Bench installed agent. The
 agent requires `CLIO_CODER_MAIN_URL` and `CLIO_CODER_WORKER_URL`; it has no endpoint
 defaults. The adapter writes a scheduled-run `manifest.json` and `summary.json`
 under `benchmarks/community/terminal-bench/runs/latest` unless
@@ -100,7 +100,7 @@ CLIO_CODER_MAIN_URL=http://orchestrator.example:8080 \
 CLIO_CODER_WORKER_URL=http://worker.example:1234 \
 PYTHONPATH=benchmarks/community/terminal-bench \
 tb run -d terminal-bench-core==0.1.1 --n-concurrent 1 \
-  --agent-import-path "tb_clio_agent.clio_agent:ClioAgent" \
+  --agent-import-path "tb_clio_coder.clio_coder:ClioCoder" \
   --output-path benchmarks/community/terminal-bench/runs/smoke
 ```
 

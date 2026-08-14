@@ -25,7 +25,7 @@ untracked.
 `benchmarks/community/` contains thin adapters for public benchmark ecosystems:
 
 1. SWE-bench Lite patch generation through `swe-bench-lite/swebench_clio.py`.
-2. Terminal-Bench container episodes through `terminal-bench/tb_clio_agent/`.
+2. Terminal-Bench container episodes through `terminal-bench/tb_clio_coder/`.
 3. SciCode prompt generation and grading through `scicode/scicode_clio.py`.
 4. OpenAI HumanEval completion generation and grading through `human-eval/humaneval_clio.py`.
 

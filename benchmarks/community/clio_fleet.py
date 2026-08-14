@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "# Terminal-Bench (needs the `tb` CLI + Docker):\n"
         "#   tb run -d terminal-bench-core==0.1.1 --n-concurrent 1 "
-        '--agent-import-path "tb_clio_agent.clio_agent:ClioAgent" --output-path runs/smoke',
+        '--agent-import-path "tb_clio_coder.clio_coder:ClioCoder" --output-path runs/smoke',
         file=sys.stderr,
     )
     return 0

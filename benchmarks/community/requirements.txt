@@ -10,7 +10,7 @@
 datasets            # load princeton-nlp/SWE-bench_Lite
 swebench            # harness for `python -m swebench.harness.run_evaluation`
 
-# --- terminal-bench (tb_clio_agent/) ---
+# --- terminal-bench (tb_clio_coder/) ---
 terminal-bench      # provides the `tb` CLI and AbstractInstalledAgent base
 
 # --- scicode (scicode_clio.py grade path) ---
