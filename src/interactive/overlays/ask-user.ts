@@ -13,11 +13,23 @@ import {
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { ASK_USER_OTHER_LABEL, cancelledAskUserResult } from "../../tools/ask-user.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, dotSep, GLYPH, screenTitle } from "../theme/index.js";
+import { type ClioToken, clioTheme, dotSep, GLYPH, screenTitle } from "../theme/index.js";
 
 export const ASK_USER_OVERLAY_WIDTH = "94%";
 export const ASK_USER_OVERLAY_MIN_WIDTH = 72;
 export const ASK_USER_OVERLAY_MAX_HEIGHT = "92%";
+
+/**
+ * The border and title token while a decision is pending.
+ *
+ * Orange is the token that means Clio is acting, and a prompt holding the
+ * keyboard is the moment the operator has to act with it. Everything
+ * informational keeps the teal frame, so the one border that is not teal is the
+ * one asking for an answer.
+ */
+export const ASK_USER_DECISION_TONE: ClioToken = "action";
+export const ASK_USER_DECISION_TITLE = "Decision required";
+export const ASK_USER_WAITING_TITLE = "Ask User";
 
 const ASK_USER_MIN_INNER_ROWS = 12;
 const ASK_USER_FALLBACK_INNER_ROWS = 20;
@@ -185,6 +197,11 @@ class AskUserOverlayView implements Component {
 		return this.phase === "waiting" && this.resolveCurrent === null;
 	}
 
+	/** True while the overlay is holding a question the operator has to answer. */
+	isDecisionPending(): boolean {
+		return this.phase === "asking";
+	}
+
 	invalidate(): void {
 		this.list?.invalidate();
 		this.input?.invalidate();
@@ -274,24 +291,28 @@ class AskUserOverlayView implements Component {
 					])
 				: buildHint([{ key: "Enter", verb: "submit" }]);
 		}
+		// `accept` rather than `select` or `commit`: the footer of a decision prompt
+		// has one job, which is to name the key that answers it. Esc keeps the
+		// product's one word for the way out, since it closes the prompt and the
+		// interview together.
 		if (question.multi_select === true) {
 			return this.questions.length > 1
 				? buildHint([
 						{ key: "Left/Right", verb: "question" },
 						{ key: "Space", verb: "toggle" },
-						{ key: "Enter", verb: "commit" },
+						{ key: "Enter", verb: "accept" },
 					])
 				: buildHint([
 						{ key: "Space", verb: "toggle" },
-						{ key: "Enter", verb: "commit" },
+						{ key: "Enter", verb: "accept" },
 					]);
 		}
 		return this.questions.length > 1
 			? buildHint([
 					{ key: "Left/Right", verb: "question" },
-					{ key: "Enter", verb: "select" },
+					{ key: "Enter", verb: "accept" },
 				])
-			: buildHint([{ key: "Enter", verb: "select" }]);
+			: buildHint([{ key: "Enter", verb: "accept" }]);
 	}
 
 	private finish(result: AskUserResult): void {
@@ -439,10 +460,11 @@ class AskUserOverlayView implements Component {
 		const primaryColumnWidth = this.primaryColumnWidth(items, width);
 		const lines: string[] = [];
 
+		const acceptKey = question.multi_select === true ? "Space" : "Enter";
 		for (let index = start; index < end; index += 1) {
 			const item = items[index];
 			if (!item) continue;
-			lines.push(this.renderOptionRow(item, index === selectedIndex, width, primaryColumnWidth));
+			lines.push(this.renderOptionRow(item, index === selectedIndex, width, primaryColumnWidth, acceptKey));
 		}
 
 		if (start > 0 || end < items.length) {
@@ -457,10 +479,20 @@ class AskUserOverlayView implements Component {
 		return Math.max(1, Math.min(bounded, Math.max(1, width - 4)));
 	}
 
-	private renderOptionRow(item: SelectItem, selected: boolean, width: number, primaryColumnWidth: number): string {
+	private renderOptionRow(
+		item: SelectItem,
+		selected: boolean,
+		width: number,
+		primaryColumnWidth: number,
+		acceptKey: string,
+	): string {
 		const theme = clioTheme();
 		const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
-		const available = Math.max(1, width - 2);
+		// The key that answers rides on the focused row. An operator whose eyes are
+		// already on the option they want should not have to travel to the footer
+		// to learn what commits it.
+		const affordance = selected ? ` ${theme.style("accent", `[${acceptKey}]`, { bold: true })}` : "";
+		const available = Math.max(1, width - 2 - visibleWidth(affordance));
 		const description = item.description?.replace(/[\r\n]+/g, " ").trim();
 
 		let body: string;
@@ -478,7 +510,7 @@ class AskUserOverlayView implements Component {
 			body = selected ? theme.style("accent", label, { bold: true }) : label;
 		}
 
-		return fitLine(`${prefix}${body}`, width);
+		return fitLine(`${prefix}${body}${affordance}`, width);
 	}
 
 	private padLines(lines: string[], targetRows: number): string[] {
@@ -721,7 +753,8 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		minWidth: ASK_USER_OVERLAY_MIN_WIDTH,
 		maxHeight: ASK_USER_OVERLAY_MAX_HEIGHT,
 		margin: 1,
-		title: "Ask User",
+		title: () => (view.isDecisionPending() ? ASK_USER_DECISION_TITLE : ASK_USER_WAITING_TITLE),
+		tone: () => (view.isDecisionPending() ? ASK_USER_DECISION_TONE : undefined),
 		footerHint: () => view.footerHint(),
 	});
 	const close = (): void => {

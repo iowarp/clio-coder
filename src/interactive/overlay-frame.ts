@@ -50,19 +50,34 @@ export class FocusBox extends Box {
 	}
 }
 
-function clioFrame(text: string): string {
-	return clioTheme().fg("frame", text);
+/**
+ * The border and title token of a framed overlay.
+ *
+ * Every overlay used to draw the same teal frame, informational or not, so a
+ * prompt that had taken the keyboard and was waiting on a decision read as one
+ * more panel. A tone is the one signal that separates the two classes; the
+ * overlays that carry one say so, and everything else stays on the frame token.
+ */
+export type OverlayTone = ClioToken | (() => ClioToken | undefined);
+
+function resolveTone(tone: OverlayTone | undefined): ClioToken | undefined {
+	return typeof tone === "function" ? tone() : tone;
 }
 
-function clioTitle(text: string): string {
-	return screenTitle(clioTheme(), text);
+function clioFrame(text: string, token: ClioToken = "frame"): string {
+	return clioTheme().fg(token, text);
+}
+
+function clioTitle(text: string, token?: ClioToken): string {
+	return token === undefined ? screenTitle(clioTheme(), text) : clioTheme().style(token, text, { bold: true });
 }
 
 export function clioError(text: string): string {
 	return clioTheme().fg("error", text);
 }
 
-function brandedTopBorder(label: string, innerWidth: number): string {
+function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): string {
+	const frame = (text: string): string => clioFrame(text, tone ?? "frame");
 	const clean = label.replace(/^[┌┐└┘├┤─│\s]+/, "").replace(/[┌┐└┘├┤─│\s]+$/, "");
 	const formatted = clean.length > 0 ? `─ ${clean} ` : "─";
 	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "…", true) : formatted;
@@ -71,9 +86,9 @@ function brandedTopBorder(label: string, innerWidth: number): string {
 	if (cleanIndex !== -1) {
 		const prefix = clipped.slice(0, cleanIndex);
 		const suffix = clipped.slice(cleanIndex + clean.length);
-		return `${clioFrame("┌")}${clioFrame(prefix)}${clioTitle(clean)}${clioFrame(suffix)}${clioFrame(fill)}${clioFrame("┐")}`;
+		return `${frame("┌")}${frame(prefix)}${clioTitle(clean, tone)}${frame(suffix)}${frame(fill)}${frame("┐")}`;
 	}
-	return `${clioFrame("┌")}${clioFrame(clipped)}${clioFrame(fill)}${clioFrame("┐")}`;
+	return `${frame("┌")}${frame(clipped)}${frame(fill)}${frame("┐")}`;
 }
 
 /**
@@ -239,9 +254,10 @@ export function elideHint(hint: string, maxCleanWidth: number): string {
 	return rendered.replace(/\[\] /gu, "");
 }
 
-function brandedBottomBorder(innerWidth: number, hint?: string): string {
+function brandedBottomBorder(innerWidth: number, hint?: string, tone?: ClioToken): string {
+	const frame = (text: string): string => clioFrame(text, tone ?? "frame");
 	if (!hint || hint.trim().length === 0) {
-		return `${clioFrame("└")}${clioFrame("─".repeat(innerWidth))}${clioFrame("┘")}`;
+		return `${frame("└")}${frame("─".repeat(innerWidth))}${frame("┘")}`;
 	}
 	let clean = hint.trim();
 	const maxCleanWidth = innerWidth - 3;
@@ -255,9 +271,9 @@ function brandedBottomBorder(innerWidth: number, hint?: string): string {
 	if (cleanIndex !== -1) {
 		const prefix = clipped.slice(0, cleanIndex);
 		const suffix = clipped.slice(cleanIndex + clean.length);
-		return `${clioFrame("└")}${clioFrame(prefix)}${clioTheme().fg("dim", clean)}${clioFrame(suffix)}${clioFrame(fill)}${clioFrame("┘")}`;
+		return `${frame("└")}${frame(prefix)}${clioTheme().fg("dim", clean)}${frame(suffix)}${frame(fill)}${frame("┘")}`;
 	}
-	return `${clioFrame("└")}${clioFrame(clipped)}${clioFrame(fill)}${clioFrame("┘")}`;
+	return `${frame("└")}${frame(clipped)}${frame(fill)}${frame("┘")}`;
 }
 
 export function brandedContentRow(text: string, contentWidth: number): string {
@@ -339,7 +355,15 @@ export class ClioOverlayFrame implements Component {
 	 * array and correctly hits.
 	 */
 	private cachedRender:
-		| { width: number; rowBudget: number; childLines: string[]; title: string; hint: string | undefined; lines: string[] }
+		| {
+				width: number;
+				rowBudget: number;
+				childLines: string[];
+				title: string;
+				hint: string | undefined;
+				tone: ClioToken | undefined;
+				lines: string[];
+		  }
 		| undefined;
 
 	constructor(
@@ -355,6 +379,11 @@ export class ClioOverlayFrame implements Component {
 		/** Box width in columns. Zero fills the row it is given. */
 		private readonly boxWidth = 0,
 		private readonly align: FrameAlign = "center",
+		/**
+		 * A function tone is re-read per frame, so one overlay can carry the
+		 * decision treatment only while it is actually holding a decision.
+		 */
+		private readonly tone?: OverlayTone,
 	) {}
 
 	setRowBudget(rows: number): void {
@@ -367,6 +396,7 @@ export class ClioOverlayFrame implements Component {
 		const childLines = this.child.render(contentWidth);
 		const titleText = typeof this.title === "function" ? this.title() : this.title;
 		const hint = typeof this.footerHint === "function" ? this.footerHint(contentWidth + 2) : this.footerHint;
+		const tone = resolveTone(this.tone);
 		// pi-tui has no dirty-component model, so a modal re-derived both borders,
 		// re-fit the hint row, and re-padded every body row on every frame for as
 		// long as it stayed open: 0.4 ms at 12 rows, 1.3 ms at 40. A child that
@@ -379,17 +409,17 @@ export class ClioOverlayFrame implements Component {
 			cached.rowBudget === this.rowBudget &&
 			cached.childLines === childLines &&
 			cached.title === titleText &&
-			cached.hint === hint
+			cached.hint === hint &&
+			cached.tone === tone
 		) {
 			return cached.lines;
 		}
 		const label = titleText.length > 0 ? `─ ${titleText} ` : "─ ";
+		const side = clioFrame("│", tone ?? "frame");
 		const boxLines = [
-			brandedTopBorder(label, contentWidth + 2),
-			...fitBody(childLines, this.rowBudget, contentWidth).map(
-				(line) => `${clioFrame("│")} ${padAnsi(line, contentWidth)} ${clioFrame("│")}`,
-			),
-			brandedBottomBorder(contentWidth + 2, hint),
+			brandedTopBorder(label, contentWidth + 2, tone),
+			...fitBody(childLines, this.rowBudget, contentWidth).map((line) => `${side} ${padAnsi(line, contentWidth)} ${side}`),
+			brandedBottomBorder(contentWidth + 2, hint, tone),
 		];
 		const slack = Math.max(0, width - boxWidth);
 		const lines = ((): string[] => {
@@ -399,7 +429,7 @@ export class ClioOverlayFrame implements Component {
 			const trail = " ".repeat(slack - leading);
 			return boxLines.map((line) => `${lead}${line}${trail}`);
 		})();
-		this.cachedRender = { width, rowBudget: this.rowBudget, childLines, title: titleText, hint, lines };
+		this.cachedRender = { width, rowBudget: this.rowBudget, childLines, title: titleText, hint, tone, lines };
 		return lines;
 	}
 
@@ -441,11 +471,13 @@ export function showClioOverlayFrame(
 	options: OverlayOptions & {
 		title: string | (() => string);
 		footerHint?: string | ((innerWidth: number) => string | undefined);
+		/** Border and title token; omitted leaves the informational frame. */
+		tone?: OverlayTone;
 	},
 ): OverlayHandle {
-	const { title, footerHint, width, visible, maxHeight, margin, ...overlayOptions } = options;
+	const { title, footerHint, tone, width, visible, maxHeight, margin, ...overlayOptions } = options;
 	const boxWidth = typeof width === "number" ? width : 0;
-	const frame = new ClioOverlayFrame(child, title, footerHint, boxWidth, frameAlignForAnchor(options.anchor));
+	const frame = new ClioOverlayFrame(child, title, footerHint, boxWidth, frameAlignForAnchor(options.anchor), tone);
 	const marginRows = typeof margin === "number" ? margin * 2 : (margin?.top ?? 0) + (margin?.bottom ?? 0);
 	return tui.showOverlay(frame, {
 		...overlayOptions,

@@ -23,8 +23,9 @@ const TOKENS: Record<ClioToken, TokenColor> = {
 	accentDeep: { rgb: [31, 183, 166], xterm: 44 },
 	// Second brand color: neon orange. The token name teaches the rule: orange
 	// means Clio is acting. It fires only for Clio's signature actions
-	// (dispatching, queued and running fleet work, steering), never as
-	// decoration, and never a metric, at most one orange element per region of
+	// (dispatching, queued and running fleet work, steering) and for the border
+	// of a prompt that has taken the keyboard and is waiting on a decision, never
+	// as decoration, and never a metric, at most one orange element per region of
 	// the screen. warning stays the soft amber for actual warnings.
 	action: { rgb: [255, 126, 41], xterm: 208 },
 	success: { rgb: [87, 227, 137], xterm: 114 },
