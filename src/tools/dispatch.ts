@@ -7,6 +7,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
+import type { DetachedBatchRun } from "../domains/dispatch/batch-store.js";
 import type {
 	AbortReason,
 	DispatchContract,
@@ -104,11 +105,100 @@ import {
 const TRUNCATION_MARKER = "\n[agent output truncated]";
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
+/**
+ * Result of an operator-initiated attach to detach conversion. The message is
+ * the line the keypress feedback renders, so a refusal names the topology that
+ * refused rather than reading as a dropped key.
+ */
+export type DispatchBackgroundOutcome = { ok: true; message: string } | { ok: false; message: string };
+
+export interface DispatchBackgroundControl {
+	/** Tool call the control belongs to; one attached dispatch owns one control. */
+	toolCallId: string;
+	/** Operator-facing name of the call, used in both outcome messages. */
+	label: string;
+	convert(): DispatchBackgroundOutcome;
+}
+
+/**
+ * Live attached dispatches that the operator may send to the background. An
+ * attached `dispatch` call registers one control for as long as it awaits its
+ * runs; the TUI keybinding fires the newest one. Absent from a deps bundle
+ * (workers, headless) nothing registers and attached dispatch behaves exactly
+ * as it did before.
+ */
+export interface DispatchBackgroundRegistry {
+	/** Returns the deregistration handle; calling it more than once is harmless. */
+	register(control: DispatchBackgroundControl): () => void;
+	/** Fire the newest still-registered control. */
+	backgroundNewest(): DispatchBackgroundOutcome;
+	/** How many attached dispatches are currently registered. */
+	size(): number;
+}
+
+export function createDispatchBackgroundRegistry(): DispatchBackgroundRegistry {
+	// Map insertion order is registration order, and the newest attached dispatch
+	// is the one the operator just watched start, so the keypress takes the last
+	// entry rather than asking a UI projection which segment is newest.
+	const controls = new Map<string, DispatchBackgroundControl>();
+	return {
+		register(control) {
+			controls.set(control.toolCallId, control);
+			return () => {
+				if (controls.get(control.toolCallId) === control) controls.delete(control.toolCallId);
+			};
+		},
+		backgroundNewest() {
+			let newest: DispatchBackgroundControl | undefined;
+			for (const control of controls.values()) newest = control;
+			if (newest === undefined) {
+				return { ok: false, message: "background: no attached dispatch is running" };
+			}
+			return newest.convert();
+		},
+		size: () => controls.size,
+	};
+}
+
+/**
+ * One-shot latch an attached executor races against its runs. Firing it never
+ * aborts anything: the registry drain that meters the runs was never owned by
+ * the awaiting code path, so unwinding the await leaves token metering, run
+ * tails, and bus progress flowing.
+ */
+interface BackgroundSwitch {
+	/** Resolves when the operator fires the control; never rejects. */
+	readonly requested: Promise<void>;
+	fire(): void;
+}
+
+function createBackgroundSwitch(): BackgroundSwitch {
+	let fired = false;
+	let signal = (): void => {};
+	const requested = new Promise<void>((resolve) => {
+		signal = resolve;
+	});
+	return {
+		requested,
+		fire: () => {
+			if (fired) return;
+			fired = true;
+			signal();
+		},
+	};
+}
+
 export interface DispatchToolDeps {
 	dispatch: DispatchContract;
 	bus?: SafeEventBus;
 	/** Instance-scoped owner for ordinary tool-owned run streams and monitor tails. */
 	runEvents?: DispatchRunEventRegistry;
+	/**
+	 * Operator-initiated backgrounding of an attached call. Wired only by the
+	 * interactive composition root, because only that process has a keypress to
+	 * fire the control with.
+	 */
+	background?: DispatchBackgroundRegistry;
 	/** Optional compete storage overrides for alternate backends and deterministic fault tests. */
 	competeWorktrees?: {
 		createCandidate?: typeof createCandidateWorktree;
@@ -478,6 +568,124 @@ async function runDetached(
 			batchId: handle.batchId,
 			assignmentIds: [...handle.assignmentIds],
 			runs: runs.map((run) => ({ runId: run.runId, assignmentId: run.assignmentId, agentId: run.agentId })),
+		},
+	};
+}
+
+/**
+ * Publish this call's conversion control for as long as its topology branch
+ * runs. A refusing control still registers: the operator who pressed the key
+ * needs the topology's reason, and an unregistered call would answer with the
+ * "nothing running" no-op instead.
+ */
+function registerBackgroundControl(
+	deps: DispatchToolDeps,
+	toolCallId: string | undefined,
+	plan: { label: string; refusal: string | null; fire: () => void },
+): () => void {
+	const registry = deps.background;
+	if (registry === undefined || toolCallId === undefined || toolCallId.length === 0) return () => {};
+	let release = (): void => {};
+	release = registry.register({
+		toolCallId,
+		label: plan.label,
+		convert: () => {
+			if (plan.refusal !== null) {
+				return { ok: false, message: `${plan.label} cannot be backgrounded: ${plan.refusal}` };
+			}
+			// Drop the control before firing so a second keypress reaches the next
+			// attached dispatch instead of re-firing a converted one.
+			release();
+			plan.fire();
+			return { ok: true, message: `${plan.label} is moving to the background as a detached batch` };
+		},
+	});
+	return () => release();
+}
+
+/**
+ * Thrown out of an attached executor when the operator converts the call to a
+ * detached batch. The runs keep going; only the await unwinds. `settled` names
+ * sequential steps that already finished, and `undispatched` names later steps
+ * that were never started, because a mid-sequence conversion really does leave
+ * them unstarted and reporting a completed sequence would be a lie.
+ */
+class DispatchBackgroundedError extends Error {
+	constructor(
+		readonly batchId: string,
+		readonly live: ReadonlyArray<DetachedBatchRun>,
+		readonly settled: ReadonlyArray<CompletedRun>,
+		readonly undispatched: ReadonlyArray<string>,
+	) {
+		super("dispatch: backgrounded by operator");
+		this.name = "DispatchBackgroundedError";
+	}
+}
+
+/**
+ * Finish an operator-initiated conversion: persist the same durable batch
+ * record a `detach: true` call would have written, so monitor collect, the
+ * completion nudge, and resume all attach to it exactly as they do for a
+ * model-initiated detach, then answer the model in the detached shape.
+ */
+async function backgroundedDispatchResult(
+	deps: RegisteredDispatchToolDeps,
+	converted: DispatchBackgroundedError,
+	mode: string,
+	sessionId: string | null,
+): Promise<ToolResult> {
+	const liveIds = converted.live.map((run) => run.assignmentId);
+	const detached = deps.dispatch.detached;
+	if (!detached) {
+		return {
+			kind: "error",
+			message: `dispatch: the operator moved this call to the background, but detached batch records are unavailable in this context; ${liveIds.join(", ")} keep running and can only be reached with monitor(mode="wait", run_id=<id>)`,
+			details: { mode: "detached", assignmentIds: liveIds },
+		};
+	}
+	// Same ordering as runDetached: the runs are already live, so their
+	// assignment records must land before the batch record an immediate collect
+	// would resolve through.
+	await deps.dispatch.assignments?.flushWrites?.();
+	try {
+		await detached.register({ batchId: converted.batchId, runs: converted.live, sessionId });
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return {
+			kind: "error",
+			message: `dispatch: the operator moved this call to the background (batch=${converted.batchId}, assignments=${liveIds.join(", ")}) but the durable batch record failed: ${message}`,
+			details: { mode: "detached", batchId: converted.batchId, assignmentIds: liveIds },
+		};
+	}
+	const lines = [
+		`dispatch (${mode}) was moved to the background by the operator: batch=${converted.batchId} holds ${converted.live.length} still-running assignment(s)`,
+		...converted.live.map((run) => `- ${run.assignmentId} agent=${run.agentId}`),
+	];
+	if (converted.settled.length > 0) {
+		lines.push(
+			`${converted.settled.length} earlier ${mode} step(s) had already finished and are not in this batch: ${converted.settled.map((run) => run.receipt.runId).join(", ")}. Read them with monitor(mode="receipt", run_id=<id>).`,
+		);
+	}
+	if (converted.undispatched.length > 0) {
+		lines.push(
+			`${converted.undispatched.length} later ${mode} step(s) were never dispatched (agents: ${converted.undispatched.join(", ")}); re-issue them if they are still wanted.`,
+		);
+	}
+	lines.push(
+		"",
+		`Runs continue in the background. Collect results with monitor(mode="collect", batch_id="${converted.batchId}"); block on one run with monitor(mode="wait", run_id=<id>).`,
+	);
+	return {
+		kind: "ok",
+		output: lines.join("\n"),
+		details: {
+			mode: "detached",
+			conversion: "operator-backgrounded",
+			batchId: converted.batchId,
+			assignmentIds: liveIds,
+			runs: converted.live.map((run) => ({ runId: run.runId, assignmentId: run.assignmentId, agentId: run.agentId })),
+			settledRunIds: converted.settled.map((run) => run.receipt.runId),
+			undispatchedAgentIds: [...converted.undispatched],
 		},
 	};
 }
@@ -2600,158 +2808,188 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				};
 				requests = requests.map((request) => ({ ...request, plan }));
 			}
-			if (resolvedPlan?.topology === "fleet") {
-				const executionPlan = trustedExecutionPlans.get(args);
-				if (
-					executionPlan === undefined ||
-					resolvedPlan.source === null ||
-					resolvedPlan.deadlineMs === null ||
-					reservationOwnerId === undefined
-				) {
-					return { kind: "error", message: "dispatch: trusted Scout dependency plan is unavailable" };
-				}
-				if (executionPlan.hash !== resolvedPlan.source.executionPlanHash) {
-					return { kind: "error", message: "dispatch: Scout dependency plan hash drifted after admission" };
-				}
-				if (!scoutPlanAuthorityGranted(resolvedPlan, authenticatedApproval !== undefined, autonomy === "full-auto")) {
-					return { kind: "error", message: "dispatch: Scout dependency plan lacks authenticated authority grants" };
-				}
-				const executable = compileExecutionPlan({
-					topology: executionPlan.topology,
-					rootTask: executionPlan.rootTask,
-					maxWorkers: executionPlan.maxWorkers,
-					onFailure: executionPlan.onFailure,
-					steps: requireAgentSteps(executionPlan.steps).map((step) => ({
-						...step,
-						approvedAuthority: step.requestedAuthority,
-					})),
-				});
-				try {
-					const outcome = await runScoutContinuationPlan({
-						dispatch: deps.dispatch,
-						plan: executable,
-						artifact: resolvedPlan,
-						requests,
-						reservationOwnerId,
-						...(options?.signal === undefined ? {} : { signal: options.signal }),
-						register: (handle, agentId) =>
-							deps.runEvents.registerSingle(handle, agentId, fallbackProgressBus(deps)).completion,
-						complete: (receipt, summary) => {
-							const completed = completeRun(deps, receipt, summary);
-							return { value: completed, integrityValid: completed.integrity.ok };
-						},
-					});
-					const output = formatDispatchOutput("fleet", outcome.runs, maxOutputBytes);
-					const details = {
-						...dispatchDetails(deps, "fleet", outcome.runs),
-						executionPlanHash: executable.hash,
-						skippedSteps: outcome.skipped,
-					};
-					const failed = outcome.runs.some((run) => run.receipt.exitCode !== 0) || outcome.skipped.length > 0;
-					return failed ? { kind: "error", message: output, details } : { kind: "ok", output, details };
-				} catch (error) {
-					return {
-						kind: "error",
-						message: `dispatch: Scout dependency plan failed: ${error instanceof Error ? error.message : String(error)}`,
-					};
-				}
-			}
-
-			if (args.detach === true) {
-				if (mode !== "parallel") {
-					return { kind: "error", message: `dispatch: detach only supports parallel mode; got '${mode}'` };
-				}
-				if (review !== undefined) {
-					return {
-						kind: "error",
-						message: "dispatch: detach cannot combine with a review gate; run gated dispatch attached",
-					};
-				}
-				if (timeoutMs !== undefined) {
-					return {
-						kind: "error",
-						message:
-							'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; monitor(mode="wait") only observes for a bounded time, and steer(action="cancel") stops a run',
-					};
-				}
-				try {
-					return await runDetached(deps, requests, options?.sessionId ?? null);
-				} catch (err) {
-					return { kind: "error", message: dispatchErrorMessage(err) };
-				}
-			}
-
-			if (mode === "compete") {
-				if (requests.length !== 1 || requests[0] === undefined) {
-					return { kind: "error", message: "dispatch: compete requires exactly one task" };
-				}
-				if (review !== undefined) {
-					return { kind: "error", message: "dispatch: compete has its own judge and cannot combine with review" };
-				}
-				const competeParsed = competeSettingsFromArgs(args);
-				if (!competeParsed.ok) return { kind: "error", message: competeParsed.message };
-				let compete = competeParsed.compete;
-				if (resolvedPlan !== null) {
-					const judge = resolvedPlan.tasks.find((task) => task.role === "judge");
-					if (judge === undefined) {
-						return { kind: "error", message: "dispatch: resolved compete plan has no judge task" };
-					}
-					compete = {
-						...compete,
-						judge: { agent: judge.agent, target: judge.target, model: judge.model, node: judge.node },
-						resolvedTasks: resolvedPlan.tasks,
-					};
-				}
-				try {
-					const outcome = await runCompete(deps, requests[0], compete, autonomy, timeoutMs, options?.signal);
-					return competeResult(deps, outcome, autonomy, maxOutputBytes);
-				} catch (err) {
-					return { kind: "error", message: dispatchErrorMessage(err) };
-				}
-			}
-
-			if (review !== undefined) {
-				if (requests.length !== 1 || requests[0] === undefined) {
-					return { kind: "error", message: "dispatch: review supports exactly one task" };
-				}
-				if (mode !== "parallel") {
-					return { kind: "error", message: `dispatch: review does not combine with mode=${mode}` };
-				}
-				try {
-					const outcome = await runReviewGated(deps, requests[0], review, timeoutMs, options?.signal);
-					return reviewGateResult(deps, outcome, maxOutputBytes);
-				} catch (err) {
-					return { kind: "error", message: dispatchErrorMessage(err) };
-				}
-			}
-
+			const backgroundRefusal =
+				resolvedPlan?.topology === "fleet"
+					? "a Scout dependency plan drives its stages from this turn"
+					: mode === "compete"
+						? "compete holds its judge gate in this turn"
+						: review !== undefined
+							? "a review gate holds its cycle state in this turn"
+							: mode === "pipeline" && requests.length > 1
+								? "a pipeline threads each step's output through this turn"
+								: timeoutMs !== undefined
+									? `this call set timeout_ms=${timeoutMs} and nobody would be left to enforce the deadline`
+									: deps.dispatch.detached === undefined
+										? "detached batch records are unavailable in this context"
+										: null;
+			const background = createBackgroundSwitch();
+			// Review and Scout both execute under mode=parallel, so the operator-facing
+			// label names the topology they actually asked for.
+			const backgroundLabel = resolvedPlan?.topology === "fleet" ? "fleet" : review !== undefined ? "review" : mode;
+			const releaseBackground = registerBackgroundControl(deps, options?.toolCallId, {
+				label: `dispatch (${backgroundLabel})`,
+				refusal: backgroundRefusal,
+				fire: () => background.fire(),
+			});
 			try {
-				let runs: CompletedRun[];
-				if (mode === "pipeline" && requests.length > 1) {
-					runs = await runPipeline(deps, requests, timeoutMs, options?.signal);
-				} else if (mode === "sequential" || mode === "pipeline" || requests.length === 1) {
-					// A single-task pipeline has nothing to thread, so it degrades to
-					// plain sequential and no pipeline-input message is sent.
-					runs = await runSequential(deps, requests, mode, timeoutMs, options?.signal);
-				} else {
-					runs = await runBatch(deps, requests, timeoutMs, options?.signal);
+				if (resolvedPlan?.topology === "fleet") {
+					const executionPlan = trustedExecutionPlans.get(args);
+					if (
+						executionPlan === undefined ||
+						resolvedPlan.source === null ||
+						resolvedPlan.deadlineMs === null ||
+						reservationOwnerId === undefined
+					) {
+						return { kind: "error", message: "dispatch: trusted Scout dependency plan is unavailable" };
+					}
+					if (executionPlan.hash !== resolvedPlan.source.executionPlanHash) {
+						return { kind: "error", message: "dispatch: Scout dependency plan hash drifted after admission" };
+					}
+					if (!scoutPlanAuthorityGranted(resolvedPlan, authenticatedApproval !== undefined, autonomy === "full-auto")) {
+						return { kind: "error", message: "dispatch: Scout dependency plan lacks authenticated authority grants" };
+					}
+					const executable = compileExecutionPlan({
+						topology: executionPlan.topology,
+						rootTask: executionPlan.rootTask,
+						maxWorkers: executionPlan.maxWorkers,
+						onFailure: executionPlan.onFailure,
+						steps: requireAgentSteps(executionPlan.steps).map((step) => ({
+							...step,
+							approvedAuthority: step.requestedAuthority,
+						})),
+					});
+					try {
+						const outcome = await runScoutContinuationPlan({
+							dispatch: deps.dispatch,
+							plan: executable,
+							artifact: resolvedPlan,
+							requests,
+							reservationOwnerId,
+							...(options?.signal === undefined ? {} : { signal: options.signal }),
+							register: (handle, agentId) =>
+								deps.runEvents.registerSingle(handle, agentId, fallbackProgressBus(deps)).completion,
+							complete: (receipt, summary) => {
+								const completed = completeRun(deps, receipt, summary);
+								return { value: completed, integrityValid: completed.integrity.ok };
+							},
+						});
+						const output = formatDispatchOutput("fleet", outcome.runs, maxOutputBytes);
+						const details = {
+							...dispatchDetails(deps, "fleet", outcome.runs),
+							executionPlanHash: executable.hash,
+							skippedSteps: outcome.skipped,
+						};
+						const failed = outcome.runs.some((run) => run.receipt.exitCode !== 0) || outcome.skipped.length > 0;
+						return failed ? { kind: "error", message: output, details } : { kind: "ok", output, details };
+					} catch (error) {
+						return {
+							kind: "error",
+							message: `dispatch: Scout dependency plan failed: ${error instanceof Error ? error.message : String(error)}`,
+						};
+					}
 				}
-				const output = formatDispatchOutput(mode, runs, maxOutputBytes);
-				const details = dispatchDetails(deps, mode, runs);
-				const failed = runs.filter((run) => run.receipt.exitCode !== 0);
-				if (failed.length > 0) return { kind: "error", message: output, details };
-				return { kind: "ok", output, details };
-			} catch (err) {
-				if (err instanceof PipelineHaltError) {
-					const haltMessage = `dispatch: ${err.message}`;
-					const output = formatDispatchOutput("pipeline", err.runs, maxOutputBytes);
-					return {
-						kind: "error",
-						message: `${haltMessage}\n\n${output}`,
-						details: dispatchDetails(deps, "pipeline", err.runs),
-					};
+
+				if (args.detach === true) {
+					if (mode !== "parallel") {
+						return { kind: "error", message: `dispatch: detach only supports parallel mode; got '${mode}'` };
+					}
+					if (review !== undefined) {
+						return {
+							kind: "error",
+							message: "dispatch: detach cannot combine with a review gate; run gated dispatch attached",
+						};
+					}
+					if (timeoutMs !== undefined) {
+						return {
+							kind: "error",
+							message:
+								'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; monitor(mode="wait") only observes for a bounded time, and steer(action="cancel") stops a run',
+						};
+					}
+					try {
+						return await runDetached(deps, requests, options?.sessionId ?? null);
+					} catch (err) {
+						return { kind: "error", message: dispatchErrorMessage(err) };
+					}
 				}
-				return { kind: "error", message: dispatchErrorMessage(err) };
+
+				if (mode === "compete") {
+					if (requests.length !== 1 || requests[0] === undefined) {
+						return { kind: "error", message: "dispatch: compete requires exactly one task" };
+					}
+					if (review !== undefined) {
+						return { kind: "error", message: "dispatch: compete has its own judge and cannot combine with review" };
+					}
+					const competeParsed = competeSettingsFromArgs(args);
+					if (!competeParsed.ok) return { kind: "error", message: competeParsed.message };
+					let compete = competeParsed.compete;
+					if (resolvedPlan !== null) {
+						const judge = resolvedPlan.tasks.find((task) => task.role === "judge");
+						if (judge === undefined) {
+							return { kind: "error", message: "dispatch: resolved compete plan has no judge task" };
+						}
+						compete = {
+							...compete,
+							judge: { agent: judge.agent, target: judge.target, model: judge.model, node: judge.node },
+							resolvedTasks: resolvedPlan.tasks,
+						};
+					}
+					try {
+						const outcome = await runCompete(deps, requests[0], compete, autonomy, timeoutMs, options?.signal);
+						return competeResult(deps, outcome, autonomy, maxOutputBytes);
+					} catch (err) {
+						return { kind: "error", message: dispatchErrorMessage(err) };
+					}
+				}
+
+				if (review !== undefined) {
+					if (requests.length !== 1 || requests[0] === undefined) {
+						return { kind: "error", message: "dispatch: review supports exactly one task" };
+					}
+					if (mode !== "parallel") {
+						return { kind: "error", message: `dispatch: review does not combine with mode=${mode}` };
+					}
+					try {
+						const outcome = await runReviewGated(deps, requests[0], review, timeoutMs, options?.signal);
+						return reviewGateResult(deps, outcome, maxOutputBytes);
+					} catch (err) {
+						return { kind: "error", message: dispatchErrorMessage(err) };
+					}
+				}
+
+				try {
+					let runs: CompletedRun[];
+					if (mode === "pipeline" && requests.length > 1) {
+						runs = await runPipeline(deps, requests, timeoutMs, options?.signal);
+					} else if (mode === "sequential" || mode === "pipeline" || requests.length === 1) {
+						// A single-task pipeline has nothing to thread, so it degrades to
+						// plain sequential and no pipeline-input message is sent.
+						runs = await runSequential(deps, requests, mode, timeoutMs, options?.signal, background);
+					} else {
+						runs = await runBatch(deps, requests, timeoutMs, options?.signal, background);
+					}
+					const output = formatDispatchOutput(mode, runs, maxOutputBytes);
+					const details = dispatchDetails(deps, mode, runs);
+					const failed = runs.filter((run) => run.receipt.exitCode !== 0);
+					if (failed.length > 0) return { kind: "error", message: output, details };
+					return { kind: "ok", output, details };
+				} catch (err) {
+					if (err instanceof DispatchBackgroundedError) {
+						return await backgroundedDispatchResult(deps, err, mode, options?.sessionId ?? null);
+					}
+					if (err instanceof PipelineHaltError) {
+						const haltMessage = `dispatch: ${err.message}`;
+						const output = formatDispatchOutput("pipeline", err.runs, maxOutputBytes);
+						return {
+							kind: "error",
+							message: `${haltMessage}\n\n${output}`,
+							details: dispatchDetails(deps, "pipeline", err.runs),
+						};
+					}
+					return { kind: "error", message: dispatchErrorMessage(err) };
+				}
+			} finally {
+				releaseBackground();
 			}
 		},
 	};
@@ -2769,6 +3007,7 @@ async function runSequential(
 	mode: string,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
+	background: BackgroundSwitch,
 ): Promise<CompletedRun[]> {
 	const runs: CompletedRun[] = [];
 	let expired = false;
@@ -2788,7 +3027,7 @@ async function runSequential(
 	const timer = timeoutMs !== undefined ? setTimeout(() => abortActive(false), timeoutMs) : null;
 	signal?.addEventListener("abort", onSignalAbort, { once: true });
 	try {
-		for (const request of requests) {
+		for (const [index, request] of requests.entries()) {
 			if (expired || signal?.aborted) {
 				throw new Error(
 					`${mode} dispatch stopped after ${runs.length}/${requests.length} task(s): ${signal?.aborted ? "aborted" : `timed out after ${timeoutMs}ms`}`,
@@ -2797,9 +3036,21 @@ async function runSequential(
 			const handle = await deps.dispatch.dispatch(request);
 			activeRunId = handle.runId;
 			const registered = deps.runEvents.registerSingle(handle, request.agentId, fallbackProgressBus(deps));
-			const { receipt, summary } = await registered.completion;
+			const completion = registered.completion.then((value) => ({ kind: "completed" as const, value }));
+			const settled = await Promise.race([completion, background.requested.then(() => ({ kind: "background" as const }))]);
+			if (settled.kind === "background") {
+				// activeRunId stays set on purpose: the finally below only clears the
+				// timer and the abort listener, and the live step must survive both.
+				completion.catch(() => {});
+				throw new DispatchBackgroundedError(
+					newGateGroupId("batch"),
+					[{ runId: handle.runId, assignmentId: handle.runId, agentId: request.agentId }],
+					[...runs],
+					requests.slice(index + 1).map((later) => later.agentId),
+				);
+			}
 			activeRunId = null;
-			runs.push(completeRun(deps, receipt, summary));
+			runs.push(completeRun(deps, settled.value.receipt, settled.value.summary));
 		}
 		return runs;
 	} finally {
@@ -2895,6 +3146,7 @@ async function runBatch(
 	requests: ReadonlyArray<DispatchRequest>,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
+	background: BackgroundSwitch,
 ): Promise<CompletedRun[]> {
 	const handle = await deps.dispatch.dispatchBatch(requests);
 	const registered = deps.runEvents.registerBatch(
@@ -2912,7 +3164,24 @@ async function runBatch(
 	const timer = timeoutMs !== undefined ? setTimeout(() => abort(false), timeoutMs) : null;
 	signal?.addEventListener("abort", onSignalAbort, { once: true });
 	try {
-		const { summaries, receipts } = await registered.completion;
+		const completion = registered.completion.then((value) => ({ kind: "completed" as const, value }));
+		const settled = await Promise.race([completion, background.requested.then(() => ({ kind: "background" as const }))]);
+		if (settled.kind === "background") {
+			// The batch drain keeps metering; only this await unwinds. Every run in
+			// a parallel batch is already live, so the whole batch converts.
+			completion.catch(() => {});
+			throw new DispatchBackgroundedError(
+				handle.batchId,
+				handle.assignmentIds.map((runId, index) => ({
+					runId,
+					assignmentId: runId,
+					agentId: requests[index]?.agentId ?? "unknown",
+				})),
+				[],
+				[],
+			);
+		}
+		const { summaries, receipts } = settled.value;
 		return receipts.map((receipt) =>
 			completeRun(
 				deps,

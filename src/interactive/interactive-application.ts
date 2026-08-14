@@ -194,6 +194,13 @@ export interface InteractiveDeps {
 	onCycleScopedModelForward?: () => boolean;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
 	onCycleScopedModelBackward?: () => boolean;
+	/**
+	 * Convert the newest attached `dispatch` call into a detached batch. The
+	 * outcome carries the line to render: `ok: false` covers both "nothing is
+	 * running" and a topology that refuses the conversion, and both read better
+	 * as a notice than as a keypress that changes no pixel.
+	 */
+	onBackgroundDispatch?: () => { ok: boolean; message: string };
 	onShutdown: () => Promise<void>;
 }
 
@@ -249,6 +256,7 @@ export interface KeyBindingDeps {
 	requestShutdown: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
+	backgroundDispatch: () => void;
 	openModelSelector: () => void;
 	openTree: () => void;
 	cycleScopedModelForward: () => void;
@@ -327,6 +335,9 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 		case "clio.dispatchBoard.toggle":
 			deps.toggleDispatchBoard();
 			return true;
+		case "clio.dispatch.background":
+			deps.backgroundDispatch();
+			return true;
 		case "clio.model.select":
 			deps.openModelSelector();
 			return true;
@@ -352,6 +363,7 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 		"clio.thinking.cycle",
 		"clio.session.tree",
 		"clio.dispatchBoard.toggle",
+		"clio.dispatch.background",
 		"clio.model.select",
 		// Match cycleBackward before cycleForward so a user rebind where one key
 		// is a prefix of the other resolves to the more specific binding first.
@@ -637,6 +649,18 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			"scoped-models:empty",
 		);
 	};
+	/**
+	 * Alt+S / Ctrl+Alt+B. The dispatch tool owns the conversion and answers with
+	 * the line to show, so the refusal a review-gated or compete call returns is
+	 * rendered verbatim rather than restated here.
+	 */
+	const backgroundActiveDispatch = (): void => {
+		const outcome = deps.onBackgroundDispatch?.() ?? {
+			ok: false,
+			message: "background: dispatch backgrounding is unavailable in this session",
+		};
+		notify(outcome.ok ? "success" : "info", outcome.message, "dispatch:background");
+	};
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
 		refreshFooter: () => footer.refresh(),
@@ -659,6 +683,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			cycleScopedModelBackward: () => {
 				if (deps.onCycleScopedModelBackward?.() === false) announceEmptyScopedSet();
 			},
+			backgroundActiveDispatch,
 		},
 		overlay: overlayLifecycle,
 		refreshFooter: () => footer.refresh(),

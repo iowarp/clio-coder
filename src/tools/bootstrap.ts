@@ -14,7 +14,7 @@ import { bashTool } from "./bash.js";
 import { codeNavTool } from "./codewiki/code-nav.js";
 import { createContextTool } from "./context/index.js";
 import { credentialPresentTool } from "./credential-present.js";
-import { createDispatchRunEventRegistry, createDispatchTool } from "./dispatch.js";
+import { createDispatchRunEventRegistry, createDispatchTool, type DispatchBackgroundRegistry } from "./dispatch.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
 import { grepTool } from "./grep.js";
@@ -52,6 +52,12 @@ export interface ToolBootstrapDeps {
 	getAutonomy?: () => AutonomyLevel;
 	/** Scheduling cost ceiling recorded on dispatch plan provenance. */
 	getCostCeilingUsd?: () => number;
+	/**
+	 * Operator-initiated attach-to-detach conversion of a running dispatch. Only
+	 * the interactive composition root wires it, because only that process has a
+	 * keypress to fire the control with.
+	 */
+	dispatchBackground?: DispatchBackgroundRegistry;
 	getSkillLoaderOptions?: () => Pick<
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
@@ -408,6 +414,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			...(deps.getAgentRoleFacts ? { getAgentRoleFacts: deps.getAgentRoleFacts } : {}),
 			...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
 			...(deps.getCostCeilingUsd ? { getCostCeilingUsd: deps.getCostCeilingUsd } : {}),
+			...(deps.dispatchBackground ? { background: deps.dispatchBackground } : {}),
 		};
 		registry.register({
 			...builtin(createDispatchTool(dispatchToolDeps), {

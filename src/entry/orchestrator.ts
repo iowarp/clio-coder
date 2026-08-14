@@ -162,6 +162,7 @@ import { createToolProseRegistration } from "../interactive/tool-prose-registrat
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { isGitRepository, recoverCleanupReadyCompeteGroups } from "../tools/compete-worktrees.js";
+import { createDispatchBackgroundRegistry } from "../tools/dispatch.js";
 import { coalescePathSink, createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { createRegistry } from "../tools/registry.js";
 
@@ -1175,6 +1176,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// needs the provenance for, and the receipt already carried it here.
 		foldDispatchSkillActivations(session, payload);
 	});
+	// Operator-initiated backgrounding is a TUI affordance: the registry is the
+	// one object the dispatch tool and the keypress both hold.
+	const dispatchBackground = createDispatchBackgroundRegistry();
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
 		taskBoard,
@@ -1187,6 +1191,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Same effective-autonomy resolution the registry admission uses, so plan
 		// provenance and compete winner handling agree with the approval surface.
 		getAutonomy: resolveEffectiveAutonomy,
+		...(interactive ? { dispatchBackground } : {}),
 		getCostCeilingUsd: () => result.getContract<SchedulingContract>("scheduling")?.ceilingUsd() ?? 0,
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
@@ -1666,6 +1671,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getSettings: getCurrentSettings,
 		getFleetNodes: () => result.getContract<SchedulingContract>("scheduling")?.fleet?.list() ?? [],
+		onBackgroundDispatch: () => dispatchBackground.backgroundNewest(),
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		...(contextDomain
 			? {

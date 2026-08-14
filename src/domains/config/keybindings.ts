@@ -23,6 +23,7 @@ export interface ClioAppKeybindings {
 	"clio.status.toggle": true;
 	"clio.session.tree": true;
 	"clio.dispatchBoard.toggle": true;
+	"clio.dispatch.background": true;
 	"clio.model.select": true;
 	"clio.model.cycleForward": true;
 	"clio.model.cycleBackward": true;
@@ -83,6 +84,14 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.dispatchBoard.toggle": {
 		defaultKeys: "alt+w",
 		description: "Toggle the dispatch (workers) board overlay",
+	},
+	"clio.dispatch.background": {
+		// Ctrl+B alone is pi-tui's editor cursor-left, so the Claude Code chord
+		// cannot be the primary here. Alt+S ("send to background") keeps the app
+		// scheme and earns the Ctrl+G leader fallback, which only alt+<letter>
+		// bindings get; Ctrl+Alt+B stays for the b-for-background muscle memory.
+		defaultKeys: ["alt+s", "ctrl+alt+b"],
+		description: "Send the running attached dispatch to the background as a detached batch",
 	},
 	"clio.model.select": {
 		defaultKeys: "alt+l",
