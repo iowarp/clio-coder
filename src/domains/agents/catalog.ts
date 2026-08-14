@@ -15,6 +15,33 @@ function renderAgentCatalogSections(recipes: ReadonlyArray<AgentRecipe>): AgentC
 /** Keeps one roster line short enough that the whole fleet block stays near its token budget. */
 const FLEET_PROMPT_PURPOSE_MAX_CHARS = 64;
 
+/**
+ * The delegation default stated as a rule the model can evaluate against the
+ * task in front of it. The E19 drive found the previous phrasing lost to
+ * inertia every time: an incentive ("dispatch is the cheap path") is not a
+ * test, so a model that had already started reading simply kept reading. A
+ * threshold it can count against is.
+ */
+export const FLEET_DELEGATION_RULE =
+	"Delegate when the task has two or more independent file-scoped subtasks, or any broad exploration. You keep synthesis and validation; a single narrow change stays with you.";
+
+/**
+ * R6 issued five near-identical `tester` dispatches because each differed
+ * textually, so a string-identity rule never fired. The test that catches that
+ * run is about the work, and the model needs somewhere else to go than a sixth
+ * dispatch.
+ */
+export const FLEET_ANTI_CHURN_RULE =
+	"A dispatch with the same target files and the same goal as one you already ran is a repeat however differently you word it: read that run's receipt, or run the check yourself, instead of dispatching again.";
+
+/**
+ * `agent:"auto"` baselines from task text alone and cannot see the shape of a
+ * probe, so the jobs it most often misroutes are named against the roster ids
+ * directly below this line.
+ */
+export const FLEET_SPECIALIST_ROUTING =
+	"Pick by job: receipts, diffs, or telemetry -> provenance; external docs -> researcher; broad recon -> scout; tests -> tester; gates or review -> verifier.";
+
 function fleetPromptPurpose(description: string): string {
 	const trimmed = description.trim().replace(/\s+/gu, " ");
 	if (trimmed.length === 0) return "";
@@ -52,7 +79,10 @@ export function renderFleetPromptSection(input: ReadonlyArray<AgentSpec>): strin
 
 	const lines: string[] = [
 		"# Fleet",
+		FLEET_DELEGATION_RULE,
+		FLEET_ANTI_CHURN_RULE,
 		`Workers you reach with \`dispatch\`, by \`agent\` id (default ${DEFAULT_DISPATCH_AGENT_ID}). Capability class is what a worker may do: a read-only worker cannot edit.`,
+		FLEET_SPECIALIST_ROUTING,
 	];
 	if (publicSpecs.length > 0) {
 		lines.push("", "Operator-facing:", ...publicSpecs.map(fleetPromptLine));
@@ -85,7 +115,8 @@ export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSp
 		"User-facing agents are base/custom. Shadow agents are internal helpers for context, research, and provenance; do not recommend them as normal `/run` choices.",
 		"Prefer fast read-only agents for orientation, verification agents for gates, and workspace-edit agents only for bounded coding tasks.",
 		"When a task matches a skill named on an agent line (skills=...), prefer the recipe that binds it; its worker is told to load bound skills for the run.",
-		'After a dispatch succeeds, synthesize from the sealed receipt; the worker\'s prose is an advisory claim until its verification state is verified. Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim. Do not repeat the same dispatch.',
+		'After a dispatch succeeds, synthesize from the sealed receipt; the worker\'s prose is an advisory claim until its verification state is verified. Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.',
+		FLEET_ANTI_CHURN_RULE,
 	];
 
 	if (publicSpecs.length > 0) {
