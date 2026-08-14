@@ -17,6 +17,8 @@ import { resolvePackageRoot } from "../../src/core/package-root.js";
 import {
 	FLEET_ANTI_CHURN_RULE,
 	FLEET_DELEGATION_RULE,
+	FLEET_HANDOFF_RULE,
+	FLEET_REFUSAL_DISCLOSURE,
 	FLEET_SPECIALIST_ROUTING,
 	renderAgentCatalog,
 	renderFleetPromptSection,
@@ -69,9 +71,11 @@ describe("contracts/orchestration fleet roster in the session prompt", () => {
 		// ceilChars() is the compiler's estimator: 4 chars per token. The roster
 		// alone was 326; the three routing rules above it cost 133 more, which is
 		// the price of the E19 finding that a visible menu without an evaluable
-		// rule still loses to inertia.
+		// rule still loses to inertia. The handoff and refusal-disclosure clauses
+		// added 284 chars, taking 456 tokens to 527: both drives lost work to a
+		// rule the model was never given, which is worth 71 tokens.
 		const tokens = Math.ceil(section.length / 4);
-		ok(tokens <= 480, `fleet section is ${tokens} tokens:\n${section}`);
+		ok(tokens <= 528, `fleet section is ${tokens} tokens:\n${section}`);
 		for (const line of section.split("\n")) {
 			ok(line.length <= 220, `roster line too long: ${line}`);
 		}
@@ -88,6 +92,31 @@ describe("contracts/orchestration fleet roster in the session prompt", () => {
 		ok(FLEET_DELEGATION_RULE.includes("any broad exploration"), FLEET_DELEGATION_RULE);
 		ok(FLEET_DELEGATION_RULE.includes("You keep synthesis and validation"), FLEET_DELEGATION_RULE);
 		ok(section.indexOf(FLEET_DELEGATION_RULE) < section.indexOf("Operator-facing:"), section);
+	});
+
+	it("keeps the orchestrator's hands off a file it has already delegated", () => {
+		const section = renderFleetPromptSection(builtinSpecs());
+		// S3 edited both handoff files before dispatching, reverted one, and told
+		// the operator about neither. Pending and succeeded are both named because
+		// the second edit landed after the receipt came back.
+		ok(FLEET_HANDOFF_RULE.includes("not yours to edit"), FLEET_HANDOFF_RULE);
+		ok(FLEET_HANDOFF_RULE.includes("pending"), FLEET_HANDOFF_RULE);
+		ok(FLEET_HANDOFF_RULE.includes("after it succeeds"), FLEET_HANDOFF_RULE);
+		// A rule with no exit leaves an orchestrator that already edited stuck.
+		ok(FLEET_HANDOFF_RULE.includes("if you already changed it, say so"), FLEET_HANDOFF_RULE);
+		ok(section.includes(FLEET_HANDOFF_RULE), section);
+		// It qualifies the delegation rule, so it reads directly after it.
+		strictEqual(section.split("\n")[2], FLEET_HANDOFF_RULE);
+	});
+
+	it("makes a refused admission something the operator hears about", () => {
+		const section = renderFleetPromptSection(builtinSpecs());
+		// R5 was refused a verifier for mutation work, with the mismatch named in
+		// the refusal, and the final answer never mentioned that any of it happened.
+		ok(FLEET_REFUSAL_DISCLOSURE.includes("admission refuses a dispatch"), FLEET_REFUSAL_DISCLOSURE);
+		ok(FLEET_REFUSAL_DISCLOSURE.includes("the reason it gave"), FLEET_REFUSAL_DISCLOSURE);
+		ok(FLEET_REFUSAL_DISCLOSURE.includes("never substitute another agent without saying why"), FLEET_REFUSAL_DISCLOSURE);
+		ok(section.includes(FLEET_REFUSAL_DISCLOSURE), section);
 	});
 
 	it("names the specialist for each job auto cannot route, against ids the roster carries", () => {
@@ -401,7 +430,7 @@ describe("contracts/orchestration prompts domain wiring", () => {
 		ok(compiled.systemPrompt.includes("- provenance (read-only,"), compiled.systemPrompt);
 		const fleet = compiled.sections.find((section) => section.id === "fleet");
 		ok(fleet !== undefined);
-		ok(fleet.tokenEstimate <= 480, `fleet section is ${fleet.tokenEstimate} tokens`);
+		ok(fleet.tokenEstimate <= 528, `fleet section is ${fleet.tokenEstimate} tokens`);
 	});
 
 	it("compiles a fleet-free prompt when no agents domain is loaded", async () => {
