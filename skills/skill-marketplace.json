@@ -66,6 +66,14 @@
 			"category": "git"
 		},
 		{
+			"name": "file-ticket",
+			"description": "Use when something noticed mid-session must become a tracker issue — \"file a ticket\", \"open an issue for this\", \"log this bug\", \"ticket this behavior\". Captures evidence from the live session, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Filing only; never fixes. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use investigate-issue.",
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/file-ticket",
+			"version": "0.1.0",
+			"audit": "pass",
+			"category": "git"
+		},
+		{
 			"name": "investigate-issue",
 			"description": "Use when a GitHub issue needs diagnosis before any fix — \"investigate issue 123\", \"root-cause this bug\", \"what's behind this issue\". Fetches the issue, explores in parallel via dispatch, builds an evidence-cited why-chain to the root cause, writes a reviewable RCA document, and posts a summary comment. Diagnosis only; the fix is a separate task. Not for failures without an issue; use scientific-debugging.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/investigate-issue",

@@ -38,6 +38,10 @@ skills:
     path: git/create-pr
     version: 0.2.0
     sha256: 8baa650a83bda09338bc1c52e40a3eb4f3de832464c51e2679295b4ac8414253
+  - name: file-ticket
+    path: git/file-ticket
+    version: 0.1.0
+    sha256: d829650a113acf19f9f1bfe9e09d05f160d6d4640987fd5f733b9ea724f1f5fc
   - name: investigate-issue
     path: git/investigate-issue
     version: 0.2.0

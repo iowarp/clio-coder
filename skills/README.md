@@ -57,6 +57,7 @@ folder is presentation and provenance, not a namespace.
 
 | Skill | Type | Use when |
 |---|---|---|
+| [`file-ticket`](git/file-ticket/) | workflow | Something noticed mid-session must become a tracker issue: capture evidence, dedup, compose, confirm, create via gh. |
 | [`commit-crafting`](git/commit-crafting/) | workflow | The user asks to commit finished work. One atomic conventional commit, explicit-path staging, no push. |
 | [`review-changes`](git/review-changes/) | workflow | Pre-commit review of uncommitted work: real bugs and security, verified findings, severity-ranked report. |
 | [`create-pr`](git/create-pr/) | workflow | The user asks to push the branch and open a PR. Base detection, state gates, structured body, URL back. |
