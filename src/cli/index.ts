@@ -15,7 +15,7 @@ Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosyst
 science. CLIO stands for Context Layer for Input/Output, named for the Greek muse of history.
 
 Usage:
-  clio                      start interactive repository chat
+  clio-coder                      start interactive repository chat
   clio-coder acp                  serve Clio as an ACP v1 agent over stdio
   clio-coder run [flags] <task>   run one headless main-agent turn
   clio-coder --version, -v        print the Clio Coder version
