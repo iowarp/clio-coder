@@ -4,6 +4,7 @@ import type { AccountabilitySummary } from "./accountability.js";
 import type { CostAggregate, CostEntry, UsageBreakdown } from "./cost.js";
 import type { MetricsView } from "./metrics.js";
 import type { TelemetrySnapshot } from "./telemetry.js";
+import type { SessionTurnTrace } from "./trace-store.js";
 
 export interface TokenThroughputSnapshot {
 	tokensPerSecond: number;
@@ -139,6 +140,18 @@ export interface ObservabilityContract {
 	): void;
 	/** Record final output token throughput for one completed assistant stream. */
 	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;
+	/**
+	 * Mirror one fact about a turn the operator ran themselves into the trace
+	 * database, so `clio trace runs` lists the session's own turns beside the
+	 * runs it dispatched. The dispatch mirror hears only the dispatch bus
+	 * channels, and an interactive turn is not a dispatch, so without this the
+	 * only rows a session contributes are its workers'.
+	 *
+	 * Best effort, exactly like the dispatch mirror: writes are queued off the
+	 * turn hot path and a failing mirror degrades silently rather than
+	 * interrupting chat.
+	 */
+	recordSessionTurn(trace: SessionTurnTrace): void;
 	/**
 	 * Current product-facing projection. Cheap to call: it folds in-memory state
 	 * (bounded run/notice rings, session cost/tokens, aggregated metrics, and the

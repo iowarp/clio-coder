@@ -632,36 +632,22 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 				return output;
 			};
 
+			// E6: llama-server compiles `response_format.schema` into a sampler
+			// grammar and cannot build it beside the tool-call grammar, so a request
+			// carrying both is answered 400 before a token is generated. Bootstrap
+			// always carries tools, so admission refuses the schema up front and the
+			// run takes the prompt parser with nothing spent. This fixture would
+			// accept both happily, which is exactly why the assertion has to be
+			// about what Clio sends rather than about what a mock tolerates: one
+			// request, tools on it, no response_format at all.
 			const llamaOutput = await runBootstrap("fixture-llama", join(scratch.dir, "llama-project"));
-			strictEqual(llamaOutput.generation?.run?.structuredOutputMode, "native-schema");
+			strictEqual(llamaOutput.generation?.run?.structuredOutputMode, "prompt-parser");
 			strictEqual(llamaOutput.generation?.run?.runtimeId, "llamacpp");
-			strictEqual(fixture.requests.length, 1);
+			strictEqual(fixture.requests.length, 1, "the doomed schema request is never sent");
 			const llamaRequest = fixture.requests[0];
 			strictEqual(llamaRequest?.stream, true);
 			ok(Array.isArray(llamaRequest?.tools) && llamaRequest.tools.length > 0, "Scout tools must reach llama.cpp");
-			deepStrictEqual(llamaRequest?.response_format, {
-				type: "json_object",
-				schema: {
-					type: "object",
-					additionalProperties: false,
-					required: ["projectName", "identity", "conventions", "invariants", "sections"],
-					properties: {
-						projectName: { type: "string" },
-						identity: { type: "string" },
-						conventions: { type: "array", items: { type: "string" } },
-						invariants: { type: "array", items: { type: "string" } },
-						sections: {
-							type: "array",
-							items: {
-								type: "object",
-								additionalProperties: false,
-								required: ["title", "body"],
-								properties: { title: { type: "string" }, body: { type: "string" } },
-							},
-						},
-					},
-				},
-			});
+			strictEqual("response_format" in (llamaRequest ?? {}), false);
 
 			const compatOutput = await runBootstrap("fixture-openai-scout", join(scratch.dir, "openai-project"));
 			strictEqual(compatOutput.generation?.run?.structuredOutputMode, "prompt-parser");

@@ -33,7 +33,9 @@ describe("contracts/cli-trace", () => {
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			match(result.stdout, /^no trace database yet at /);
 			match(result.stdout, new RegExp(defaultDb.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-			match(result.stdout, /runs are recorded when dispatches execute/);
+			// Session turns land in the same table since D2, so the empty state names
+			// both ways a row appears rather than dispatch alone.
+			match(result.stdout, /rows are recorded when a dispatch executes or an interactive turn runs/);
 			// The empty state must not load node:sqlite, whose ExperimentalWarning
 			// is the only Node internal this CLI ever leaked to a user.
 			strictEqual(result.stderr, "", `unexpected stderr: ${result.stderr}`);

@@ -50,6 +50,11 @@ export {
 export { DEFAULT_HISTOGRAM_CAPACITY, type MetricKind, type TelemetrySnapshot } from "./telemetry.js";
 export type {
 	DispatchTraceMirror,
+	SessionTurnEvent,
+	SessionTurnFinish,
+	SessionTurnStart,
+	SessionTurnTrace,
+	SessionTurnUsage,
 	TraceEventInput,
 	TraceEventRow,
 	TraceGateCheck,
@@ -62,6 +67,7 @@ export type {
 } from "./trace-store.js";
 export {
 	createDispatchTraceMirror,
+	SESSION_TRACE_ASSIGNMENT_ID,
 	TRACE_DATABASE_FILE,
 	TRACE_EVENT_POLL_LIMIT,
 	TRACE_SCHEMA_VERSION,

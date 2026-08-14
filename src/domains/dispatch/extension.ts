@@ -19,7 +19,11 @@ import { GUARDRAIL_DEFAULTS } from "../../core/guardrails.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { protectedResidencyModelIds } from "../../core/residency-protection.js";
-import { runtimeSpeaksResponseSchemaDialect, UnsupportedResponseSchemaError } from "../../core/response-schema.js";
+import {
+	responseSchemaConflictsWithTools,
+	runtimeSpeaksResponseSchemaDialect,
+	UnsupportedResponseSchemaError,
+} from "../../core/response-schema.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import {
@@ -1489,9 +1493,15 @@ function assertResponseSchemaEnforceable(
 	runtime: RuntimeDescriptor,
 	capabilities: CapabilityFlags | null,
 	responseSchema: Record<string, unknown> | undefined,
+	toolCount: number,
 ): void {
 	if (responseSchema === undefined) return;
 	if (runtimeSpeaksResponseSchemaDialect(runtime)) {
+		if (responseSchemaConflictsWithTools(runtime, toolCount)) {
+			throw new UnsupportedResponseSchemaError(
+				"dispatch: this runtime compiles a response schema into a sampler grammar and cannot build it beside a tool grammar; a run carrying both is refused before it is spent",
+			);
+		}
 		if (capabilities?.structuredOutputs === "json-schema") return;
 		throw new UnsupportedResponseSchemaError(
 			"dispatch: responseSchema requires resolved structuredOutputs='json-schema'; the selected llama.cpp target/model reports no enforceable schema support",
@@ -1597,7 +1607,12 @@ function resolveDelegationAdmissionStage(req: DispatchRequest, safety: SafetyCon
 }
 
 function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: ConfigContract): WorkerSpec {
-	assertResponseSchemaEnforceable(input.target.runtime, input.target.modelCapabilities, input.req.responseSchema);
+	assertResponseSchemaEnforceable(
+		input.target.runtime,
+		input.target.modelCapabilities,
+		input.req.responseSchema,
+		input.admission.allowedTools.length,
+	);
 	const settings = input.settings ?? config?.get();
 	const spec: WorkerSpec = {
 		specVersion: WORKER_SPEC_VERSION,
@@ -3964,7 +3979,12 @@ export function createDispatchBundle(
 		req = routeAroundCoolingTarget(req, settings) ?? req;
 		const lifecycle = await resolveLifecycle(req, settings);
 		timing.decisionCompletedAt = new Date(now()).toISOString();
-		assertResponseSchemaEnforceable(lifecycle.target.runtime, lifecycle.target.modelCapabilities, req.responseSchema);
+		assertResponseSchemaEnforceable(
+			lifecycle.target.runtime,
+			lifecycle.target.modelCapabilities,
+			req.responseSchema,
+			lifecycle.admission.allowedTools.length,
+		);
 		assertTargetNotCoolingDown(
 			req,
 			lifecycle.target.target.id,
@@ -5085,7 +5105,7 @@ export function createDispatchBundle(
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
-		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema);
+		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
 		assertWriteRootsEnforceable(target.runtime, req.writeRoots);
 		assertProtectedArtifactsEnforceable(
 			target.runtime.id,

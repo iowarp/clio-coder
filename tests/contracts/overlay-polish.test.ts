@@ -249,6 +249,7 @@ function observability(entries: CostEntry[]): {
 		resetSession: () => {},
 		recordTokens: () => {},
 		recordTokenThroughput: () => {},
+		recordSessionTurn: () => {},
 		snapshot,
 		subscribe: (listener: (snapshot: ObservabilitySnapshot) => void) => {
 			listeners.add(listener);
