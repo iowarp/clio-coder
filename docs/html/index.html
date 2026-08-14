@@ -214,6 +214,11 @@
       border: 1px solid rgba(245, 158, 11, 0.25);
       color: var(--color-amber);
     }
+    .badge-markdown {
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      color: #a5b4fc;
+    }
     .card-desc {
       font-size: 0.875rem;
       color: var(--text-muted);
@@ -741,6 +746,97 @@
         <div class="card-footer">
           <span class="path">config-knobs-audit.md</span>
           <span class="feature">Knobs Auditor</span>
+        </div>
+      </a>
+
+      <!-- Card: Session Lifecycle -->
+      <a href="../session-lifecycle.md" class="doc-card" data-categories="operate,reference" data-title="Session Lifecycle" data-tags="session ledger tree jsonl fork resume checkpoint active path migrations">
+        <div class="card-top">
+          <h3 class="card-title">Session Lifecycle</h3>
+          <span class="card-badge badge-markdown">Markdown Spec</span>
+        </div>
+        <p class="card-desc">Session ledger v3, conversation tree graph, active-path lineage selection, /fork, /resume, checkpoints, and write-ahead protected artifact journal.</p>
+        <div class="card-footer">
+          <span class="path">session-lifecycle.md</span>
+          <span class="feature" style="color: #a5b4fc;">Ledger Format v3 ↗</span>
+        </div>
+      </a>
+
+      <!-- Card: ACP Server -->
+      <a href="../acp.md" class="doc-card" data-categories="operate,reference" data-title="ACP Protocol Server" data-tags="acp agent client protocol jsonrpc stdio permissions mediator zed errors">
+        <div class="card-top">
+          <h3 class="card-title">ACP Protocol Server</h3>
+          <span class="card-badge badge-markdown">Markdown Spec</span>
+        </div>
+        <p class="card-desc">Agent Client Protocol (ACP v1 / schema 0.4.5) JSON-RPC server over stdio, tool mediation, non-stall permission handling, and error taxonomy.</p>
+        <div class="card-footer">
+          <span class="path">acp.md</span>
+          <span class="feature" style="color: #a5b4fc;">JSON-RPC 2.0 ↗</span>
+        </div>
+      </a>
+
+      <!-- Card: Artifact Versions -->
+      <a href="../artifact-versions.md" class="doc-card" data-categories="reference" data-title="Artifact Versions" data-tags="versions receipt integrity session format workerspec fleet eval trace schema migration">
+        <div class="card-top">
+          <h3 class="card-title">Artifact Versions</h3>
+          <span class="card-badge badge-markdown">Markdown Spec</span>
+        </div>
+        <p class="card-desc">Authoritative registry and migration policies for all 9 serialized artifact schemas across Clio Coder.</p>
+        <div class="card-footer">
+          <span class="path">artifact-versions.md</span>
+          <span class="feature" style="color: #a5b4fc;">Version Registry ↗</span>
+        </div>
+      </a>
+
+      <!-- Card: Exit Codes & Output Contracts -->
+      <a href="../exit-codes-and-output.md" class="doc-card" data-categories="operate,reference" data-title="Exit Codes &amp; Output Contracts" data-tags="exit codes status help json streaming stdout stderr format cli">
+        <div class="card-top">
+          <h3 class="card-title">Exit Codes &amp; Output</h3>
+          <span class="card-badge badge-markdown">Markdown Spec</span>
+        </div>
+        <p class="card-desc">Deterministic process exit code taxonomy (0, 1, 2, 3), --help standard on stdout, and machine-readable JSON streaming contracts.</p>
+        <div class="card-footer">
+          <span class="path">exit-codes-and-output.md</span>
+          <span class="feature" style="color: #a5b4fc;">Exit Taxonomy ↗</span>
+        </div>
+      </a>
+
+      <!-- Card: Capacity Leases & Scheduling -->
+      <a href="../capacity-and-scheduling.md" class="doc-card" data-categories="fleet,reference" data-title="Capacity Leases &amp; Scheduling" data-tags="capacity leases scheduling drain lock ttl admission cluster dispatch">
+        <div class="card-top">
+          <h3 class="card-title">Capacity &amp; Scheduling</h3>
+          <span class="card-badge badge-markdown">Markdown Spec</span>
+        </div>
+        <p class="card-desc">Multi-process capacity leasing (dispatch-admission.json), heartbeat TTLs, cross-process transaction locks, and cluster drain control.</p>
+        <div class="card-footer">
+          <span class="path">capacity-and-scheduling.md</span>
+          <span class="feature" style="color: #a5b4fc;">Leasing Protocol ↗</span>
+        </div>
+      </a>
+
+      <!-- Card: Glossary -->
+      <a href="../glossary.md" class="doc-card" data-categories="reference" data-title="Glossary" data-tags="glossary terms assignment run attempt batch plan receipt topology types">
+        <div class="card-top">
+          <h3 class="card-title">Glossary</h3>
+          <span class="card-badge badge-markdown">Markdown Spec</span>
+        </div>
+        <p class="card-desc">Authoritative definitions of 17 core architectural concepts mapped to their owning TypeScript types in src/.</p>
+        <div class="card-footer">
+          <span class="path">glossary.md</span>
+          <span class="feature" style="color: #a5b4fc;">17 Core Terms ↗</span>
+        </div>
+      </a>
+
+      <!-- Card: Troubleshooting -->
+      <a href="../troubleshooting.md" class="doc-card" data-categories="operate,reference" data-title="Troubleshooting" data-tags="troubleshooting errors remedies diagnostics doctor probe repair warnings">
+        <div class="card-top">
+          <h3 class="card-title">Troubleshooting</h3>
+          <span class="card-badge badge-markdown">Markdown Spec</span>
+        </div>
+        <p class="card-desc">Actionable error remediation and diagnostics catalog keyed by exact user-facing messages and failure codes.</p>
+        <div class="card-footer">
+          <span class="path">troubleshooting.md</span>
+          <span class="feature" style="color: #a5b4fc;">Error Matrix ↗</span>
         </div>
       </a>
 

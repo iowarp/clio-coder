@@ -10,6 +10,7 @@ operator guidance out of the README so the release entry point stays short.
 
 Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 `src/domains/dispatch/**`, `src/tools/registry.ts`, and the current test suite.
+For process exit codes, stdout deliverable guarantees, and machine-readable JSON streaming formats, see [exit-codes-and-output.md](exit-codes-and-output.md).
 
 ## CLI Commands
 
