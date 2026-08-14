@@ -487,7 +487,7 @@
             
             <div class="tui-console">
               <div class="tui-line">
-                <span class="tui-prompt">clio &gt;</span>
+                <span class="tui-prompt">clio-coder &gt;</span>
                 <input type="text" id="consoleInput" class="tui-input" placeholder="Type / to trigger autocomplete..." oninput="onInputChanged()" onkeydown="onConsoleKeyDown(event)">
               </div>
 
@@ -669,10 +669,10 @@
       { cmd: "/view", usage: "/view [filter] | /view verify <runId>", desc: "Browses receipts, dispatch outputs, durable tool output, and compaction summaries." },
       { cmd: "/context", usage: "/context", desc: "Visualizes token sliding window and compaction breakdown." },
       { cmd: "/help", usage: "/help [query]", desc: "Searches available shortcuts and operating posture documentation." },
-      { cmd: "/quit", usage: "/quit", desc: "Exits clio process cleanly." },
-      { cmd: "/context init", usage: "/context init [flags]", desc: "Explore the repo and bootstrap project context: CLIO.md and codewiki." },
-      { cmd: "/context refresh", usage: "/context refresh", desc: "Re-index the codewiki and restamp the CLIO.md fingerprint footer." },
-      { cmd: "/context reset", usage: "/context reset [--all]", desc: "Clear accumulated project context artifacts (CLIO.md preserved without --all)." },
+      { cmd: "/quit", usage: "/quit", desc: "Exits clio-coder process cleanly." },
+      { cmd: "/context init", usage: "/context init [flags]", desc: "Explore the repo and bootstrap project context: CLIO-CODER.md and codewiki." },
+      { cmd: "/context refresh", usage: "/context refresh", desc: "Re-index the codewiki and restamp the CLIO-CODER.md fingerprint footer." },
+      { cmd: "/context reset", usage: "/context reset [--all]", desc: "Clear accumulated project context artifacts (CLIO-CODER.md preserved without --all)." },
       { cmd: "/prompts", usage: "/prompts", desc: "List prompt templates." },
       { cmd: "/extensions", usage: "/extensions", desc: "List installed extensions." },
       { cmd: "/share", usage: "/share export <path> | /share import <path>", desc: "Export or import Clio archives." },

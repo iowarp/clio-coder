@@ -31,7 +31,7 @@ export function defaultScopedResourceRoots(kind: ExtensionResourceKind, cwd: str
 			source: root.source,
 		})),
 		{ path: path.join(clioConfigDir(), kind), scope: "user", source: "config" },
-		{ path: path.join(cwd, ".clio", kind), scope: "project", source: "project" },
+		{ path: path.join(cwd, ".clio-coder", kind), scope: "project", source: "project" },
 	];
 }
 

@@ -7,7 +7,7 @@ import { ensureClioState } from "../domains/lifecycle/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio agents [--json] [--all]
+const HELP = `clio-coder agents [--json] [--all]
 
 List user-facing agent specs from built-in, user, and project recipes.
 

@@ -1,7 +1,7 @@
 import { lstatSync, rmSync, unlinkSync } from "node:fs";
 
 /**
- * Shared deletion accounting for `clio reset` and `clio uninstall`.
+ * Shared deletion accounting for `clio-coder reset` and `clio-coder uninstall`.
  *
  * A recursive delete can fail halfway through: an unwritable parent leaves
  * some children removed and some in place, and `rmSync` reports only the
@@ -35,8 +35,8 @@ export interface RemovalFailure {
  * the link. `existsSync` reports a dangling symlink as absent, and `rmSync`
  * with `force: true` stats through it, sees ENOENT, and returns as though the
  * path were already gone. A launcher left pointing at a removed installation
- * is exactly that shape, so `clio uninstall --remove-binary` printed `remove`,
- * exited 0, and left a broken `clio` on PATH.
+ * is exactly that shape, so `clio-coder uninstall --remove-binary` printed `remove`,
+ * exited 0, and left a broken `clio-coder` on PATH.
  */
 export function removePath(label: string, path: string, dryRun: boolean): RemovalFailure | null {
 	if (dryRun) return null;

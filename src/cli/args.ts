@@ -235,7 +235,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		if (arg?.startsWith("-")) {
 			parsed.diagnostics.push({
 				type: "error",
-				message: globalFlagPositionHint(arg, "run") ?? `unknown clio run option: ${arg}`,
+				message: globalFlagPositionHint(arg, "run") ?? `unknown clio-coder run option: ${arg}`,
 			});
 			continue;
 		}

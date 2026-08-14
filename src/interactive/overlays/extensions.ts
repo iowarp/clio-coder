@@ -5,7 +5,7 @@ import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 /** @internal exported for contract tests */
 export const EXTENSIONS_EMPTY =
-	"no extensions installed. install one with `clio extensions install <path>`, then `clio extensions list` shows what it contributed.";
+	"no extensions installed. install one with `clio-coder extensions install <path>`, then `clio-coder extensions list` shows what it contributed.";
 
 export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
 	const list = ctx.listExtensions?.() ?? [];

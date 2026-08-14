@@ -69,13 +69,13 @@ function withKvCacheMode<T>(value: string, fn: () => T): T {
  * test reaches for a socket.
  */
 async function withSdkPrediction<T>(fn: () => Promise<T>): Promise<T> {
-	const previous = process.env.CLIO_LMSTUDIO_SDK_PREDICT;
-	process.env.CLIO_LMSTUDIO_SDK_PREDICT = "1";
+	const previous = process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT;
+	process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT = "1";
 	try {
 		return await fn();
 	} finally {
-		if (previous === undefined) delete process.env.CLIO_LMSTUDIO_SDK_PREDICT;
-		else process.env.CLIO_LMSTUDIO_SDK_PREDICT = previous;
+		if (previous === undefined) delete process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT;
+		else process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT = previous;
 	}
 }
 
@@ -308,15 +308,15 @@ describe("contracts/lmstudio-native co-resident residency", () => {
 		setResidencyNoticeSink(() => {});
 		// These assert on residency, and reach the prediction only to observe that
 		// the turn completed. Pinning the SDK transport keeps them off the network.
-		previousSdkPredict = process.env.CLIO_LMSTUDIO_SDK_PREDICT;
-		process.env.CLIO_LMSTUDIO_SDK_PREDICT = "1";
+		previousSdkPredict = process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT;
+		process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT = "1";
 	});
 
 	afterEach(() => {
 		setResidencyNoticeSink(null);
 		resetResidencyState();
-		if (previousSdkPredict === undefined) delete process.env.CLIO_LMSTUDIO_SDK_PREDICT;
-		else process.env.CLIO_LMSTUDIO_SDK_PREDICT = previousSdkPredict;
+		if (previousSdkPredict === undefined) delete process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT;
+		else process.env.CLIO_CODER_LMSTUDIO_SDK_PREDICT = previousSdkPredict;
 	});
 
 	function residencyDeps(opts: {

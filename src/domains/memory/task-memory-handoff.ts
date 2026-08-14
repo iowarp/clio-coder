@@ -138,7 +138,7 @@ export function seedTaskMemoryBank(
 
 /** Read only the newest handoff; an older embedded snapshot never shadows a newer brief. */
 export function readNewestTaskMemoryHandoff(cwd: string): TaskMemoryHandoffArtifact | null {
-	const directory = join(cwd, ".clio", "handoffs");
+	const directory = join(cwd, ".clio-coder", "handoffs");
 	if (!existsSync(directory)) return null;
 	let candidates: Array<{ path: string; mtimeMs: number }>;
 	try {

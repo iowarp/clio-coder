@@ -306,7 +306,7 @@ function candidateDocFiles(root: string): string[] {
 	} catch {
 		// The caller reports a missing docs directory below if nothing can load.
 	}
-	for (const name of ["README.md", "CHANGELOG.md", "CLIO.md"]) {
+	for (const name of ["README.md", "CHANGELOG.md", "CLIO-CODER.md"]) {
 		if (existsSync(join(root, name))) files.push(name);
 	}
 	return files;

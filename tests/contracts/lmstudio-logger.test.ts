@@ -20,11 +20,11 @@ function captureStderr(run: () => void): string[] {
 
 describe("lmStudioQuietLogger", () => {
 	afterEach(() => {
-		delete process.env.CLIO_DEBUG_LMSTUDIO;
+		delete process.env.CLIO_CODER_DEBUG_LMSTUDIO;
 	});
 
 	it("swallows SDK log output by default so nothing tears the TUI", () => {
-		delete process.env.CLIO_DEBUG_LMSTUDIO;
+		delete process.env.CLIO_CODER_DEBUG_LMSTUDIO;
 		const lines = captureStderr(() => {
 			lmStudioQuietLogger.error("WebSocket error:", new Error("connect ENETUNREACH 192.168.1.50:1234"));
 			lmStudioQuietLogger.warn("channel teardown");
@@ -34,8 +34,8 @@ describe("lmStudioQuietLogger", () => {
 		assert.deepEqual(lines, []);
 	});
 
-	it("routes SDK log output to stderr when CLIO_DEBUG_LMSTUDIO=1", () => {
-		process.env.CLIO_DEBUG_LMSTUDIO = "1";
+	it("routes SDK log output to stderr when CLIO_CODER_DEBUG_LMSTUDIO=1", () => {
+		process.env.CLIO_CODER_DEBUG_LMSTUDIO = "1";
 		const lines = captureStderr(() => {
 			lmStudioQuietLogger.error("WebSocket error:", new Error("connect ENETUNREACH"));
 		});

@@ -144,7 +144,7 @@ export interface InteractiveDeps {
 	getSessionId?: () => string | null;
 	/** Install the TUI-backed ask_user handler for this interactive process. */
 	registerAskUserHandler?: (handler: AskUserHandler) => () => void;
-	/** Live CLIO.md and memory state for the footer Context quadrant. */
+	/** Live CLIO-CODER.md and memory state for the footer Context quadrant. */
 	getContextState?: (cwd?: string) => ContextState;
 	/** Persist a thinking level chosen in the /thinking overlay. */
 	onSetThinkingLevel?: (level: ThinkingLevel) => void;
@@ -184,7 +184,7 @@ export interface InteractiveDeps {
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
 	/** Run /context reset for the current working directory. */
 	onContextClear?: (options: ContextClearCommandOptions) => Promise<void>;
-	/** Run /context refresh: re-index codewiki and refresh .clio state without touching CLIO.md. */
+	/** Run /context refresh: re-index codewiki and refresh .clio-coder state without touching CLIO-CODER.md. */
 	onContextRefresh?: () => Promise<void>;
 	/**
 	 * Advance the orchestrator target one step forward through `provider.scope`.

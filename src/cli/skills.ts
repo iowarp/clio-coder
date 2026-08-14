@@ -12,23 +12,23 @@ import {
 } from "../domains/resources/index.js";
 import { formatColumns, printError, printOk } from "./shared.js";
 
-const HELP = `clio skills <command>
+const HELP = `clio-coder skills <command>
 
 Manage local Clio and Agent Skills-compatible skills.
 
 Commands:
-  clio skills list [--json] [--all]
-  clio skills search <query> [--json]
-  clio skills inspect <name> [--json]
-  clio skills validate [path] [--json]
-  clio skills install <name|path|github-url>... [--user|--project] [--name <name>] [--force]
-  clio skills install --category <category> [--user|--project] [--force]
-  clio skills update <name> | --all [--force]
-  clio skills sync [--force]
-  clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
+  clio-coder skills list [--json] [--all]
+  clio-coder skills search <query> [--json]
+  clio-coder skills inspect <name> [--json]
+  clio-coder skills validate [path] [--json]
+  clio-coder skills install <name|path|github-url>... [--user|--project] [--name <name>] [--force]
+  clio-coder skills install --category <category> [--user|--project] [--force]
+  clio-coder skills update <name> | --all [--force]
+  clio-coder skills sync [--force]
+  clio-coder skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
 
 search covers installed skills plus the local marketplace (a repo skills/
-catalog, CLIO_SKILL_CATALOG_DIR, or the skill-marketplace.json index).
+catalog, CLIO_CODER_SKILL_CATALOG_DIR, or the skill-marketplace.json index).
 
 install resolves a bare name through that marketplace; a path or GitHub URL
 installs directly, and an existing local path always wins over a same-named
@@ -267,7 +267,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 		case "search": {
 			const query = parsed.positional.join(" ").trim().toLowerCase();
 			if (query.length === 0) {
-				process.stderr.write("usage: clio skills search <query> [--json]\n");
+				process.stderr.write("usage: clio-coder skills search <query> [--json]\n");
 				return 2;
 			}
 			const list = loadSkills({ cwd: process.cwd() });
@@ -306,7 +306,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				}
 			}
 			if (marketplace.length > 0) {
-				process.stdout.write("marketplace (clio skills install <name>):\n");
+				process.stdout.write("marketplace (clio-coder skills install <name>):\n");
 				for (const skill of marketplace) {
 					process.stdout.write(`  ${skill.name.padEnd(24)} ${skill.description}  (${formatMarketplaceOrigin(skill)})\n`);
 				}
@@ -321,7 +321,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 		case "inspect": {
 			const name = parsed.positional[0];
 			if (!name || parsed.positional.length !== 1) {
-				process.stderr.write("usage: clio skills inspect <name> [--json]\n");
+				process.stderr.write("usage: clio-coder skills inspect <name> [--json]\n");
 				return 2;
 			}
 			const list = loadSkills({ cwd: process.cwd() });
@@ -334,7 +334,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				const available = discoverMarketplaceSkills({ cwd: process.cwd() }).skills.some((entry) => entry.name === name);
 				printError(
 					available
-						? `skill not installed: ${name} (available in the marketplace; install it with: clio skills install ${name})`
+						? `skill not installed: ${name} (available in the marketplace; install it with: clio-coder skills install ${name})`
 						: `unknown skill: ${name}`,
 				);
 				return 1;
@@ -346,7 +346,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 		case "validate": {
 			const pathArg = parsed.positional[0];
 			if (parsed.positional.length > 1) {
-				process.stderr.write("usage: clio skills validate [path] [--json]\n");
+				process.stderr.write("usage: clio-coder skills validate [path] [--json]\n");
 				return 2;
 			}
 			const list = validationLoad(pathArg);
@@ -387,8 +387,8 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			}
 			if (sources.length === 0) {
 				process.stderr.write(
-					"usage: clio skills install <name|path|github-url>... [--user|--project] [--name <name>] [--force]\n" +
-						"       clio skills install --category <category> [--user|--project] [--force]\n",
+					"usage: clio-coder skills install <name|path|github-url>... [--user|--project] [--name <name>] [--force]\n" +
+						"       clio-coder skills install --category <category> [--user|--project] [--force]\n",
 				);
 				return 2;
 			}
@@ -422,7 +422,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 		case "update": {
 			const name = parsed.positional[0];
 			if ((!name && !parsed.all) || parsed.positional.length > 1) {
-				process.stderr.write("usage: clio skills update <name> | --all [--force]\n");
+				process.stderr.write("usage: clio-coder skills update <name> | --all [--force]\n");
 				return 2;
 			}
 			try {
@@ -445,12 +445,12 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			const name = parsed.positional[0];
 			if (!name || parsed.positional.length !== 1) {
 				process.stderr.write(
-					"usage: clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]\n",
+					"usage: clio-coder skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]\n",
 				);
 				return 2;
 			}
 			// Dynamic import keeps the eval lane (evidence + eval domains) out of
-			// the chunk that clio skills list/search load.
+			// the chunk that clio-coder skills list/search load.
 			const { runSkillsEvalCommand } = await import("./skills-eval.js");
 			return runSkillsEvalCommand(name, {
 				json: parsed.json,

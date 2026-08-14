@@ -2,9 +2,9 @@
  * Micro-profiler for boot phases. Target budget is ≤800ms to first frame per spec §17.
  *
  * Marks double as boot-trace phase markers: each `mark()` forwards to
- * `traceBoot`, so `CLIO_TRACE_BOOT=1` streams the same phases live to stderr
+ * `traceBoot`, so `CLIO_CODER_TRACE_BOOT=1` streams the same phases live to stderr
  * (with elapsed-from-process-start) while the in-memory report stays relative
- * to construction for the `CLIO_TIMING=1` summary.
+ * to construction for the `CLIO_CODER_TIMING=1` summary.
  */
 
 import { traceBoot } from "./boot-trace.js";

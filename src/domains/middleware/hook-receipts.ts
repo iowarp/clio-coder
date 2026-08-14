@@ -1,7 +1,7 @@
 /**
  * Durable receipt log for user-defined middleware hooks. Every hook execution
  * emits a {@link HookReceipt}; this log keeps a bounded in-memory ring (the live
- * surface `clio config inspect` reads) and persists it atomically through
+ * surface `clio-coder config inspect` reads) and persists it atomically through
  * safeResourceWrite. Writes are throttled so a per-tool-call cadence never turns
  * into per-call disk I/O; `flush()` forces a final write at shutdown.
  */

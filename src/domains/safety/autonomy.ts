@@ -107,7 +107,7 @@ export function autonomyAskRejection(level: AutonomyLevel, tool: string, actionC
 			"The call is parked until the operator approves it once or cancels it.",
 		hints: [
 			"Approving resumes only this call.",
-			"Recognized commands can be added to .clio/safety.yaml.",
+			"Recognized commands can be added to .clio-coder/safety.yaml.",
 			// The sanctioned pivots for a gated shell command: typed verification
 			// and read-class observe tools run without approval at this level,
 			// and models otherwise stall retrying denied bash for checks or

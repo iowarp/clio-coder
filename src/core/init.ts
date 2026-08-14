@@ -34,7 +34,7 @@ interface InstallMetadata {
 	upgradedAt?: string;
 	/**
 	 * When this record was rebuilt because it was missing or unreadable. A repair
-	 * is not an install and must never be written into `installedAt`: `clio
+	 * is not an install and must never be written into `installedAt`: `clio-coder
 	 * doctor --fix` over a wiped state root reported the repair minute as the day
 	 * the user installed Clio, and every later run repeated it as fact.
 	 */
@@ -96,7 +96,7 @@ export function initializeClioHome(): InitReport {
 	if (!existsSync(credentialsPath)) {
 		writeFileSync(
 			credentialsPath,
-			"# Managed via `clio auth`. Do not edit manually unless you know what you are doing.\n{}\n",
+			"# Managed via `clio-coder auth`. Do not edit manually unless you know what you are doing.\n{}\n",
 			{
 				encoding: "utf8",
 				mode: 0o600,
@@ -171,20 +171,20 @@ function readInstallMetadata(path: string): InstallMetadata | null {
 
 /**
  * Opt-in safety check that prevents tests from clobbering a parent process's
- * sandbox when the parent has CLIO_CONFIG_DIR/CLIO_DATA_DIR/CLIO_STATE_DIR/
- * CLIO_CACHE_DIR set and the test only overrides CLIO_HOME. Individual env
- * vars take precedence over CLIO_HOME inside resolveClioDirs, so a test that
+ * sandbox when the parent has CLIO_CODER_CONFIG_DIR/CLIO_CODER_DATA_DIR/CLIO_CODER_STATE_DIR/
+ * CLIO_CODER_CACHE_DIR set and the test only overrides CLIO_CODER_HOME. Individual env
+ * vars take precedence over CLIO_CODER_HOME inside resolveClioDirs, so a test that
  * forgets to override all five will silently inherit the parent's paths and
  * write into the wrong sandbox.
  *
- * Enable by setting CLIO_REQUIRE_HOME_PREFIX=1 in the test env. The test
+ * Enable by setting CLIO_CODER_REQUIRE_HOME_PREFIX=1 in the test env. The test
  * harness in tests/harness/spawn.ts opts in by default. We deliberately do
  * not enable this in production because dev installs may legitimately point
- * individual dirs outside CLIO_HOME.
+ * individual dirs outside CLIO_CODER_HOME.
  */
 function enforceHomePrefixGuard(): void {
-	if (process.env.CLIO_REQUIRE_HOME_PREFIX !== "1") return;
-	const home = process.env.CLIO_HOME?.trim();
+	if (process.env.CLIO_CODER_REQUIRE_HOME_PREFIX !== "1") return;
+	const home = process.env.CLIO_CODER_HOME?.trim();
 	if (!home) return;
 	const dirs = resolveClioDirs();
 	const offenders: string[] = [];
@@ -194,11 +194,11 @@ function enforceHomePrefixGuard(): void {
 	if (!dirs.cache.startsWith(home)) offenders.push(`cacheDir=${dirs.cache}`);
 	if (offenders.length === 0) return;
 	throw new Error(
-		`CLIO_REQUIRE_HOME_PREFIX guardrail tripped: resolved Clio directories escape CLIO_HOME=${home}. ` +
+		`CLIO_CODER_REQUIRE_HOME_PREFIX guardrail tripped: resolved Clio directories escape CLIO_CODER_HOME=${home}. ` +
 			`Offending paths: ${offenders.join(", ")}. ` +
-			`Individual overrides CLIO_CONFIG_DIR, CLIO_DATA_DIR, CLIO_STATE_DIR, and CLIO_CACHE_DIR take precedence ` +
-			`over CLIO_HOME, so a test that sets only CLIO_HOME inherits whatever the parent process configured. ` +
-			`Override all five env vars in lockstep to scratch subdirs (CLIO_HOME plus CLIO_CONFIG_DIR, ` +
-			`CLIO_DATA_DIR, CLIO_STATE_DIR, CLIO_CACHE_DIR pointing under it), then call resetXdgCache().`,
+			`Individual overrides CLIO_CODER_CONFIG_DIR, CLIO_CODER_DATA_DIR, CLIO_CODER_STATE_DIR, and CLIO_CODER_CACHE_DIR take precedence ` +
+			`over CLIO_CODER_HOME, so a test that sets only CLIO_CODER_HOME inherits whatever the parent process configured. ` +
+			`Override all five env vars in lockstep to scratch subdirs (CLIO_CODER_HOME plus CLIO_CODER_CONFIG_DIR, ` +
+			`CLIO_CODER_DATA_DIR, CLIO_CODER_STATE_DIR, CLIO_CODER_CACHE_DIR pointing under it), then call resetXdgCache().`,
 	);
 }

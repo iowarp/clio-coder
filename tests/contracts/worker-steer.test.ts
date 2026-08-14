@@ -786,11 +786,11 @@ describe("contracts/worker-steer", () => {
 
 	describe("worker runtime guardrail bounds", () => {
 		function withWorkerCap<T>(cap: number, fn: () => Promise<T>): Promise<T> {
-			const previousCap = process.env.CLIO_WORKER_TOOL_CALL_CAP;
-			process.env.CLIO_WORKER_TOOL_CALL_CAP = String(cap);
+			const previousCap = process.env.CLIO_CODER_WORKER_TOOL_CALL_CAP;
+			process.env.CLIO_CODER_WORKER_TOOL_CALL_CAP = String(cap);
 			return fn().finally(() => {
-				if (previousCap === undefined) Reflect.deleteProperty(process.env, "CLIO_WORKER_TOOL_CALL_CAP");
-				else process.env.CLIO_WORKER_TOOL_CALL_CAP = previousCap;
+				if (previousCap === undefined) Reflect.deleteProperty(process.env, "CLIO_CODER_WORKER_TOOL_CALL_CAP");
+				else process.env.CLIO_CODER_WORKER_TOOL_CALL_CAP = previousCap;
 			});
 		}
 

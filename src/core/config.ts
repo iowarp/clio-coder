@@ -60,16 +60,16 @@ function issuesKind(issues: ReadonlyArray<SettingsIssue>): SettingsIssueKind {
 
 /**
  * The one action that repairs each failure kind, followed by the two commands
- * that are true for all of them. `clio doctor --fix` is deliberately not the
+ * that are true for all of them. `clio-coder doctor --fix` is deliberately not the
  * first line: `--fix` creates missing structure and repairs credential
  * permissions, and initialization never reads or rewrites an existing
  * settings.yaml, so on its own it leaves every one of these failures exactly
  * as it found them.
  */
 function settingsRemedy(kind: SettingsIssueKind, path: string): string {
-	if (kind === "unreadable") return `Restore read access to ${path}, then run \`clio doctor\` to re-check.`;
-	if (kind === "syntax") return `Fix the YAML in ${path}, then run \`clio doctor\` to re-check.`;
-	return `Fix the keys above in ${path}, then run \`clio doctor\` to re-check.`;
+	if (kind === "unreadable") return `Restore read access to ${path}, then run \`clio-coder doctor\` to re-check.`;
+	if (kind === "syntax") return `Fix the YAML in ${path}, then run \`clio-coder doctor\` to re-check.`;
+	return `Fix the keys above in ${path}, then run \`clio-coder doctor\` to re-check.`;
 }
 
 /** The same repair as {@link settingsRemedy}, phrased to sit inside one line's parentheses. */
@@ -100,8 +100,8 @@ export class SettingsValidationError extends Error {
 		super(
 			`${headline}\n${lines.join("\n")}\n\n` +
 				`${settingsRemedy(kind, path)}\n` +
-				"`clio doctor --fix` repairs directories and credential permissions; it never rewrites settings.\n" +
-				"To discard these settings and start from defaults instead, run `clio reset --config --force`.",
+				"`clio-coder doctor --fix` repairs directories and credential permissions; it never rewrites settings.\n" +
+				"To discard these settings and start from defaults instead, run `clio-coder reset --config --force`.",
 		);
 		this.name = "SettingsValidationError";
 		this.issues = issues;
@@ -161,7 +161,7 @@ export function formatSettingsIssues(issues: ReadonlyArray<SettingsIssue>): stri
 		kind === "schema"
 			? issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")
 			: issues.map((issue) => issue.message.replace(/^(?:invalid YAML|unreadable): /u, "")).join("; ");
-	const discard = "`clio reset --config --force` to start from defaults";
+	const discard = "`clio-coder reset --config --force` to start from defaults";
 	return foldToOneLine(
 		`${settingsFailureHeadline(kind)}: ${settingsRemedyInline(kind, path)}, or ${discard}. ${detail}`,
 	);
@@ -1329,7 +1329,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 /**
  * Validate the settings file on disk without throwing. Missing file is valid.
  * Resolves the path without the clioConfigDir mkdir side effect so read-only
- * surfaces (plain `clio doctor`, readSettings on a fresh machine) never
+ * surfaces (plain `clio-coder doctor`, readSettings on a fresh machine) never
  * create directories.
  */
 export function validateSettingsFile(): SettingsValidationResult {

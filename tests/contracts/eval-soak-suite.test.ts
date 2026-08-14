@@ -23,7 +23,7 @@ function fakeClio(entryPath: string, body: string): void {
 		[
 			"import { mkdirSync, writeFileSync } from 'node:fs';",
 			"import { join } from 'node:path';",
-			"const stateDir = process.env.CLIO_STATE_DIR;",
+			"const stateDir = process.env.CLIO_CODER_STATE_DIR;",
 			"if (stateDir === undefined) { process.stderr.write('no state dir\\n'); process.exit(90); }",
 			"mkdirSync(join(stateDir, 'receipts'), { recursive: true });",
 			"mkdirSync(join(stateDir, 'sessions', 'cwd-hash', 'session-1'), { recursive: true });",
@@ -111,9 +111,9 @@ describe("contracts/soak suite", { concurrency: false }, () => {
 		const continuity = loaded.suite.tasks.find((task) => task.id === "compaction-continuity.main-agent");
 		strictEqual(continuity?.runner.kind, "external-command");
 		strictEqual(continuity?.runner.commands?.length, 3);
-		for (const command of continuity?.runner.commands ?? []) ok(command.includes('node "$CLIO_ENTRY" run'));
+		for (const command of continuity?.runner.commands ?? []) ok(command.includes('node "$CLIO_CODER_ENTRY" run'));
 		ok(continuity?.runner.commands?.[1]?.includes("--continue"));
-		ok(continuity?.runner.commands?.[2]?.includes("CLIO_FORCE_COMPACT=1"));
+		ok(continuity?.runner.commands?.[2]?.includes("CLIO_CODER_FORCE_COMPACT=1"));
 		for (const metric of ["continuity.compactionSummaryPresent", "continuity.answeredFromPreCompaction"]) {
 			ok(
 				(continuity?.verify.assertions ?? []).some((assertion) => assertion.metric === metric),

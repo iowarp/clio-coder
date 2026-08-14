@@ -4,7 +4,7 @@ import type { TaskMemoryEnvelope } from "./task-memory-policy.js";
 
 /**
  * Opt-in raw-envelope trace for the LLM memory tier. Off unless
- * CLIO_MEMORY_TRACE names a file.
+ * CLIO_CODER_MEMORY_TRACE names a file.
  *
  * The telemetry row is deliberately content-free: it carries counts and
  * outcomes so it can be shipped and read without exposing the bank, the task,
@@ -47,7 +47,7 @@ export interface TaskMemoryTrace {
 const TRACE_TEXT_MAX_CHARS = 8_000;
 
 export function taskMemoryTracePath(env: NodeJS.ProcessEnv = process.env): string | null {
-	const raw = env.CLIO_MEMORY_TRACE?.trim();
+	const raw = env.CLIO_CODER_MEMORY_TRACE?.trim();
 	return raw !== undefined && raw.length > 0 ? raw : null;
 }
 

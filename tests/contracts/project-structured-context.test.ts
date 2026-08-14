@@ -16,7 +16,7 @@ function context(): DomainContext {
 
 function writeClioMd(cwd: string, extraSections: string): void {
 	writeFileSync(
-		join(cwd, "CLIO.md"),
+		join(cwd, "CLIO-CODER.md"),
 		[
 			"# Fixture Project",
 			"",

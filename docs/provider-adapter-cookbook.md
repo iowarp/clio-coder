@@ -144,5 +144,5 @@ export const BUILTIN_RUNTIMES = [
 
 ### 5.2 Dynamic Plugin Loading
 Clio's `RuntimeRegistry` can load custom runtimes dynamically at startup:
-* **Directories:** Place compiled Javascript descriptors (`.js`) inside `$CLIO_CONFIG_DIR/runtimes/` (defaulting to `~/.config/clio/runtimes/` or `~/.clio/runtimes/`).
+* **Directories:** Place compiled Javascript descriptors (`.js`) inside `$CLIO_CODER_CONFIG_DIR/runtimes/` (defaulting to `~/.config/clio-coder/runtimes/`).
 * **Package exports:** Publish an npm package that exports a `clioRuntimes` array containing your runtime descriptors, then list the package name under `runtimePlugins` in your configuration settings.

@@ -26,7 +26,7 @@ describe("contracts/write-roots", () => {
 		// classify plain "write". Mirror that here so the classifier does not
 		// escalate scratch paths to system_modify for being outside the repo root.
 		process.chdir(scratch);
-		root = join(scratch, ".clio", "wiki-staging-abc");
+		root = join(scratch, ".clio-coder", "wiki-staging-abc");
 		safety = createWorkerSafety({ cwd: scratch, writeRoots: [root] });
 	});
 
@@ -48,7 +48,7 @@ describe("contracts/write-roots", () => {
 	});
 
 	it("blocks a write into a sibling staging directory", () => {
-		const sibling = join(scratch, ".clio", "wiki-staging-other", "quickstart.md");
+		const sibling = join(scratch, ".clio-coder", "wiki-staging-other", "quickstart.md");
 		const decision = safety.evaluate({ tool: ToolNames.Write, args: { file_path: sibling } });
 		strictEqual(decision.kind, "block");
 		strictEqual(decision.policy?.reasonCode, "write-root");

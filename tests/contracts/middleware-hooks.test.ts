@@ -21,7 +21,7 @@ import {
 } from "../../src/domains/middleware/index.js";
 
 const WORKSPACE = "/work/repo";
-const PROJECT: UserHookSource = { origin: "project", sourcePath: ".clio/hooks.yaml" };
+const PROJECT: UserHookSource = { origin: "project", sourcePath: ".clio-coder/hooks.yaml" };
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -241,7 +241,7 @@ describe("contracts/middleware hook receipt log", () => {
 			at: 1,
 			hookId: id,
 			origin: "project",
-			sourcePath: ".clio/hooks.yaml",
+			sourcePath: ".clio-coder/hooks.yaml",
 			hash: "abc",
 			hook: "turn_start",
 			kind: "prompt",
@@ -265,13 +265,13 @@ describe("contracts/middleware hook receipt log", () => {
 describe("contracts/middleware install from disk", () => {
 	it("reads project hook files, registers them, and surfaces file issues", () => {
 		const dir = scratch();
-		mkdirSync(join(dir, ".clio"), { recursive: true });
+		mkdirSync(join(dir, ".clio-coder"), { recursive: true });
 		writeFileSync(
-			join(dir, ".clio", "hooks.yaml"),
+			join(dir, ".clio-coder", "hooks.yaml"),
 			"- on: turn_start\n  kind: prompt\n  message: project hook\n",
 			"utf8",
 		);
-		writeFileSync(join(dir, ".clio", "hooks.local.yaml"), ": not valid yaml :\n  - [", "utf8");
+		writeFileSync(join(dir, ".clio-coder", "hooks.local.yaml"), ": not valid yaml :\n  - [", "utf8");
 		const registrations: MiddlewareHookRegistration[] = [];
 		const receipts: HookReceipt[] = [];
 		const result = installUserHooks({

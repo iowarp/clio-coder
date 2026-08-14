@@ -211,7 +211,7 @@ describe("contracts/packaging", () => {
 	});
 
 	/**
-	 * The root cause of the CLIO.md packaging defect. A gitignored path is
+	 * The root cause of the CLIO-CODER.md packaging defect. A gitignored path is
 	 * generated runtime state: npm packs from the working tree, so shipping one
 	 * publishes whatever the release machine happened to generate, and requiring
 	 * one fails the gate on a clean checkout. Neither is a thing a release can do.
@@ -232,7 +232,7 @@ describe("contracts/packaging", () => {
 	});
 
 	/**
-	 * The general form of the `clio docs` packaging defect. `resolvePackageRoot()`
+	 * The general form of the `clio-coder docs` packaging defect. `resolvePackageRoot()`
 	 * returns the installed package root, so every path built on it is a claim
 	 * that the tarball carries that path. The release manifest lists a handful of
 	 * those claims by hand and drifts the moment someone drops an entry from

@@ -2,7 +2,7 @@ import type { PathPolicyInput } from "./path-policy.js";
 
 /**
  * Source-level damage-control path defaults adapted from the reference
- * extension. These apply even when a project has no `.clio/safety.yaml`, so the
+ * extension. These apply even when a project has no `.clio-coder/safety.yaml`, so the
  * agent has a useful safety net out of the box. Project policy can add more
  * paths, or disable these defaults entirely when a local repo intentionally
  * needs a looser profile.

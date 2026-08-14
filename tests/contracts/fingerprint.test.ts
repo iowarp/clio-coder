@@ -112,7 +112,7 @@ describe("contracts/fingerprint", () => {
 		writeFileSync(join(cwd, "src", "index.ts"), "export const value = 1;\n", "utf8");
 		const prev = computeFingerprint(cwd);
 
-		for (const dir of [".superpowers", ".codex", ".claude", ".clio-benchmark"]) {
+		for (const dir of [".superpowers", ".codex", ".claude", ".clio-coder-benchmark"]) {
 			mkdirSync(join(cwd, dir), { recursive: true });
 			writeFileSync(join(cwd, dir, "scratch.ts"), "export const scratch = 1;\n", "utf8");
 		}

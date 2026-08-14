@@ -817,7 +817,7 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 	it("keeps the full frozen surface on a pending-skill turn; loading a skill never reshapes the wire schemas", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-chat-skill-"));
 		try {
-			const skillDir = join(scratch, ".clio", "skills", "narrow");
+			const skillDir = join(scratch, ".clio-coder", "skills", "narrow");
 			mkdirSync(skillDir, { recursive: true });
 			writeFileSync(
 				join(skillDir, "SKILL.md"),
@@ -917,7 +917,7 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 	it("releases skill narrowing when the turn that requested it ends", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-chat-skill-life-"));
 		try {
-			const skillDir = join(scratch, ".clio", "skills", "narrow");
+			const skillDir = join(scratch, ".clio-coder", "skills", "narrow");
 			mkdirSync(skillDir, { recursive: true });
 			writeFileSync(
 				join(skillDir, "SKILL.md"),

@@ -357,7 +357,7 @@ function runDependents(index: NavIndex, query: string, limit: number): NavPayloa
 	};
 }
 
-const WIKI_UPDATE_COMMAND = "clio context wiki --update";
+const WIKI_UPDATE_COMMAND = "clio-coder context wiki --update";
 const WIKI_SUMMARY_MAX_CHARS = 240;
 
 function wikiPageId(path: string): string {
@@ -367,7 +367,7 @@ function wikiPageId(path: string): string {
 function wikiPageSummary(cwd: string, path: string): string {
 	let text = "";
 	try {
-		text = readFileSync(join(cwd, ".clio", "wiki", path), "utf8");
+		text = readFileSync(join(cwd, ".clio-coder", "wiki", path), "utf8");
 	} catch {
 		return "Summary unavailable; read the page for details.";
 	}
@@ -459,7 +459,7 @@ function runWiki(cwd: string, query: string): NavPayload | ToolResult {
 					id: wikiPageId(resolved.path),
 					title: resolved.title,
 					summary: wikiPageSummary(cwd, resolved.path),
-					path: `.clio/wiki/${resolved.path}`,
+					path: `.clio-coder/wiki/${resolved.path}`,
 				},
 				staleness,
 				...(messages.length > 0 ? { message: messages.join(" ") } : {}),

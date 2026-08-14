@@ -32,8 +32,8 @@ npm run test:smoke        # spawn dist/cli/index.js end-to-end (NEEDS a build)
 npm run test              # contracts + smoke + boundaries
 npm run build             # tsup -> dist/
 npm run dev               # tsup --watch -> rebuilds dist/ on save
-npm run ci                # typecheck && lint && build && test
-npm run test:live         # local live provider smoke; requires CLIO_LIVE_SMOKE=1
+npm run ci                # typecheck && lint && skills:check && build && test && test:trace-viewer
+npm run test:live         # local live provider smoke; requires CLIO_CODER_LIVE_SMOKE=1
 npm run test:live -- --delegation  # adds local opencode/copilot ACP checks
 ```
 
@@ -46,7 +46,7 @@ npm run test:live -- --delegation  # adds local opencode/copilot ACP checks
 | skills loader / activation | `npm run test:contracts` | `tests/contracts/skills.test.ts`, `skill-activation-compaction.test.ts` |
 | any `src/` import edit | `npm run check:boundaries` | enforces rule1/2/3 |
 | `src/cli/*` or `src/entry/*` user-facing flow | build, then `npm run test:smoke` | smoke spawns the real `dist/cli/index.js` |
-| ACP surface (`src/cli/acp.ts`, engine ACP) | build, then `npm run test:smoke` | smoke drives `clio acp` over JSON-RPC/stdio |
+| ACP surface (`src/cli/acp.ts`, engine ACP) | build, then `npm run test:smoke` | smoke drives `clio-coder acp` over JSON-RPC/stdio |
 
 **See `references/test-map.md`** for exactly where each test lives and how to run
 a single file.
@@ -54,8 +54,8 @@ a single file.
 ## Boundary rules you must not break
 
 `tests/boundaries/check-boundaries.ts` enforces three rules (also the Hard
-Invariants in `CLIO.md`). If `npm run check:boundaries` reports a violation, fix
-the import — never silence the check:
+Invariants in `CLIO-CODER.md`). If `npm run check:boundaries` reports a
+violation, fix the import — never silence the check:
 
 - **rule1**: only `src/engine/**` may value-import `@earendil-works/pi-*`. Outside
   engine, use Clio contracts or type-only imports that erase at compile time.

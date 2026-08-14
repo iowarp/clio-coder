@@ -46,7 +46,7 @@ export async function runContextInitRunner(
 	const effectiveRuntimeKind = stringField(run, "runtimeKind");
 	const effectiveThinking = stringField(run, "thinkingLevel");
 	const structuredOutputMode = stringField(run, "structuredOutputMode");
-	const clioMdPath = join(cwd, "CLIO.md");
+	const clioMdPath = join(cwd, "CLIO-CODER.md");
 	const clioMdBytes = existsSync(clioMdPath) ? statSync(clioMdPath).size : 0;
 	return {
 		assignmentId: null,

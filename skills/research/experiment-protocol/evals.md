@@ -14,7 +14,7 @@ printf 'import time\n\ndef smooth(values, window):\n    out = []\n    for i in r
 
 Expected:
 
-- Writes a pre-registration into `.clio/validation.yaml` or `VALIDATION.md`
+- Writes a pre-registration into `.clio-coder/validation.yaml` or `VALIDATION.md`
   before running any benchmark or editing any code.
 - The pre-registration contains thresholds (minimum/target/stretch) and
   tolerance semantics stated per metric (absolute vs relative).
@@ -67,7 +67,7 @@ Expected:
 
 ## Observed gap closure
 
-S1 run 2026-07-01, headless `clio run` against a scratch git fixture (a pure
+S1 run 2026-07-01, headless `clio-coder run` against a scratch git fixture (a pure
 Python O(n^2) nearest-neighbor kernel with a single-shot bench script).
 Prompt: "Make this kernel faster."
 
@@ -76,7 +76,7 @@ Prompt: "Make this kernel faster."
   thresholds or tolerance semantics, and pinned nothing. Correctness was
   checked ad hoc after the fact.
 - GREEN (skill via `--skill` and `/skill:` invocation): the tool-call ledger
-  shows sha256 and environment capture, then `.clio/validation.yaml` written
+  shows sha256 and environment capture, then `.clio-coder/validation.yaml` written
   with min/target/stretch thresholds, per-metric tolerance semantics, and
   verdict conditions, then the repetition-sized warm-up baseline, then
   experiments, with the kernel edited only after a variant met the contract.
@@ -87,5 +87,5 @@ Prompt: "Make this kernel faster."
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS. Pre-registration written before touching the seeded kernel; judge 5/5.

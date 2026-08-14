@@ -40,7 +40,7 @@ function headlessRegistry(level: AutonomyLevel = "auto-edit"): ToolRegistry {
 	});
 	registry.register(mockSpec(ToolNames.Bash, "execute"));
 	registry.register(mockSpec(ToolNames.Write, "write"));
-	// What entry/orchestrator.ts wires for `clio run`: nobody can confirm, so
+	// What entry/orchestrator.ts wires for `clio-coder run`: nobody can confirm, so
 	// every parked ask is cancelled with the headless denial sentence.
 	registry.onPermissionRequired(() => {
 		registry.cancelParkedCalls(HEADLESS_PERMISSION_DENIED_REASON);
@@ -110,7 +110,7 @@ describe("contracts/headless denial teaches the recognized bash form", () => {
 		const { detail } = blockedRejection(
 			await registry.invoke({
 				tool: ToolNames.Write,
-				args: { file_path: join(".clio", "test-scratch", "headless-guidance.txt"), content: "x" },
+				args: { file_path: join(".clio-coder", "test-scratch", "headless-guidance.txt"), content: "x" },
 			}),
 		);
 		strictEqual(detail, HEADLESS_PERMISSION_DENIED_REASON, "a write ask has no recognized form to teach");

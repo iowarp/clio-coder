@@ -33,7 +33,7 @@
           <p>Point-in-time inventory of legacy env variables and consolidation records</p>
           <div class="meta-chips-row">
             <span class="chip">Source: docs/config-knobs-audit.md</span>
-            <span class="chip chip-orange" style="color: var(--color-amber); border-color: rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.05);">clio docs config_knobs_audit</span>
+            <span class="chip chip-orange" style="color: var(--color-amber); border-color: rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.05);">clio-coder docs config_knobs_audit</span>
           </div>
         </div>
       </div>
@@ -86,9 +86,9 @@
                 <div class="form-group">
                   <label for="knobSelect">Legacy Env Variable</label>
                   <select id="knobSelect" onchange="updateAuditDetails()">
-                    <option value="orch_calls">CLIO_ORCH_MAX_TOOL_CALLS</option>
-                    <option value="max_context">CLIO_MAX_CONTEXT_TOKENS</option>
-                    <option value="sampling">CLIO_SAMPLING_OVERRIDES</option>
+                    <option value="orch_calls">CLIO_CODER_ORCH_MAX_TOOL_CALLS</option>
+                    <option value="max_context">CLIO_CODER_MAX_CONTEXT_TOKENS</option>
+                    <option value="sampling">CLIO_CODER_SAMPLING_OVERRIDES</option>
                   </select>
                 </div>
               </div>
@@ -119,7 +119,7 @@
             <p>During the consolidation sweep on 2026-07-03, the following tasks were completed:</p>
             <ul>
               <li><strong>Guardrails section added:</strong> All soft and hard loop ceilings are now defined under <code>guardrails:</code> settings structures.</li>
-              <li><strong>Bridge variables collapsed:</strong> Legacy variables used to pass CLI parameters into deep engines are replaced by <code>CLIO_RUN_OVERRIDES</code> JSON transport configurations.</li>
+              <li><strong>Bridge variables collapsed:</strong> Legacy variables used to pass CLI parameters into deep engines are replaced by <code>CLIO_CODER_RUN_OVERRIDES</code> JSON transport configurations.</li>
             </ul>
           </div>
         </div>
@@ -148,15 +148,15 @@
     const AUDITS = {
       orch_calls: {
         desc: "Orchestrator per-turn soft and hard tool call limits.",
-        rep: "CLIO_TURN_TOOL_CALL_BUDGET / guardrails.turnToolCallBudget"
+        rep: "CLIO_CODER_TURN_TOOL_CALL_BUDGET / guardrails.turnToolCallBudget"
       },
       max_context: {
         desc: "Context-window override for local models.",
-        rep: "CLIO_RUN_OVERRIDES / clio run --max-context-tokens"
+        rep: "CLIO_CODER_RUN_OVERRIDES / clio-coder run --max-context-tokens"
       },
       sampling: {
         desc: "JSON sampling-parameter overrides passed from CLI print modes.",
-        rep: "CLIO_RUN_OVERRIDES / sampling flags"
+        rep: "CLIO_CODER_RUN_OVERRIDES / sampling flags"
       }
     };
 

@@ -82,7 +82,7 @@ type ToolCallMetrics = {
 
 type ToolOutcome = "ok" | "error" | "blocked";
 
-/** Fold the terminal tool events emitted by `clio run --json`. */
+/** Fold the terminal tool events emitted by `clio-coder run --json`. */
 export function toolCallMetricsFromJsonl(stdout: string): ToolCallMetrics {
 	const executionEnds: ToolCallMetrics = { totalCalls: 0, failed: 0, blocked: 0 };
 	const canonicalFinishes: ToolCallMetrics = { totalCalls: 0, failed: 0, blocked: 0 };

@@ -18,15 +18,15 @@ import { runEvalSuiteV2 } from "../domains/eval/suites/run.js";
 import { EvalTaskFileError } from "../domains/eval/task-file.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio eval <command>
+const HELP = `clio-coder eval <command>
 
 Commands:
-  clio eval validate --suite <suite.yaml>
-  clio eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-entry <path>]
-  clio eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-entry <path>]
-  clio eval report <evalId> --format text|json|md|swe-jsonl|junit
-  clio eval compare <baselineEvalId> <candidateEvalId>
-  clio eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
+  clio-coder eval validate --suite <suite.yaml>
+  clio-coder eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-entry <path>]
+  clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-entry <path>]
+  clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
+  clio-coder eval compare <baselineEvalId> <candidateEvalId>
+  clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
 `;
 
 type EvalCommand = "validate" | "run" | "report" | "compare" | "gate";

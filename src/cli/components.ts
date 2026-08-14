@@ -5,11 +5,11 @@ import { createComponentSnapshot, diffComponentSnapshots, loadComponentSnapshot 
 import type { ComponentDiff, ComponentSnapshot, HarnessComponent } from "../domains/components/types.js";
 import { printError, printOk } from "./shared.js";
 
-const HELP = `clio components [list] [--json]
-clio components snapshot --out <path>
-clio components diff --from <snapshot-a.json> --to <snapshot-b.json> [--json]
+const HELP = `clio-coder components [list] [--json]
+clio-coder components snapshot --out <path>
+clio-coder components diff --from <snapshot-a.json> --to <snapshot-b.json> [--json]
 
-List read-only Clio Coder harness components, write a snapshot, or diff two snapshots. The bare \`clio components\` form and \`clio components list\` are equivalent.
+List read-only Clio Coder harness components, write a snapshot, or diff two snapshots. The bare \`clio-coder components\` form and \`clio-coder components list\` are equivalent.
 `;
 
 interface ParsedComponentsArgs {

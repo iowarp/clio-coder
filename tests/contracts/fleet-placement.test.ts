@@ -378,7 +378,7 @@ describe("fleet preflight store", () => {
 		);
 		match(
 			fleetPreflightVerdict(node, "/shared/app", [record({ localVersion: "0.0.1" })]).reason ?? "",
-			/predates a local clio upgrade/,
+			/predates a local clio-coder upgrade/,
 		);
 		match(
 			fleetPreflightVerdict(node, "/shared/app", [record({ ok: false, detail: "clio missing" })]).reason ?? "",

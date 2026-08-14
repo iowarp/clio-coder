@@ -95,11 +95,11 @@ async function withApprovalHarness<T>(
 	const originalEnv = { ...process.env };
 	const scratch = mkdtempSync(join(tmpdir(), "clio-approval-identity-"));
 	const stateDir = join(scratch, "state");
-	process.env.CLIO_HOME = scratch;
-	process.env.CLIO_DATA_DIR = join(scratch, "data");
-	process.env.CLIO_CONFIG_DIR = join(scratch, "config");
-	process.env.CLIO_STATE_DIR = stateDir;
-	process.env.CLIO_CACHE_DIR = join(scratch, "cache");
+	process.env.CLIO_CODER_HOME = scratch;
+	process.env.CLIO_CODER_DATA_DIR = join(scratch, "data");
+	process.env.CLIO_CODER_CONFIG_DIR = join(scratch, "config");
+	process.env.CLIO_CODER_STATE_DIR = stateDir;
+	process.env.CLIO_CODER_CACHE_DIR = join(scratch, "cache");
 	resetXdgCache();
 
 	const bus = createSafeEventBus();
@@ -346,7 +346,7 @@ describe("contracts/approval identity", () => {
 	});
 
 	it("headless fast-deny emits adjacent request and policy resolution with one id", async () => {
-		const reason = "clio run cannot confirm permission requests; rerun interactively to approve this action.";
+		const reason = "clio-coder run cannot confirm permission requests; rerun interactively to approve this action.";
 		const { requests, resolutions } = await withApprovalHarness("auto-edit", async ({ registry, bus }) => {
 			registry.onPermissionRequired((call, decision, meta) => {
 				bus.emit(BusChannels.PermissionResolved, {

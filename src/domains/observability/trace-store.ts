@@ -67,7 +67,7 @@ function requireSqlite(): DatabaseSyncConstructor {
  * Run one synchronous module load with the SQLite ExperimentalWarning dropped.
  *
  * The warning names a Node internal the operator never chose and it lands on
- * stderr in the middle of `clio trace` output, which is the fresh-install
+ * stderr in the middle of `clio-coder trace` output, which is the fresh-install
  * opacity F1 was filed for. Workers are already spawned with
  * `--disable-warning=ExperimentalWarning` (dispatch/worker-spawn.ts), so
  * silencing it here is consistency rather than new policy.
@@ -820,7 +820,7 @@ export class TraceStore {
 	 * runs/phases pair, `event` appends to the same `events` table a worker's
 	 * tool calls land in, and `finish` closes both with the turn's usage. The
 	 * phase id is the run id, as it is for a dispatched run's single phase, so
-	 * `clio trace phases` and `clio trace tail` need no session-specific path.
+	 * `clio-coder trace phases` and `clio-coder trace tail` need no session-specific path.
 	 */
 	recordSessionTurn(input: SessionTurnTrace): void {
 		if (input.kind === "start") {

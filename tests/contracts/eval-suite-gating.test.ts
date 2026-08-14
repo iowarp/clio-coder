@@ -293,7 +293,7 @@ describe("contracts/eval suite gating", { concurrency: false }, () => {
 			const task = quietTask("entry-env", []);
 			task.runner = {
 				kind: "external-command",
-				commands: [`${process.execPath} -e "if (process.env.CLIO_ENTRY !== '${clioEntry}') process.exit(12)"`],
+				commands: [`${process.execPath} -e "if (process.env.CLIO_CODER_ENTRY !== '${clioEntry}') process.exit(12)"`],
 				args: [],
 			};
 

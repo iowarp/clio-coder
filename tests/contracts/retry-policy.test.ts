@@ -25,7 +25,7 @@ describe("contracts/retry-policy", () => {
 	 * Measured against LM Studio serving an evicted model over openai-compat:
 	 * the first request answers `500 Internal Server Error`, the next answers
 	 * the bare string `Model is unloaded.` while the load runs. The second was
-	 * not in the retryable pattern at all, so `clio run --target dynamo --model
+	 * not in the retryable pattern at all, so `clio-coder run --target dynamo --model
 	 * qwopus3.6-35b-a3b-coder-mtp` gave up after two attempts in six seconds
 	 * and printed the server's error where the answer belongs.
 	 */

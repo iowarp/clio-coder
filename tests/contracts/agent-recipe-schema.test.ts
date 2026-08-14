@@ -109,7 +109,7 @@ describe("contracts/agent recipe schema", () => {
 	it("a discovered recipe cannot claim an audience its provenance does not give it", () => {
 		const dir = mkdtempSync(join(tmpdir(), "clio-audience-recipe-"));
 		try {
-			// `internal` and `shadow` hide an agent from `clio agents` while
+			// `internal` and `shadow` hide an agent from `clio-coder agents` while
 			// leaving it reachable by internal orchestration, and `base` claims
 			// Clio shipped it. None of the three is a discovered recipe's to say.
 			for (const claimed of ["internal", "shadow", "base"] as const) {

@@ -423,7 +423,10 @@ describe("contracts/config", () => {
 	});
 
 	it("expands environment variable references", () => {
-		strictEqual(expandConfigValue(`Bearer $${"{CLIO_TOKEN}"}`, { env: { CLIO_TOKEN: "secret" } }), "Bearer secret");
+		strictEqual(
+			expandConfigValue(`Bearer $${"{CLIO_CODER_TOKEN}"}`, { env: { CLIO_CODER_TOKEN: "secret" } }),
+			"Bearer secret",
+		);
 	});
 
 	it("expands home-relative and env-bearing paths", () => {

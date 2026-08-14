@@ -40,7 +40,7 @@ export function validateInitOptions(options: ContextInitOptions): string | null 
 		options.proposeClioMd === true &&
 		(options.adopt === true || options.applyClioMd === true || options.rewriteClioMd === true)
 	) {
-		return "clio context init: --propose cannot be combined with --adopt, --apply, or --rewrite";
+		return "clio-coder context init: --propose cannot be combined with --adopt, --apply, or --rewrite";
 	}
 	return null;
 }

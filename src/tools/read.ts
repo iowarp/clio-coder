@@ -20,7 +20,7 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 // pi's 50KB so large source/generated files finish in fewer calls (a 144KB file
 // took ~9 sequential 16KB reads before). The per-turn observation budget
 // (src/tools/observation.ts) still bounds the aggregate. Value, settings key,
-// and env override (CLIO_READ_MAX_BYTES) live in core/guardrails.ts.
+// and env override (CLIO_CODER_READ_MAX_BYTES) live in core/guardrails.ts.
 export const DEFAULT_READ_MAX_BYTES = GUARDRAIL_DEFAULTS.readMaxBytes;
 export const READ_MAX_BYTES_ENV = GUARDRAIL_ENV_VARS.readMaxBytes;
 const MIN_READ_CAP_BYTES = 1024;

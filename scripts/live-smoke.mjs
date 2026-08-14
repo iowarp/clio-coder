@@ -9,7 +9,7 @@ const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
 	console.log(`Usage: node scripts/live-smoke.mjs [--delegation]
 
-Runs an opt-in live provider smoke only when CLIO_LIVE_SMOKE=1.
+Runs an opt-in live provider smoke only when CLIO_CODER_LIVE_SMOKE=1.
 Pass --delegation to also validate external ACP delegation agents
 (opencode and copilot), which must be installed locally.`);
 	process.exit(0);
@@ -21,8 +21,8 @@ if (unknown) {
 }
 const includeDelegation = args.includes("--delegation");
 
-if (process.env.CLIO_LIVE_SMOKE !== "1") {
-	console.log("CLIO_LIVE_SMOKE environment variable is not set to '1'. Skipping live LLM smoke validation.");
+if (process.env.CLIO_CODER_LIVE_SMOKE !== "1") {
+	console.log("CLIO_CODER_LIVE_SMOKE environment variable is not set to '1'. Skipping live LLM smoke validation.");
 	process.exit(0);
 }
 
@@ -35,13 +35,15 @@ if (!existsSync(CLI_ENTRY)) {
 }
 
 // Extract live model targets and variables
-const targetId = process.env.CLIO_LIVE_TARGET || "live-target";
-const runtimeId = process.env.CLIO_LIVE_RUNTIME || (process.env.CLIO_LIVE_BASE_URL ? "openai-compat" : "openai");
-const model = process.env.CLIO_LIVE_MODEL || (runtimeId === "anthropic" ? "claude-3-5-sonnet-latest" : "gpt-4o-mini");
-const url = process.env.CLIO_LIVE_BASE_URL || undefined;
+const targetId = process.env.CLIO_CODER_LIVE_TARGET || "live-target";
+const runtimeId =
+	process.env.CLIO_CODER_LIVE_RUNTIME || (process.env.CLIO_CODER_LIVE_BASE_URL ? "openai-compat" : "openai");
+const model =
+	process.env.CLIO_CODER_LIVE_MODEL || (runtimeId === "anthropic" ? "claude-3-5-sonnet-latest" : "gpt-4o-mini");
+const url = process.env.CLIO_CODER_LIVE_BASE_URL || undefined;
 
-let envVarName = "CLIO_LIVE_API_KEY";
-let apiKey = process.env.CLIO_LIVE_API_KEY || "";
+let envVarName = "CLIO_CODER_LIVE_API_KEY";
+let apiKey = process.env.CLIO_CODER_LIVE_API_KEY || "";
 
 if (!apiKey) {
 	if (runtimeId === "openai" && process.env.OPENAI_API_KEY) {
@@ -55,7 +57,7 @@ if (!apiKey) {
 
 if (!apiKey && runtimeId !== "openai-compat") {
 	console.error(
-		"Error: CLIO_LIVE_SMOKE=1 is active, but no API key was found in CLIO_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
+		"Error: CLIO_CODER_LIVE_SMOKE=1 is active, but no API key was found in CLIO_CODER_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
 	);
 	process.exit(1);
 }
@@ -65,7 +67,7 @@ function redact(str) {
 	if (!str) return "";
 	let redacted = str;
 	const secrets = [
-		process.env.CLIO_LIVE_API_KEY,
+		process.env.CLIO_CODER_LIVE_API_KEY,
 		process.env.OPENAI_API_KEY,
 		process.env.ANTHROPIC_API_KEY,
 		apiKey,
@@ -152,12 +154,12 @@ writeFileSync(settingsPath, stringify(settings), "utf8");
 
 const childEnv = {
 	...process.env,
-	CLIO_HOME: clioHome,
-	CLIO_DATA_DIR: clioDataDir,
-	CLIO_CONFIG_DIR: clioConfigDir,
-	CLIO_STATE_DIR: clioStateDir,
-	CLIO_CACHE_DIR: clioCacheDir,
-	CLIO_REQUIRE_HOME_PREFIX: "1",
+	CLIO_CODER_HOME: clioHome,
+	CLIO_CODER_DATA_DIR: clioDataDir,
+	CLIO_CODER_CONFIG_DIR: clioConfigDir,
+	CLIO_CODER_STATE_DIR: clioStateDir,
+	CLIO_CODER_CACHE_DIR: clioCacheDir,
+	CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
 };
 if (apiKey) {
 	childEnv[envVarName] = apiKey;
@@ -204,23 +206,23 @@ async function main() {
 	console.log(`Scratch config path: ${settingsPath}`);
 
 	try {
-		// 1. clio --version
-		console.log("Running: clio --version");
+		// 1. clio-coder --version
+		console.log("Running: clio-coder --version");
 		const r1 = await runCommand(["--version"], 15_000);
 		console.log(`Exit code: ${r1.code}`);
 		console.log(redact(r1.stdout).trim());
-		if (r1.code !== 0) throw new Error("clio --version failed");
+		if (r1.code !== 0) throw new Error("clio-coder --version failed");
 
-		// 2. clio doctor --fix
-		console.log("Running: clio doctor --fix");
+		// 2. clio-coder doctor --fix
+		console.log("Running: clio-coder doctor --fix");
 		const r2 = await runCommand(["doctor", "--fix"], 30_000);
 		console.log(`Exit code: ${r2.code}`);
 		if (r2.code !== 0) {
 			console.error("Stderr:", redact(r2.stderr));
-			throw new Error("clio doctor --fix failed");
+			throw new Error("clio-coder doctor --fix failed");
 		}
 
-		// 3. clio run --no-context-files "Reply with exactly: clio-live-ok"
+		// 3. clio-coder run --no-context-files "Reply with exactly: clio-live-ok"
 		console.log("Running live validation prompt...");
 		const r3 = await runCommand(["--no-context-files", "run", "Reply with exactly: clio-live-ok"], 120_000);
 		console.log(`Exit code: ${r3.code}`);
@@ -233,7 +235,7 @@ async function main() {
 		}
 
 		if (r3.code !== 0) {
-			throw new Error(`clio run failed with code ${r3.code}`);
+			throw new Error(`clio-coder run failed with code ${r3.code}`);
 		}
 
 		if (!cleanStdout.toLowerCase().includes("clio-live-ok")) {
@@ -246,20 +248,20 @@ async function main() {
 			return;
 		}
 
-		// 4. clio run --agent opencode "Reply with exactly: clio-opencode-ok"
+		// 4. clio-coder run --agent opencode "Reply with exactly: clio-opencode-ok"
 		console.log("Running opencode delegation live validation...");
 		const r4 = await runCommand(["run", "--agent", "opencode", "Reply with exactly: clio-opencode-ok"], 120_000);
 		console.log(`Exit code: ${r4.code}`);
 		const cleanStdout4 = redact(r4.stdout);
 		console.log("Stdout:\n", cleanStdout4);
 		if (r4.code !== 0) {
-			throw new Error(`clio run --agent opencode failed with code ${r4.code}`);
+			throw new Error(`clio-coder run --agent opencode failed with code ${r4.code}`);
 		}
 		if (!cleanStdout4.toLowerCase().includes("clio-opencode-ok")) {
 			throw new Error("Validation prompt response did not contain 'clio-opencode-ok'");
 		}
 
-		// 5. clio run --agent opencode "Create a file named scratch/live-smoke-opencode.txt containing 'opencode-tool-ok', then read it back and print it."
+		// 5. clio-coder run --agent opencode "Create a file named scratch/live-smoke-opencode.txt containing 'opencode-tool-ok', then read it back and print it."
 		console.log("Running opencode complex delegation live validation...");
 		const r5 = await runCommand(
 			[
@@ -274,23 +276,23 @@ async function main() {
 		const cleanStdout5 = redact(r5.stdout);
 		console.log("Stdout:\n", cleanStdout5);
 		if (r5.code !== 0) {
-			throw new Error(`clio run --agent opencode (complex) failed with code ${r5.code}`);
+			throw new Error(`clio-coder run --agent opencode (complex) failed with code ${r5.code}`);
 		}
 
-		// 6. clio run --agent copilot "Reply with exactly: clio-copilot-ok"
+		// 6. clio-coder run --agent copilot "Reply with exactly: clio-copilot-ok"
 		console.log("Running copilot delegation live validation...");
 		const r6 = await runCommand(["run", "--agent", "copilot", "Reply with exactly: clio-copilot-ok"], 120_000);
 		console.log(`Exit code: ${r6.code}`);
 		const cleanStdout6 = redact(r6.stdout);
 		console.log("Stdout:\n", cleanStdout6);
 		if (r6.code !== 0) {
-			throw new Error(`clio run --agent copilot failed with code ${r6.code}`);
+			throw new Error(`clio-coder run --agent copilot failed with code ${r6.code}`);
 		}
 		if (!cleanStdout6.toLowerCase().includes("clio-copilot-ok")) {
 			throw new Error("Validation prompt response did not contain 'clio-copilot-ok'");
 		}
 
-		// 7. clio run --agent copilot "Create a file named scratch/live-smoke-copilot.txt containing 'copilot-tool-ok', then read it back and print it."
+		// 7. clio-coder run --agent copilot "Create a file named scratch/live-smoke-copilot.txt containing 'copilot-tool-ok', then read it back and print it."
 		console.log("Running copilot complex delegation live validation...");
 		const r7 = await runCommand(
 			[
@@ -305,7 +307,7 @@ async function main() {
 		const cleanStdout7 = redact(r7.stdout);
 		console.log("Stdout:\n", cleanStdout7);
 		if (r7.code !== 0) {
-			throw new Error(`clio run --agent copilot (complex) failed with code ${r7.code}`);
+			throw new Error(`clio-coder run --agent copilot (complex) failed with code ${r7.code}`);
 		}
 
 		console.log("Live smoke validation: SUCCESS");
@@ -313,8 +315,8 @@ async function main() {
 		console.error("Live smoke validation failed:", err.message);
 		process.exitCode = 1;
 	} finally {
-		if (process.env.CLIO_LIVE_KEEP === "1") {
-			console.log(`CLIO_LIVE_KEEP=1. Keeping scratch directory at: ${scratchDir}`);
+		if (process.env.CLIO_CODER_LIVE_KEEP === "1") {
+			console.log(`CLIO_CODER_LIVE_KEEP=1. Keeping scratch directory at: ${scratchDir}`);
 		} else {
 			console.log(`Cleaning up scratch directory: ${scratchDir}`);
 			try {

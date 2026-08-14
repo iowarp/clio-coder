@@ -7,15 +7,15 @@ usage() {
 Usage: scripts/install-local.sh [--skip-deps] [--no-build] [--dry-run] [--force]
 
 Install Clio Coder from this source checkout by placing a deterministic symlink at:
-  ${CLIO_BIN_DIR:-$HOME/.local/bin}/clio
+  ${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder
 After linking, the script runs the installed CLI's structure repair
-(node dist/cli/index.js doctor --fix) so a fresh install passes plain clio doctor.
+(node dist/cli/index.js doctor --fix) so a fresh install passes plain clio-coder doctor.
 
 Options:
   --skip-deps    Do not run npm ci, even if node_modules looks stale or missing.
   --no-build     Do not run npm run build; require an existing dist/cli/index.js.
   --dry-run      Print planned actions without changing files.
-  --force        Replace an existing clio symlink even if it points outside this repo.
+  --force        Replace an existing clio-coder symlink even if it points outside this repo.
   -h, --help     Show this help.
 USAGE
 }
@@ -45,7 +45,7 @@ NODE
 }
 
 # Prints the path with every symlink resolved, or nothing when it cannot be
-# resolved. `clio uninstall` treats an unresolvable path as unresolved rather
+# resolved. `clio-coder uninstall` treats an unresolvable path as unresolved rather
 # than as a match, because a dangling link is still something the operator will
 # hit and still not this installation.
 resolve_path() {
@@ -59,7 +59,7 @@ try {
 NODE
 }
 
-# The `clio` a shell will find, when that is not the launcher this install is
+# The `clio-coder` a shell will find, when that is not the launcher this install is
 # about. Mirrors `otherClioOnPath` in src/cli/uninstall.ts: same comparison,
 # same wording, so the install and the uninstall describe one PATH the same way.
 # That function is TypeScript and this script runs before there is a dist to
@@ -80,15 +80,15 @@ other_clio_on_path() {
 	printf '%s\n' "$path_clio"
 }
 
-# Being on PATH is not enough: an earlier PATH entry (an old npm-global clio,
-# say) shadows the freshly linked launcher, and a bare `clio` then answers for
+# Being on PATH is not enough: an earlier PATH entry (an old npm-global clio-coder,
+# say) shadows the freshly linked launcher, and a bare `clio-coder` then answers for
 # the other installation. The README promises this warning.
 warn_about_shadowing_clio() {
 	local path_clio survivor
-	path_clio="$(command -v clio 2>/dev/null || true)"
+	path_clio="$(command -v clio-coder 2>/dev/null || true)"
 	survivor="$(other_clio_on_path "$path_clio" "$link_path" || true)"
 	[[ -z "$survivor" ]] && return 0
-	warn "another clio is on your PATH at $survivor"
+	warn "another clio-coder is on your PATH at $survivor"
 	warn "it shadows the launcher this install links at $link_path"
 	warn "check it with: $survivor --version"
 	warn "remove the shadowing install or reorder PATH, then run: hash -r"
@@ -142,7 +142,7 @@ deps_are_acceptable() {
 }
 
 # The verification line names the launcher this run installed, by path. A bare
-# `clio` resolves through PATH and can answer for an older install earlier on it,
+# `clio-coder` resolves through PATH and can answer for an older install earlier on it,
 # which verifies that one instead of this one.
 print_next_steps() {
 	cat <<NEXT
@@ -151,10 +151,10 @@ Verify the install you just made:
   $link_path --version
 
 Next: configure a model target, then start Clio:
-  clio configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator --set-fleet-default
-  clio
+  clio-coder configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator --set-fleet-default
+  clio-coder
 
-If this shell still tries an old clio path, run \`hash -r\` (Bash) or \`rehash\` (Zsh), then try again.
+If this shell still tries an old clio-coder path, run \`hash -r\` (Bash) or \`rehash\` (Zsh), then try again.
 NEXT
 }
 
@@ -183,9 +183,9 @@ need_cmd node
 need_cmd npm
 verify_node_engine
 
-bin_dir="$(expand_tilde "${CLIO_BIN_DIR:-$HOME/.local/bin}")"
+bin_dir="$(expand_tilde "${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}")"
 cli_target="$repo_root/dist/cli/index.js"
-link_path="$bin_dir/clio"
+link_path="$bin_dir/clio-coder"
 
 log "source root: $repo_root"
 log "bin dir:     $bin_dir"
@@ -240,11 +240,11 @@ if [[ -e "$link_path" || -L "$link_path" ]]; then
 		fi
 		current_target="$(normalize_path "$cli_target")"
 		if [[ "$existing_target" == "$current_target" ]]; then
-			ok "existing clio symlink already points at this checkout"
+			ok "existing clio-coder symlink already points at this checkout"
 		elif path_is_under_repo "$existing_target"; then
-			log "existing clio symlink points inside this repo; it will be replaced"
+			log "existing clio-coder symlink points inside this repo; it will be replaced"
 		elif [[ $force -eq 1 ]]; then
-			warn "replacing clio symlink that points outside this repo: $existing_target"
+			warn "replacing clio-coder symlink that points outside this repo: $existing_target"
 		else
 			fail "refusing to replace $link_path; it points to $existing_target (use --force if this is intentional)"
 		fi
@@ -274,7 +274,7 @@ else
 fi
 
 # Outside that branch on purpose. A bin dir that is not on PATH is the case
-# where some *other* clio is the only one a bare name can reach, and the old
+# where some *other* clio-coder is the only one a bare name can reach, and the old
 # check skipped it there. A dry run reports it too: the divergence is a fact
 # about the machine, not about whether this run wrote anything.
 warn_about_shadowing_clio

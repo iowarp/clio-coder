@@ -18,7 +18,7 @@ const DEFAULT_STATE: ExtensionState = { version: 1, disabled: [], installed: {} 
 export function extensionBaseDir(scope: ExtensionScope, cwd = process.cwd()): string {
 	return scope === "user"
 		? path.join(clioConfigDir(), "extensions")
-		: path.join(path.resolve(cwd), ".clio", "extensions");
+		: path.join(path.resolve(cwd), ".clio-coder", "extensions");
 }
 
 function statePath(scope: ExtensionScope, cwd = process.cwd()): string {

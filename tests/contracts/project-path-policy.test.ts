@@ -12,7 +12,7 @@ describe("contracts/project path safety policy", () => {
 
 	beforeEach(() => {
 		scratch = mkdtempSync(join(tmpdir(), "clio-project-policy-"));
-		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 	});
 
 	afterEach(() => {
@@ -33,8 +33,8 @@ describe("contracts/project path safety policy", () => {
 		strictEqual(normalRead.kind, "allow");
 	});
 
-	it("loads .clio/safety.yaml path rules and enforces real tool calls", () => {
-		const policyPath = join(scratch, ".clio", "safety.yaml");
+	it("loads .clio-coder/safety.yaml path rules and enforces real tool calls", () => {
+		const policyPath = join(scratch, ".clio-coder", "safety.yaml");
 		writeFileSync(
 			policyPath,
 			[
@@ -82,7 +82,7 @@ describe("contracts/project path safety policy", () => {
 		symlinkSync(join(scratch, "secrets", "key.txt"), join(scratch, "secret-link"));
 		symlinkSync(join(scratch, "vendor"), join(scratch, "vendor-link"));
 		writeFileSync(
-			join(scratch, ".clio", "safety.yaml"),
+			join(scratch, ".clio-coder", "safety.yaml"),
 			[
 				"version: 1",
 				"disableDefaultPathPolicy: true",
@@ -110,7 +110,7 @@ describe("contracts/project path safety policy", () => {
 		try {
 			symlinkSync(outside, join(scratch, "outside-link"));
 			writeFileSync(
-				join(scratch, ".clio", "safety.yaml"),
+				join(scratch, ".clio-coder", "safety.yaml"),
 				["version: 1", "disableDefaultPathPolicy: true", ""].join("\n"),
 				"utf8",
 			);
@@ -125,7 +125,7 @@ describe("contracts/project path safety policy", () => {
 	});
 
 	it("rejects absolute and escaping path entries and fails execution closed", () => {
-		const policyPath = join(scratch, ".clio", "safety.yaml");
+		const policyPath = join(scratch, ".clio-coder", "safety.yaml");
 		writeFileSync(
 			policyPath,
 			["version: 1", "zeroAccessPaths:", "  - /etc", "readOnlyPaths:", "  - ../outside", ""].join("\n"),

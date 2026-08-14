@@ -1,10 +1,10 @@
 /**
- * `clio targets --probe` wrote nine fixed-width columns summing to 164, so it
+ * `clio-coder targets --probe` wrote nine fixed-width columns summing to 164, so it
  * emitted 141 to 195 column rows into whatever terminal it was given and the
  * shell wrapped every one of them. The cut was the worse half: each cell was
  * sliced to its fixed width with no mark, so a target id longer than 13
  * characters printed as a prefix that reads like an id, is not one, and cannot
- * be pasted back into `clio targets use`.
+ * be pasted back into `clio-coder targets use`.
  *
  * The width the layout is given is the width it must respect. These cases pin
  * containment first, then the two properties the cut has to keep: ids survive

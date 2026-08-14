@@ -238,7 +238,7 @@ export interface CreateChatLoopDeps {
 	 * crossed). Configuration, provider, read, and persistence failures reject
 	 * so the activity path can report them as failures. Chat-loop invokes this from two sites:
 	 *   1. Before every agent.prompt when the threshold is crossed or
-	 *      CLIO_FORCE_COMPACT=1 is set.
+	 *      CLIO_CODER_FORCE_COMPACT=1 is set.
 	 *   2. After catching a ContextOverflowError, as the first half of the
 	 *      one-shot compact-and-retry recovery path.
 	 * Both sites share an AutoCompactionTrigger so two fires in the same tick
@@ -544,7 +544,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				.join("\n\n");
 
 			// 2. Pre-submit auto-compaction trigger
-			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
+			const forceNow = process.env.CLIO_CODER_FORCE_COMPACT === "1";
 			try {
 				await context.runAutoCompact(agentRuntime, forceNow, undefined, undefined, submittedText);
 			} catch (err) {

@@ -308,7 +308,7 @@ describe("contracts/usage-report headless main-agent receipts", () => {
 		const fixture = await startOpenAICompatFixture("receipt reply");
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
-			const env = { ...usageEnv(scratch), CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const env = { ...usageEnv(scratch), CLIO_CODER_TEST_OPENAI_KEY: "sk-test" };
 			const run = await runCli(["--no-context-files", "--no-skills", "run", "hello receipt"], {
 				env,
 				cwd: scratch.dir,
@@ -383,7 +383,7 @@ describe("contracts/usage-report opportunities", () => {
 		strictEqual(memory.length, 1);
 		const suggestion = String(memory[0]?.suggestion);
 		ok(suggestion.includes("test-failure"));
-		ok(suggestion.includes("clio memory propose --from-evidence run-aaa"), `suggestion: ${suggestion}`);
+		ok(suggestion.includes("clio-coder memory propose --from-evidence run-aaa"), `suggestion: ${suggestion}`);
 		ok(!suggestion.includes("build-failure"), "memorized build-failure must stay silent");
 		ok(!suggestion.includes("timeout"), "single-occurrence timeout must stay silent");
 	});

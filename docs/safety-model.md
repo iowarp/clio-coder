@@ -43,7 +43,7 @@ The level is persisted as `autonomy` in `settings.yaml`, hot-reloads, and is edi
 
 Every tool call, orchestrator or worker, evaluates in this order:
 
-1. **Safety net** (policy engine + middleware guards): `block` is final at every level; `ask` is a confirm rail (damage-control `ask` rules, project `requireConfirmation`, `system_modify`) that parks at every level; `pass` hands off to step 2. Blocks precede asks: a damage-control `ask` rule never bypasses a hard block, so confirming an ask-rule command that targets a zero-access path still blocks. The built-in path protection (which includes zero-access blocklists for critical files like `.git/config` and `credentials.yaml`, resolved with symlink canonicalization to prevent bypasses) is evaluated even when `.clio/safety.yaml` is malformed, invalid, or attempts to override it. A malformed project policy cannot disable built-in default path protection, so credential protection never fails open.
+1. **Safety net** (policy engine + middleware guards): `block` is final at every level; `ask` is a confirm rail (damage-control `ask` rules, project `requireConfirmation`, `system_modify`) that parks at every level; `pass` hands off to step 2. Blocks precede asks: a damage-control `ask` rule never bypasses a hard block, so confirming an ask-rule command that targets a zero-access path still blocks. The built-in path protection (which includes zero-access blocklists for critical files like `.git/config` and `credentials.yaml`, resolved with symlink canonicalization to prevent bypasses) is evaluated even when `.clio-coder/safety.yaml` is malformed, invalid, or attempts to override it. A malformed project policy cannot disable built-in default path protection, so credential protection never fails open.
 2. **Autonomy mapping**: the action class plus the level produce allow, ask, or deny per the matrix above.
 3. **Approvals**: whatever asked in step 1 or 2 parks interactively, denies deterministically headless, resolves per `workers.onPermission` in workers, and non-stall denies in delegations.
 
@@ -94,7 +94,7 @@ Target capability, dispatch tool profiles, and recipe constraints can further na
 
 ## Skill tool surface narrowing
 
-A `SKILL.md` may declare `allowed-tools` and `disallowed-tools`. The declaration is enforced at tool admission, between the safety net and the autonomy mapping, on every surface that activates skills (interactive turns, headless `clio run` turns, and dispatched workers whose recipes declare skills).
+A `SKILL.md` may declare `allowed-tools` and `disallowed-tools`. The declaration is enforced at tool admission, between the safety net and the autonomy mapping, on every surface that activates skills (interactive turns, headless `clio-coder run` turns, and dispatched workers whose recipes declare skills).
 
 - **Window.** Narrowing arms when `context` (scope="skills") successfully loads the skill and lasts for the lifetime of the pending-skill policy: to the end of the current turn for the main agent, and to the end of the run for a worker. A later turn is unrestricted until a skill is requested and loaded again.
 - **Merge.** Denials win: a tool named in any loaded skill's `disallowed-tools` is blocked. Allow-narrowing applies only while every loaded skill declares `allowed-tools`; the merged surface is the union of those lists. A loaded skill that declares no `allowed-tools` keeps the full surface for its own workflow, which lifts the allow-narrowing (never the denials) for that window.
@@ -118,7 +118,7 @@ Safety policy metadata records active rule IDs and hashes so receipts/evidence c
 
 The policy engine tags every bash command as recognized or unrecognized; the autonomy mapping decides what happens next:
 
-1. **Recognized**: a valid `.clio/safety.yaml` command entry, or the narrow built-in no-prompt set such as `pwd`, simple `ls`, `git status`, bounded `git diff/log`, common test/lint/build commands, `pytest`, `cargo test`, `go test`, or `make test`. In addition, compound `&&` chains where every segment is a recognized safe command (up to `CHAIN_MAX_SEGMENTS = 6`) are recognized. Commands wrapped inside `sh -c` are expanded up to depth 3 (`INNER_SHELL_MAX_DEPTH = 3`) and evaluated segment by segment. Recognized commands run without prompting at `auto-edit` and `full-auto`.
+1. **Recognized**: a valid `.clio-coder/safety.yaml` command entry, or the narrow built-in no-prompt set such as `pwd`, simple `ls`, `git status`, bounded `git diff/log`, common test/lint/build commands, `pytest`, `cargo test`, `go test`, or `make test`. In addition, compound `&&` chains where every segment is a recognized safe command (up to `CHAIN_MAX_SEGMENTS = 6`) are recognized. Commands wrapped inside `sh -c` are expanded up to depth 3 (`INNER_SHELL_MAX_DEPTH = 3`) and evaluated segment by segment. Recognized commands run without prompting at `auto-edit` and `full-auto`.
 2. **Unrecognized**: anything else. Unrecognized bash asks for one-shot approval at `auto-edit` and runs at `full-auto`; at `suggest` it asks like every mutation, and at `read-only` it is denied.
 
 Shell operators split two ways. Unrecognized sequencing and redirection (`||`, `;`, pipes, redirects, newlines, or `&&` chains with unapproved commands or more than 6 segments) make a command unrecognized: it asks at `auto-edit` and runs at `full-auto`. Command substitution (`$(...)`, backticks) is a net confirm rail at every level, full-auto included, because the net cannot scan what it executes until runtime. The rule pack scans the full command string before either check, so a destructive verb behind an operator is caught regardless of level. Project policy entries reject operator kinds unless the entry sets `shellOperators: allow`.
@@ -136,7 +136,7 @@ Every tool call entering the safety engine passes through a strict 10-step evalu
 1. **Damage-Control Scan**: Evaluates compiled rule packs (`damage-control-rules.yaml`) against command strings, paths, and tool arguments.
 2. **Write-Root Containment**: Verifies that mutations remain within configured write boundaries (`evaluateWriteRoots`).
 3. **Hard Blocks**: Enforces unconditional blocks against destructive actions (such as `git_destructive` operations and zero-access credentials).
-4. **Invalid Project Policy Fail-Closed**: If `.clio/safety.yaml` contains parsing or schema errors, execution tools fail closed.
+4. **Invalid Project Policy Fail-Closed**: If `.clio-coder/safety.yaml` contains parsing or schema errors, execution tools fail closed.
 5. **Path Policy Enforcement**: Evaluates `zeroAccessPaths`, `readOnlyPaths`, and `noDeletePaths`.
 6. **Bash Zero-Access Protocol**: Rejects shell commands attempting to read, exfiltrate, or redirect from protected credential files. A safe presence-check exception (`grep -sq "^NAME=" <file>`) is permitted for environment probing without exposing secrets.
 7. **Ask Rails**: Evaluates rules requiring confirmation (such as project `requireConfirmation` or unanalyzable command substitutions `$(...)`).
@@ -148,7 +148,7 @@ Every tool call entering the safety engine passes through a strict 10-step evalu
 
 ## Project safety policy
 
-Clio searches upward from the current working directory for `.clio/safety.yaml`. The file is parsed once into a loaded policy. Invalid policy files fail closed for execution tools.
+Clio searches upward from the current working directory for `.clio-coder/safety.yaml`. The file is parsed once into a loaded policy. Invalid policy files fail closed for execution tools.
 
 Minimal schema v1:
 
@@ -237,7 +237,7 @@ Dispatch workers can run the same HTTP, native, or pi-ai-backed runtimes as the 
 Three integration paths exist for driving Claude Code, ranging from fully enforced to advisory gating:
 
 - **`claude-sdk` (Enforced Safety):** Drives [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) directly. This is the **strong safety path** because Clio enforces tool gating before execution. Clio registers a `PreToolUse` hook (which fires for all tool uses, including auto-allowed reads) and wraps `canUseTool` for permission paths. Every tool request is mapped into a Clio tool/action class, evaluated by the safety net, and passed through the active autonomy matrix. Because a dispatched worker is noninteractive, any `ask` decision is resolved as a non-stall denial (`workers.onPermission=deny` returns denial; `workers.onPermission=fail` terminates the run with a permission-required code).
-- **`claude-code` (Subprocess Gating):** Drives `claude -p` as a subprocess. Because the CLI lacks a direct callback hook, Clio cannot evaluate each tool invocation. Instead, Clio maps the active autonomy level to the binary's command-line parameters (such as `--permission-mode` and tool allowlists). Unrecognized tools are gated by the subprocess runtime itself. Dispatch at autonomy `suggest` is refused outright (the same applies to `antigravity-code`): a subprocess cannot park a tool call for approval, so `suggest` has no honest mapping and the runner fails closed before launching the external CLI. A dangerous bypass (`--allow-dangerously-skip-permissions`) is only sent when autonomy is `full-auto` and `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`, and it is never silent: the run's receipt records it (see the enforcement grades below) and evidence raises an external-bypass finding.
+- **`claude-code` (Subprocess Gating):** Drives `claude -p` as a subprocess. Because the CLI lacks a direct callback hook, Clio cannot evaluate each tool invocation. Instead, Clio maps the active autonomy level to the binary's command-line parameters (such as `--permission-mode` and tool allowlists). Unrecognized tools are gated by the subprocess runtime itself. Dispatch at autonomy `suggest` is refused outright (the same applies to `antigravity-code`): a subprocess cannot park a tool call for approval, so `suggest` has no honest mapping and the runner fails closed before launching the external CLI. A dangerous bypass (`--allow-dangerously-skip-permissions`) is only sent when autonomy is `full-auto` and `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1`, and it is never silent: the run's receipt records it (see the enforcement grades below) and evidence raises an external-bypass finding.
 - **Claude Code over ACP (Advisory Gating):** Drives Zed's `@zed-industries/claude-code-acp` (or `@agentclientprotocol/claude-agent-acp`) bridge as an [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agent. Clio's ACP mediator intercepts tool calls and filters them against the safety net, but gating is ultimately **advisory** as Claude governs its own runtime execution. For strict, code-enforced per-tool safety, `claude-sdk` is preferred over ACP.
 
 All Claude Code runtimes rely on the user's existing CLI authentication and store no credentials in Clio.
@@ -248,7 +248,7 @@ How faithfully a runtime can honor the autonomy model is a recorded fact, not an
 
 - **`mediated`**: per-call evaluation through Clio's net and autonomy mapping (native workers, `claude-sdk`).
 - **`approximated`**: the posture is mapped to external harness flags with no per-call mediation (`claude-code`, `antigravity-code` subprocesses).
-- **`bypassed`**: a dangerous external mode ran under `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`, where even net blocks do not exist.
+- **`bypassed`**: a dangerous external mode ran under `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1`, where even net blocks do not exist.
 
 Evidence raises a warn-level external-bypass finding for bypassed runs and an info-level approximation note otherwise, and the provenance projection surfaces the block in `transcript.md`, `trace.cleaned.jsonl`, and compact dispatch output. The product statement is: safety-net blocks are final on mediated runtimes; on approximated runtimes Clio maps your autonomy level to the closest external posture and records that it did; bypassed runs are explicitly marked in receipts and evidence.
 
@@ -270,9 +270,9 @@ In interactive mode, a permission request opens a queued overlay prompt immediat
 
 ### Deterministic Headless Behavior
 
-When executing tasks in headless mode through `clio run`, there is no terminal operator to prompt.
+When executing tasks in headless mode through `clio-coder run`, there is no terminal operator to prompt.
 - **Deterministic Denials:** Any action that requires permission resolves as a deterministic tool denial. The model receives the rejection and may adapt within the same run.
-- **Rejection Message:** The engine assigns a standard rejection reason to the denied action: `"clio run cannot confirm permission requests; rerun interactively to approve this action."`
+- **Rejection Message:** The engine assigns a standard rejection reason to the denied action: `"clio-coder run cannot confirm permission requests; rerun interactively to approve this action."`
 - **Run Exit:** The process exit code reflects the overall run outcome, not the permission denial by itself. A run can still exit 0 if the model completes successfully after receiving the rejected tool result.
 - **Receipts and Audit:** Headless permission denials increment `permissionRequested` receipt/audit counts, so scripts can detect that approval would have been needed without treating every denial as a failed process.
 
@@ -296,8 +296,8 @@ It is critical to distinguish these two control axes:
 
 | Setting | Axis | Governed By | Handled In |
 | --- | --- | --- | --- |
-| **Autonomy** | Authority | `autonomy` settings dial, `CLIO_ALLOW_EXTERNAL_FULL_ACCESS` | `src/tools/registry.ts`, `src/domains/safety/` |
-| **Rigor** | Validation | `CLIO_RIGOR` override, workspace validation contracts | `src/domains/safety/rigor.ts`, `src/domains/safety/finish-contract-registration.ts` |
+| **Autonomy** | Authority | `autonomy` settings dial, `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` | `src/tools/registry.ts`, `src/domains/safety/` |
+| **Rigor** | Validation | `CLIO_CODER_RIGOR` override, workspace validation contracts | `src/domains/safety/rigor.ts`, `src/domains/safety/finish-contract-registration.ts` |
 
 ---
 
@@ -305,10 +305,10 @@ It is critical to distinguish these two control axes:
 
 The effective rigor level for a session or dispatch run is resolved at boot time using the following prioritization:
 
-1. **Explicit Override**: Checked via the `CLIO_RIGOR` environment variable. It is trimmed and parsed case-insensitively. A value of `"high"` or `"normal"` overrides any other setting.
+1. **Explicit Override**: Checked via the `CLIO_CODER_RIGOR` environment variable. It is trimmed and parsed case-insensitively. A value of `"high"` or `"normal"` overrides any other setting.
 2. **Repository-Derived Default**: If no override is present, Clio checks the workspace root for the presence of any of the following validation contract files:
-   - `.clio/validation.yaml`
-   - `.clio/validation.yml`
+   - `.clio-coder/validation.yaml`
+   - `.clio-coder/validation.yml`
    - `validation.yaml`
    - `validation.yml`
    - `VALIDATION.md`

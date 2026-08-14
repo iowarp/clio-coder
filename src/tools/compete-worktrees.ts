@@ -3,9 +3,9 @@
  *
  * Each candidate builds in its own worktree on its own branch
  * (`clio/compete/<group>/<n>`), created from the repository HEAD under
- * `<root>/.clio/worktrees/<group>/candidate-<n>`. The path sits inside the
+ * `<root>/.clio-coder/worktrees/<group>/candidate-<n>`. The path sits inside the
  * project root because remote fleet nodes share the filesystem and doctor
- * preflight verifies path parity only for the project root; `.clio/` is
+ * preflight verifies path parity only for the project root; `.clio-coder/` is
  * ignored, so candidate churn never dirties the repository status.
  *
  * A group is claimed by a durable owner manifest before the first git
@@ -100,8 +100,8 @@ export interface CompeteRunAdmission {
 	runtimeKind: RunKind;
 }
 
-const COMPETE_PARENT_SEGMENTS = [".clio", "worktrees"] as const;
-const COMPETE_MANIFEST_FILE = ".clio-compete-owner.json";
+const COMPETE_PARENT_SEGMENTS = [".clio-coder", "worktrees"] as const;
+const COMPETE_MANIFEST_FILE = ".clio-coder-compete-owner.json";
 const COMPETE_MANIFEST_KIND = "clio-compete-group";
 const COMPETE_COMMIT_IDENTITY = "clio-compete";
 

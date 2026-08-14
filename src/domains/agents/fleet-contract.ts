@@ -2,7 +2,7 @@
  * Repo-owned fleet contracts (Symphony P5: work policy lives in the repo,
  * versioned and strictly validated).
  *
- * A fleet contract is a Markdown file at `.clio/fleets/<name>.md` with typed
+ * A fleet contract is a Markdown file at `.clio-coder/fleets/<name>.md` with typed
  * YAML front matter and a prompt-template body. Discovery is project-scope
  * only: no precedence tiers, no global fallbacks. The body uses strict
  * `{{var}}` rendering: every placeholder must resolve from operator-supplied
@@ -295,7 +295,7 @@ function firstSchemaError(frontmatter: Record<string, unknown>, version: FleetCo
 }
 
 function fleetsDir(cwd: string): string {
-	return join(cwd, ".clio", "fleets");
+	return join(cwd, ".clio-coder", "fleets");
 }
 
 type RawStep = {
@@ -642,11 +642,11 @@ export function fleetCodeSteps(contract: FleetContract): Array<{ id: string; com
 }
 
 /** Where a repo declares what its fleet command ids run, relative to its root. */
-export const FLEET_COMMANDS_REPO_PATH = ".clio/fleets/commands.yaml";
+export const FLEET_COMMANDS_REPO_PATH = ".clio-coder/fleets/commands.yaml";
 
 /** How to produce that file, for the surfaces that report it missing by name. */
 export const FLEET_COMMANDS_REMEDY =
-	"declare each id there under `commands:` with an `argv` list; `clio docs fleet_dispatch` has the schema";
+	"declare each id there under `commands:` with an `argv` list; `clio-coder docs fleet_dispatch` has the schema";
 
 /**
  * A well-formed contract binding code steps in a repo that declares no command
@@ -692,7 +692,7 @@ export function validateFleetCommands(contract: FleetContract, registry: FleetCo
 /**
  * Where the shipped SDLC chains live. Builtin fleets are packaged beside the
  * builtin recipes they reference, and a project file of the same name shadows
- * one: a repo that wants a different `sdlc` writes `.clio/fleets/sdlc.md` and
+ * one: a repo that wants a different `sdlc` writes `.clio-coder/fleets/sdlc.md` and
  * gets it, with no precedence surprises beyond that single rule.
  */
 function builtinFleetsDir(): string {
@@ -729,7 +729,7 @@ function listDirectory(dir: string): string[] {
 }
 
 /**
- * Enumerate the builtin fleets plus every `.clio/fleets/*.md`, project files
+ * Enumerate the builtin fleets plus every `.clio-coder/fleets/*.md`, project files
  * shadowing builtins of the same name. Invalid files are listed with their
  * error, never hidden: an operator must see exactly what is invalid, and a
  * builtin that needs a command this repo has not registered is exactly that.

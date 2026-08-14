@@ -128,7 +128,7 @@ const KIND_LABELS: Record<AdoptionSourceKind, string> = {
 
 const GENERATED_OR_SECRET_DIRS = new Set([
 	".git",
-	".clio",
+	".clio-coder",
 	".antigravitycli",
 	"node_modules",
 	"dist",
@@ -764,7 +764,7 @@ function quoteShort(text: string): string {
 export function renderImportedAgentContext(scan: AdoptionScanResult): string {
 	if (scan.sources.length === 0 && scan.rejected.length === 0) return "";
 	const lines: string[] = [
-		"Conflict policy: CLIO.md conventions and hard invariants are canonical; project-local imports win over explicit global imports; duplicate rules are merged by normalized text.",
+		"Conflict policy: CLIO-CODER.md conventions and hard invariants are canonical; project-local imports win over explicit global imports; duplicate rules are merged by normalized text.",
 		"",
 		"### Adopted rules",
 		"",

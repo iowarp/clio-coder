@@ -37,15 +37,15 @@ import { credentialWriteFailed, printError, printOk, printPlaintextCredentialWar
 import { terminalColumns, wrapPlain } from "./text-layout.js";
 import { validateModelChoice } from "./validate-model.js";
 
-const HELP = `clio configure
+const HELP = `clio-coder configure
 
 Configure model targets for chat and fleet-agent dispatch.
 
 Usage:
-  clio configure                   interactive wizard
-  clio configure --list            list target runtimes (user-facing only)
-  clio configure --list --all      list every registered runtime including aliases
-  clio configure --id <targetId> [flags] --runtime <runtimeId>
+  clio-coder configure                   interactive wizard
+  clio-coder configure --list            list target runtimes (user-facing only)
+  clio-coder configure --list --all      list every registered runtime including aliases
+  clio-coder configure --id <targetId> [flags] --runtime <runtimeId>
 
 Non-interactive flags:
   --id <targetId>                  target id to register (required when non-interactive)
@@ -274,7 +274,7 @@ function defaultUrlFor(runtimeId: string): string {
 }
 
 const RUNTIME_LIST_CAPTION =
-	"every registered runtime. run `clio auth list` for the ones clio authenticates itself; the rest authenticate through their own tool (claude-cli, aws-sdk) or need no credential.";
+	"every registered runtime. run `clio-coder auth list` for the ones clio authenticates itself; the rest authenticate through their own tool (claude-cli, aws-sdk) or need no credential.";
 
 function printRuntimeList(includeHidden: boolean): void {
 	const settings = readSettings();
@@ -309,7 +309,7 @@ function printRuntimeList(includeHidden: boolean): void {
 	for (const line of formatRuntimeList(rows, width)) {
 		process.stdout.write(`${line}\n`);
 	}
-	// The other half of the pair `clio auth list` names. This table is every
+	// The other half of the pair `clio-coder auth list` names. This table is every
 	// registered runtime; that one is the subset Clio holds a credential for,
 	// and a user who found a name here and could not find it there was reading
 	// two screens that each claimed to be the list of what you can connect.
@@ -530,7 +530,7 @@ function probeLines(descriptor: TargetDescriptor, probe: ProbeResult): string[] 
 		const where = descriptor.url ? ` ${descriptor.url}` : "";
 		return [
 			`probe failed${latency}:${where} ${probe.error ?? "unknown"}`,
-			`  check the server is running and reachable, then re-run: clio configure --id ${descriptor.id} --url <url>`,
+			`  check the server is running and reachable, then re-run: clio-coder configure --id ${descriptor.id} --url <url>`,
 		];
 	}
 	const readings = probeReadings(probe);
@@ -538,7 +538,7 @@ function probeLines(descriptor: TargetDescriptor, probe: ProbeResult): string[] 
 	return [
 		`probe reachable${latency}, but the target answered no model list and no version`,
 		"  Clio cannot verify the model id or the context window from here and will send both as written.",
-		"  re-read them once the server serves them with: clio targets --probe",
+		"  re-read them once the server serves them with: clio-coder targets --probe",
 	];
 }
 
@@ -701,7 +701,7 @@ function refuseCatalogSeededModel(runtime: RuntimeDescriptor, support: ProviderS
 		`--model is required for ${runtime.id}: its ${support.modelHints.length} model ids come from the pi-ai catalog in name order, which recommends none of them`,
 	);
 	process.stderr.write(
-		`  run \`clio configure --runtime ${runtime.id}\` with no other flags to choose from the full list\n`,
+		`  run \`clio-coder configure --runtime ${runtime.id}\` with no other flags to choose from the full list\n`,
 	);
 }
 
@@ -740,7 +740,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		const fingerprint = await fingerprintNativeRuntime(url);
 		if (fingerprint) {
 			process.stdout.write(
-				`note: detected ${fingerprint.displayName} at ${url}; consider \`clio targets convert ${args.id} --runtime ${fingerprint.runtimeId}\` for proper resident-model lifecycle\n`,
+				`note: detected ${fingerprint.displayName} at ${url}; consider \`clio-coder targets convert ${args.id} --runtime ${fingerprint.runtimeId}\` for proper resident-model lifecycle\n`,
 			);
 		}
 	}
@@ -855,7 +855,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		!auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false }).available
 	) {
 		process.stdout.write(
-			`note: authenticate ${runtime.id} with \`clio auth login ${runtime.id}\` before using this target\n`,
+			`note: authenticate ${runtime.id} with \`clio-coder auth login ${runtime.id}\` before using this target\n`,
 		);
 	}
 	printOk(`target ${args.id} saved`);
@@ -1455,7 +1455,7 @@ export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<
 
 	if (args.positional.length > 0) {
 		printError(
-			"`clio configure` accepts flags, not positional runtimes. Use `clio auth login <runtime>` first when authentication is needed, then `clio configure --runtime <runtimeId> ...`.",
+			"`clio-coder configure` accepts flags, not positional runtimes. Use `clio-coder auth login <runtime>` first when authentication is needed, then `clio-coder configure --runtime <runtimeId> ...`.",
 		);
 		return 2;
 	}
@@ -1466,7 +1466,7 @@ export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<
 		runtime = getRuntimeRegistry().get(runtimeId);
 		if (!runtime) {
 			printError(`unknown runtime id: ${runtimeId}`);
-			process.stdout.write("run `clio configure --list` to see registered runtimes\n");
+			process.stdout.write("run `clio-coder configure --list` to see registered runtimes\n");
 			return 2;
 		}
 	}

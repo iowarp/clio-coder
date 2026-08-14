@@ -73,7 +73,7 @@ CONFIRMED verdict, escalate. Say that you are escalating; do not silently keep
 poking.
 
 **Structured investigation**: write an investigation file (for example
-`INVESTIGATION.md` or `.clio/investigation-<slug>.md` via bash heredoc since
+`INVESTIGATION.md` or `.clio-coder/investigation-<slug>.md` via bash heredoc since
 this skill does not edit code) containing the goal, baseline measurements of
 the failing behavior, and one experiment per hypothesis with its verdict
 condition committed *before* the experiment runs. Update verdicts as evidence

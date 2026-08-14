@@ -50,7 +50,7 @@ export interface ClioProjectState {
 	lastIndexedAt?: string;
 }
 
-const STATE_RELATIVE_PATH = ".clio/state.json";
+const STATE_RELATIVE_PATH = ".clio-coder/state.json";
 
 const BOOTSTRAP_GENERATION_MODES = new Set<BootstrapGenerationMode>(["model", "heuristic", "existing"]);
 const BOOTSTRAP_PARSER_OUTCOMES = new Set<BootstrapParserOutcome>(["parsed", "rejected", "not-run"]);

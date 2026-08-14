@@ -23,28 +23,28 @@ function captureStderr(fn: () => void): string {
 }
 
 describe("core/boot-trace", () => {
-	const previous = process.env.CLIO_TRACE_BOOT;
+	const previous = process.env.CLIO_CODER_TRACE_BOOT;
 	afterEach(() => {
-		if (previous === undefined) Reflect.deleteProperty(process.env, "CLIO_TRACE_BOOT");
-		else process.env.CLIO_TRACE_BOOT = previous;
+		if (previous === undefined) Reflect.deleteProperty(process.env, "CLIO_CODER_TRACE_BOOT");
+		else process.env.CLIO_CODER_TRACE_BOOT = previous;
 	});
 
-	it("writes nothing and reports disabled when CLIO_TRACE_BOOT is unset", () => {
-		Reflect.deleteProperty(process.env, "CLIO_TRACE_BOOT");
+	it("writes nothing and reports disabled when CLIO_CODER_TRACE_BOOT is unset", () => {
+		Reflect.deleteProperty(process.env, "CLIO_CODER_TRACE_BOOT");
 		strictEqual(isBootTraceEnabled(), false);
 		const out = captureStderr(() => traceBoot("cli entry"));
 		strictEqual(out, "");
 	});
 
 	it("writes nothing for any value other than exactly '1'", () => {
-		process.env.CLIO_TRACE_BOOT = "true";
+		process.env.CLIO_CODER_TRACE_BOOT = "true";
 		strictEqual(isBootTraceEnabled(), false);
 		const out = captureStderr(() => traceBoot("cli entry"));
 		strictEqual(out, "");
 	});
 
 	it("stamps a phase marker with elapsed-from-start when enabled", () => {
-		process.env.CLIO_TRACE_BOOT = "1";
+		process.env.CLIO_CODER_TRACE_BOOT = "1";
 		strictEqual(isBootTraceEnabled(), true);
 		const out = captureStderr(() => traceBoot("domains loaded", "count=14"));
 		ok(
@@ -54,7 +54,7 @@ describe("core/boot-trace", () => {
 	});
 
 	it("omits the detail parenthetical when no detail is given", () => {
-		process.env.CLIO_TRACE_BOOT = "1";
+		process.env.CLIO_CODER_TRACE_BOOT = "1";
 		const out = captureStderr(() => traceBoot("first TUI paint"));
 		ok(/^\[clio:boot\] \+\d+(\.\d+)?ms first TUI paint\n$/.test(out), `unexpected trace line: ${JSON.stringify(out)}`);
 	});

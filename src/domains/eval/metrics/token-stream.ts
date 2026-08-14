@@ -24,7 +24,7 @@ export const UNMEASURED_TOKEN_USAGE: EvalTokenStreamUsage = {
 };
 
 /**
- * Fold provider usage out of a `clio run --json` stream as it arrives.
+ * Fold provider usage out of a `clio-coder run --json` stream as it arrives.
  *
  * Usage is counted from `message_end` events only. That is the one event
  * carrying a completed message's usage exactly once; `turn_end` republishes

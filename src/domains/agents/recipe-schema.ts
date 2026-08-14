@@ -71,7 +71,7 @@ function enumValue<T extends string>(value: unknown, path: string, predicate: (v
  * Audience is provenance, not a claim a file makes about itself. It decides
  * whether an operator can see an agent and whether a user-origin dispatch may
  * reach it, so a discovered recipe declaring `shadow` or `internal` would hide
- * itself from `clio agents` while staying reachable by internal orchestration,
+ * itself from `clio-coder agents` while staying reachable by internal orchestration,
  * and one declaring `base` would present itself as shipped. Only recipes Clio
  * ships may name any audience; everything discovered under a user or project
  * root is `custom`. The declaration is rejected rather than coerced, because a

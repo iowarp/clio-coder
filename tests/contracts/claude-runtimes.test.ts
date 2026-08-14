@@ -503,12 +503,12 @@ describe("contracts/claude subprocess permission gate", () => {
 
 		throws(() => claudeSubprocessPermissionConfigForAutonomy("suggest", {}), /cannot enforce autonomy 'suggest'/);
 		throws(
-			() => claudeSubprocessPermissionConfigForAutonomy("suggest", { CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1" }),
+			() => claudeSubprocessPermissionConfigForAutonomy("suggest", { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }),
 			/cannot enforce autonomy 'suggest'/,
 		);
 
 		const fullAutoWithEnv = claudeSubprocessPermissionConfigForAutonomy("full-auto", {
-			CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1",
+			CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1",
 		});
 		strictEqual(fullAutoWithEnv.dangerousBypass, true);
 		strictEqual(fullAutoWithEnv.permissionMode, "bypassPermissions");

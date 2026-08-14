@@ -35,7 +35,7 @@ diagnosis, not an experiment; use scientific-debugging.
 ## Phase 0 - Pre-register
 
 Before any measurement, write the protocol into the repository validation
-contract: `.clio/validation.yaml` (preferred) or `VALIDATION.md` at the repo
+contract: `.clio-coder/validation.yaml` (preferred) or `VALIDATION.md` at the repo
 root. Creating this file raises Clio's repo-derived rigor to high immediately;
 from the next turn onward, completion claims in this session must carry
 validation evidence or state a limitation. That escalation is the point:
@@ -89,7 +89,7 @@ candidate strategies rejected.
 Request: "make the halo exchange faster."
 
 ```yaml
-# .clio/validation.yaml
+# .clio-coder/validation.yaml
 experiment: halo-exchange-overlap
 outcome: overlap communication with interior compute; >= 1.5x step throughput
 thresholds: { minimum: 1.2x, target: 1.5x, stretch: 2.0x }

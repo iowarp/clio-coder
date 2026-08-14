@@ -1,9 +1,9 @@
 /**
- * `clio uninstall` removes the state root out from under processes that are
+ * `clio-coder uninstall` removes the state root out from under processes that are
  * still holding a dispatch ledger. Every writer under the ledger mkdirs its
  * parent back (the state file lock before its critical section, `atomicWrite`
  * again for the temp file), so a persist landing a moment after the removal
- * recreated `$CLIO_STATE_DIR` with runs.json inside it: an uninstall that
+ * recreated `$CLIO_CODER_STATE_DIR` with runs.json inside it: an uninstall that
  * reported success left a state home behind, and the next start read a ledger
  * out of a home that was supposed to be gone.
  */

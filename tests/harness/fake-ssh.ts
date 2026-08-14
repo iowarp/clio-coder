@@ -91,7 +91,7 @@ function announce(spec) {
 		protocolVersion: 1,
 		specVersion: scenario === "version-skew" ? 2 : spec.specVersion,
 		pid: process.pid,
-		processGroupId: Number.parseInt(process.env.CLIO_WORKER_PGID || "", 10) || process.pid,
+		processGroupId: Number.parseInt(process.env.CLIO_CODER_WORKER_PGID || "", 10) || process.pid,
 		host: "fake-node",
 		settingsFingerprint: scenario === "settings-drift" ? sha256("a different settings snapshot") : spec.settingsFingerprint,
 		specDigest: scenario === "spec-drift" ? sha256("a different spec") : sha256("clio.workerSpec:" + canonicalJson(spec)),
@@ -104,7 +104,7 @@ function announce(spec) {
 				? sha256("clio.tools:a-different-tool-surface")
 				: sha256("clio.tools:" + [...(spec.allowedTools || [])].sort().join(",")),
 		resources: {
-			labels: (process.env.CLIO_WORKER_LABELS || "").split(",").filter((l) => l.length > 0),
+			labels: (process.env.CLIO_CODER_WORKER_LABELS || "").split(",").filter((l) => l.length > 0),
 			cpuCount: { known: true, value: 8 },
 			totalMemoryBytes: { known: true, value: 17179869184 },
 			freeMemoryBytes: { known: true, value: 8589934592 },

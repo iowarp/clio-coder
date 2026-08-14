@@ -88,7 +88,7 @@ export interface BranchSummaryEntry extends BaseSessionEntry {
  * tools can distinguish a threshold-driven shrink from a user-issued /compact
  * and from a context-overflow retry.
  *   - "auto"      : pre-submit context-pressure trigger via shouldCompact().
- *   - "force"     : explicit /compact slash command or CLIO_FORCE_COMPACT=1.
+ *   - "force"     : explicit /compact slash command or CLIO_CODER_FORCE_COMPACT=1.
  *   - "overflow"  : compact-and-retry path after a context overflow error.
  */
 export type CompactionTrigger = "auto" | "force" | "overflow";

@@ -33,8 +33,8 @@ function describeNodeType(stats: Stats): string {
 
 /**
  * One of Clio's four roots. `existsSync` alone was reporting OK for anything at
- * the path, so `touch $CLIO_CACHE_DIR` produced a green report and exit 0 while
- * `clio doctor --fix` one command later died on "Expected directory". A root
+ * the path, so `touch $CLIO_CODER_CACHE_DIR` produced a green report and exit 0 while
+ * `clio-coder doctor --fix` one command later died on "Expected directory". A root
  * has to be a directory Clio can actually traverse and write, and the remedy
  * differs by failure: `--fix` creates a missing root but cannot move a file out
  * of the way or widen a mode, so the row says which one is needed.
@@ -45,7 +45,7 @@ function directoryFinding(name: string, path: string): DoctorFinding {
 		stats = statSync(path);
 	} catch (error) {
 		const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
-		if (code === "ENOENT") return { ok: false, name, detail: `${path} missing (run \`clio doctor --fix\`)` };
+		if (code === "ENOENT") return { ok: false, name, detail: `${path} missing (run \`clio-coder doctor --fix\`)` };
 		const message = error instanceof Error ? error.message : String(error);
 		return { ok: false, name, detail: `${path} cannot be inspected: ${message}` };
 	}
@@ -53,7 +53,7 @@ function directoryFinding(name: string, path: string): DoctorFinding {
 		return {
 			ok: false,
 			name,
-			detail: `${path} is ${describeNodeType(stats)}, not a directory (move it aside, then run \`clio doctor --fix\`)`,
+			detail: `${path} is ${describeNodeType(stats)}, not a directory (move it aside, then run \`clio-coder doctor --fix\`)`,
 		};
 	}
 	// Named one bit at a time. A single combined access() check reported the same
@@ -140,9 +140,9 @@ function collectSessionLedgers(dir: string, ledgers: string[], unlistable: strin
 
 /**
  * The store holding every recorded session, checked the way the resume path
- * reads it. Without this row `clio doctor` called a deleted store healthy: the
+ * reads it. Without this row `clio-coder doctor` called a deleted store healthy: the
  * state metadata row said the install was on record, nothing looked at
- * `state/sessions`, and `clio resume` then reported no sessions on a machine
+ * `state/sessions`, and `clio-coder resume` then reported no sessions on a machine
  * that had run hundreds. Damage inside a ledger is the same silence one level
  * down, so each file is parsed by the reader that resume uses and the lines it
  * would skip are named here instead of being dropped into a warning stream
@@ -264,7 +264,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		findings.push({
 			ok: false,
 			name: "settings.yaml",
-			detail: "missing (run `clio doctor --fix` or `clio configure`)",
+			detail: "missing (run `clio-coder doctor --fix` or `clio-coder configure`)",
 		});
 	} else {
 		const validation = validateSettingsFile();
@@ -280,7 +280,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	// row name instead of branching on state.
 	const creds = join(config, "credentials.yaml");
 	if (!existsSync(creds)) {
-		findings.push({ ok: false, name: "credentials", detail: "missing (run `clio doctor --fix`)" });
+		findings.push({ ok: false, name: "credentials", detail: "missing (run `clio-coder doctor --fix`)" });
 	} else {
 		try {
 			accessSync(creds, constants.R_OK);
@@ -300,7 +300,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			findings.push({
 				ok: false,
 				name: "credentials",
-				detail: foldDetail(`${creds} cannot be read: ${message} (run \`clio doctor --fix\`)`),
+				detail: foldDetail(`${creds} cannot be read: ${message} (run \`clio-coder doctor --fix\`)`),
 			});
 		}
 	}
@@ -325,15 +325,15 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		detail: state
 			? stateCurrent
 				? `${state.version} (${stateStamp})`
-				: `stale ${state.version} (${stateStamp}); current ${version.clio} (run \`clio doctor --fix\`)`
+				: `stale ${state.version} (${stateStamp}); current ${version.clio} (run \`clio-coder doctor --fix\`)`
 			: stateRead.problem !== null
 				? // Present but unreadable. `--fix` cannot repair this one: it fails on
 					// the same permissions, so pointing there would send the user in a
 					// circle.
 					stateRead.problem
 				: // Every other failing row names the command that repairs it. This one
-					// said only "missing", and `clio doctor --fix` does write it.
-					"missing (run `clio doctor --fix`)",
+					// said only "missing", and `clio-coder doctor --fix` does write it.
+					"missing (run `clio-coder doctor --fix`)",
 	});
 
 	const sessionStore = sessionStoreFinding(dirs.state, state !== null);
@@ -436,7 +436,7 @@ export async function runDoctorRuntimeChecks(): Promise<DoctorFinding[]> {
 				ok: true,
 				level: "warn",
 				name: `target ${target.id}`,
-				detail: `${fingerprint.displayName} detected at ${url}; run \`clio targets convert ${target.id} --runtime ${fingerprint.runtimeId}\` for proper resident-model lifecycle`,
+				detail: `${fingerprint.displayName} detected at ${url}; run \`clio-coder targets convert ${target.id} --runtime ${fingerprint.runtimeId}\` for proper resident-model lifecycle`,
 			};
 		}),
 	);

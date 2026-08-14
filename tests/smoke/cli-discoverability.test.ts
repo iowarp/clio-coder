@@ -3,10 +3,10 @@
  * types them exactly as written.
  *
  * Both cases here are honest at the point of failure and silent at the point
- * of discovery, which is the worse half to be silent in. `clio run
+ * of discovery, which is the worse half to be silent in. `clio-coder run
  * --no-context-files` said only that the option was unknown while `clio
  * --no-context-files run` worked, leaving the ordering rule to be guessed at.
- * `clio trace ui` was listed beside subcommands that work everywhere but can
+ * `clio-coder trace ui` was listed beside subcommands that work everywhere but can
  * only fail from an installed package, which does not ship the viewer.
  */
 import { match, ok, strictEqual } from "node:assert/strict";
@@ -44,12 +44,15 @@ describe("clio discoverability messages", { concurrency: false }, () => {
 			const misplaced = await runCli(["run", "--no-context-files", "hello"], { env: scratch.env });
 			match(misplaced.stderr, /--no-context-files is a global option/);
 			match(misplaced.stderr, /must come before the subcommand/);
-			match(misplaced.stderr, /clio --no-context-files run/);
-			ok(!/unknown clio run option/.test(misplaced.stderr), "a flag the CLI does accept must not be reported as unknown");
+			match(misplaced.stderr, /clio-coder --no-context-files run/);
+			ok(
+				!/unknown clio-coder run option/.test(misplaced.stderr),
+				"a flag the CLI does accept must not be reported as unknown",
+			);
 
 			// The same rule, stated for the flag that carries a value.
 			const key = await runCli(["run", "--api-key", "not-a-real-key", "hello"], { env: scratch.env });
-			match(key.stderr, /clio --api-key <key> run/);
+			match(key.stderr, /clio-coder --api-key <key> run/);
 			ok(!key.stderr.includes("not-a-real-key"), "the hint must not echo the value back");
 
 			// `--no-skills` is a run option as well as a global one, so both
@@ -65,13 +68,13 @@ describe("clio discoverability messages", { concurrency: false }, () => {
 	it("answers --help on stdout with status 0 for every subcommand", async () => {
 		const scratch = makeScratchHome("clio-discover-help-");
 		try {
-			// `clio trace --help` reported `unknown trace flag: --help` on stderr
+			// `clio-coder trace --help` reported `unknown trace flag: --help` on stderr
 			// and exited 2, so the one thing a lost user reliably types was the one
 			// thing that looked broken.
 			for (const topic of ["configure", "targets", "doctor", "reset", "uninstall", "trace", "models"]) {
 				const result = await runCli([topic, "--help"], { env: scratch.env });
 				strictEqual(result.code, 0, `clio ${topic} --help exited ${result.code}: ${result.stderr}`);
-				ok(result.stdout.includes(`clio ${topic}`), `clio ${topic} --help names itself on stdout`);
+				ok(result.stdout.includes(`clio-coder ${topic}`), `clio ${topic} --help names itself on stdout`);
 				strictEqual(result.stderr.trim(), "", `clio ${topic} --help writes nothing to stderr`);
 			}
 		} finally {
@@ -89,18 +92,18 @@ describe("clio discoverability messages", { concurrency: false }, () => {
 	 * dispatch admission.
 	 */
 	const helpSurfaces: ReadonlyArray<readonly [ReadonlyArray<string>, RegExp]> = [
-		[["targets", "use"], /^usage: clio targets use <id>/m],
-		[["targets", "remove"], /^usage: clio targets remove <id>$/m],
-		[["targets", "rename"], /^usage: clio targets rename <old> <new>$/m],
-		[["targets", "profile"], /^usage: clio targets profile <name> <id>/m],
-		[["targets", "convert"], /^usage: clio targets convert <id> --runtime <runtimeId>$/m],
-		[["context", "refresh"], /clio context refresh \[--wiki\]/],
-		[["fleet", "list"], /^clio fleet <subcommand>$/m],
-		[["fleet", "run"], /^clio fleet <subcommand>$/m],
-		[["fleet", "status"], /^clio fleet <subcommand>$/m],
-		[["fleet", "drain"], /^clio fleet <subcommand>$/m],
-		[["fleet", "resume"], /^clio fleet <subcommand>$/m],
-		[["auth", "login"], /^ {7}clio auth login \[target-or-runtime\]/m],
+		[["targets", "use"], /^usage: clio-coder targets use <id>/m],
+		[["targets", "remove"], /^usage: clio-coder targets remove <id>$/m],
+		[["targets", "rename"], /^usage: clio-coder targets rename <old> <new>$/m],
+		[["targets", "profile"], /^usage: clio-coder targets profile <name> <id>/m],
+		[["targets", "convert"], /^usage: clio-coder targets convert <id> --runtime <runtimeId>$/m],
+		[["context", "refresh"], /clio-coder context refresh \[--wiki\]/],
+		[["fleet", "list"], /^clio-coder fleet <subcommand>$/m],
+		[["fleet", "run"], /^clio-coder fleet <subcommand>$/m],
+		[["fleet", "status"], /^clio-coder fleet <subcommand>$/m],
+		[["fleet", "drain"], /^clio-coder fleet <subcommand>$/m],
+		[["fleet", "resume"], /^clio-coder fleet <subcommand>$/m],
+		[["auth", "login"], /^ {7}clio-coder auth login \[target-or-runtime\]/m],
 	];
 
 	for (const [command, usage] of helpSurfaces) {
@@ -144,7 +147,7 @@ describe("clio discoverability messages", { concurrency: false }, () => {
 		const scratch = makeScratchHome("clio-discover-trace-");
 		try {
 			const usage = await runCli(["trace"], { env: scratch.env });
-			match(usage.stdout, /clio trace ui .*source checkout only/);
+			match(usage.stdout, /clio-coder trace ui .*source checkout only/);
 			match(usage.stdout, /ships with the repository, not the npm package/);
 		} finally {
 			scratch.cleanup();
@@ -171,7 +174,7 @@ describe("clio discoverability messages", { concurrency: false }, () => {
 			strictEqual(result.code, 1, `stdout=${result.stdout} stderr=${result.stderr}`);
 			match(result.stderr, /trace viewer is available only from a source checkout/);
 			match(result.stderr, /npm package does not carry the viewer/);
-			match(result.stderr, /clio trace runs --db /);
+			match(result.stderr, /clio-coder trace runs --db /);
 			match(result.stderr, /npm run trace:ui/);
 		} finally {
 			scratch.cleanup();

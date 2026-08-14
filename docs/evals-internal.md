@@ -11,7 +11,7 @@ Run a private suite from this source checkout with:
 
 ```sh
 npm run build
-clio eval run --suite <external-path> --clio-entry dist/cli/index.js
+clio-coder eval run --suite <external-path> --clio-entry dist/cli/index.js
 ```
 
 Use `--out <dir>` when the artifact should be written outside the default Clio
@@ -198,7 +198,7 @@ tasks:
       excludes:
         - node_modules
         - dist
-        - .clio
+        - .clio-coder
     runner:
       kind: clio-run
       prompt: Summarize the repository purpose and make no file changes.
@@ -232,7 +232,7 @@ tasks:
       excludes:
         - node_modules
         - dist
-        - .clio
+        - .clio-coder
     runner:
       kind: clio-run
       prompt: Fix the failing unit test with the smallest source change.

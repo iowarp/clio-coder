@@ -122,8 +122,8 @@ async function runMatrixItem(
 		// harness failure rather than reporting an invariant it never observed.
 		if (!setup.pass) throw new EvalWorkspaceSetupError(setup.exitCode, setup.stderr);
 		const runner = await runTaskRunner(task, target, workspace.dir, clioEntry, {
-			CLIO_STATE_DIR: stateDir,
-			CLIO_ENTRY: clioEntry,
+			CLIO_CODER_STATE_DIR: stateDir,
+			CLIO_CODER_ENTRY: clioEntry,
 		});
 		const patch = collectPatchMetrics(workspace.dir);
 		const receiptExitCode = receiptProcessExitCode(runner);

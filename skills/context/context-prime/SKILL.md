@@ -44,10 +44,10 @@ Skip it for a one-line question in a repo you already have full context on.
 Work top to bottom; stop early once you have enough to state where things stand.
 
 1. **Constitution.** Read the project's instruction file if present, in order of
-   preference: `CLIO.md`, then `AGENTS.md`, `CLAUDE.md`, else `README.md`. Note
+   preference: `CLIO-CODER.md`, then `AGENTS.md`, `CLAUDE.md`, else `README.md`. Note
    hard invariants and workflow rules. Do not re-derive what it already states.
 
-2. **Last handoff.** Read the newest `.clio/handoffs/handoff-*.md`; if none,
+2. **Last handoff.** Read the newest `.clio-coder/handoffs/handoff-*.md`; if none,
    fall back to `NEXT-SESSION.md` at the repo root. This is the previous
    session's brief: focus, work-in-progress, blockers, suggested skills.
 
@@ -57,9 +57,9 @@ Work top to bottom; stop early once you have enough to state where things stand.
    handoff's "work in progress" — flag anything that drifted (committed
    since, reverted, conflicts).
 
-4. **Active signals.** Check `.clio/state.json` and codewiki freshness if
+4. **Active signals.** Check `.clio-coder/state.json` and codewiki freshness if
    present. Treat stale summaries as hints, never as authority over source.
-   A v1 or missing `.clio/codewiki.json` may rebuild on demand through
+   A v1 or missing `.clio-coder/codewiki.json` may rebuild on demand through
    codewiki tools, but source files remain authoritative.
 
 5. **Skills.** List installed skills with `context(scope="skills")` and note
@@ -91,5 +91,5 @@ Work top to bottom; stop early once you have enough to state where things stand.
   copy long documents into context.
 - Read-only. context-prime orients; it does not start editing. The user confirms
   the focus first.
-- Degrade gracefully: missing `CLIO.md` → next constitution file; missing Clio
+- Degrade gracefully: missing `CLIO-CODER.md` → next constitution file; missing Clio
   tools → plain `git`; no handoff → say so and orient from git + constitution.

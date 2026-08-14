@@ -703,7 +703,7 @@
         <p>Technical architecture specification, compiler calculator, and registry simulator for Clio Coder's secure LLM delivery.</p>
         <div class="meta-chips-row">
           <span class="chip">Source: docs/prompt-envelope-and-tools.md</span>
-          <span class="chip chip-orange">clio docs tools</span>
+          <span class="chip chip-orange">clio-coder docs tools</span>
         </div>
       </div>
     </div>
@@ -1656,7 +1656,7 @@
     // Retrieval Hints
     let hintsText = '';
     if (deliveryMode !== 'no-tools-fallback' && selectedScenarioTools.size > 0) {
-      hintsText = `# Retrieval Hints\nRepository structure and CLIO.md are not preloaded. Use context(scope="workspace").`;
+      hintsText = `# Retrieval Hints\nRepository structure and CLIO-CODER.md are not preloaded. Use context(scope="workspace").`;
     }
     const hintsTokens = estimateTokens(hintsText);
 

@@ -48,7 +48,7 @@ const DEFAULT_RUN_TIMEOUT_MS = 600_000;
 /**
  * The autonomy the acting arms run at.
  *
- * A headless `clio run` has no operator to answer a permission ask, so below
+ * A headless `clio-coder run` has no operator to answer a permission ask, so below
  * full-auto every exec-class call in an arm dies with the harness's own denial
  * and the judge scores a skill that was never allowed to act. Operator decision
  * of 2026-08-13 (docs/findings/HARNESS-NOTES.md item 4): eval arms run
@@ -148,7 +148,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	// attribute to a source is not evidence about a skill, and several roots may
 	// carry this name.
 	process.stderr.write(
-		`clio skills eval: ${skill.name} from ${resolved.origin ?? "unknown"} at ${resolved.baseDir} (sha256 ${skill.normalizedHash.slice(0, 12)}…)\n`,
+		`clio-coder skills eval: ${skill.name} from ${resolved.origin ?? "unknown"} at ${resolved.baseDir} (sha256 ${skill.normalizedHash.slice(0, 12)}…)\n`,
 	);
 	const evalsPath = join(resolved.baseDir, "evals.md");
 	let evalsRaw: string;
@@ -160,7 +160,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	}
 	const parsed = parseSkillEvals(evalsRaw);
 	for (const diagnostic of parsed.diagnostics) {
-		process.stderr.write(`clio skills eval: ${diagnostic}\n`);
+		process.stderr.write(`clio-coder skills eval: ${diagnostic}\n`);
 	}
 	const matcher = options.scenario === undefined ? null : scenarioMatcher(options.scenario);
 	if (options.scenario !== undefined && matcher === null) {
@@ -177,7 +177,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 		return 2;
 	}
 
-	process.stderr.write(`clio skills eval: ${describeArmPolicy(options.allowNetwork)}\n`);
+	process.stderr.write(`clio-coder skills eval: ${describeArmPolicy(options.allowNetwork)}\n`);
 	const childEnv = evalChildEnv(options.allowNetwork);
 	const timeoutMs = options.timeoutSeconds !== undefined ? options.timeoutSeconds * 1000 : DEFAULT_RUN_TIMEOUT_MS;
 	const workspaceOverride = await resolveWorkspaceOverride(options.workspace);
@@ -188,7 +188,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	const startedAt = new Date().toISOString();
 	const outcomes: ScenarioOutcome[] = [];
 	for (const scenario of scenarios) {
-		process.stderr.write(`clio skills eval: ${skill.name} ${scenario.id} baseline/treatment/judge...\n`);
+		process.stderr.write(`clio-coder skills eval: ${skill.name} ${scenario.id} baseline/treatment/judge...\n`);
 		outcomes.push(
 			await runScenario(
 				skill.name,
@@ -227,7 +227,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 		evidenceErrors.push(error instanceof Error ? error.message : String(error));
 	}
 	for (const message of evidenceErrors) {
-		process.stderr.write(`clio skills eval: evidence build failed: ${message}\n`);
+		process.stderr.write(`clio-coder skills eval: evidence build failed: ${message}\n`);
 	}
 
 	if (options.json) {
@@ -301,7 +301,7 @@ function describeArmPolicyOutcome(allowNetwork: boolean): string {
 type EvalArm = "baseline" | "treatment" | "judge";
 
 /**
- * The argv for one arm's child `clio run`. Every arm streams terminal JSON
+ * The argv for one arm's child `clio-coder run`. Every arm streams terminal JSON
  * events (a turn that ends on a terminating tool carries its content there,
  * not in text mode) and runs with discovery off so only the explicit --skill
  * of the treatment arm loads.
@@ -349,7 +349,7 @@ function unmeasuredBullets(scenario: SkillEvalScenario, reason: string): ScoredB
 }
 
 /**
- * The environment each arm's child `clio run` inherits. Absent
+ * The environment each arm's child `clio-coder run` inherits. Absent
  * `--allow-network` the hermetic switch is set, which strips the RETRIEVE
  * plane from every registry the child and its descendants build. With the flag
  * the variable is removed rather than left alone, so an ambient setting in the
@@ -659,7 +659,7 @@ function validateFixtureCommands(commands: string): string | null {
 		},
 		{
 			pattern:
-				/\$(?:\{(?:HOME|CLIO_HOME|CLIO_CONFIG_DIR|CLIO_DATA_DIR|CLIO_STATE_DIR|CLIO_CACHE_DIR)\}|(?:HOME|CLIO_HOME|CLIO_CONFIG_DIR|CLIO_DATA_DIR|CLIO_STATE_DIR|CLIO_CACHE_DIR)\b)/,
+				/\$(?:\{(?:HOME|CLIO_CODER_HOME|CLIO_CODER_CONFIG_DIR|CLIO_CODER_DATA_DIR|CLIO_CODER_STATE_DIR|CLIO_CODER_CACHE_DIR)\}|(?:HOME|CLIO_CODER_HOME|CLIO_CODER_CONFIG_DIR|CLIO_CODER_DATA_DIR|CLIO_CODER_STATE_DIR|CLIO_CODER_CACHE_DIR)\b)/,
 			reason: "home and Clio directory environment variables are not allowed in fixture commands",
 		},
 		{

@@ -3,8 +3,8 @@
  * command runner. Hooks live in dedicated, secrets-free files so they stay out
  * of the strict settings schema:
  *
- *   - `.clio/hooks.yaml`        committed project hooks (origin "project"),
- *   - `.clio/hooks.local.yaml`  gitignored local hooks (origin "project.local"),
+ *   - `.clio-coder/hooks.yaml`        committed project hooks (origin "project"),
+ *   - `.clio-coder/hooks.local.yaml`  gitignored local hooks (origin "project.local"),
  *   - `<extensionRoot>/hooks.yaml`  hooks shipped by an installed extension.
  *
  * Reads are best-effort: a missing file is skipped silently, and a malformed
@@ -93,15 +93,15 @@ export function readHookSources(options: ReadHookSourcesOptions): ReadHookSource
 	}
 
 	const projectBatch = readBatch(
-		{ origin: "project", sourcePath: ".clio/hooks.yaml" },
-		join(options.cwd, ".clio", "hooks.yaml"),
+		{ origin: "project", sourcePath: ".clio-coder/hooks.yaml" },
+		join(options.cwd, ".clio-coder", "hooks.yaml"),
 		fileIssues,
 	);
 	if (projectBatch) batches.push(projectBatch);
 
 	const localBatch = readBatch(
-		{ origin: "project.local", sourcePath: ".clio/hooks.local.yaml" },
-		join(options.cwd, ".clio", "hooks.local.yaml"),
+		{ origin: "project.local", sourcePath: ".clio-coder/hooks.local.yaml" },
+		join(options.cwd, ".clio-coder", "hooks.local.yaml"),
 		fileIssues,
 	);
 	if (localBatch) batches.push(localBatch);
@@ -127,7 +127,7 @@ export interface InstallUserHooksResult extends UserHookLoadResult {
 
 /**
  * Read, normalize, and register every user hook on the middleware contract. The
- * returned hooks and issues feed `clio config inspect`. Best-effort throughout:
+ * returned hooks and issues feed `clio-coder config inspect`. Best-effort throughout:
  * a malformed file or hook is reported, never thrown.
  */
 export function installUserHooks(options: InstallUserHooksOptions): InstallUserHooksResult {

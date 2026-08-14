@@ -123,7 +123,7 @@ export interface RuntimeDescriptor {
 	 */
 	oauthProviderId?: string;
 	/**
-	 * Optional one-line notice printed before an interactive `clio auth login` or
+	 * Optional one-line notice printed before an interactive `clio-coder auth login` or
 	 * configure connect for this runtime. Used to surface subscription usage-terms
 	 * considerations so OAuth subscription paths are an explicit, informed opt-in.
 	 */
@@ -137,7 +137,7 @@ export interface RuntimeDescriptor {
 	/**
 	 * When true, this id is a real, distinct runtime (e.g. `llamacpp-anthropic`,
 	 * the Anthropic Messages surface on llama.cpp, or the embed/rerank runtimes)
-	 * that stays resolvable by id but is hidden from `clio configure --list` and
+	 * that stays resolvable by id but is hidden from `clio-coder configure --list` and
 	 * the interactive wizard, where a composite descriptor owns the
 	 * user-visible slot.
 	 */

@@ -59,7 +59,7 @@ describe("contracts/agents", () => {
 		// a typed report is what made a small model fabricate one.
 		const wikiWriter = recipes.find((entry) => entry.id === "wiki-writer");
 		deepStrictEqual(wikiWriter?.resultContract, { kind: "artifact-report" });
-		// `clio context init` needs a JSON handbook, and a recipe's result
+		// `clio-coder context init` needs a JSON handbook, and a recipe's result
 		// contract is enforced in the worker and sealed by the orchestrator. When
 		// bootstrap rode on Scout, every model that obeyed its recipe returned
 		// reconnaissance findings and the handbook parser rejected the run. The
@@ -104,7 +104,7 @@ describe("contracts/agents", () => {
 
 	it("preserves native recipe precedence over project overrides", () => {
 		const builtin = recipe({ id: "coder", source: "builtin", filepath: "/pkg/coder.md" });
-		const project = recipe({ id: "coder", source: "project", filepath: "/repo/.clio/agents/coder.md" });
+		const project = recipe({ id: "coder", source: "project", filepath: "/repo/.clio-coder/agents/coder.md" });
 		const merged = mergeRecipes([builtin], [project]);
 		strictEqual(merged[0]?.filepath, "/pkg/coder.md");
 	});

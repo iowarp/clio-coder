@@ -20,7 +20,7 @@ import {
  * llama-server build exposes when `--jinja` is set. Specialized surfaces
  * (anthropic-messages, embeddings, rerank, raw completion + infill) live
  * behind hidden surface-specific descriptors that ship alongside this one;
- * users select them explicitly via `clio configure --list --all`.
+ * users select them explicitly via `clio-coder configure --list --all`.
  */
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,

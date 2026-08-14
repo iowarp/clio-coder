@@ -198,7 +198,7 @@ describe("durable trace store", () => {
 			kind: "worker",
 			name: "coder",
 			pid: 1234,
-			command: "node clio worker",
+			command: "node clio-coder worker",
 			startedAt: "2026-01-01T00:00:00Z",
 		});
 		store.recordGate({

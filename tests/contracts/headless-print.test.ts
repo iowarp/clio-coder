@@ -135,7 +135,7 @@ describe("contracts/headless-print", () => {
 		// Regression for FINDINGS.md F2's headless corroboration: a turn whose
 		// only action is a terminal artifact (kind=plan/review/report) never
 		// produces an assistant message_end (ToolResult.terminate skips the
-		// follow-up LLM call), so headless `clio run` used to report "no
+		// follow-up LLM call), so headless `clio-coder run` used to report "no
 		// assistant response" and exit 1 even though the tool did real,
 		// successful work.
 		const chat = buildFakeChatLoop([
@@ -226,8 +226,8 @@ describe("contracts/headless-print", () => {
 		// finish-contract reprompts start new agent runs). Usage is accrued once
 		// per completed assistant message; the agent_end that republishes the
 		// same segment must not count it a second time.
-		const savedStateDir = process.env.CLIO_STATE_DIR;
-		process.env.CLIO_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-headless-usage-"));
+		const savedStateDir = process.env.CLIO_CODER_STATE_DIR;
+		process.env.CLIO_CODER_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-headless-usage-"));
 		resetXdgCache();
 		try {
 			const usageMessage = (tokens: number) => ({
@@ -248,7 +248,7 @@ describe("contracts/headless-print", () => {
 			(chat as unknown as { lastRunSnapshot: () => unknown }).lastRunSnapshot = () => runSnapshot();
 			const exitCode = await runHeadlessMainAgent(chat, { prompt: "multi-segment" });
 			strictEqual(exitCode, 0);
-			const receiptsDir = join(process.env.CLIO_STATE_DIR ?? "", "receipts");
+			const receiptsDir = join(process.env.CLIO_CODER_STATE_DIR ?? "", "receipts");
 			const files = readdirSync(receiptsDir).filter((name) => name.endsWith(".json"));
 			strictEqual(files.length, 1, "one receipt recorded");
 			const receipt = JSON.parse(readFileSync(join(receiptsDir, files[0] ?? ""), "utf8")) as {
@@ -260,8 +260,8 @@ describe("contracts/headless-print", () => {
 			ok(receipt.outputTokenCount === 20, "per-field totals sum too");
 			deepStrictEqual(receipt.autonomyEnforcement, { grade: "mediated", autonomy: "read-only" });
 		} finally {
-			if (savedStateDir === undefined) delete process.env.CLIO_STATE_DIR;
-			else process.env.CLIO_STATE_DIR = savedStateDir;
+			if (savedStateDir === undefined) delete process.env.CLIO_CODER_STATE_DIR;
+			else process.env.CLIO_CODER_STATE_DIR = savedStateDir;
 			resetXdgCache();
 		}
 	});
@@ -271,8 +271,8 @@ describe("contracts/headless-print", () => {
 		// strictly before the awaited submit resumes. A soak of SciCode problem
 		// 11 interrupted mid-step consumed 1,008,198 reported tokens and left no
 		// receipt at all. The drain phase seals it instead.
-		const savedStateDir = process.env.CLIO_STATE_DIR;
-		process.env.CLIO_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-headless-interrupt-"));
+		const savedStateDir = process.env.CLIO_CODER_STATE_DIR;
+		process.env.CLIO_CODER_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-headless-interrupt-"));
 		resetXdgCache();
 		try {
 			const drainHooks: Array<() => void | Promise<void>> = [];
@@ -314,7 +314,7 @@ describe("contracts/headless-print", () => {
 			interrupted = true;
 			for (const hook of drainHooks) await hook();
 
-			const receiptsDir = join(process.env.CLIO_STATE_DIR ?? "", "receipts");
+			const receiptsDir = join(process.env.CLIO_CODER_STATE_DIR ?? "", "receipts");
 			const files = readdirSync(receiptsDir).filter((name) => name.endsWith(".json"));
 			strictEqual(files.length, 1, "the interrupted run has a receipt");
 			const receipt = JSON.parse(readFileSync(join(receiptsDir, files[0] ?? ""), "utf8")) as {
@@ -335,8 +335,8 @@ describe("contracts/headless-print", () => {
 				"the completion path does not seal a second receipt",
 			);
 		} finally {
-			if (savedStateDir === undefined) delete process.env.CLIO_STATE_DIR;
-			else process.env.CLIO_STATE_DIR = savedStateDir;
+			if (savedStateDir === undefined) delete process.env.CLIO_CODER_STATE_DIR;
+			else process.env.CLIO_CODER_STATE_DIR = savedStateDir;
 			resetXdgCache();
 		}
 	});

@@ -40,7 +40,7 @@
 		"node": ">=22.19.0"
 	},
 	"bin": {
-		"clio": "dist/cli/index.js"
+		"clio-coder": "dist/cli/index.js"
 	},
 	"files": [
 		"dist",

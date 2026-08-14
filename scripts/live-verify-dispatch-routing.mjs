@@ -34,25 +34,25 @@
  *   8. agent-auto-shadow  An explicit Scout stays on Scout while the one joint
  *                 shadow decision seals its bounded agent recommendation.
  *
- * Never runs in an ordinary test or CI lane: CLIO_LIVE_EVAL=1 is required.
+ * Never runs in an ordinary test or CI lane: CLIO_CODER_LIVE_EVAL=1 is required.
  * Build first, then invoke with:
  *
- *   CLIO_LIVE_EVAL=1 npm run test:live-verify:dispatch-routing
+ *   CLIO_CODER_LIVE_EVAL=1 npm run test:live-verify:dispatch-routing
  *
  * Requirements beyond the model target:
- *   - Passwordless SSH (BatchMode) to CLIO_LIVE_FLEET_HOST (default localhost).
+ *   - Passwordless SSH (BatchMode) to CLIO_CODER_LIVE_FLEET_HOST (default localhost).
  *     Scenario 1 needs a real per-node capacity cap, and only an SSH node has
  *     one; the implicit local node is bounded by the global gate instead.
  *   - A free TCP port for the always-503 target used by scenario 3.
  *
  * Environment:
- *   CLIO_LIVE_TARGET / CLIO_LIVE_RUNTIME / CLIO_LIVE_MODEL / CLIO_LIVE_BASE_URL
- *   CLIO_LIVE_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
- *   CLIO_LIVE_FLEET_HOST        SSH host for the capacity-one node (default localhost)
- *   CLIO_LIVE_DEAD_PORT         port for the always-503 target (default 8599)
- *   CLIO_LIVE_VERIFY_TIMEOUT_MS per-turn timeout (default 900000)
- *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover,joint-shadow,attestation,active-readonly,agent-auto-shadow (default all)
- *   CLIO_LIVE_KEEP=1            retain the isolated scratch tree on success
+ *   CLIO_CODER_LIVE_TARGET / CLIO_CODER_LIVE_RUNTIME / CLIO_CODER_LIVE_MODEL / CLIO_CODER_LIVE_BASE_URL
+ *   CLIO_CODER_LIVE_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
+ *   CLIO_CODER_LIVE_FLEET_HOST        SSH host for the capacity-one node (default localhost)
+ *   CLIO_CODER_LIVE_DEAD_PORT         port for the always-503 target (default 8599)
+ *   CLIO_CODER_LIVE_VERIFY_TIMEOUT_MS per-turn timeout (default 900000)
+ *   CLIO_CODER_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover,joint-shadow,attestation,active-readonly,agent-auto-shadow (default all)
+ *   CLIO_CODER_LIVE_KEEP=1            retain the isolated scratch tree on success
  */
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -63,8 +63,8 @@ import { join } from "node:path";
 import { tsImport } from "tsx/esm/api";
 import { stringify } from "yaml";
 
-if (process.env.CLIO_LIVE_EVAL !== "1") {
-	console.log("CLIO_LIVE_EVAL is not set to '1'. Skipping the dispatch routing live verification.");
+if (process.env.CLIO_CODER_LIVE_EVAL !== "1") {
+	console.log("CLIO_CODER_LIVE_EVAL is not set to '1'. Skipping the dispatch routing live verification.");
 	process.exit(0);
 }
 
@@ -75,13 +75,15 @@ if (!existsSync(CLI_ENTRY)) {
 	process.exit(1);
 }
 
-const targetId = process.env.CLIO_LIVE_TARGET || "live-target";
-const runtimeId = process.env.CLIO_LIVE_RUNTIME || (process.env.CLIO_LIVE_BASE_URL ? "openai-compat" : "openai");
-const model = process.env.CLIO_LIVE_MODEL || (runtimeId === "anthropic" ? "claude-3-5-sonnet-latest" : "gpt-4o-mini");
-const url = process.env.CLIO_LIVE_BASE_URL || undefined;
-const fleetHost = process.env.CLIO_LIVE_FLEET_HOST || "localhost";
-const deadPort = Number.parseInt(process.env.CLIO_LIVE_DEAD_PORT || "8599", 10);
-const timeoutMs = Number.parseInt(process.env.CLIO_LIVE_VERIFY_TIMEOUT_MS || "900000", 10);
+const targetId = process.env.CLIO_CODER_LIVE_TARGET || "live-target";
+const runtimeId =
+	process.env.CLIO_CODER_LIVE_RUNTIME || (process.env.CLIO_CODER_LIVE_BASE_URL ? "openai-compat" : "openai");
+const model =
+	process.env.CLIO_CODER_LIVE_MODEL || (runtimeId === "anthropic" ? "claude-3-5-sonnet-latest" : "gpt-4o-mini");
+const url = process.env.CLIO_CODER_LIVE_BASE_URL || undefined;
+const fleetHost = process.env.CLIO_CODER_LIVE_FLEET_HOST || "localhost";
+const deadPort = Number.parseInt(process.env.CLIO_CODER_LIVE_DEAD_PORT || "8599", 10);
+const timeoutMs = Number.parseInt(process.env.CLIO_CODER_LIVE_VERIFY_TIMEOUT_MS || "900000", 10);
 const ALL_SCENARIOS = [
 	"quality",
 	"capacity",
@@ -106,27 +108,27 @@ const ACTIVE_TARGET = "mini";
 const ACTIVE_MODEL = "KAT-Coder-V2.5-Dev-IQ4_NL";
 const ACTIVE_RUNTIME = "llamacpp";
 const ACTIVE_URL = "http://192.168.86.141:8080";
-const scenarios = (process.env.CLIO_LIVE_VERIFY_SCENARIOS || ALL_SCENARIOS.join(","))
+const scenarios = (process.env.CLIO_CODER_LIVE_VERIFY_SCENARIOS || ALL_SCENARIOS.join(","))
 	.split(",")
 	.map((name) => name.trim())
 	.filter((name) => name.length > 0);
 for (const name of scenarios) {
 	if (!ALL_SCENARIOS.includes(name)) {
-		console.error(`Error: CLIO_LIVE_VERIFY_SCENARIOS entry '${name}' is not one of ${ALL_SCENARIOS.join(", ")}.`);
+		console.error(`Error: CLIO_CODER_LIVE_VERIFY_SCENARIOS entry '${name}' is not one of ${ALL_SCENARIOS.join(", ")}.`);
 		process.exit(1);
 	}
 }
 if (!Number.isSafeInteger(deadPort) || deadPort < 1024 || deadPort > 65535) {
-	console.error("Error: CLIO_LIVE_DEAD_PORT must be a port between 1024 and 65535.");
+	console.error("Error: CLIO_CODER_LIVE_DEAD_PORT must be a port between 1024 and 65535.");
 	process.exit(1);
 }
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 60_000) {
-	console.error("Error: CLIO_LIVE_VERIFY_TIMEOUT_MS must be an integer of at least 60000.");
+	console.error("Error: CLIO_CODER_LIVE_VERIFY_TIMEOUT_MS must be an integer of at least 60000.");
 	process.exit(1);
 }
 
-let envVarName = "CLIO_LIVE_API_KEY";
-let apiKey = process.env.CLIO_LIVE_API_KEY || "";
+let envVarName = "CLIO_CODER_LIVE_API_KEY";
+let apiKey = process.env.CLIO_CODER_LIVE_API_KEY || "";
 if (!apiKey) {
 	if (runtimeId === "openai" && process.env.OPENAI_API_KEY) {
 		envVarName = "OPENAI_API_KEY";
@@ -146,7 +148,7 @@ if (scenarios.includes("quality") && !keylessRuntimes.has(runtimeId)) {
 const needsEnvironmentTarget = scenarios.some((name) => ["quality", "capacity", "budget", "failover"].includes(name));
 if (needsEnvironmentTarget && !apiKey && !keylessRuntimes.has(runtimeId)) {
 	console.error(
-		"Error: CLIO_LIVE_EVAL=1 is active, but no API key was found in CLIO_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
+		"Error: CLIO_CODER_LIVE_EVAL=1 is active, but no API key was found in CLIO_CODER_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
 	);
 	process.exit(1);
 }
@@ -163,20 +165,20 @@ for (const dir of [clioDataDir, clioConfigDir, clioStateDir, clioCacheDir, works
 
 const childEnv = {
 	...process.env,
-	CLIO_HOME: scratchDir,
-	CLIO_DATA_DIR: clioDataDir,
-	CLIO_CONFIG_DIR: clioConfigDir,
-	CLIO_STATE_DIR: clioStateDir,
-	CLIO_CACHE_DIR: clioCacheDir,
-	CLIO_REQUIRE_HOME_PREFIX: "1",
+	CLIO_CODER_HOME: scratchDir,
+	CLIO_CODER_DATA_DIR: clioDataDir,
+	CLIO_CODER_CONFIG_DIR: clioConfigDir,
+	CLIO_CODER_STATE_DIR: clioStateDir,
+	CLIO_CODER_CACHE_DIR: clioCacheDir,
+	CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
 };
 Object.assign(process.env, {
-	CLIO_HOME: scratchDir,
-	CLIO_DATA_DIR: clioDataDir,
-	CLIO_CONFIG_DIR: clioConfigDir,
-	CLIO_STATE_DIR: clioStateDir,
-	CLIO_CACHE_DIR: clioCacheDir,
-	CLIO_REQUIRE_HOME_PREFIX: "1",
+	CLIO_CODER_HOME: scratchDir,
+	CLIO_CODER_DATA_DIR: clioDataDir,
+	CLIO_CODER_CONFIG_DIR: clioConfigDir,
+	CLIO_CODER_STATE_DIR: clioStateDir,
+	CLIO_CODER_CACHE_DIR: clioCacheDir,
+	CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
 });
 if (apiKey) childEnv[envVarName] = apiKey;
 
@@ -188,8 +190,8 @@ if (apiKey) childEnv[envVarName] = apiKey;
  * non-interactive SSH login usually has no version-managed node on PATH.
  */
 const remoteEntry =
-	`env CLIO_HOME=${scratchDir} CLIO_DATA_DIR=${clioDataDir} CLIO_CONFIG_DIR=${clioConfigDir} ` +
-	`CLIO_STATE_DIR=${clioStateDir} CLIO_CACHE_DIR=${clioCacheDir} CLIO_REQUIRE_HOME_PREFIX=1 ` +
+	`env CLIO_CODER_HOME=${scratchDir} CLIO_CODER_DATA_DIR=${clioDataDir} CLIO_CODER_CONFIG_DIR=${clioConfigDir} ` +
+	`CLIO_CODER_STATE_DIR=${clioStateDir} CLIO_CODER_CACHE_DIR=${clioCacheDir} CLIO_CODER_REQUIRE_HOME_PREFIX=1 ` +
 	`${process.execPath} ${CLI_ENTRY} worker`;
 
 const liveTarget = {
@@ -1344,9 +1346,9 @@ try {
 	console.error(`[dispatch-routing] artifacts retained under ${scratchDir}`);
 	process.exitCode = 1;
 } finally {
-	if (passed && process.env.CLIO_LIVE_KEEP !== "1") {
+	if (passed && process.env.CLIO_CODER_LIVE_KEEP !== "1") {
 		rmSync(scratchDir, { recursive: true, force: true });
 	} else if (passed) {
-		console.log(`[dispatch-routing] CLIO_LIVE_KEEP=1; artifacts retained under ${scratchDir}`);
+		console.log(`[dispatch-routing] CLIO_CODER_LIVE_KEEP=1; artifacts retained under ${scratchDir}`);
 	}
 }

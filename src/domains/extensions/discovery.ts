@@ -8,7 +8,7 @@ import type {
 	ExtensionManifestResources,
 } from "./types.js";
 
-const MANIFEST_NAMES = ["clio-extension.yaml", "clio-extension.yml", "clio-extension.json"] as const;
+const MANIFEST_NAMES = ["clio-coder-extension.yaml", "clio-coder-extension.yml", "clio-coder-extension.json"] as const;
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);

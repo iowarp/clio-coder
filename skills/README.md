@@ -13,7 +13,7 @@ Clio's engine discovers *runtime* skills from these roots (see
 - `~/.agents`, `~/.claude`, `~/.codex`, `~/.config/opencode`, `~/.copilot` → their `skills/` subdir
 - `<clio-config>/skills` (per-user)
 - project `.agents` / `.claude` / `.codex` / `.opencode` / `.github` → their `skills/` subdir
-- `.clio/skills` (per-project)
+- `.clio-coder/skills` (per-project)
 
 This repo's `skills/` directory is **not** one of those roots, so nothing here
 auto-loads. That gap is deliberate.
@@ -95,7 +95,7 @@ folder is presentation and provenance, not a namespace.
 | Skill | Type | Use when |
 |---|---|---|
 | [`skill-craft`](meta/skill-craft/) | reference | Writing, reviewing, or pruning any SKILL.md: invocation cost, trigger-only descriptions, completion criteria, progressive disclosure, and the pruning pass. |
-| [`find-skills`](meta/find-skills/) | workflow | A capability might exist as an installable skill. Searches with `clio skills search`, browses the ecosystem read-only, and installs only through `clio skills install`. |
+| [`find-skills`](meta/find-skills/) | workflow | A capability might exist as an installable skill. Searches with `clio-coder skills search`, browses the ecosystem read-only, and installs only through `clio-coder skills install`. |
 | [`clio-dev`](meta/clio-dev/) | discipline | Modifying Clio's own source in this repo; deciding whether a change stays local or becomes a contribution. |
 | [`clio-test`](meta/clio-test/) | reference | Writing or verifying changes to Clio against the real harness (contracts / smoke / boundaries). |
 | [`credentials`](meta/credentials/) | discipline | A task needs an API key, token, or facility credential. Verifies presence without exposing values, collects new secrets via hidden terminal input, and contains leaks. |
@@ -110,23 +110,23 @@ allow. Full semantics: docs/safety-model.md, "Skill tool surface narrowing".
 
 ## Install (activate a marketplace skill)
 
-`clio skills install` is the bridge from marketplace to runtime. It copies a
+`clio-coder skills install` is the bridge from marketplace to runtime. It copies a
 skill into a discovery root and stamps install provenance so Clio can load it.
 
 ```bash
-# Project scope (default): copy into <repo>/.clio/skills
-clio skills install context-handoff
+# Project scope (default): copy into <repo>/.clio-coder/skills
+clio-coder skills install context-handoff
 
 # User scope: copy into the Clio config skills dir, available everywhere
-clio skills install clio-dev --user
+clio-coder skills install clio-dev --user
 
 # Several at once, or a whole catalog group
-clio skills install context-prime context-handoff --user
-clio skills install --category git
+clio-coder skills install context-prime context-handoff --user
+clio-coder skills install --category git
 ```
 
 Bare names resolve through the local marketplace (this catalog when run from
-the repo, `CLIO_SKILL_CATALOG_DIR`, or the skill-marketplace.json index); an
+the repo, `CLIO_CODER_SKILL_CATALOG_DIR`, or the skill-marketplace.json index); an
 existing local path always wins over a same-named marketplace entry.
 `--category` installs every marketplace skill in one catalog group and is the
 short form for the sets below; it reports each install separately and exits
@@ -151,37 +151,37 @@ teammate cloning it gets the same behavior.
 | `--category coding` | project | `tdd` and `coding-standards` follow the language and the test seams of the checkout. |
 | `--category workflow` | either | `grill-me` and `cut-it` travel with the operator; `design-council` is worth pinning per project when the project has recurring design forks. |
 
-When both scopes carry the same name, project wins: `.clio/skills` outranks the
+When both scopes carry the same name, project wins: `.clio-coder/skills` outranks the
 user root, which outranks every compat root.
 
 After install, confirm Clio sees it:
 
 ```bash
-clio skills list            # human view
-clio skills inspect context-handoff # full metadata + provenance
+clio-coder skills list            # human view
+clio-coder skills inspect context-handoff # full metadata + provenance
 ```
 
 Installed copies are frozen; refresh them from their `source-url` provenance
-with `clio skills update <name>` or `clio skills sync`. While developing a
+with `clio-coder skills update <name>` or `clio-coder skills sync`. While developing a
 catalog skill, load it directly without installing:
-`clio --skill skills/<category>/<name>/SKILL.md`.
+`clio-coder --skill skills/<category>/<name>/SKILL.md`.
 
-Uninstall is just removing the copy: `rm -r .clio/skills/<name>` (or the
-user-scope equivalent). Installs never write outside `.clio/skills` or the
+Uninstall is just removing the copy: `rm -r .clio-coder/skills/<name>` (or the
+user-scope equivalent). Installs never write outside `.clio-coder/skills` or the
 user config skills dir, both of which are gitignored / outside the repo.
 
 ### Skill discovery and find-skills precedence
 
 Clio ships [`find-skills`](meta/find-skills/) so that discovery and installation
-both route through `clio skills`. A community skill of the same name is
+both route through `clio-coder skills`. A community skill of the same name is
 commonly present in the compat roots (`~/.agents/skills`,
 `~/.claude/skills`) and drives the external `npx skills` installer, which
 bypasses Clio. Compat roots stay enabled, and the loader resolves name
-collisions by precedence: the Clio user root and `.clio/skills` outrank the
+collisions by precedence: the Clio user root and `.clio-coder/skills` outrank the
 compat roots. Install the catalog copy so it wins:
 
 ```bash
-clio skills install find-skills --user   # or --project for one repo
+clio-coder skills install find-skills --user   # or --project for one repo
 ```
 
 ## Publishing: the marketplace index
@@ -197,9 +197,9 @@ A Clio install anywhere points at it and gets bare-name installs from this
 catalog:
 
 ```bash
-export CLIO_SKILL_MARKETPLACE_INDEX=/path/to/skill-marketplace.json
-clio skills search worktree      # entries show (index, v0.2.0, audit: pass)
-clio skills install worktree-merge
+export CLIO_CODER_SKILL_MARKETPLACE_INDEX=/path/to/skill-marketplace.json
+clio-coder skills search worktree      # entries show (index, v0.2.0, audit: pass)
+clio-coder skills install worktree-merge
 ```
 
 Install then clones the repository named in that entry's `sourceUrl` and copies
@@ -253,7 +253,7 @@ Field semantics inside `clio:`:
 
 - `registry-id` names the audited catalog a skill claims membership of; it is
   content, participates in the pinned hash, and survives installs.
-- `source-url` and `audit` are install-lifecycle fields: `clio skills install`
+- `source-url` and `audit` are install-lifecycle fields: `clio-coder skills install`
   rewrites `source-url` to the actual install source and resets `audit` to
   `unknown` because auditing is a human decision. Both are provenance-stripped
   before hashing.
@@ -263,7 +263,7 @@ Field semantics inside `clio:`:
 - `eval-status` is honest test standing: `untested` (no scenarios),
   `scenarios-recorded` (evals.md scenarios written, not yet executed),
   `smoke-checked` (one representative scenario executed through
-  `clio skills eval` and the transcript showed the skill loading and driving
+  `clio-coder skills eval` and the transcript showed the skill loading and driving
   its core behavior), `eval-run` (the full scenario set executed and passing;
   record the date in evals.md when setting this).
 - `model-size` is body-quality guidance: `any` means the body is written to
@@ -340,7 +340,7 @@ That inertness is the safe outcome, and it is why the catalog keeps Clio tool
 names rather than mapping them. Translating `bash` to `Bash` for
 Claude-compatibility would not restrict anything; it would silently add `Bash`
 to the always-allow rules of every session that loaded the skill. The same goes
-for a `clio skills export --for claude` lane, so there is no such lane. To keep
+for a `clio-coder skills export --for claude` lane, so there is no such lane. To keep
 a well-meaning edit from introducing that, `npm run skills:check` fails on any
 `allowed-tools` entry that is not a Clio tool name in canonical lowercase.
 
@@ -375,7 +375,7 @@ A skill is "approved for the marketplace" when a maintainer:
 3. Sets / bumps `version`.
 
 Each skill ships an `evals.md` recording the baseline scenarios it was tested
-against (RED-GREEN per [`skill-craft`](meta/skill-craft/)). `clio skills eval <name>`
+against (RED-GREEN per [`skill-craft`](meta/skill-craft/)). `clio-coder skills eval <name>`
 executes those scenarios instead of trusting the prose; the eval lane is the
 curation gate for this catalog, not an end-user feature.
 
@@ -389,7 +389,7 @@ cannot pass on instructions the model merely read. But nothing confines a run
 to its workspace: the write boundary is a per-run tool policy, not something a
 harness can impose on a child process it spawns, and a full-auto arm has been
 observed writing outside its workspace. Eval numbers are evidence about a
-cooperative model, not an isolation guarantee. Run campaigns with `CLIO_*`
+cooperative model, not an isolation guarantee. Run campaigns with `CLIO_CODER_*`
 pointed at throwaway directories.
 
 `npm run skills:pin` enforces this contract structurally: it refuses to pin a
@@ -399,7 +399,7 @@ its `evals.md`, declares a tool name Clio does not have, or carries a
 (run in CI) fails on any drift between the catalog and either generated file,
 `registry.yaml` or `skill-marketplace.json`. Pinned hashes are provenance-stripped
 (install-lifecycle stamps like `installed-at` do not count as drift; content
-and registry-identity edits do), so a copy installed via `clio skills install`
+and registry-identity edits do), so a copy installed via `clio-coder skills install`
 still verifies against its audited source at activation.
 
 A skill may declare typed dependencies with `requires: [skill:<name>, ...]`

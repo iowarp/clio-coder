@@ -63,7 +63,7 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 		let next: ClioSettings;
 		try {
 			// readSettings keeps the strict throw-on-invalid-user-settings gate; the
-			// layered read then overlays project .clio/settings(.local).yaml.
+			// layered read then overlays project .clio-coder/settings(.local).yaml.
 			readSettings();
 			next = readLayeredSettings(process.cwd()).settings;
 		} catch (err) {

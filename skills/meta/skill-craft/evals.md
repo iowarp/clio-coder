@@ -7,10 +7,10 @@ WITH the skill to confirm it closes). Rubric is pass/fail per bullet.
 Setup: any repo. Prompt: "write a project skill called log-triage that greps
 service logs for errors, groups them by cause, and files a summary."
 Expected:
-- Writes `.clio/skills/log-triage/SKILL.md` directly with the write tool.
+- Writes `.clio-coder/skills/log-triage/SKILL.md` directly with the write tool.
 - Description is triggers-only, front-loaded, no synonym-duplicated branches.
 - Every step ends on a checkable completion criterion, not "until done".
-- Frontmatter passes `clio skills validate`.
+- Frontmatter passes `clio-coder skills validate`.
 
 ## S2 — prune an overgrown skill
 Setup: repo containing a 200-line skill whose body restates one rule three
@@ -37,5 +37,5 @@ Expected:
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. NOT COMPARABLE: baseline arm hit the loop guard, so no baseline exists; treatment was visibly scaffolding a skill when the run was scored INFRA.

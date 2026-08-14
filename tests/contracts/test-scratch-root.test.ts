@@ -25,7 +25,7 @@ describe("contracts/test scratch root", () => {
 	it("resolves every mkdtemp in this run inside one removable root", () => {
 		// The suite is started with --import tmp-root.ts, so this holds in the
 		// runner and in every test child without any test opting in.
-		const root = process.env.CLIO_TEST_TMP_ROOT;
+		const root = process.env.CLIO_CODER_TEST_TMP_ROOT;
 		ok(root, "the run has a scratch root");
 		strictEqual(tmpdir(), root, "tmpdir() resolves to it, so untouched call sites land inside it");
 		ok(basename(root).startsWith(TEST_TMP_ROOT_PREFIX), `root is named for the harness: ${root}`);

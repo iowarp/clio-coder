@@ -8,7 +8,7 @@ Clio Coder has two related but separate surfaces:
 1. **Components**: deterministic inventory of files that can affect harness behavior.
 2. **Middleware**: an experimental hook/effect contract around tool, turn, and compaction lifecycle points.
 
-The components surface is active and user-facing through `clio components`. The middleware runtime is intentionally conservative in the current alpha: the hook/effect types, validation helpers, declarative rule engine, built-in registrations, and a receipted hook-file surface exist, but arbitrary repository or user middleware packages are not a shipped public extension point. Enforcing guard registrations ride the same hook runtime at the composition root: the loop guard, protected-artifacts guard, dispatch dedup, file and skill observers, tool-prose checks, and finish-contract assessor form the middleware tier of the safety net (see [safety-model.md](safety-model.md)).
+The components surface is active and user-facing through `clio-coder components`. The middleware runtime is intentionally conservative in the current alpha: the hook/effect types, validation helpers, declarative rule engine, built-in registrations, and a receipted hook-file surface exist, but arbitrary repository or user middleware packages are not a shipped public extension point. Enforcing guard registrations ride the same hook runtime at the composition root: the loop guard, protected-artifacts guard, dispatch dedup, file and skill observers, tool-prose checks, and finish-contract assessor form the middleware tier of the safety net (see [safety-model.md](safety-model.md)).
 
 ---
 
@@ -44,7 +44,7 @@ It does not execute scanned files.
 | `config-schema` | `src/core/defaults.ts`, `src/core/config.ts` (scanner list in `src/domains/components/scan.ts`) | runtime-critical |
 | `session-schema` | session entry/contract files | runtime-critical |
 | `receipt-schema` | dispatch receipt/integrity files | runtime-critical |
-| `context-file` | `CLIO.md`, `CONTRIBUTING.md`, `SECURITY.md` | advisory |
+| `context-file` | `CLIO-CODER.md`, `CONTRIBUTING.md`, `SECURITY.md` | advisory |
 | `doc-spec` | currently `docs/specs/**/*.md` if present | descriptive |
 | `middleware` | reserved kind | enforcing |
 | `memory` | reserved kind | advisory |
@@ -67,10 +67,10 @@ It does not execute scanned files.
 ## Component CLI
 
 ```bash
-clio components
-clio components --json
-clio components snapshot --out before.json
-clio components diff --from before.json --to after.json
+clio-coder components
+clio-coder components --json
+clio-coder components snapshot --out before.json
+clio-coder components diff --from before.json --to after.json
 ```
 
 Snapshots are useful in reviews because they show behavior-affecting changes even when the raw diff is broad.
@@ -112,11 +112,11 @@ Middleware hook budgets are phase-aware through `DEFAULT_MIDDLEWARE_HOOK_BUDGETS
 - `turn_end`: 75 ms
 - `on_compaction`: 150 ms
 
-Per-phase budgets can be overridden via `CLIO_HOOK_BUDGET_<PHASE>_MS` or global `CLIO_HOOK_BUDGET_MS`. Warmup grace exempts initial calls (`DEFAULT_HOOK_BUDGET_WARMUP_CALLS = 1`), and steady-state warnings trigger when at least 3 of the last 5 post-warmup calls exceed budget (`DEFAULT_HOOK_BUDGET_WINDOW = 5`, `DEFAULT_HOOK_BUDGET_THRESHOLD = 3`). Overruns are reported but do not abort the turn. The orchestrator and workers share the middleware contract, but worker guard state is process-local.
+Per-phase budgets can be overridden via `CLIO_CODER_HOOK_BUDGET_<PHASE>_MS` or global `CLIO_CODER_HOOK_BUDGET_MS`. Warmup grace exempts initial calls (`DEFAULT_HOOK_BUDGET_WARMUP_CALLS = 1`), and steady-state warnings trigger when at least 3 of the last 5 post-warmup calls exceed budget (`DEFAULT_HOOK_BUDGET_WINDOW = 5`, `DEFAULT_HOOK_BUDGET_THRESHOLD = 3`). Overruns are reported but do not abort the turn. The orchestrator and workers share the middleware contract, but worker guard state is process-local.
 
 Middleware reminders are visible request text, not hidden prompt state. `turn_start` reminders flush into the same accepted request; `turn_end` reminders flush once on the next request. The built-in stalled-turn rule can request one automatic continuation for a user prompt, then stops rather than looping forever.
 
-User-defined hook declarations load from three places: `<extensionRoot>/hooks.yaml`, `.clio/hooks.yaml`, and `.clio/hooks.local.yaml`. A hook can be `prompt`, `effect`, or `command`. Command hooks run an argv array without a shell, under the workspace with a timeout and bounded output, and every hook execution emits a receipt.
+User-defined hook declarations load from three places: `<extensionRoot>/hooks.yaml`, `.clio-coder/hooks.yaml`, and `.clio-coder/hooks.local.yaml`. A hook can be `prompt`, `effect`, or `command`. Command hooks run an argv array without a shell, under the workspace with a timeout and bounded output, and every hook execution emits a receipt.
 
 ---
 

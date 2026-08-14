@@ -16,62 +16,62 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 
 | Command | Purpose |
 | --- | --- |
-| `clio` | Launch the interactive terminal UI. |
-| `clio run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. |
-| `clio run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively and write a receipt. |
-| `clio acp` | Serve Clio as an ACP v1 agent over stdio for ACP frontends. |
-| `clio --version` | Print the installed version. |
-| `clio --api-key <key>` | Override the active target API key for one invocation. |
-| `clio --no-context-files` / `clio -nc` | Skip `CLIO.md` project-context injection for one invocation. |
-| `clio --no-skills` | Disable skill discovery for one invocation while still honoring explicit `--skill` paths. |
-| `clio --skill <path>` | Load one explicit skill file or directory for one invocation (repeatable). |
-| `clio configure` | Run the configuration wizard. |
-| `clio configure --list` | List user-facing runtime ids. |
-| `clio configure --list --all` | List every registered runtime, including aliases. |
-| `clio targets [--json] [--probe] [--target <id>]` | List configured targets, health, auth, runtime, model, and capabilities. |
-| `clio targets add` | Add a target interactively or through configure flags. |
-| `clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]` | Point the orchestrator at one target. Without `--fleet-target` the fleet default follows it; with `--fleet-target` the fleet runs on a different node. `--worker-target` and `--worker-model` are accepted aliases from before the worker/fleet rename. |
-| `clio targets profile list\|set\|remove\|rename\|bind\|unbind\|bindings` | Manage named fleet profiles and agent bindings. |
-| `clio targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
-| `clio targets remove <id>` | Remove a target. |
-| `clio targets rename <old> <new>` | Rename a target id. |
-| `clio models [search] [--target <id>] [--json] [--offline]` | List models. Live probing is the default; `--offline` skips it. |
-| `clio paths [--json]` | Print the resolved config, data, state, and cache directories. |
-| `clio auth list` | Show known auth entries. |
-| `clio auth status [target-or-runtime]` | Inspect auth state. |
-| `clio auth login [target-or-runtime] [--api-key <value>]` | Add credentials through the supported flow. |
-| `clio auth logout [target-or-runtime]` | Remove stored credentials. |
-| `clio doctor [--fix] [--json]` | Diagnose state; with `--fix`, create missing structure and templates, repair credential permissions, and refresh install metadata. Settings remain strict and are not migrated. |
-| `clio reset [--state\|--data\|--cache\|--auth\|--config\|--all] [--dry-run] [--force]` | Reset selected Clio Coder state. `--state` is the default level. |
-| `clio uninstall [--dry-run] [--remove-binary] [--force]` | Remove Clio Coder state and print uninstall guidance. |
-| `clio upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations]` | Refresh state metadata, apply migrations, and update npm installs when applicable. |
-| `clio agents [--json] [--all]` | List discovered agent specs. |
-| `clio fleet list\|run\|status` | List fleet contracts, run a contract, or show dispatch state. |
-| `clio dev components [list] [--json]` | List behavior-affecting harness components. |
-| `clio dev components snapshot --out <path>` | Write a component snapshot JSON file. |
-| `clio dev components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
-| `clio evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
-| `clio eval validate\|run\|report\|compare\|gate` | Validate, run, report, compare, and gate local evaluation suites (Suite v2). |
-| `clio memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
-| `clio trace runs [--db PATH] [--limit N]` | List runs recorded in the durable trace mirror beside the ledger. |
-| `clio trace phases <runId> [--db PATH]` | Show one run's recorded phases. |
-| `clio trace tail <runId> [--follow] [--db PATH]` | Tail one run's recorded events; `--follow` streams as they land. |
-| `clio trace procs <runId> [--db PATH]` | Show the processes one run spawned. |
-| `clio trace sql <SELECT query> [--db PATH]` | Run one read-only SELECT against the mirror. Only SELECT is accepted. |
-| `clio trace ui [--db PATH] [--port N]` | Serve the localhost-only waterfall viewer. The viewer is not part of the published package. |
-| `clio dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
-| `clio extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. |
-| `clio skills list\|search\|inspect\|validate\|install\|update\|sync\|eval` | Manage discovered skills, Clio-native skills, and local marketplace installs. |
-| `clio docs [topic] [--no-open]` | Serve bundled HTML docs on 127.0.0.1. |
-| `clio dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
-| `clio dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
-| `clio dev share inspect <path> [--json]` | Inspect a share archive without importing it. |
-| `clio context` | Show project context status, preload class, codewiki freshness, and the codewiki digest when present. |
-| `clio context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO.md`, `.clio/codewiki.json`, and `.clio/state.json`. |
-| `clio context refresh [--wiki]` | Rebuild the codewiki and state without touching `CLIO.md`; with `--wiki`, update an existing Markdown wiki. |
-| `clio context wiki [--update\|--status]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio/wiki/`. |
-| `clio context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
-| `clio context index [--json]` | Build the structural codewiki index without model calls; writes `.clio/codewiki.json` and `.clio/state.json` and prints coverage plus a structural hash. |
+| `clio-coder` | Launch the interactive terminal UI. |
+| `clio-coder run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. |
+| `clio-coder run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively and write a receipt. |
+| `clio-coder acp` | Serve Clio as an ACP v1 agent over stdio for ACP frontends. |
+| `clio-coder --version` | Print the installed version. |
+| `clio-coder --api-key <key>` | Override the active target API key for one invocation. |
+| `clio-coder --no-context-files` / `clio-coder -nc` | Skip `CLIO-CODER.md` project-context injection for one invocation. |
+| `clio-coder --no-skills` | Disable skill discovery for one invocation while still honoring explicit `--skill` paths. |
+| `clio-coder --skill <path>` | Load one explicit skill file or directory for one invocation (repeatable). |
+| `clio-coder configure` | Run the configuration wizard. |
+| `clio-coder configure --list` | List user-facing runtime ids. |
+| `clio-coder configure --list --all` | List every registered runtime, including aliases. |
+| `clio-coder targets [--json] [--probe] [--target <id>]` | List configured targets, health, auth, runtime, model, and capabilities. |
+| `clio-coder targets add` | Add a target interactively or through configure flags. |
+| `clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]` | Point the orchestrator at one target. Without `--fleet-target` the fleet default follows it; with `--fleet-target` the fleet runs on a different node. `--worker-target` and `--worker-model` are accepted aliases from before the worker/fleet rename. |
+| `clio-coder targets profile list\|set\|remove\|rename\|bind\|unbind\|bindings` | Manage named fleet profiles and agent bindings. |
+| `clio-coder targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
+| `clio-coder targets remove <id>` | Remove a target. |
+| `clio-coder targets rename <old> <new>` | Rename a target id. |
+| `clio-coder models [search] [--target <id>] [--json] [--offline]` | List models. Live probing is the default; `--offline` skips it. |
+| `clio-coder paths [--json]` | Print the resolved config, data, state, and cache directories. |
+| `clio-coder auth list` | Show known auth entries. |
+| `clio-coder auth status [target-or-runtime]` | Inspect auth state. |
+| `clio-coder auth login [target-or-runtime] [--api-key <value>]` | Add credentials through the supported flow. |
+| `clio-coder auth logout [target-or-runtime]` | Remove stored credentials. |
+| `clio-coder doctor [--fix] [--json]` | Diagnose state; with `--fix`, create missing structure and templates, repair credential permissions, and refresh install metadata. Settings remain strict and are not migrated. |
+| `clio-coder reset [--state\|--data\|--cache\|--auth\|--config\|--all] [--dry-run] [--force]` | Reset selected Clio Coder state. `--state` is the default level. |
+| `clio-coder uninstall [--dry-run] [--remove-binary] [--force]` | Remove Clio Coder state and print uninstall guidance. |
+| `clio-coder upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations]` | Refresh state metadata, apply migrations, and update npm installs when applicable. |
+| `clio-coder agents [--json] [--all]` | List discovered agent specs. |
+| `clio-coder fleet list\|run\|status` | List fleet contracts, run a contract, or show dispatch state. |
+| `clio-coder dev components [list] [--json]` | List behavior-affecting harness components. |
+| `clio-coder dev components snapshot --out <path>` | Write a component snapshot JSON file. |
+| `clio-coder dev components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
+| `clio-coder evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
+| `clio-coder eval validate\|run\|report\|compare\|gate` | Validate, run, report, compare, and gate local evaluation suites (Suite v2). |
+| `clio-coder memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
+| `clio-coder trace runs [--db PATH] [--limit N]` | List runs recorded in the durable trace mirror beside the ledger. |
+| `clio-coder trace phases <runId> [--db PATH]` | Show one run's recorded phases. |
+| `clio-coder trace tail <runId> [--follow] [--db PATH]` | Tail one run's recorded events; `--follow` streams as they land. |
+| `clio-coder trace procs <runId> [--db PATH]` | Show the processes one run spawned. |
+| `clio-coder trace sql <SELECT query> [--db PATH]` | Run one read-only SELECT against the mirror. Only SELECT is accepted. |
+| `clio-coder trace ui [--db PATH] [--port N]` | Serve the localhost-only waterfall viewer. The viewer is not part of the published package. |
+| `clio-coder dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
+| `clio-coder extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. |
+| `clio-coder skills list\|search\|inspect\|validate\|install\|update\|sync\|eval` | Manage discovered skills, Clio-native skills, and local marketplace installs. |
+| `clio-coder docs [topic] [--no-open]` | Serve bundled HTML docs on 127.0.0.1. |
+| `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
+| `clio-coder dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
+| `clio-coder dev share inspect <path> [--json]` | Inspect a share archive without importing it. |
+| `clio-coder context` | Show project context status, preload class, codewiki freshness, and the codewiki digest when present. |
+| `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codewiki.json`, and `.clio-coder/state.json`. |
+| `clio-coder context refresh [--wiki]` | Rebuild the codewiki and state without touching `CLIO-CODER.md`; with `--wiki`, update an existing Markdown wiki. |
+| `clio-coder context wiki [--update\|--status]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
+| `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
+| `clio-coder context index [--json]` | Build the structural codewiki index without model calls; writes `.clio-coder/codewiki.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
 
 ## Headless Run Flags
 
@@ -100,17 +100,17 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 
 ### Headless Session Continuity
 
-A headless turn (`clio run`) starts a fresh session unless `--session <id>` or `--continue` specifies a session to append to.
+A headless turn (`clio-coder run`) starts a fresh session unless `--session <id>` or `--continue` specifies a session to append to.
 - `--session <id>` appends the turn to the session with id `<id>`.
 - `--continue` appends the turn to the most recent session recorded for the current working directory.
 - `--session` and `--continue` are mutually exclusive. Specifying both causes the invocation to fail with exit code 2 before execution.
 - Session continuity options apply strictly to main-agent execution. They are non-applicable to `--agent` fleet dispatches because dispatched agents execute in isolated worker processes with independent transcripts; specifying session flags alongside `--agent` exits with code 2.
 - A named session that cannot be resumed (such as an unknown session ID or unreadable history) fails the run with exit code 2 before any model call is initiated.
-- The session ID is discoverable via the `session` event when running under `--json` mode and on stderr via the `clio run: session <id>` line in text mode. Standard output remains reserved for the assistant answer alone.
+- The session ID is discoverable via the `session` event when running under `--json` mode and on stderr via the `clio-coder run: session <id>` line in text mode. Standard output remains reserved for the assistant answer alone.
 
 ### JSON Event Streaming and Wire Projection Promise
 
-When `--json` or `--json-events <mode>` (`full` | `terminal`) is passed, `clio run` streams structured JSONL events.
+When `--json` or `--json-events <mode>` (`full` | `terminal`) is passed, `clio-coder run` streams structured JSONL events.
 - **Wire Projection Promise:** Each piece of turn content crosses the wire exactly once.
 - Intermediate `message_update` events are dropped to prevent quadratic snapshot duplication over stdout.
 - `text_delta` and `thinking_delta` events stream incremental text deltas rather than accumulating message snapshots.
@@ -120,7 +120,7 @@ When `--json` or `--json-events <mode>` (`full` | `terminal`) is passed, `clio r
 Example:
 
 ```bash
-clio run \
+clio-coder run \
   "Find the test command and summarize the project structure." \
   --target local-lmstudio \
   --model your-model-id
@@ -163,12 +163,12 @@ The registry table below lists the available interactive slash commands. The "Al
 
 `/context` with no arguments opens the context-window ledger overlay. The
 subcommands own the durable project-context noun: `compact` summarizes older
-turns in the session window, `init` bootstraps or updates `CLIO.md` and the
-codewiki, `refresh` re-indexes the codewiki and refreshes `.clio/state.json`
-without touching `CLIO.md`, and `reset` deletes accumulated
-context artifacts (`.clio/codewiki.json`, `.clio/state.json`,
-`.clio/handoffs/`, `.clio/proposals/`). Its interactive choice preserves or
-deletes `CLIO.md`; cancellation makes no changes. Session reset stays `/new`;
+turns in the session window, `init` bootstraps or updates `CLIO-CODER.md` and the
+codewiki, `refresh` re-indexes the codewiki and refreshes `.clio-coder/state.json`
+without touching `CLIO-CODER.md`, and `reset` deletes accumulated
+context artifacts (`.clio-coder/codewiki.json`, `.clio-coder/state.json`,
+`.clio-coder/handoffs/`, `.clio-coder/proposals/`). Its interactive choice preserves or
+deletes `CLIO-CODER.md`; cancellation makes no changes. Session reset stays `/new`;
 there is deliberately no `/context clear`. The spellings `/context-init`,
 `/context-clear`, and `/context-view` are gone and are not aliased to anything.
 `/compact` is an alias for `/context compact` and carries the same optional
@@ -307,19 +307,19 @@ Fleet dispatch runs focused agent recipes through configured targets. The final 
 | `scout` | `explore` / `shadow` | Read-only repository exploration, symbol mapping, and context assembly. |
 | `researcher` | `research` / `shadow` | Documentation, literature, and web-grounded investigation. |
 | `provenance` | `operations` / `shadow` | Reading evidence files, receipts, diffs, and telemetry for handoffs. |
-| `context-bootstrap` | `internal` / `internal` | Bootstrap agent behind `clio context init` that inspects the repository and returns `CLIO.md`. |
+| `context-bootstrap` | `internal` / `internal` | Bootstrap agent behind `clio-coder context init` that inspects the repository and returns `CLIO-CODER.md`. |
 
 Examples:
 
 ```bash
-clio run --agent coder "Find the main build, test, and lint commands."
-clio run --agent architect "Plan a minimal change to add JSON output to the CLI."
-clio run --agent verifier "Run tests and confirm the build passes."
+clio-coder run --agent coder "Find the main build, test, and lint commands."
+clio-coder run --agent architect "Plan a minimal change to add JSON output to the CLI."
+clio-coder run --agent verifier "Run tests and confirm the build passes."
 ```
 
 Shadow agents (`scout`, `researcher`, `provenance`) are internal orchestration
-helpers. They appear in `clio agents --all` and the main prompt catalog, but
-user-origin `/run` and `clio run --agent` requests are rejected for them.
+helpers. They appear in `clio-coder agents --all` and the main prompt catalog, but
+user-origin `/run` and `clio-coder run --agent` requests are rejected for them.
 For broad repository reconnaissance, the operating contract and Scout catalog
 description steer the model to author a Scout dispatch. The chat harness does
 not mechanically route the request. A threshold nudge advises Scout delegation
@@ -336,7 +336,7 @@ to execute through the existing Pi-backed worker path, the sanctioned Claude Cod
 | --- | --- |
 | `npm run ci` | Local and GitHub PR gate: typecheck, Biome check, skills pin check, build, and deterministic tests. |
 | `npm run ci:release` | Maintainer release gate: `npm run ci`, then the `check-release` dist and packaging audit. |
-| `npm run test:live` | Local manual live-model smoke. Requires `CLIO_LIVE_SMOKE=1` and a configured real model target. Add `-- --delegation` for `opencode` and `copilot` ACP delegation checks. |
+| `npm run test:live` | Local manual live-model smoke. Requires `CLIO_CODER_LIVE_SMOKE=1` and a configured real model target. Add `-- --delegation` for `opencode` and `copilot` ACP delegation checks. |
 | `npm run typecheck` | Strict TypeScript pass. |
 | `npm run lint` | Biome checks; warnings are reported in the release gate output. |
 | `npm run test` | Contract, smoke, and boundary tests. |
@@ -348,11 +348,11 @@ to execute through the existing Pi-backed worker path, the sanctioned Claude Cod
 Live smoke example:
 
 ```bash
-CLIO_LIVE_SMOKE=1 \
-CLIO_LIVE_TARGET=openai-compat \
-CLIO_LIVE_RUNTIME=openai-compat \
-CLIO_LIVE_MODEL=your-model \
-CLIO_LIVE_BASE_URL=http://localhost:8080/v1 \
+CLIO_CODER_LIVE_SMOKE=1 \
+CLIO_CODER_LIVE_TARGET=openai-compat \
+CLIO_CODER_LIVE_RUNTIME=openai-compat \
+CLIO_CODER_LIVE_MODEL=your-model \
+CLIO_CODER_LIVE_BASE_URL=http://localhost:8080/v1 \
 npm run test:live
 ```
 
@@ -360,7 +360,7 @@ Delegation validation is a separate opt-in flag because it depends on local
 `opencode` and `copilot` commands:
 
 ```bash
-CLIO_LIVE_SMOKE=1 npm run test:live -- --delegation
+CLIO_CODER_LIVE_SMOKE=1 npm run test:live -- --delegation
 ```
 
 Live checks cost tokens or local GPU time and are not deterministic CI. They
@@ -370,30 +370,30 @@ credentials are available.
 
 ## Environment Variables
 
-Clio Coder's behavior can be customized or overridden using various environment variables (such as `CLIO_RIGOR`, `CLIO_HOME`, and guardrail overrides). For the complete, detailed, and maintained inventory of environment variables, please refer to [environment-variables.md](environment-variables.md).
+Clio Coder's behavior can be customized or overridden using various environment variables (such as `CLIO_CODER_RIGOR`, `CLIO_CODER_HOME`, and guardrail overrides). For the complete, detailed, and maintained inventory of environment variables, please refer to [environment-variables.md](environment-variables.md).
 
 ---
 
 ## Project Context
 
-Clio uses the nearest checked-in `CLIO.md` as the canonical project guide. Run
-`/context init` in the TUI or `clio context init` from the shell to create or
+Clio uses the nearest checked-in `CLIO-CODER.md` as the canonical project guide. Run
+`/context init` in the TUI or `clio-coder context init` from the shell to create or
 refresh it. During adoption, Clio can fold useful content from supported agent
-instruction files into `CLIO.md` with provenance.
+instruction files into `CLIO-CODER.md` with provenance.
 
 To skip project context for one invocation:
 
 ```bash
-clio --no-context-files
-clio -nc run --agent scout "..."
+clio-coder --no-context-files
+clio-coder -nc run --agent scout "..."
 ```
 
 ### Codewiki index
 
-`clio context index` builds the structural codewiki without any model calls. It
-writes `.clio/codewiki.json` plus
-`.clio/state.json`, records `codewikiVersion`, and prints coverage plus a
-structural hash. The same builder is used by `clio context init`, `clio context
+`clio-coder context index` builds the structural codewiki without any model calls. It
+writes `.clio-coder/codewiki.json` plus
+`.clio-coder/state.json`, records `codewikiVersion`, and prints coverage plus a
+structural hash. The same builder is used by `clio-coder context init`, `clio-coder context
 refresh`, session freshness checks, tool-demand backfill, and in-session
 incremental updates.
 
@@ -406,12 +406,12 @@ Java, Ruby, and C#, with per-file regex fallback where a regex extractor exists.
 
 ### Markdown wiki commands
 
-`clio context wiki` generates the optional agent-authored wiki under
-`.clio/wiki/` by dispatching the `wiki-writer` agent through the configured
+`clio-coder context wiki` generates the optional agent-authored wiki under
+`.clio-coder/wiki/` by dispatching the `wiki-writer` agent through the configured
 model target. It makes one planning dispatch, which revises the page plan the
 codewiki index derived, then one dispatch per page. `quickstart.md` and every
 directory `index.md` are generated deterministically from the pages' front
-matter after the run, so no dispatch writes them. `.clio/wiki/meta.json` records
+matter after the run, so no dispatch writes them. `.clio-coder/wiki/meta.json` records
 the page list, model label, content hash, git head, indexed source-tree hash,
 and the plan.
 
@@ -419,29 +419,29 @@ Each page dispatch is bounded on its own wall clock, and the run is bounded
 between pages. Neither bound loses work: a page that fails or times out is
 recorded as still owed and the run continues to the next one, and every finished
 page is assembled and promoted. When `generation.pagesWritten` is below
-`generation.pagesPlanned`, run `clio context wiki --update` to finish the rest;
+`generation.pagesPlanned`, run `clio-coder context wiki --update` to finish the rest;
 it resumes from the plan rather than starting over.
 
-`clio context wiki --update` requests update mode explicitly. It rewrites the
+`clio-coder context wiki --update` requests update mode explicitly. It rewrites the
 pages whose front-matter `sources` git reports as changed since the recorded
 wiki `gitHead`, and leaves the rest alone.
-`clio context wiki --status` is read-only: it prints whether wiki metadata is
+`clio-coder context wiki --status` is read-only: it prints whether wiki metadata is
 present, page count, `updatedAt`, recorded `gitHead`, whether that head differs
 from current `HEAD`, and how many planned pages remain unwritten. It dispatches
 nothing and spends no model tokens.
 
-`clio context refresh` rebuilds only the structural codewiki and state. It does
-not run a model and does not touch `CLIO.md` or `.clio/wiki/`. If a wiki exists
+`clio-coder context refresh` rebuilds only the structural codewiki and state. It does
+not run a model and does not touch `CLIO-CODER.md` or `.clio-coder/wiki/`. If a wiki exists
 and its recorded git head is stale, the command prints the hint:
 
 ```text
-wiki is stale; run clio context refresh --wiki or clio context wiki --update
+wiki is stale; run clio-coder context refresh --wiki or clio-coder context wiki --update
 ```
 
-`clio context refresh --wiki` is the explicit model-spend path for refresh. It
+`clio-coder context refresh --wiki` is the explicit model-spend path for refresh. It
 first rebuilds the structural codewiki, then updates an existing wiki when
-`.clio/wiki/meta.json` exists. If no wiki metadata exists, the flag is accepted
-and no wiki model call is made; use `clio context wiki` to create the first
+`.clio-coder/wiki/meta.json` exists. If no wiki metadata exists, the flag is accepted
+and no wiki model call is made; use `clio-coder context wiki` to create the first
 wiki.
 
 ### code_nav modes
@@ -529,26 +529,26 @@ All TUI overlays fluidly adapt to narrow terminals down to 40 columns:
 
 | Problem | Try this |
 | --- | --- |
-| `clio: command not found` | Run `npm run install:local`, then `hash -r`; confirm `${CLIO_BIN_DIR:-$HOME/.local/bin}` is on `PATH`. |
-| No model target is available | Run `clio configure`, then `clio targets --probe`. |
+| `clio-coder: command not found` | Run `npm run install:local`, then `hash -r`; confirm `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}` is on `PATH`. |
+| No model target is available | Run `clio-coder configure`, then `clio-coder targets --probe`. |
 | Local model does not respond | Confirm the runtime is running and the target URL is correct. |
-| Cloud model auth fails | Check `clio auth status <target>` and verify the relevant API key or login flow. |
+| Cloud model auth fails | Check `clio-coder auth status <target>` and verify the relevant API key or login flow. |
 | Source changes do not appear | Re-run `npm run build`; linked CLI points at `dist/`. |
 | Session replay looks incomplete | Confirm durable session entries exist for the relevant tool, bash, or display activity. |
-| Doctor reports stale state metadata | Run `clio doctor --fix`; upgrades also refresh install metadata after reinstalling. |
-| You need a clean start | Use `clio reset --state`, `--data`, `--cache`, `--auth`, `--config`, or `--all`. |
+| Doctor reports stale state metadata | Run `clio-coder doctor --fix`; upgrades also refresh install metadata after reinstalling. |
+| You need a clean start | Use `clio-coder reset --state`, `--data`, `--cache`, `--auth`, `--config`, or `--all`. |
 
-For issue reports, include `clio --version`, `node --version`, `clio doctor`,
-`clio targets`, the command you ran, the target/model, expected behavior, and
+For issue reports, include `clio-coder --version`, `node --version`, `clio-coder doctor`,
+`clio-coder targets`, the command you ran, the target/model, expected behavior, and
 actual behavior. Redact secrets and private repository content.
 
 > [!NOTE]
-> `clio dev <command>` groups the instruments that answer a question about the
-> harness rather than about your own work. Bare `clio dev` or `clio dev --help` prints
+> `clio-coder dev <command>` groups the instruments that answer a question about the
+> harness rather than about your own work. Bare `clio-coder dev` or `clio-coder dev --help` prints
 > developer instrument help and exits with code 0. Nothing under it is deprecated: every
 > name still resolves without the prefix, so scripts and agents driving Clio over
-> bash keep working unchanged. The prefix exists so `clio --help` stays the set of
-> commands a person needs to read; `clio --help --all` prints both lists. Across all
+> bash keep working unchanged. The prefix exists so `clio-coder --help` stays the set of
+> commands a person needs to read; `clio-coder --help --all` prints both lists. Across all
 > CLI subcommands (`targets use/remove/rename/profile/convert`, `context refresh`,
 > `fleet list/run/status/drain/resume`, `auth login`), passing `--help` prints
 > usage instructions and exits with code 0.

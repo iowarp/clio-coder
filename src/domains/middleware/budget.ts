@@ -107,15 +107,15 @@ function hookEnvSuffix(hook: MiddlewareHook): string {
 
 /**
  * Resolve per-phase budgets from the environment. Precedence per phase:
- * `CLIO_HOOK_BUDGET_<PHASE>_MS` > `CLIO_HOOK_BUDGET_MS` (global) > built-in
+ * `CLIO_CODER_HOOK_BUDGET_<PHASE>_MS` > `CLIO_CODER_HOOK_BUDGET_MS` (global) > built-in
  * default. Invalid or non-positive values are ignored so a typo never zeroes a
  * budget. Lets an operator on a slow disk loosen budgets without a rebuild.
  */
 export function resolveHookBudgetsFromEnv(env: NodeJS.ProcessEnv = process.env): HookBudgetMap {
-	const global = parsePositiveMs(env.CLIO_HOOK_BUDGET_MS);
+	const global = parsePositiveMs(env.CLIO_CODER_HOOK_BUDGET_MS);
 	const map = {} as HookBudgetMap;
 	for (const hook of MIDDLEWARE_HOOKS) {
-		const perPhase = parsePositiveMs(env[`CLIO_HOOK_BUDGET_${hookEnvSuffix(hook)}_MS`]);
+		const perPhase = parsePositiveMs(env[`CLIO_CODER_HOOK_BUDGET_${hookEnvSuffix(hook)}_MS`]);
 		map[hook] = perPhase ?? global ?? DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS[hook];
 	}
 	return map;
@@ -128,9 +128,9 @@ export function resolveHookBudgetTunablesFromEnv(env: NodeJS.ProcessEnv = proces
 	threshold: number;
 } {
 	return {
-		warmupCalls: parseNonNegativeInt(env.CLIO_HOOK_BUDGET_WARMUP_CALLS) ?? DEFAULT_HOOK_BUDGET_WARMUP_CALLS,
-		windowSize: parsePositiveInt(env.CLIO_HOOK_BUDGET_WINDOW) ?? DEFAULT_HOOK_BUDGET_WINDOW,
-		threshold: parsePositiveInt(env.CLIO_HOOK_BUDGET_THRESHOLD) ?? DEFAULT_HOOK_BUDGET_THRESHOLD,
+		warmupCalls: parseNonNegativeInt(env.CLIO_CODER_HOOK_BUDGET_WARMUP_CALLS) ?? DEFAULT_HOOK_BUDGET_WARMUP_CALLS,
+		windowSize: parsePositiveInt(env.CLIO_CODER_HOOK_BUDGET_WINDOW) ?? DEFAULT_HOOK_BUDGET_WINDOW,
+		threshold: parsePositiveInt(env.CLIO_CODER_HOOK_BUDGET_THRESHOLD) ?? DEFAULT_HOOK_BUDGET_THRESHOLD,
 	};
 }
 
@@ -160,7 +160,7 @@ export function createHookBudgetTracker(options: HookBudgetTrackerOptions = {}):
 	const windowSize = Math.max(1, options.windowSize ?? DEFAULT_HOOK_BUDGET_WINDOW);
 	// Bound the threshold by the window: overCount can never exceed the number of
 	// samples the window holds, so a threshold above windowSize would silently
-	// disable steady-state warnings forever (e.g. CLIO_HOOK_BUDGET_WINDOW=2 with
+	// disable steady-state warnings forever (e.g. CLIO_CODER_HOOK_BUDGET_WINDOW=2 with
 	// the default threshold of 3). Clamp so the signal is always reachable.
 	const threshold = Math.min(windowSize, Math.max(1, options.threshold ?? DEFAULT_HOOK_BUDGET_THRESHOLD));
 	const states = new Map<string, KeyState>();

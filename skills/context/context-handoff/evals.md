@@ -26,7 +26,7 @@ printf 'const BACKOFF_MS = 200;\nfunction fetchRetry(url) {\n  return { url, bac
 Expected:
 - Runs `date +%F`; uses the real date, never a fabricated one.
 - Produces the template sections, including the exact pick-up point for the WIP.
-- Writes to `.clio/handoffs/handoff-<date>.md` (via `scripts/new-handoff.sh`
+- Writes to `.clio-coder/handoffs/handoff-<date>.md` (via `scripts/new-handoff.sh`
   when available, else directly).
 - Confirms the path and names `context-prime` as the next step.
 - Copies a supplied `clio-task-memory` fence verbatim under `## Task memory
@@ -53,5 +53,5 @@ Expected:
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS on the re-run with the bare-number scenario form (harness exit 0, all bullets pass, 2026-08-13 12:17 CDT).

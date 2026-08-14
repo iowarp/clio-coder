@@ -19,7 +19,7 @@ import type { TargetDescriptor } from "../../types/target-descriptor.js";
  * worker runner cannot mediate individual agy tool calls the way the Claude SDK
  * runner does. Permission gating is coarse: `--mode plan --sandbox` for
  * read-only runs and `--dangerously-skip-permissions` only under `full-auto`
- * plus the explicit `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` environment gate.
+ * plus the explicit `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1` environment gate.
  * agy's own `settings.json` still governs modes that Clio does not explicitly
  * constrain.
  */

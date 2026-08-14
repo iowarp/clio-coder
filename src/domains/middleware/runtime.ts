@@ -107,8 +107,8 @@ export function writeMiddlewareDiagnosticToStderr(diagnostic: MiddlewareDiagnost
 		return;
 	}
 	// A single post-warmup spike is telemetry, not operator-facing noise: only
-	// consistent slowness prints, unless CLIO_HOOK_BUDGET_DEBUG=1 asks for all.
-	if (!diagnostic.steadyStateWarn && process.env.CLIO_HOOK_BUDGET_DEBUG !== "1") return;
+	// consistent slowness prints, unless CLIO_CODER_HOOK_BUDGET_DEBUG=1 asks for all.
+	if (!diagnostic.steadyStateWarn && process.env.CLIO_CODER_HOOK_BUDGET_DEBUG !== "1") return;
 	const stats = diagnostic.stats;
 	const trend =
 		stats.window > 0

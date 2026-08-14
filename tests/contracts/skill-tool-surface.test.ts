@@ -120,11 +120,11 @@ describe("contracts/skill-tool-surface registry enforcement", () => {
 	beforeEach(() => {
 		scratch = mkdtempSync(join(tmpdir(), "clio-skill-surface-"));
 		process.env.HOME = scratch;
-		process.env.CLIO_HOME = scratch;
-		process.env.CLIO_DATA_DIR = join(scratch, "data");
-		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
-		process.env.CLIO_STATE_DIR = join(scratch, "state");
-		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
+		process.env.CLIO_CODER_HOME = scratch;
+		process.env.CLIO_CODER_DATA_DIR = join(scratch, "data");
+		process.env.CLIO_CODER_CONFIG_DIR = join(scratch, "config");
+		process.env.CLIO_CODER_STATE_DIR = join(scratch, "state");
+		process.env.CLIO_CODER_CACHE_DIR = join(scratch, "cache");
 		resetXdgCache();
 	});
 
@@ -141,7 +141,7 @@ describe("contracts/skill-tool-surface registry enforcement", () => {
 
 	it("blocks out-of-surface calls after context loads a narrowing skill", async () => {
 		const cwd = join(scratch, "project");
-		writeSkillDir(join(cwd, ".clio", "skills"), "narrow", [
+		writeSkillDir(join(cwd, ".clio-coder", "skills"), "narrow", [
 			'name: "narrow"',
 			'description: "Narrowing fixture skill."',
 			"allowed-tools:",

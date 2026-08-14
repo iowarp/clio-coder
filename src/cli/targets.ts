@@ -21,27 +21,27 @@ import { column, terminalColumns, truncate } from "./text-layout.js";
 const HEADER: ReadonlyArray<string> = ["id", "tier", "runtime", "auth", "url", "model", "health", "caps", "notes"];
 type ProviderOutputTier = RuntimeTier | "unknown";
 
-const HELP = `clio targets
+const HELP = `clio-coder targets
 
 List and manage configured model targets.
 
 Usage:
-  clio targets [--json] [--probe] [--target <id>]
-  clio targets add [configure flags]
-  clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
+  clio-coder targets [--json] [--probe] [--target <id>]
+  clio-coder targets add [configure flags]
+  clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
                        [--fleet-target <id>] [--fleet-model <id>]
-  clio targets fleet [--json]
-  clio targets profile list [--json]
-  clio targets profile set <name> <id> [--model <id>] [--thinking <level>]
-  clio targets profile <name> <id> [--model <id>] [--thinking <level>]
-  clio targets profile remove <name> [--force]
-  clio targets profile rename <old> <new>
-  clio targets profile bind <agentId> <profileName>
-  clio targets profile unbind <agentId>
-  clio targets profile bindings [--json]
-  clio targets convert <id> --runtime <runtimeId>
-  clio targets remove <id>
-  clio targets rename <old> <new>
+  clio-coder targets fleet [--json]
+  clio-coder targets profile list [--json]
+  clio-coder targets profile set <name> <id> [--model <id>] [--thinking <level>]
+  clio-coder targets profile <name> <id> [--model <id>] [--thinking <level>]
+  clio-coder targets profile remove <name> [--force]
+  clio-coder targets profile rename <old> <new>
+  clio-coder targets profile bind <agentId> <profileName>
+  clio-coder targets profile unbind <agentId>
+  clio-coder targets profile bindings [--json]
+  clio-coder targets convert <id> --runtime <runtimeId>
+  clio-coder targets remove <id>
+  clio-coder targets rename <old> <new>
 
 Aliases:
   --worker-target and --worker-model are accepted for --fleet-target and
@@ -49,7 +49,7 @@ Aliases:
 `;
 
 const USE_USAGE =
-	"clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]";
+	"clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]";
 
 /**
  * `--help` anywhere on a targets subcommand is a question, not an argument.
@@ -207,7 +207,9 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 		});
 		process.stdout.write(`${JSON.stringify({ targets: rows }, null, 2)}\n`);
 	} else if (filtered.length === 0) {
-		process.stdout.write("no targets configured. run `clio configure` or `clio targets add` to register one.\n");
+		process.stdout.write(
+			"no targets configured. run `clio-coder configure` or `clio-coder targets add` to register one.\n",
+		);
 	} else {
 		renderTable(providers, filtered);
 	}
@@ -420,7 +422,7 @@ function resolveDispatchProfileTarget(
 
 function runProfileSet(
 	args: ReadonlyArray<string>,
-	usage = "clio targets profile <name> <id> [--model <id>] [--thinking <level>]",
+	usage = "clio-coder targets profile <name> <id> [--model <id>] [--thinking <level>]",
 ): number {
 	if (wantsHelp(args)) return printUsage(usage);
 	let parsed: WorkerProfileArgs | null;
@@ -454,7 +456,7 @@ function runProfileSet(
 }
 
 function runProfileRemove(args: ReadonlyArray<string>): number {
-	if (wantsHelp(args)) return printUsage("clio targets profile remove <name> [--force]");
+	if (wantsHelp(args)) return printUsage("clio-coder targets profile remove <name> [--force]");
 	let parsed: ProfileRemoveArgs | null;
 	try {
 		parsed = parseProfileRemoveArgs(args);
@@ -463,7 +465,7 @@ function runProfileRemove(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	if (!parsed) {
-		printError("usage: clio targets profile remove <name> [--force]");
+		printError("usage: clio-coder targets profile remove <name> [--force]");
 		return 2;
 	}
 	ensureClioState();
@@ -498,7 +500,7 @@ function runProfileRemove(args: ReadonlyArray<string>): number {
 }
 
 function runProfileRename(args: ReadonlyArray<string>): number {
-	if (wantsHelp(args)) return printUsage("clio targets profile rename <old> <new>");
+	if (wantsHelp(args)) return printUsage("clio-coder targets profile rename <old> <new>");
 	let parsed: ProfileRenameArgs | null;
 	try {
 		parsed = parseProfileRenameArgs(args);
@@ -507,7 +509,7 @@ function runProfileRename(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	if (!parsed) {
-		printError("usage: clio targets profile rename <old> <new>");
+		printError("usage: clio-coder targets profile rename <old> <new>");
 		return 2;
 	}
 	if (parsed.oldName === parsed.newName) {
@@ -543,7 +545,7 @@ function runProfileRename(args: ReadonlyArray<string>): number {
 }
 
 function runProfileBind(args: ReadonlyArray<string>): number {
-	if (wantsHelp(args)) return printUsage("clio targets profile bind <agentId> <profileName>");
+	if (wantsHelp(args)) return printUsage("clio-coder targets profile bind <agentId> <profileName>");
 	let parsed: ProfileBindArgs | null;
 	try {
 		parsed = parseProfileBindArgs(args);
@@ -552,7 +554,7 @@ function runProfileBind(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	if (!parsed) {
-		printError("usage: clio targets profile bind <agentId> <profileName>");
+		printError("usage: clio-coder targets profile bind <agentId> <profileName>");
 		return 2;
 	}
 	ensureClioState();
@@ -576,10 +578,10 @@ function runProfileBind(args: ReadonlyArray<string>): number {
 }
 
 function runProfileUnbind(args: ReadonlyArray<string>): number {
-	if (wantsHelp(args)) return printUsage("clio targets profile unbind <agentId>");
+	if (wantsHelp(args)) return printUsage("clio-coder targets profile unbind <agentId>");
 	let parsed: string;
 	try {
-		if (args.length !== 1) throw new Error("usage: clio targets profile unbind <agentId>");
+		if (args.length !== 1) throw new Error("usage: clio-coder targets profile unbind <agentId>");
 		parsed = requireTrimmed(args[0], "agent id");
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
@@ -606,7 +608,7 @@ function runProfileBindings(args: ReadonlyArray<string>): number {
 			continue;
 		}
 		if (arg === "--help" || arg === "-h") {
-			process.stdout.write("usage: clio targets profile bindings [--json]\n");
+			process.stdout.write("usage: clio-coder targets profile bindings [--json]\n");
 			return 0;
 		}
 		printError(`unknown targets profile bindings argument: ${arg}`);
@@ -632,7 +634,7 @@ function runProfileBindings(args: ReadonlyArray<string>): number {
 	}
 	if (rows.length === 0) {
 		process.stdout.write(
-			"no agent profile bindings configured. run `clio targets profile bind <agentId> <profile>` to add one.\n",
+			"no agent profile bindings configured. run `clio-coder targets profile bind <agentId> <profile>` to add one.\n",
 		);
 		return 0;
 	}
@@ -650,13 +652,16 @@ function runProfileBindings(args: ReadonlyArray<string>): number {
 function runProfile(args: ReadonlyArray<string>): number {
 	const subcommand = args[0];
 	// Ambiguity: a profile literally named like a subcommand must use
-	// `clio targets profile set <name> ...`.
+	// `clio-coder targets profile set <name> ...`.
 	if (subcommand && PROFILE_SUBCOMMANDS.has(subcommand)) {
 		switch (subcommand) {
 			case "list":
-				return runFleet(args.slice(1), "clio targets profile list [--json]");
+				return runFleet(args.slice(1), "clio-coder targets profile list [--json]");
 			case "set":
-				return runProfileSet(args.slice(1), "clio targets profile set <name> <id> [--model <id>] [--thinking <level>]");
+				return runProfileSet(
+					args.slice(1),
+					"clio-coder targets profile set <name> <id> [--model <id>] [--thinking <level>]",
+				);
 			case "remove":
 				return runProfileRemove(args.slice(1));
 			case "rename":
@@ -672,7 +677,7 @@ function runProfile(args: ReadonlyArray<string>): number {
 	return runProfileSet(args);
 }
 
-function runFleet(args: ReadonlyArray<string>, usage = "clio targets fleet [--json]"): number {
+function runFleet(args: ReadonlyArray<string>, usage = "clio-coder targets fleet [--json]"): number {
 	let json = false;
 	for (const arg of args) {
 		if (arg === "--json") {
@@ -704,7 +709,7 @@ function runFleet(args: ReadonlyArray<string>, usage = "clio targets fleet [--js
 		return 0;
 	}
 	if (rows.length === 0) {
-		process.stdout.write("no fleet profiles configured. run `clio targets profile <name> <id>` to add one.\n");
+		process.stdout.write("no fleet profiles configured. run `clio-coder targets profile <name> <id>` to add one.\n");
 		return 0;
 	}
 	process.stdout.write(
@@ -719,9 +724,9 @@ function runFleet(args: ReadonlyArray<string>, usage = "clio targets fleet [--js
 }
 
 function runRemove(args: ReadonlyArray<string>): number {
-	if (wantsHelp(args)) return printUsage("clio targets remove <id>");
+	if (wantsHelp(args)) return printUsage("clio-coder targets remove <id>");
 	if (args.length !== 1 || !args[0]) {
-		printError("usage: clio targets remove <id>");
+		printError("usage: clio-coder targets remove <id>");
 		return 2;
 	}
 	ensureClioState();
@@ -729,16 +734,16 @@ function runRemove(args: ReadonlyArray<string>): number {
 }
 
 function runRename(args: ReadonlyArray<string>): number {
-	if (wantsHelp(args)) return printUsage("clio targets rename <old> <new>");
+	if (wantsHelp(args)) return printUsage("clio-coder targets rename <old> <new>");
 	if (args.length !== 2 || !args[0] || !args[1]) {
-		printError("usage: clio targets rename <old> <new>");
+		printError("usage: clio-coder targets rename <old> <new>");
 		return 2;
 	}
 	ensureClioState();
 	return runTargetRename(args[0], args[1]);
 }
 
-const CONVERT_USAGE = "clio targets convert <id> --runtime <runtimeId>";
+const CONVERT_USAGE = "clio-coder targets convert <id> --runtime <runtimeId>";
 
 function runConvert(args: ReadonlyArray<string>): number {
 	if (wantsHelp(args)) return printUsage(CONVERT_USAGE);
@@ -772,7 +777,7 @@ function runConvert(args: ReadonlyArray<string>): number {
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 	const runtime = registry.get(runtimeId);
 	if (!runtime) {
-		printError(`unknown runtime id: ${runtimeId} (run \`clio configure --list\` to see registered runtimes)`);
+		printError(`unknown runtime id: ${runtimeId} (run \`clio-coder configure --list\` to see registered runtimes)`);
 		return 2;
 	}
 	const settings = readSettings();
@@ -831,7 +836,7 @@ const TABLE_GAP = 1;
  * The order the columns give room back in, each down to the floor beside it.
  *
  * `id` and `caps` are absent on purpose. A cut id is not an id: it cannot be
- * passed back to `clio targets use`, so shortening it turns the column into
+ * passed back to `clio-coder targets use`, so shortening it turns the column into
  * something that reads like an identifier and is not one. The badges are one
  * letter per capability and mean nothing partially printed.
  *

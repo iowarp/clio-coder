@@ -1217,7 +1217,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					}
 				}
 				const assistant = ensureAssistant();
-				// Compact resource reads (SKILL.md, CLIO.md, AGENTS.md, docs/) stay
+				// Compact resource reads (SKILL.md, CLIO-CODER.md, AGENTS.md, docs/) stay
 				// collapsed to one labeled line until explicitly expanded.
 				const expanded = assistant.pending === false && classifyResourceRead(event.toolName, event.args) === null;
 				assistant.pending = true;

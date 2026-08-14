@@ -248,7 +248,7 @@ describe("contracts/context compaction cumulative replay", () => {
 					...entryBase("05", "04"),
 					activation: {
 						name: "active-skill",
-						filePath: "/repo/.clio/skills/active-skill/SKILL.md",
+						filePath: "/repo/.clio-coder/skills/active-skill/SKILL.md",
 						hash: "a".repeat(64),
 						source: "clio",
 						triggeredBy: "slash-command",

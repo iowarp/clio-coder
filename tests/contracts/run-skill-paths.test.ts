@@ -22,7 +22,7 @@ function scratchSkillDir(frontmatter: string[]): string {
 	return dir;
 }
 
-describe("clio run explicit --skill path preflight", () => {
+describe("clio-coder run explicit --skill path preflight", () => {
 	it("reports a missing path with the resolved location", () => {
 		const errors = explicitSkillPathErrors(["/no/such/skill-path"]);
 		strictEqual(errors.length, 1);
@@ -42,7 +42,7 @@ describe("clio run explicit --skill path preflight", () => {
 		strictEqual(explicitSkillPathErrors([dir]).length, 0);
 	});
 
-	it("fails clio run with exit 2 and a diagnostic before any model invocation (BT04-2)", async () => {
+	it("fails clio-coder run with exit 2 and a diagnostic before any model invocation (BT04-2)", async () => {
 		const stderrChunks: string[] = [];
 		const originalWrite = process.stderr.write.bind(process.stderr);
 		process.stderr.write = ((chunk: string | Uint8Array) => {
@@ -58,7 +58,7 @@ describe("clio run explicit --skill path preflight", () => {
 			process.stderr.write = originalWrite;
 		}
 		const stderr = stderrChunks.join("");
-		ok(stderr.includes("clio run: --skill"), `diagnostic uses the clio run voice: ${stderr}`);
+		ok(stderr.includes("clio-coder run: --skill"), `diagnostic uses the clio-coder run voice: ${stderr}`);
 		ok(stderr.includes("/no/such/skill-path"), "diagnostic names the missing path");
 	});
 });

@@ -46,12 +46,12 @@ function overlayHarness(): {
 }
 
 describe("contracts/context-reset overlay", () => {
-	it("offers exactly preserve CLIO.md, delete CLIO.md, and cancel", () => {
+	it("offers exactly preserve CLIO-CODER.md, delete CLIO-CODER.md, and cancel", () => {
 		deepStrictEqual(
 			buildContextResetItems().map((item) => ({ value: item.value, label: item.label })),
 			[
-				{ value: "preserve-clio-md", label: "Preserve CLIO.md" },
-				{ value: "delete-clio-md", label: "Delete CLIO.md" },
+				{ value: "preserve-clio-md", label: "Preserve CLIO-CODER.md" },
+				{ value: "delete-clio-md", label: "Delete CLIO-CODER.md" },
 				{ value: "cancel", label: "Cancel" },
 			],
 		);
@@ -108,8 +108,8 @@ describe("contracts/context-reset overlay", () => {
 			for (const line of lines) {
 				strictEqual(visibleWidth(line), width, `${width}-column row must neither wrap nor overflow: ${stripAnsi(line)}`);
 			}
-			ok(clean.some((line) => line.includes("Preserve CLIO.md")));
-			ok(clean.some((line) => line.includes("Delete CLIO.md")));
+			ok(clean.some((line) => line.includes("Preserve CLIO-CODER.md")));
+			ok(clean.some((line) => line.includes("Delete CLIO-CODER.md")));
 			ok(clean.some((line) => line.includes("Cancel")));
 			strictEqual(clean.filter((line) => line.includes("[Enter] select")).length, 1);
 			strictEqual(clean.filter((line) => line.includes("[Esc] close")).length, 1);

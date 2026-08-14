@@ -45,10 +45,10 @@ export const BOOTSTRAP_MAX_OUTPUT_BYTES = 256 * 1024;
 const CONTEXT_BOOTSTRAP_AGENT_ID = "context-bootstrap";
 
 /**
- * Model-driven CLIO.md generation. Dispatches Clio's internal
+ * Model-driven CLIO-CODER.md generation. Dispatches Clio's internal
  * `context-bootstrap` agent with a prompt grounded in the codewiki structure,
  * then validates the structured JSON the model returns. Shared by
- * `clio context init` and the interactive `/context init` command.
+ * `clio-coder context init` and the interactive `/context init` command.
  */
 
 export interface ModelBootstrapGenerateOptions {
@@ -68,7 +68,7 @@ export interface BootstrapRoute {
  * The bootstrap agent's route, resolved with the same precedence every other
  * internal dispatch uses: an explicit profile binding first, then
  * `workers.default`. A fresh install with a perfectly good `workers.default`
- * must still produce a model-driven CLIO.md, so an absent binding is an absent
+ * must still produce a model-driven CLIO-CODER.md, so an absent binding is an absent
  * opinion rather than a refusal. A dangling binding still throws, because
  * naming a profile that does not resolve is an operator error.
  *
@@ -94,7 +94,7 @@ export function resolveBootstrapRoute(settings: Readonly<ClioSettings>): Bootstr
 		throw new Error(
 			`bootstrap has no route: workers.agentBindings.${CONTEXT_BOOTSTRAP_AGENT_ID} is unbound and ` +
 				`workers.default has no target; bind a profile with ` +
-				`'clio targets profile bind ${CONTEXT_BOOTSTRAP_AGENT_ID} <profile>' or set workers.default.target`,
+				`'clio-coder targets profile bind ${CONTEXT_BOOTSTRAP_AGENT_ID} <profile>' or set workers.default.target`,
 		);
 	}
 	return {
@@ -430,7 +430,7 @@ async function loadBootstrapDispatch(): Promise<{
 		SessionDomainModule,
 		// Same shape as the wiki writer: one internal dispatch in a process that
 		// exits with it. The SQLite mirror opens `node:sqlite` on the first
-		// dispatch event, which costs `clio context init` a module load it never
+		// dispatch event, which costs `clio-coder context init` a module load it never
 		// reads back and prints Node's ExperimentalWarning over the command's own
 		// output. Receipts and the ledger still record the run.
 		createObservabilityDomainModule({ dispatchTrace: false }),
@@ -448,7 +448,7 @@ async function loadBootstrapDispatch(): Promise<{
 
 /**
  * Wrap model-driven generation so any failure (no configured target, offline
- * endpoint, malformed output) degrades cleanly. Existing valid CLIO.md content
+ * endpoint, malformed output) degrades cleanly. Existing valid CLIO-CODER.md content
  * is preserved when possible; otherwise the deterministic heuristic is used.
  */
 export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = {}): BootstrapGenerate {
@@ -479,7 +479,7 @@ export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = 
 				status: "running",
 				message:
 					fallback.mode === "existing"
-						? "bootstrap agent unavailable; preserving existing CLIO.md"
+						? "bootstrap agent unavailable; preserving existing CLIO-CODER.md"
 						: "bootstrap agent unavailable; using heuristic bootstrap",
 				detail: error.message,
 			});

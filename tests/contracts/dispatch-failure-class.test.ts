@@ -329,8 +329,8 @@ describe("dispatch failure classification", () => {
 		qualitySettings.workers.default.model = "fallback-model";
 		const qualityRoutes: Array<{ targetId: string; model: string }> = [];
 		let qualitySpawns = 0;
-		const originalRigor = process.env.CLIO_RIGOR;
-		process.env.CLIO_RIGOR = "high";
+		const originalRigor = process.env.CLIO_CODER_RIGOR;
+		process.env.CLIO_CODER_RIGOR = "high";
 		const qualityBundle = makeDispatchBundle(dispatchStubContext({ settings: qualitySettings }), {
 			resilienceCooldownMs: 5_000,
 			spawnWorker: (spec) => {
@@ -381,8 +381,8 @@ describe("dispatch failure classification", () => {
 			deepStrictEqual(qualityRoutes, [{ targetId: "quality-target", model: "rejected-model" }]);
 			ok(qualityBundle.contract.assignments?.get(handle.runId)?.outcomeDetail?.includes("retry suppressed"));
 		} finally {
-			if (originalRigor === undefined) delete process.env.CLIO_RIGOR;
-			else process.env.CLIO_RIGOR = originalRigor;
+			if (originalRigor === undefined) delete process.env.CLIO_CODER_RIGOR;
+			else process.env.CLIO_CODER_RIGOR = originalRigor;
 			await qualityBundle.extension.stop?.();
 		}
 

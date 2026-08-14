@@ -6,7 +6,7 @@
  *
  * Storage bundles with scoped settings: a user profile at
  * `<configDir>/profile.yaml` is overridden field by field by a project
- * `.clio/profile.yaml`. Every field is a closed enum or a bounded path list, and
+ * `.clio-coder/profile.yaml`. Every field is a closed enum or a bounded path list, and
  * the rendered section is capped so the profile can never crowd out the task.
  */
 
@@ -109,7 +109,7 @@ export interface LoadOperatorProfileOptions {
 export function loadOperatorProfile(cwd: string, options: LoadOperatorProfileOptions = {}): LoadedOperatorProfile {
 	const issues: string[] = [];
 	const userPath = options.userPath ?? join(resolveClioDirs().config, "profile.yaml");
-	const projectPath = join(cwd, ".clio", "profile.yaml");
+	const projectPath = join(cwd, ".clio-coder", "profile.yaml");
 	const user = readProfileFile(userPath, issues);
 	const project = readProfileFile(projectPath, issues);
 	const profile: OperatorProfile = { ...user.profile, ...project.profile };

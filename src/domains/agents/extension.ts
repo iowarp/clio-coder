@@ -17,7 +17,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 	function discover(): void {
 		const builtinDir = path.join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
 		const userDir = path.join(clioConfigDir(), "agents");
-		const projectDir = path.join(process.cwd(), ".clio", "agents");
+		const projectDir = path.join(process.cwd(), ".clio-coder", "agents");
 		const nextDiagnostics: AgentRecipeDiagnostic[] = [];
 		const builtin = loadRecipesFromDir({ dir: builtinDir, source: "builtin" }, nextDiagnostics);
 		const user = loadRecipesFromDir({ dir: userDir, source: "user" }, nextDiagnostics);

@@ -71,7 +71,7 @@
           <p>Process overrides, directory layout overrides, and internal plumbing variables</p>
           <div class="meta-chips-row">
             <span class="chip">Source: docs/environment-variables.md</span>
-            <span class="chip chip-orange">clio docs environment</span>
+            <span class="chip chip-orange">clio-coder docs environment</span>
           </div>
         </div>
       </div>
@@ -116,7 +116,7 @@
             <p>Filter or search process environment variables:</p>
             
             <div class="form-group" style="margin-top: 1rem;">
-              <input type="text" id="envSearch" placeholder="Search variables (e.g. CLIO_HOME, turn, budget)..." oninput="filterEnvTable()" style="padding: 0.65rem 0.85rem; font-size: 0.9rem;">
+              <input type="text" id="envSearch" placeholder="Search variables (e.g. CLIO_CODER_HOME, turn, budget)..." oninput="filterEnvTable()" style="padding: 0.65rem 0.85rem; font-size: 0.9rem;">
             </div>
 
             <div class="filter-tags" style="justify-content: flex-start; margin-bottom: 1rem;">
@@ -139,102 +139,102 @@
               </thead>
               <tbody id="envTableBody">
                 <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_TURN_TOOL_CALL_BUDGET</td>
+                  <td class="env-name">CLIO_CODER_TURN_TOOL_CALL_BUDGET</td>
                   <td><code>60</code></td>
                   <td>Orchestrator per-turn soft tool-call budget; hard ceiling sits 15 above.</td>
                 </tr>
                 <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_WORKER_TOOL_CALL_CAP</td>
+                  <td class="env-name">CLIO_CODER_WORKER_TOOL_CALL_CAP</td>
                   <td><code>150</code></td>
                   <td>Lifetime tool-call cap per dispatched worker process run.</td>
                 </tr>
                 <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_INTERNAL_DISPATCH_TIMEOUT_MS</td>
+                  <td class="env-name">CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS</td>
                   <td><code>900000</code></td>
                   <td>Internal dispatch execution timeout in milliseconds (15 minutes).</td>
                 </tr>
                 <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_MAX_RUNS</td>
+                  <td class="env-name">CLIO_CODER_MAX_RUNS</td>
                   <td><code>1000</code></td>
                   <td>Dispatch run-ledger retention cap.</td>
                 </tr>
                 <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_READ_MAX_BYTES</td>
+                  <td class="env-name">CLIO_CODER_READ_MAX_BYTES</td>
                   <td><code>51200</code></td>
                   <td>Per-call byte cap for the file read tool (min 1024).</td>
                 </tr>
                 <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_OBSERVATION_TURN_BUDGET_BYTES</td>
+                  <td class="env-name">CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES</td>
                   <td><code>196608</code></td>
                   <td>Shared per-turn byte pool across observation tools.</td>
                 </tr>
                 <tr data-cat="knob">
-                  <td class="env-name">CLIO_RIGOR</td>
+                  <td class="env-name">CLIO_CODER_RIGOR</td>
                   <td><code>normal</code></td>
                   <td>Finish-contract evidence validation bar (normal or high).</td>
                 </tr>
                 <tr data-cat="knob">
-                  <td class="env-name">CLIO_RESIDENCY</td>
+                  <td class="env-name">CLIO_CODER_RESIDENCY</td>
                   <td><code>managed</code></td>
                   <td>Control local model residency managers (managed/observe/off).</td>
                 </tr>
                 <tr data-cat="knob">
-                  <td class="env-name">CLIO_TRUST_PROJECT_SKILLS</td>
+                  <td class="env-name">CLIO_CODER_TRUST_PROJECT_SKILLS</td>
                   <td><code>off</code></td>
                   <td>Enable project-local skills execution (1/0).</td>
                 </tr>
                 <tr data-cat="knob">
-                  <td class="env-name">CLIO_ALLOW_EXTERNAL_FULL_ACCESS</td>
+                  <td class="env-name">CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS</td>
                   <td><code>off</code></td>
                   <td>Let full-auto pass to external runtimes.</td>
                 </tr>
                 <tr data-cat="layout">
-                  <td class="env-name">CLIO_HOME</td>
+                  <td class="env-name">CLIO_CODER_HOME</td>
                   <td><code>unset</code></td>
                   <td>Override installation root path. Sets config, state, and cache relative to it.</td>
                 </tr>
                 <tr data-cat="layout">
-                  <td class="env-name">CLIO_CONFIG_DIR</td>
+                  <td class="env-name">CLIO_CODER_CONFIG_DIR</td>
                   <td><code>Platform XDG</code></td>
                   <td>Settings directory path override.</td>
                 </tr>
                 <tr data-cat="layout">
-                  <td class="env-name">CLIO_DATA_DIR</td>
+                  <td class="env-name">CLIO_CODER_DATA_DIR</td>
                   <td><code>Platform XDG</code></td>
                   <td>Data directory path override.</td>
                 </tr>
                 <tr data-cat="layout">
-                  <td class="env-name">CLIO_STATE_DIR</td>
+                  <td class="env-name">CLIO_CODER_STATE_DIR</td>
                   <td><code>Platform XDG</code></td>
                   <td>State and session directory path override.</td>
                 </tr>
                 <tr data-cat="layout">
-                  <td class="env-name">CLIO_CACHE_DIR</td>
+                  <td class="env-name">CLIO_CODER_CACHE_DIR</td>
                   <td><code>Platform XDG</code></td>
                   <td>Marketplace/models caching path override.</td>
                 </tr>
                 <tr data-cat="debug">
-                  <td class="env-name">CLIO_BUS_TRACE</td>
+                  <td class="env-name">CLIO_CODER_BUS_TRACE</td>
                   <td><code>off</code></td>
                   <td>Trace event-bus events to stderr.</td>
                 </tr>
                 <tr data-cat="debug">
-                  <td class="env-name">CLIO_TIMING</td>
+                  <td class="env-name">CLIO_CODER_TIMING</td>
                   <td><code>off</code></td>
                   <td>Print boot timing reports.</td>
                 </tr>
                 <tr data-cat="plumbing">
-                  <td class="env-name">CLIO_INTERACTIVE</td>
+                  <td class="env-name">CLIO_CODER_INTERACTIVE</td>
                   <td><code>off</code></td>
                   <td>Flag indicating interactive TUI mode. Cleaned from children.</td>
                 </tr>
                 <tr data-cat="plumbing">
-                  <td class="env-name">CLIO_RUN_OVERRIDES</td>
+                  <td class="env-name">CLIO_CODER_RUN_OVERRIDES</td>
                   <td><code>unset</code></td>
                   <td>JSON envelope for process option bindings.</td>
                 </tr>
                 <tr data-cat="test">
-                  <td class="env-name">CLIO_WORKER_FAUX</td>
+                  <td class="env-name">CLIO_CODER_WORKER_FAUX</td>
                   <td><code>unset</code></td>
                   <td>Fake LLM responses mapping framework for test assertions.</td>
                 </tr>
@@ -261,12 +261,12 @@
                 </div>
 
                 <div class="form-group">
-                  <label for="clioHomeInput">CLIO_HOME (Override)</label>
+                  <label for="clioHomeInput">CLIO_CODER_HOME (Override)</label>
                   <input type="text" id="clioHomeInput" value="" placeholder="e.g. /home/user/my_clio_tree" oninput="resolvePaths()">
                 </div>
 
                 <div class="form-group">
-                  <label for="clioConfigInput">CLIO_CONFIG_DIR (Override)</label>
+                  <label for="clioConfigInput">CLIO_CODER_CONFIG_DIR (Override)</label>
                   <input type="text" id="clioConfigInput" value="" placeholder="e.g. /etc/clio" oninput="resolvePaths()">
                 </div>
               </div>
@@ -279,19 +279,19 @@
                 
                 <div class="path-row">
                   <span class="path-label">Config Folder</span>
-                  <span class="path-value" id="valConfig">/home/user/.config/clio</span>
+                  <span class="path-value" id="valConfig">/home/user/.config/clio-coder</span>
                 </div>
                 <div class="path-row">
                   <span class="path-label">Data Folder</span>
-                  <span class="path-value" id="valData">/home/user/.local/share/clio</span>
+                  <span class="path-value" id="valData">/home/user/.local/share/clio-coder</span>
                 </div>
                 <div class="path-row">
                   <span class="path-label">State Folder</span>
-                  <span class="path-value" id="valState">/home/user/.local/state/clio</span>
+                  <span class="path-value" id="valState">/home/user/.local/state/clio-coder</span>
                 </div>
                 <div class="path-row">
                   <span class="path-label">Cache Folder</span>
-                  <span class="path-value" id="valCache">/home/user/.cache/clio</span>
+                  <span class="path-value" id="valCache">/home/user/.cache/clio-coder</span>
                 </div>
               </div>
             </div>
@@ -366,20 +366,20 @@
         cache = `${clioHome}/cache`;
       } else {
         if (os === "linux") {
-          config = "~/.config/clio";
-          data = "~/.local/share/clio";
-          state = "~/.local/state/clio";
-          cache = "~/.cache/clio";
+          config = "~/.config/clio-coder";
+          data = "~/.local/share/clio-coder";
+          state = "~/.local/state/clio-coder";
+          cache = "~/.cache/clio-coder";
         } else if (os === "macos") {
-          config = "~/Library/Application Support/clio";
-          data = "~/Library/Application Support/clio";
-          state = "~/Library/Application Support/clio/state";
-          cache = "~/Library/Caches/clio";
+          config = "~/Library/Application Support/clio-coder";
+          data = "~/Library/Application Support/clio-coder";
+          state = "~/Library/Application Support/clio-coder/state";
+          cache = "~/Library/Caches/clio-coder";
         } else {
-          config = "%APPDATA%\\clio";
-          data = "%LOCALAPPDATA%\\clio";
-          state = "%LOCALAPPDATA%\\clio\\state";
-          cache = "%LOCALAPPDATA%\\clio\\cache";
+          config = "%APPDATA%\\clio-coder";
+          data = "%LOCALAPPDATA%\\clio-coder";
+          state = "%LOCALAPPDATA%\\clio-coder\\state";
+          cache = "%LOCALAPPDATA%\\clio-coder\\cache";
         }
       }
 

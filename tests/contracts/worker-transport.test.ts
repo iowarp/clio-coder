@@ -101,7 +101,10 @@ describe("ssh argv and remote command construction", () => {
 
 	it("builds the remote worker command with cwd, env whitelist, and default entry", () => {
 		const command = buildRemoteWorkerCommand(SSH_NODE, "/shared/projects/app");
-		strictEqual(command, "cd '/shared/projects/app' && exec env CLIO_RESIDENCY=observe CLIO_WORKER_PGID=$$ clio worker");
+		strictEqual(
+			command,
+			"cd '/shared/projects/app' && exec env CLIO_CODER_RESIDENCY=observe CLIO_CODER_WORKER_PGID=$$ clio-coder worker",
+		);
 	});
 
 	it("honors per-node residency and clioEntry overrides", () => {
@@ -109,7 +112,10 @@ describe("ssh argv and remote command construction", () => {
 			{ ...SSH_NODE, residency: "manage", clioEntry: "/opt/clio/bin/clio worker" },
 			"/w",
 		);
-		strictEqual(command, "cd '/w' && exec env CLIO_RESIDENCY=manage CLIO_WORKER_PGID=$$ /opt/clio/bin/clio worker");
+		strictEqual(
+			command,
+			"cd '/w' && exec env CLIO_CODER_RESIDENCY=manage CLIO_CODER_WORKER_PGID=$$ /opt/clio/bin/clio worker",
+		);
 	});
 
 	it("builds non-interactive ssh args with port, identity, and user", () => {
@@ -163,7 +169,7 @@ describe("ssh worker transport channel contract", () => {
 		const argv = JSON.parse(argvLines[argvLines.length - 1] ?? "[]") as string[];
 		ok(argv.includes("-T"));
 		ok(argv.includes("blade.lan"));
-		match(argv[argv.length - 1] ?? "", /cd '\/shared\/projects\/app' && exec env CLIO_RESIDENCY=observe/);
+		match(argv[argv.length - 1] ?? "", /cd '\/shared\/projects\/app' && exec env CLIO_CODER_RESIDENCY=observe/);
 	});
 
 	it("passes remote exit codes through: 1, 3 (permission required), 2 with stderr tail", async () => {

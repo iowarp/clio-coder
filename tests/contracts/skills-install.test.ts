@@ -81,7 +81,10 @@ describe("contracts/skills install containment", () => {
 		const installed = readFileSync(result.path, "utf8");
 		ok(installed.includes("audit: unknown"), "an install lands unreviewed");
 		ok(installed.includes(`source-url: "${source}"`));
-		ok(existsSync(join(project, ".clio", "skills", "review", "scripts", "check.sh")), "assets install beside SKILL.md");
+		ok(
+			existsSync(join(project, ".clio-coder", "skills", "review", "scripts", "check.sh")),
+			"assets install beside SKILL.md",
+		);
 	});
 
 	it("writes install lifecycle nested in the clio block and keeps registry identity", () => {
@@ -133,7 +136,7 @@ describe("contracts/skills install containment", () => {
 	it("still reads flat provenance keys from copies installed before the nested form", () => {
 		const workspace = scratchDir();
 		const project = join(workspace, "project");
-		const dir = join(project, ".clio", "skills", "legacy");
+		const dir = join(project, ".clio-coder", "skills", "legacy");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "SKILL.md"),
@@ -172,7 +175,7 @@ describe("contracts/skills install containment", () => {
 		const good = writeSkillSource(workspace, "review", "The original.");
 		const project = join(workspace, "project");
 		mkdirSync(project, { recursive: true });
-		const dest = join(project, ".clio", "skills", "review");
+		const dest = join(project, ".clio-coder", "skills", "review");
 
 		installSkillFromSource({ source: good, scope: "project", cwd: project });
 		const before = readFileSync(join(dest, "SKILL.md"), "utf8");
@@ -195,8 +198,8 @@ describe("contracts/skills install containment", () => {
 		ok(survived.includes("The original."));
 
 		// No staging or backup directory survives a completed install.
-		const leftovers = readdirSync(join(project, ".clio", "skills")).filter(
-			(entry) => entry.includes(".clio-staging-") || entry.includes(".clio-backup-"),
+		const leftovers = readdirSync(join(project, ".clio-coder", "skills")).filter(
+			(entry) => entry.includes(".clio-coder-staging-") || entry.includes(".clio-coder-backup-"),
 		);
 		deepStrictEqual(leftovers, []);
 	});
@@ -242,7 +245,7 @@ describe("contracts/skills update lifecycle", () => {
 		const project = join(workspace, "project");
 		mkdirSync(project, { recursive: true });
 		installSkillFromSource({ source, scope: "project", cwd: project });
-		const before = readFileSync(join(project, ".clio", "skills", "review", "SKILL.md"), "utf8");
+		const before = readFileSync(join(project, ".clio-coder", "skills", "review", "SKILL.md"), "utf8");
 
 		// Upstream drops the description, so the skill would install and then
 		// silently stop existing while the operator is told it updated.
@@ -251,7 +254,7 @@ describe("contracts/skills update lifecycle", () => {
 		strictEqual(report?.status, "error");
 
 		strictEqual(
-			readFileSync(join(project, ".clio", "skills", "review", "SKILL.md"), "utf8"),
+			readFileSync(join(project, ".clio-coder", "skills", "review", "SKILL.md"), "utf8"),
 			before,
 			"a refused update leaves the installed skill byte-identical",
 		);
@@ -266,7 +269,7 @@ describe("contracts/skills update lifecycle", () => {
 
 		strictEqual(checkSkillDrift(installed(project, "review"), project)?.verdict, "match");
 
-		const file = join(project, ".clio", "skills", "review", "SKILL.md");
+		const file = join(project, ".clio-coder", "skills", "review", "SKILL.md");
 		writeFileSync(file, `${readFileSync(file, "utf8")}\nSomething nobody audited.\n`, "utf8");
 
 		// No registry-id and no pinned manifest, so the manifest cannot speak for

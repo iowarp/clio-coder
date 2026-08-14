@@ -104,10 +104,10 @@ describe("contracts/context-init-options", () => {
 		deepStrictEqual(contextInitOptionsFromCliArgs(["--heuristic"]), { heuristic: true });
 	});
 
-	it("regenerates from scratch on --rewrite instead of using the existing CLIO.md as source", async () => {
+	it("regenerates from scratch on --rewrite instead of using the existing CLIO-CODER.md as source", async () => {
 		const cwd = scratchProject();
 		writeFileSync(
-			join(cwd, "CLIO.md"),
+			join(cwd, "CLIO-CODER.md"),
 			serializeClioMd({
 				projectName: "Curated Context",
 				identity: "Curated Context is an existing handbook that rewrite must ignore.",
@@ -151,7 +151,7 @@ describe("contracts/context-init-options", () => {
 		});
 
 		strictEqual(generated, true);
-		const after = readFileSync(join(cwd, "CLIO.md"), "utf8");
+		const after = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 		ok(after.includes("# Init Options Fixture"), after);
 		ok(after.includes("## Fresh Rewrite Evidence"), after);
 		strictEqual(after.includes("Curated Context"), false);

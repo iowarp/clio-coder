@@ -19,7 +19,7 @@ import { createMiddlewareSnapshot } from "./snapshot.js";
 
 /**
  * One session-scoped budget tracker per contract, seeded from the environment so
- * an operator can loosen budgets (`CLIO_HOOK_BUDGET_*`) without a rebuild. The
+ * an operator can loosen budgets (`CLIO_CODER_HOOK_BUDGET_*`) without a rebuild. The
  * persistent instance is what makes warmup grace and the steady-state rolling
  * window meaningful: state accumulates across every hook occurrence in the run.
  */

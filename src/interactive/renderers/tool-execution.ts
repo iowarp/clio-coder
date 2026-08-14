@@ -290,7 +290,7 @@ export function classifyResourceRead(toolName: string, args: unknown): string | 
 	const normalized = path.replace(/\\/g, "/");
 	const base = normalized.split("/").pop() ?? "";
 	if (base === "SKILL.md") return "skill";
-	if (base === "CLIO.md") return "handbook";
+	if (base === "CLIO-CODER.md") return "handbook";
 	if (base === "AGENTS.md") return "agents";
 	if (/(^|\/)docs\//.test(normalized)) return "docs";
 	return null;

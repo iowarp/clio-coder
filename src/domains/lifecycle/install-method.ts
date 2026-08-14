@@ -1,5 +1,5 @@
 /**
- * Deterministic install-method detection for lifecycle verbs. `clio upgrade`
+ * Deterministic install-method detection for lifecycle verbs. `clio-coder upgrade`
  * must never offer the npm-global reinstall path to a source-checkout install:
  * the published package may not exist, and `npm install -g` would escape the
  * install's roots and touch the global npm prefix.

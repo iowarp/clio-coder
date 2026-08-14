@@ -17,12 +17,12 @@ Source of truth:
 
 ## 1. Spawning Sequence & Environment Isolation
 
-When the orchestrator dispatches a task to a fleet agent (such as via the `dispatch` tool or `clio eval` execution), it spins up a child process running the compiled worker entry.
+When the orchestrator dispatches a task to a fleet agent (such as via the `dispatch` tool or `clio-coder eval` execution), it spins up a child process running the compiled worker entry.
 
 1. **Child Process Creation:**
    The parent process spawns a Node.js subprocess pointing to `dist/worker/entry.js`.
 2. **Environment Scrubbing:**
-   To ensure clean execution, the child process runs with a sanitized environment. The orchestrator scrubs user-interactive flags (e.g., `CLIO_INTERACTIVE` is removed from `process.env`) to prevent child workers from attempting to mount TUI elements or intercept standard input signals.
+   To ensure clean execution, the child process runs with a sanitized environment. The orchestrator scrubs user-interactive flags (e.g., `CLIO_CODER_INTERACTIVE` is removed from `process.env`) to prevent child workers from attempting to mount TUI elements or intercept standard input signals.
 3. **Spec Injection & Attestation Handshake:**
    The orchestrator serializes a `WorkerSpec` JSON document and writes it as the very first line of `stdin` to the child worker. Before reaching a model, every worker announces its attestation on the structured stderr control lane (`@clio-control/1 ` prefix): protocol version (`WORKER_PROTOCOL_VERSION = 1`), spec version, process ID, process group ID (or null), host, settings fingerprint, worker-computed spec digest (`specDigest`), runtime ID, target ID, endpoint identity hash (`endpointIdentityHash`), wire model ID, effective tool signature, and bounded node resource facts (labels, CPU count, total memory, free memory, GPU count, VRAM, and resident models). The orchestrator compares each field against the approved plan and terminates a drifting peer instead of running it. Bulk NDJSON on `stdout` is accepted only once that attestation verifies.
 

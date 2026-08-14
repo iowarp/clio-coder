@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Only argument parsing and boot tracing load statically. Every subcommand is
 // imported dynamically through the command registry (see `dispatch`), so a bare `clio`
-// (interactive) or `clio --version` pays for its own module graph and nothing
+// (interactive) or `clio-coder --version` pays for its own module graph and nothing
 // else — this is the highest-value cut of the cold module-load tax. Code
 // splitting (tsup.config.ts) keeps each command's transitive heavy externals in
 // its own chunk.
@@ -16,44 +16,44 @@ science. CLIO stands for Context Layer for Input/Output, named for the Greek mus
 
 Usage:
   clio                      start interactive repository chat
-  clio acp                  serve Clio as an ACP v1 agent over stdio
-  clio run [flags] <task>   run one headless main-agent turn
-  clio --version, -v        print the Clio Coder version
-  clio --api-key <key>      override the active target API key for this run
-  clio --no-context-files, -nc  skip CLIO.md project-context injection
-  clio configure            interactive first-run/configuration wizard
-  clio targets              list configured targets, health, auth, and capabilities
-  clio targets add          add a target interactively or via flags
-  clio targets use <id>     set chat and fleet defaults to a target
-  clio targets profile      set a named fleet profile
-  clio targets remove <id>  remove a target
-  clio targets rename <old> <new>  rename a target
-  clio models [search]      list models for configured targets
-  clio auth list|status|login|logout [target-or-runtime]
-  clio doctor [--fix]       diagnose state; --fix creates or repairs it
-  clio paths [--json]       print resolved config/data/cache directories
-  clio reset                recover or wipe Clio Coder state
-  clio context              show project context status (CLIO.md, preload, codewiki)
-  clio context init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO.md and codewiki
-  clio context refresh [--wiki]  re-index the codewiki and optionally update the Markdown wiki
-  clio context wiki [--update] [--status] [--depth auto|simple|medium|detailed] [--target <id>] [--model <id>]
-  clio context reset [--all] [--yes]  clear accumulated project context artifacts
-  clio context index [--json]  build the codewiki index without model calls
-  clio uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
-  clio upgrade              upgrade Clio Coder and run pending migrations
-  clio agents               list discovered agent recipes
-  clio fleet list|run|status|drain|resume  fleet contracts, status, and admission control
-  clio evidence             build, list, or inspect evidence artifacts
-  clio eval                 run, report, or compare local eval task files
-  clio memory               list, propose, approve, reject, or prune memory
-  clio usage report         cross-session usage facts and opportunities (experimental)
-  clio trace                query or view the durable dispatch trace mirror
-  clio extensions           install, list, enable, disable, or remove extension packages
-  clio skills               list, inspect, validate, or install skills
-  clio docs [topic]         serve bundled HTML docs on 127.0.0.1 (--no-open to skip browser)
-  clio dev <command>        harness instruments; run 'clio dev' for the list
-  clio --help, -h           this message
-  clio --help --all         this message plus every command under 'clio dev'
+  clio-coder acp                  serve Clio as an ACP v1 agent over stdio
+  clio-coder run [flags] <task>   run one headless main-agent turn
+  clio-coder --version, -v        print the Clio Coder version
+  clio-coder --api-key <key>      override the active target API key for this run
+  clio-coder --no-context-files, -nc  skip CLIO-CODER.md project-context injection
+  clio-coder configure            interactive first-run/configuration wizard
+  clio-coder targets              list configured targets, health, auth, and capabilities
+  clio-coder targets add          add a target interactively or via flags
+  clio-coder targets use <id>     set chat and fleet defaults to a target
+  clio-coder targets profile      set a named fleet profile
+  clio-coder targets remove <id>  remove a target
+  clio-coder targets rename <old> <new>  rename a target
+  clio-coder models [search]      list models for configured targets
+  clio-coder auth list|status|login|logout [target-or-runtime]
+  clio-coder doctor [--fix]       diagnose state; --fix creates or repairs it
+  clio-coder paths [--json]       print resolved config/data/cache directories
+  clio-coder reset                recover or wipe Clio Coder state
+  clio-coder context              show project context status (CLIO-CODER.md, preload, codewiki)
+  clio-coder context init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO-CODER.md and codewiki
+  clio-coder context refresh [--wiki]  re-index the codewiki and optionally update the Markdown wiki
+  clio-coder context wiki [--update] [--status] [--depth auto|simple|medium|detailed] [--target <id>] [--model <id>]
+  clio-coder context reset [--all] [--yes]  clear accumulated project context artifacts
+  clio-coder context index [--json]  build the codewiki index without model calls
+  clio-coder uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
+  clio-coder upgrade              upgrade Clio Coder and run pending migrations
+  clio-coder agents               list discovered agent recipes
+  clio-coder fleet list|run|status|drain|resume  fleet contracts, status, and admission control
+  clio-coder evidence             build, list, or inspect evidence artifacts
+  clio-coder eval                 run, report, or compare local eval task files
+  clio-coder memory               list, propose, approve, reject, or prune memory
+  clio-coder usage report         cross-session usage facts and opportunities (experimental)
+  clio-coder trace                query or view the durable dispatch trace mirror
+  clio-coder extensions           install, list, enable, disable, or remove extension packages
+  clio-coder skills               list, inspect, validate, or install skills
+  clio-coder docs [topic]         serve bundled HTML docs on 127.0.0.1 (--no-open to skip browser)
+  clio-coder dev <command>        harness instruments; run 'clio-coder dev' for the list
+  clio-coder --help, -h           this message
+  clio-coder --help --all         this message plus every command under 'clio-coder dev'
 `;
 
 /**
@@ -63,7 +63,7 @@ Usage:
  * Nothing here is removed or deprecated. An agent driving Clio over bash can
  * reach a wider surface than a person reading a help screen can hold, so the
  * capability stays and only the default listing shrinks: every name below still
- * resolves at the top level, and `clio --help --all` prints all of it.
+ * resolves at the top level, and `clio-coder --help --all` prints all of it.
  */
 const DEV_COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
 	{ name: "components", summary: "list, snapshot, or diff harness components" },
@@ -74,7 +74,7 @@ const DEV_COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
 const DEV_HELP = `Clio Coder harness instruments
 
 Usage:
-${DEV_COMMANDS.map((entry) => `  clio dev ${entry.name.padEnd(20)}${entry.summary}`).join("\n")}
+${DEV_COMMANDS.map((entry) => `  clio-coder dev ${entry.name.padEnd(20)}${entry.summary}`).join("\n")}
 
 Each also resolves without the 'dev' prefix, so existing scripts and agent
 callers keep working. The prefix exists so the default help stays the set of
@@ -106,7 +106,7 @@ function nodeVersionError(): string | null {
 		const wanted = MIN_NODE[i] ?? 0;
 		if (actual > wanted) return null;
 		if (actual < wanted) {
-			return `clio requires Node.js >=${MIN_NODE.join(".")}; this is ${process.versions.node}. Upgrade Node and retry.`;
+			return `clio-coder requires Node.js >=${MIN_NODE.join(".")}; this is ${process.versions.node}. Upgrade Node and retry.`;
 		}
 	}
 	return null;
@@ -114,7 +114,7 @@ function nodeVersionError(): string | null {
 
 async function main(argv: string[]): Promise<number> {
 	// First application statement after the static import graph resolved: the
-	// elapsed here is the cold module-load tax (see CLIO_TRACE_BOOT).
+	// elapsed here is the cold module-load tax (see CLIO_CODER_TRACE_BOOT).
 	traceBoot("cli entry");
 	const versionError = nodeVersionError();
 	if (versionError !== null) {
@@ -189,7 +189,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 		"dev",
 		async (subArgs, bootOptions) => {
 			const devSubcommand = subArgs[0];
-			// `clio dev` is what the top-level help tells the user to run for this
+			// `clio-coder dev` is what the top-level help tells the user to run for this
 			// listing, so printing the listing is the command succeeding, not a
 			// usage error.
 			if (devSubcommand === undefined || devSubcommand === "--help" || devSubcommand === "-h") {

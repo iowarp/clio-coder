@@ -23,7 +23,7 @@ import { lstatSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 
-const ROOT_ENV = "CLIO_TEST_TMP_ROOT";
+const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
 /** Names every root this harness makes, and the only names it will remove. */
 export const TEST_TMP_ROOT_PREFIX = "clio-tests-";
 
@@ -35,7 +35,7 @@ const systemTmp = resolve(tmpdir());
  * before a recursive delete.
  *
  * The value reaching here comes from the environment, so it is attacker-shaped
- * input as far as this module is concerned: an inherited `CLIO_TEST_TMP_ROOT`
+ * input as far as this module is concerned: an inherited `CLIO_CODER_TEST_TMP_ROOT`
  * of `/` or of a symlink pointing at a source tree must not be walked by
  * `rm -rf`. A path that fails any check is left alone; leaking one directory is
  * recoverable and deleting the wrong tree is not.

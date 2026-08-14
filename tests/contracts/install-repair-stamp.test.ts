@@ -1,5 +1,5 @@
 /**
- * `clio doctor` reported an install timestamp that was the repair time.
+ * `clio-coder doctor` reported an install timestamp that was the repair time.
  *
  * `initializeClioHome()` writes install.json when it cannot read one, and it
  * wrote `installedAt: now` every time. Recreating the file over a state root
@@ -48,7 +48,7 @@ describe("contracts/install and repair stamps", () => {
 	it("calls a rebuild over an existing home a repair, and claims no install time", () => {
 		initializeClioHome();
 		// The state root survives; only the record of the install is gone. This is
-		// what `clio doctor --fix` faces after the file is deleted or corrupted.
+		// what `clio-coder doctor --fix` faces after the file is deleted or corrupted.
 		rmSync(installPath);
 		mkdirSync(join(scratch.dir, "state", "sessions"), { recursive: true });
 

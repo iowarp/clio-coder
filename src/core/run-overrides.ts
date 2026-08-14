@@ -2,18 +2,18 @@
  * Run-scoped option overrides: one-run settings a CLI invocation carries into
  * deep engine code (context-window override, KV-cache mode, sampling params).
  *
- * These ride a single JSON env var, `CLIO_RUN_OVERRIDES`, instead of one env
+ * These ride a single JSON env var, `CLIO_CODER_RUN_OVERRIDES`, instead of one env
  * var per option. The env var is internal plumbing, not an operator surface:
- * operators set the CLI flags (`clio run --max-context-tokens`, sampling
+ * operators set the CLI flags (`clio-coder run --max-context-tokens`, sampling
  * flags) or durable settings.yaml keys, and the CLI writes this var for the
  * scope of the run via {@link withRunOverrides}. Env is the transport, rather
  * than an in-process store, because dispatched worker subprocesses inherit
  * `process.env` and must see the same overrides. Keeping it to ONE var means
  * new run-scoped options extend the typed interface here instead of minting
- * another `CLIO_*` variable with its own ad-hoc parse/save/restore code.
+ * another `CLIO_CODER_*` variable with its own ad-hoc parse/save/restore code.
  */
 
-export const RUN_OVERRIDES_ENV = "CLIO_RUN_OVERRIDES";
+export const RUN_OVERRIDES_ENV = "CLIO_CODER_RUN_OVERRIDES";
 
 export interface RunOverrides {
 	/** One-run context-window override for supported local runtimes. */

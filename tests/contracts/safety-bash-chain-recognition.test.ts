@@ -113,9 +113,9 @@ describe("contracts/safety && chain recognition", () => {
 	});
 
 	it("takes the most restrictive member's verdict when project policy asks for confirmation", () => {
-		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 		writeFileSync(
-			join(scratch, ".clio", "safety.yaml"),
+			join(scratch, ".clio-coder", "safety.yaml"),
 			[
 				"version: 1",
 				"commands:",

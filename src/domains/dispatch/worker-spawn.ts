@@ -16,7 +16,7 @@
  *     heartbeat, because the lanes are separate pipes.
  *
  * The channel machinery is transport-neutral: `spawnWorkerProcess` takes an
- * argv and works for both the local fork and an `ssh <host> -- clio worker`
+ * argv and works for both the local fork and an `ssh <host> -- clio-coder worker`
  * remote launch (see transport.ts). The wire protocol is identical on every
  * transport.
  *

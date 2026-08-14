@@ -77,7 +77,7 @@ describe("contracts/SciCode Clio adapter", () => {
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
-	it("inspects data, generates clio eval tasks, and grades a JSON-reference fixture", () => {
+	it("inspects data, generates clio-coder eval tasks, and grades a JSON-reference fixture", () => {
 		const inspected = JSON.parse(runPython(["inspect-data", "--data", data, "--references", refs])) as {
 			problems: number;
 			sub_steps: number;

@@ -2,27 +2,27 @@ import type { BootstrapProgressEvent } from "../domains/context/index.js";
 import type { BootstrapGenerationState } from "../domains/context/state.js";
 
 const HELP = `Usage:
-  clio context
-  clio context init [--yes] [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
-  clio context refresh [--wiki]
-  clio context wiki [--update] [--status] [--depth auto|simple|medium|detailed]
+  clio-coder context
+  clio-coder context init [--yes] [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
+  clio-coder context refresh [--wiki]
+  clio-coder context wiki [--update] [--status] [--depth auto|simple|medium|detailed]
                     [--target <id>] [--model <id>] [--thinking off|low|medium|high]
-  clio context reset [--all] [--yes]
-  clio context index [--json]
+  clio-coder context reset [--all] [--yes]
+  clio-coder context index [--json]
 
 Project context commands:
-  clio context              show project context status (CLIO.md, preload, codewiki)
-  clio context init         explore the repo and bootstrap CLIO.md and codewiki
-  clio context refresh      re-index the codewiki and optionally update the Markdown wiki
-  clio context wiki         generate or inspect the agent-authored Markdown wiki
-  clio context reset        clear accumulated project context artifacts
-  clio context index        build the codewiki index without model calls
+  clio-coder context              show project context status (CLIO-CODER.md, preload, codewiki)
+  clio-coder context init         explore the repo and bootstrap CLIO-CODER.md and codewiki
+  clio-coder context refresh      re-index the codewiki and optionally update the Markdown wiki
+  clio-coder context wiki         generate or inspect the agent-authored Markdown wiki
+  clio-coder context reset        clear accumulated project context artifacts
+  clio-coder context index        build the codewiki index without model calls
 `;
 
 function printWikiProgress(event: BootstrapProgressEvent): void {
 	if (event.status === "completed") return;
 	const detail = event.detail ? ` (${event.detail})` : "";
-	process.stderr.write(`clio context wiki: ${event.message}${detail}\n`);
+	process.stderr.write(`clio-coder context wiki: ${event.message}${detail}\n`);
 }
 
 function compactMetric(value: number, suffix: string): string {
@@ -82,19 +82,19 @@ async function printContextStatus(): Promise<number> {
 		? "absent"
 		: state && !context.isStale(state.fingerprint, context.computeFingerprint(cwd, codewiki))
 			? "fresh"
-			: "stale (run clio context refresh)";
+			: "stale (run clio-coder context refresh)";
 	const codewikiLines = [`codewiki: ${codewikiState} (${codewikiCount} entr${codewikiCount === 1 ? "y" : "ies"})`];
 	if (codewiki) codewikiLines.push(context.renderCodewikiDigest(codewiki));
 
 	const adoptionSources = state?.contextSources ?? [];
 	const adoptionChanged =
 		state?.contextSources !== undefined ? context.adoptionSourcesChanged(adoptionSources, { cwd }) : false;
-	const adoptionState = adoptionChanged ? "changed (run clio context init --adopt)" : "up to date";
+	const adoptionState = adoptionChanged ? "changed (run clio-coder context init --adopt)" : "up to date";
 	const generationLine = formatGenerationStatus(state?.lastBootstrap);
 
 	process.stdout.write(
 		[
-			`CLIO.md: ${clioMdState}`,
+			`CLIO-CODER.md: ${clioMdState}`,
 			`preload: ${preloadClass.label}`,
 			...codewikiLines,
 			`adoption: ${adoptionSources.length} source${adoptionSources.length === 1 ? "" : "s"}, ${adoptionState}`,
@@ -118,7 +118,7 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 			updateWiki = true;
 			continue;
 		}
-		process.stderr.write(`clio context refresh: unknown flag ${arg}\n`);
+		process.stderr.write(`clio-coder context refresh: unknown flag ${arg}\n`);
 		process.stdout.write(HELP);
 		return 2;
 	}
@@ -140,19 +140,19 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 		if (result.wiki) {
 			if (result.wiki.status === "failed") {
 				process.stderr.write(
-					`clio context refresh: wiki update failed: ${(result.wiki.problems ?? ["unknown failure"]).join("; ")}\n`,
+					`clio-coder context refresh: wiki update failed: ${(result.wiki.problems ?? ["unknown failure"]).join("; ")}\n`,
 				);
 				return 1;
 			}
 			process.stdout.write(
 				result.wiki.status === "noop"
-					? `clio context refresh: wiki unchanged (${result.wiki.pages} page${result.wiki.pages === 1 ? "" : "s"})\n`
-					: `clio context refresh: wiki updated (${result.wiki.pages} page${result.wiki.pages === 1 ? "" : "s"})\n`,
+					? `clio-coder context refresh: wiki unchanged (${result.wiki.pages} page${result.wiki.pages === 1 ? "" : "s"})\n`
+					: `clio-coder context refresh: wiki updated (${result.wiki.pages} page${result.wiki.pages === 1 ? "" : "s"})\n`,
 			);
 		}
 		return 0;
 	} catch (err) {
-		process.stderr.write(`clio context refresh failed: ${err instanceof Error ? err.message : String(err)}\n`);
+		process.stderr.write(`clio-coder context refresh failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
 	}
 }
@@ -179,7 +179,7 @@ async function runWikiStatusCommand(): Promise<number> {
 				`${pagesWritten}/${pagesPlanned} planned pages written)`,
 		);
 		if (pagesWritten < pagesPlanned) {
-			lines.push(`pending: ${pagesPlanned - pagesWritten} page(s); run \`clio context wiki --update\` to finish`);
+			lines.push(`pending: ${pagesPlanned - pagesWritten} page(s); run \`clio-coder context wiki --update\` to finish`);
 		}
 	}
 	if (currentHead !== meta.gitHead) {
@@ -228,7 +228,7 @@ async function runWikiCommand(args: string[]): Promise<number> {
 			index += 1;
 			if (arg === "--target" || arg === "--model") {
 				if (!value || value.startsWith("--")) {
-					process.stderr.write(`clio context wiki: ${arg} requires a value\n`);
+					process.stderr.write(`clio-coder context wiki: ${arg} requires a value\n`);
 					return 2;
 				}
 				if (arg === "--target") target = value;
@@ -237,20 +237,20 @@ async function runWikiCommand(args: string[]): Promise<number> {
 			}
 			if (arg === "--thinking") {
 				if (!isThinkingLevel(value)) {
-					process.stderr.write("clio context wiki: --thinking must be off, low, medium, or high\n");
+					process.stderr.write("clio-coder context wiki: --thinking must be off, low, medium, or high\n");
 					return 2;
 				}
 				thinkingLevel = value;
 				continue;
 			}
 			if (!isWikiDepth(value)) {
-				process.stderr.write("clio context wiki: --depth must be auto, simple, medium, or detailed\n");
+				process.stderr.write("clio-coder context wiki: --depth must be auto, simple, medium, or detailed\n");
 				return 2;
 			}
 			depth = value;
 			continue;
 		}
-		process.stderr.write(`clio context wiki: unknown flag ${arg}\n`);
+		process.stderr.write(`clio-coder context wiki: unknown flag ${arg}\n`);
 		process.stdout.write(HELP);
 		return 2;
 	}
@@ -272,17 +272,17 @@ async function runWikiCommand(args: string[]): Promise<number> {
 			onProgress: printWikiProgress,
 		});
 		if (result.status === "failed") {
-			process.stderr.write(`clio context wiki failed: ${(result.problems ?? ["unknown failure"]).join("; ")}\n`);
+			process.stderr.write(`clio-coder context wiki failed: ${(result.problems ?? ["unknown failure"]).join("; ")}\n`);
 			return 1;
 		}
 		process.stdout.write(
 			result.status === "noop"
-				? `clio context wiki: unchanged (${result.pages} page${result.pages === 1 ? "" : "s"})\n`
-				: `clio context wiki: generated ${result.pages} page${result.pages === 1 ? "" : "s"}\n`,
+				? `clio-coder context wiki: unchanged (${result.pages} page${result.pages === 1 ? "" : "s"})\n`
+				: `clio-coder context wiki: generated ${result.pages} page${result.pages === 1 ? "" : "s"}\n`,
 		);
 		return 0;
 	} catch (err) {
-		process.stderr.write(`clio context wiki failed: ${err instanceof Error ? err.message : String(err)}\n`);
+		process.stderr.write(`clio-coder context wiki failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
 	}
 }
@@ -309,7 +309,7 @@ export async function runContextCommand(args: string[]): Promise<number> {
 		case "index":
 			return (await import("./context-index.js")).runContextIndexCommand(rest);
 		default:
-			process.stderr.write(`clio context: unknown subcommand ${verb}\n`);
+			process.stderr.write(`clio-coder context: unknown subcommand ${verb}\n`);
 			process.stdout.write(HELP);
 			return 2;
 	}

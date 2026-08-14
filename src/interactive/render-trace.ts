@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 
 /**
- * Opt-in per-frame render instrument. Off unless CLIO_RENDER_TRACE names a
+ * Opt-in per-frame render instrument. Off unless CLIO_CODER_RENDER_TRACE names a
  * file, and it costs one `performance.now()` plus a buffered line per frame
  * when it is on.
  *
@@ -47,7 +47,7 @@ export interface RenderTrace {
 const FLUSH_EVERY = 8;
 
 export function renderTracePath(env: NodeJS.ProcessEnv = process.env): string | null {
-	const raw = env.CLIO_RENDER_TRACE?.trim();
+	const raw = env.CLIO_CODER_RENDER_TRACE?.trim();
 	return raw && raw.length > 0 ? raw : null;
 }
 

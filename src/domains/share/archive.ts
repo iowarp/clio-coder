@@ -92,7 +92,7 @@ export interface ShareImportRecovery {
 	failed?: string;
 }
 
-const PROJECT_CONTEXT_FILES = ["CLIO.md", "AGENTS.md", "CODEX.md", "GEMINI.md", "CLAUDE.md"] as const;
+const PROJECT_CONTEXT_FILES = ["CLIO-CODER.md", "AGENTS.md", "CODEX.md", "GEMINI.md", "CLAUDE.md"] as const;
 const SETTINGS_FRAGMENT_PATH = "settings.fragment.yaml";
 
 function sha256(buffer: Buffer): string {
@@ -253,19 +253,20 @@ export function createShareArchive(options: ShareExportOptions = {}): ClioShareA
 
 	if (includes.includePrompts) {
 		for (const scope of scopes) {
-			const root = scope === "user" ? path.join(clioConfigDir(), "prompts") : path.join(cwd, ".clio", "prompts");
+			const root = scope === "user" ? path.join(clioConfigDir(), "prompts") : path.join(cwd, ".clio-coder", "prompts");
 			addTree(files, "prompt", scope, root, `${scope}/prompts`);
 		}
 	}
 	if (includes.includeSkills) {
 		for (const scope of scopes) {
-			const root = scope === "user" ? path.join(clioConfigDir(), "skills") : path.join(cwd, ".clio", "skills");
+			const root = scope === "user" ? path.join(clioConfigDir(), "skills") : path.join(cwd, ".clio-coder", "skills");
 			addTree(files, "skill", scope, root, `${scope}/skills`);
 		}
 	}
 	if (includes.includeExtensions) {
 		for (const scope of scopes) {
-			const root = scope === "user" ? path.join(clioConfigDir(), "extensions") : path.join(cwd, ".clio", "extensions");
+			const root =
+				scope === "user" ? path.join(clioConfigDir(), "extensions") : path.join(cwd, ".clio-coder", "extensions");
 			addTree(files, "extension", scope, root, `${scope}/extensions`, (rel) => path.basename(rel) !== "state.json");
 		}
 	}
@@ -386,15 +387,15 @@ function targetRootForFile(entry: ShareArchiveFile, options: ShareImportOptions)
 		case "prompt":
 			return scope === "user"
 				? { root: path.join(config, "prompts"), containmentRoot: config, scope }
-				: { root: path.join(cwd, ".clio", "prompts"), containmentRoot: cwd, scope };
+				: { root: path.join(cwd, ".clio-coder", "prompts"), containmentRoot: cwd, scope };
 		case "skill":
 			return scope === "user"
 				? { root: path.join(config, "skills"), containmentRoot: config, scope }
-				: { root: path.join(cwd, ".clio", "skills"), containmentRoot: cwd, scope };
+				: { root: path.join(cwd, ".clio-coder", "skills"), containmentRoot: cwd, scope };
 		case "extension":
 			return scope === "user"
 				? { root: path.join(config, "extensions"), containmentRoot: config, scope }
-				: { root: path.join(cwd, ".clio", "extensions"), containmentRoot: cwd, scope };
+				: { root: path.join(cwd, ".clio-coder", "extensions"), containmentRoot: cwd, scope };
 		case "settings":
 			return { root: config, containmentRoot: config, scope };
 	}

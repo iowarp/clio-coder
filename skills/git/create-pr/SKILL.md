@@ -62,7 +62,7 @@ Every STOP is final for this run: report the reason and end.
 
 ## Step 3 — Gather the body
 
-- PR conventions from the project instruction file (`CLIO.md`, `AGENTS.md`,
+- PR conventions from the project instruction file (`CLIO-CODER.md`, `AGENTS.md`,
   `CLAUDE.md`) override the template below.
 - Commits: `git log origin/<base>..HEAD --pretty=format:"- %s"`.
 - Shape: `git diff --stat origin/<base>..HEAD`.

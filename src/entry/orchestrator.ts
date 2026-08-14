@@ -184,7 +184,7 @@ export interface HeadlessSamplingOverrides {
 export interface BootOptions {
 	/** Process-lifetime API key override applied to the active orchestrator target. */
 	apiKey?: string;
-	/** Suppress CLIO.md project-context injection for this run. */
+	/** Suppress CLIO-CODER.md project-context injection for this run. */
 	noContextFiles?: boolean;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
@@ -238,13 +238,13 @@ function bannerConfigurationLine(): string {
 	try {
 		settings = readSettings();
 	} catch {
-		return chalk.yellow("settings.yaml is not valid. Run `clio doctor` for the exact keys.");
+		return chalk.yellow("settings.yaml is not valid. Run `clio-coder doctor` for the exact keys.");
 	}
 	// A dangling chat target normalizes to null in the schema, so a deleted
 	// target arrives here as no target at all rather than as a name to report.
 	const targetId = settings.orchestrator?.target;
 	if (!targetId) {
-		return chalk.yellow("no model target configured. Run `clio configure` to add one.");
+		return chalk.yellow("no model target configured. Run `clio-coder configure` to add one.");
 	}
 	const model = settings.orchestrator?.model;
 	return chalk.dim(`target ${targetId}${model ? ` · model ${model}` : " · no default model"}`);
@@ -634,7 +634,7 @@ async function runCompactionFlow(
 		isSplitTurn: result.isSplitTurn,
 		tokensAfter: estimateTokensAfterCompaction(entries, result),
 		// The summarization call is a real model call. Persisting its provider
-		// usage on the entry is what puts it in front of `/cost` and `clio usage
+		// usage on the entry is what puts it in front of `/cost` and `clio-coder usage
 		// report`, which folded the ledger and so counted every call but this one.
 		...(result.usage !== undefined ? { usage: result.usage } : {}),
 	};
@@ -830,10 +830,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	timer.mark("session_start fired");
 
 	const acpMode = options.acp !== undefined;
-	const interactive = !options.headless && !acpMode && process.env.CLIO_INTERACTIVE === "1";
+	const interactive = !options.headless && !acpMode && process.env.CLIO_CODER_INTERACTIVE === "1";
 	if (!interactive && !options.headless && !acpMode) {
 		process.stdout.write(buildBanner());
-		if (process.env.CLIO_TIMING === "1") process.stdout.write(`${timer.report()}\n`);
+		if (process.env.CLIO_CODER_TIMING === "1") process.stdout.write(`${timer.report()}\n`);
 	}
 
 	const config = result.getContract<ConfigContract>("config");
@@ -857,7 +857,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	if (!interactive && !options.headless && !acpMode) {
-		process.stdout.write(`${chalk.dim("  (non-interactive boot. pass CLIO_INTERACTIVE=1 to launch the TUI.)")}\n`);
+		process.stdout.write(`${chalk.dim("  (non-interactive boot. pass CLIO_CODER_INTERACTIVE=1 to launch the TUI.)")}\n`);
 		await termination.shutdown(0);
 		return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
 	}
@@ -899,7 +899,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			else resolvedResumeId = latest.id;
 		}
 	}
-	const resumeId = resolvedResumeId ?? process.env.CLIO_RESUME_SESSION_ID?.trim();
+	const resumeId = resolvedResumeId ?? process.env.CLIO_CODER_RESUME_SESSION_ID?.trim();
 	let resumedSessionAtBoot = false;
 	if (resumeId && session && headlessResumeFailure === null) {
 		try {
@@ -911,9 +911,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			else process.stderr.write(`Clio Coder: failed to resume session ${resumeId}: ${detail}\n`);
 		}
 	}
-	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
+	Reflect.deleteProperty(process.env, "CLIO_CODER_RESUME_SESSION_ID");
 	if (headlessResumeFailure !== null) {
-		process.stderr.write(`clio run: ${headlessResumeFailure}\n`);
+		process.stderr.write(`clio-coder run: ${headlessResumeFailure}\n`);
 		await termination.shutdown(2);
 		return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
 	}
@@ -1079,8 +1079,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			createFileMutationObserver(coalescePathSink((paths) => contextDomain.noteFileChanges(paths))),
 		);
 	}
-	// User-defined hooks: extensions and the project (.clio/hooks.yaml,
-	// .clio/hooks.local.yaml) declare a conservative, receipted hook set on the
+	// User-defined hooks: extensions and the project (.clio-coder/hooks.yaml,
+	// .clio-coder/hooks.local.yaml) declare a conservative, receipted hook set on the
 	// same effect machinery. They register after the guards, so safety stays
 	// authoritative: a hook may add effects (including request block_tool) but
 	// cannot grant a permission safety would deny. Loading is best-effort.
@@ -1140,7 +1140,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let askUserHandler: AskUserHandler | null = null;
 	// ask_user is interactive-only by design: it is a human interview tool and
 	// headless/ACP surfaces have no operator to interview, so the tool is not
-	// registered there at all (documented in `clio run --help`). Skills that
+	// registered there at all (documented in `clio-coder run --help`). Skills that
 	// interview fall back to their stated defaults when the tool is absent.
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
 		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();
@@ -1423,7 +1423,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					const meta = session.current();
 					return meta ? readRecentSessionEntriesForContract(meta.id) : null;
 				},
-				resolveRigor: () => resolveRigor({ cwd: process.cwd(), override: parseRigorOverride(process.env.CLIO_RIGOR) }),
+				resolveRigor: () =>
+					resolveRigor({ cwd: process.cwd(), override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) }),
 				recordDecision: (record) => safety.audit.recordCompletionContract?.(record),
 			}),
 		);
@@ -1484,7 +1485,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		await chat.whenSettled();
 	});
 
-	// A boot-time resume (CLIO_RESUME_SESSION_ID) must replay the resumed
+	// A boot-time resume (CLIO_CODER_RESUME_SESSION_ID) must replay the resumed
 	// session into the chat loop the same way the interactive /resume overlay
 	// does. Without this, the first submit runs with an empty provider context
 	// and parents its user turn at null, appending a second root that silently
@@ -1709,7 +1710,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											},
 											onFallback: (err, mode) =>
 												runIo?.stderr(
-													`context init: Scout unavailable, using ${mode === "existing" ? "existing CLIO.md" : "heuristic"} (${err.message})\n`,
+													`context init: Scout unavailable, using ${mode === "existing" ? "existing CLIO-CODER.md" : "heuristic"} (${err.message})\n`,
 												),
 										}),
 										modelId: "configured-clio-target",

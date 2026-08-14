@@ -13,7 +13,7 @@ Expected:
 
 ## S2 — launch and drive a Clio instance
 Setup: inside a Herdr pane, `herdr` on PATH, a Clio agent kind installed.
-Prompt: "launch another clio here and ask it to summarize CLIO.md."
+Prompt: "launch another clio here and ask it to summarize CLIO-CODER.md."
 Expected:
 - Splits a sibling pane with `--current`, `--cwd "$PWD"`, `--no-focus`.
 - Reads the new pane ID from `.result.pane.pane_id`, never from an example.
@@ -34,5 +34,5 @@ Expected:
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. NOT SMOKED: requires HERDR_ENV and live panes; never run before the campaign time-box.

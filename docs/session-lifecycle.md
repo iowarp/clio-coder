@@ -8,7 +8,7 @@ Source implementations: `src/engine/session.ts` and `src/domains/session/`.
 
 ## 1. On-Disk Session Layout
 
-Sessions are persisted durably on disk under the platform state root (`clioStateDir()`, resolving to `~/.local/state/clio-coder` on Linux/macOS or `%LOCALAPPDATA%\clio-coder` on Windows):
+Sessions are persisted durably on disk under the platform state root (`clioStateDir()`, resolving to `~/.local/state/clio-coder` on Linux, `~/Library/Application Support/clio-coder/state` on macOS, or `%LOCALAPPDATA%\clio-coder\state` on Windows):
 
 ```text
 <stateDir>/sessions/<cwdHash>/<sessionId>/
@@ -126,7 +126,7 @@ The `/fork` command (`src/domains/session/tree/fork.ts:forkFromParentTurn`) init
 
 ## 5. Session Resumption (`/resume`) & Working Directory Fallback
 
-When resuming a session via `/resume <sessionId>` or `CLIO_RESUME_SESSION_ID`:
+When resuming a session via `/resume <sessionId>` or `CLIO_CODER_RESUME_SESSION_ID`:
 1. `src/domains/session/manager.ts:resumeSessionState` loads `meta.json` and runs migrations.
 2. `src/domains/session/cwd-fallback.ts:resolveSessionCwd` probes the recorded `meta.cwd` against the filesystem.
 3. If the directory is invalid, it returns a typed failure reason:

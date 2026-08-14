@@ -23,7 +23,7 @@ describe("contracts/cli-args-contract", () => {
 	];
 
 	for (const args of missingValueCases) {
-		it(`clio ${args.join(" ")} rejects the missing value instead of consuming a subcommand`, async () => {
+		it(`clio-coder ${args.join(" ")} rejects the missing value instead of consuming a subcommand`, async () => {
 			const result = await runCli(args, { env: scratch.env });
 			strictEqual(result.code, 2, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
@@ -32,7 +32,7 @@ describe("contracts/cli-args-contract", () => {
 	}
 
 	for (const flag of ["--probe", "--no-probe"]) {
-		it(`clio models ${flag} rejects the removed flag`, async () => {
+		it(`clio-coder models ${flag} rejects the removed flag`, async () => {
 			const result = await runCli(["models", flag], { env: scratch.env });
 			strictEqual(result.code, 2, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
@@ -42,7 +42,7 @@ describe("contracts/cli-args-contract", () => {
 
 	// A real value followed by a subcommand is the advertised form and must keep
 	// working: the value is consumed and the subcommand runs.
-	it("clio --api-key <key> paths --json still runs the subcommand", async () => {
+	it("clio-coder --api-key <key> paths --json still runs the subcommand", async () => {
 		const result = await runCli(["--api-key", "sk-not-a-subcommand", "paths", "--json"], { env: scratch.env });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 		match(result.stdout, /"config"/);

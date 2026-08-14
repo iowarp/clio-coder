@@ -290,7 +290,7 @@ describe("contracts/receipt-integrity", () => {
 					version: 1,
 					rulePackHash: "1".repeat(64),
 					rulePackVersion: 1,
-					projectPolicyPath: "/workspace/.clio/safety.yaml",
+					projectPolicyPath: "/workspace/.clio-coder/safety.yaml",
 					projectPolicyHash: "2".repeat(64),
 					projectPolicyValid: true,
 				},

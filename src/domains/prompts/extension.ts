@@ -155,7 +155,7 @@ export function createPromptsBundle(
 
 /**
  * Inline prompt fragments for the project's customization surfaces. Unconditional
- * `.clio/rules/**` rules load with project context here; path-scoped rules stay
+ * `.clio-coder/rules/**` rules load with project context here; path-scoped rules stay
  * out of the base prompt and activate through the rule loader once a matching
  * file is in working context. The operator profile renders as one capped
  * section. Both are deterministic (rules sort by id), so a local model's cached
@@ -274,7 +274,9 @@ function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTo
 	if (projectType) lines.push(`Language: ${projectType}`);
 	if (context.clioMd) {
 		lines.push(`Project: ${context.clioMd.projectName}`);
-		lines.push("CLIO.md: available; compact synopsis only because the handbook is too large for automatic preload.");
+		lines.push(
+			"CLIO-CODER.md: available; compact synopsis only because the handbook is too large for automatic preload.",
+		);
 	}
 	if (hasCodewiki(context.text)) lines.push("Codewiki: available via code_nav.");
 	if (wiki) lines.push(`Wiki: ${wiki}`);
@@ -288,7 +290,7 @@ function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTo
 }
 
 /**
- * Project context is selected once per session compile: the full CLIO.md
+ * Project context is selected once per session compile: the full CLIO-CODER.md
  * preload when it is small enough, a compact synopsis otherwise. No per-turn
  * selection — the session prompt is stable for the session's lifetime. The
  * cliff itself lives in prompts/preload.ts so reporting surfaces classify

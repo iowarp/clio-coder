@@ -1,8 +1,8 @@
 /**
- * `clio uninstall` printed "PATH lookup" and "local source bin" on adjacent
+ * `clio-coder uninstall` printed "PATH lookup" and "local source bin" on adjacent
  * lines and left the reader to notice they were different paths. They are
  * different installations when they differ, and the operator who has just been
- * told "removed Clio Coder state" types `clio` next and reaches the other one,
+ * told "removed Clio Coder state" types `clio-coder` next and reaches the other one,
  * which still works and still has its own state.
  *
  * The comparison resolves symlinks first: the PATH entry is normally a link
@@ -27,7 +27,7 @@ describe("contracts/uninstall path divergence", () => {
 		entry = join(root, "checkout", "dist", "cli", "index.js");
 		writeFileSync(entry, "", "utf8");
 		mkdirSync(join(root, "bin"), { recursive: true });
-		linkPath = join(root, "bin", "clio");
+		linkPath = join(root, "bin", "clio-coder");
 	});
 
 	afterEach(() => {
@@ -39,7 +39,7 @@ describe("contracts/uninstall path divergence", () => {
 		strictEqual(otherClioOnPath(linkPath, linkPath), null);
 	});
 
-	// The common shape: /usr/local/bin/clio is a symlink to ~/.local/bin/clio,
+	// The common shape: /usr/local/bin/clio-coder is a symlink to ~/.local/bin/clio-coder,
 	// which is a symlink to this checkout. Two paths, one installation.
 	it("says nothing when two paths resolve to the same installation", () => {
 		symlinkSync(entry, linkPath);

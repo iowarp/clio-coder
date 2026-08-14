@@ -30,16 +30,16 @@ try {
 
 - `runCli(args, { env, cwd, timeoutMs, input })` → `Promise<{ code, signal, stdout, stderr }>`.
   Default `timeoutMs` is 15_000; raise it for `run`/`acp`.
-- `makeScratchHome()` → `{ dir, env, cleanup }`. The `env` sets `CLIO_HOME`,
-  `CLIO_DATA_DIR`, `CLIO_CONFIG_DIR`, `CLIO_CACHE_DIR`, and
-  `CLIO_REQUIRE_HOME_PREFIX=1`. **Always pass `env: scratch.env`** so the test
+- `makeScratchHome()` → `{ dir, env, cleanup }`. The `env` sets `CLIO_CODER_HOME`,
+  `CLIO_CODER_DATA_DIR`, `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_CACHE_DIR`, and
+  `CLIO_CODER_REQUIRE_HOME_PREFIX=1`. **Always pass `env: scratch.env`** so the test
   never touches the developer's real config, and always `cleanup()` in `finally`.
 - Bootstrap a scratch home with `runCli(["doctor", "--fix"], …)` before commands
   that need settings.
 
 Useful flags seen in smoke tests: `--no-context-files`, `--no-skills`,
-`--skill <path>`, `--json`. For the live CLI surface, run `clio --help` and
-`clio <command> --help` rather than hardcoding a command list here.
+`--skill <path>`, `--json`. For the live CLI surface, run `clio-coder --help` and
+`clio-coder <command> --help` rather than hardcoding a command list here.
 
 ## Mocking a provider
 
@@ -56,7 +56,7 @@ const fixture = await startOpenAICompatFixture("mock reply");
 seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
 // 3. Run, providing the key env var the target references.
 const res = await runCli(["--no-context-files", "run", "hello"], {
-  env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+  env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
   timeoutMs: 20_000,
 });
 // res.stdout === "mock reply\n"
@@ -68,7 +68,7 @@ The fixture also records `fixture.requests`, so you can assert what Clio sent
 
 ## ACP over JSON-RPC/stdio
 
-`clio acp` speaks ACP v1 over stdio. Drive it with a line-delimited JSON-RPC
+`clio-coder acp` speaks ACP v1 over stdio. Drive it with a line-delimited JSON-RPC
 client (see `createJsonRpcProcessClient` in the smoke test): `initialize` →
 `session/new` → `session/prompt` → `session/close`. Streaming arrives as
 `session/update` notifications whose `update.sessionUpdate` must be a v1 variant

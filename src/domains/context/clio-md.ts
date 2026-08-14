@@ -257,7 +257,7 @@ export function parseClioMd(source: string): ClioMdParseResult {
 function validateForSerialization(input: SerializeClioMdInput): void {
 	const test = parseClioMd(renderWithoutParse(input));
 	if (!test.ok) {
-		throw new Error(`CLIO.md serialization failed validation: ${test.errors.join("; ")}`);
+		throw new Error(`CLIO-CODER.md serialization failed validation: ${test.errors.join("; ")}`);
 	}
 }
 
@@ -312,7 +312,7 @@ export function renderProjectContextFragment(parsed: ParsedClioMd): string {
 }
 
 export function tryReadClioMd(cwd: string): { ok: true; value: ParsedClioMd } | { ok: false; error: string } | null {
-	const filePath = join(cwd, "CLIO.md");
+	const filePath = join(cwd, "CLIO-CODER.md");
 	if (!existsSync(filePath)) return null;
 	let content: string;
 	try {

@@ -12,11 +12,11 @@ import {
 } from "../domains/evidence/index.js";
 import { printError, printOk } from "./shared.js";
 
-const HELP = `clio evidence build --run <runId>
-clio evidence build --session <sessionId>
-clio evidence build --eval <evalId>
-clio evidence inspect <evidenceId>
-clio evidence list
+const HELP = `clio-coder evidence build --run <runId>
+clio-coder evidence build --session <sessionId>
+clio-coder evidence build --eval <evalId>
+clio-coder evidence inspect <evidenceId>
+clio-coder evidence list
 
 Build or inspect deterministic Clio evidence artifacts.
 `;
@@ -165,7 +165,8 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 		printError(error instanceof Error ? error.message : String(error));
 		// The id came from the user, and the command that shows which ids exist is
 		// the only thing that turns this exit into a working one.
-		if (error instanceof EvidenceNotFoundError) process.stderr.write("  run `clio evidence list` to see local bundles\n");
+		if (error instanceof EvidenceNotFoundError)
+			process.stderr.write("  run `clio-coder evidence list` to see local bundles\n");
 		return error instanceof InvalidIdError ? 2 : 1;
 	}
 }

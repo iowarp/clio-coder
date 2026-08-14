@@ -5,18 +5,18 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
-// `clio context reset` confirmed through a readline prompt that answers false
+// `clio-coder context reset` confirmed through a readline prompt that answers false
 // whenever stdin is not a TTY, so every scripted or CI invocation cancelled
 // while reporting success. The reset had no non-interactive expression at all.
 
 function makeProject(): string {
 	const dir = mkdtempSync(join(tmpdir(), "clio-reset-project-"));
-	mkdirSync(join(dir, ".clio"), { recursive: true });
-	writeFileSync(join(dir, ".clio", "codewiki.json"), "{}");
-	writeFileSync(join(dir, ".clio", "state.json"), "{}");
-	mkdirSync(join(dir, ".clio", "wiki"), { recursive: true });
-	writeFileSync(join(dir, ".clio", "wiki", "index.md"), "# Wiki\n");
-	writeFileSync(join(dir, "CLIO.md"), "# Handbook\n");
+	mkdirSync(join(dir, ".clio-coder"), { recursive: true });
+	writeFileSync(join(dir, ".clio-coder", "codewiki.json"), "{}");
+	writeFileSync(join(dir, ".clio-coder", "state.json"), "{}");
+	mkdirSync(join(dir, ".clio-coder", "wiki"), { recursive: true });
+	writeFileSync(join(dir, ".clio-coder", "wiki", "index.md"), "# Wiki\n");
+	writeFileSync(join(dir, "CLIO-CODER.md"), "# Handbook\n");
 	return dir;
 }
 
@@ -38,11 +38,11 @@ describe("contracts/cli-context-reset", () => {
 		const result = await runCli(["context", "reset", "--yes"], { env: scratch.env, cwd });
 
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
-		strictEqual(existsSync(join(cwd, ".clio", "codewiki.json")), false);
-		strictEqual(existsSync(join(cwd, ".clio", "state.json")), false);
+		strictEqual(existsSync(join(cwd, ".clio-coder", "codewiki.json")), false);
+		strictEqual(existsSync(join(cwd, ".clio-coder", "state.json")), false);
 		// The wiki is the expensive artifact and stays without --all.
-		strictEqual(existsSync(join(cwd, ".clio", "wiki", "index.md")), true);
-		strictEqual(existsSync(join(cwd, "CLIO.md")), true);
+		strictEqual(existsSync(join(cwd, ".clio-coder", "wiki", "index.md")), true);
+		strictEqual(existsSync(join(cwd, "CLIO-CODER.md")), true);
 	});
 
 	it("removes the handbook only when --all joins --yes", async () => {
@@ -50,8 +50,8 @@ describe("contracts/cli-context-reset", () => {
 		const result = await runCli(["context", "reset", "--all", "--yes"], { env: scratch.env, cwd });
 
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
-		strictEqual(existsSync(join(cwd, ".clio", "codewiki.json")), false);
-		strictEqual(existsSync(join(cwd, "CLIO.md")), false);
+		strictEqual(existsSync(join(cwd, ".clio-coder", "codewiki.json")), false);
+		strictEqual(existsSync(join(cwd, "CLIO-CODER.md")), false);
 	});
 
 	it("cancels without --yes and names the flag that would have worked", async () => {
@@ -59,7 +59,7 @@ describe("contracts/cli-context-reset", () => {
 		const result = await runCli(["context", "reset"], { env: scratch.env, cwd });
 
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
-		strictEqual(existsSync(join(cwd, ".clio", "codewiki.json")), true);
+		strictEqual(existsSync(join(cwd, ".clio-coder", "codewiki.json")), true);
 		strictEqual(/--yes/.test(result.stdout + result.stderr), true, "expected the hint to name --yes");
 	});
 });

@@ -41,14 +41,14 @@ npm run ci:release
 Live LLM smoke validation (manual/opt-in):
 
 ```bash
-CLIO_LIVE_SMOKE=1 CLIO_LIVE_TARGET=anthropic ANTHROPIC_API_KEY=your_key npm run test:live
+CLIO_CODER_LIVE_SMOKE=1 CLIO_CODER_LIVE_TARGET=anthropic ANTHROPIC_API_KEY=your_key npm run test:live
 ```
 
 ## Testing conventions
 
 CLI-facing contract tests drive the built binary through the child-process
 harness in `tests/harness/spawn.ts`: `makeScratchHome()` gives the run an
-isolated `CLIO_HOME`, and `runCli(args, { env, cwd })` spawns `dist/cli` and
+isolated `CLIO_CODER_HOME`, and `runCli(args, { env, cwd })` spawns `dist/cli` and
 returns its captured `stdout`, `stderr`, and exit code. Rebuild `dist/` with
 `npm run build` after changing CLI source, since these tests exercise the
 built output.
@@ -103,7 +103,7 @@ What `scripts/check-release.mjs` enforces, and how to respond when it fails:
 
 Build shape, for anyone changing `tsup.config.ts`: two ESM entries with code
 splitting on. `src/cli/index.ts` imports every subcommand dynamically, so a
-command pays only for its own chunk and `clio --version` stays fast. Keep new
+command pays only for its own chunk and `clio-coder --version` stays fast. Keep new
 subcommands behind dynamic imports, and keep heavyweight runtime dependencies
 in the `external` list so they load from `node_modules` only when a chunk
 that needs them runs.
@@ -192,7 +192,7 @@ Review rubric:
 
 Agents should:
 
-- Read `CLIO.md`, `CHANGELOG.md`, and this file before broad
+- Read `CLIO-CODER.md`, `CHANGELOG.md`, and this file before broad
   edits.
 - Prefer `rg` for search.
 - Use existing modules and helpers before adding abstractions.
@@ -206,7 +206,7 @@ Agents should:
 `skills/` is the curated skills marketplace: maintainer-approved `SKILL.md`
 guides, distinct from the runtime skills any user can drop into a discovery
 root. It is not itself a discovery root, so nothing here auto-loads; skills
-activate only via `clio skills install <name>`.
+activate only via `clio-coder skills install <name>`.
 
 To propose a skill:
 
@@ -216,8 +216,8 @@ To propose a skill:
    progressive disclosure (push heavy reference into `references/`).
 2. Include the provenance frontmatter (`registry-id`, `source-url`, `version`,
    `license`) and ship an `evals.md` with the baseline scenarios you tested.
-3. Verify locally: `clio skills validate skills/<name>/SKILL.md`, then
-   `clio skills install <name>` and `clio skills list`.
+3. Verify locally: `clio-coder skills validate skills/<name>/SKILL.md`, then
+   `clio-coder skills install <name>` and `clio-coder skills list`.
 4. Open a PR. A maintainer reviews against the rubric, then sets `audit: pass`
    and the `version` to approve it for the catalog.
 

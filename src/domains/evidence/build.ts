@@ -286,7 +286,7 @@ function buildFindings(
 			const message =
 				autonomyEnforcement.externalMode === "agent-managed"
 					? "run used external agent-managed governance; Clio safety blocks were not enforced"
-					: "run executed with external permission bypass (CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1); Clio safety blocks were not enforced";
+					: "run executed with external permission bypass (CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1); Clio safety blocks were not enforced";
 			findings.push(finding(findings.length, "warn", "external-bypass", source.envelope.id, message));
 		} else if (autonomyEnforcement?.grade === "approximated") {
 			const mode = autonomyEnforcement.externalMode ? ` via ${autonomyEnforcement.externalMode}` : "";

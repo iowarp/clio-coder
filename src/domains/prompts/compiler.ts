@@ -404,7 +404,7 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 	}
 	return [
 		"# Retrieval Hints",
-		"Compact CLIO.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
+		"Compact CLIO-CODER.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
 		"For narrow questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. For explicit broad repository exploration, hand the search to a reconnaissance worker with dispatch when it is available. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
 	].join("\n");
 }

@@ -27,7 +27,7 @@ describe("contracts/share-cli inspect --json", () => {
 	// BUG-012: a valid-but-unsafe archive must expose the unsafe-path diagnostic
 	// rather than looking like a successful inspection.
 	it("surfaces the unsafe-path diagnostic for a structurally valid archive", async () => {
-		const archivePath = join(scratch.dir, "unsafe.clio-share.json");
+		const archivePath = join(scratch.dir, "unsafe.clio-coder-share.json");
 		const archive = {
 			kind: "clio-share-archive",
 			formatVersion: 1,
@@ -56,7 +56,7 @@ describe("contracts/share-cli inspect --json", () => {
 	// A clean archive inspects with an empty diagnostics array; the success shape
 	// still carries the archive.
 	it("returns the archive with no diagnostics for a valid archive", async () => {
-		const archivePath = join(scratch.dir, "ok.clio-share.json");
+		const archivePath = join(scratch.dir, "ok.clio-coder-share.json");
 		const exported = await runCli(["share", "export", "--out", archivePath], { env: scratch.env });
 		strictEqual(exported.code, 0, `stderr=${exported.stderr}`);
 		const result = await runCli(["share", "inspect", archivePath, "--json"], { env: scratch.env });

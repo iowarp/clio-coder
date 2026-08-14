@@ -294,7 +294,7 @@ function unknownModelDiagnostic(
 		return diagnostic(
 			"warning",
 			"model-catalog-unreadable",
-			`target '${target.id}' returned no model list, so Clio could not check whether '${wireModelId}' is served there; requests will send the id as-is. Re-read the catalog with: clio targets --probe`,
+			`target '${target.id}' returned no model list, so Clio could not check whether '${wireModelId}' is served there; requests will send the id as-is. Re-read the catalog with: clio-coder targets --probe`,
 		);
 	}
 	return diagnostic(
@@ -649,7 +649,7 @@ export function resolveContextWindowDetails(
 		source = runtimeDefault !== undefined ? "descriptor-default" : "unknown";
 	}
 
-	// One-run CLI override (clio run --max-context-tokens), delivered over the
+	// One-run CLI override (clio-coder run --max-context-tokens), delivered over the
 	// run-overrides transport; see core/run-overrides.ts.
 	const overrideMaxContextTokens = runOverrides().maxContextTokens;
 	if (overrideMaxContextTokens !== undefined) {
@@ -675,7 +675,7 @@ export function resolveContextWindowDetails(
 	if (source === "descriptor-default" || source === "unknown") {
 		provenanceNotice =
 			`Context window ${effective} is Clio's assumed minimum, not a figure this target reported. ` +
-			`Run 'clio targets --probe' to read the real one.`;
+			`Run 'clio-coder targets --probe' to read the real one.`;
 	}
 
 	return {

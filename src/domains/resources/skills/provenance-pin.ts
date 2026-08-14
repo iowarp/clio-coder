@@ -33,7 +33,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /** Resolve the manifest path using the same catalog resolution as the marketplace. */
 function resolveSkillPinManifestPath(cwd: string): string | null {
-	const fromEnv = process.env.CLIO_SKILL_CATALOG_DIR;
+	const fromEnv = process.env.CLIO_CODER_SKILL_CATALOG_DIR;
 	const catalogDir = fromEnv && fromEnv.trim().length > 0 ? path.resolve(fromEnv.trim()) : path.join(cwd, "skills");
 	const manifestPath = path.join(catalogDir, SKILL_PIN_MANIFEST_FILENAME);
 	return existsSync(manifestPath) ? manifestPath : null;

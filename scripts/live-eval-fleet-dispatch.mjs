@@ -8,17 +8,17 @@
  * steering, monitoring, collection, and truthful terminal evidence labels.
  * It runs against a committed temporary copy and fails if that copy changes.
  *
- * Never runs in an ordinary test or CI lane: CLIO_LIVE_EVAL=1 is required.
+ * Never runs in an ordinary test or CI lane: CLIO_CODER_LIVE_EVAL=1 is required.
  * Build first, then invoke with:
  *
- *   CLIO_LIVE_EVAL=1 npm run test:live-eval:fleet-dispatch
+ *   CLIO_CODER_LIVE_EVAL=1 npm run test:live-eval:fleet-dispatch
  *
  * Target conventions match the other live-eval scripts:
- *   CLIO_LIVE_TARGET / CLIO_LIVE_RUNTIME / CLIO_LIVE_MODEL / CLIO_LIVE_BASE_URL
- *   CLIO_LIVE_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
- *   CLIO_LIVE_THINKING             parent and worker thinking level (default medium)
- *   CLIO_LIVE_FLEET_TIMEOUT_MS     one-turn timeout (default 600000)
- *   CLIO_LIVE_KEEP=1               retain the isolated scratch tree on success
+ *   CLIO_CODER_LIVE_TARGET / CLIO_CODER_LIVE_RUNTIME / CLIO_CODER_LIVE_MODEL / CLIO_CODER_LIVE_BASE_URL
+ *   CLIO_CODER_LIVE_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
+ *   CLIO_CODER_LIVE_THINKING             parent and worker thinking level (default medium)
+ *   CLIO_CODER_LIVE_FLEET_TIMEOUT_MS     one-turn timeout (default 600000)
+ *   CLIO_CODER_LIVE_KEEP=1               retain the isolated scratch tree on success
  */
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -37,8 +37,8 @@ import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { stringify } from "yaml";
 
-if (process.env.CLIO_LIVE_EVAL !== "1") {
-	console.log("CLIO_LIVE_EVAL is not set to '1'. Skipping the fleet-dispatch live regression.");
+if (process.env.CLIO_CODER_LIVE_EVAL !== "1") {
+	console.log("CLIO_CODER_LIVE_EVAL is not set to '1'. Skipping the fleet-dispatch live regression.");
 	process.exit(0);
 }
 
@@ -49,24 +49,26 @@ if (!existsSync(CLI_ENTRY)) {
 	process.exit(1);
 }
 
-const targetId = process.env.CLIO_LIVE_TARGET || "live-target";
-const runtimeId = process.env.CLIO_LIVE_RUNTIME || (process.env.CLIO_LIVE_BASE_URL ? "openai-compat" : "openai");
-const model = process.env.CLIO_LIVE_MODEL || (runtimeId === "anthropic" ? "claude-3-5-sonnet-latest" : "gpt-4o-mini");
-const url = process.env.CLIO_LIVE_BASE_URL || undefined;
-const thinkingLevel = process.env.CLIO_LIVE_THINKING || "medium";
-const timeoutMs = Number.parseInt(process.env.CLIO_LIVE_FLEET_TIMEOUT_MS || "600000", 10);
+const targetId = process.env.CLIO_CODER_LIVE_TARGET || "live-target";
+const runtimeId =
+	process.env.CLIO_CODER_LIVE_RUNTIME || (process.env.CLIO_CODER_LIVE_BASE_URL ? "openai-compat" : "openai");
+const model =
+	process.env.CLIO_CODER_LIVE_MODEL || (runtimeId === "anthropic" ? "claude-3-5-sonnet-latest" : "gpt-4o-mini");
+const url = process.env.CLIO_CODER_LIVE_BASE_URL || undefined;
+const thinkingLevel = process.env.CLIO_CODER_LIVE_THINKING || "medium";
+const timeoutMs = Number.parseInt(process.env.CLIO_CODER_LIVE_FLEET_TIMEOUT_MS || "600000", 10);
 const validThinkingLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 if (!validThinkingLevels.has(thinkingLevel)) {
-	console.error(`Error: CLIO_LIVE_THINKING must be one of ${[...validThinkingLevels].join(", ")}.`);
+	console.error(`Error: CLIO_CODER_LIVE_THINKING must be one of ${[...validThinkingLevels].join(", ")}.`);
 	process.exit(1);
 }
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 30_000) {
-	console.error("Error: CLIO_LIVE_FLEET_TIMEOUT_MS must be an integer of at least 30000.");
+	console.error("Error: CLIO_CODER_LIVE_FLEET_TIMEOUT_MS must be an integer of at least 30000.");
 	process.exit(1);
 }
 
-let envVarName = "CLIO_LIVE_API_KEY";
-let apiKey = process.env.CLIO_LIVE_API_KEY || "";
+let envVarName = "CLIO_CODER_LIVE_API_KEY";
+let apiKey = process.env.CLIO_CODER_LIVE_API_KEY || "";
 if (!apiKey) {
 	if (runtimeId === "openai" && process.env.OPENAI_API_KEY) {
 		envVarName = "OPENAI_API_KEY";
@@ -79,13 +81,13 @@ if (!apiKey) {
 const keylessRuntimes = new Set(["openai-compat", "llamacpp", "ollama", "lmstudio"]);
 if (!apiKey && !keylessRuntimes.has(runtimeId)) {
 	console.error(
-		"Error: CLIO_LIVE_EVAL=1 is active, but no API key was found in CLIO_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
+		"Error: CLIO_CODER_LIVE_EVAL=1 is active, but no API key was found in CLIO_CODER_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
 	);
 	process.exit(1);
 }
 
-const BRIEFING_SENTINEL = "CLIO_FLEET_BRIEFING_SENTINEL_v6_20260713";
-const STEERING_SENTINEL = "CLIO_FLEET_STEERING_SENTINEL_v6_20260713";
+const BRIEFING_SENTINEL = "CLIO_CODER_FLEET_BRIEFING_SENTINEL_v6_20260713";
+const STEERING_SENTINEL = "CLIO_CODER_FLEET_STEERING_SENTINEL_v6_20260713";
 const SPECIALIST_TASK =
 	"Read-only: verify the receipt v4/v5/v6 compatibility boundary and report two cited risks without quoting dynamic context or steering messages.";
 const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
@@ -104,7 +106,7 @@ for (const dir of [clioDataDir, clioConfigDir, clioStateDir, clioCacheDir]) {
 	mkdirSync(dir, { recursive: true });
 }
 
-const excludedRoots = new Set([".git", ".clio", ".superpowers", "coverage", "dist", "node_modules"]);
+const excludedRoots = new Set([".git", ".clio-coder", ".superpowers", "coverage", "dist", "node_modules"]);
 cpSync(REPO_ROOT, workspaceDir, {
 	recursive: true,
 	filter(source) {
@@ -177,12 +179,12 @@ writeFileSync(join(clioConfigDir, "settings.yaml"), stringify(settings), "utf8")
 
 const childEnv = {
 	...process.env,
-	CLIO_HOME: scratchDir,
-	CLIO_DATA_DIR: clioDataDir,
-	CLIO_CONFIG_DIR: clioConfigDir,
-	CLIO_STATE_DIR: clioStateDir,
-	CLIO_CACHE_DIR: clioCacheDir,
-	CLIO_REQUIRE_HOME_PREFIX: "1",
+	CLIO_CODER_HOME: scratchDir,
+	CLIO_CODER_DATA_DIR: clioDataDir,
+	CLIO_CODER_CONFIG_DIR: clioConfigDir,
+	CLIO_CODER_STATE_DIR: clioStateDir,
+	CLIO_CODER_CACHE_DIR: clioCacheDir,
+	CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
 };
 if (apiKey) childEnv[envVarName] = apiKey;
 
@@ -567,9 +569,9 @@ try {
 	console.error(`[fleet-live] artifacts retained under ${scratchDir}`);
 	process.exitCode = 1;
 } finally {
-	if (passed && process.env.CLIO_LIVE_KEEP !== "1") {
+	if (passed && process.env.CLIO_CODER_LIVE_KEEP !== "1") {
 		rmSync(scratchDir, { recursive: true, force: true });
 	} else if (passed) {
-		console.log(`[fleet-live] CLIO_LIVE_KEEP=1; artifacts retained under ${scratchDir}`);
+		console.log(`[fleet-live] CLIO_CODER_LIVE_KEEP=1; artifacts retained under ${scratchDir}`);
 	}
 }

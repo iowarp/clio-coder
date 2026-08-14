@@ -174,7 +174,7 @@ describe("contracts/skills loader normalization", () => {
 		const scratch = scratchDir();
 		const workspace = join(scratch, "repo");
 		const outside = join(scratch, "outside", "secrets");
-		mkdirSync(join(workspace, ".clio", "skills"), { recursive: true });
+		mkdirSync(join(workspace, ".clio-coder", "skills"), { recursive: true });
 		mkdirSync(outside, { recursive: true });
 		writeFileSync(join(outside, "credentials.txt"), "AWS_SECRET=hunter2\n", "utf8");
 		writeFileSync(
@@ -182,7 +182,7 @@ describe("contracts/skills loader normalization", () => {
 			["---", 'name: "escaped"', 'description: "Base dir outside the repo."', "---", "", "body", ""].join("\n"),
 			"utf8",
 		);
-		symlinkSync(outside, join(workspace, ".clio", "skills", "escaped"));
+		symlinkSync(outside, join(workspace, ".clio-coder", "skills", "escaped"));
 
 		const list = loadSkills({ cwd: workspace, home: join(scratch, "nohome"), configDir: join(scratch, "noconfig") });
 
@@ -202,14 +202,14 @@ describe("contracts/skills loader normalization", () => {
 		const scratch = scratchDir();
 		const workspace = join(scratch, "repo");
 		const shared = join(workspace, "shared", "skills", "inside");
-		mkdirSync(join(workspace, ".clio", "skills"), { recursive: true });
+		mkdirSync(join(workspace, ".clio-coder", "skills"), { recursive: true });
 		mkdirSync(shared, { recursive: true });
 		writeFileSync(
 			join(shared, "SKILL.md"),
 			["---", 'name: "inside"', 'description: "Shared across checkouts."', "---", "", "body", ""].join("\n"),
 			"utf8",
 		);
-		symlinkSync(shared, join(workspace, ".clio", "skills", "inside"));
+		symlinkSync(shared, join(workspace, ".clio-coder", "skills", "inside"));
 
 		const list = loadSkills({ cwd: workspace, home: join(scratch, "nohome"), configDir: join(scratch, "noconfig") });
 
@@ -506,7 +506,10 @@ describe("contracts/skills compatibility roots", () => {
 describe("contracts/skills on-demand listing", () => {
 	it("context scope=skills with no name lists model-visible skills without a pending request", async () => {
 		const project = scratchDir("clio-proj-");
-		writeSkillDir(join(project, ".clio", "skills"), "visible", ['name: "visible"', 'description: "Catalog entry."']);
+		writeSkillDir(join(project, ".clio-coder", "skills"), "visible", [
+			'name: "visible"',
+			'description: "Catalog entry."',
+		]);
 		const tool = createContextTool({ getCwd: () => project });
 		const result = await tool.run({ scope: "skills" }, undefined);
 		strictEqual(result.kind, "ok");
@@ -535,7 +538,7 @@ describe("contracts/skills on-demand listing", () => {
 		};
 
 		const withSkills = scratchDir("clio-proj-");
-		writeSkillDir(join(withSkills, ".clio", "skills"), "pointer", ['name: "pointer"', 'description: "Pointer."']);
+		writeSkillDir(join(withSkills, ".clio-coder", "skills"), "pointer", ['name: "pointer"', 'description: "Pointer."']);
 		const tool = createContextTool({ getCwd: () => withSkills, workspace: workspaceDeps });
 		const result = await tool.run({ scope: "workspace" }, undefined);
 		strictEqual(result.kind, "ok");
@@ -563,7 +566,7 @@ describe("contracts/skills on-demand listing", () => {
 
 	it("context scope=skills listing excludes disable-model-invocation skills", async () => {
 		const project = scratchDir("clio-proj-");
-		writeSkillDir(join(project, ".clio", "skills"), "manual-only", [
+		writeSkillDir(join(project, ".clio-coder", "skills"), "manual-only", [
 			'name: "manual-only"',
 			'description: "Only via slash command."',
 			"disable-model-invocation: true",
@@ -768,11 +771,11 @@ describe("contracts/skills tools", () => {
 	beforeEach(() => {
 		scratch = mkdtempSync(join(tmpdir(), "clio-skill-tools-"));
 		process.env.HOME = scratch;
-		process.env.CLIO_HOME = scratch;
-		process.env.CLIO_DATA_DIR = join(scratch, "data");
-		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
-		process.env.CLIO_STATE_DIR = join(scratch, "state");
-		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
+		process.env.CLIO_CODER_HOME = scratch;
+		process.env.CLIO_CODER_DATA_DIR = join(scratch, "data");
+		process.env.CLIO_CODER_CONFIG_DIR = join(scratch, "config");
+		process.env.CLIO_CODER_STATE_DIR = join(scratch, "state");
+		process.env.CLIO_CODER_CACHE_DIR = join(scratch, "cache");
 		resetXdgCache();
 	});
 
@@ -790,7 +793,7 @@ describe("contracts/skills tools", () => {
 	it("context scope=skills returns structured metadata, hash, base_dir, and body", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
-			join(cwd, ".clio", "skills"),
+			join(cwd, ".clio-coder", "skills"),
 			"readable",
 			['name: "readable"', 'description: "Readable skill."', 'license: "MIT"'],
 			"READ ME BODY",
@@ -808,13 +811,13 @@ describe("contracts/skills tools", () => {
 		match(String(details.hash), /^[0-9a-f]{64}$/);
 		strictEqual(details.scope, "project");
 		strictEqual(details.sourceOrigin, "project");
-		ok(String(details.baseDir).includes(".clio"));
+		ok(String(details.baseDir).includes(".clio-coder"));
 	});
 
 	it("frames every loaded skill with the workspace root and the foreign-vocabulary rule", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
-			join(cwd, ".clio", "skills"),
+			join(cwd, ".clio-coder", "skills"),
 			"portable",
 			['name: "portable"', 'description: "A skill written for another harness."'],
 			"Send a single message with two Agent tool calls using general-purpose.",
@@ -840,13 +843,13 @@ describe("contracts/skills tools", () => {
 	it("context skill loads honor the pending policy for non-requested and repeated loads", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
-			join(cwd, ".clio", "skills"),
+			join(cwd, ".clio-coder", "skills"),
 			"grill-me",
 			['name: "grill-me"', 'description: "Interview skill."'],
 			"ASK ONE QUESTION",
 		);
 		writeSkillDir(
-			join(cwd, ".clio", "skills"),
+			join(cwd, ".clio-coder", "skills"),
 			"context-prime",
 			['name: "context-prime"', 'description: "Context skill."'],
 			"PRIME CONTEXT",
@@ -881,7 +884,7 @@ describe("contracts/skills tools", () => {
 	it("context skill load denial without a pending request names the compliant next move", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
-			join(cwd, ".clio", "skills"),
+			join(cwd, ".clio-coder", "skills"),
 			"grill-me",
 			['name: "grill-me"', 'description: "Interview skill."'],
 			"ASK ONE QUESTION",
@@ -918,7 +921,7 @@ describe("contracts/skills tools", () => {
 	it("context skill activation reaches the observer registration with turn metadata", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
-			join(cwd, ".clio", "skills"),
+			join(cwd, ".clio-coder", "skills"),
 			"readable",
 			['name: "readable"', 'description: "Readable skill."'],
 			"READ ME BODY",
@@ -965,7 +968,7 @@ describe("contracts/skills tools", () => {
 	it("context skill loads annotate marketplace provenance drift without blocking", async () => {
 		const cwd = join(scratch, "project");
 		const skillPath = writeSkillDir(
-			join(cwd, ".clio", "skills"),
+			join(cwd, ".clio-coder", "skills"),
 			"pinned",
 			['name: "pinned"', 'description: "Pinned skill."', 'registry-id: "pinned"'],
 			"PINNED BODY",
@@ -1015,7 +1018,7 @@ describe("contracts/skills tools", () => {
 
 	it("context skill include_tree lists sibling resources without executing them", async () => {
 		const cwd = join(scratch, "project");
-		const dir = join(cwd, ".clio", "skills", "with-tree");
+		const dir = join(cwd, ".clio-coder", "skills", "with-tree");
 		mkdirSync(join(dir, "scripts"), { recursive: true });
 		mkdirSync(join(dir, "references"), { recursive: true });
 		writeFileSync(
@@ -1038,7 +1041,7 @@ describe("contracts/skills tools", () => {
 
 	it("context skill loads refuse skills hidden from model invocation", async () => {
 		const cwd = join(scratch, "project");
-		writeSkillDir(join(cwd, ".clio", "skills"), "hidden", [
+		writeSkillDir(join(cwd, ".clio-coder", "skills"), "hidden", [
 			'name: "hidden"',
 			'description: "Hidden skill."',
 			"disable-model-invocation: true",
@@ -1059,8 +1062,13 @@ describe("contracts/skills tools", () => {
 
 	it("context skill loads with a recipe-bound policy admit exactly the declared skills", async () => {
 		const cwd = join(scratch, "project");
-		writeSkillDir(join(cwd, ".clio", "skills"), "cut-it", ['name: "cut-it"', 'description: "Slice plans."'], "SLICE");
-		writeSkillDir(join(cwd, ".clio", "skills"), "other", ['name: "other"', 'description: "Other skill."'], "OTHER");
+		writeSkillDir(
+			join(cwd, ".clio-coder", "skills"),
+			"cut-it",
+			['name: "cut-it"', 'description: "Slice plans."'],
+			"SLICE",
+		);
+		writeSkillDir(join(cwd, ".clio-coder", "skills"), "other", ['name: "other"', 'description: "Other skill."'], "OTHER");
 		const policy = agentSkillToolPolicy(["cut-it"]);
 		ok(policy);
 		const tool = createContextTool({ getCwd: () => cwd });
@@ -1088,7 +1096,7 @@ describe("contracts/skills tools", () => {
 	it("context skill loads record the skill's declared tool policy on the pending policy", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
-			join(cwd, ".clio", "skills"),
+			join(cwd, ".clio-coder", "skills"),
 			"narrow",
 			[
 				'name: "narrow"',

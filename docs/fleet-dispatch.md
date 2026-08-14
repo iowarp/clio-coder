@@ -59,9 +59,9 @@ Design decisions that shape everything else:
   can be activated only for named roles/postures after exact-tuple readiness,
   and hard constraints always eliminate before any score.
 - Environment whitelist. The SSH command carries an explicit environment
-  (`CLIO_RESIDENCY=observe`, `CLIO_WORKER_PGID=$$`, and any configured
-  `CLIO_WORKER_LABELS`); the orchestrator's `process.env` never crosses the
-  wire. `CLIO_WORKER_PGID` names the remote process group so an abort escalates
+  (`CLIO_CODER_RESIDENCY=observe`, `CLIO_CODER_WORKER_PGID=$$`, and any configured
+  `CLIO_CODER_WORKER_LABELS`); the orchestrator's `process.env` never crosses the
+  wire. `CLIO_CODER_WORKER_PGID` names the remote process group so an abort escalates
   against the whole group rather than one process.
 
 ## Worker prompt and budget admission
@@ -100,7 +100,7 @@ fleet:
       maxWorkers: 1
 ```
 
-`clioEntry` may override the remote invocation (default `clio worker`).
+`clioEntry` may override the remote invocation (default `clio-coder worker`).
 Node ids must be unique and `local` is reserved.
 
 Worker profiles can pin work to a node: `workers.profiles.<name>.node` routes
@@ -114,17 +114,17 @@ A remote node is dispatch-eligible only after one preflight pass proved, over
 the node's real SSH channel:
 
 1. reachability (SSH connects in batch mode),
-2. a version-matched `clio` on the remote invocation path,
+2. a version-matched `clio-coder` on the remote invocation path,
 3. path parity for the project root (the shared-filesystem assumption),
 4. a writable remote state directory,
 5. node-scoped target reachability, runtime/model compatibility, endpoint
    identity, and explicit resource facts where the target exposes them.
 
-Run it with `clio doctor`. Results persist under the state dir
+Run it with `clio-coder doctor`. Results persist under the state dir
 (`fleet-preflight.json`) keyed by node and project root, so eligibility
 survives across processes. A record is invalidated by a changed host, a
-changed project root, or a local `clio` upgrade; admission then fails closed
-with a reason that names the fix (run `clio doctor` again). Failing nodes are
+changed project root, or a local `clio-coder` upgrade; admission then fails closed
+with a reason that names the fix (run `clio-coder doctor` again). Failing nodes are
 doctor warnings, never fatal: the fleet degrades to the nodes that passed.
 
 ## Placement and process-safe admission
@@ -144,13 +144,13 @@ Placement and admission are separate, deterministic authorities:
 
 The durable capacity state file (`dispatch-admission.json`) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (`DEFAULT_CAPACITY_DRAIN_TTL_MS` = 3,600,000 ms). A lease acts as durable expiring authority (`DEFAULT_CAPACITY_LEASE_TTL_MS` = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself. Full leasing schema and locking protocols are specified in [capacity-and-scheduling.md](capacity-and-scheduling.md).
 
-Use `clio fleet drain [--json]` before maintenance to close that shared
+Use `clio-coder fleet drain [--json]` before maintenance to close that shared
 admission authority. Existing workers continue, but new plans and every new
 execution start—including a retry or a previously reserved member—fail closed.
 The drain expires after one hour so an abandoned operator process cannot wedge
-future dispatch; repeating the command renews the deadline. `clio fleet
+future dispatch; repeating the command renews the deadline. `clio-coder fleet
 status [--json]` reports the active deadline, requesting PID, and request time.
-Use `clio fleet resume [--json]` to reopen admission early. Detailed drain mechanics are documented in [capacity-and-scheduling.md](capacity-and-scheduling.md).
+Use `clio-coder fleet resume [--json]` to reopen admission early. Detailed drain mechanics are documented in [capacity-and-scheduling.md](capacity-and-scheduling.md).
 
 With no fleet configured and nothing requested, placement resolves to the
 implicit local path and optional fleet-node provenance may remain absent.
@@ -241,7 +241,7 @@ and surfaces as an explicit operator decision, never a silent failure.
 ### Compete
 
 N candidate builders (2 to 4) run the same task, each in its own scratch git
-worktree under `.clio/worktrees/<group>/` on its own
+worktree under `.clio-coder/worktrees/<group>/` on its own
 `clio/compete/<group>/<n>` branch. Each candidate's work is committed on its
 branch; a read-only judge ranks the branches and names a winner
 (`WINNER: <n>`). At full-auto the winning branch is merged. At supervised
@@ -303,7 +303,7 @@ rejected.
 
 ### Shipped fleets and contract versions
 
-Clio ships three builtin fleet contracts under `src/domains/agents/fleets/`: `build-test`, `build-review`, and `sdlc`. Projects can declare custom fleet contracts or shadow builtin fleets by placing Markdown files under `.clio/fleets/<name>.md`. A file named `.clio/fleets/<name>.md` shadows a builtin fleet of the same name.
+Clio ships three builtin fleet contracts under `src/domains/agents/fleets/`: `build-test`, `build-review`, and `sdlc`. Projects can declare custom fleet contracts or shadow builtin fleets by placing Markdown files under `.clio-coder/fleets/<name>.md`. A file named `.clio-coder/fleets/<name>.md` shadows a builtin fleet of the same name.
 
 Fleet contracts support schema versions 1 through 4:
 - Version 1: Supports agent steps only.
@@ -328,7 +328,7 @@ Write boundary enforcement is detect-and-rollback, never OS or filesystem sandbo
 4. Content source: Rollback restores content strictly from what git already has in the pinned baseline commit (`snapshot.head`). If a path was already dirty when the step snapshot was captured, its prior content is not stored in git, so in-place restoration cannot be guaranteed. The working tree is left as the step made it, and the status settles as `rollback-incomplete`.
 5. Violation handling: Any unauthorized change fails the step with the typed reason `writes_boundary_violation`.
 6. Window attribution: Enforcement evaluates scheduling windows (`wave-<n>` or `revalidate-<stepId>-<n>`). A wave window cannot combine steps with overlapping declared boundaries or multiple concurrent step writers, ensuring single-step attribution.
-7. Ignored paths and state subtraction: Enforcement evaluates paths reported by git status. Git-ignored paths remain outside enforcement. The Clio state directory (`.clio/` or `clioStateDir()`) is subtracted from status checks so orchestrator receipts, code step log artifacts, and boundary verdicts do not trigger false violations.
+7. Ignored paths and state subtraction: Enforcement evaluates paths reported by git status. Git-ignored paths remain outside enforcement. The Clio state directory (`.clio-coder/` or `clioStateDir()`) is subtracted from status checks so orchestrator receipts, code step log artifacts, and boundary verdicts do not trigger false violations.
 8. Durable records: Verdicts are serialized as JSON records at `write-boundaries/<rootId>/<window>.json` under the Clio state directory, carrying the baseline HEAD commit, checked paths, violations, rollback actions, status, and SHA-256 digest.
 
 ### Bounded check/repair loops
@@ -346,13 +346,13 @@ At plan compilation, the orchestrator unrolls each loop statically into a determ
 ### Deterministic code steps
 
 Deterministic code steps (`kind: code`) execute known commands directly as subprocesses rather than calling an agent model.
-- Registry binding: The `command` property must reference a command ID declared in `.clio/fleets/commands.yaml`. Invocation strings are never generated from model output.
+- Registry binding: The `command` property must reference a command ID declared in `.clio-coder/fleets/commands.yaml`. Invocation strings are never generated from model output.
 - Execution environment: Code steps run unattended with arguments bound from the command registry, fixed working directory, closed environment allowlist (`FLEET_COMMAND_BASE_ENV` plus declared command env), bounded timeout (`timeoutMs`), byte-capped output capture (`CODE_STEP_CAPTURE_MAX_BYTES` = 1 MB log artifact, `CODE_STEP_EXCERPT_MAX_BYTES` = 8 KB excerpt), no stdin pipe, no permission prompt, and no shell interpreter.
-- Missing registry diagnostic: If a contract declares code steps but `.clio/fleets/commands.yaml` is missing in the repository, `clio fleet list` reports the fleet status as `setup` and provides the remedy: `needs .clio/fleets/commands.yaml declaring <id>; declare each id there under commands: with an argv list; clio docs fleet_dispatch has the schema`.
+- Missing registry diagnostic: If a contract declares code steps but `.clio-coder/fleets/commands.yaml` is missing in the repository, `clio-coder fleet list` reports the fleet status as `setup` and provides the remedy: `needs .clio-coder/fleets/commands.yaml declaring <id>; declare each id there under commands: with an argv list; clio-coder docs fleet_dispatch has the schema`.
 - Commit message sources: A code step with `commitFrom` populates its `commitMessage` placeholder from the output of preceding agent steps.
 - Route quality: Code steps do not consume model tokens or cost estimates; their quality reports `unmeasured` rather than zero.
 
-#### Command Registry Schema (`.clio/fleets/commands.yaml`)
+#### Command Registry Schema (`.clio-coder/fleets/commands.yaml`)
 
 The repository command registry binds command IDs to exact argument vectors:
 
@@ -557,7 +557,7 @@ hard block.
   (with the node pin), and bindings.
 - The monitor tool reports the node and reroute lineage on `status`, `list`,
   and `collect`.
-- `clio fleet status [--json]` shows the durable ledger view cross-process.
+- `clio-coder fleet status [--json]` shows the durable ledger view cross-process.
 
 ## Speculation observer
 
@@ -570,7 +570,7 @@ disabling it changes nothing else.
 ## Residency
 
 Remote workers default to residency observe: the SSH transport exports
-`CLIO_RESIDENCY=observe`, so a worker on a node that serves resident models
+`CLIO_CODER_RESIDENCY=observe`, so a worker on a node that serves resident models
 (for example a GPU box running the operator's inference server) never evicts
 them. A node opts into management explicitly with `residency: manage` in its
 fleet entry.
@@ -581,7 +581,7 @@ After `npm run build`, an operator with a configured model target can run the
 single-turn, read-only fleet lifecycle check explicitly:
 
 ```bash
-CLIO_LIVE_EVAL=1 npm run test:live-eval:fleet-dispatch
+CLIO_CODER_LIVE_EVAL=1 npm run test:live-eval:fleet-dispatch
 ```
 
 It is not part of deterministic CI. The script copies the repository into an

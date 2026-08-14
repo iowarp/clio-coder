@@ -456,28 +456,28 @@
             </div>
 
             <div class="form-group">
-              <label for="clioHomeInput">CLIO_HOME (Unified override)</label>
+              <label for="clioHomeInput">CLIO_CODER_HOME (Unified override)</label>
               <input type="text" id="clioHomeInput" value="" placeholder="e.g. /home/user/my-clio-home" oninput="resolvePaths()">
             </div>
 
             <div class="form-row">
               <div class="form-group">
-                <label for="configDirInput">CLIO_CONFIG_DIR</label>
+                <label for="configDirInput">CLIO_CODER_CONFIG_DIR</label>
                 <input type="text" id="configDirInput" value="" placeholder="Default" oninput="resolvePaths()">
               </div>
               <div class="form-group">
-                <label for="dataDirInput">CLIO_DATA_DIR</label>
+                <label for="dataDirInput">CLIO_CODER_DATA_DIR</label>
                 <input type="text" id="dataDirInput" value="" placeholder="Default" oninput="resolvePaths()">
               </div>
             </div>
 
             <div class="form-row">
               <div class="form-group">
-                <label for="stateDirInput">CLIO_STATE_DIR</label>
+                <label for="stateDirInput">CLIO_CODER_STATE_DIR</label>
                 <input type="text" id="stateDirInput" value="" placeholder="Default" oninput="resolvePaths()">
               </div>
               <div class="form-group">
-                <label for="cacheDirInput">CLIO_CACHE_DIR</label>
+                <label for="cacheDirInput">CLIO_CODER_CACHE_DIR</label>
                 <input type="text" id="cacheDirInput" value="" placeholder="Default" oninput="resolvePaths()">
               </div>
             </div>
@@ -485,19 +485,19 @@
             <div class="resolved-paths-panel">
               <div class="path-row">
                 <strong>Config Directory (settings/keys)</strong>
-                <span id="resolvedConfig">~/.config/clio</span>
+                <span id="resolvedConfig">~/.config/clio-coder</span>
               </div>
               <div class="path-row">
                 <strong>Data Directory (memory/evidence/evals)</strong>
-                <span id="resolvedData">~/.local/share/clio</span>
+                <span id="resolvedData">~/.local/share/clio-coder</span>
               </div>
               <div class="path-row">
                 <strong>State Directory (sessions/audit/receipts)</strong>
-                <span id="resolvedState">~/.local/state/clio</span>
+                <span id="resolvedState">~/.local/state/clio-coder</span>
               </div>
               <div class="path-row">
                 <strong>Cache Directory</strong>
-                <span id="resolvedCache">~/.cache/clio</span>
+                <span id="resolvedCache">~/.cache/clio-coder</span>
               </div>
             </div>
           </div>
@@ -540,24 +540,24 @@
           <tbody>
             <tr>
               <td>Linux / Unix</td>
-              <td><code>~/.config/clio</code></td>
-              <td><code>~/.local/share/clio</code></td>
-              <td><code>~/.local/state/clio</code></td>
-              <td><code>~/.cache/clio</code></td>
+              <td><code>~/.config/clio-coder</code></td>
+              <td><code>~/.local/share/clio-coder</code></td>
+              <td><code>~/.local/state/clio-coder</code></td>
+              <td><code>~/.cache/clio-coder</code></td>
             </tr>
             <tr>
               <td>macOS</td>
-              <td><code>~/Library/Application Support/clio/config</code></td>
-              <td><code>~/Library/Application Support/clio/data</code></td>
-              <td><code>~/Library/Application Support/clio/state</code></td>
-              <td><code>~/Library/Caches/clio</code></td>
+              <td><code>~/Library/Application Support/clio-coder/config</code></td>
+              <td><code>~/Library/Application Support/clio-coder/data</code></td>
+              <td><code>~/Library/Application Support/clio-coder/state</code></td>
+              <td><code>~/Library/Caches/clio-coder</code></td>
             </tr>
             <tr>
               <td>Windows</td>
-              <td><code>%APPDATA%\clio\config</code></td>
-              <td><code>%APPDATA%\clio\data</code></td>
-              <td><code>%LOCALAPPDATA%\clio\state</code></td>
-              <td><code>%LOCALAPPDATA%\clio\cache</code></td>
+              <td><code>%APPDATA%\clio-coder\config</code></td>
+              <td><code>%APPDATA%\clio-coder\data</code></td>
+              <td><code>%LOCALAPPDATA%\clio-coder\state</code></td>
+              <td><code>%LOCALAPPDATA%\clio-coder\cache</code></td>
             </tr>
           </tbody>
         </table>
@@ -601,7 +601,7 @@
         </table>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Doctor Repair Semantics</h3>
-        <p><code>clio doctor</code> is read-only. <code>clio doctor --fix</code> creates missing structure and templates, repairs credential permissions, and refreshes install metadata. Settings are validated directly against the current schema; <code>--fix</code> never rewrites removed keys or migrates an older settings file.</p>
+        <p><code>clio-coder doctor</code> is read-only. <code>clio-coder doctor --fix</code> creates missing structure and templates, repairs credential permissions, and refreshes install metadata. Settings are validated directly against the current schema; <code>--fix</code> never rewrites removed keys or migrates an older settings file.</p>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Durable symlink setup</h3>
         <pre><code># checkout repo
@@ -611,7 +611,7 @@ cd clio-coder
 # install and link
 npm run install:local
 hash -r
-clio --version</code></pre>
+clio-coder --version</code></pre>
       </div>
     </main>
 
@@ -649,20 +649,20 @@ clio --version</code></pre>
       let defCache = '';
 
       if (platform === 'linux') {
-        defConfig = '/home/user/.config/clio';
-        defData = '/home/user/.local/share/clio';
-        defState = '/home/user/.local/state/clio';
-        defCache = '/home/user/.cache/clio';
+        defConfig = '/home/user/.config/clio-coder';
+        defData = '/home/user/.local/share/clio-coder';
+        defState = '/home/user/.local/state/clio-coder';
+        defCache = '/home/user/.cache/clio-coder';
       } else if (platform === 'macos') {
-        defConfig = '/Users/user/Library/Application Support/clio/config';
-        defData = '/Users/user/Library/Application Support/clio/data';
-        defState = '/Users/user/Library/Application Support/clio/state';
-        defCache = '/Users/user/Library/Caches/clio';
+        defConfig = '/Users/user/Library/Application Support/clio-coder/config';
+        defData = '/Users/user/Library/Application Support/clio-coder/data';
+        defState = '/Users/user/Library/Application Support/clio-coder/state';
+        defCache = '/Users/user/Library/Caches/clio-coder';
       } else {
-        defConfig = 'C:\\Users\\user\\AppData\\Roaming\\clio\\config';
-        defData = 'C:\\Users\\user\\AppData\\Roaming\\clio\\data';
-        defState = 'C:\\Users\\user\\AppData\\Local\\clio\\state';
-        defCache = 'C:\\Users\\user\\AppData\\Local\\clio\\cache';
+        defConfig = 'C:\\Users\\user\\AppData\\Roaming\\clio-coder\\config';
+        defData = 'C:\\Users\\user\\AppData\\Roaming\\clio-coder\\data';
+        defState = 'C:\\Users\\user\\AppData\\Local\\clio-coder\\state';
+        defCache = 'C:\\Users\\user\\AppData\\Local\\clio-coder\\cache';
       }
 
       // apply overrides

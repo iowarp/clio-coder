@@ -69,8 +69,8 @@ function persistState(
  */
 async function ensureCodewikiFresh(cwd: string): Promise<void> {
 	// The bootstrap model-generation child runs a headless session purely to draft
-	// CLIO.md; it must not re-index while the parent context-init owns the rebuild.
-	if (process.env.CLIO_BOOTSTRAP_GENERATE_CHILD === "1") return;
+	// CLIO-CODER.md; it must not re-index while the parent context-init owns the rebuild.
+	if (process.env.CLIO_CODER_BOOTSTRAP_GENERATE_CHILD === "1") return;
 	const state = readClioState(cwd);
 	if (!state && !existsSync(codewikiPath(cwd))) return;
 	const slicer = createSlicer();
@@ -154,10 +154,10 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 	}
 	const clio = tryReadClioMd(cwd);
 	if (!clio && projectType !== "unknown" && options.noContextFiles !== true) {
-		hints.push("clio: No CLIO.md detected. Run /context init to explore the repo and bootstrap context.");
+		hints.push("clio: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.");
 	}
 	if (clio && !clio.ok) {
-		hints.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
+		hints.push(`clio: malformed CLIO-CODER.md ignored: ${clio.error}`);
 	}
 	const state = readClioState(cwd);
 	if (!state) return hints;
@@ -216,7 +216,7 @@ export function createContextBundle(
 			// Indexing is best-effort; a failed refresh must not block session start.
 		});
 		startupHints = collectStartupHints(lastCwd, options);
-		if (process.env.CLIO_INTERACTIVE === "1") return;
+		if (process.env.CLIO_CODER_INTERACTIVE === "1") return;
 		for (const hint of startupHints) process.stderr.write(`${hint}\n`);
 	};
 

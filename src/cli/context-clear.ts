@@ -4,15 +4,15 @@ import { createInterface } from "node:readline/promises";
 import { runContextClear } from "../domains/context/index.js";
 
 const HELP = `Usage:
-  clio context reset [--all] [--yes]
+  clio-coder context reset [--all] [--yes]
 
 Clear accumulated project context owned by the context engine:
-.clio/codewiki.json, .clio/state.json, .clio/handoffs/, and .clio/proposals/.
+.clio-coder/codewiki.json, .clio-coder/state.json, .clio-coder/handoffs/, and .clio-coder/proposals/.
 
-Preserves by default: CLIO.md, .clio/agents/, .clio/skills/, and .clio/wiki/.
+Preserves by default: CLIO-CODER.md, .clio-coder/agents/, .clio-coder/skills/, and .clio-coder/wiki/.
 
 Options:
-  --all       also remove CLIO.md after a second confirmation
+  --all       also remove CLIO-CODER.md after a second confirmation
   --yes, -y   answer every confirmation, required when stdin is not a terminal
 `;
 
@@ -39,7 +39,7 @@ export async function runContextClearCommand(args: string[]): Promise<number> {
 	}
 	for (const arg of args) {
 		if (arg !== "--all" && arg !== "--yes" && arg !== "-y") {
-			process.stderr.write(`clio context reset: unknown flag ${arg}\n`);
+			process.stderr.write(`clio-coder context reset: unknown flag ${arg}\n`);
 			process.stdout.write(HELP);
 			return 2;
 		}
@@ -51,7 +51,7 @@ export async function runContextClearCommand(args: string[]): Promise<number> {
 	// Say which flag turns that into an answer instead of leaving it to be
 	// discovered.
 	if (!assumeYes && !input.isTTY) {
-		process.stderr.write("clio context reset: stdin is not a terminal; pass --yes to confirm non-interactively\n");
+		process.stderr.write("clio-coder context reset: stdin is not a terminal; pass --yes to confirm non-interactively\n");
 	}
 	const answer = (question: string): Promise<boolean> => (assumeYes ? Promise.resolve(true) : confirm(question));
 	try {
@@ -63,12 +63,14 @@ export async function runContextClearCommand(args: string[]): Promise<number> {
 				stderr: (s) => process.stderr.write(s),
 			},
 			confirmContext: () =>
-				answer("Clear .clio/codewiki.json, .clio/state.json, .clio/handoffs/, and .clio/proposals/? [y/N] "),
-			confirmAll: () => answer("Also remove CLIO.md? [y/N] "),
+				answer(
+					"Clear .clio-coder/codewiki.json, .clio-coder/state.json, .clio-coder/handoffs/, and .clio-coder/proposals/? [y/N] ",
+				),
+			confirmAll: () => answer("Also remove CLIO-CODER.md? [y/N] "),
 		});
 		return 0;
 	} catch (err) {
-		process.stderr.write(`clio context reset failed: ${err instanceof Error ? err.message : String(err)}\n`);
+		process.stderr.write(`clio-coder context reset failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
 	}
 }

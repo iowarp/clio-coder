@@ -23,7 +23,7 @@ export function claudeSubprocessPermissionConfigForAutonomy(
 	level: AutonomyLevel | undefined,
 	env: NodeJS.ProcessEnv = process.env,
 ): ClaudeSubprocessPermissionConfig {
-	if (level === "full-auto" && env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
+	if (level === "full-auto" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
 		return {
 			permissionMode: "bypassPermissions",
 			extraArgs: ["--allow-dangerously-skip-permissions"],

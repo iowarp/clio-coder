@@ -38,7 +38,7 @@ describe("contracts/configure-cli non-interactive gating", () => {
 	];
 
 	for (const args of partialCases) {
-		it(`clio ${args.join(" ")} rejects the incomplete non-interactive invocation`, async () => {
+		it(`clio-coder ${args.join(" ")} rejects the incomplete non-interactive invocation`, async () => {
 			const result = await runCli(args, { env: scratch.env, input: "" });
 			strictEqual(result.code, 2, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
@@ -47,7 +47,7 @@ describe("contracts/configure-cli non-interactive gating", () => {
 	}
 
 	// A complete non-interactive invocation still succeeds without a TTY.
-	it("clio configure with --id and --runtime and a target flag succeeds", async () => {
+	it("clio-coder configure with --id and --runtime and a target flag succeeds", async () => {
 		const result = await runCli(
 			[
 				"configure",
@@ -69,7 +69,7 @@ describe("contracts/configure-cli non-interactive gating", () => {
 });
 
 /**
- * `clio configure --list` and `clio auth list` render the same runtime registry
+ * `clio-coder configure --list` and `clio-coder auth list` render the same runtime registry
  * through two predicates: everything registered, and the subset whose
  * credential Clio owns. Both screens read as "the runtimes you can connect", so
  * the eight rows only one of them showed looked like a disagreement about what
@@ -133,9 +133,9 @@ describe("contracts/configure-cli runtime inventories agree", () => {
 
 		// Each screen says which set it is and where the rest are.
 		match(connectable.stdout, /runtimes clio authenticates itself/);
-		match(connectable.stdout, /clio configure --list/);
+		match(connectable.stdout, /clio-coder configure --list/);
 		match(full.stdout, /every registered runtime/);
-		match(full.stdout, /clio auth list/);
+		match(full.stdout, /clio-coder auth list/);
 	});
 
 	// Where a name copied off the wider list lands if the caption did not stop
@@ -145,13 +145,13 @@ describe("contracts/configure-cli runtime inventories agree", () => {
 		["claude-code", "claude-cli"],
 		["bedrock", "aws-sdk"],
 	] as const) {
-		it(`clio auth login ${runtimeId} names where that runtime authenticates instead`, async () => {
+		it(`clio-coder auth login ${runtimeId} names where that runtime authenticates instead`, async () => {
 			const result = await runCli(["auth", "login", runtimeId], { env: scratch.env, input: "" });
 			strictEqual(result.code, 1, `stdout=${result.stdout}`);
 			match(result.stderr, new RegExp(`runtime ${runtimeId} does not support interactive auth login`));
 			match(result.stderr, new RegExp(`authenticates as '${authKind}'`));
-			match(result.stderr, new RegExp(`clio auth status ${runtimeId}`));
-			match(result.stderr, /clio configure --list/);
+			match(result.stderr, new RegExp(`clio-coder auth status ${runtimeId}`));
+			match(result.stderr, /clio-coder configure --list/);
 		});
 	}
 });
@@ -205,7 +205,7 @@ describe("contracts/configure-cli catalog-ordered model ids", () => {
 		}
 	});
 
-	it("clio configure --list prints the catalog size for openai instead of its two oldest ids", async () => {
+	it("clio-coder configure --list prints the catalog size for openai instead of its two oldest ids", async () => {
 		const result = await runCli(["configure", "--list"], { env: scratch.env });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 		// At 80 columns the list uses its two-line form, so the models cell is on
@@ -218,7 +218,7 @@ describe("contracts/configure-cli catalog-ordered model ids", () => {
 		ok(!/models=gpt-/.test(result.stdout), `a catalog row still samples ids:\n${result.stdout}`);
 	});
 
-	it("clio configure refuses to seed defaultModel from the catalog and names --model", async () => {
+	it("clio-coder configure refuses to seed defaultModel from the catalog and names --model", async () => {
 		const result = await runCli(["configure", "--id", "oa", "--runtime", "openai", "--api-key-env", "OPENAI_API_KEY"], {
 			env: scratch.env,
 			input: "",
@@ -226,7 +226,7 @@ describe("contracts/configure-cli catalog-ordered model ids", () => {
 		strictEqual(result.code, 2, `stdout=${result.stdout}`);
 		match(result.stderr, /--model is required for openai/);
 		match(result.stderr, /pi-ai catalog in name order/);
-		match(result.stderr, /clio configure --runtime openai/);
+		match(result.stderr, /clio-coder configure --runtime openai/);
 
 		// Refusing means nothing was written: no target, and no gpt-4 anywhere.
 		const settings = join(scratch.dir, "config", "settings.yaml");

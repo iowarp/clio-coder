@@ -7,7 +7,7 @@ Clio can use Argonne's ALCF inference gateway as an OpenAI-compatible target
 backed by Globus OAuth. The runtime id is `alcf`; each configured target points
 at one gateway cluster URL, such as Sophia or Metis.
 
-The login flow is SSH-friendly. `clio auth login alcf` opens a Globus authorize
+The login flow is SSH-friendly. `clio-coder auth login alcf` opens a Globus authorize
 URL and asks you to paste back the displayed authorization code. Clio stores the
 resulting OAuth refresh/access credential in `providers.auth` persisted through `openAuthStorage()`,
 refreshed through the same provider auth path used by other OAuth runtimes.
@@ -17,20 +17,20 @@ refreshed through the same provider auth path used by other OAuth runtimes.
 Authenticate first:
 
 ```bash
-clio auth login alcf
+clio-coder auth login alcf
 ```
 
 Then register one or both cluster targets:
 
 ```bash
-clio configure \
+clio-coder configure \
   --id alcf-sophia \
   --runtime alcf \
   --url https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1 \
   --model openai/gpt-oss-120b \
   --max-tokens 4096
 
-clio configure \
+clio-coder configure \
   --id alcf-metis \
   --runtime alcf \
   --url https://inference-api.alcf.anl.gov/resource_server/metis/api/v1 \
@@ -45,9 +45,9 @@ configured wire model id literally and does not rewrite it.
 Set a target as the chat default when you are ready:
 
 ```bash
-clio targets use alcf-sophia
-clio targets --probe
-clio models --target alcf-sophia
+clio-coder targets use alcf-sophia
+clio-coder targets --probe
+clio-coder models --target alcf-sophia
 ```
 
 ## Implementation Notes
@@ -68,5 +68,5 @@ scientific apps:
   accepted top-level `reasoning_effort`.
 
 Live model availability depends on which gateway jobs are running. The static
-model list is only a fallback for offline resolution; `clio targets --probe`
+model list is only a fallback for offline resolution; `clio-coder targets --probe`
 uses the ALCF catalog and jobs endpoints after authentication.

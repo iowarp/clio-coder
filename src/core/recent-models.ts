@@ -72,7 +72,7 @@ export function rememberRecentModel(ref: string, limit: number): string[] {
 	const next = [ref, ...base.filter((entry) => entry !== ref)].slice(0, max);
 	cache = next;
 	cachePath = path;
-	// An Alt+L model pick in a session outliving `clio uninstall` must not
+	// An Alt+L model pick in a session outliving `clio-coder uninstall` must not
 	// rebuild the state root around recent-models.json. The in-memory list still
 	// updates so the picker behaves for the rest of the run; see stateRootRemoved().
 	if (stateRootRemoved()) return next;

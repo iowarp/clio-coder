@@ -98,8 +98,8 @@ export function createChangeManifestTemplate(): ChangeManifest {
 		changes: [
 			{
 				id: "change-1",
-				componentIds: ["context-file:CLIO.md"],
-				filesChanged: ["CLIO.md"],
+				componentIds: ["context-file:CLIO-CODER.md"],
+				filesChanged: ["CLIO-CODER.md"],
 				authorityLevel: "prompt",
 				evidenceRefs: [],
 				rootCause: "First exploratory iteration; no evidence corpus exists yet.",

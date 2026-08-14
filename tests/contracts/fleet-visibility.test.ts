@@ -237,6 +237,6 @@ describe("fleet overlay fleet visibility", () => {
 
 		const empty = strip(formatFleetNodesBodyLines([], 100).join("\n"));
 		ok(empty.includes("no fleet nodes configured"));
-		ok(empty.includes("clio doctor"));
+		ok(empty.includes("clio-coder doctor"));
 	});
 });

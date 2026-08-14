@@ -345,7 +345,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * compaction summary entry, then replay from the session view.
 	 *
 	 * `force = true` skips the pressure check and the mask pre-stage and runs
-	 * the LLM summary directly. Used for `/compact`, CLIO_FORCE_COMPACT=1,
+	 * the LLM summary directly. Used for `/compact`, CLIO_CODER_FORCE_COMPACT=1,
 	 * and overflow recovery.
 	 */
 	const runAutoCompact = async (

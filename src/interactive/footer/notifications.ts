@@ -1,6 +1,6 @@
 /**
  * NotificationCenter: a dedicated harness→user surface anchored in the footer
- * region. Harness messages (CLIO.md hints, keybinding notices, connect/probe
+ * region. Harness messages (CLIO-CODER.md hints, keybinding notices, connect/probe
  * results) used to be dumped as plain stderr text into the transcript, where
  * they polluted scrollback and looked unintentional. They route here instead.
  *

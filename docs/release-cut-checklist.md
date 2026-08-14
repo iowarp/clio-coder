@@ -35,7 +35,7 @@ or the npm registry.
    Node 24 must be green; the repo is developed against 22.22.3 and 24.9.0.
 9. `npm run test:lifecycle` for the twenty-case lifecycle matrix against a real
    `npm pack` installed into a temporary prefix. Case 9 needs `--live` plus
-   `CLIO_LIFECYCLE_URL` and `CLIO_LIFECYCLE_MODEL` naming a target whose model
+   `CLIO_CODER_LIFECYCLE_URL` and `CLIO_CODER_LIFECYCLE_MODEL` naming a target whose model
    is already resident.
 10. `npm run ci:release`, which adds `scripts/check-release.mjs`: dist shebang
     integrity, the forbidden-file list, the required runtime resources, and the
@@ -82,9 +82,9 @@ undone by a local `git` command. **None of them has been run.**
     temporary prefix on a machine that has never had Clio installed, with empty
     XDG roots. `npm run test:lifecycle` covers this on the development machine;
     a second machine is what proves no developer-local state is load-bearing.
-17. **NOT RUN** — From that install, verify: `clio --version`, `clio --help`,
-    an empty-state non-TTY launch, `clio configure` to a real target,
-    `clio doctor`, one real turn, and `clio uninstall --dry-run`.
+17. **NOT RUN** — From that install, verify: `clio-coder --version`, `clio-coder --help`,
+    an empty-state non-TTY launch, `clio-coder configure` to a real target,
+    `clio-coder doctor`, one real turn, and `clio-coder uninstall --dry-run`.
 18. **NOT RUN** — Inspect the artifact by hand: `tar -tzf` the tarball, confirm
     no source maps, no `scripts/`, no `tests/`, no `benchmarks/`, no
     `apps/trace-viewer`, and that `skills/`, `docs/*.md`, `docs/html/`, the
@@ -123,7 +123,7 @@ undone by a local `git` command. **None of them has been run.**
 27. **NOT RUN** — On a clean machine, `npm install -g @iowarp/clio-coder` from
     the registry rather than from a local tarball, then repeat step 17 against
     it. This is the only step that tests what users actually receive.
-28. **NOT RUN** — Verify `clio upgrade` finds and applies the published
+28. **NOT RUN** — Verify `clio-coder upgrade` finds and applies the published
     version from an installation of the previous release.
 29. **NOT RUN** — Publish the GitHub release with the `CHANGELOG.md` section
     for this version.

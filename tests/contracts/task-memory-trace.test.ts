@@ -10,9 +10,9 @@ import { createMemoryInterventionRegistration } from "../../src/domains/middlewa
 describe("contracts/task memory envelope trace", () => {
 	it("stays off unless the operator names a file", () => {
 		strictEqual(taskMemoryTracePath({}), null);
-		strictEqual(taskMemoryTracePath({ CLIO_MEMORY_TRACE: "" }), null);
-		strictEqual(taskMemoryTracePath({ CLIO_MEMORY_TRACE: "   " }), null);
-		strictEqual(taskMemoryTracePath({ CLIO_MEMORY_TRACE: " /tmp/trace.jsonl " }), "/tmp/trace.jsonl");
+		strictEqual(taskMemoryTracePath({ CLIO_CODER_MEMORY_TRACE: "" }), null);
+		strictEqual(taskMemoryTracePath({ CLIO_CODER_MEMORY_TRACE: "   " }), null);
+		strictEqual(taskMemoryTracePath({ CLIO_CODER_MEMORY_TRACE: " /tmp/trace.jsonl " }), "/tmp/trace.jsonl");
 	});
 
 	it("writes nothing until a step happens, then one row carrying what the model actually said", () => {

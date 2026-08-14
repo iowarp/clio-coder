@@ -24,7 +24,7 @@ export type ResultContract =
 	 */
 	| { kind: "artifact-report" }
 	/**
-	 * The CLIO.md handbook payload `clio context init` parses. It exists as its
+	 * The CLIO-CODER.md handbook payload `clio-coder context init` parses. It exists as its
 	 * own kind because the alternative was dispatching Scout and telling it in
 	 * prose to ignore its own recipe: the recipe body and the repair directive
 	 * both name the findings shape, so a model that obeys the recipe returns

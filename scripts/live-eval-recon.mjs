@@ -15,13 +15,13 @@
  *
  * Bounds: repeats=1, per-task timeouts, and a matrix maxCostUsd ceiling that
  * fails remaining items closed once known receipt cost exceeds it. Never runs
- * in the default test lane: requires CLIO_LIVE_EVAL=1.
+ * in the default test lane: requires CLIO_CODER_LIVE_EVAL=1.
  *
  * Environment (same conventions as live-smoke.mjs):
- *   CLIO_LIVE_EVAL=1                   enable
- *   CLIO_LIVE_TARGET / CLIO_LIVE_RUNTIME / CLIO_LIVE_MODEL / CLIO_LIVE_BASE_URL
- *   CLIO_LIVE_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
- *   CLIO_LIVE_EVAL_MAX_COST_USD        matrix cost ceiling (default 0.50)
+ *   CLIO_CODER_LIVE_EVAL=1                   enable
+ *   CLIO_CODER_LIVE_TARGET / CLIO_CODER_LIVE_RUNTIME / CLIO_CODER_LIVE_MODEL / CLIO_CODER_LIVE_BASE_URL
+ *   CLIO_CODER_LIVE_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
+ *   CLIO_CODER_LIVE_EVAL_MAX_COST_USD        matrix cost ceiling (default 0.50)
  */
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -29,8 +29,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify } from "yaml";
 
-if (process.env.CLIO_LIVE_EVAL !== "1") {
-	console.log("CLIO_LIVE_EVAL is not set to '1'. Skipping bounded reconnaissance live eval.");
+if (process.env.CLIO_CODER_LIVE_EVAL !== "1") {
+	console.log("CLIO_CODER_LIVE_EVAL is not set to '1'. Skipping bounded reconnaissance live eval.");
 	process.exit(0);
 }
 
@@ -41,14 +41,16 @@ if (!existsSync(CLI_ENTRY)) {
 	process.exit(1);
 }
 
-const targetId = process.env.CLIO_LIVE_TARGET || "live-target";
-const runtimeId = process.env.CLIO_LIVE_RUNTIME || (process.env.CLIO_LIVE_BASE_URL ? "openai-compat" : "openai");
-const model = process.env.CLIO_LIVE_MODEL || (runtimeId === "anthropic" ? "claude-3-5-sonnet-latest" : "gpt-4o-mini");
-const url = process.env.CLIO_LIVE_BASE_URL || undefined;
-const maxCostUsd = Number.parseFloat(process.env.CLIO_LIVE_EVAL_MAX_COST_USD || "0.50");
+const targetId = process.env.CLIO_CODER_LIVE_TARGET || "live-target";
+const runtimeId =
+	process.env.CLIO_CODER_LIVE_RUNTIME || (process.env.CLIO_CODER_LIVE_BASE_URL ? "openai-compat" : "openai");
+const model =
+	process.env.CLIO_CODER_LIVE_MODEL || (runtimeId === "anthropic" ? "claude-3-5-sonnet-latest" : "gpt-4o-mini");
+const url = process.env.CLIO_CODER_LIVE_BASE_URL || undefined;
+const maxCostUsd = Number.parseFloat(process.env.CLIO_CODER_LIVE_EVAL_MAX_COST_USD || "0.50");
 
-let envVarName = "CLIO_LIVE_API_KEY";
-let apiKey = process.env.CLIO_LIVE_API_KEY || "";
+let envVarName = "CLIO_CODER_LIVE_API_KEY";
+let apiKey = process.env.CLIO_CODER_LIVE_API_KEY || "";
 if (!apiKey) {
 	if (runtimeId === "openai" && process.env.OPENAI_API_KEY) {
 		envVarName = "OPENAI_API_KEY";
@@ -61,7 +63,7 @@ if (!apiKey) {
 const keylessRuntimes = new Set(["openai-compat", "llamacpp", "ollama", "lmstudio"]);
 if (!apiKey && !keylessRuntimes.has(runtimeId)) {
 	console.error(
-		"Error: CLIO_LIVE_EVAL=1 is active, but no API key was found in CLIO_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
+		"Error: CLIO_CODER_LIVE_EVAL=1 is active, but no API key was found in CLIO_CODER_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
 	);
 	process.exit(1);
 }
@@ -97,12 +99,12 @@ writeFileSync(join(clioConfigDir, "settings.yaml"), stringify(settings), "utf8")
 
 const childEnv = {
 	...process.env,
-	CLIO_HOME: scratchDir,
-	CLIO_DATA_DIR: clioDataDir,
-	CLIO_CONFIG_DIR: clioConfigDir,
-	CLIO_STATE_DIR: clioStateDir,
-	CLIO_CACHE_DIR: clioCacheDir,
-	CLIO_REQUIRE_HOME_PREFIX: "1",
+	CLIO_CODER_HOME: scratchDir,
+	CLIO_CODER_DATA_DIR: clioDataDir,
+	CLIO_CODER_CONFIG_DIR: clioConfigDir,
+	CLIO_CODER_STATE_DIR: clioStateDir,
+	CLIO_CODER_CACHE_DIR: clioCacheDir,
+	CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
 };
 if (apiKey) childEnv[envVarName] = apiKey;
 
@@ -171,7 +173,7 @@ const suite = {
 			workspace: {
 				kind: "temp-copy",
 				path: REPO_ROOT,
-				excludes: ["node_modules", "dist", ".git", ".clio", ".superpowers", "coverage"],
+				excludes: ["node_modules", "dist", ".git", ".clio-coder", ".superpowers", "coverage"],
 			},
 			runner: {
 				kind: "clio-run",

@@ -52,7 +52,7 @@ interface Scratch {
 
 /**
  * A declared target the TUI can name but never reach. Without one the empty
- * state routes into `clio configure` and the frame under test never renders;
+ * state routes into `clio-coder configure` and the frame under test never renders;
  * with a reachable one the test would depend on a live endpoint.
  */
 function makeScratch(extraEnv: Record<string, string> = {}): Scratch {
@@ -75,13 +75,13 @@ function makeScratch(extraEnv: Record<string, string> = {}): Scratch {
 		dir,
 		env: {
 			...process.env,
-			CLIO_HOME: dir,
-			CLIO_CONFIG_DIR: join(dir, "config"),
-			CLIO_DATA_DIR: join(dir, "data"),
-			CLIO_STATE_DIR: join(dir, "state"),
-			CLIO_CACHE_DIR: join(dir, "cache"),
+			CLIO_CODER_HOME: dir,
+			CLIO_CODER_CONFIG_DIR: join(dir, "config"),
+			CLIO_CODER_DATA_DIR: join(dir, "data"),
+			CLIO_CODER_STATE_DIR: join(dir, "state"),
+			CLIO_CODER_CACHE_DIR: join(dir, "cache"),
 			// Never manage residency on any runtime from a test.
-			CLIO_RESIDENCY: "observe",
+			CLIO_CODER_RESIDENCY: "observe",
 			TERM: "xterm-256color",
 			...extraEnv,
 		} as Record<string, string>,

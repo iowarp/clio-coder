@@ -125,7 +125,7 @@ export interface SkillRoot {
 	 * Directory every discovered skill must resolve inside. A skill root says
 	 * what a repository or an operator's machine offers, so a symlink out of it
 	 * would let a cloned repository offer content it does not contain, under
-	 * paths that still read as repository-local. `.clio/skills` is trusted
+	 * paths that still read as repository-local. `.clio-coder/skills` is trusted
 	 * unconditionally, so the escape needs no opt-in to reach the model.
 	 *
 	 * The anchor is the workspace for a project root and the home directory for
@@ -210,7 +210,7 @@ function defaultPrecedenceForScope(scope: ResourceScope): number {
 
 function projectCompatTrusted(input: LoadSkillsInput): boolean {
 	if (input.trustProjectCompatRoots === true) return true;
-	return process.env.CLIO_TRUST_PROJECT_SKILLS === "1";
+	return process.env.CLIO_CODER_TRUST_PROJECT_SKILLS === "1";
 }
 
 /**
@@ -219,7 +219,7 @@ function projectCompatTrusted(input: LoadSkillsInput): boolean {
  *  2. shared user compat roots (~/.agents, ~/.claude, ~/.codex, ~/.copilot, ~/.config/opencode)
  *  3. Clio user root (<config>/skills)
  *  4. project compat roots (.agents, .claude, .codex, .github, .opencode), trusted only on opt-in
- *  5. Clio project root (.clio/skills)
+ *  5. Clio project root (.clio-coder/skills)
  */
 export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 	const cwd = input.cwd ?? process.cwd();
@@ -344,7 +344,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 	});
 
 	roots.push({
-		path: path.join(cwd, ".clio", "skills"),
+		path: path.join(cwd, ".clio-coder", "skills"),
 		scope: "project",
 		source: "clio",
 		origin: "project",

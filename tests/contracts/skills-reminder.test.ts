@@ -144,7 +144,7 @@ describe("contracts/skills first-turn reminder", () => {
 	it("teaches the same reply anchor as the context skills listing footer", async () => {
 		const project = mkdtempSync(join(tmpdir(), "clio-reminder-anchor-"));
 		roots.push(project);
-		const skillDir = join(project, ".clio", "skills", "visible");
+		const skillDir = join(project, ".clio-coder", "skills", "visible");
 		mkdirSync(skillDir, { recursive: true });
 		writeFileSync(
 			join(skillDir, "SKILL.md"),

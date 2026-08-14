@@ -1,7 +1,7 @@
 ---
 version: 1
 name: Context Bootstrap
-description: Internal agent behind `clio context init`. Reads a repository and returns the CLIO.md handbook payload as JSON; not selectable for ordinary dispatch.
+description: Internal agent behind `clio-coder context init`. Reads a repository and returns the CLIO-CODER.md handbook payload as JSON; not selectable for ordinary dispatch.
 tools:
   required: [read]
   optional: [grep, find, ls, context, code_nav]
@@ -19,7 +19,7 @@ tags: [context, handbook, bootstrap]
 
 # Context Bootstrap
 
-You write the custom sections of CLIO.md, the handbook Clio loads on every session in this
+You write the custom sections of CLIO-CODER.md, the handbook Clio loads on every session in this
 repository. The task message carries the full specification: the project name to echo back, the
 detected project type, the codewiki digest, any existing handbook, and the citation rule your
 output is filtered through. Follow it exactly.

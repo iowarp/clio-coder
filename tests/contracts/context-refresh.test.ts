@@ -51,7 +51,7 @@ function writeFixtureClioMd(cwd: string): string {
 			loc: 1,
 		},
 	});
-	writeFileSync(join(cwd, "CLIO.md"), text, "utf8");
+	writeFileSync(join(cwd, "CLIO-CODER.md"), text, "utf8");
 	return text;
 }
 
@@ -114,7 +114,7 @@ function context(events: ContextActivityPayload[]): DomainContext {
 }
 
 describe("contracts/context-refresh", () => {
-	it("rebuilds the codewiki and state without changing CLIO.md bytes", async () => {
+	it("rebuilds the codewiki and state without changing CLIO-CODER.md bytes", async () => {
 		const cwd = scratchProject();
 		const before = writeFixtureClioMd(cwd);
 		let stdout = "";
@@ -129,13 +129,13 @@ describe("contracts/context-refresh", () => {
 		strictEqual("clioMdRestamped" in result, false);
 		strictEqual(
 			stdout,
-			`clio context refresh: codewiki rebuilt (${result.codewikiEntries} source file${result.codewikiEntries === 1 ? "" : "s"})\n`,
+			`clio-coder context refresh: codewiki rebuilt (${result.codewikiEntries} source file${result.codewikiEntries === 1 ? "" : "s"})\n`,
 		);
 
-		const after = readFileSync(join(cwd, "CLIO.md"), "utf8");
+		const after = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 		strictEqual(after, before);
 
-		ok(existsSync(join(cwd, ".clio", "codewiki.json")), "codewiki.json written");
+		ok(existsSync(join(cwd, ".clio-coder", "codewiki.json")), "codewiki.json written");
 		const state = readClioState(cwd);
 		strictEqual(state?.fingerprint.treeHash, computeFingerprint(cwd).treeHash);
 	});
@@ -164,7 +164,7 @@ describe("contracts/context-refresh", () => {
 
 	it("emits a failed context-refresh activity when refresh throws", async () => {
 		const cwd = scratchProject();
-		writeFileSync(join(cwd, ".clio"), "not a directory\n", "utf8");
+		writeFileSync(join(cwd, ".clio-coder"), "not a directory\n", "utf8");
 		const events: ContextActivityPayload[] = [];
 		const bundle = createContextBundle(context(events));
 
@@ -193,13 +193,13 @@ describe("contracts/context-refresh", () => {
 		ok(fresh.text.includes("<codewiki>available; use code_nav</codewiki>"));
 	});
 
-	it("refreshes without CLIO.md and leaves CLIO.md absent", async () => {
+	it("refreshes without CLIO-CODER.md and leaves CLIO-CODER.md absent", async () => {
 		const cwd = scratchProject();
 		const result = await runContextRefresh({ cwd });
 		strictEqual("clioMdRestamped" in result, false);
 		strictEqual(result.clioMd, "absent");
-		ok(existsSync(join(cwd, ".clio", "codewiki.json")));
-		strictEqual(existsSync(join(cwd, "CLIO.md")), false);
+		ok(existsSync(join(cwd, ".clio-coder", "codewiki.json")));
+		strictEqual(existsSync(join(cwd, "CLIO-CODER.md")), false);
 	});
 
 	/**
@@ -212,7 +212,7 @@ describe("contracts/context-refresh", () => {
 	it("re-derives the index-owned handbook sections against the rebuilt codewiki", async () => {
 		const cwd = scratchProject();
 		writeFileSync(
-			join(cwd, "CLIO.md"),
+			join(cwd, "CLIO-CODER.md"),
 			serializeClioMd({
 				projectName: "Refresh Fixture",
 				identity: "Refresh Fixture is a TypeScript project used to test context refresh.",
@@ -229,7 +229,7 @@ describe("contracts/context-refresh", () => {
 		const result = await runContextRefresh({ cwd });
 
 		strictEqual(result.clioMd, "updated");
-		const after = readFileSync(join(cwd, "CLIO.md"), "utf8");
+		const after = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 		strictEqual(after.includes("4096 source files"), false, after);
 		ok(after.includes(`indexes ${result.codewikiEntries} source file`), after);
 		// Sections the index does not author survive untouched, prose and all.
@@ -248,24 +248,24 @@ describe("contracts/context-refresh", () => {
 		const result = await runContextRefresh({ cwd });
 
 		strictEqual(result.clioMd, "unchanged");
-		strictEqual(readFileSync(join(cwd, "CLIO.md"), "utf8"), before);
+		strictEqual(readFileSync(join(cwd, "CLIO-CODER.md"), "utf8"), before);
 	});
 
 	/**
 	 * A malformed handbook is the same as no handbook: nothing in this repository
-	 * may require CLIO.md to exist or to parse, least of all the command whose job
+	 * may require CLIO-CODER.md to exist or to parse, least of all the command whose job
 	 * is to keep the index healthy.
 	 */
-	it("refreshes past a malformed CLIO.md without failing", async () => {
+	it("refreshes past a malformed CLIO-CODER.md without failing", async () => {
 		const cwd = scratchProject();
-		writeFileSync(join(cwd, "CLIO.md"), "no heading here, just prose\n", "utf8");
+		writeFileSync(join(cwd, "CLIO-CODER.md"), "no heading here, just prose\n", "utf8");
 
 		const result = await runContextRefresh({ cwd });
 
 		strictEqual(result.action, "refreshed");
 		strictEqual(result.clioMd, "absent");
-		strictEqual(readFileSync(join(cwd, "CLIO.md"), "utf8"), "no heading here, just prose\n");
-		ok(existsSync(join(cwd, ".clio", "codewiki.json")));
+		strictEqual(readFileSync(join(cwd, "CLIO-CODER.md"), "utf8"), "no heading here, just prose\n");
+		ok(existsSync(join(cwd, ".clio-coder", "codewiki.json")));
 	});
 
 	it("updates the wiki after the L1 rebuild only when wiki is explicitly true", async () => {
@@ -280,7 +280,7 @@ describe("contracts/context-refresh", () => {
 			wikiGenerate: (input) => {
 				called += 1;
 				strictEqual(input.mode, "update");
-				sawRebuiltCodewiki = existsSync(join(input.cwd, ".clio", "codewiki.json"));
+				sawRebuiltCodewiki = existsSync(join(input.cwd, ".clio-coder", "codewiki.json"));
 			},
 		});
 
@@ -318,7 +318,7 @@ describe("contracts/context-refresh", () => {
 
 		strictEqual(called, 0);
 		strictEqual(result.wiki, undefined);
-		strictEqual(result.hint, "wiki is stale; run clio context refresh --wiki or clio context wiki --update");
+		strictEqual(result.hint, "wiki is stale; run clio-coder context refresh --wiki or clio-coder context wiki --update");
 	});
 
 	// --wiki with no wiki on disk used to return silently, so the operator saw a
@@ -337,7 +337,7 @@ describe("contracts/context-refresh", () => {
 
 		strictEqual(called, 0);
 		strictEqual(result.wiki, undefined);
-		strictEqual(result.hint, "no wiki exists, so --wiki had nothing to update; run clio context wiki to build one");
+		strictEqual(result.hint, "no wiki exists, so --wiki had nothing to update; run clio-coder context wiki to build one");
 	});
 
 	// A page is the unit of work, so a run that loses pages to a deadline still
@@ -353,7 +353,7 @@ describe("contracts/context-refresh", () => {
 		strictEqual(result.wiki, undefined);
 		strictEqual(
 			result.hint,
-			"wiki is incomplete: 12 of 32 planned pages written, 20 owed; run clio context wiki --update to resume",
+			"wiki is incomplete: 12 of 32 planned pages written, 20 owed; run clio-coder context wiki --update to resume",
 		);
 	});
 

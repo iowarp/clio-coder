@@ -114,11 +114,11 @@ async function withAuditedRegistry(
 	const originalEnv = { ...process.env };
 	const scratch = mkdtempSync(join(tmpdir(), "clio-autonomy-audit-"));
 	const stateDir = join(scratch, "state");
-	process.env.CLIO_HOME = scratch;
-	process.env.CLIO_DATA_DIR = join(scratch, "data");
-	process.env.CLIO_CONFIG_DIR = join(scratch, "config");
-	process.env.CLIO_STATE_DIR = stateDir;
-	process.env.CLIO_CACHE_DIR = join(scratch, "cache");
+	process.env.CLIO_CODER_HOME = scratch;
+	process.env.CLIO_CODER_DATA_DIR = join(scratch, "data");
+	process.env.CLIO_CODER_CONFIG_DIR = join(scratch, "config");
+	process.env.CLIO_CODER_STATE_DIR = stateDir;
+	process.env.CLIO_CODER_CACHE_DIR = join(scratch, "cache");
 	resetXdgCache();
 	const bus = createSafeEventBus();
 	const mockContext: DomainContext = { bus, getContract: () => undefined };
@@ -326,7 +326,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 
 		const notice = approvalParkedNotice("bash", decision, "auto-edit");
 		match(notice.text, /^\[approval\] bash parked \(execute\): asks at autonomy auto-edit\./);
-		ok(notice.text.includes(".clio/safety.yaml"));
+		ok(notice.text.includes(".clio-coder/safety.yaml"));
 
 		const body = createPermissionOverlayBody(approvalViewForDecision("bash", decision, "auto-edit")).render(60);
 		ok(body.includes("Asked by: autonomy level (auto-edit)"), body.join("\n"));
@@ -605,7 +605,8 @@ describe("contracts/autonomy denial payload says the denial once", () => {
 describe("contracts/autonomy approvals contexts", () => {
 	it("headless: an autonomy ask resolves as a deterministic deny when the context cancels parked calls", async () => {
 		const registry = registryAt("auto-edit");
-		const headlessReason = "clio run cannot confirm permission requests; rerun interactively to approve this action.";
+		const headlessReason =
+			"clio-coder run cannot confirm permission requests; rerun interactively to approve this action.";
 		registry.onPermissionRequired(() => {
 			registry.cancelParkedCalls(headlessReason);
 		});
@@ -629,7 +630,7 @@ describe("contracts/autonomy approvals contexts", () => {
 			// cancels and continues; "fail" cancels and aborts the run.
 			registry.cancelParkedCalls("permission denied by policy: dispatched workers run non-interactively");
 		});
-		const verdict = await registry.invoke(writeCall(join(".clio", "test-scratch", "autonomy-worker.txt")));
+		const verdict = await registry.invoke(writeCall(join(".clio-coder", "test-scratch", "autonomy-worker.txt")));
 		strictEqual(verdict.kind, "blocked");
 		strictEqual(askedTool, ToolNames.Write);
 

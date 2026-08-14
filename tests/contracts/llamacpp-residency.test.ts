@@ -211,7 +211,7 @@ describe("contracts/llamacpp router residency", () => {
 		strictEqual(notices.at(-1)?.level, "error");
 	});
 
-	it("CLIO_RESIDENCY/lifecycle opt-out (managed=false) observes without loading or unloading", async () => {
+	it("CLIO_CODER_RESIDENCY/lifecycle opt-out (managed=false) observes without loading or unloading", async () => {
 		const router = fakeRouter(
 			[
 				{ id: SCOUT, state: "loaded", tags: ["role:scout", "pinned:true"] },

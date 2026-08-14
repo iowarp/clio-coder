@@ -339,7 +339,7 @@ export interface FooterDashboardPanel extends FooterPanel {
 }
 
 function formatClioMdState(value: ContextState["clioMd"] | null | undefined): string | null {
-	return value ? `CLIO.md ${value}` : null;
+	return value ? `CLIO-CODER.md ${value}` : null;
 }
 
 function formatMemoryState(count: number | null | undefined): string | null {

@@ -38,9 +38,9 @@ import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js
 import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
-	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--session <id>|--continue] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio-coder run [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--session <id>|--continue] [--agent <recipe-id>] "<task>"\n';
 
-const HELP = `clio run [flags] "<task>"
+const HELP = `clio-coder run [flags] "<task>"
 
 Run one headless main-agent turn. Fleet dispatch is explicit with --agent.
 
@@ -130,7 +130,7 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<{
 		...(fileRefs.images.length > 0 ? { fileImages: fileRefs.images } : {}),
 	});
 	if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
-		process.stderr.write("clio run: empty task\n");
+		process.stderr.write("clio-coder run: empty task\n");
 		process.stderr.write(USAGE);
 		return null;
 	}
@@ -177,26 +177,26 @@ export async function runClioRun(
 				return 0;
 			}
 			for (const diagnostic of parsed.diagnostics) {
-				process.stderr.write(`clio run: ${diagnostic.message}\n`);
+				process.stderr.write(`clio-coder run: ${diagnostic.message}\n`);
 			}
 			if (parsed.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
 				process.stderr.write(USAGE);
 				return 2;
 			}
 			if (parsed.agentId === undefined && hasDispatchOnlyOptions(parsed)) {
-				process.stderr.write("clio run: fleet dispatch flags require --agent <recipe-id>\n");
+				process.stderr.write("clio-coder run: fleet dispatch flags require --agent <recipe-id>\n");
 				process.stderr.write(USAGE);
 				return 2;
 			}
 			if (parsed.sessionId !== undefined && parsed.continueSession) {
-				process.stderr.write("clio run: --session and --continue name different sessions; pass one\n");
+				process.stderr.write("clio-coder run: --session and --continue name different sessions; pass one\n");
 				process.stderr.write(USAGE);
 				return 2;
 			}
 			// A dispatched agent runs in its own worker with its own transcript,
 			// so there is no main-agent session for it to continue.
 			if ((parsed.sessionId !== undefined || parsed.continueSession) && parsed.agentId !== undefined) {
-				process.stderr.write("clio run: --session and --continue apply to the main agent, not --agent dispatch\n");
+				process.stderr.write("clio-coder run: --session and --continue apply to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
 				return 2;
 			}
@@ -209,7 +209,7 @@ export async function runClioRun(
 			const skillPathErrors = explicitSkillPathErrors(skillPaths);
 			if (skillPathErrors.length > 0) {
 				for (const message of skillPathErrors) {
-					process.stderr.write(`clio run: --skill ${message}\n`);
+					process.stderr.write(`clio-coder run: --skill ${message}\n`);
 				}
 				return 2;
 			}
@@ -223,7 +223,7 @@ export async function runClioRun(
 				// headless turn so the resolver diagnostic never streams to stdout as a
 				// message_end/agent_end assistant turn.
 				if (parsed.target !== undefined && explicitTargetMissing(parsed.target)) {
-					process.stderr.write(`clio run: target '${parsed.target}' not found in settings.targets\n`);
+					process.stderr.write(`clio-coder run: target '${parsed.target}' not found in settings.targets\n`);
 					return 2;
 				}
 				takeOverStdout();
@@ -278,18 +278,18 @@ async function runDispatch(
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> },
 ): Promise<number> {
 	if (parsed.toolProfile !== undefined && !isToolProfileName(parsed.toolProfile)) {
-		process.stderr.write("clio run: --tool-profile must be one of: minimal-local|science-local|full-agent\n");
+		process.stderr.write("clio-coder run: --tool-profile must be one of: minimal-local|science-local|full-agent\n");
 		process.stderr.write(USAGE);
 		return 2;
 	}
 	if (parsed.target && parsed.agentProfile) {
 		process.stderr.write(
-			`clio run: --target ${parsed.target} takes precedence; --agent-profile ${parsed.agentProfile} will be ignored\n`,
+			`clio-coder run: --target ${parsed.target} takes precedence; --agent-profile ${parsed.agentProfile} will be ignored\n`,
 		);
 	}
 	if (parsed.target && parsed.agentRuntime) {
 		process.stderr.write(
-			`clio run: --target ${parsed.target} takes precedence; --agent-runtime ${parsed.agentRuntime} will be ignored\n`,
+			`clio-coder run: --target ${parsed.target} takes precedence; --agent-runtime ${parsed.agentRuntime} will be ignored\n`,
 		);
 	}
 
@@ -331,7 +331,7 @@ async function runDispatch(
 	if (options.apiKey) {
 		const providers = loaded.getContract<ProvidersContract>("providers");
 		if (!providers) {
-			process.stderr.write("clio run: --api-key supplied but providers domain unavailable\n");
+			process.stderr.write("clio-coder run: --api-key supplied but providers domain unavailable\n");
 			await loaded.stop();
 			return 1;
 		}
@@ -352,7 +352,7 @@ async function runDispatch(
 		const target = targetId ? providers.getTarget(targetId) : null;
 		const runtime = target ? providers.getRuntime(target.runtime) : null;
 		if (!target || !runtime) {
-			process.stderr.write("clio run: --api-key supplied but no target resolved; pass --target <id>\n");
+			process.stderr.write("clio-coder run: --api-key supplied but no target resolved; pass --target <id>\n");
 			await loaded.stop();
 			return 2;
 		}
@@ -398,7 +398,7 @@ async function runDispatch(
 		}).section;
 	} catch (err) {
 		process.stderr.write(
-			`clio run: memory load failed: ${err instanceof Error ? err.message : String(err)}; continuing without memory\n`,
+			`clio-coder run: memory load failed: ${err instanceof Error ? err.message : String(err)}; continuing without memory\n`,
 		);
 	}
 	if (memorySection.length > 0) dispatchReq.memorySection = memorySection;
@@ -470,7 +470,7 @@ async function runDispatch(
 			cleanupSteer();
 		}
 		const msg = err instanceof Error ? err.message : String(err);
-		process.stderr.write(`clio run failed: ${msg}\n`);
+		process.stderr.write(`clio-coder run failed: ${msg}\n`);
 		await loaded.stop();
 		if (/target '.+' not found/.test(msg)) return 2;
 		if (

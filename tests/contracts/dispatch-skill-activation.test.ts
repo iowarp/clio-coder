@@ -18,7 +18,7 @@ function recordingSession(): { session: SessionContract; recorded: SkillActivati
 
 const activation: SkillActivation = {
 	name: "review",
-	filePath: "/w/.clio/skills/review/SKILL.md",
+	filePath: "/w/.clio-coder/skills/review/SKILL.md",
 	hash: "a".repeat(64),
 	source: "clio",
 	sourceOrigin: "project",

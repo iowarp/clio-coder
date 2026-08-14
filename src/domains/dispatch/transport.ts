@@ -10,7 +10,7 @@
  *
  * SSH tier invariants:
  *   - The remote environment is a whitelist, never the orchestrator's
- *     process.env. Remote workers default to CLIO_RESIDENCY=observe so a
+ *     process.env. Remote workers default to CLIO_CODER_RESIDENCY=observe so a
  *     worker on a node that serves models for the operator can never evict a
  *     resident model.
  *   - The orchestrator cwd is entered on the remote node (shared-filesystem
@@ -47,10 +47,10 @@ export interface SshNodeEndpoint {
 	port?: number;
 	identityFile?: string;
 	/**
-	 * Remote worker-entry invocation. Defaults to `clio worker`, which requires
-	 * a version-matched clio on the remote PATH (the doctor fleet preflight
+	 * Remote worker-entry invocation. Defaults to `clio-coder worker`, which requires
+	 * a version-matched clio-coder on the remote PATH (the doctor fleet preflight
 	 * verifies both). Operators with non-PATH installs point this at their
-	 * entry, e.g. `/opt/clio/bin/clio worker`.
+	 * entry, e.g. `/opt/clio-coder/bin/clio-coder worker`.
 	 */
 	clioEntry?: string;
 	/**
@@ -91,7 +91,7 @@ export function createLocalWorkerTransport(opts?: Omit<SpawnOptions, "cwd">): Wo
 }
 
 const DEFAULT_SSH_CONNECT_TIMEOUT_SEC = 10;
-const DEFAULT_REMOTE_CLIO_ENTRY = "clio worker";
+const DEFAULT_REMOTE_CLIO_ENTRY = "clio-coder worker";
 
 /**
  * The env whitelist exported to the remote worker. Nothing from the
@@ -107,8 +107,8 @@ function remoteEnvAssignments(node: SshNodeEndpoint): string {
 	// inherits both the pid and the group leadership, and the value it announces
 	// is the group an abort must signal.
 	const labels = (node.labels ?? []).map((label) => label.trim()).filter((label) => label.length > 0);
-	const labelAssignment = labels.length > 0 ? ` CLIO_WORKER_LABELS=${shellQuote(labels.join(","))}` : "";
-	return `CLIO_RESIDENCY=${residency} CLIO_WORKER_PGID=$$${labelAssignment}`;
+	const labelAssignment = labels.length > 0 ? ` CLIO_CODER_WORKER_LABELS=${shellQuote(labels.join(","))}` : "";
+	return `CLIO_CODER_RESIDENCY=${residency} CLIO_CODER_WORKER_PGID=$$${labelAssignment}`;
 }
 
 export function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string): string {

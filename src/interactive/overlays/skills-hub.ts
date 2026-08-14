@@ -26,7 +26,7 @@ const GROUP_DIAGNOSTICS = "Diagnostics";
 
 /** @internal exported for contract tests */
 export const SKILLS_HUB_EMPTY =
-	"no skills installed and no local marketplace configured. install one with `clio skills install <path|github-url>`, or point CLIO_SKILL_CATALOG_DIR at a skills/ catalog.";
+	"no skills installed and no local marketplace configured. install one with `clio-coder skills install <path|github-url>`, or point CLIO_CODER_SKILL_CATALOG_DIR at a skills/ catalog.";
 
 export interface SkillsHubDeps {
 	listSkills: () => ResourceList<Skill>;

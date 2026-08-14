@@ -130,7 +130,7 @@ export function receiptInvariantMetrics(
  * This is a different observation from `tokens.*`, which is folded live off
  * the runner's stdout by `token-stream.ts` and means exactly one thing: usage
  * a provider reported on an assistant `message_end` this runner watched cross
- * the wire. Some surfaces publish no such stream. `clio fleet run --json`
+ * the wire. Some surfaces publish no such stream. `clio-coder fleet run --json`
  * drains its workers' events and publishes receipts and one summary, so a
  * bounded loop's cost never reaches that fold and `tokens.measured` is
  * correctly false.

@@ -261,15 +261,15 @@ describe("phase-aware hook budgets", () => {
 		}
 		deepStrictEqual(resolveHookBudgetsFromEnv({} as NodeJS.ProcessEnv), { ...DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS });
 		const overridden = resolveHookBudgetsFromEnv({
-			CLIO_HOOK_BUDGET_TURN_END_MS: "5",
-			CLIO_HOOK_BUDGET_MS: "200",
+			CLIO_CODER_HOOK_BUDGET_TURN_END_MS: "5",
+			CLIO_CODER_HOOK_BUDGET_MS: "200",
 		} as NodeJS.ProcessEnv);
 		strictEqual(overridden.turn_end, 5); // per-phase wins
 		strictEqual(overridden.before_tool, 200); // global applies where no per-phase key
 		strictEqual(overridden.on_compaction, 200);
 		// A non-positive or non-numeric value is ignored, never zeroing a budget.
 		strictEqual(
-			resolveHookBudgetsFromEnv({ CLIO_HOOK_BUDGET_TURN_END_MS: "-5" } as NodeJS.ProcessEnv).turn_end,
+			resolveHookBudgetsFromEnv({ CLIO_CODER_HOOK_BUDGET_TURN_END_MS: "-5" } as NodeJS.ProcessEnv).turn_end,
 			DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS.turn_end,
 		);
 	});

@@ -14,7 +14,7 @@ specifics from the repo (see *Detecting the specifics*), never assume a stack.
 
 2. **Gitignored config & secrets — the commonly-missed layer.** A fresh checkout has NONE of the untracked files
    the app reads at runtime: `.env`, `.env.local`, `.env.<stage>`, credential/service-account JSON, `*.pem` and
-   other keys, `.npmrc` / `.pypirc`, local settings (`.claude/settings.local.json`, `.clio/` state), and anything similar. Copy
+   other keys, `.npmrc` / `.pypirc`, local settings (`.claude/settings.local.json`, `.clio-coder/` state), and anything similar. Copy
    these from the main working tree into the worktree. Confirm each is actually ignored (`git check-ignore <f>`)
    so tracked files are never duplicated. If the repo ships a `.worktreeinclude`, use that list as the source of
    truth for what to copy.

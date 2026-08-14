@@ -9,7 +9,7 @@ import { runCli } from "../harness/spawn.js";
 /**
  * E1 and slice-3 S1 recorded the same line twice: loading `node:sqlite` emits
  * an ExperimentalWarning that lands on the operator's stderr in the middle of
- * `clio trace` output, on a fresh install, about a Node internal they never
+ * `clio-coder trace` output, on a fresh install, about a Node internal they never
  * chose. `databaseSyncConstructor` is the one load site every path reaches, so
  * one narrow filter closes both residuals.
  */

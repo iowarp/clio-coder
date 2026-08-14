@@ -33,7 +33,7 @@ export type AgentLatencyClass = "fast" | "balanced" | "deep";
  * How much durable project context a worker run receives as a dynamic prompt
  * message: "bounded" is the capped name/conventions/invariants projection,
  * "none" is nothing. Defaults derive from the capability class so read-only
- * scouts never pay the CLIO.md read; recipe frontmatter may override.
+ * scouts never pay the CLIO-CODER.md read; recipe frontmatter may override.
  */
 export type AgentProjectContextTier = "none" | "bounded";
 

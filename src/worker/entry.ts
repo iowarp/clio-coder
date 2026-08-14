@@ -41,14 +41,14 @@ const CHANNEL_CLOSE_EXIT_GRACE_MS = 5000;
  * different label sets.
  */
 function configuredNodeLabels(): string[] {
-	return (process.env.CLIO_WORKER_LABELS ?? "")
+	return (process.env.CLIO_CODER_WORKER_LABELS ?? "")
 		.split(",")
 		.map((label) => label.trim())
 		.filter((label) => label.length > 0);
 }
 
 function announcedProcessGroupId(): number | null {
-	const declared = Number.parseInt(process.env.CLIO_WORKER_PGID ?? "", 10);
+	const declared = Number.parseInt(process.env.CLIO_CODER_WORKER_PGID ?? "", 10);
 	if (Number.isSafeInteger(declared) && declared > 0) return declared;
 	return process.platform === "win32" ? null : process.pid;
 }

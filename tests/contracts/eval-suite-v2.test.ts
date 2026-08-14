@@ -327,7 +327,7 @@ function evalIdFrom(stdout: string): string {
 }
 
 function readArtifact(env: NodeJS.ProcessEnv, evalId: string): EvalArtifactV4 {
-	const dataDir = env.CLIO_DATA_DIR;
-	if (dataDir === undefined) throw new Error("scratch CLIO_DATA_DIR missing");
+	const dataDir = env.CLIO_CODER_DATA_DIR;
+	if (dataDir === undefined) throw new Error("scratch CLIO_CODER_DATA_DIR missing");
 	return JSON.parse(readFileSync(join(dataDir, "evals", `${evalId}.json`), "utf8")) as EvalArtifactV4;
 }

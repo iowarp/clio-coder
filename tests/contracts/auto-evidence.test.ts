@@ -18,7 +18,7 @@ import { newScratchClioHome } from "../harness/scratch-env.js";
  * Drive the auto-build path in-process: emit a DispatchCompleted on the bus and
  * assert that the observability listener builds an evidence bundle under
  * <dataDir>/evidence/run-<id>/ and writes a sidecar index row, with no
- * `clio evidence` CLI call. Also assert that an unknown runId (whose build
+ * `clio-coder evidence` CLI call. Also assert that an unknown runId (whose build
  * throws inside buildEvidence) is swallowed and never crashes the run.
  */
 
@@ -400,7 +400,7 @@ describe("auto-build evidence on dispatch completion", { concurrency: false }, (
 		await bundle.extension.start();
 
 		// Emit completion, then stop immediately without waiting. This mirrors a
-		// headless `clio run` that tears the process down right after dispatch:
+		// headless `clio-coder run` that tears the process down right after dispatch:
 		// stop() must flush the pending forensic build rather than abandon it.
 		context.bus.emit(BusChannels.DispatchCompleted, {
 			runId,

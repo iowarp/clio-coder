@@ -212,7 +212,7 @@ export async function runWikiDispatch(input: {
 			...routeFields(input.route),
 			// `git` cannot answer anything for this dispatch. The prompt already
 			// embeds `git status` and `git log` verbatim, and the staging dir is
-			// under the gitignored `.clio/`, so `op=diff` cannot see the pages this
+			// under the gitignored `.clio-coder/`, so `op=diff` cannot see the pages this
 			// run is writing.
 			denyTools: [ToolNames.Git],
 			// Containment: the worker safety seam blocks any write-class tool call

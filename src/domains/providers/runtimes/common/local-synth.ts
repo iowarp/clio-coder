@@ -130,7 +130,7 @@ export function stripTrailingSlash(url: string): string {
  * Drop a redundant trailing `/v1` from a target URL.
  *
  * Every OpenAI-compatible client documents its base URL as the `/v1` mount
- * point, so `http://host:8080/v1` is what users type and what `clio configure`
+ * point, so `http://host:8080/v1` is what users type and what `clio-coder configure`
  * accepts. Clio's own request paths already carry `/v1`, so the two compose
  * into `/v1/v1/chat/completions` and the server answers 404. Reducing the URL
  * to the server root here makes `http://host:8080` and `http://host:8080/v1`

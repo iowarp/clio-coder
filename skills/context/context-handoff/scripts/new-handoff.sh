@@ -4,7 +4,7 @@
 #
 #   new-handoff.sh [slug]
 #
-# Honors CLIO_HANDOFF_DIR; defaults to <repo-root>/.clio/handoffs.
+# Honors CLIO_CODER_HANDOFF_DIR; defaults to <repo-root>/.clio-coder/handoffs.
 # The default .gitignore policy ignores this machine-local context directory.
 set -euo pipefail
 
@@ -14,7 +14,7 @@ date_str="$(date +%F)"
 # Prefer the git repo root; fall back to the current directory.
 if root="$(git rev-parse --show-toplevel 2>/dev/null)"; then :; else root="$PWD"; fi
 
-dir="${CLIO_HANDOFF_DIR:-$root/.clio/handoffs}"
+dir="${CLIO_CODER_HANDOFF_DIR:-$root/.clio-coder/handoffs}"
 mkdir -p "$dir"
 
 if [ -n "$slug" ]; then

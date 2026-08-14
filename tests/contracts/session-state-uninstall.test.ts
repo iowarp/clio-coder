@@ -1,5 +1,5 @@
 /**
- * `clio uninstall` removed the state root and reported success; roughly two
+ * `clio-coder uninstall` removed the state root and reported success; roughly two
  * minutes later the session shutdown checkpoint rebuilt the root around a
  * meta.json and a tree.json carrying `lastCheckpointReason: shutdown`. Every
  * writer under the root mkdirs its parent back (`sessionPaths` for the session

@@ -30,5 +30,5 @@ Expected:
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS (smoke). Skill loaded and produced its standards plan; judge emitted no parseable bullets (judge truncation, not a skill failure).

@@ -425,7 +425,7 @@
         <div class="skills-list-container">
           <!-- Project Group -->
           <div>
-            <div class="group-title">Project Skills (.clio/skills)</div>
+            <div class="group-title">Project Skills (.clio-coder/skills)</div>
             <div id="group-project"></div>
           </div>
           <!-- User Group -->
@@ -493,7 +493,7 @@
         name: "hdf5-review",
         scope: "project",
         scopeClass: "scope-project",
-        provenance: "Local Disk (.clio/skills/hdf5-review)",
+        provenance: "Local Disk (.clio-coder/skills/hdf5-review)",
         provDot: "provenance-cached",
         license: "MIT",
         version: "1.0.0",
@@ -510,7 +510,7 @@
         name: "sys-bench",
         scope: "user",
         scopeClass: "scope-user",
-        provenance: "User Directory (~/.config/clio/skills/sys-bench)",
+        provenance: "User Directory (~/.config/clio-coder/skills/sys-bench)",
         provDot: "provenance-cached",
         license: "Apache-2.0",
         version: "1.2.0",
@@ -620,13 +620,13 @@
 
     function simulateInstallSkill() {
       const sk = SKILLS[activeSkill];
-      document.getElementById("console-output").innerText = `[CLI] Eagerly installing skill '${sk.name}' into project scope at '.clio/skills/${sk.name}'...`;
+      document.getElementById("console-output").innerText = `[CLI] Eagerly installing skill '${sk.name}' into project scope at '.clio-coder/skills/${sk.name}'...`;
       
       setTimeout(() => {
         // Upgrade scope to project
         sk.scope = "project";
         sk.scopeClass = "scope-project";
-        sk.provenance = `Eagerly Installed (.clio/skills/${sk.name})`;
+        sk.provenance = `Eagerly Installed (.clio-coder/skills/${sk.name})`;
         sk.provDot = "provenance-cached";
         
         renderList();

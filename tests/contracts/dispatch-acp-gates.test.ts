@@ -125,7 +125,7 @@ function nativeFabric(): {
 		spawn(spec, opts) {
 			spawns.push({ spec, cwd: opts?.cwd });
 			const cwd = opts?.cwd;
-			if (cwd?.includes(join(".clio", "worktrees"))) {
+			if (cwd?.includes(join(".clio-coder", "worktrees"))) {
 				const candidate = /candidate-(\d+)$/.exec(cwd)?.[1] ?? String(spawns.length);
 				writeFileSync(join(cwd, `candidate-${candidate}.txt`), `candidate ${candidate}\n`);
 			}
@@ -368,7 +368,7 @@ describe("ACP gate role authority", () => {
 				strictEqual(acpStarts, 0);
 				strictEqual(bundle.contract.listRuns().length, 0);
 				if (repo !== null) {
-					strictEqual(existsSync(join(repo, ".clio", "worktrees")), false);
+					strictEqual(existsSync(join(repo, ".clio-coder", "worktrees")), false);
 				}
 			} finally {
 				await bundle.extension.stop?.();

@@ -13,27 +13,27 @@ git branch -M main
 git config user.email eval@clio.local
 git config user.name "Clio Eval"
 git config commit.gpgsign false
-printf '# CLIO.md\n\nSmall todo CLI. Hard rule: todos.json is the only persistence; never add a database.\n' > CLIO.md
+printf '# CLIO-CODER.md\n\nSmall todo CLI. Hard rule: todos.json is the only persistence; never add a database.\n' > CLIO-CODER.md
 printf 'function listTodos() {\n  return [];\n}\n\nmodule.exports = { listTodos };\n' > todos.js
-git add CLIO.md todos.js
+git add CLIO-CODER.md todos.js
 git commit -qm "chore: seed project"
-mkdir -p .clio/handoffs
-printf '# Handoff - 2026-06-05\n\n## Context\nTodo CLI, adding the done command.\n\n## Work completed\n- add command works and persists to todos.json.\n\n## Work in progress\n- done command half-written in todos.js; markDone lacks bounds check. Pick up there.\n\n## Blockers\n- none.\n\n## Suggested skills\n- context-prime\n- tdd\n' > .clio/handoffs/handoff-2026-06-05.md
+mkdir -p .clio-coder/handoffs
+printf '# Handoff - 2026-06-05\n\n## Context\nTodo CLI, adding the done command.\n\n## Work completed\n- add command works and persists to todos.json.\n\n## Work in progress\n- done command half-written in todos.js; markDone lacks bounds check. Pick up there.\n\n## Blockers\n- none.\n\n## Suggested skills\n- context-prime\n- tdd\n' > .clio-coder/handoffs/handoff-2026-06-05.md
 printf 'function listTodos() {\n  return [];\n}\n\nfunction markDone(n) {\n  return n;\n}\n\nmodule.exports = { listTodos, markDone };\n' > todos.js
 ```
 
 Expected:
-- Reads `CLIO.md` and the newest handoff before saying anything substantive.
+- Reads `CLIO-CODER.md` and the newest handoff before saying anything substantive.
 - Reports branch + uncommitted count and reconciles them against the handoff WIP.
 - Produces the orientation block and asks the user to confirm the focus.
 - Does NOT start editing before confirmation.
 
 ## S2 — no handoff present
-Setup: clean repo, no `.clio/handoffs/`, no `NEXT-SESSION.md`. Prompt: "where
+Setup: clean repo, no `.clio-coder/handoffs/`, no `NEXT-SESSION.md`. Prompt: "where
 were we?"
 Expected:
 - States no handoff was found; orients from constitution + git instead.
-- Falls back to `AGENTS.md`/`README.md` when `CLIO.md` is absent.
+- Falls back to `AGENTS.md`/`README.md` when `CLIO-CODER.md` is absent.
 - Does not fabricate prior context.
 
 ## S3 — handoff disagrees with git
@@ -50,5 +50,5 @@ Expected:
 
 ## Smoke record (2026-08-13)
 
-One representative scenario via `clio skills eval` against Nemo-3.5-Lightning
+One representative scenario via `clio-coder skills eval` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. PASS. Prime sequence ran against the seeded handoff fixture; judge 3/4.

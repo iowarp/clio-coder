@@ -5,7 +5,7 @@
  * visible closing message rather than left to spin.
  *
  * The interactive TUI wires its own subscriber (it also renders the per-block
- * warn notices). Operatorless surfaces (headless `clio run`, ACP) have no such
+ * warn notices). Operatorless surfaces (headless `clio-coder run`, ACP) have no such
  * subscriber, so a degenerate local model spins until an external timeout: the
  * `block_tool` effect blocks each call but nothing aborts the run. This module
  * is the single source of truth for the closing-message text and the

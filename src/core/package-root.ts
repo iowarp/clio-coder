@@ -9,7 +9,7 @@ let cachedPiMonoVersion: string | null = null;
 
 export function resolvePackageRoot(metaUrl = import.meta.url): string {
 	if (cached) return cached;
-	const override = process.env.CLIO_PACKAGE_ROOT?.trim();
+	const override = process.env.CLIO_CODER_PACKAGE_ROOT?.trim();
 	if (override) {
 		cached = resolve(override);
 		return cached;

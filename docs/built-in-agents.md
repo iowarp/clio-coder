@@ -25,7 +25,7 @@ At startup, Clio loads recipes from three roots:
 | --- | --- | --- |
 | **Built-in** | `src/domains/agents/builtins/*.md` in the installed package | Shipped defaults. |
 | **User** | `<configDir>/agents/*.md` | Per-user recipes. `<configDir>` follows Clio's XDG/platform config directory. |
-| **Project** | `.clio/agents/*.md` under the current repo | Repository-local overrides and additions (custom/domain agents). |
+| **Project** | `.clio-coder/agents/*.md` under the current repo | Repository-local overrides and additions (custom/domain agents). |
 
 Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Recipes must live directly under their respective directories.
 
@@ -33,8 +33,8 @@ Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Rec
 *   **Shadow Protection**: User or project agents can **never** override shadow or internal agents.
 *   **Built-in Protection**: Project agents cannot override any shipped built-ins; they are strictly treated as custom/domain agents.
 *   **Reserved IDs**: The IDs `worker` and `delegate` are strictly reserved for custom/internal contexts and cannot be registered as custom agent IDs.
-*   **Local Ignored Custom Examples**: Local examples (e.g., `benchmark-runner`, `clio-dev`, `implementer`, `scientific-validator`) may exist under `.clio/agents` for documentation or test purposes, but are ignored if they collide with reserved/built-in rules.
-*   **Fleet Contracts**: Shipped builtin fleet contracts (`build-test`, `build-review`, `sdlc`) live under `src/domains/agents/fleets/*.md`. Project-level fleet contracts placed at `.clio/fleets/<name>.md` shadow builtin fleets of the same name. Deterministic code steps reference commands declared in `.clio/fleets/commands.yaml`. Contract v4 requires per-step write boundaries (`writes`).
+*   **Local Ignored Custom Examples**: Local examples (e.g., `benchmark-runner`, `clio-dev`, `implementer`, `scientific-validator`) may exist under `.clio-coder/agents` for documentation or test purposes, but are ignored if they collide with reserved/built-in rules.
+*   **Fleet Contracts**: Shipped builtin fleet contracts (`build-test`, `build-review`, `sdlc`) live under `src/domains/agents/fleets/*.md`. Project-level fleet contracts placed at `.clio-coder/fleets/<name>.md` shadow builtin fleets of the same name. Deterministic code steps reference commands declared in `.clio-coder/fleets/commands.yaml`. Contract v4 requires per-step write boundaries (`writes`).
 
 ---
 
@@ -43,7 +43,7 @@ Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Rec
 Current built-ins under `src/domains/agents/builtins/`:
 
 ### Shipped Base Agents
-User-facing agents visible in `clio agents` and `/agents`.
+User-facing agents visible in `clio-coder agents` and `/agents`.
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
@@ -57,14 +57,14 @@ User-facing agents visible in `clio agents` and `/agents`.
 | `wiki-writer` | read, write, edit, grep, find, ls, code_nav, context | Plans one repository wiki, or researches and writes one wiki page. | `workspace-edit` | `balanced` |
 
 ### Shipped Shadow and Internal Agents
-Internal orchestration helpers and internal process agents. They are hidden from default displays (but visible via `clio agents --all` and in a separate section of the prompt catalog).
+Internal orchestration helpers and internal process agents. They are hidden from default displays (but visible via `clio-coder agents --all` and in a separate section of the prompt catalog).
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
 | `scout` | read, grep, find, ls, context, code_nav, git | Broad repository reconnaissance, codebase orientation, structure and entry-point mapping, and multi-file symbol hunting. | `read-only` | `fast` |
 | `researcher` | read, web_fetch, context | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
 | `provenance` | read, grep, find, ls, git | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
-| `context-bootstrap` | read, grep, find, ls, context, code_nav | Internal agent behind `clio context init` that parses repository and returns CLIO.md payload. | `read-only` | `balanced` |
+| `context-bootstrap` | read, grep, find, ls, context, code_nav | Internal agent behind `clio-coder context init` that parses repository and returns CLIO-CODER.md payload. | `read-only` | `balanced` |
 
 `scout` is bound by a live-grounding contract: its whole final response is one `scout-report` object whose every finding carries the `claim` it observed and the `path:line` that grounds it, a lead it could not confirm live is simply left out, and wiki or index content is orientation only, never citable as evidence. It has an 18-call exploration phase followed by a tool-free synthesis phase; wide parallel batches cannot consume the synthesis backstop as separate violations. Dispatch labels its answer `reconnaissance output (advisory leads, not validation evidence):`.
 
@@ -113,8 +113,8 @@ Skills are knowledge attachments declared under `skills: [...]` in the YAML fron
 
 ## Dispatching agents
 
-*   **Visibility**: Normal `clio agents` lists user-visible (base/custom) agents. The `/agents` slash command shows both Clio fleet agents and ACP delegation agents. The command `clio agents --all` includes shadow/internal specs reserved for Clio orchestration.
-*   **Invocation limits**: User-origin `/run` and `clio run --agent` **cannot** invoke shadow/internal agents.
+*   **Visibility**: Normal `clio-coder agents` lists user-visible (base/custom) agents. The `/agents` slash command shows both Clio fleet agents and ACP delegation agents. The command `clio-coder agents --all` includes shadow/internal specs reserved for Clio orchestration.
+*   **Invocation limits**: User-origin `/run` and `clio-coder run --agent` **cannot** invoke shadow/internal agents.
 *   **Orchestrator dispatch**: Internal main-agent dispatch can invoke shadow agents through the `dispatch` tool. The operating contract and Scout's catalog description steer the model to dispatch Scout for broad repository reconnaissance, while narrow file or symbol inspection remains local to the main agent. If a turn reaches 9 or more manual read-only exploration calls without completing Scout dispatch, a threshold nudge advises delegation on the continuation.
 *   **TUI rendering and control**: Shadow dispatch rows are marked with an `sh:` prefix. The Fleet Runs island and board show the bounded task, run ID, live tools, tokens, priced cost, retry state, and terminal outcome. Select an HTTP/SDK run to steer it or cancel any active worker/retry timer.
 *   **ACP Delegation**: The `/delegate` command is reserved for ACP delegation only, which is separate from Clio fleet subagents.
@@ -131,7 +131,7 @@ Scout is the bounded escalation path for broad reconnaissance, not an authority 
 
 ACP delegation agents (registered under `delegation.agents` in `settings.yaml`) are integrated as first-class workers:
 - **Automatic Routing:** When a task is dispatched to an agent ID matching a configured ACP delegation agent, the dispatch engine automatically routes the execution to that delegation agent.
-- **Dynamic Spec Discovery:** The agent registry automatically synthesizes complete AgentSpecs for configured ACP delegation agents. They are visible via `clio agents` and in slash command menus.
+- **Dynamic Spec Discovery:** The agent registry automatically synthesizes complete AgentSpecs for configured ACP delegation agents. They are visible via `clio-coder agents` and in slash command menus.
 
 ### Restricted Shadow Agent Delegation
 
@@ -158,7 +158,7 @@ Interactive TUI:
 Headless CLI:
 
 ```bash
-clio run --agent coder "Refactor the parser."
+clio-coder run --agent coder "Refactor the parser."
 ```
 
 Dispatch admission enforces three gates:
@@ -191,9 +191,9 @@ over run:
 
 - **Project context** (capability classes `workspace-edit`, `verification`,
   and `artifact-write` only): the project name, conventions, and hard
-  invariants parsed from `CLIO.md`, capped at 1500 characters with conventions
+  invariants parsed from `CLIO-CODER.md`, capped at 1500 characters with conventions
   truncated first. Read-only, shadow, and orchestration recipes get none, and
-  no message is sent when `CLIO.md` is absent or malformed.
+  no message is sent when `CLIO-CODER.md` is absent or malformed.
 - **Safety posture** (every run, including ACP delegation): one line naming
   the run's effective autonomy level with the same directive text the session
   prompt's safety section uses.
@@ -245,7 +245,7 @@ Escalate is only meaningful with an interactive operator attached. Headless sess
 
 ## Adding a project agent
 
-Create `.clio/agents/my-agent.md`:
+Create `.clio-coder/agents/my-agent.md`:
 
 ```md
 ---
@@ -260,6 +260,6 @@ You are My Agent. Inspect only the requested area. Never edit files. End by writ
 Then run:
 
 ```bash
-clio agents
-clio run --agent my-agent "Review the parser change."
+clio-coder agents
+clio-coder run --agent my-agent "Review the parser change."
 ```

@@ -38,7 +38,7 @@ export interface LoadedProjectSafetyPolicy {
 	disableDefaultPathPolicy: boolean;
 }
 
-const POLICY_RELATIVE_PATH = path.join(".clio", "safety.yaml");
+const POLICY_RELATIVE_PATH = path.join(".clio-coder", "safety.yaml");
 // Includes "unknown" because safety.yaml policy schema parsing accepts unclassified commands as valid policy targets.
 const ACTION_CLASSES = new Set<ActionClass>([
 	"read",

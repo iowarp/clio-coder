@@ -10,10 +10,10 @@ import { readClioState, statePath, writeClioState } from "../domains/context/sta
 import { detectProjectProfile } from "../domains/session/workspace/project-type.js";
 
 const HELP = `Usage:
-  clio context index [--json]
+  clio-coder context index [--json]
 
 Build the structural codewiki index for the current repository without model calls.
-Writes .clio/codewiki.json and .clio/state.json, then prints source coverage.
+Writes .clio-coder/codewiki.json and .clio-coder/state.json, then prints source coverage.
 
 Options:
   --json          print machine-readable coverage and hash details
@@ -48,7 +48,7 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 	const allowed = new Set(["--json"]);
 	for (const arg of args) {
 		if (!allowed.has(arg)) {
-			process.stderr.write(`clio context index: unknown flag ${arg}\n`);
+			process.stderr.write(`clio-coder context index: unknown flag ${arg}\n`);
 			return 2;
 		}
 	}
@@ -90,7 +90,7 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 	}
 	process.stdout.write(
 		[
-			`clio context index indexed ${indexed}/${profile.sourceFiles} source file${profile.sourceFiles === 1 ? "" : "s"} (${(coverage * 100).toFixed(1)}%)`,
+			`clio-coder context index indexed ${indexed}/${profile.sourceFiles} source file${profile.sourceFiles === 1 ? "" : "s"} (${(coverage * 100).toFixed(1)}%)`,
 			`  language ${profile.projectType}; counts ${formatCounts(counts)}`,
 			`  codewiki ${payload.codewikiPath}`,
 			`  state ${payload.statePath}`,

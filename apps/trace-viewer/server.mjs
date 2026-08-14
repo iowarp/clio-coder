@@ -260,7 +260,7 @@ async function main() {
 	const args = process.argv.slice(2);
 	const dbIndex = args.indexOf("--db");
 	const portIndex = args.indexOf("--port");
-	const db = dbIndex >= 0 ? args[dbIndex + 1] : process.env.CLIO_TRACE_DB;
+	const db = dbIndex >= 0 ? args[dbIndex + 1] : process.env.CLIO_CODER_TRACE_DB;
 	if (!db) throw new Error("usage: node server.mjs --db PATH [--port N]");
 	const port = portIndex >= 0 ? Number(args[portIndex + 1]) : 4600;
 	const viewer = await startTraceViewer({ db, port });

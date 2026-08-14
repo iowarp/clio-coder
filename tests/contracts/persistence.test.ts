@@ -208,7 +208,7 @@ describe("contracts/persistence", () => {
 
 		contract.recordSkillActivation({
 			name: "review-tests",
-			filePath: join(scratch, ".clio", "skills", "review-tests", "SKILL.md"),
+			filePath: join(scratch, ".clio-coder", "skills", "review-tests", "SKILL.md"),
 			hash: "a".repeat(64),
 			source: "clio",
 			triggeredBy: "slash-command",
@@ -238,7 +238,7 @@ describe("contracts/persistence", () => {
 		// carry it so /view can attribute worker skill provenance.
 		contract.recordSkillActivation({
 			name: "verify-suite",
-			filePath: join(scratch, ".clio", "skills", "verify-suite", "SKILL.md"),
+			filePath: join(scratch, ".clio-coder", "skills", "verify-suite", "SKILL.md"),
 			hash: "b".repeat(64),
 			source: "clio",
 			triggeredBy: "tool",
@@ -414,7 +414,7 @@ describe("contracts/persistence", () => {
 	/**
 	 * One command reads the same ledger from several callers that do not know
 	 * about each other (resume, the turn tree, history), and the default sink
-	 * reprinted every skipped line on each pass. `clio run --continue` printed
+	 * reprinted every skipped line on each pass. `clio-coder run --continue` printed
 	 * the identical warning six times, three per session load across two loads,
 	 * and it read as six separate problems. Six reads here for that reason: the
 	 * dedupe has to hold for the whole process, not for one load.

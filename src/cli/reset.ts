@@ -7,7 +7,7 @@ import { type RemovalFailure, removePath, reportRemovalFailures } from "./remova
 import { printError, printHeader, printOk } from "./shared.js";
 import { terminalColumns, wrapPlain } from "./text-layout.js";
 
-const HELP = `clio reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]
+const HELP = `clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]
 
 Recover or wipe Clio Coder state while keeping the clio binary installed.
 Each level clears exactly the root (or file) it names and nothing else.
@@ -35,7 +35,7 @@ Safety:
  * works from.
  *
  * `--data` carried this and `--state` did not, which is backwards: `--state` is
- * what a bare `clio reset` selects, so the one scope that runs without being
+ * what a bare `clio-coder reset` selects, so the one scope that runs without being
  * asked for by name was the one that explained nothing before taking every
  * transcript on the machine.
  */
@@ -170,7 +170,7 @@ function resetInvocation(args: ParsedResetArgs): string {
 	)
 		.filter(([, on]) => on)
 		.map(([name]) => `--${name}`);
-	return `clio reset ${levels.join(" ")} --force`;
+	return `clio-coder reset ${levels.join(" ")} --force`;
 }
 
 export function runResetCommand(argv: ReadonlyArray<string>): number {
@@ -187,7 +187,7 @@ export function runResetCommand(argv: ReadonlyArray<string>): number {
 		return 0;
 	}
 	if (!args.dryRun && !args.force) {
-		printError("`clio reset` requires --force unless you are using --dry-run");
+		printError("`clio-coder reset` requires --force unless you are using --dry-run");
 		process.stdout.write(HELP);
 		return 2;
 	}
