@@ -991,7 +991,9 @@ describe("chat-panel render caching", () => {
 
 	it("a finished tool moves the expand hint without re-rendering settled history", () => {
 		const rendered: number[] = [];
-		const panel = createChatPanel({ onRenderMetrics: (metrics) => rendered.push(metrics.entriesRendered) });
+		// Fixed clock: real elapsed time would stamp a wall-clock duration onto
+		// the tool row in whichever panel happened to run slower.
+		const panel = createChatPanel({ now: () => 1000, onRenderMetrics: (metrics) => rendered.push(metrics.entriesRendered) });
 		const toolTurn = (id: string): void => {
 			panel.appendUser(`run ${id}`);
 			panel.applyEvent({
@@ -1016,7 +1018,7 @@ describe("chat-panel render caching", () => {
 			`the hint move re-rendered ${dirtyRender} entries; only the old and new hint owners should re-render`,
 		);
 
-		const fresh = createChatPanel();
+		const fresh = createChatPanel({ now: () => 1000 });
 		const freshTurn = (id: string): void => {
 			fresh.appendUser(`run ${id}`);
 			fresh.applyEvent({
