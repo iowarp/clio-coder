@@ -22,7 +22,7 @@ const HELP = `Usage:
   clio-coder trace ui [--db PATH] [--port N]        source checkout only
 
 The viewer ships with the repository, not the npm package, so from an installed
-clio the subcommands above are the way in. They read the same database.
+Clio the subcommands above are the way in. They read the same database.
 `;
 
 interface ParsedTraceArgs {

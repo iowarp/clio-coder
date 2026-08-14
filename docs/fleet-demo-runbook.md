@@ -64,7 +64,7 @@ clio-coder fleet status
 ## 3. Open the session and the fleet views
 
 ```
-clio
+clio-coder
 ```
 
 In the session:

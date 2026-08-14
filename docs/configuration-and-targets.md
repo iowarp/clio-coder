@@ -91,7 +91,7 @@ Use the id you chose, probe it, then launch the TUI:
 clio-coder targets use local-lmstudio
 clio-coder targets --probe
 clio-coder models --target local-lmstudio
-clio
+clio-coder
 ```
 
 Inside the TUI, verify the local surface with:
