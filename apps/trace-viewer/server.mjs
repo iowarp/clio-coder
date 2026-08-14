@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -7,6 +7,14 @@ import { fileURLToPath } from "node:url";
 
 export const TRACE_SCHEMA_VERSION = 1;
 export const EVENT_LIMIT = 500;
+export const EVIDENCE_INDEX_FILE = "evidence-index.json";
+/**
+ * Receipt fields the viewer never renders: assistant transcripts, upstream
+ * response bodies, the full route decision, and briefing/steering prose. The
+ * receipt panel shows provenance, not transcripts, so dropping them keeps the
+ * response bounded without hiding anything the page would have displayed.
+ */
+export const RECEIPT_OMITTED_FIELDS = ["output", "upstreamResponses", "routeDecision", "briefing", "steering"];
 const root = dirname(fileURLToPath(import.meta.url));
 const publicRoot = join(root, "public");
 const assetRoot = resolve(root, "..", "..", "assets");
@@ -87,7 +95,7 @@ export function createTraceViewerHandler(database, staticRoot = publicRoot, asse
 			if (url.pathname === "/api/runs") {
 				return json(response, 200, { runs: database.runs(numberParam(url, "limit", 50)) }, request.method === "HEAD");
 			}
-			const match = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(phases|events|gates|envelopes|processes))?$/);
+			const match = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(phases|events|gates|envelopes|processes|receipt))?$/);
 			if (match) {
 				const runId = decodeURIComponent(match[1]);
 				const resource = match[2];
@@ -104,6 +112,8 @@ export function createTraceViewerHandler(database, staticRoot = publicRoot, asse
 					return json(response, 200, { envelopes: database.envelopes(runId) }, request.method === "HEAD");
 				if (resource === "processes")
 					return json(response, 200, { processes: database.processes(runId) }, request.method === "HEAD");
+				if (resource === "receipt")
+					return json(response, 200, await readReceiptSidecars(dirname(database.path), runId), request.method === "HEAD");
 				const after = numberParam(url, "after", 0);
 				const limit = clamp(numberParam(url, "limit", EVENT_LIMIT), 1, EVENT_LIMIT);
 				const events = database.events(runId, after, limit);
@@ -147,6 +157,43 @@ export async function startTraceViewer({ db, port = 0 }) {
 			database.close();
 		},
 	};
+}
+
+/**
+ * Sealed receipt plus evidence sidecar row for one run, both optional.
+ *
+ * The trace database is the only thing the viewer is guaranteed to have: a
+ * mirror copied off a node, or a bare db with no `receipts/` directory beside
+ * it, must still render. So every failure here is a `null` half, never a 5xx.
+ */
+export async function readReceiptSidecars(stateDir, runId) {
+	return { receipt: await readReceiptFile(stateDir, runId), evidence: await readEvidenceRow(stateDir, runId) };
+}
+
+async function readReceiptFile(stateDir, runId) {
+	if (runId.length === 0 || /[\\/]/.test(runId) || runId.includes("..")) return null;
+	const receipts = resolve(stateDir, "receipts");
+	const candidate = resolve(receipts, `${runId}.json`);
+	if (dirname(candidate) !== receipts) return null;
+	const receipt = await readJsonFile(candidate);
+	if (receipt === null || typeof receipt !== "object" || Array.isArray(receipt)) return null;
+	const bounded = { ...receipt };
+	for (const field of RECEIPT_OMITTED_FIELDS) delete bounded[field];
+	return bounded;
+}
+
+async function readEvidenceRow(stateDir, runId) {
+	const index = await readJsonFile(resolve(stateDir, EVIDENCE_INDEX_FILE));
+	if (!Array.isArray(index)) return null;
+	return index.find((row) => row !== null && typeof row === "object" && row.runId === runId) ?? null;
+}
+
+async function readJsonFile(path) {
+	try {
+		return JSON.parse(await readFile(path, "utf8"));
+	} catch {
+		return null;
+	}
 }
 
 async function serveStatic(pathname, response, head, staticRoot, indexFallback = true) {

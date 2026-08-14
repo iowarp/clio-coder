@@ -110,3 +110,23 @@ When resolving the SQLite database path:
 4. **`procs`**: Lists orchestrator and worker process executions associated with a `runId`. Displays state (`live` or `ended`), PID, process kind, name, and command string.
 5. **`sql`**: Executes a single read-only `SELECT` or `WITH` SQL statement against the SQLite trace database. The subcommand enforces read-only access: queries containing semicolons or data mutation keywords (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, etc.) are rejected with exit code 2. BigInt numbers in result objects format as JSON strings.
 6. **`ui`**: Launches the web-based interactive trace viewer server on the specified `--port` (default 0). This subcommand requires a source checkout containing `apps/trace-viewer/server.mjs`.
+
+### Trace Viewer Surface
+
+The viewer binds to `127.0.0.1` only and serves a read-only JSON API beside the static page:
+
+| Endpoint | Source |
+| --- | --- |
+| `GET /api/health` | Schema version handshake. |
+| `GET /api/runs[?limit=N]` | `runs`, newest first. |
+| `GET /api/runs/:runId` | One `runs` row. |
+| `GET /api/runs/:runId/phases` | `phases`, ordered by `seq`. |
+| `GET /api/runs/:runId/events[?after=cursor&limit=N]` | `events` by rowid cursor, capped at 500 per page. |
+| `GET /api/runs/:runId/gates` | `gate_results`. |
+| `GET /api/runs/:runId/envelopes` | `envelopes`. |
+| `GET /api/runs/:runId/processes` | `processes`. |
+| `GET /api/runs/:runId/receipt` | Sidecars beside the database: `<stateDir>/receipts/<runId>.json` and the matching `<stateDir>/evidence-index.json` row. |
+
+The receipt endpoint derives `<stateDir>` from the directory holding the trace database, since `clio trace ui` reads `<stateDir>/trace.sqlite`. A mirror copied away from its state directory has no sidecars, so a missing, unreadable, or malformed file yields a `null` half with HTTP 200 rather than an error. The response drops `output`, `upstreamResponses`, `routeDecision`, `briefing`, and `steering`: the panel renders provenance, not transcripts.
+
+The run page renders the task request, wall-clock duration, phase description, failure reason and retry count, a chronological log of every event type with its payload, gate verdicts and violations, the run's processes, and a receipt panel covering outcome, verification state and basis, spend, per-tool call statistics, safety counters, findings, and build provenance. Fields the harness never sealed read as absent rather than as zero.
