@@ -142,7 +142,7 @@ Placement and admission are separate, deterministic authorities:
    queue preserves priority/FIFO order until its finite deadline instead of
    silently selecting another node.
 
-The durable capacity state file (`dispatch-admission.json`) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (`DEFAULT_CAPACITY_DRAIN_TTL_MS` = 3,600,000 ms). A lease acts as durable expiring authority (`DEFAULT_CAPACITY_LEASE_TTL_MS` = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself.
+The durable capacity state file (`dispatch-admission.json`) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (`DEFAULT_CAPACITY_DRAIN_TTL_MS` = 3,600,000 ms). A lease acts as durable expiring authority (`DEFAULT_CAPACITY_LEASE_TTL_MS` = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself. Full leasing schema and locking protocols are specified in [capacity-and-scheduling.md](capacity-and-scheduling.md).
 
 Use `clio fleet drain [--json]` before maintenance to close that shared
 admission authority. Existing workers continue, but new plans and every new
@@ -150,7 +150,7 @@ execution start—including a retry or a previously reserved member—fail close
 The drain expires after one hour so an abandoned operator process cannot wedge
 future dispatch; repeating the command renews the deadline. `clio fleet
 status [--json]` reports the active deadline, requesting PID, and request time.
-Use `clio fleet resume [--json]` to reopen admission early.
+Use `clio fleet resume [--json]` to reopen admission early. Detailed drain mechanics are documented in [capacity-and-scheduling.md](capacity-and-scheduling.md).
 
 With no fleet configured and nothing requested, placement resolves to the
 implicit local path and optional fleet-node provenance may remain absent.

@@ -163,7 +163,7 @@ its command cache with `hash -r` in Bash or `rehash` in Zsh.
 
 ## 5. Lifecycle Commands
 
-Clio Coder provides CLI utilities to manage operations safely.
+Clio Coder provides CLI utilities to manage operations safely. For a complete catalog of operational errors, permission denial handling, and remediation procedures, see [troubleshooting.md](troubleshooting.md).
 
 ### A. Integrity Diagnostics (`clio doctor`)
 Runs a series of health sweeps across the environment:

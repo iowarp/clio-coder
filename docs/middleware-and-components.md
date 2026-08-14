@@ -41,7 +41,7 @@ It does not execute scanned files.
 | `tool-helper` | selected helper files such as `src/tools/registry.ts` | enforcing |
 | `runtime-descriptor` | `src/domains/providers/runtimes/**/*.ts` | runtime-critical |
 | `safety-rule-pack` | `damage-control-rules.yaml` | enforcing |
-| `config-schema` | `src/core/defaults.ts`, `src/core/config.ts`, `src/domains/config/schema.ts` | runtime-critical |
+| `config-schema` | `src/core/defaults.ts`, `src/core/config.ts` (scanner list in `src/domains/components/scan.ts`) | runtime-critical |
 | `session-schema` | session entry/contract files | runtime-critical |
 | `receipt-schema` | dispatch receipt/integrity files | runtime-critical |
 | `context-file` | `CLIO.md`, `CONTRIBUTING.md`, `SECURITY.md` | advisory |

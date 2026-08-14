@@ -1,0 +1,156 @@
+# Session Lifecycle
+
+This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in `v0.3.0`.
+
+Source implementations: `src/engine/session.ts` and `src/domains/session/`.
+
+---
+
+## 1. On-Disk Session Layout
+
+Sessions are persisted durably on disk under the platform state root (`clioStateDir()`, resolving to `~/.local/state/clio-coder` on Linux/macOS or `%LOCALAPPDATA%\clio-coder` on Windows):
+
+```text
+<stateDir>/sessions/<cwdHash>/<sessionId>/
+  meta.json        # ClioSessionMeta JSON document
+  current.jsonl    # Append-only structured session event ledger
+  tree.json        # SessionTreeNode[] conversation tree graph
+```
+
+- `<cwdHash>`: First 16 hexadecimal characters of SHA-256 of canonical workspace root path (`createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 16)`).
+- `<sessionId>`: UUIDv7 generated at session initialization.
+
+---
+
+## 2. Session Metadata (`meta.json`)
+
+Session metadata is written atomically (`.tmp` + `fsyncSync` + `renameSync`) by `src/engine/session.ts:atomicWrite` and updated without closing via `src/domains/session/manager.ts:persistSessionMeta`.
+
+```typescript
+export interface ClioSessionMeta {
+  id: string;
+  cwd: string;
+  cwdHash: string;
+  createdAt: string;
+  endedAt: string | null;
+  model: string | null;
+  target: string | null;
+  clioVersion: string;
+  piMonoVersion: string;
+  platform: string;
+  nodeVersion: string;
+  sessionFormatVersion?: number; // CURRENT_SESSION_FORMAT_VERSION = 3
+}
+```
+
+Format version `CURRENT_SESSION_FORMAT_VERSION = 3` (`src/engine/session.ts:66`) is stamped on all sessions created in `v0.3.0`. Sessions with missing or earlier format versions trigger schema migrations in `src/domains/session/migrations/` on `/resume`.
+
+---
+
+## 3. Append-Only Context Ledger (`current.jsonl`)
+
+The session ledger `current.jsonl` records all conversation events, model turns, tool executions, and checkpoints in strict append-only order.
+
+### Header Line
+
+The first line of `current.jsonl` is the canonical session header:
+
+```json
+{"type":"session","version":3,"id":"01912a34-b567-7890-abcd-ef0123456789","timestamp":"2026-08-14T12:00:00.000Z","cwd":"/path/to/project"}
+```
+
+### Entry Taxonomy
+
+Subsequent lines represent typed `SessionEntry` objects (`src/domains/session/entries.ts`):
+
+1. **`message`**: User inputs, assistant responses, and tool calls/results.
+   ```typescript
+   export interface MessageEntry {
+     kind: "message";
+     turnId: string;
+     parentTurnId: string | null;
+     timestamp: string;
+     role: "user" | "assistant" | "tool_call" | "tool_result" | "system" | "checkpoint";
+     payload: unknown;
+   }
+   ```
+2. **`label`**: User-defined turn bookmark or tag anchored to `targetTurnId`.
+3. **`sessionInfo`**: Metadata event (such as model switch, target change, or thinking level adjustment).
+4. **`compactionSummary`**: Progressive compaction snapshot retaining historical context up to `firstKeptTurnId`.
+
+### Write Durability & Atomicity
+
+- Appends hold an open `O_APPEND` file descriptor across the writer lifetime (`src/engine/session.ts:openSync`).
+- Each line append is executed via a single `write(2)` call.
+- `fsyncSync` is debounced during high-frequency streaming turns and unconditionally forced on checkpoint (`persistTree`) and session shutdown (`close`).
+- Torn last lines resulting from abrupt system crashes or power losses are tolerated by the ledger reader (`src/engine/session.ts:readSessionFileEntries`), which logs a warning and skips the incomplete trailing record.
+
+---
+
+## 4. Conversation Tree Graph (`tree.json`) & Lineage
+
+Clio Coder tracks all conversation turns as a directed tree graph, enabling non-destructive branching, navigation, and message forking.
+
+### Tree Structure
+
+`tree.json` stores the complete node linkage:
+
+```typescript
+export interface SessionTreeNode {
+  id: string;              // UUIDv7 turn identifier
+  parentId: string | null; // UUIDv7 parent turn identifier
+  at: string;              // ISO-8601 creation timestamp
+  kind: "user" | "assistant" | "tool_call" | "tool_result" | "system" | "checkpoint";
+}
+```
+
+### Active Path Lineage Selection
+
+When an operator branches or switches turns using `/tree` or `Alt+T`, the next append point changes without mutating or deleting historical entries in `current.jsonl`.
+
+The active path filter (`src/domains/session/tree/active-path.ts:filterEntriesToActivePath`) traces ancestry back from the active leaf:
+1. Retains all message entries on the direct ancestral path from leaf to root.
+2. Retains sidecar entries anchored to turns on the active path (`targetTurnId`, `parentTurnId`, or `firstKeptTurnId`).
+3. Retains unanchored global sidecars (`parentTurnId: null`).
+4. Prunes abandoned sibling branches from the context window supplied to the LLM.
+
+### Branch Forking (`/fork`)
+
+The `/fork` command (`src/domains/session/tree/fork.ts:forkFromParentTurn`) initializes an independent session branched from an arbitrary turn:
+1. Closes the current session writer.
+2. Creates a new session directory and metadata inheriting `cwd`, `model`, and `target` from the parent.
+3. Traces ancestry up to `parentTurnId` and copies only the active path entries into the new session ledger.
+4. Stamps `parentSession` and `parentTurnId` in the new session header.
+
+---
+
+## 5. Session Resumption (`/resume`) & Working Directory Fallback
+
+When resuming a session via `/resume <sessionId>` or `CLIO_RESUME_SESSION_ID`:
+1. `src/domains/session/manager.ts:resumeSessionState` loads `meta.json` and runs migrations.
+2. `src/domains/session/cwd-fallback.ts:resolveSessionCwd` probes the recorded `meta.cwd` against the filesystem.
+3. If the directory is invalid, it returns a typed failure reason:
+   - `no-cwd`: `meta.cwd` is missing or empty.
+   - `missing`: The directory no longer exists on disk.
+   - `not-a-directory`: The path points to a non-directory file or broken symlink.
+4. The interactive layer displays the `cwd-fallback` overlay prompting the operator to choose a valid workspace directory.
+
+---
+
+## 6. Protected-Artifact Write-Ahead Journal
+
+To guarantee that protected artifacts and validation locks survive unexpected crashes between tool execution and ledger commitment, Clio Coder maintains a write-ahead journal (`src/domains/session/protected-artifact-journal.ts`):
+
+- Location: `<stateDir>/protected-artifact-pending/<sessionKey>/<recordId>.json`
+- Lifecycle:
+  1. **Stage**: Before a mutating tool result is returned, the protected artifact registration is staged atomically to the journal directory.
+  2. **Commit**: Once the turn completes and appends to `current.jsonl`, the staged journal file is unlinked.
+  3. **Reconcile**: During session startup or resume, `reconcilePendingProtectedArtifacts` reads any leftover staged records and injects them into the protection engine before accepting user commands.
+
+---
+
+## 7. In-Session Task Board & Usage Accounting
+
+- **Task Board** (`src/domains/session/task-board.ts`): Maintains session task items with states (`todo`, `in_progress`, `done`, `failed`). Emits middleware reminders when uncompleted tasks remain before turn end.
+- **Usage Accounting** (`src/domains/session/usage.ts`): Aggregates session token counts across input, output, cache read, cache write, and reasoning tokens. Anchors against provider-reported totals on settled turns.
+- **Aborted Turn Persistence**: When a turn is interrupted by `Ctrl+C` or a SIGINT signal, partial assistant output and completed tool executions are committed to `current.jsonl` with `interrupted: true` before yielding the prompt.

@@ -46,8 +46,16 @@ Classify claims clearly:
 | [environment-variables.md](environment-variables.md) | `src/core/guardrails.ts`, `src/core/xdg.ts`, `src/domains/providers/knowledge-base-path.ts` | Comprehensive env var matrix: guardrail overrides, directory layout (CLIO_HOME), debug toggles, and internal plumbing. |
 | [built-in-agents.md](built-in-agents.md) | `src/domains/agents/**`, `src/domains/agents/builtins/*.md`, `src/domains/dispatch/**` | Builtin agent recipes, discovery roots, frontmatter schema, fleet contract shadowing (`.clio/fleets/<name>.md`), active route automation. |
 | [fleet-dispatch.md](fleet-dispatch.md) | `src/domains/dispatch/**` | Multi-node SSH dispatch: process-safe admission, capacity leases, Contract v4 write boundaries (detect-and-rollback), bounded check/repair loops (`loop_bound_exhausted`), deterministic code steps, attestation, receipts v15. |
+| [capacity-and-scheduling.md](capacity-and-scheduling.md) | `src/domains/scheduling/**`, `src/domains/dispatch/capacity-lease.ts`, `src/domains/dispatch/reservation-store.ts` | Multi-process capacity leases (`dispatch-admission.json`), heartbeat TTLs, cross-process transaction locks (`dispatch-admission.json.lock`), and cluster drain controls. |
 | [worker-dispatch-mechanics.md](worker-dispatch-mechanics.md) | `src/worker/**` | NDJSON parent-child socket protocols, control/bulk lane demuxing, watchdog timers, worker attestation (13 protocol fields), permission parking, exit codes. |
 | [fleet-demo-runbook.md](fleet-demo-runbook.md) | `src/domains/dispatch/**` | Multi-node fleet demo: SSH setup, C++ build/repair workflow, reviewer gates, receipt verification v15. |
+| [session-lifecycle.md](session-lifecycle.md) | `src/engine/session.ts`, `src/domains/session/**` | Session lifecycle, on-disk ledger format v3 (`current.jsonl`), tree branching (`tree.json`), active-path lineage selection, `/fork`, `/resume`, checkpoints, and write-ahead protected-artifact journal. |
+| [acp.md](acp.md) | `src/engine/acp/**`, `src/cli/acp.ts` | Agent Client Protocol (ACP) server over stdio, tool mediation, non-stall permission handling, timeout bounds, and error taxonomy. |
+| [artifact-versions.md](artifact-versions.md) | `src/domains/dispatch/receipt-integrity.ts`, `src/engine/session.ts`, `src/worker/spec-contract.ts`, `src/domains/agents/fleet-contract.ts`, `src/domains/eval/schema/`, `src/domains/observability/trace-store.ts` | Version registry and migration policies for all 9 serialized artifact schemas across Clio Coder. |
+| [exit-codes-and-output.md](exit-codes-and-output.md) | `src/cli/**`, `src/entry/**` | Global process exit codes (0, 1, 2, 3), `--help` standard on stdout, machine-readable JSON streaming (`--json`, `--json-events`), and headless stdout deliverable contracts. |
+| [troubleshooting.md](troubleshooting.md) | `src/core/**`, `src/cli/**`, `src/domains/**` | Actionable error remediation and diagnostics keyed by exact user-facing messages. |
+| [glossary.md](glossary.md) | `src/domains/dispatch/types.ts`, `src/tools/**`, `src/domains/agents/**`, `src/core/**` | Canonical definitions of 17 core architectural concepts mapped to `src/` types. |
+| [documentation-coverage.md](documentation-coverage.md) | `src/**` | Complete source-to-documentation mapping matrix and subsystem coverage status. |
 | [tui-design.md](tui-design.md) | `src/interactive/theme/tokens.ts`, `src/interactive/theme/glyphs.ts` | TUI color system, glyph vocabulary (`contextReserve`), structural layouts, state choreography, code ink. |
 | [installation-and-lifecycle.md](installation-and-lifecycle.md) | `src/cli/paths.ts`, `src/cli/doctor.ts`, `src/cli/uninstall.ts`, `src/cli/removal.ts` | Installation, upgrade, reset, uninstallation, launcher ownership and what `--remove-binary` will and will not remove, partial-failure behavior, configuration folders (`credentials.yaml` `0o600`), and permissions. |
 | [release-cut-checklist.md](release-cut-checklist.md) | `scripts/check-release.mjs`, `scripts/lifecycle-matrix.mjs`, `package.json` | Ordered release-cut steps with an explicit authorization boundary: everything external or irreversible is marked not run and needs an operator decision. |
@@ -100,6 +108,19 @@ Use alerts sparingly:
 
 > [!CAUTION]
 > Safety, data loss, or security-sensitive constraints.
+
+---
+
+## Blueprint Coverage & Format Strategy
+
+Clio Coder maintains two complementary documentation formats:
+
+1. **Markdown Documents (`docs/*.md`)**: The single canonical reference for coding agents, developers, and maintainers. They optimize for retrievability, exact enumerations, schema tables, typed TypeScript contracts, and source citations (`src/...:line`).
+2. **Interactive HTML Blueprints (`docs/html/*.html`)**: Visual reference cards and client-side simulators designed for human operators exploring dynamic behaviors (such as safety rule evaluation, token compaction calculation, YAML target validation, and prompt structure).
+
+### Blueprint Creation Policy
+
+Not every markdown document earns a standalone interactive HTML blueprint. Reference specifications—such as `artifact-versions.md`, `exit-codes-and-output.md`, `glossary.md`, `troubleshooting.md`, `session-lifecycle.md`, `acp.md`, `capacity-and-scheduling.md`, and `documentation-coverage.md`—are authoritative tabular contracts and state machine specifications. Building client-side JavaScript simulators for these documents would duplicate runtime validation logic and introduce synchronization hazards across releases. These pages are therefore linked directly from `docs/html/index.html` as Markdown Reference Specifications with explicit visual distinction from interactive simulator blueprints.
 
 ---
 
