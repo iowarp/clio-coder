@@ -214,6 +214,28 @@ describe("contracts/dispatch validation grounding", () => {
 		);
 	});
 
+	it("reads a claim under the wider grounding vocabulary", () => {
+		// `npx -y jest --coverage` shares no substring with the canonical
+		// `npx jest`, so this claim only lands once the claim side canonicalizes
+		// under the grounding scope. The executed set here stands in for what
+		// run-effects records; it still canonicalizes under the strict scope, so
+		// the widened shapes only ground once that side is widened too.
+		const output = JSON.stringify({
+			verdict: "pass",
+			checks: [
+				{ name: "npx -y jest --coverage", passed: true, evidence: "42 passing" },
+				{ name: "git diff review of the patch", passed: true, evidence: "clean" },
+			],
+		});
+		const grounding = groundClaimedValidations({
+			contractKind: "verifier-report",
+			output,
+			executedCommands: new Set(["npx jest", "git diff"]),
+			executedCheckingCalls: 2,
+		});
+		deepStrictEqual(grounding, { claimed: 2, grounded: 2, ungrounded: [], basis: "unmatched-command" });
+	});
+
 	it("never accuses a self-reported failure or an ungroundable contract", () => {
 		const failing = JSON.stringify({
 			verdict: "fail",

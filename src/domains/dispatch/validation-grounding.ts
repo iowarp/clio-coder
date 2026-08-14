@@ -25,6 +25,13 @@
  * `detectValidationCommand` does not enumerate, and calling that a fabricated
  * check would be the same false-confidence defect pointed the other way.
  *
+ * Because a miss here costs a line of receipt noise rather than an open gate,
+ * this module reads claims under the wider `grounding` vocabulary: read
+ * verification (`git diff`), ad-hoc checks (`node -e`), and the runners the
+ * strict set omits (`npx vitest`, `tsc --noEmit`). The finish contract and the
+ * mutation-report validator keep the strict vocabulary, where a match is spent
+ * on a gate and `git diff` must not satisfy one.
+ *
  * Only passing claims are checked: a check the worker reports as failed is a
  * report against its own interest and needs no corroboration.
  */
@@ -73,7 +80,7 @@ function normalize(value: string): string {
  * is not spelled as a shell command ("typecheck", "unit tests").
  */
 function claimIdentity(name: string): string {
-	const detected = detectValidationCommand(name);
+	const detected = detectValidationCommand(name, "grounding");
 	return detected.kind === "validation" ? normalize(detected.matched) : normalize(name);
 }
 
