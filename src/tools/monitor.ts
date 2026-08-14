@@ -27,6 +27,8 @@ import { receiptEvidenceLabels, workerTextLabel, workerTextNonEvidenceNotices } 
  * enumerates known runs (this
  * session first), status reports one run's state and progress counters, peek
  * returns the bounded tail of a run's recent events buffered in this process,
+ * tools answers what a run executed (its tool calls with outcomes, plus the
+ * receipt's per-tool totals),
  * receipt returns the stored receipt, wait observes one run for a bounded
  * time until it is terminal or the timeout fires (it never cancels anything;
  * steer action=cancel stops a run), collect is the batch barrier: a pending
@@ -170,6 +172,144 @@ function runPeek(deps: MonitorToolDeps, runId: string): ToolResult {
 		kind: "ok",
 		output: lines.join("\n"),
 		details: { mode: "peek", runId, eventCount: tail.entries.length, omitted: dropped },
+	};
+}
+
+const TOOLS_MAX_CALL_LINES = 60;
+const TOOLS_MAX_BYTES = 8 * 1024;
+const TOOLS_ARGUMENTS_CHARS = 160;
+
+/**
+ * Tail event types that describe one tool call. `clio_tool_finish` is the
+ * authoritative per-call outcome (it distinguishes a permission block from a
+ * command that ran and exited nonzero); the engine's own `tool_execution_end`
+ * is kept only when the tail recorded a detail for it, since a bare type line
+ * says nothing the finish event does not.
+ */
+const TOOL_CALL_EVENT_TYPES: ReadonlySet<string> = new Set([
+	"clio_tool_finish",
+	"clio_permission_resolved",
+	"clio_permission_escalated",
+]);
+
+function toolCallLines(entries: ReadonlyArray<{ at: string; type: string; detail?: string }>): string[] {
+	const lines: string[] = [];
+	for (const entry of entries) {
+		const detailed = entry.detail !== undefined && entry.detail.length > 0;
+		if (!TOOL_CALL_EVENT_TYPES.has(entry.type) && !(entry.type === "tool_execution_end" && detailed)) continue;
+		lines.push(`  ${entry.at} ${entry.type}${detailed ? `: ${entry.detail}` : ""}`);
+	}
+	return lines;
+}
+
+function receiptToolLines(receipt: RunReceipt): string[] {
+	const lines: string[] = [];
+	const activity = receipt.toolActivity;
+	if (activity) {
+		lines.push(
+			`  totals: calls=${activity.calls} succeeded=${activity.succeeded} failed=${activity.failed} blocked=${activity.blocked} mutating_succeeded=${activity.mutatingSucceeded}`,
+		);
+	} else {
+		lines.push(`  totals: calls=${receipt.toolCalls}`);
+	}
+	for (const stat of receipt.toolStats) {
+		lines.push(
+			`  ${stat.tool}: count=${stat.count} ok=${stat.ok} errors=${stat.errors} blocked=${stat.blocked} total_ms=${stat.totalDurationMs}`,
+		);
+	}
+	for (const attempt of receipt.safety?.blockedAttempts ?? []) {
+		const parts = [
+			`  blocked: ${attempt.tool}`,
+			attempt.actionClass !== undefined ? `class=${attempt.actionClass}` : "",
+			attempt.ruleId !== undefined ? `rule=${attempt.ruleId}` : "",
+			attempt.reasonCode !== undefined ? `reason_code=${attempt.reasonCode}` : "",
+		].filter((part) => part.length > 0);
+		lines.push(parts.join(" "));
+	}
+	for (const entry of receipt.delegation?.toolCallLog ?? []) {
+		let rendered: string;
+		try {
+			rendered = truncateUtf8(JSON.stringify(entry.arguments), TOOLS_ARGUMENTS_CHARS, "…");
+		} catch {
+			rendered = "(arguments not serializable)";
+		}
+		lines.push(`  ${entry.timestamp} ${entry.tool} ${entry.decision} args=${rendered}`);
+	}
+	return lines;
+}
+
+/**
+ * What a run actually executed, call by call. It exists because the question
+ * "did this run really run the validation it claims" had no in-session answer:
+ * an orchestrator checking a worker's claimed `npm run typecheck` had to crawl
+ * dozens of unrelated calls to find out, and the receipt's `toolCalls` is an
+ * integer (REPORT-dispatch-drive-1.md R2).
+ *
+ * Two sources, both already in this process's hands: the same bounded event
+ * tail `mode="peek"` reads, and the run's integrity-verified receipt. Neither
+ * carries a command line for an ordinary worker call, so this mode does not
+ * pretend to: it reports tool name and outcome per call, aggregates per tool,
+ * and the arguments only where the source actually recorded them, which today
+ * is the ACP delegation log. Loading the trace mirror to get argv would be a
+ * new sqlite path and is deliberately not done here.
+ */
+function runTools(deps: MonitorToolDeps, runId: string): ToolResult {
+	const requestedRun = deps.dispatch.getRun(runId);
+	const rootRunId = requestedRun?.lineage?.rootRunId ?? runId;
+	const assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+	const resolvedRunId = assignment?.terminalRunId ?? runId;
+	const run = deps.dispatch.getRun(resolvedRunId) ?? requestedRun ?? null;
+	if (run === null && assignment === null) return { kind: "error", message: `monitor: unknown run '${runId}'` };
+	const tail = deps.runEvents?.eventTail(resolvedRunId) ?? null;
+	const callLines = tail ? toolCallLines(tail.entries) : [];
+	const evidence = durableRunEvidence(run);
+	const receiptLines = evidence.receipt !== null ? receiptToolLines(evidence.receipt) : [];
+
+	const lines = [`tool calls for run ${resolvedRunId}${run ? ` (${run.agentId})` : ""}:`];
+	let omitted = 0;
+	if (callLines.length > 0) {
+		// Keep the newest calls: an orchestrator asking what a run executed is
+		// usually asking about its last moves.
+		const shown = callLines.length > TOOLS_MAX_CALL_LINES ? callLines.slice(-TOOLS_MAX_CALL_LINES) : callLines;
+		omitted = callLines.length - shown.length;
+		lines.push(
+			`executed calls from this process's event buffer (newest last, ${shown.length} of ${callLines.length}${omitted > 0 ? `, ${omitted} older omitted` : ""}):`,
+			...shown,
+		);
+	} else {
+		lines.push(
+			tail === null
+				? "executed calls: no event buffer for this run in this process (it ran in another process, or its tail was evicted)."
+				: "executed calls: the event buffer holds no tool-call events for this run.",
+		);
+	}
+	if (receiptLines.length > 0) {
+		lines.push("receipt totals (integrity verified):", ...receiptLines);
+	} else if (evidence.integrityNote !== null) {
+		lines.push(`receipt totals: unavailable. ${evidence.integrityNote}`);
+	}
+	lines.push(
+		"note: the event buffer records tool name and outcome, not command arguments; absent argv is not evidence that no command ran.",
+	);
+	const body = truncateUtf8(lines.join("\n"), TOOLS_MAX_BYTES, "\n[tool list truncated]");
+	return {
+		kind: "ok",
+		output: body,
+		details: {
+			mode: "tools",
+			runId: resolvedRunId,
+			callCount: callLines.length,
+			omitted,
+			bufferAvailable: tail !== null,
+			receiptAvailable: evidence.receipt !== null,
+			...(evidence.receipt !== null
+				? {
+						toolCalls: evidence.receipt.toolCalls,
+						toolActivity: evidence.receipt.toolActivity ?? null,
+						toolStats: evidence.receipt.toolStats,
+					}
+				: {}),
+		},
 	};
 }
 
@@ -567,8 +707,8 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 			),
 			mode: Type.Optional(
 				stringEnum(
-					["status", "peek", "receipt", "list", "wait", "collect"],
-					"What to return. Defaults to status when run_id is present and list when it is absent. status, peek, receipt, and wait each observe one run and require a run_id; list takes none.",
+					["status", "peek", "receipt", "list", "wait", "collect", "tools"],
+					"What to return. Defaults to status when run_id is present and list when it is absent. status, peek, receipt, tools, and wait each observe one run and require a run_id; list takes none. tools answers what a run executed: its tool calls with outcomes, plus per-tool totals from the receipt.",
 				),
 			),
 			batch_id: Type.Optional(Type.String({ description: "Detached batch id from dispatch detach:true (mode=collect)." })),
@@ -599,11 +739,12 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 				mode !== "receipt" &&
 				mode !== "list" &&
 				mode !== "wait" &&
-				mode !== "collect"
+				mode !== "collect" &&
+				mode !== "tools"
 			) {
 				return {
 					kind: "error",
-					message: `monitor: mode must be status, peek, receipt, list, wait, or collect; got '${mode}'`,
+					message: `monitor: mode must be status, peek, receipt, list, wait, collect, or tools; got '${mode}'`,
 				};
 			}
 			if (mode === "list") return listRuns(deps, options);
@@ -640,6 +781,7 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 			}
 			if (mode === "status") return runStatus(deps, runId);
 			if (mode === "peek") return runPeek(deps, runId);
+			if (mode === "tools") return runTools(deps, runId);
 			return runReceipt(deps, runId);
 		},
 	};

@@ -225,14 +225,77 @@ export function detectValidationCommand(command: string): ValidationCommandDetec
  * shell runs.
  */
 export function extractCommandWriteTargets(command: string): string[] {
-	const tokens = tokenizeShellLike(command);
 	const targets: string[] = [];
-	for (const segment of splitSegments(tokens)) {
+	for (const segment of expandedSegments(command)) {
 		collectRedirectTargets(segment, targets);
 		collectInvokedWriteTargets(segment, targets);
 		collectInPlaceEditTargets(segment, targets);
 	}
 	return targets.filter(isInterestingWriteTarget);
+}
+
+/** Shells whose `-c` argument is a script this scanner has to read as a command line. */
+const INNER_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+
+/** Depth cap for `sh -c 'sh -c "..."'`; three levels is far past anything real. */
+const INNER_SHELL_MAX_DEPTH = 3;
+
+/**
+ * The script a segment hands a shell through `-c`, or null when the segment is
+ * not that shape. The tokenizer keeps a quoted script as one token, so without
+ * this every scanner here is blind one `sh -c` deep: `sh -c 'echo x >
+ * /etc/foo'` exposed no redirect target at all, which is how a recorded drive
+ * got a write past the gate that refused the same redirect written plainly
+ * (REPORT-dispatch-drive-1.md S1). Flag clusters (`-lc`, `-ec`) count, since
+ * the shell reads them the same way.
+ */
+function segmentShellScript(segment: ReadonlyArray<string>): string | null {
+	const commandIndex = commandTokenIndex(segment);
+	if (commandIndex === null) return null;
+	if (!INNER_SHELLS.has(basenameToken(segment[commandIndex]))) return null;
+	for (let index = commandIndex + 1; index < segment.length; index += 1) {
+		const token = segment[index];
+		if (token === undefined) continue;
+		if (token.startsWith("-") && token.length > 1) {
+			if (!token.slice(1).includes("c")) continue;
+			const script = segment[index + 1];
+			return script !== undefined && script.length > 0 ? script : null;
+		}
+		// The first operand of a shell invocation without -c is a script file,
+		// whose contents this scanner cannot see anyway.
+		return null;
+	}
+	return null;
+}
+
+/**
+ * A command's segments, with every `sh -c '<script>'` wrapper followed by the
+ * segments of the script it runs. The wrapper segment itself is kept: a
+ * scanner that reads its operands (`cp`, `tee`) must still see them.
+ */
+function expandedSegments(command: string, depth = 0): string[][] {
+	const segments = splitSegments(tokenizeShellLike(command));
+	if (depth >= INNER_SHELL_MAX_DEPTH) return segments;
+	const out: string[][] = [];
+	for (const segment of segments) {
+		out.push(segment);
+		const script = segmentShellScript(segment);
+		if (script !== null) out.push(...expandedSegments(script, depth + 1));
+	}
+	return out;
+}
+
+/**
+ * The script when the whole command is one `sh -c '<script>'` invocation and
+ * nothing else. The policy engine recognizes such a command by its inner
+ * script rather than treating `sh` as an unrecognized executable.
+ */
+export function inlineShellScript(command: string): string | null {
+	const segments = splitSegments(tokenizeShellLike(command));
+	if (segments.length !== 1) return null;
+	const segment = segments[0];
+	if (segment === undefined) return null;
+	return segmentShellScript(segment);
 }
 
 /**
@@ -245,9 +308,8 @@ export function extractCommandWriteTargets(command: string): string[] {
  * relative files outside the session workspace).
  */
 export function extractCommandCdTargets(command: string): string[] {
-	const tokens = tokenizeShellLike(command);
 	const targets: string[] = [];
-	for (const segment of splitSegments(tokens)) {
+	for (const segment of expandedSegments(command)) {
 		const commandIndex = commandTokenIndex(segment);
 		if (commandIndex === null) continue;
 		const executable = basenameToken(segment[commandIndex]);
@@ -264,9 +326,8 @@ export function extractCommandCdTargets(command: string): string[] {
  * patterns; broader command admission remains owned by the policy engine.
  */
 export function extractCommandDeleteTargets(command: string): string[] {
-	const tokens = tokenizeShellLike(command);
 	const targets: string[] = [];
-	for (const segment of splitSegments(tokens)) {
+	for (const segment of expandedSegments(command)) {
 		const commandIndex = commandTokenIndex(segment);
 		if (commandIndex === null) continue;
 		const executable = basenameToken(segment[commandIndex]);

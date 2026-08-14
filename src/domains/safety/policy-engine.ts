@@ -18,7 +18,12 @@ import {
 	loadProjectSafetyPolicy,
 	type ProjectCommandPolicy,
 } from "./project-policy.js";
-import { extractCommandDeleteTargets, extractCommandWriteTargets, tokenizeShellLike } from "./protected-artifacts.js";
+import {
+	extractCommandDeleteTargets,
+	extractCommandWriteTargets,
+	inlineShellScript,
+	tokenizeShellLike,
+} from "./protected-artifacts.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
 
@@ -113,6 +118,17 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:go-test", re: /^go\s+test(?:\s+[\w=./:-]+)*$/ },
 	{ id: "builtin:make-test", re: /^make\s+test(?:\s+[\w=./:-]+)*$/ },
 ];
+
+/**
+ * What the recognized spelling looks like, carried on every unrecognized-bash
+ * decision. It rides the decision's reasons so the approval overlay, the audit
+ * record, and any surface that renders them all say the same thing: an agent
+ * that hits this rail should learn the form that passes instead of retrying the
+ * same shape. A headless run still answers the resulting ask with its own
+ * denial sentence, which does not carry these reasons.
+ */
+const BASH_RECOGNIZED_FORM_HINT =
+	"Recognized forms run without asking: one command per bash call, or a && chain whose every step is recognized, with cwd passed as the cwd argument instead of a leading cd.";
 
 const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
 
@@ -601,7 +617,11 @@ function evaluateBashPolicy(
 	// what `$(...)` or backticks produce at runtime, so it stays an ask rail at
 	// every level, including full-auto (sd-01 M5). A confirmed posture (one-shot
 	// grant) admits it like any other confirm rail.
-	if (hasCommandSubstitution(command) && posture !== "confirmed") {
+	// A command that is nothing but `sh -c '<script>'` is recognized by its
+	// script. Recognition can only narrow this way: the script is what runs, and
+	// judging the wrapper instead is what let the wrapper be a bypass.
+	const recognitionCommand = inlineShellScript(command) ?? command;
+	if (hasCommandSubstitution(recognitionCommand) && posture !== "confirmed") {
 		return {
 			kind: "ask",
 			ruleId: "bash-command-substitution",
@@ -611,23 +631,49 @@ function evaluateBashPolicy(
 			execRecognition: "unrecognized",
 		};
 	}
-	// Sequencing operators (pipes, &&, ;, redirects) defeat per-command
-	// recognition, so the command is unrecognized by definition: the autonomy
-	// mapping asks at suggest/auto-edit, runs at full-auto, denies at
-	// read-only. The rule pack has already scanned the full string, so a
-	// destructive verb behind an operator was caught before this point.
+	const chain = recognizeCommandChain(recognitionCommand, callCwd, workspaceRoot, policy);
+	if (chain !== null) {
+		const chainReasons = [`every step of the && chain is recognized: ${chain.ruleIds.join(", ")}`];
+		if (chain.requiresConfirmation && posture !== "confirmed") {
+			return {
+				kind: "ask",
+				ruleId: "bash-recognized-chain",
+				reasonCode: "bash-recognized-chain",
+				reasons: [...chainReasons, "project policy requires confirmation for one step"],
+				policySource: "builtin-command-allowlist",
+				execRecognition: "recognized",
+			};
+		}
+		return {
+			kind: "allow",
+			ruleId: "bash-recognized-chain",
+			reasonCode: "bash-recognized-chain",
+			reasons: chainReasons,
+			policySource: "builtin-command-allowlist",
+			execRecognition: "recognized",
+		};
+	}
+	// Remaining sequencing operators (pipes, ;, redirects, and && chains with an
+	// unrecognized member) defeat per-command recognition, so the command is
+	// unrecognized by definition: the autonomy mapping asks at suggest/auto-edit,
+	// runs at full-auto, denies at read-only. The rule pack has already scanned
+	// the full string, so a destructive verb behind an operator was caught before
+	// this point.
 	if (hasSequencingOperators(command)) {
 		return {
 			kind: "allow",
 			ruleId: "bash-shell-operators",
 			reasonCode: "bash-shell-operators",
-			reasons: ["shell operators defeat per-command recognition; the autonomy level decides admission"],
+			reasons: [
+				"shell operators defeat per-command recognition; the autonomy level decides admission",
+				BASH_RECOGNIZED_FORM_HINT,
+			],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "unrecognized",
 		};
 	}
 	for (const entry of BUILTIN_ALLOWLIST) {
-		if (entry.re.test(command)) {
+		if (entry.re.test(recognitionCommand)) {
 			return {
 				kind: "allow",
 				ruleId: entry.id,
@@ -642,7 +688,10 @@ function evaluateBashPolicy(
 		kind: "allow",
 		ruleId: "bash-unrecognized",
 		reasonCode: "bash-unrecognized",
-		reasons: ["bash command is outside the no-prompt set; the autonomy level decides admission"],
+		reasons: [
+			"bash command is outside the no-prompt set; the autonomy level decides admission",
+			BASH_RECOGNIZED_FORM_HINT,
+		],
 		policySource: "builtin-command-allowlist",
 		execRecognition: "unrecognized",
 	};
@@ -757,6 +806,82 @@ function matchingProjectCommand(
 		return entry;
 	}
 	return null;
+}
+
+/** Operators that end chain recognition; only `&&` keeps a chain readable. */
+const CHAIN_BREAKING_TOKENS: ReadonlySet<string> = new Set([";", "|", "||", ">", ">>", "<", "<<"]);
+
+/** Chain length ceiling. Real compound calls are two or three steps. */
+const CHAIN_MAX_SEGMENTS = 6;
+
+interface ChainRecognition {
+	ruleIds: ReadonlyArray<string>;
+	requiresConfirmation: boolean;
+}
+
+/**
+ * Recognition for `cd <workspace dir> && <recognized command>` and the longer
+ * `&&` chains built from the same parts. Every member is checked on its own and
+ * the chain takes its most restrictive member's verdict, so the chain can never
+ * admit something its members would not.
+ *
+ * This exists because the compound form is what a model reaches for first and
+ * the flat rule cost more than it bought: in a recorded live drive 34 of 75
+ * calls were blocked, nearly all of them `cd x && y`, since an unrecognized
+ * execute asks below full-auto and a headless run answers every ask with a
+ * denial (REPORT-dispatch-drive-1.md S2). Meanwhile `sh -c '<anything>'` sailed
+ * past the same rail, so the rail was mostly taxing the honest spelling. The
+ * `sh -c` half is closed at both ends now: this function recognizes such a
+ * command by its inner script, and the shared write-target scanner reads inside
+ * the script too.
+ */
+function recognizeCommandChain(
+	command: string,
+	callCwd: string,
+	workspaceRoot: string,
+	policy: LoadedProjectSafetyPolicy,
+): ChainRecognition | null {
+	const segments: string[][] = [];
+	let current: string[] = [];
+	for (const token of tokenizeShellLike(command)) {
+		if (token === "&&") {
+			segments.push(current);
+			current = [];
+			continue;
+		}
+		if (CHAIN_BREAKING_TOKENS.has(token)) return null;
+		current.push(token);
+	}
+	segments.push(current);
+	if (segments.length < 2 || segments.length > CHAIN_MAX_SEGMENTS) return null;
+	const ruleIds: string[] = [];
+	let requiresConfirmation = false;
+	for (const segment of segments) {
+		if (segment.length === 0) return null;
+		if (segment[0] === "cd") {
+			// A `cd` that stays inside the workspace re-bases nothing the net cares
+			// about; one that leaves it is the laundering pattern the action
+			// classifier already escalates, so it is not recognizable here.
+			if (segment.length !== 2) return null;
+			const target = segment[1] ?? "";
+			if (target.startsWith("~") || !isUnderOrSame(path.resolve(callCwd, target), workspaceRoot)) return null;
+			ruleIds.push("builtin:cd-workspace");
+			continue;
+		}
+		// Re-rendered from tokens, so quoting is gone: a member that needed its
+		// quotes fails the allowlist regex and the whole chain stays unrecognized.
+		const rendered = segment.join(" ");
+		const projectMatch = matchingProjectCommand(policy, rendered, callCwd);
+		if (projectMatch) {
+			ruleIds.push(projectMatch.id);
+			if (projectMatch.requireConfirmation) requiresConfirmation = true;
+			continue;
+		}
+		const builtin = BUILTIN_ALLOWLIST.find((entry) => entry.re.test(rendered));
+		if (builtin === undefined) return null;
+		ruleIds.push(builtin.id);
+	}
+	return { ruleIds, requiresConfirmation };
 }
 
 /**
