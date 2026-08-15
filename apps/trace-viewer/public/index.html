@@ -10,13 +10,23 @@
 </head>
 <body>
   <header class="masthead">
-    <a class="brand" href="#/">
-      <img src="/assets/clio-coder-logo-128.webp" alt="Clio Coder" width="32" height="32">
-      <span>RUN TRACE</span>
-    </a>
-    <div id="connection" class="connection"><i></i> local mirror</div>
+    <div class="header-left">
+      <a class="header-logo" href="#/" title="All Runs">
+        <img src="/assets/clio-coder-logo-128.webp" alt="Clio Coder" width="30" height="30">
+      </a>
+      <div class="header-title-wrapper">
+        <div class="brand-line">
+          <a class="brand-title" href="#/">Clio Run Trace</a>
+        </div>
+        <p class="brand-subtitle">Durable execution trace mirror &amp; provenance inspector</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div id="connection" class="connection"><i class="pulse-dot"></i> <span>local mirror</span></div>
+      <span class="version-badge">v0.3.1</span>
+    </div>
   </header>
-  <main id="app" aria-live="polite"><div class="loading">Reading trace mirror…</div></main>
+  <main id="app" class="app-container" aria-live="polite"><div class="loading">Reading trace mirror…</div></main>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
