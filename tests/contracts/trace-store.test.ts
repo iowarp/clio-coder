@@ -1,6 +1,7 @@
 import { deepStrictEqual, equal, match, strictEqual, throws } from "node:assert";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, describe, it } from "node:test";
@@ -184,6 +185,62 @@ describe("durable trace store", () => {
 			);
 			equal(phase?.reasoning_tokens, 3);
 			equal(phase?.output_tokens, 7);
+		} finally {
+			reader.close();
+		}
+	});
+
+	it("finalizes running rows whose local owner is dead on open, leaving live and foreign owners alone", () => {
+		const file = path("reconcile");
+		const deadPid = spawnSync(process.execPath, ["-e", ""]).pid ?? 4194303;
+		let store = new TraceStore(file);
+		for (const [runId, pid, host] of [
+			["dead", deadPid, hostname()],
+			["live", process.pid, hostname()],
+			["foreign", deadPid, "other-host"],
+			["legacy", deadPid, null],
+		] as const) {
+			store.startRun({ ...run(runId), pid, processCommand: "[]" }, "2026-01-01T00:00:00Z");
+			store.insertEvent({
+				eventId: `${runId}:e`,
+				runId,
+				phaseId: runId,
+				type: "log",
+				name: "x",
+				startedAt: "2026-01-01T00:00:05Z",
+			});
+			store.db.prepare("UPDATE processes SET host=?, birth_token=NULL WHERE run_id=?").run(host, runId);
+		}
+		store.close();
+		store = new TraceStore(file);
+		store.close();
+		const reader = new TraceReader(file);
+		try {
+			equal(reader.run("dead")?.status, "fail");
+			equal(reader.run("dead")?.ended_at, "2026-01-01T00:00:05Z");
+			equal(reader.phases("dead")[0]?.status, "fail");
+			equal(reader.processes("dead")[0]?.ended_at, "2026-01-01T00:00:05Z");
+			for (const untouched of ["live", "foreign", "legacy"]) {
+				equal(reader.run(untouched)?.status, "running", untouched);
+				equal(reader.run(untouched)?.ended_at, null, untouched);
+			}
+		} finally {
+			reader.close();
+		}
+	});
+
+	it("adds owner-identity columns to a pre-amendment database in place", () => {
+		const file = path("migrate");
+		let store = new TraceStore(file);
+		store.db.exec("ALTER TABLE processes DROP COLUMN host; ALTER TABLE processes DROP COLUMN birth_token;");
+		store.close();
+		store = new TraceStore(file);
+		store.startRun({ ...run(), pid: process.pid, processCommand: "[]" }, "2026-01-01T00:00:00Z");
+		store.close();
+		const reader = new TraceReader(file);
+		try {
+			equal(reader.processes("run-1")[0]?.host, hostname());
+			equal(reader.run("run-1")?.status, "running");
 		} finally {
 			reader.close();
 		}
