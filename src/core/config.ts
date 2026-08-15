@@ -566,17 +566,22 @@ function normalizeModelRefs(
 	return out;
 }
 
-/** Scope entries: `targetId` or `targetId/wireModelId`, filtered to configured ids. */
-function normalizeScope(
-	refs: ReadonlyArray<string>,
-	targets: ReadonlyArray<ClioSettings["targets"][number]>,
-): string[] {
-	const byId = new Set(targets.map((target) => target.id));
+/**
+ * Scope entries: `targetId` or `targetId/wireModelId`, deduplicated. A ref
+ * whose target is not configured is kept, not dropped: a renamed or
+ * temporarily removed target is the common staleness case, and silently
+ * deleting the operator's cycle set at load destroys a preference they never
+ * asked to change. Disclosure belongs to the presentation layer, which lists
+ * unresolvable refs under "Unavailable"; the consumers that must resolve a ref
+ * (advanceScopedTarget) filter it themselves.
+ */
+function normalizeScope(refs: ReadonlyArray<string>): string[] {
 	const out: string[] = [];
 	for (const ref of refs) {
-		const [targetId] = ref.split("/");
-		if (!targetId || !byId.has(targetId)) continue;
-		if (!out.includes(ref)) out.push(ref);
+		const trimmed = ref.trim();
+		const [targetId] = trimmed.split("/");
+		if (!targetId) continue;
+		if (!out.includes(trimmed)) out.push(trimmed);
 	}
 	return out;
 }
@@ -1164,7 +1169,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 
 	if ("scope" in raw) {
 		const v = expectStringArray(issues, "scope", raw.scope);
-		if (v !== undefined) settings.scope = normalizeScope(v, settings.targets);
+		if (v !== undefined) settings.scope = normalizeScope(v);
 	}
 
 	if ("modelSelector" in raw) {

@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { chmodSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -10,6 +10,7 @@ import {
 	readSettings,
 	SettingsValidationError,
 	settingsPath,
+	updateSettings,
 	validateSettings,
 	validateSettingsFile,
 } from "../../src/core/config.js";
@@ -422,6 +423,26 @@ describe("contracts/config", () => {
 		strictEqual(advanceScopedTarget(settings, "forward"), null);
 	});
 
+	// A renamed or temporarily removed target is the common way a cycle-set ref
+	// goes stale. Dropping it at load destroyed a preference the operator never
+	// touched, before the checklist's Unavailable group could disclose it.
+	it("keeps scope refs whose target is not configured, and skips them when cycling", () => {
+		const result = validateSettings({
+			targets: [{ id: "chat", runtime: "openai-compat", defaultModel: "chat-model" }],
+			orchestrator: { target: "chat", model: "chat-model" },
+			scope: ["ghost-target/ghost-model", "chat/chat-model", "phantom-target", "chat/chat-model"],
+		});
+
+		deepStrictEqual(result.issues, []);
+		deepStrictEqual(result.settings.scope, ["ghost-target/ghost-model", "chat/chat-model", "phantom-target"]);
+		// Routing must not resolve the ghosts: cycling steps over them.
+		deepStrictEqual(advanceScopedTarget(result.settings, "forward"), { target: "chat", model: "chat-model" });
+		deepStrictEqual(advanceScopedTarget(result.settings, "backward"), { target: "chat", model: "chat-model" });
+		const ghostsOnly = structuredClone(result.settings);
+		ghostsOnly.scope = ["ghost-target/ghost-model", "phantom-target"];
+		strictEqual(advanceScopedTarget(ghostsOnly, "forward"), null);
+	});
+
 	it("expands environment variable references", () => {
 		strictEqual(
 			expandConfigValue(`Bearer $${"{CLIO_CODER_TOKEN}"}`, { env: { CLIO_CODER_TOKEN: "secret" } }),
@@ -600,6 +621,46 @@ describe("contracts/config runtime reload failure", () => {
 		} finally {
 			await bundle.extension.stop?.();
 		}
+	});
+});
+
+describe("contracts/config stale scope refs", () => {
+	let scratch: ReturnType<typeof isolateClioEnv>;
+
+	beforeEach(() => {
+		scratch = isolateClioEnv("clio-config-scope-");
+	});
+
+	afterEach(() => {
+		scratch.restore();
+	});
+
+	it("round-trips a scope ref whose target is gone through load and save", () => {
+		writeFileSync(
+			settingsPath(),
+			[
+				"targets:",
+				"  - id: chat",
+				"    runtime: openai-compat",
+				"    defaultModel: chat-model",
+				"scope:",
+				"  - ghost-target/ghost-model",
+				"  - chat/chat-model",
+				"  - phantom-target",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		deepStrictEqual(readSettings().scope, ["ghost-target/ghost-model", "chat/chat-model", "phantom-target"]);
+
+		updateSettings((settings) => {
+			settings.retry.maxRetries = 5;
+		});
+
+		const saved = parseYaml(readFileSync(settingsPath(), "utf8")) as Record<string, unknown>;
+		deepStrictEqual(saved.scope, ["ghost-target/ghost-model", "chat/chat-model", "phantom-target"]);
+		deepStrictEqual(readSettings().scope, ["ghost-target/ghost-model", "chat/chat-model", "phantom-target"]);
 	});
 });
 
