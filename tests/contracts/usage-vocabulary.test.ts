@@ -43,7 +43,7 @@ function costBody(rows: ReadonlyArray<CostRow>): string {
 }
 
 function panelBody(usage: Record<string, number>, thinking?: string): string {
-	const panel = createChatPanel();
+	const panel = createChatPanel({ getOutputVerbosity: () => "verbose" });
 	const content = thinking === undefined ? [{ type: "text", text: "answer" }] : [{ type: "thinking", thinking }];
 	const message = { role: "assistant", content, usage, stopReason: "stop" };
 	panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);

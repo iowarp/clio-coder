@@ -2,8 +2,8 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
-import { redactToolArgs } from "../../src/interactive/renderers/tool-execution.js";
-import { fgSequence, GLYPH } from "../../src/interactive/theme/index.js";
+import { redactToolArgs, renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
+import { fgSequence, GLYPH, SGR_DIM } from "../../src/interactive/theme/index.js";
 import { createTestClock } from "../harness/clock.js";
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
@@ -117,6 +117,97 @@ describe("chat-panel queued user turn injection", () => {
 		const pivotIndex = rendered.findIndex((line) => line.includes("pivoting"));
 		ok(promptIndex < steerIndex, "the steer renders after the original prompt");
 		ok(steerIndex < pivotIndex, `the post-steer response renders below the injected turn:\n${joined}`);
+	});
+});
+
+describe("chat-panel voice-first prose gutter", () => {
+	const longProse =
+		"A deliberately long sentence keeps every wrapped continuation visibly owned by the speaker across terminal widths.";
+
+	function assertOwnedRows(rows: string[], glyph: string, width: number): void {
+		ok(rows.length > 1, `fixture must wrap at ${width}: ${JSON.stringify(rows)}`);
+		strictEqual(rows[0]?.startsWith(`${glyph} `), true, `first row owns ${glyph}: ${JSON.stringify(rows)}`);
+		for (const row of rows.slice(1)) {
+			strictEqual(row.startsWith("  "), true, `continuation has a two-cell gutter: ${JSON.stringify(rows)}`);
+			ok(row.length <= width, `row exceeds ${width}: ${JSON.stringify(row)}`);
+		}
+	}
+
+	it("hangs wrapped user and streaming assistant prose at multiple widths", () => {
+		for (const width of [20, 40, 80]) {
+			const user = createChatPanel({ now: frozen.now });
+			user.appendUser(longProse);
+			assertOwnedRows(user.render(width).map(strip), GLYPH.user, width);
+
+			const assistant = createChatPanel({ now: frozen.now });
+			assistant.applyEvent({ type: "text_delta", contentIndex: 0, delta: longProse } as ChatLoopEvent);
+			assertOwnedRows(assistant.render(width).map(strip), GLYPH.agent, width);
+		}
+	});
+
+	it("keeps plain prose row-stable from streaming through finalized Markdown", () => {
+		for (const width of [20, 40, 80]) {
+			const panel = createChatPanel({ now: frozen.now });
+			panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: longProse } as ChatLoopEvent);
+			const streaming = panel.render(width).map(strip);
+			panel.applyEvent({
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: longProse }], stopReason: "stop" },
+			} as ChatLoopEvent);
+			panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+			const finalized = panel.render(width).map(strip);
+			strictEqual(finalized.join("\n"), streaming.join("\n"), `stream/final shape changed at ${width}`);
+			assertOwnedRows(finalized, GLYPH.agent, width);
+		}
+	});
+
+	it("budgets finalized fenced Markdown inside the prose gutter", () => {
+		const markdown = "Here is the command:\n\n```ts\nconst answer = 42;\nconsole.log(answer);\n```\n\nDone.";
+		for (const width of [20, 40, 80]) {
+			const panel = createChatPanel({ now: frozen.now });
+			panel.applyEvent({
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: markdown }], stopReason: "stop" },
+			} as ChatLoopEvent);
+			panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+			const rows = panel.render(width).map(strip);
+			strictEqual(rows[0]?.startsWith(`${GLYPH.agent} `), true, JSON.stringify(rows));
+			for (const row of rows.slice(1)) strictEqual(row.startsWith("  "), true, JSON.stringify(rows));
+			for (const row of rows) ok(row.length <= width, `fence row exceeds ${width}: ${JSON.stringify(row)}`);
+			ok(
+				rows.some((row) => row.includes("const answer")),
+				JSON.stringify(rows),
+			);
+		}
+	});
+
+	it("leaves interleaved tool ledgers on their existing full-width grammar", () => {
+		const width = 40;
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: longProse } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "read-voice",
+			toolName: "read",
+			args: { path: "AGENTS.md" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "read-voice",
+			toolName: "read",
+			result: "contents",
+			isError: false,
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "text_delta", contentIndex: 1, delta: "Summary after the tool." } as ChatLoopEvent);
+		const rendered = panel.render(width);
+		const ledger = renderToolSubline(
+			{ toolCallId: "read-voice", toolName: "read", args: { path: "AGENTS.md" }, result: "contents", isError: false },
+			width,
+		);
+		for (const row of ledger)
+			ok(rendered.includes(row), `panel changed the full-width tool row: ${JSON.stringify(rendered)}`);
+		const summary = rendered.map(strip).find((row) => row.includes("Summary after the tool."));
+		ok(summary?.startsWith("  "), `post-tool prose keeps the assistant gutter: ${JSON.stringify(rendered)}`);
 	});
 });
 
@@ -683,7 +774,7 @@ describe("chat-panel edit diff block", () => {
 
 describe("chat-panel reasoning provenance and renderer controls", () => {
 	it("shows provider reasoning totals distinctly from estimated totals", () => {
-		const providerPanel = createChatPanel({ now: frozen.now });
+		const providerPanel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => "verbose" });
 		const providerMessage = {
 			role: "assistant",
 			content: [{ type: "thinking", thinking: "provider reasoning body" }],
@@ -698,7 +789,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		ok(providerText.includes("cache 3/1"), providerText);
 		ok(providerText.includes("not a verification"), providerText);
 
-		const estimatedPanel = createChatPanel({ now: frozen.now });
+		const estimatedPanel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => "verbose" });
 		estimatedPanel.applyEvent({
 			type: "message_end",
 			message: {
@@ -718,7 +809,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		// excerpt, not a verification`. The caveat is about reasoning text the
 		// panel displayed, so on a turn that displayed none it warned about
 		// something absent and cost a wrapped line per turn at 70 columns.
-		const panel = createChatPanel({ now: frozen.now });
+		const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => "verbose" });
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "no thinking here" }],
@@ -737,7 +828,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		// nothing at all, and the panel printed `reasoning 0 provider` for it. At
 		// 71 columns that pushed the bare word `provider` onto its own line. Zero
 		// reasoning is the same story as no reasoning: say nothing.
-		const panel = createChatPanel({ now: frozen.now });
+		const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => "verbose" });
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "answered without thinking" }],
@@ -750,6 +841,49 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		ok(text.includes("cache 16865/0"), text);
 		ok(!text.includes("reasoning"), text);
 		ok(!text.includes("provider"), text);
+	});
+
+	it("makes turn receipts honest to minimal, default, and verbose output", () => {
+		let verbosity: "minimal" | "default" | "verbose" = "minimal";
+		const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => verbosity });
+		const message = {
+			role: "assistant",
+			content: [{ type: "thinking", thinking: "reasoning excerpt" }],
+			usage: { input: 12_345, output: 678, cacheRead: 90, cacheWrite: 12, reasoningTokens: 34 },
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		const followupCall = {
+			role: "assistant",
+			content: [],
+			usage: { input: 0, output: 1, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0 },
+			stopReason: "toolUse",
+		};
+		panel.applyEvent({
+			type: "agent_end",
+			messages: [message, followupCall, followupCall],
+		} as unknown as ChatLoopEvent);
+
+		let rows = panel.render(36).map(strip);
+		strictEqual(rows.filter((row) => row.includes("turn ·")).length, 0, JSON.stringify(rows));
+
+		verbosity = "default";
+		const defaultRows = panel.render(36);
+		ok(defaultRows.find((row) => strip(row).includes("turn ·"))?.includes(SGR_DIM), "the compact receipt is dim");
+		rows = defaultRows.map(strip);
+		const compact = rows.filter((row) => row.includes("turn ·"));
+		strictEqual(compact.length, 1, `default owns one receipt row: ${JSON.stringify(rows)}`);
+		ok(compact[0]?.includes("in 12345 · out 680"), JSON.stringify(compact));
+		ok(!compact[0]?.includes("cache"), JSON.stringify(compact));
+		ok(!rows.some((row) => row.includes("not a verification")), JSON.stringify(rows));
+
+		verbosity = "verbose";
+		const verbose = strip(panel.render(120).join("\n"));
+		const normalizedVerbose = verbose.replace(/\s+/g, " ");
+		ok(verbose.includes("over 3 calls"), verbose);
+		ok(verbose.includes("cache 90/12"), verbose);
+		ok(verbose.includes("reasoning 34 provider"), verbose);
+		ok(normalizedVerbose.includes("reasoning text is a UI excerpt, not a verification"), verbose);
 	});
 
 	it("pauses and resumes cumulative live tool output without changing execution state", () => {
@@ -906,6 +1040,46 @@ describe("chat-panel render caching", () => {
 			panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 		}
 	};
+
+	it("keeps hanging-indent bytes stable when settled turns are frozen", () => {
+		const metrics: number[] = [];
+		const buildSettledHistory = (panel: ReturnType<typeof createChatPanel>): void => {
+			for (let index = 0; index < 24; index += 1) {
+				panel.appendUser(`question ${index} wraps across the narrow transcript width for ownership`);
+				panel.applyEvent({
+					type: "message_end",
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: `answer ${index} also wraps across the narrow transcript width` }],
+					},
+				} as ChatLoopEvent);
+				panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+			}
+		};
+
+		const cached = createChatPanel({
+			now: frozen.now,
+			onRenderMetrics: ({ entriesRendered }) => metrics.push(entriesRendered),
+		});
+		buildSettledHistory(cached);
+		cached.render(32);
+		cached.applyEvent({
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "live tail that wraps after frozen history",
+		} as ChatLoopEvent);
+		const cachedRows = cached.render(32);
+		ok((metrics.at(-1) ?? Number.POSITIVE_INFINITY) <= 1, JSON.stringify(metrics));
+
+		const fresh = createChatPanel({ now: frozen.now });
+		buildSettledHistory(fresh);
+		fresh.applyEvent({
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "live tail that wraps after frozen history",
+		} as ChatLoopEvent);
+		strictEqual(cachedRows.join("\n"), fresh.render(32).join("\n"));
+	});
 
 	it("renders identically after a tool event that no longer clears the whole cache", () => {
 		const cached = createChatPanel({ now: frozen.now });
