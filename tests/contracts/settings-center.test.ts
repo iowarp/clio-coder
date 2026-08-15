@@ -216,6 +216,34 @@ describe("contracts/settings center", () => {
 		);
 	});
 
+	it("joins every status row without doubled separators", () => {
+		const items = buildSettingItems(settingsWithTargets(), {
+			providers: providersWithHealth({ "target-a": "unknown", "target-b": "down" }),
+			getFleetNodes: () => [
+				{
+					id: "remote-a",
+					host: "remote-a.example",
+					kind: "ssh",
+					state: "offline",
+					stateReason: null,
+					activeWorkers: 0,
+					maxWorkers: 1,
+					labels: [],
+					lastSeenAt: null,
+				},
+			],
+		});
+		for (const item of items.filter((candidate) => candidate.presentationKind === "status")) {
+			ok(
+				!item.valueSegments
+					.map((segment) => segment.text)
+					.join("")
+					.includes("· ·"),
+				item.id,
+			);
+		}
+	});
+
 	it("marks destructive submenu actions red while preserving an explicit NO_COLOR label", () => {
 		const center = noopSettingsCenter(20);
 		center.setSelection("targets", 1);
@@ -265,7 +293,7 @@ describe("contracts/settings center", () => {
 		ok(targetRender.includes(`${theme.fgSequence("warning")}◐ degraded`), "degraded stays amber");
 		ok(targetRender.includes(`${theme.fgSequence("error")}○ down`), "down health remains red under selection");
 		ok(!targetRender.includes(`${theme.fgSequence("success")}○ down`), "selection cannot repaint down as healthy");
-		ok(targetRender.includes(`${theme.fgSequence("dim")}· unknown`), "unknown remains visibly unsettled");
+		ok(targetRender.includes(`${theme.fgSequence("dim")}? unknown`), "unknown remains visibly unsettled");
 
 		center.setSelection("fleet", items.filter((item) => item.section === "fleet").length - 1);
 		const nodeRender = center.render(112).join("\n");
@@ -310,8 +338,13 @@ describe("contracts/settings center", () => {
 			const targetLines = center.render(112).join("\\n");
 			center.setSelection("fleet", items.filter((item) => item.section === "fleet").length - 1);
 			const nodeLines = center.render(112).join("\\n");
+			const fleetItems = items.filter((item) => item.section === "fleet");
+			center.setSelection("fleet", fleetItems.findIndex((item) => item.id === "workers.agentBindings"));
+			const readOnlyLines = center.render(112).join("\\n");
+			center.setSelection("fleet", fleetItems.findIndex((item) => item.id === "workers.maxRetries"));
+			const editableLines = center.render(112).join("\\n");
 			center.setSelection("retry", 1);
-			process.stdout.write(targetLines + "\\n" + nodeLines + "\\n" + center.render(112).join("\\n"));
+			process.stdout.write(targetLines + "\\n" + nodeLines + "\\n" + readOnlyLines + "\\n" + editableLines + "\\n" + center.render(112).join("\\n"));
 		`;
 		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], {
 			cwd: process.cwd(),
@@ -325,8 +358,17 @@ describe("contracts/settings center", () => {
 		ok(plain.includes(`${GLYPH.running} healthy`), "healthy target remains explicit without color");
 		ok(plain.includes("◐ degraded"), "degraded target remains explicit without color");
 		ok(plain.includes("○ down"), "down target remains explicit without color");
-		ok(plain.includes("· unknown"), "unknown target remains explicit without color");
+		ok(plain.includes("? unknown"), "unknown target remains explicit without color");
 		ok(plain.includes("○ offline"), "offline node remains explicit without color");
+		const plainLines = plain.split("\n");
+		ok(
+			plainLines.some((line) => line.includes("Agent bindings") && line.includes("— (none)")),
+			"glyph-less read-only facts retain an explicit fallback",
+		);
+		ok(
+			plainLines.some((line) => line.includes("Fleet retries") && line.includes("2") && !line.includes("— ")),
+			"editable rows do not carry the read-only mark",
+		);
 		ok(plain.includes("◇") && plain.includes("changed (default: 3)"), "modified state remains explicit without color");
 	});
 

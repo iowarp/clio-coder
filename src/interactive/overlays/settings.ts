@@ -1120,7 +1120,7 @@ function targetHealthSegment(status: TargetHealth["status"]): SettingsValueSegme
 		case "down":
 			return { text: "○ down", tone: "unhealthy" };
 		case "unknown":
-			return { text: "· unknown", tone: "unknown" };
+			return { text: "? unknown", tone: "unknown" };
 	}
 }
 
@@ -1664,7 +1664,11 @@ function formatSettingRow(
 		used += columns.path + visibleWidth(ROW_GAP);
 	}
 	const valueWidth = Math.max(1, width - used - 2);
-	const valueSegments = pending ? [{ text: displayValue, tone: "neutral" as const }] : item.valueSegments;
+	const valueSegments = pending
+		? [{ text: displayValue, tone: "neutral" as const }]
+		: item.presentationKind === "read-only-fact"
+			? [{ text: "— ", tone: "neutral" as const }, ...item.valueSegments]
+			: item.valueSegments;
 	const value = renderSettingValue(valueSegments, valueWidth, selected, item.readOnly);
 	return truncateToWidth(`${indent}${prefix}${label}${ROW_GAP}${pathSegment}${marker}${value}`, width, ELLIPSIS, true);
 }
