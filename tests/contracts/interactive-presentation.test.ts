@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import type { SafeEventBus } from "../../src/core/event-bus.js";
@@ -73,7 +73,22 @@ function harness() {
 			return [];
 		},
 	} as unknown as ClioKeybindingManager;
-	const banner = component();
+	let bannerMode: "launchpad" | "session" = "launchpad";
+	const banner = {
+		...component(),
+		collapseToSessionHeader: () => {
+			if (bannerMode === "session") return false;
+			bannerMode = "session";
+			log.push("banner.collapse");
+			return true;
+		},
+		resetToLaunchpad: () => {
+			if (bannerMode === "launchpad") return false;
+			bannerMode = "launchpad";
+			log.push("banner.reset");
+			return true;
+		},
+	};
 	const chatPanel = {
 		...component(),
 		appendReplayBlock: () => {},
@@ -311,10 +326,16 @@ describe("interactive presentation ownership", () => {
 		const summary = { stopReason: "stop" } as TurnSummary;
 		presentation.setLastTurnSummary(summary);
 		strictEqual(input.getLastTurnSummary?.(), summary);
+		const rendersBeforeCollapse = test.counts().renders;
+		presentation.collapseWelcomeDashboard();
+		presentation.collapseWelcomeDashboard();
+		ok(test.log.includes("banner.collapse"));
+		strictEqual(test.counts().renders, rendersBeforeCollapse + 1, "the height transition requests exactly one repaint");
 
 		// A new session starts with no history, so the footer must not still be
 		// reporting the turn the previous session ended on.
 		presentation.resetForNewSession();
+		ok(test.log.includes("banner.reset"));
 		deepStrictEqual(input.getToolCounts?.(), { tools: {}, errors: 0, active: 0, truncatedResults: 0 });
 		strictEqual(input.getLastTurnSummary?.(), null);
 

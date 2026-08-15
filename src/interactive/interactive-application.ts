@@ -534,6 +534,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		sessionTranscript,
 		chatPanel,
 		dispatchCommand: slashRuntime.dispatchCommand,
+		collapseLaunchpadBeforeSubmit: () => presentation.collapseWelcomeDashboard(),
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		notify,
 	});
