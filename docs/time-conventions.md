@@ -2,7 +2,7 @@
 
 This document defines the canonical time and clock conventions for `clio-coder`. These policies establish consistent rules for measuring durations, recording instants, converting timezones, and managing concurrency across the codebase.
 
-This policy is promoted from Section 10 of the repository time audit in [time-audit-2026-08-15.md](file:///home/akougkas/iowarp/clio-coder/docs/issues/time-audit-2026-08-15.md).
+This policy is promoted from Section 10 of the repository time audit in [time-audit-2026-08-15.md](issues/time-audit-2026-08-15.md).
 
 ---
 
