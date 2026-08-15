@@ -14,6 +14,7 @@ import {
 	isOrchestratorEligibleRuntime,
 	type ProvidersContract,
 	resolveModelRuntimeCapabilitiesForProviders,
+	type TargetHealth,
 	thinkingLevelChoiceLabel,
 	thinkingLevelFromChoiceLabel,
 } from "../../domains/providers/index.js";
@@ -363,6 +364,21 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 export type SettingSubmenuBuilder = NonNullable<SettingItem["submenu"]>;
 type SettingsCenterLane = "sections" | "rows";
 
+export type SettingsPresentationKind =
+	| "setting"
+	| "status"
+	| "action"
+	| "group-header"
+	| "read-only-fact"
+	| "destructive-action";
+
+type SettingsValueTone = "neutral" | "healthy" | "degraded" | "unhealthy" | "unknown" | "activity";
+
+export interface SettingsValueSegment {
+	text: string;
+	tone: SettingsValueTone;
+}
+
 export interface SettingsCenterItem extends SettingItem {
 	id: EditableSettingId;
 	label: string;
@@ -372,6 +388,8 @@ export interface SettingsCenterItem extends SettingItem {
 	affordance: string;
 	scope: SettingScope;
 	readOnly: boolean;
+	presentationKind: SettingsPresentationKind;
+	valueSegments: readonly SettingsValueSegment[];
 	help?: string;
 	valueHelp?: Record<string, string>;
 	defaultValue?: string;
@@ -405,6 +423,10 @@ interface BuildSettingItemsOptions {
 	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
 	/** Run the API-key / OAuth connect flow for a target; absent hides the action. */
 	connectTarget?: (targetId: string) => Promise<void> | void;
+	/** The connect/probe operation currently acting on a target, if any. */
+	getTargetOperation?: (targetId: string) => "connect" | "probe" | null;
+	/** Keeps the row grammar synchronized with the lifetime of connect/probe work. */
+	onTargetOperationChange?: (targetId: string, operation: "connect" | "probe" | null, operationToken: object) => void;
 }
 
 export class SubmenuWrapper implements Component {
@@ -525,11 +547,21 @@ function editNumberSubmenu(title: string): SettingSubmenuBuilder {
 
 function selectListSubmenu(
 	title: string,
-	items: ReadonlyArray<{ value: string; label: string }>,
+	items: ReadonlyArray<{ value: string; label: string; presentationKind?: SettingsPresentationKind }>,
 	note?: string,
 ): SettingSubmenuBuilder {
 	return (_currentValue: string, done: (val?: string) => void) => {
-		const list = new SettingsSelectList([...items], Math.min(10, Math.max(1, items.length)), DEFAULT_SELECT_THEME);
+		const theme = clioTheme();
+		const presented = items.map((item) => ({
+			value: item.value,
+			label:
+				item.presentationKind === "destructive-action"
+					? theme.fg("error", `${GLYPH.error} ${item.label}`)
+					: item.presentationKind === "action"
+						? `${GLYPH.active} ${item.label}`
+						: item.label,
+		}));
+		const list = new SettingsSelectList(presented, Math.min(10, Math.max(1, items.length)), DEFAULT_SELECT_THEME);
 		list.onSelect = (item) => done(item.value);
 		list.onCancel = () => done();
 		return new SubmenuWrapper(title, list, undefined, note);
@@ -585,10 +617,14 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 		const runtime = providers?.list().find((entry) => entry.target.id === targetId)?.runtime ?? null;
 		const chatEligible = !providers || (runtime !== null && isOrchestratorEligibleRuntime(runtime));
 		const items = [
-			...(chatEligible ? [{ value: "use", label: "Use for chat and fleet dispatch" }] : []),
-			...(connectTarget ? [{ value: "connect", label: "Connect (API key or OAuth), then probe" }] : []),
-			...(providers ? [{ value: "probe", label: "Probe health now" }] : []),
-			{ value: "remove", label: "Remove target" },
+			...(chatEligible
+				? [{ value: "use", label: "Use for chat and fleet dispatch", presentationKind: "action" as const }]
+				: []),
+			...(connectTarget
+				? [{ value: "connect", label: "Connect (API key or OAuth), then probe", presentationKind: "action" as const }]
+				: []),
+			...(providers ? [{ value: "probe", label: "Probe health now", presentationKind: "action" as const }] : []),
+			{ value: "remove", label: "Remove target", presentationKind: "destructive-action" as const },
 		];
 		const note = chatEligible ? undefined : "Not chat-eligible: its runtime is not HTTP/native.";
 		return selectListSubmenu(
@@ -599,12 +635,34 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 			const refresh = (): void => requestRefresh?.();
 			if (value === "connect" && connectTarget) {
 				done();
-				void Promise.resolve(connectTarget(targetId)).then(refresh, refresh);
+				const operationToken = {};
+				options?.onTargetOperationChange?.(targetId, "connect", operationToken);
+				refresh();
+				const settle = (): void => {
+					options?.onTargetOperationChange?.(targetId, null, operationToken);
+					refresh();
+				};
+				try {
+					void Promise.resolve(connectTarget(targetId)).then(settle, settle);
+				} catch {
+					settle();
+				}
 				return;
 			}
 			if (value !== "probe" || !providers) return done(value);
 			done();
-			void providers.probeTarget(targetId).then(refresh, refresh);
+			const operationToken = {};
+			options?.onTargetOperationChange?.(targetId, "probe", operationToken);
+			refresh();
+			const settle = (): void => {
+				options?.onTargetOperationChange?.(targetId, null, operationToken);
+				refresh();
+			};
+			try {
+				void Promise.resolve(providers.probeTarget(targetId)).then(settle, settle);
+			} catch {
+				settle();
+			}
 		});
 	};
 }
@@ -644,6 +702,8 @@ function settingItem(
 		submenu?: SettingSubmenuBuilder;
 		affordance?: string;
 		readOnly?: boolean;
+		presentationKind?: SettingsPresentationKind;
+		valueSegments?: readonly SettingsValueSegment[];
 		label?: string;
 		description?: string;
 	},
@@ -658,6 +718,8 @@ function settingItem(
 		affordance: options.affordance ?? (options.values ? cycleAffordance(options.values) : "opens picker"),
 		scope: scopeForId(id),
 		readOnly: options.readOnly ?? false,
+		presentationKind: options.presentationKind ?? (options.readOnly ? "read-only-fact" : "setting"),
+		valueSegments: options.valueSegments ?? [{ text: currentValue, tone: "neutral" }],
 	};
 	const help = SETTINGS_HELP_BY_ID[id];
 	if (help) item.help = help;
@@ -815,11 +877,13 @@ export function buildSettingItems(
 		settingItem("workers.profiles", profileCount > 0 ? `${profileCount} profile(s)` : "(none)", {
 			submenu: addProfileSubmenu,
 			affordance: "Enter adds a profile",
+			presentationKind: "action",
 		}),
 		...fleetProfileRows(settings, live, options),
 		settingItem("workers.agentBindings", bindingCount > 0 ? `${bindingCount} binding(s)` : "(none)", {
 			...(profileCount > 0 ? { submenu: addBindingSubmenu } : { readOnly: true }),
 			affordance: profileCount > 0 ? "Enter binds an agent" : "create a profile first",
+			presentationKind: profileCount > 0 ? "action" : "read-only-fact",
 		}),
 		...agentBindingRows(settings, live),
 		settingItem("workers.maxRetries", String(settings.workers.maxRetries), {
@@ -829,6 +893,7 @@ export function buildSettingItems(
 		settingItem("targets", settings.targets.length > 0 ? `${settings.targets.length} configured` : "(none)", {
 			affordance: "add with `clio-coder targets add`",
 			readOnly: true,
+			presentationKind: "group-header",
 		}),
 		...targetRows(settings, options),
 		settingItem("scope", scopeText, {
@@ -934,7 +999,10 @@ function fleetProfileRows(
 			const thinking = thinkingChoices(providers, profile.target, profile.model, profile.thinkingLevel);
 			const targetSubmenu = selectListSubmenu(
 				`Target for profile ${name}`,
-				[...profileTargetChoices(live, providers), { value: REMOVE_PROFILE_CHOICE, label: REMOVE_PROFILE_CHOICE }],
+				[
+					...profileTargetChoices(live, providers),
+					{ value: REMOVE_PROFILE_CHOICE, label: REMOVE_PROFILE_CHOICE, presentationKind: "destructive-action" as const },
+				],
 				"Changing the target rebases the model on that target's default. Removing the profile drops its agent bindings.",
 			);
 			const modelSubmenu = providers
@@ -1014,15 +1082,40 @@ function targetRows(
 			settings.background.target === target.id ? "memory" : null,
 		].filter((role) => role !== null);
 		const health = status?.health.status ?? "unknown";
+		const operation = options?.getTargetOperation?.(target.id) ?? null;
 		// Roles lead: the value column shows about twelve cells at 120 columns.
+		const roleText = roles.length > 0 ? `${roles.join("+")} · ` : "";
+		const healthSegment = targetHealthSegment(health);
+		const activitySegment: SettingsValueSegment | null = operation
+			? { text: `${GLYPH.running} ${operation === "connect" ? "connecting" : "probing"}`, tone: "activity" }
+			: null;
+		const valueSegments = [
+			...(roleText ? [{ text: roleText, tone: "neutral" as const }] : []),
+			activitySegment ?? healthSegment,
+		];
 		const value = roles.length > 0 ? `${roles.join("+")} · ${health}` : health;
 		return settingItem(`targets.${target.id}`, value, {
 			label: target.id,
 			description: `${target.runtime} · ${target.url ?? "no url"} · default model ${target.defaultModel ?? "(none)"}${status?.health.lastError ? ` · ${status.health.lastError}` : ""}`,
 			submenu: targetActionsSubmenu(target.id, options),
 			affordance: options?.connectTarget ? "Enter: use, connect, probe, remove" : "Enter: use, probe, remove",
+			presentationKind: "status",
+			valueSegments,
 		});
 	});
+}
+
+function targetHealthSegment(status: TargetHealth["status"]): SettingsValueSegment {
+	switch (status) {
+		case "healthy":
+			return { text: `${GLYPH.running} healthy`, tone: "healthy" };
+		case "degraded":
+			return { text: "◐ degraded", tone: "degraded" };
+		case "down":
+			return { text: "○ down", tone: "unhealthy" };
+		case "unknown":
+			return { text: "· unknown", tone: "unknown" };
+	}
 }
 
 /** Read-only placement rows: where dispatched workers run, from the live scheduler snapshot. */
@@ -1034,6 +1127,14 @@ function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>): SettingsCenterI
 			description: `${node.kind} · ${node.host}${node.stateReason ? ` · ${node.stateReason}` : ""}${node.lastSeenAt ? ` · seen ${clockLocal(node.lastSeenAt)}` : ""}`,
 			affordance: "declared as fleet.nodes in settings.yaml; `clio-coder doctor` preflights them",
 			readOnly: true,
+			presentationKind: "status",
+			valueSegments: [
+				{
+					text: `${node.state === "online" ? GLYPH.running : "○"} ${node.state}`,
+					tone: node.state === "online" ? "healthy" : "unhealthy",
+				},
+				{ text: ` · ${busy}`, tone: "neutral" },
+			],
 		});
 	});
 }
@@ -1062,6 +1163,8 @@ function refreshSettingItemsInPlace(items: SettingsCenterItem[], next: readonly 
 		item.affordance = updated.affordance;
 		item.scope = updated.scope;
 		item.readOnly = updated.readOnly;
+		item.presentationKind = updated.presentationKind;
+		item.valueSegments = updated.valueSegments;
 		if (updated.help) item.help = updated.help;
 		else delete item.help;
 		if (updated.valueHelp) item.valueHelp = updated.valueHelp;
@@ -1508,29 +1611,94 @@ function formatSettingRow(
 	const indent = " ".repeat(Math.max(0, indentWidth));
 	const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
 	const labelText = padAnsi(item.label, columns.label, ELLIPSIS);
-	const label = selected ? theme.style("accent", labelText, { bold: true }) : labelText;
+	const label = selected
+		? theme.style("accent", labelText, { bold: true })
+		: item.presentationKind === "group-header" || item.presentationKind === "action"
+			? theme.style("accentDeep", labelText, { bold: true })
+			: labelText;
 	const modified = !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue;
 	const marker = pending
-		? theme.fg("warning", `${GLYPH.running} `)
+		? theme.fg("accent", `${GLYPH.scoped} `)
 		: modified
-			? theme.fg("accent", `${GLYPH.running} `)
+			? theme.fg("accent", `${GLYPH.scoped} `)
 			: "  ";
 	let used = visibleWidth(indent) + 2 + columns.label + visibleWidth(ROW_GAP);
 	let pathSegment = "";
-	if (columns.path > 0) {
+	// Status rows need enough room for both their role/fact and their semantic
+	// health text. At the ultrawide center-column floor, the dotted config path
+	// is the expendable metadata; keeping it would collapse `chat+fleet` to
+	// `cha…` beside an otherwise readable health state.
+	if (columns.path > 0 && !(item.presentationKind === "status" && width < 64)) {
 		pathSegment = `${theme.fg("dim", padAnsi(item.configPath, columns.path, ELLIPSIS))}${ROW_GAP}`;
 		used += columns.path + visibleWidth(ROW_GAP);
 	}
 	const valueWidth = Math.max(1, width - used - 2);
-	const valueText = truncateToWidth(displayValue, valueWidth, ELLIPSIS, true);
-	const value = pending
-		? theme.fg("warning", valueText)
-		: item.readOnly
-			? theme.fg("dim", valueText)
-			: selected
-				? theme.fg("success", valueText)
-				: theme.fg("muted", valueText);
+	const valueSegments = pending ? [{ text: displayValue, tone: "neutral" as const }] : item.valueSegments;
+	const value = renderSettingValue(valueSegments, valueWidth, selected, item.readOnly);
 	return truncateToWidth(`${indent}${prefix}${label}${ROW_GAP}${pathSegment}${marker}${value}`, width, ELLIPSIS, true);
+}
+
+function renderSettingValue(
+	segments: readonly SettingsValueSegment[],
+	width: number,
+	selected: boolean,
+	readOnly: boolean,
+): string {
+	const theme = clioTheme();
+	let semantic: SettingsValueSegment | null = null;
+	for (let index = segments.length - 1; index >= 0; index -= 1) {
+		const candidate = segments[index];
+		if (candidate && candidate.tone !== "neutral") {
+			semantic = candidate;
+			break;
+		}
+	}
+	let visible = segments;
+	if (semantic && visibleWidth(segments.map((segment) => segment.text).join("")) > width) {
+		const semanticWidth = Math.min(width, visibleWidth(semantic.text));
+		const prefixWidth = Math.max(0, width - semanticWidth);
+		const prefix = segments
+			.slice(0, segments.indexOf(semantic))
+			.map((segment) => segment.text)
+			.join("")
+			.replace(/ · $/, "·");
+		visible = [
+			...(prefixWidth > 0
+				? [
+						{
+							text: visibleWidth(prefix) <= prefixWidth ? prefix : truncateToWidth(prefix, prefixWidth, ELLIPSIS, true),
+							tone: "neutral" as const,
+						},
+					]
+				: []),
+			{ ...semantic, text: truncateToWidth(semantic.text, semanticWidth, ELLIPSIS, true) },
+		];
+	}
+	let remaining = width;
+	const rendered: string[] = [];
+	for (const segment of visible) {
+		if (remaining <= 0) break;
+		const text = truncateToWidth(segment.text, remaining, ELLIPSIS);
+		remaining -= visibleWidth(text);
+		const token =
+			segment.tone === "healthy"
+				? "success"
+				: segment.tone === "degraded"
+					? "warning"
+					: segment.tone === "unhealthy"
+						? "error"
+						: segment.tone === "activity"
+							? "action"
+							: segment.tone === "unknown"
+								? "dim"
+								: readOnly
+									? "dim"
+									: selected
+										? "accent"
+										: "muted";
+		rendered.push(theme.fg(token, text));
+	}
+	return rendered.join("");
 }
 
 export interface SettingsCenterOptions {
@@ -1907,7 +2075,7 @@ export class SettingsCenter implements Component {
 				const modifiedCount = section.items.filter(
 					(item) => !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue,
 				).length;
-				const badge = modifiedCount > 0 ? theme.fg("dim", ` ${GLYPH.running}${modifiedCount}`) : "";
+				const badge = modifiedCount > 0 ? theme.fg("accent", ` ${GLYPH.scoped}${modifiedCount}`) : "";
 				const label = selected ? theme.style("accent", section.label, { bold: true }) : section.label;
 				return `${cursor}${label}${badge}`;
 			}),
@@ -2014,7 +2182,7 @@ export class SettingsCenter implements Component {
 			const modified = item.currentValue !== item.defaultValue;
 			parts.push(
 				modified
-					? theme.fg("accent", `${GLYPH.running} changed (default: ${item.defaultValue})`)
+					? theme.fg("accent", `${GLYPH.scoped} changed (default: ${item.defaultValue})`)
 					: theme.fg("dim", `default: ${item.defaultValue}`),
 			);
 		}
@@ -2102,7 +2270,21 @@ function settingsBodyHeight(tui: TUI): number {
 }
 
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): SettingsOverlayHandle {
-	const buildOptions: BuildSettingItemsOptions = { getSettings: deps.getSettings, requestRefresh: () => refreshRows() };
+	const targetOperations = new Map<string, { operation: "connect" | "probe"; token: object }>();
+	const buildOptions: BuildSettingItemsOptions = {
+		getSettings: deps.getSettings,
+		requestRefresh: () => refreshRows(),
+		getTargetOperation: (targetId) => {
+			const keyboardOwningOperation = targetOperations.entries().next().value as
+				| [string, { operation: "connect" | "probe"; token: object }]
+				| undefined;
+			return keyboardOwningOperation?.[0] === targetId ? keyboardOwningOperation[1].operation : null;
+		},
+		onTargetOperationChange: (targetId, operation, operationToken) => {
+			if (operation) targetOperations.set(targetId, { operation, token: operationToken });
+			else if (targetOperations.get(targetId)?.token === operationToken) targetOperations.delete(targetId);
+		},
+	};
 	if (deps.providers) buildOptions.providers = deps.providers;
 	if (deps.getFleetNodes) buildOptions.getFleetNodes = deps.getFleetNodes;
 	if (deps.connectTarget) buildOptions.connectTarget = deps.connectTarget;

@@ -1,8 +1,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { MAX_TIMER_DELAY_MS } from "../../src/core/timers.js";
+import type { ProvidersContract, TargetHealth, TargetStatus } from "../../src/domains/providers/index.js";
 import type { Component, OverlayHandle, TUI } from "../../src/engine/tui.js";
 import {
 	applySettingChange,
@@ -16,6 +18,7 @@ import {
 	SETTINGS_SECTIONS,
 	SettingsCenter,
 } from "../../src/interactive/overlays/settings.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
 const ENTER = "\r";
@@ -56,6 +59,32 @@ function settingsWithTargets(): ClioSettings {
 	settings.retry = { enabled: true, maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 60000, streamStallMs: 180000 };
 	settings.terminal.showTerminalProgress = false;
 	return settings;
+}
+
+function providersWithHealth(
+	healthByTarget: Readonly<Record<string, TargetHealth["status"]>>,
+	settings: Readonly<ClioSettings> = settingsWithTargets(),
+): ProvidersContract {
+	return {
+		list: () =>
+			settings.targets.map(
+				(target) =>
+					({
+						target,
+						runtime: null,
+						available: healthByTarget[target.id] === "healthy",
+						reason: healthByTarget[target.id] ?? "unknown",
+						health: {
+							status: healthByTarget[target.id] ?? "unknown",
+							lastCheckAt: null,
+							lastError: null,
+							latencyMs: null,
+						},
+						discoveredModels: [],
+						capabilities: {},
+					}) as unknown as TargetStatus,
+			),
+	} as unknown as ProvidersContract;
 }
 
 function stripAnsi(value: string): string {
@@ -147,6 +176,158 @@ describe("contracts/settings center", () => {
 		strictEqual(byId.get("runtimePlugins")?.scope, "restart");
 		strictEqual(byId.get("autonomy")?.scope, "live");
 		strictEqual(byId.get("retry.maxRetries")?.scope, "live");
+	});
+
+	it("assigns explicit presentation kinds and independently semantic status segments", () => {
+		const settings = settingsWithTargets();
+		const items = buildSettingItems(settings, {
+			providers: providersWithHealth({ "target-a": "healthy", "target-b": "down" }),
+			getFleetNodes: () => [
+				{
+					id: "remote-a",
+					host: "remote-a.example",
+					kind: "ssh",
+					state: "offline",
+					stateReason: "unreachable",
+					activeWorkers: 0,
+					maxWorkers: 4,
+					labels: [],
+					lastSeenAt: null,
+				},
+			],
+		});
+		const byId = new Map(items.map((item) => [item.id, item]));
+		strictEqual(byId.get("autonomy")?.presentationKind, "setting");
+		strictEqual(byId.get("safetyNet")?.presentationKind, "read-only-fact");
+		strictEqual(byId.get("workers.profiles")?.presentationKind, "action");
+		strictEqual(byId.get("targets")?.presentationKind, "group-header");
+		strictEqual(byId.get("targets.target-b")?.presentationKind, "status");
+		deepStrictEqual(byId.get("targets.target-b")?.valueSegments, [{ text: "○ down", tone: "unhealthy" }]);
+		strictEqual(byId.get("fleet.nodes.remote-a")?.presentationKind, "status");
+		deepStrictEqual(byId.get("fleet.nodes.remote-a")?.valueSegments, [
+			{ text: "○ offline", tone: "unhealthy" },
+			{ text: " · 0/4 busy", tone: "neutral" },
+		]);
+		deepStrictEqual(
+			buildSettingItems(settings, { getTargetOperation: (targetId) => (targetId === "target-b" ? "probe" : null) }).find(
+				(item) => item.id === "targets.target-b",
+			)?.valueSegments,
+			[{ text: `${GLYPH.running} probing`, tone: "activity" }],
+		);
+	});
+
+	it("marks destructive submenu actions red while preserving an explicit NO_COLOR label", () => {
+		const center = noopSettingsCenter(20);
+		center.setSelection("targets", 1);
+		center.handleInput(ENTER);
+		center.handleInput(DOWN);
+		const rendered = center.render(80).join("\n");
+		ok(rendered.includes(`${clioTheme().fgSequence("error")}${GLYPH.error} Remove target`));
+		ok(stripAnsi(rendered).includes(`${GLYPH.error} Remove target`));
+	});
+
+	it("keeps selected focus teal while settled target and node health retain their own colors", () => {
+		const settings = settingsWithTargets();
+		settings.targets.push(
+			{ id: "target-c", runtime: "openai-compat", url: "http://localhost:3333", defaultModel: "model-c" },
+			{ id: "target-d", runtime: "openai-compat", url: "http://localhost:4444", defaultModel: "model-d" },
+		);
+		const items = buildSettingItems(settings, {
+			providers: providersWithHealth(
+				{ "target-a": "healthy", "target-b": "degraded", "target-c": "down", "target-d": "unknown" },
+				settings,
+			),
+			getFleetNodes: () => [
+				{
+					id: "remote-a",
+					host: "remote-a.example",
+					kind: "ssh",
+					state: "offline",
+					stateReason: null,
+					activeWorkers: 0,
+					maxWorkers: 1,
+					labels: [],
+					lastSeenAt: null,
+				},
+			],
+		});
+		const center = new SettingsCenter(items, {
+			getBodyHeight: () => 30,
+			prepareChange: () => null,
+			onApply: () => undefined,
+			onCancel: () => undefined,
+		});
+		center.setSelection("targets", 3);
+		const targetRender = center.render(112).join("\n");
+		const theme = clioTheme();
+		ok(targetRender.includes(`${theme.fgSequence("accent")}${GLYPH.cursor} `), "selection owns the teal cursor");
+		ok(targetRender.includes(`${theme.fgSequence("success")}${GLYPH.running} healthy`), "healthy stays green");
+		ok(targetRender.includes(`${theme.fgSequence("warning")}◐ degraded`), "degraded stays amber");
+		ok(targetRender.includes(`${theme.fgSequence("error")}○ down`), "down health remains red under selection");
+		ok(!targetRender.includes(`${theme.fgSequence("success")}○ down`), "selection cannot repaint down as healthy");
+		ok(targetRender.includes(`${theme.fgSequence("dim")}· unknown`), "unknown remains visibly unsettled");
+
+		center.setSelection("fleet", items.filter((item) => item.section === "fleet").length - 1);
+		const nodeRender = center.render(112).join("\n");
+		ok(nodeRender.includes(`${theme.fgSequence("error")}○ offline`), "offline is a red status, not a dim fact");
+	});
+
+	it("uses a teal change mark instead of the live-operation glyph for modified values", () => {
+		const settings = settingsWithTargets();
+		settings.retry.maxRetries = 8;
+		const center = new SettingsCenter(buildSettingItems(settings), {
+			getBodyHeight: () => 26,
+			prepareChange: () => null,
+			onApply: () => undefined,
+			onCancel: () => undefined,
+		});
+		center.setSelection("retry", 1);
+		const rendered = center.render(112).join("\n");
+		const theme = clioTheme();
+		ok(rendered.includes(theme.fg("accent", `${GLYPH.scoped} `)), "modified row has the change mark");
+		ok(rendered.includes("changed (default: 3)"), "detail explains the change mark in text");
+		ok(!rendered.includes(`${GLYPH.running} changed`), "settled modification is never presented as live work");
+	});
+
+	it("keeps semantic glyph and text fallbacks readable under NO_COLOR", () => {
+		const source = `
+			import { DEFAULT_SETTINGS } from "./src/core/defaults.ts";
+			import { buildSettingItems, SettingsCenter } from "./src/interactive/overlays/settings.ts";
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			settings.targets = [
+				{ id: "healthy-target", runtime: "openai-compat", url: "http://healthy", defaultModel: "m" },
+				{ id: "degraded-target", runtime: "openai-compat", url: "http://degraded", defaultModel: "m" },
+				{ id: "down-target", runtime: "openai-compat", url: "http://down", defaultModel: "m" },
+				{ id: "unknown-target", runtime: "openai-compat", url: "http://unknown", defaultModel: "m" },
+			];
+			settings.autonomy = "auto-edit";
+			settings.retry.maxRetries = 8;
+			const states = ["healthy", "degraded", "down", "unknown"];
+			const providers = { list: () => settings.targets.map((target, index) => ({ target, runtime: null, available: index === 0, reason: states[index], health: { status: states[index], lastCheckAt: null, lastError: index === 2 ? "offline" : null, latencyMs: null }, capabilities: {}, discoveredModels: [] })) };
+			const items = buildSettingItems(settings, { providers, getFleetNodes: () => [{ id: "remote", host: "host", kind: "ssh", state: "offline", stateReason: null, activeWorkers: 0, maxWorkers: 1, labels: [], lastSeenAt: null }] });
+			const center = new SettingsCenter(items, { getBodyHeight: () => 30, prepareChange: () => null, onApply: () => {}, onCancel: () => {} });
+			center.setSelection("targets", 3);
+			const targetLines = center.render(112).join("\\n");
+			center.setSelection("fleet", items.filter((item) => item.section === "fleet").length - 1);
+			const nodeLines = center.render(112).join("\\n");
+			center.setSelection("retry", 1);
+			process.stdout.write(targetLines + "\\n" + nodeLines + "\\n" + center.render(112).join("\\n"));
+		`;
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], {
+			cwd: process.cwd(),
+			env: { ...process.env, NO_COLOR: "1" },
+			encoding: "utf8",
+		});
+		strictEqual(child.status, 0, child.stderr);
+		ok(!new RegExp(`${ESC}\\[[0-9;]*38(?:;|m)`).test(child.stdout), "NO_COLOR emits no foreground color sequences");
+		const plain = stripAnsi(child.stdout);
+		ok(plain.includes("❯ down-target"), "focus survives without color");
+		ok(plain.includes(`${GLYPH.running} healthy`), "healthy target remains explicit without color");
+		ok(plain.includes("◐ degraded"), "degraded target remains explicit without color");
+		ok(plain.includes("○ down"), "down target remains explicit without color");
+		ok(plain.includes("· unknown"), "unknown target remains explicit without color");
+		ok(plain.includes("○ offline"), "offline node remains explicit without color");
+		ok(plain.includes("◇") && plain.includes("changed (default: 3)"), "modified state remains explicit without color");
 	});
 
 	it("keeps the human label to setting id mapping explicit", () => {
@@ -987,11 +1168,93 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(ENTER); // connect
 		deepStrictEqual(connected, ["target-b"]);
 		deepStrictEqual(calls, [], "connect is an action, not a settings change");
+		const running = overlay.render(120).join("\n");
+		ok(
+			running.includes(`${clioTheme().fgSequence("action")}${GLYPH.running} connecting`),
+			"only live connect work is orange",
+		);
 		const renders = fake.renders();
 		resolveConnect?.();
 		await Promise.resolve();
 		await Promise.resolve();
 		ok(fake.renders() > renders, "the rows re-derive once the connect flow settles");
+		ok(!overlay.render(120).join("\n").includes(`${GLYPH.running} connecting`), "settled connect clears live activity");
+	});
+
+	it("keeps newer target work visible when overlapping operations settle out of order", async () => {
+		const live = { current: settingsWithTargets() };
+		const fake = fakeTui(30, 120);
+		let resolveConnect: (() => void) | undefined;
+		let resolveProbe: (() => void) | undefined;
+		const providers = {
+			...providersWithHealth({ "target-a": "healthy", "target-b": "unknown" }),
+			probeTarget: () =>
+				new Promise<TargetStatus | null>((resolve) => {
+					resolveProbe = () => resolve(null);
+				}),
+		} as unknown as ProvidersContract;
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			providers,
+			connectTarget: () =>
+				new Promise<void>((resolve) => {
+					resolveConnect = resolve;
+				}),
+			section: "targets",
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay);
+		overlay.handleInput?.("j");
+		overlay.handleInput?.("j"); // target-b
+		overlay.handleInput?.(ENTER); // connect, probe, remove
+		overlay.handleInput?.(ENTER); // connect
+		overlay.handleInput?.(ENTER); // reopen actions while connect runs
+		overlay.handleInput?.(DOWN);
+		overlay.handleInput?.(ENTER); // probe replaces the visible operation for this target
+		ok(stripAnsi(overlay.render(120).join("\n")).includes(`${GLYPH.running} probing`));
+
+		resolveConnect?.();
+		await Promise.resolve();
+		await Promise.resolve();
+		ok(
+			stripAnsi(overlay.render(120).join("\n")).includes(`${GLYPH.running} probing`),
+			"an older connect settlement cannot clear the newer probe token",
+		);
+		resolveProbe?.();
+		await Promise.resolve();
+		await Promise.resolve();
+		ok(!stripAnsi(overlay.render(120).join("\n")).includes(`${GLYPH.running} probing`));
+	});
+
+	it("clears probe activity when a provider throws before returning a promise", () => {
+		const live = { current: settingsWithTargets() };
+		const fake = fakeTui(30, 120);
+		const providers = {
+			...providersWithHealth({ "target-a": "healthy", "target-b": "unknown" }),
+			probeTarget: () => {
+				throw new Error("synchronous probe failure");
+			},
+		} as unknown as ProvidersContract;
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			providers,
+			section: "targets",
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay);
+		overlay.handleInput?.("j");
+		overlay.handleInput?.("j"); // target-b
+		overlay.handleInput?.(ENTER); // probe, remove
+		overlay.handleInput?.(ENTER); // probe throws synchronously but the UI settles
+		ok(!stripAnsi(overlay.render(120).join("\n")).includes(`${GLYPH.running} probing`));
 	});
 
 	it("removing a profile through its row also drops its bindings on refresh", () => {
