@@ -1,5 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { SKILL_SUGGESTION_ANCHOR } from "../../src/core/skill-activation.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { redactToolArgs, renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
@@ -598,6 +599,41 @@ describe("chat-panel agent voice", () => {
 			strip(rendered).includes("✦ Hello there"),
 			`stripped reply reads glyph + text: ${JSON.stringify(strip(rendered))}`,
 		);
+	});
+
+	it("leaves a leading skill suggestion unglyphed and gives ✦ to the answer after the tool ledger", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: SKILL_SUGGESTION_ANCHOR }], stopReason: "stop" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "skill-read",
+			toolName: "read",
+			args: { path: "skills/example/SKILL.md" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "skill-read",
+			toolName: "read",
+			result: "skill body",
+			isError: false,
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: "Substantive answer" }], stopReason: "stop" },
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+
+		const plain = strip(panel.render(100).join("\n"));
+		const suggestionAt = plain.indexOf(SKILL_SUGGESTION_ANCHOR);
+		const toolAt = plain.indexOf("skills/example/SKILL.md");
+		const answerAt = plain.indexOf("✦ Substantive answer");
+		ok(suggestionAt >= 0, `the suggestion renders: ${plain}`);
+		ok(!plain.includes(`✦ ${SKILL_SUGGESTION_ANCHOR}`), `the suggestion does not claim the glyph: ${plain}`);
+		ok(toolAt > suggestionAt, `the tool ledger follows the suggestion: ${plain}`);
+		ok(answerAt > toolAt, `the substantive answer owns the glyph below the tool ledger: ${plain}`);
 	});
 
 	it("turns the reply glyph and the terminal error text red on a failed turn", () => {
