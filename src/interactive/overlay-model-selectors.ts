@@ -6,7 +6,7 @@ import type { FooterDashboardPanel } from "./footer/dashboard.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
 import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
-import { openSettingsOverlay } from "./overlays/settings.js";
+import { openSettingsOverlay, type SettingsSectionId } from "./overlays/settings.js";
 import {
 	openThinkingOverlay,
 	readThinkingLevel,
@@ -40,7 +40,7 @@ export interface OverlayModelSelectors {
 	openThinkingOverlayState(): void;
 	openModelOverlayState(): void;
 	openScopedModelsOverlayState(): void;
-	openSettingsOverlayState(): void;
+	openSettingsOverlayState(section?: SettingsSectionId): void;
 	refreshSettingsOverlay(): void;
 }
 
@@ -123,12 +123,13 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 		deps.tui.requestRender();
 	};
 
-	const openSettingsOverlayState = (): void => {
+	const openSettingsOverlayState = (section?: SettingsSectionId): void => {
 		if (deps.transitions.state !== "closed" || !deps.getSettings || !deps.writeSettings) return;
 		deps.transitions.state = "settings";
 		const handle = openSettings(deps.tui, {
 			getSettings: deps.getSettings,
 			providers: deps.providers,
+			...(section ? { section } : {}),
 			writeSettings: (next) => {
 				deps.writeSettings?.(next);
 				deps.refreshFooter();

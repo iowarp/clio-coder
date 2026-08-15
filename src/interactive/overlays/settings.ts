@@ -1639,6 +1639,8 @@ export interface OpenSettingsOverlayDeps {
 	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "global") => void;
 	notice?: (level: SettingsNoticeLevel, text: string, key?: string) => void;
 	onClose: () => void;
+	/** Open focused on this section (deep link from `/settings <section>`). */
+	section?: SettingsSectionId;
 }
 
 function formatSettingChangeNotice(id: string, value: string, scope: "session" | "global"): string {
@@ -1675,6 +1677,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		onCancel: () => deps.onClose(),
 		requestRender: () => tui.requestRender(),
 	});
+	if (deps.section) center.setSelection(deps.section, 0);
 	const refreshRows = (): void => {
 		refreshSettingItemsInPlace(items, buildSettingItems(deps.getSettings(), buildOptions));
 		center.refreshItems();

@@ -15,6 +15,7 @@ import { parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
 import type { NoticeLevel } from "./command-output.js";
+import { SETTINGS_SECTIONS, type SettingsSectionId } from "./overlays/settings.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
 
@@ -62,7 +63,7 @@ type SlashCommandVariant =
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
 	| { kind: "scoped-models" }
-	| { kind: "settings" }
+	| { kind: "settings"; section?: SettingsSectionId }
 	| { kind: "resume" }
 	| { kind: "new" }
 	| { kind: "tree" }
@@ -280,7 +281,7 @@ export interface SlashCommandContext {
 	/** Apply a resolved model reference to settings (and optionally thinking level). */
 	applyModelRef: (ref: ResolvedModelRef) => void;
 	openScopedModels: () => void;
-	openSettings: () => void;
+	openSettings: (section?: SettingsSectionId) => void;
 	openResume: () => void;
 	startNewSession: () => void;
 	openTree: () => void;
@@ -342,6 +343,10 @@ const RUN_THINKING_LEVELS: ReadonlyArray<JobThinkingLevel> = THINKING_LEVELS;
 
 function isRunThinkingLevel(value: string): value is JobThinkingLevel {
 	return RUN_THINKING_LEVELS.some((level) => level === value);
+}
+
+function isSettingsSectionId(value: string): value is SettingsSectionId {
+	return SETTINGS_SECTIONS.some((section) => section.id === value);
 }
 
 /** `/context compact` alone keeps a free-form optional instruction tail. */
@@ -923,10 +928,19 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Open interactive settings",
 		aliases: ["config"],
 		kinds: ["settings"],
-		args: {},
-		fromArgs: fromArgsOrUsage("settings", { kind: "settings" }),
-		handle(_command, ctx) {
-			ctx.openSettings();
+		args: { positionals: [{ name: "section", required: false }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "settings", reason: parsed.error };
+			const section = parsed.positionals[0];
+			if (section === undefined) return { kind: "settings" };
+			if (!isSettingsSectionId(section)) {
+				const known = SETTINGS_SECTIONS.map((entry) => entry.id).join(", ");
+				return { kind: "usage-error", command: "settings", reason: `Unknown section: ${section} (one of ${known})` };
+			}
+			return { kind: "settings", section };
+		},
+		handle(command, ctx) {
+			if (command.kind === "settings") ctx.openSettings(command.section);
 		},
 	},
 	{

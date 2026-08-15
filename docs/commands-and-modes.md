@@ -154,7 +154,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/output` | - | `/output <verbosity>` | Set transcript detail: minimal, default, or verbose |
 | `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
 | `/scoped-models` | - | `/scoped-models` | Edit the Alt+J / Alt+K model cycle set |
-| `/settings` | `/config` | `/settings` | Open interactive settings |
+| `/settings` | `/config` | `/settings [section]` | Open interactive settings |
 | `/resume` | - | `/resume` | Resume a past session |
 | `/new` | - | `/new` | Start a fresh session |
 | `/tree` | - | `/tree` | Open session tree navigator |

@@ -19,6 +19,7 @@ import { openProvidersOverlay } from "./providers-overlay.js";
 export * from "./overlay-key-routing.js";
 
 import type { OverlayState } from "./overlay-key-routing.js";
+import type { SettingsSectionId } from "./overlays/settings.js";
 
 // Runtime lifecycle construction lives beside the pure modal key router so the
 // application composition root no longer owns the mutable overlay state.
@@ -119,7 +120,7 @@ export interface OverlayLifecycleController {
 	openThinkingOverlayState(): void;
 	openModelOverlayState(): void;
 	openScopedModelsOverlayState(): void;
-	openSettingsOverlayState(): void;
+	openSettingsOverlayState(section?: SettingsSectionId): void;
 	openResumeOverlayState(): void;
 	openTreeOverlayState(): void;
 	openMessagePickerOverlayState(): void;
