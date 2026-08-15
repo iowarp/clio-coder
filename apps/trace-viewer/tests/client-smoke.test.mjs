@@ -267,4 +267,116 @@ describe("trace viewer client", () => {
 		assert.match(html, /No sealed receipt was found for this run\./);
 		assert.doesNotMatch(html, /undefined/);
 	});
+
+	it("renders tool durations, truncated payloads, and findings disagreements honestly", () => {
+		const run = {
+			run_id: "run-2",
+			status: "fail",
+			agent: "reviewer",
+			target: "remote-cluster",
+			model: "claude-3-7-sonnet",
+			runtime: "anthropic-native",
+			node: "node-c2",
+			assignment_id: "dispatch-42",
+			started_at: "2026-01-01T12:00:00Z",
+			ended_at: "2026-01-01T12:05:00Z",
+		};
+		const phase = {
+			phase_id: "p2",
+			run_id: "run-2",
+			seq: 0,
+			name: "review-code",
+			kind: "judge",
+			owner: "reviewer",
+			status: "fail",
+			attempt: 0,
+			started_at: "2026-01-01T12:00:00Z",
+			ended_at: "2026-01-01T12:05:00Z",
+		};
+		const events = [
+			{
+				rowid: 1,
+				event_id: "e10",
+				run_id: "run-2",
+				phase_id: "p2",
+				type: "tool_call",
+				name: "eval: pytest",
+				payload_json: JSON.stringify({
+					tool: "pytest",
+					agent: "reviewer",
+					ok: false,
+					duration_ms: 1540,
+					block_reason: "assertion failed",
+				}),
+				started_at: "2026-01-01T12:01:00Z",
+				ended_at: "2026-01-01T12:01:02Z",
+			},
+			{
+				rowid: 2,
+				event_id: "e11",
+				run_id: "run-2",
+				phase_id: "p2",
+				type: "log",
+				name: "large output truncated",
+				payload_json: JSON.stringify({
+					truncated: true,
+					snippet: "output line 1... output line 2...",
+				}),
+				started_at: "2026-01-01T12:02:00Z",
+				ended_at: null,
+			},
+		];
+		const processes = [
+			{
+				kind: "eval",
+				name: "pytest worker",
+				pid: 8812,
+				command: "pytest tests/suite -v",
+				started_at: "2026-01-01T12:00:00Z",
+				ended_at: null, // live process
+			},
+		];
+		const receipt = {
+			outcome: "fail",
+			costUsd: 1.25,
+			findingsSummary: {
+				tags: ["security", "linter"],
+				findingCount: 3,
+				firstPassSuccess: false,
+			},
+			integrity: { digest: "abcdef0123456789" },
+		};
+		const evidence = {
+			runId: "run-2",
+			evidenceId: "ev-99",
+			findingCount: 3,
+			firstPassSuccess: true, // disagrees with receipt!
+		};
+
+		const html = runPage(run, [phase], events, [], "p2", processes, receipt, evidence);
+
+		// Verified chips
+		assert.match(html, /remote-cluster/);
+		assert.match(html, /anthropic-native/);
+		assert.match(html, /dispatch-42/);
+		assert.match(html, /node-c2/);
+
+		// Tool took formatting
+		assert.match(html, /pytest/);
+		assert.match(html, /1\.5s/);
+		assert.match(html, /assertion failed/);
+
+		// Truncation notice honesty
+		assert.match(html, /payload exceeded the trace limit; snippet only/);
+
+		// Process live indicator
+		assert.match(html, /pytest worker/);
+		assert.match(html, /8812/);
+		assert.match(html, /live/);
+
+		// Findings disagreement honesty
+		assert.match(html, /first pass \(receipt\)/);
+		assert.match(html, /first pass \(evidence\)/);
+		assert.doesNotMatch(html, /undefined/);
+	});
 });
