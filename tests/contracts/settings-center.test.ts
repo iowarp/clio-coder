@@ -48,7 +48,7 @@ function settingsWithTargets(): ClioSettings {
 	settings.scope = ["target-a/model-a", "target-b/model-b"];
 	settings.budget.sessionCeilingUsd = 5;
 	settings.compaction = { auto: true, threshold: 0.8, excludeLastTurns: 6 };
-	settings.retry = { enabled: true, maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 60000 };
+	settings.retry = { enabled: true, maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 60000, streamStallMs: 180000 };
 	settings.terminal.showTerminalProgress = false;
 	return settings;
 }

@@ -1287,12 +1287,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.retry)) {
 			issues.add("retry", `expected a map, got ${describe(raw.retry)}`);
 		} else {
-			issues.unknownKeys("retry", raw.retry, ["enabled", "maxRetries", "baseDelayMs", "maxDelayMs"]);
+			issues.unknownKeys("retry", raw.retry, ["enabled", "maxRetries", "baseDelayMs", "maxDelayMs", "streamStallMs"]);
 			if ("enabled" in raw.retry) {
 				const v = expectBoolean(issues, "retry.enabled", raw.retry.enabled);
 				if (v !== undefined) settings.retry.enabled = v;
 			}
-			for (const key of ["maxRetries", "baseDelayMs", "maxDelayMs"] as const) {
+			for (const key of ["maxRetries", "baseDelayMs", "maxDelayMs", "streamStallMs"] as const) {
 				if (key in raw.retry) {
 					const v = expectInteger(issues, `retry.${key}`, raw.retry[key], { min: 0 });
 					if (v !== undefined) settings.retry[key] = v;

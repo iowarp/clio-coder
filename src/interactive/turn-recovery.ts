@@ -69,6 +69,35 @@ export interface TurnRecovery {
 	cancelRetryCountdown(): void;
 }
 
+/**
+ * Rewrite a stall-driven abort as a transient error so the retry ladder takes
+ * it. `agent.abort()` always settles the run as `stopReason: "aborted"`, and
+ * both gates below refuse that on purpose: an operator who pressed Esc must
+ * never have the turn restarted under them. The stall watchdog in
+ * `turn-runtime.ts` is the one caller that aborts with no operator behind it,
+ * and `state.streamStallReason` is the flag that says so. An operator cancel
+ * that landed in the same window wins: `activeInterruptReason` is set only by
+ * `ChatLoop.cancel`, so the stall reason is dropped rather than retried.
+ *
+ * The failure's assistant message is rewritten in place because it is the same
+ * object the ledger persists and the transcript renders; without it the turn
+ * would read "[aborted] Request was aborted." instead of naming the stall.
+ */
+export function reclassifyStallAbort(
+	state: ChatTurnState,
+	failure: TerminalAssistantFailure,
+): TerminalAssistantFailure {
+	const reason = state.streamStallReason;
+	state.streamStallReason = null;
+	if (reason === null || failure.stopReason !== "aborted" || state.activeInterruptReason !== null) return failure;
+	if (failure.message) {
+		const message = failure.message as { stopReason?: unknown; errorMessage?: unknown };
+		message.stopReason = "error";
+		message.errorMessage = reason;
+	}
+	return { ...failure, stopReason: "error", errorMessage: reason };
+}
+
 export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 	const { state, persistence, context } = deps;
 	let retryCountdown: RetryCountdownHandle | null = null;
@@ -235,8 +264,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				return true;
 			}
 
-			const nextFailure = detectTerminalFailureFromState(agentRuntime.agent);
-			if (!nextFailure) {
+			const settled = detectTerminalFailureFromState(agentRuntime.agent);
+			if (!settled) {
 				recordRetryStatus({
 					phase: "recovered",
 					attempt,
@@ -244,6 +273,10 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				});
 				return true;
 			}
+			// This attempt can stall exactly like the first one did, so the same
+			// reclassification runs here; otherwise the ladder would read the
+			// watchdog's abort as an operator cancel and stop one rung in.
+			const nextFailure = reclassifyStallAbort(state, settled);
 			ensureFailureVisibleAndPersisted(nextFailure);
 			if (nextFailure.stopReason === "aborted" || !isRetryableErrorMessage(nextFailure.errorMessage)) {
 				pruneFailedAssistantFromContext(agentRuntime.agent);
