@@ -42,9 +42,31 @@ describe("contracts/footer notification widths", () => {
 		strictEqual(visibleWidth(badge), 21);
 	});
 
+	it("degrades narrow footers by whole dismiss affordances, never a mid-word clip", () => {
+		const theme = createClioTheme({ color: false });
+		for (const [width, expected] of [
+			[20, "ℹ 1 · [Alt+X]"],
+			[16, "ℹ 1 · [Alt+X]"],
+			[12, "ℹ 1"],
+		] as const) {
+			const badge = formatNotificationBadge([notice("Complete detail remains in the dashboard")], width, { theme });
+			strictEqual(badge, expected, `${width} columns choose a whole compact unit`);
+			ok(visibleWidth(badge ?? "") <= width);
+		}
+	});
+
+	it("uses the compact fallback instead of a message body containing only an ellipsis", () => {
+		const badge = formatNotificationBadge([notice("Complete detail remains in the dashboard")], 32, {
+			theme: createClioTheme({ color: false }),
+		});
+
+		strictEqual(badge, "ℹ 1 · [Alt+X] dismiss");
+	});
+
 	it("fits styled ANSI output by visible columns without losing the action tail", () => {
+		const theme = createClioTheme({ color: true, truecolor: true });
 		const badge = formatNotificationBadge([notice("A deliberately long colored notification message")], 48, {
-			theme: createClioTheme({ color: true, truecolor: true }),
+			theme,
 		});
 
 		ok(badge);
@@ -52,6 +74,7 @@ describe("contracts/footer notification widths", () => {
 		strictEqual(visibleWidth(badge), 48);
 		ok(strip(badge).endsWith(" · [Alt+X] dismiss"), strip(badge));
 		ok(strip(badge).includes("…"), strip(badge));
+		ok(badge.includes(`${theme.fgSequence("muted")}…`), "the ellipsis carries the muted token after its own reset");
 	});
 
 	it("counts wide glyphs while preserving a complete ellipsis and dismiss key", () => {
