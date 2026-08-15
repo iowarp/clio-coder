@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -219,6 +220,28 @@ describe("welcome-dashboard and footer integration tests", () => {
 				ok(rendered.includes("EXPERIMENTAL"), `${mode} width ${width}: ${rendered}`);
 			}
 		}
+	});
+
+	it("keeps the EXPERIMENTAL safety warning bold under NO_COLOR", () => {
+		const source = `
+			import { buildWelcomeDashboardLines } from "./src/interactive/welcome-dashboard.ts";
+			const stats = {
+				cwd: process.cwd(), workspace: null, targetLabel: "target", modelLabel: "model",
+				currentAvailable: true, targetHealthLabel: null, factsPending: false, clioMdStatus: "ok",
+			};
+			process.stdout.write(buildWelcomeDashboardLines(stats, 80, "launchpad").join("\\n"));
+		`;
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], {
+			cwd: process.cwd(),
+			env: { ...process.env, NO_COLOR: "1" },
+			encoding: "utf8",
+		});
+		strictEqual(child.status, 0, child.stderr);
+		ok(!new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*38(?:;|m)`).test(child.stdout));
+		ok(
+			child.stdout.includes(`${String.fromCharCode(27)}[1mEXPERIMENTAL`),
+			`NO_COLOR must retain a bold EXPERIMENTAL run: ${JSON.stringify(child.stdout)}`,
+		);
 	});
 
 	it("chooses one honest NEXT action from repository readiness", () => {

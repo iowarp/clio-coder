@@ -380,7 +380,7 @@ export function buildWelcomeDashboardLines(
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
 	const title = `${brandMark(theme)} ${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${readClioVersion()}`)}`;
-	const experimental = theme.fg("warning", EXPERIMENTAL_RELEASE_WARNING);
+	const experimental = theme.style("warning", EXPERIMENTAL_RELEASE_WARNING, { bold: true });
 	const tag = (label: string): string => sectionTag(theme, "accentDeep", label, 9);
 	const row = (label: string, value: string): string => `  ${tag(label)}  ${value}`;
 
