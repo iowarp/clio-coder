@@ -861,6 +861,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	const toolCounts = options.toolCounts ?? { tools: {}, errors: 0 };
 	const statusWidth = Math.max(options.width ?? 120, 48);
 	const isStreaming = status.phase !== "idle" && status.phase !== "ended";
+	const fleetSummaryIsAction = facts.dispatchSummary !== null && status.phase !== "dispatching";
 	const rows: DashboardRow[] = [
 		statusRow(
 			buildHarnessStatePill(
@@ -871,6 +872,8 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 				options.tick ?? 0,
 				options.now ?? Date.now(),
 				statusWidth,
+				true,
+				fleetSummaryIsAction,
 			),
 		),
 	];
@@ -904,13 +907,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	// only honest rendering of that. See formatCostAggregate.
 	const cost = formatCostAggregate(options.sessionCost);
 	rows.push(cost === null ? statusRow(null) : styledKv("cost", theme.fg("muted", cost)));
-	rows.push(
-		kv(
-			"fleet",
-			fleetValue(facts.dispatchSummary, facts.dispatchRows),
-			facts.dispatchSummary && status.phase !== "dispatching" ? "action" : "dim",
-		),
-	);
+	rows.push(kv("fleet", fleetValue(facts.dispatchSummary, facts.dispatchRows), fleetSummaryIsAction ? "action" : "dim"));
 	// Every worker up to the panel bound gets its own row; what the bound cuts is
 	// counted out loud instead of vanishing, so the row count an operator sees
 	// always reconciles with the `fleet` line above it.
@@ -1025,11 +1022,15 @@ function harnessBadge(
 	status: AgentStatus,
 	toolCounts: ToolTallySnapshot,
 	dispatchRows: ReadonlyArray<DispatchBoardRow>,
+	fleetSummaryIsAction = false,
 ): string {
 	const workers = activeWorkerCount(dispatchRows);
 	const activeTools = finiteNonNegative(toolCounts.active);
 	// Active fleet work is a Clio-signature state; it gets the action color.
-	if (workers > 0) return theme.fg(status.phase === "dispatching" ? "muted" : "action", `fleet ${workers}`);
+	if (workers > 0) {
+		const token = status.phase === "dispatching" ? "muted" : fleetSummaryIsAction ? "accent" : "action";
+		return theme.fg(token, `fleet ${workers}`);
+	}
 	const badgeText = activeTools > 0 ? `tools ${activeTools}` : null;
 	return badgeText ? theme.fg("muted", badgeText) : "";
 }
@@ -1047,9 +1048,11 @@ export function buildHarnessStatePill(
 	now: number,
 	width: number,
 	showBadge = true,
+	fleetSummaryIsAction = false,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
-	const badge = showBadge && safeWidth >= 48 ? harnessBadge(theme, status, toolCounts, dispatchRows) : "";
+	const badge =
+		showBadge && safeWidth >= 48 ? harnessBadge(theme, status, toolCounts, dispatchRows, fleetSummaryIsAction) : "";
 	// Idleness is absence of work, not a phase worth narrating. If a tool or
 	// fleet remains live while the harness settles, keep that activity without
 	// prefixing it with an idle glyph.
