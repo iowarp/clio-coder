@@ -488,6 +488,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.share ? { share: deps.share } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.writeSettings ? { writeSettings: deps.writeSettings } : {}),
+		...(deps.commitSetting ? { commitSetting: deps.commitSetting } : {}),
 		...(deps.onSelectModel ? { onSelectModel: deps.onSelectModel } : {}),
 		...(deps.onSetThinkingLevel ? { onSetThinkingLevel: deps.onSetThinkingLevel } : {}),
 		...(deps.onCompact ? { onCompact: deps.onCompact } : {}),
