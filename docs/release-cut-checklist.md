@@ -101,6 +101,10 @@ undone by a local `git` command. **None of them has been run.**
 
 ## Part 5: tag and push (external, NOT run)
 
+Push the branch first and wait for `ci` to go green on that commit. The release
+workflow verifies that a successful `ci` run exists for the tagged SHA and fails
+the tag push outright if one does not.
+
 21. **NOT RUN** — `git tag -a v0.3.0 -m "..."`.
 22. **NOT RUN** — `git push origin <branch>`.
 23. **NOT RUN** — `git push origin v0.3.0`.
