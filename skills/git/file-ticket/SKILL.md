@@ -1,6 +1,6 @@
 ---
 name: file-ticket
-description: Use when something noticed mid-session must become a tracker issue — "file a ticket", "open an issue for this", "log this bug", "ticket this behavior". Captures evidence from the live session, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Filing only; never fixes. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use investigate-issue.
+description: Use when something noticed mid-session must become a tracker issue — "file a ticket", "open an issue for this", "log this bug", "ticket this behavior". Captures evidence from the live session, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Filing only; never fixes. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use fix-issue.
 version: 0.1.0
 license: Apache-2.0
 allowed-tools:
@@ -27,7 +27,7 @@ clio:
 
 Turn one observed behavior into one well-formed tracker issue, then stop.
 The ticket is the deliverable; the fix belongs to a later skill in the
-pipeline (investigate-issue, then an implementation task).
+pipeline (fix-issue picks it up from here).
 
 ## Step 1 — Capture
 
@@ -93,9 +93,8 @@ Write the body to a file and pass `--body-file`; a body inlined in a
 double-quoted shell string loses every backtick span to command
 substitution. Run the create exactly once, then verify with
 `gh issue view` before any retry; a retry after an unread result is how
-duplicates happen. Report the issue number and URL, and name the next pipeline step: bugs that
-need diagnosis go to investigate-issue; small well-understood items can go
-straight to a worktree. Done when the URL is reported or the duplicate path
+duplicates happen. Report the issue number and URL, and name the next pipeline step: fix-issue,
+which diagnoses only what the ticket leaves unknown. Done when the URL is reported or the duplicate path
 ended at an existing issue.
 
 ## Red flags

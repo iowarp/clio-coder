@@ -16,8 +16,8 @@ under pressure; git mechanics alone never justify a stage.
 | Stage | Skill | Output |
 | --- | --- | --- |
 | 1. File | [`file-ticket`](../skills/git/file-ticket/) | A labeled GitHub issue with evidence and acceptance criteria |
-| 2. Fix | `fix-issue` (planned; today: [`investigate-issue`](../skills/git/investigate-issue/) when the cause is unknown, then [`tdd`](../skills/coding/tdd/) + [`review-changes`](../skills/git/review-changes/)) | A branch where failing tests preceded the fix, self-reviewed against the issue's acceptance criteria |
-| 3. Ship | `ship` (planned; today: [`commit-crafting`](../skills/git/commit-crafting/) + [`create-pr`](../skills/git/create-pr/)) | Atomic conventional commits referencing the issue (`fixes #N`) and an open PR; merge is a human decision |
+| 2. Fix | [`fix-issue`](../skills/git/fix-issue/) | An uncommitted, verified change where failing tests preceded the fix, self-reviewed against the issue's acceptance criteria |
+| 3. Ship | [`ship`](../skills/git/ship/) | An atomic conventional commit referencing the issue (`fixes #N`), a gated push, and an open PR; merge is a human decision |
 
 Releases follow [release-cut-checklist.md](release-cut-checklist.md) as a
 human-gated checklist, not a skill. Worktrees
@@ -57,7 +57,7 @@ New `area:*` labels are proposed in an issue, not created ad hoc.
 
 Each open milestone is the next version (`v0.3.1`, `v0.4.0`). Triage means
 assigning an issue to a milestone or explicitly leaving it in the backlog.
-A release cut (stage 7) requires every issue in its milestone to be closed
+A release cut requires every issue in its milestone to be closed
 or bumped; the milestone closes when the tag is published.
 
 ## Dogfooding setup
