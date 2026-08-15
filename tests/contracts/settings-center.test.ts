@@ -4,7 +4,12 @@ import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { MAX_TIMER_DELAY_MS } from "../../src/core/timers.js";
-import type { ProvidersContract, TargetHealth, TargetStatus } from "../../src/domains/providers/index.js";
+import type {
+	CapabilityFlags,
+	ProvidersContract,
+	TargetHealth,
+	TargetStatus,
+} from "../../src/domains/providers/index.js";
 import type { Component, OverlayHandle, TUI } from "../../src/engine/tui.js";
 import {
 	applySettingChange,
@@ -17,6 +22,7 @@ import {
 	SETTINGS_SECTION_ROWS,
 	SETTINGS_SECTIONS,
 	SettingsCenter,
+	type SettingsChangePlan,
 } from "../../src/interactive/overlays/settings.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
@@ -113,6 +119,30 @@ function providersWithHealth(
 					}) as unknown as TargetStatus,
 			),
 	} as unknown as ProvidersContract;
+}
+
+function providersWithCatalog(settings: Readonly<ClioSettings>): ProvidersContract {
+	const capabilities: CapabilityFlags = {
+		chat: true,
+		tools: true,
+		reasoning: true,
+		vision: false,
+		audio: false,
+		embeddings: false,
+		rerank: false,
+		fim: false,
+		contextWindow: 131_072,
+		maxTokens: 8192,
+	};
+	const base = providersWithHealth({ "target-a": "healthy", "target-b": "healthy" }, settings);
+	const statuses = base.list().map((status) => ({
+		...status,
+		capabilities,
+		discoveredModels:
+			status.target.id === "target-a" ? ["model-a", "model-new"] : [status.target.defaultModel ?? "model-b"],
+		discoveredModelsSource: "probe" as const,
+	}));
+	return { ...base, list: () => statuses } as ProvidersContract;
 }
 
 function stripAnsi(value: string): string {
@@ -924,6 +954,111 @@ describe("contracts/settings center", () => {
 			const rendered = stripAnsi(picker.render(80).join("\n"));
 			ok(rendered.includes(`${GLYPH.cursor} model-25`), `${id} cursor:\n${rendered}`);
 		}
+	});
+
+	it("edits the scoped model set as one provider-backed plan while preserving stale catalog refs", () => {
+		const settings = settingsWithTargets();
+		settings.scope = ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"];
+		const providers = providersWithCatalog(settings);
+		const prepared: SettingsChangePlan[] = [];
+		const applied: Array<{ plan: SettingsChangePlan; scope: "session" | "global" }> = [];
+		const items = buildSettingItems(settings, { providers });
+		const center = new SettingsCenter(items, {
+			getBodyHeight: () => 30,
+			prepareChange: (item, value) => {
+				const plan = createSettingsChangePlan(settings, item, value);
+				if (plan) prepared.push(plan);
+				return plan;
+			},
+			onApply: (plan, scope) => applied.push({ plan, scope }),
+			onCancel: () => undefined,
+		});
+		center.setSelection("models", 0);
+		center.handleInput(ENTER);
+		const checklist = stripAnsi(center.render(112).join("\n"));
+		ok(checklist.includes("Target · target-a"), checklist);
+		ok(checklist.includes("[x] target-a/model-a"), checklist);
+		ok(checklist.includes("Unavailable"), checklist);
+		ok(checklist.includes("[x] target-a/stale-model"), checklist);
+		ok(checklist.includes("[x] retired,Legacy@2025"), checklist);
+		ok(checklist.includes("Capabilities: chat, tools, reasoning"), checklist);
+		ok(checklist.includes("default model when switching targets"), checklist);
+
+		center.handleInput(" "); // add target-level target-a
+		center.handleInput(DOWN); // target-a/model-a
+		center.handleInput(" "); // remove the exact model
+		center.handleInput(DOWN); // target-a/model-new
+		center.handleInput(" "); // add the newly cataloged model
+		strictEqual(prepared.length, 0, "Space toggles stay local to the checklist session");
+		center.handleInput(ENTER); // one plan, then destination prompt
+		strictEqual(prepared.length, 1, "all checklist toggles feed one SettingsChangePlan");
+		deepStrictEqual(prepared[0]?.proposed.scope, [
+			"target-a/stale-model",
+			"retired,Legacy@2025",
+			"target-a",
+			"target-a/model-new",
+		]);
+		deepStrictEqual(settings.scope, ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"]);
+		center.handleInput(ENTER); // Apply this session
+		strictEqual(applied.length, 1);
+		strictEqual(applied[0]?.scope, "session");
+		strictEqual(applied[0]?.plan, prepared[0], "destination applies the same immutable plan");
+
+		const roundTrip = buildSettingItems(prepared[0]?.proposed as ClioSettings, { providers }).find(
+			(item) => item.id === "scope",
+		);
+		ok(roundTrip?.submenu);
+		const reopened = stripAnsi(
+			roundTrip
+				.submenu(roundTrip.currentValue, () => undefined)
+				.render(112)
+				.join("\n"),
+		);
+		ok(reopened.includes("Unavailable"), reopened);
+		ok(reopened.includes("[x] target-a/stale-model"), reopened);
+		ok(reopened.includes("[x] retired,Legacy@2025"), reopened);
+	});
+
+	it("cancels scoped checklist edits and only drops an unavailable ref when explicitly unchecked", () => {
+		const settings = settingsWithTargets();
+		settings.scope = ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"];
+		const providers = providersWithCatalog(settings);
+		const plans: SettingsChangePlan[] = [];
+		const applied: SettingsChangePlan[] = [];
+		const makeCenter = (): SettingsCenter => {
+			const center = new SettingsCenter(buildSettingItems(settings, { providers }), {
+				getBodyHeight: () => 30,
+				prepareChange: (item, value) => {
+					const plan = createSettingsChangePlan(settings, item, value);
+					if (plan) plans.push(plan);
+					return plan;
+				},
+				onApply: (plan) => applied.push(plan),
+				onCancel: () => undefined,
+			});
+			center.setSelection("models", 0);
+			return center;
+		};
+
+		const checklistCancel = makeCenter();
+		checklistCancel.handleInput(ENTER);
+		checklistCancel.handleInput(" ");
+		checklistCancel.handleInput(ESC);
+		strictEqual(plans.length, 0, "Esc leaves the checklist without preparing a mutation");
+		deepStrictEqual(settings.scope, ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"]);
+
+		const destinationCancel = makeCenter();
+		destinationCancel.handleInput(ENTER);
+		for (let index = 0; index < 5; index += 1) destinationCancel.handleInput(DOWN);
+		const staleSelected = stripAnsi(destinationCancel.render(112).join("\n"));
+		ok(staleSelected.includes(`${GLYPH.cursor} [x] target-a/stale-model`), staleSelected);
+		destinationCancel.handleInput(" ");
+		destinationCancel.handleInput(ENTER);
+		strictEqual(plans.length, 1);
+		deepStrictEqual(plans[0]?.proposed.scope, ["target-a/model-a", "retired,Legacy@2025"]);
+		destinationCancel.handleInput(ESC);
+		strictEqual(applied.length, 0, "Esc at the destination prompt cancels the prepared plan");
+		deepStrictEqual(settings.scope, ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"]);
 	});
 
 	it("cycles worker approvals routing to escalate and persists it", () => {
