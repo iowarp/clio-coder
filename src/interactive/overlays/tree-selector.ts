@@ -8,6 +8,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../../engine/tui.js";
+import { clockLocal, dateLocal } from "../format-time.js";
 import { buildHint, clioError, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { type ClioTheme, clioTheme, GLYPH } from "../theme/index.js";
 
@@ -17,7 +18,7 @@ const VISIBLE_ROWS = 16;
 /**
  * /tree navigator overlay. Phase 12 slice 12b-2 behaviors only:
  *   - One row per node, indented two spaces per branch level (not per message)
- *   - Shift+T toggles ISO timestamps on/off
+ *   - Shift+T toggles operator-local timestamps on/off
  *   - `e` enters label edit submode (Enter commits, Esc cancels)
  *   - Enter on a row switches the active append point to that turn id
  *   - Esc closes the overlay
@@ -155,7 +156,7 @@ export function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; wid
 	const styledLabel = labelText ? `${theme.fg("dim", " · label:")}${theme.fg("muted", `"${row.node.label}"`)}` : "";
 	const main = `${styledPrefix}${theme.fg("muted", preview)}${styledLabel}`;
 	if (!opts.showTimestamps) return truncateToWidth(main, opts.width, "", true);
-	const ts = row.node.at.slice(0, 19).replace("T", " ");
+	const ts = `${dateLocal(row.node.at)} ${clockLocal(row.node.at)}`;
 	if (opts.width < ts.length + 12) return truncateToWidth(main, opts.width, "", true);
 	const budget = Math.max(1, opts.width - ts.length - 2);
 	const primary = truncateToWidth(main, budget, "", true);

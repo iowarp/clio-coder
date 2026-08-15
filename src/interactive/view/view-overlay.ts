@@ -8,6 +8,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../../engine/tui.js";
+import { clockLocal } from "../format-time.js";
 import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
 import {
@@ -205,11 +206,7 @@ export function formatRelativeTime(timestamp: number, now = Date.now()): string 
 }
 
 function formatLocalTime(timestamp: number): string {
-	if (!Number.isFinite(timestamp) || timestamp <= 0) return "unknown time";
-	const date = new Date(timestamp);
-	if (Number.isNaN(date.getTime())) return "unknown time";
-	const part = (value: number) => value.toString().padStart(2, "0");
-	return `${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}`;
+	return !Number.isFinite(timestamp) || timestamp <= 0 ? "unknown time" : clockLocal(timestamp);
 }
 
 export function filterViewArtifacts(artifacts: ReadonlyArray<ViewArtifact>, query: string): ViewArtifact[] {

@@ -10,6 +10,7 @@ import {
 	Text,
 	type TUI,
 } from "../../engine/tui.js";
+import { relative } from "../format-time.js";
 import { buildHint, DEFAULT_SELECT_THEME, FILTER_HINT, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { GLYPH } from "../theme/index.js";
 import { filterSessions } from "./session-selector-search.js";
@@ -34,26 +35,11 @@ const SESSION_LAYOUT: SelectListLayoutOptions = {
 /**
  * Format an ISO-8601 instant as a human-relative string ("3 minutes ago",
  * "yesterday", "2026-04-12"). Mirrors common coding-tool resume pickers so
- * users do not have to read raw timestamps.
+ * users do not have to read raw timestamps. The absent case is the picker's
+ * own: a session row can carry no activity instant at all.
  */
 export function formatRelativeTime(iso: string | null | undefined, now: number = Date.now()): string {
-	if (!iso) return "—";
-	const ts = Date.parse(iso);
-	if (Number.isNaN(ts)) return "—";
-	const diffMs = now - ts;
-	if (diffMs < 0) return "just now";
-	const sec = Math.floor(diffMs / 1000);
-	if (sec < 5) return "just now";
-	if (sec < 60) return `${sec}s ago`;
-	const min = Math.floor(sec / 60);
-	if (min < 60) return `${min}m ago`;
-	const hr = Math.floor(min / 60);
-	if (hr < 24) return `${hr}h ago`;
-	const day = Math.floor(hr / 24);
-	if (day === 1) return "yesterday";
-	if (day < 7) return `${day}d ago`;
-	if (day < 30) return `${Math.floor(day / 7)}w ago`;
-	return new Date(ts).toISOString().slice(0, 10);
+	return iso ? relative(iso, now) : "—";
 }
 
 function shortTarget(meta: SessionMeta): string {

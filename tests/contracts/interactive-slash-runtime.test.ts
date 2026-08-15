@@ -1,4 +1,7 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { SafeEventBus } from "../../src/core/event-bus.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
@@ -9,6 +12,7 @@ import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
 } from "../../src/interactive/interactive-slash-runtime.js";
+import { withTimeZone } from "../harness/clock.js";
 
 const flushAsync = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
@@ -87,6 +91,39 @@ function createHarness() {
 }
 
 describe("contracts/interactive slash runtime", () => {
+	// The export is named for the day the operator ran it. At 21:30 in Chicago
+	// the UTC date is already tomorrow, so the old naming sent an operator
+	// looking for a file dated today that was never written.
+	it("names an export file by the operator's calendar date, not UTC's", () => {
+		const harness = createHarness();
+		harness.deps.chat.getSessionId = () => "session-1";
+		harness.deps.now = () => new Date("2026-08-15T02:30:00.000Z");
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+		const scratch = mkdtempSync(join(tmpdir(), "clio-export-"));
+		const previousCwd = process.cwd();
+		try {
+			process.chdir(scratch);
+			const exported = (zone: string): string[] =>
+				withTimeZone(zone, () => {
+					runtime.dispatchCommand("/export");
+					return readdirSync(join(scratch, ".clio-coder", "exports"));
+				});
+
+			ok(exported("America/Chicago").includes("session-1-2026-08-14.md"), exported("America/Chicago").join(", "));
+			ok(exported("Asia/Kolkata").includes("session-1-2026-08-15.md"), exported("Asia/Kolkata").join(", "));
+			ok(exported("UTC").includes("session-1-2026-08-15.md"), exported("UTC").join(", "));
+			// The header inside the file stays UTC: it is the machine-readable half.
+			ok(
+				readFileSync(join(scratch, ".clio-coder", "exports", "session-1-2026-08-15.md"), "utf8").includes(
+					"Exported 2026-08-15T02:30:00.000Z",
+				),
+			);
+		} finally {
+			process.chdir(previousCwd);
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
 	it("constructs and dispatches overlay commands without a terminal or live provider", () => {
 		const harness = createHarness();
 		const runtime = createInteractiveSlashRuntime(harness.deps);

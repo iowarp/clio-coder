@@ -10,6 +10,35 @@ const state = {
 	evidence: null,
 };
 
+/**
+ * Every instant in the mirror was stamped by the orchestrator. A live span is
+ * the one number the browser used to contribute, so a machine whose clock is
+ * minutes off (a laptop back from sleep, a VM with no NTP) stretched or
+ * inverted every running bar on the page.
+ *
+ * The offset between the two clocks is taken once, from the `Date` header the
+ * server already sends on the first API response, and then held: re-reading it
+ * every poll would let the header's one-second granularity jitter a live bar
+ * back and forth. Until a response has supplied one the offset is zero, so the
+ * first paint is no worse than the old behavior.
+ */
+let clockOffsetMs = 0;
+let clockAdopted = false;
+
+/** @internal Exported so a test can render live spans against a known skew. */
+export function adoptServerClock(dateHeader, receivedAtMs = Date.now()) {
+	const server = Date.parse(dateHeader ?? "");
+	if (!Number.isFinite(server)) return clockOffsetMs;
+	clockOffsetMs = server - receivedAtMs;
+	clockAdopted = true;
+	return clockOffsetMs;
+}
+
+/** Now, on the server's clock. */
+export function serverNow() {
+	return Date.now() + clockOffsetMs;
+}
+
 if (typeof window !== "undefined") {
 	window.addEventListener("hashchange", route);
 	route();
@@ -177,7 +206,7 @@ function runHeadline(run) {
 function runDuration(run) {
 	const start = Date.parse(run.started_at);
 	if (!Number.isFinite(start)) return null;
-	const end = run.ended_at ? Date.parse(run.ended_at) : Date.now();
+	const end = run.ended_at ? Date.parse(run.ended_at) : serverNow();
 	return Number.isFinite(end) ? Math.max(0, end - start) : null;
 }
 
@@ -568,8 +597,8 @@ function timeline(phases, events, live) {
 		.filter(Boolean)
 		.map(Date.parse);
 	const ends = [...phases.map((p) => p.ended_at), ...events.map((e) => e.ended_at)].filter(Boolean).map(Date.parse);
-	const start = starts.length ? Math.min(...starts) : Date.now();
-	return { start, end: live || ends.length === 0 ? Math.max(...ends, Date.now()) : Math.max(...ends) };
+	const start = starts.length ? Math.min(...starts) : serverNow();
+	return { start, end: live || ends.length === 0 ? Math.max(...ends, serverNow()) : Math.max(...ends) };
 }
 function parseJson(value) {
 	try {
@@ -587,9 +616,19 @@ function formatTokens(value) {
 function formatCost(value) {
 	return value == null ? "not recorded" : `$${Number(value).toFixed(Number(value) < 0.01 ? 4 : 2)}`;
 }
+// Pinned rather than defaulted: the CLI renders `YYYY-MM-DD` (en-CA) and
+// `HH:MM:SS` (en-GB, h23) and an operator reads the two surfaces side by side.
+// A bare toLocaleString() would render the same instant differently per browser.
+const VIEWER_DATE = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" });
+const VIEWER_CLOCK = new Intl.DateTimeFormat("en-GB", {
+	hourCycle: "h23",
+	hour: "2-digit",
+	minute: "2-digit",
+	second: "2-digit",
+});
 function formatTime(value) {
 	const date = new Date(value);
-	return Number.isNaN(date.valueOf()) ? "unknown" : date.toLocaleString();
+	return Number.isNaN(date.valueOf()) ? "unknown" : `${VIEWER_DATE.format(date)} ${VIEWER_CLOCK.format(date)}`;
 }
 function formatDuration(value) {
 	const ms = Math.max(0, Number(value) || 0);
@@ -607,6 +646,7 @@ export function escapeHtml(value) {
 }
 async function api(path) {
 	const response = await fetch(path, { headers: { accept: "application/json" } });
+	if (!clockAdopted) adoptServerClock(response.headers.get("date"));
 	if (!response.ok) throw new Error((await response.json()).error ?? `request failed: ${response.status}`);
 	return response.json();
 }

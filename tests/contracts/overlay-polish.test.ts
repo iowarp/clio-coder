@@ -28,6 +28,7 @@ import { createSessionOverlayBox } from "../../src/interactive/overlays/session-
 import type { AgentStatus } from "../../src/interactive/status/types.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { createWelcomeDashboard, deriveWelcomeDashboardStats } from "../../src/interactive/welcome-dashboard.js";
+import { withTimeZone } from "../harness/clock.js";
 
 const ESC = "\x1b";
 const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
@@ -528,6 +529,27 @@ describe("milestone 08 overlay polish regressions", () => {
 		strictEqual(closed, 0);
 		content.handleInput?.(ESC);
 		strictEqual(closed, 1);
+	});
+
+	// The picker's whole job is "which of my turns was that": a row stamped in
+	// UTC sends an operator in Chicago looking on the wrong side of midnight.
+	it("/fork stamps a row in the operator's zone, not UTC", () => {
+		const row = (zone: string): string =>
+			withTimeZone(zone, () =>
+				stripAnsi(
+					createMessagePickerContent(
+						[{ turnId: "turn-abcdef12", shortId: "turn-abc", at: "2026-08-15T02:30:00.000Z", preview: "reply" }],
+						() => {},
+						() => {},
+					)
+						.render(88)
+						.join("\n"),
+				),
+			);
+
+		ok(row("America/Chicago").includes("2026-08-14 21:30:00"), row("America/Chicago"));
+		ok(row("Asia/Kolkata").includes("2026-08-15 08:00:00"), row("Asia/Kolkata"));
+		ok(row("UTC").includes("2026-08-15 02:30:00"), row("UTC"));
 	});
 
 	it("welcome dashboard recomputes target stats on each render and preserves a zero compaction threshold", () => {

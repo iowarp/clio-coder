@@ -25,6 +25,7 @@ import {
 } from "../../src/interactive/fleet-overlay.js";
 import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
+import { withTimeZone } from "../harness/clock.js";
 
 const ESC = String.fromCharCode(27);
 const ENTER = "\r";
@@ -280,9 +281,15 @@ describe("fleet overlay", () => {
 	});
 
 	it("renders the generated timestamp as a local clock, never a raw ISO string", () => {
-		const body = strip(formatFleetOverlayBodyLines(snapshot()).join("\n"));
-		ok(/generated \d{2}:\d{2}:\d{2}\b/.test(body), `generated line should carry a clock, got: ${body}`);
-		ok(!body.includes("2026-06-10T00:00:00.000Z"), "the raw ISO string must not survive");
+		const body = (zone: string): string =>
+			withTimeZone(zone, () => strip(formatFleetOverlayBodyLines(snapshot()).join("\n")));
+
+		ok(/generated \d{2}:\d{2}:\d{2}\b/.test(body("UTC")), `generated line should carry a clock, got: ${body("UTC")}`);
+		ok(!body("UTC").includes("2026-06-10T00:00:00.000Z"), "the raw ISO string must not survive");
+		// The snapshot was generated at midnight UTC on the 10th of June.
+		ok(body("America/Chicago").includes("generated 19:00:00"), body("America/Chicago"));
+		ok(body("Asia/Kolkata").includes("generated 05:30:00"), body("Asia/Kolkata"));
+		ok(body("UTC").includes("generated 00:00:00"), body("UTC"));
 	});
 
 	it("tokens status-ish cells: stale is a warning and failed is an error", () => {

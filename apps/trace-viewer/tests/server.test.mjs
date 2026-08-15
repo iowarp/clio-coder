@@ -70,6 +70,11 @@ describe("trace viewer server", () => {
 			const page = await fetch(`${viewer.url}/api/runs/run-1/events?after=0&limit=1`).then((response) => response.json());
 			assert.equal(page.cursor, 1);
 			assert.equal(page.hasMore, true);
+			// The client takes its clock offset from this header, so it has to be
+			// there and it has to parse. Turning off sendDate would silently put
+			// live spans back on the browser's clock.
+			const dated = await fetch(`${viewer.url}/api/runs?limit=1`);
+			assert.ok(Number.isFinite(Date.parse(dated.headers.get("date") ?? "")), dated.headers.get("date"));
 			const denied = await fetch(`${viewer.url}/api/runs`, { method: "POST" });
 			assert.equal(denied.status, 405);
 			const traversal = await fetch(`${viewer.url}/%2e%2e%2f%2e%2e%2fetc/passwd`);

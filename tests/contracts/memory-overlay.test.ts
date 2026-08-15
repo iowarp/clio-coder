@@ -10,6 +10,7 @@ import {
 	openMemoryOverlay,
 } from "../../src/interactive/memory-overlay.js";
 import { GLYPH } from "../../src/interactive/theme/index.js";
+import { withTimeZone } from "../harness/clock.js";
 
 const ESC = "\x1b";
 const SGR = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
@@ -97,18 +98,6 @@ function view(
 	onClose: () => void = () => {},
 ): MemoryOverlayView {
 	return new MemoryOverlayView(getStatus, getRecords, onClose, () => {});
-}
-
-/** Runs under a pinned zone so a row-clock assertion does not depend on the runner's TZ. */
-function withTimeZone<T>(zone: string, run: () => T): T {
-	const previous = process.env.TZ;
-	process.env.TZ = zone;
-	try {
-		return run();
-	} finally {
-		if (previous === undefined) delete process.env.TZ;
-		else process.env.TZ = previous;
-	}
 }
 
 /** The label of the row the cursor is on, without styling, columns, or padding. */

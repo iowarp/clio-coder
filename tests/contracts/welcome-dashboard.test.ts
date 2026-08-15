@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -25,6 +25,7 @@ import {
 	WELCOME_REPOSITORY_FACTS_TTL_MS,
 	WelcomeDashboard,
 } from "../../src/interactive/welcome-dashboard.js";
+import { withTimeZone } from "../harness/clock.js";
 
 const SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 const stripAnsi = (text: string): string => text.replace(SGR, "");
@@ -265,6 +266,26 @@ describe("welcome-dashboard and footer integration tests", () => {
 		ok(narrow, "expected a narrow memory status row");
 		ok(narrow.includes("Memory   on · tier LLM …"), narrow);
 		ok(!narrow.includes("ban"), `a bank fact must be retained whole or dropped: ${narrow}`);
+	});
+
+	// Handoff freshness ages out to a calendar date past 30 days, and that date
+	// is the operator's. A handoff written at 02:30Z on the 15th belongs to the
+	// 14th for anyone west of UTC that evening.
+	it("dates a stale handoff in the operator's zone, not UTC", () => {
+		const cwd = scratchDashboardProject();
+		const handoffs = join(cwd, ".clio-coder", "handoffs");
+		mkdirSync(handoffs, { recursive: true });
+		const file = join(handoffs, "handoff-old.md");
+		writeFileSync(file, "# handoff\n", "utf8");
+		const written = Date.parse("2026-06-15T02:30:00.000Z") / 1000;
+		utimesSync(file, written, written);
+
+		const freshness = (zone: string): string =>
+			withTimeZone(zone, () => readWelcomeRepositoryFacts(cwd).handoffFreshness);
+
+		strictEqual(freshness("America/Chicago"), "2026-06-14");
+		strictEqual(freshness("Asia/Kolkata"), "2026-06-15");
+		strictEqual(freshness("UTC"), "2026-06-15");
 	});
 
 	it("renders a no-wiki dashboard row when codewiki exists without Markdown wiki", async () => {

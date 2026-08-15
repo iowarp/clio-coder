@@ -8,6 +8,7 @@ import {
 	type TaskMemoryTelemetryDecision,
 } from "../domains/memory/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
+import { clockLocal } from "./format-time.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
 import { type ListOverlayItem, ListOverlayView } from "./overlays/list-overlay.js";
 import { clioTheme, fitUnits, rule } from "./theme/index.js";
@@ -104,14 +105,7 @@ function bankItems(entries: ReadonlyArray<TaskMemoryEntry>, group: string): List
  * ISO string, so converting here is what makes the two surfaces agree.
  */
 function rowClock(at: string): string {
-	const instant = new Date(at);
-	if (Number.isNaN(instant.getTime())) return at;
-	return instant.toLocaleTimeString("en-GB", {
-		hourCycle: "h23",
-		hour: "2-digit",
-		minute: "2-digit",
-		second: "2-digit",
-	});
+	return Number.isFinite(Date.parse(at)) ? clockLocal(at) : at;
 }
 
 function activityItems(events: ReadonlyArray<TaskMemoryActivityEvent>, group: string): ListOverlayItem[] {

@@ -7,11 +7,13 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
+import { buildAuditRecord, openAuditWriter } from "../../src/domains/safety/audit.js";
 import { createSafetyBundle } from "../../src/domains/safety/extension.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { createLoopState, observe } from "../../src/domains/safety/loop-detector.js";
 import { compilePathPolicy, evaluatePathPolicy } from "../../src/domains/safety/path-policy.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { withTimeZone } from "../harness/clock.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 describe("contracts/safety", () => {
@@ -648,6 +650,38 @@ describe("contracts/safety credential damage control", () => {
 		});
 		strictEqual(widened.kind, "block");
 		strictEqual(widened.policy?.reasonCode, "secret_path_bash");
+	});
+
+	// The audit file is named by local date on purpose (its rows stay UTC), and
+	// the formatter that produces that name now lives at module scope because it
+	// was being constructed once per row. Hoisting an Intl formatter freezes the
+	// zone it resolved at construction, so the rebuild has to be exercised: two
+	// zones, one process, two file names.
+	it("names an audit file by local date and re-resolves the zone after a TZ change", () => {
+		const at = () => new Date("2026-08-15T02:30:00.000Z");
+		const auditDir = join(scratch, "state", "audit");
+		const namesUnder = (zone: string): string[] =>
+			withTimeZone(zone, () => {
+				const writer = openAuditWriter({ dateFn: at });
+				writer.write(
+					buildAuditRecord({
+						tool: ToolNames.Read,
+						decision: "allowed",
+						now: at(),
+						classification: classify({ tool: "read", args: { path: "/x" } }),
+					}),
+				);
+				// close() does its work before its first await; the rows are already
+				// on disk either way, since the writer uses writeSync.
+				void writer.close();
+				return readdirSync(auditDir).filter((name) => name.endsWith(".jsonl"));
+			});
+
+		ok(namesUnder("America/Chicago").includes("2026-08-14.jsonl"), namesUnder("America/Chicago").join(", "));
+		ok(namesUnder("Asia/Kolkata").includes("2026-08-15.jsonl"), namesUnder("Asia/Kolkata").join(", "));
+		// The row inside is still UTC: the filename is the only local time on disk.
+		const row = readFileSync(join(auditDir, "2026-08-14.jsonl"), "utf8").split("\n")[0] ?? "";
+		ok(row.includes("2026-08-15T02:30:00.000Z"), row);
 	});
 
 	it("B2: the audit row for a blocked bash secret read carries secret_path_bash", async () => {

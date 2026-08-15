@@ -33,6 +33,7 @@ import {
 } from "../../domains/session/prompt-manifest.js";
 import { formatUsd } from "../footer/widgets.js";
 import { formatFooterTokens } from "../footer-panel.js";
+import { clockLocal } from "../format-time.js";
 import { abbreviateModelId } from "../theme/index.js";
 
 export type ViewArtifactCategory =
@@ -164,11 +165,7 @@ function parseTime(value: string | null | undefined): number {
 
 function formatLocalTime(value: string | null | undefined): string {
 	const timestamp = parseTime(value);
-	if (timestamp <= 0) return "unknown time";
-	const date = new Date(timestamp);
-	if (Number.isNaN(date.getTime())) return "unknown time";
-	const part = (unit: number) => unit.toString().padStart(2, "0");
-	return `${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}`;
+	return timestamp <= 0 ? "unknown time" : clockLocal(timestamp);
 }
 
 function safeTitle(value: string, fallback: string): string {
