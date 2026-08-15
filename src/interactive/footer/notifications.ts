@@ -14,6 +14,7 @@
  * color lives in `theme/**`; every emitted line is width-clamped.
  */
 
+import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { fitFooterText } from "../footer-panel.js";
 import { type ClioTheme, type ClioToken, clioTheme, GLYPH, rule } from "../theme/index.js";
 
@@ -223,10 +224,16 @@ export function formatNotificationBadge(
 	const noun = count === 1 ? "notice" : "notices";
 	const lead = entries[0]?.text ?? "";
 	const dismiss = options.dismissKeyLabel ?? "Alt+X";
+	const compactHead = theme.fg(token, `${glyph} ${count}`);
 	const head = theme.fg(token, `${glyph} ${count} ${noun}`);
-	const body = theme.fg("muted", lead);
-	const hint = theme.fg("dim", `${dismiss} dismiss`);
-	return fitFooterText(`${head} ${theme.fg("dim", "·")} ${body} ${theme.fg("dim", "·")} ${hint}`, width);
+	const separator = ` ${theme.fg("dim", "·")} `;
+	const hint = theme.fg("dim", `[${dismiss}] dismiss`);
+	const safeWidth = Math.max(1, Math.floor(width));
+	const minimum = `${compactHead}${separator}${hint}`;
+	const messageWidth = safeWidth - visibleWidth(head) - visibleWidth(separator) * 2 - visibleWidth(hint);
+	if (messageWidth < 1) return fitFooterText(minimum, safeWidth);
+	const body = theme.fg("muted", truncateToWidth(lead, messageWidth, "…", false));
+	return `${head}${separator}${body}${separator}${hint}`;
 }
 
 /**
