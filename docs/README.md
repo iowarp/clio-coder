@@ -54,6 +54,7 @@ current source, tests, and `CHANGELOG.md`.
 | WAL SQLite trace mirror database schema, rowid cursor queries, rebuildability, and CLI trace subcommands | [trace-store.md](trace-store.md) ([Interactive Blueprint](html/trace_blueprint.html)) |
 | Private context index determinism, target smoke matrices, and Clio machinery soak benchmark suite | [evals-internal.md](evals-internal.md) ([Blueprints: evals_internal](html/evals_internal_blueprint.html), [soak](html/soak_blueprint.html)) |
 | Point-in-time inventory of legacy environment variables (Historical Appendix) | [config-knobs-audit.md](config-knobs-audit.md) ([Interactive Blueprint](html/config_knobs_audit_blueprint.html)) |
+| Clock and timestamp conventions: durations, instants, ordering, and formatting | [time-conventions.md](time-conventions.md) |
 
 Every project Clio works in gets its context from a checked-in `CLIO-CODER.md`,
 bootstrapped and maintained by `clio-coder context init`. The root
