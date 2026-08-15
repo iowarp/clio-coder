@@ -306,8 +306,17 @@ function isReason(value: unknown): value is TaskMemoryPolicyReason {
 	return typeof value === "string" && REASONS.has(value as TaskMemoryPolicyReason);
 }
 
+/**
+ * Canonical UTC only, the same rule capacity-lease.ts and memory/validate.ts
+ * enforce. `Date.parse` alone admits `2026-08-15T06:18:32-05:00`, a valid
+ * instant whose string sorts wrong against a `Z` row, and telemetry rows are
+ * compared lexicographically downstream. The length bound stays as a cheap
+ * guard so a megabyte string is rejected before it is parsed.
+ */
 function validIsoTimestamp(value: unknown): value is string {
-	return typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value));
+	if (typeof value !== "string" || value.length > 40) return false;
+	const timestamp = Date.parse(value);
+	return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

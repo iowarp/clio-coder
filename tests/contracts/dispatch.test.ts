@@ -4543,8 +4543,14 @@ rl.once("line", (line) => {
 					cwd: "/tmp/none",
 				});
 				// Distinct, increasing timestamps make the ring cap deterministic
-				// regardless of same-millisecond create() ties.
-				ledger.update(created.id, { startedAt: `2026-06-10T00:00:0${i}.000Z` });
+				// regardless of same-millisecond create() ties. The rows are finished
+				// because eviction exempts still-running ones; this test is about the
+				// cap and its ordering, and the exemption has its own test.
+				ledger.update(created.id, {
+					startedAt: `2026-06-10T00:00:0${i}.000Z`,
+					endedAt: `2026-06-10T00:00:0${i}.500Z`,
+					status: "completed",
+				});
 			}
 			await ledger.persist();
 
@@ -4582,7 +4588,13 @@ rl.once("line", (line) => {
 				sessionId: null,
 				cwd: "/tmp/none",
 			});
-			seed.update(newest.id, { startedAt: "2026-06-10T00:00:09.000Z" });
+			// Finished rows throughout: eviction exempts still-running ones, and what
+			// this test measures is that the cap slices a globally sorted set.
+			seed.update(newest.id, {
+				startedAt: "2026-06-10T00:00:09.000Z",
+				endedAt: "2026-06-10T00:00:09.500Z",
+				status: "completed",
+			});
 			const oldest = seed.create({
 				agentId: "coder",
 				executionRole: "builder",
@@ -4594,7 +4606,11 @@ rl.once("line", (line) => {
 				sessionId: null,
 				cwd: "/tmp/none",
 			});
-			seed.update(oldest.id, { startedAt: "2026-06-10T00:00:01.000Z" });
+			seed.update(oldest.id, {
+				startedAt: "2026-06-10T00:00:01.000Z",
+				endedAt: "2026-06-10T00:00:01.500Z",
+				status: "completed",
+			});
 			await seed.persist();
 
 			// A stale ledger reopens with both disk rows, inserts a middle-aged row,
@@ -4612,7 +4628,11 @@ rl.once("line", (line) => {
 				sessionId: null,
 				cwd: "/tmp/none",
 			});
-			stale.update(middle.id, { startedAt: "2026-06-10T00:00:05.000Z" });
+			stale.update(middle.id, {
+				startedAt: "2026-06-10T00:00:05.000Z",
+				endedAt: "2026-06-10T00:00:05.500Z",
+				status: "completed",
+			});
 			await stale.persist();
 
 			const reopened = openLedger({ maxRuns: 10 });

@@ -151,6 +151,11 @@ describe("contracts/task memory telemetry", () => {
 			{ ...valid, droppedOperations: -1 },
 			{ ...valid, tokenCost: { input: 1, output: 2, total: 4 } },
 			{ ...valid, latencyMs: -1 },
+			// A valid instant that is not canonical UTC. It parses, so the old rule
+			// admitted it, and then it sorts before every `Z` row of the same hour.
+			{ ...valid, at: "2026-07-13T07:00:00.000-05:00" },
+			{ ...valid, at: "2026-07-13T12:00:00Z" },
+			{ ...valid, at: "2026-07-13" },
 		]) {
 			strictEqual(parseTaskMemoryTelemetryRecord(malformed), null, JSON.stringify(malformed));
 		}

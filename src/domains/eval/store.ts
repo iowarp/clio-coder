@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
@@ -65,9 +65,15 @@ export function evalArtifactPath(dataDir: string, evalId: string): string {
 	return join(evalRoot(dataDir), `${evalId}.json`);
 }
 
+/**
+ * The stamp plus task-file hash is not unique: two workers starting the same
+ * task file in the same millisecond built the same id, and `evalArtifactPath`
+ * maps an id straight to one file, so one run clobbered the other. The random
+ * suffix is the repo idiom (state.ts newRunId, reservation-store, capacity-lease).
+ */
 export function createEvalId(startedAt: Date, taskFileHash: string): string {
 	const stamp = startedAt.toISOString().replace(/[-:.]/g, "");
-	return `eval-${stamp}-${taskFileHash.slice(0, 8)}`;
+	return `eval-${stamp}-${taskFileHash.slice(0, 8)}-${randomBytes(6).toString("hex")}`;
 }
 
 export async function writeEvalArtifact(dataDir: string, artifact: EvalRunArtifact): Promise<string> {

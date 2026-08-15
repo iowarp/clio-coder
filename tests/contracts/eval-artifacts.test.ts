@@ -9,7 +9,7 @@ import {
 	writeEvalArtifactV4,
 } from "../../src/domains/eval/artifacts/store.js";
 import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
-import { loadEvalArtifact } from "../../src/domains/eval/store.js";
+import { createEvalId, evalArtifactPath, loadEvalArtifact } from "../../src/domains/eval/store.js";
 import type { EvalRunArtifact } from "../../src/domains/eval/types.js";
 
 function artifact(): EvalArtifactV4 {
@@ -123,4 +123,19 @@ describe("contracts/eval artifacts", () => {
 			}
 		});
 	}
+
+	it("gives two same-millisecond runs of one task file distinct ids and distinct artifact paths", () => {
+		// evalArtifactPath maps an id straight to one file. Before the random
+		// suffix, two workers starting the same task file in the same millisecond
+		// produced the same path and the second clobbered the first.
+		const startedAt = new Date("2026-08-15T00:00:00.000Z");
+		const ids = new Set(Array.from({ length: 64 }, () => createEvalId(startedAt, "abc123def456")));
+		strictEqual(ids.size, 64);
+		for (const id of ids) {
+			ok(id.startsWith("eval-20260815T000000000Z-abc123de-"), id);
+			ok(/-[0-9a-f]{12}$/.test(id), id);
+			// The suffix must not smuggle a path separator past the store's id guard.
+			strictEqual(evalArtifactPath("/tmp/data", id), join("/tmp/data", "evals", `${id}.json`));
+		}
+	});
 });

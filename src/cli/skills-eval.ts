@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1030,7 +1030,10 @@ function synthesizeArtifact(
 ): EvalRunArtifact {
 	const contentHash = createHash("sha256").update(evalsRaw, "utf8").digest("hex");
 	const stamp = startedAt.replace(/[-:.]/g, "");
-	const evalId = `skill-${skillName}-${stamp}-${contentHash.slice(0, 8)}`;
+	// Random suffix for the same reason createEvalId carries one: the stamp plus
+	// content hash collides between two workers on the same file in one millisecond,
+	// and the id is the artifact filename.
+	const evalId = `skill-${skillName}-${stamp}-${contentHash.slice(0, 8)}-${randomBytes(6).toString("hex")}`;
 	const results: EvalRunRecord[] = outcomes.map((outcome) => {
 		const failed = outcome.bullets.some((bullet) => bullet.verdict === "fail" || bullet.verdict === "error");
 		const unmeasured = outcome.bullets.some((bullet) => bullet.verdict === "unmeasured");
