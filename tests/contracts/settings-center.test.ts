@@ -395,6 +395,38 @@ describe("contracts/settings center", () => {
 		}
 	});
 
+	it("never truncates the target-console runtime header at the 120-column center budget", () => {
+		const settings = settingsWithTargets();
+		const [targetA, targetB] = settings.targets;
+		ok(targetA);
+		ok(targetB);
+		settings.targets[0] = { ...targetA, runtime: "llamacpp" };
+		settings.targets[1] = { ...targetB, runtime: "lmstudio-native" };
+		const center = new SettingsCenter(
+			buildSettingItems(settings, {
+				providers: providersWithHealth({ "target-a": "healthy", "target-b": "healthy" }, settings),
+			}),
+			{
+				getBodyHeight: () => 24,
+				prepareChange: () => null,
+				onApply: () => undefined,
+				onCancel: () => undefined,
+			},
+		);
+		center.setSelection("targets", 1);
+		const terminal120 = stripAnsi(center.render(112).join("\n"));
+		const compactHeader = terminal120.split("\n").find((line) => line.includes("HEALTH") && line.includes("TARGET"));
+		ok(compactHeader);
+		ok(!compactHeader.includes("RUNTI"), compactHeader);
+
+		const roomier = stripAnsi(center.render(128).join("\n"));
+		const roomierHeader = roomier.split("\n").find((line) => line.includes("HEALTH") && line.includes("TARGET"));
+		ok(roomierHeader?.includes("RUNTIME"), roomierHeader);
+		ok(roomier.includes("llamacpp"), roomier);
+		ok(roomier.includes("lmstudio-native"), roomier);
+		ok(!roomier.includes("RUNTI…"), roomier);
+	});
+
 	it("marks destructive submenu actions red while preserving an explicit NO_COLOR label", () => {
 		const center = noopSettingsCenter(20);
 		center.setSelection("targets", 1);
@@ -1372,6 +1404,8 @@ describe("contracts/settings center", () => {
 		strictEqual(emptyRender.split("clio-coder targets add").length - 1, 1, "the accepted add command appears once");
 		ok(emptyRender.includes("Run the command shown"));
 		ok(emptyRender.includes("accepted add wizard"));
+		ok(!emptyRender.includes("use: chat now"), emptyRender);
+		ok(!emptyRender.includes("remove: next dispatch"), emptyRender);
 	});
 
 	it("routes one explicit global commit through commitSetting and emits a scoped notice", () => {
