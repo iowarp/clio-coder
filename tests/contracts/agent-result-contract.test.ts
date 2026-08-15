@@ -1,8 +1,12 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { Message, Model } from "@earendil-works/pi-ai";
+import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import {
 	parseScoutResult,
+	RESULT_CONTRACT_REPAIR_TOOL,
 	resultContractAuthorship,
+	resultContractRepairMessages,
 	validateRecipeResult,
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
@@ -461,5 +465,42 @@ describe("contracts/agent result contract", () => {
 		const output = '{"mutatedPaths":[],"validations":[],"commitMessage":"","summary":""}';
 		strictEqual(resultContractAuthorship({ kind: "mutation-report" }, output).commitMessage, null);
 		strictEqual(resultContractAuthorship({ kind: "mutation-report" }, output).summary, null);
+	});
+
+	it("a repair round is a protocol-legal tool exchange: the result answers a synthetic assistant call", () => {
+		const origin = { provider: "llamacpp", api: "openai-completions", model: "nemotron" };
+		const [call, result] = resultContractRepairMessages(
+			{ contract: { kind: "scout-report" }, reason: "not JSON", attempt: 1, anchors: ["src/a.ts:1-3"] },
+			origin,
+		);
+		strictEqual(call.role, "assistant");
+		strictEqual(call.stopReason, "toolUse", "the synthetic call is never a terminal message");
+		strictEqual(call.content.length, 1);
+		strictEqual(call.content[0].type, "toolCall");
+		strictEqual(call.content[0].name, RESULT_CONTRACT_REPAIR_TOOL);
+		strictEqual(call.content[0].id, "clio-result-contract-repair-1");
+		strictEqual(result.role, "toolResult");
+		strictEqual(result.toolCallId, call.content[0].id, "the tool result pairs with the call the assistant issued");
+		strictEqual(result.toolName, RESULT_CONTRACT_REPAIR_TOOL);
+		strictEqual(result.isError, true);
+		ok(result.content[0].text.includes("Validator reason: not JSON"));
+		ok(result.content[0].text.includes("src/a.ts:1-3"));
+
+		// The provider transform neither orphans the pair nor synthesizes a
+		// second result for it, so the wire carries assistant{tool_calls} then
+		// tool{tool_call_id} after the model's own terminal text.
+		const model = { ...origin, id: origin.model, input: ["text"] } as unknown as Model<"openai-completions">;
+		const terminal = {
+			role: "assistant",
+			content: [{ type: "text", text: "Let me compile the findings." }],
+			stopReason: "stop",
+			...origin,
+			timestamp: 0,
+		};
+		const wire = transformMessages([terminal, call, result] as unknown as Message[], model);
+		strictEqual(wire.length, 3, "no synthetic result is inserted and nothing is dropped");
+		strictEqual(wire[1]?.role, "assistant");
+		strictEqual(wire[2]?.role, "toolResult");
+		strictEqual((wire[2] as { toolCallId: string }).toolCallId, "clio-result-contract-repair-1");
 	});
 });

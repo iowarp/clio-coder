@@ -1147,6 +1147,44 @@ export function resultContractRepairMessage(input: ResultContractRepairInput): s
 	return lines.join("\n");
 }
 
+/** Name of the synthetic tool call that carries a repair round. */
+export const RESULT_CONTRACT_REPAIR_TOOL = "result_contract";
+
+/**
+ * One repair round as a protocol-legal tool exchange: a synthetic assistant
+ * call to `result_contract` and the tool result that answers it, sharing the
+ * id `clio-result-contract-repair-N`. Strict endpoints (OpenAI, Anthropic)
+ * reject a tool result no assistant call issued; local servers tolerated the
+ * bare result, and this keeps the history-append shape #55 measured while
+ * satisfying both. `stopReason: "toolUse"` and the toolCall block keep the
+ * assistant half out of terminal validation, durable output, and the
+ * synthesis sanitizer.
+ */
+export function resultContractRepairMessages(
+	input: ResultContractRepairInput,
+	origin: { provider: string; api: string; model: string },
+) {
+	const id = `clio-result-contract-repair-${input.attempt}`;
+	const timestamp = Date.now();
+	return [
+		{
+			role: "assistant",
+			content: [{ type: "toolCall", id, name: RESULT_CONTRACT_REPAIR_TOOL, arguments: {} }],
+			stopReason: "toolUse",
+			...origin,
+			timestamp,
+		},
+		{
+			role: "toolResult",
+			toolCallId: id,
+			toolName: RESULT_CONTRACT_REPAIR_TOOL,
+			content: [{ type: "text", text: resultContractRepairMessage(input) }],
+			isError: true,
+			timestamp,
+		},
+	] as const;
+}
+
 /** Strict frontmatter parser for the one recipe result-contract schema. */
 export function parseResultContract(value: unknown, sourcePath: string): ResultContract {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {

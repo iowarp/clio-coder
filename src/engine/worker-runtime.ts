@@ -26,7 +26,7 @@ import {
 	parseResultContract,
 	RESULT_CONTRACT_REPAIR_LIMIT,
 	type ResultContract,
-	resultContractRepairMessage,
+	resultContractRepairMessages,
 	validateResultContract,
 } from "../domains/agents/result-contract.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
@@ -630,6 +630,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	if (input.sessionId) options.sessionId = input.sessionId;
 
 	const { agent } = createEngineAgent(options);
+	// The result-contract repair queues a call/result pair that must land in
+	// one drain, or the provider sees a lone assistant tool call.
+	agent.followUpMode = "all";
 	abortWorkerForBound = () => agent.abort();
 	const unsubscribe = agent.subscribe(async (event) => {
 		if (event.type === "turn_start") workerModelRound += 1;
@@ -687,30 +690,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					// directive's own claim that tool use is over at the request
 					// level instead of trusting the model to honor it.
 					synthesisToolLock = true;
-					// Delivered as a tool result, never a user turn. Templates that key
-					// history rendering off the last `user` message re-render every
-					// earlier assistant turn when one is appended mid-run, which
+					// Delivered as a paired tool exchange, never a user turn. Templates
+					// that key history rendering off the last `user` message re-render
+					// every earlier assistant turn when one is appended mid-run, which
 					// invalidates the whole prompt cache: Nemotron reprocessed 11,352
 					// tokens for this directive as `user` against 407 for the same
-					// bytes as a tool result. See issue #55.
-					agent.followUp({
-						role: "toolResult",
-						toolCallId: `clio-result-contract-repair-${resultContractRepairsQueued}`,
-						toolName: "result_contract",
-						content: [
-							{
-								type: "text",
-								text: resultContractRepairMessage({
-									contract,
-									reason: violation,
-									attempt: resultContractRepairsQueued,
-									anchors: observedReadAnchors(),
-								}),
-							},
-						],
-						isError: true,
-						timestamp: Date.now(),
-					} as AgentMessage);
+					// bytes as a tool result (#55). The synthetic assistant call gives
+					// the result a real tool_call_id for strict endpoints (#62).
+					const repair = resultContractRepairMessages(
+						{ contract, reason: violation, attempt: resultContractRepairsQueued, anchors: observedReadAnchors() },
+						{ provider: model.provider, api: model.api, model: model.id },
+					);
+					for (const message of repair) agent.followUp(message as unknown as AgentMessage);
 				} else if (workerBoundFailure === null) {
 					workerBoundFailure = `result contract failed after ${RESULT_CONTRACT_REPAIR_LIMIT} bounded repair rounds: ${violation}`;
 					emit({ type: "clio_run_outcome", payload: { outcomeCode: "result_contract_exhausted" } });
