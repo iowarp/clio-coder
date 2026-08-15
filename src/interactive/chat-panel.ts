@@ -468,25 +468,17 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number): string[] {
 const CLIO_PREFIX = `${TEAL}${AGENT_GLYPH}${RESET} `;
 const CLIO_PREFIX_ERROR = `${RED_CRIT}${AGENT_GLYPH}${RESET} `;
 const USER_PREFIX = `${TEAL}${USER_GLYPH}${RESET} `;
+const PROSE_GUTTER = "  ";
+const PROSE_GUTTER_WIDTH = 2;
 
 /**
- * Prefix the first rendered line of the active assistant entry with the agent glyph.
- * pi-tui's Markdown renderer right-pads every line to the requested width so
- * background colors extend edge-to-edge (markdown.js:104-107), so a line
- * returned at width=N already has visible width N. Prepending the assistant
- * label without stripping the pad would push the line past N, which
- * trips pi-tui's `Rendered line i exceeds terminal width` invariant inside
- * doRender() and crashes the TUI before the caller's output ever reaches the
- * user (regression seen on /compact without a current session at width=120).
- * Trim the trailing pad before prefixing, then re-wrap in case the content
- * itself was already close to `width` and the prefix pushes it past.
+ * Give transcript prose a fixed two-cell ownership gutter. Callers render the
+ * content at `width - 2`, then this function spends those reserved cells on
+ * either the turn glyph or a hanging indent. Tool ledgers never pass through
+ * here, so their existing full-width grammar remains untouched.
  */
-function prefixClioLabel(lines: string[], width: number, prefix: string): string[] {
-	if (lines.length === 0) return lines;
-	const first = lines[0]?.replace(/ +$/, "") ?? "";
-	const prefixed = `${prefix}${first}`;
-	const wrappedFirst = wrapTextWithAnsi(prefixed, width);
-	return [...wrappedFirst, ...lines.slice(1)];
+function hangProseLines(lines: string[], firstPrefix?: string): string[] {
+	return lines.map((line, index) => `${index === 0 && firstPrefix !== undefined ? firstPrefix : PROSE_GUTTER}${line}`);
 }
 
 /**
@@ -569,7 +561,17 @@ function renderThinkingLines(
  * reported 717676 input tokens against a 500k window; it was 65 calls of about
  * 11k, which the preceding one-call turns had already shown.
  */
-function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number): string[] {
+function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number, verbosity: OutputVerbosity): string[] {
+	if (verbosity === "minimal") return [];
+	if (verbosity === "default") {
+		const receipt = truncateToWidth(
+			`  turn · in ${usage.inputTokens} · out ${usage.outputTokens}`,
+			width,
+			GLYPH.ellipsis,
+			false,
+		);
+		return [`${DIM}${receipt}${RESET}`];
+	}
 	const calls = usage.modelCalls !== undefined && usage.modelCalls > 1 ? ` over ${usage.modelCalls} calls` : "";
 	// The label stays separated from the count in both provenances. Deriving the
 	// separator from the `≈` marker glued them together whenever the provider
@@ -692,7 +694,10 @@ function renderEntryLines(
 		return entry.renderBlock(width);
 	}
 	if (entry.role === "user") {
-		return wrapTextWithAnsi(`${USER_PREFIX}${entry.text}`, width);
+		const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
+		const lines: string[] = [];
+		for (const sourceLine of entry.text.split("\n")) lines.push(...wrapTextWithAnsi(sourceLine, contentWidth));
+		return hangProseLines(lines, USER_PREFIX);
 	}
 	if (entry.role === "retryStatus") {
 		return wrapTextWithAnsi(formatRetryStatus(entry.status), width);
@@ -730,6 +735,7 @@ function renderEntryLines(
 		);
 	}
 	const clioPrefix = entry.isError ? CLIO_PREFIX_ERROR : CLIO_PREFIX;
+	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	let labeled = false;
 	for (const seg of entry.segments) {
 		if (seg.kind === "tool") {
@@ -750,16 +756,17 @@ function renderEntryLines(
 		// Text and error segments share the reply-prefix bookkeeping: the first
 		// non-empty one carries the agent glyph and every later one hangs plain.
 		if (seg.kind === "text" && seg.text.length === 0) continue;
-		const rendered = seg.kind === "text" ? renderTextSegmentLines(seg, width) : renderErrorSegmentLines(seg, width);
+		const rendered =
+			seg.kind === "text" ? renderTextSegmentLines(seg, proseWidth) : renderErrorSegmentLines(seg, proseWidth);
 		if (rendered.length === 0) continue;
 		if (!labeled) {
-			lines.push(...prefixClioLabel(rendered, width, clioPrefix));
+			lines.push(...hangProseLines(rendered, clioPrefix));
 			labeled = true;
 		} else {
-			lines.push(...rendered);
+			lines.push(...hangProseLines(rendered));
 		}
 	}
-	if (entry.turnUsage && !entry.pending) lines.push(...renderTurnUsageLine(entry.turnUsage, width));
+	if (entry.turnUsage && !entry.pending) lines.push(...renderTurnUsageLine(entry.turnUsage, width, verbosity));
 	const shouldRenderStatus =
 		entry.pending &&
 		entry.statusLine !== null &&
