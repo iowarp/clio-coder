@@ -323,7 +323,7 @@ describe("contracts/overlay width — settings overlay", () => {
 		center.setSelection("safety", 0);
 		const flat = stripAnsi(center.render(40).join(" ")).replace(/\s+/gu, " ");
 		const help =
-			"read-only observes; suggest parks non-read calls; auto-edit edits, dispatches, and runs recognized commands; full-auto runs except command substitution and system-level changes. A confirmation marked exposure=outward parks for you at auto-edit.";
+			"read-only observes; suggest parks non-read calls; auto-edit edits, dispatches, and runs recognized commands; full-auto runs except command substitution and system-level changes. A confirmation marked exposure=outward parks for you at suggest and auto-edit.";
 		if (flat.includes(help)) return;
 		const shown = flat.slice(flat.indexOf("read-only observes"));
 		ok(shown.includes("…"), `the explanation stopped without a marker: ${JSON.stringify(shown.slice(0, 120))}`);
