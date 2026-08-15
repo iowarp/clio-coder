@@ -75,6 +75,15 @@ const ROW_GAP = "  ";
  * explanation line in this overlay carries the marker.
  */
 const ELLIPSIS = "…";
+const SELECT_UP = "\u001b[A";
+const SELECT_DOWN = "\u001b[B";
+
+/** Settings pickers accept the same j/k navigation as the rows that open them. */
+class SettingsSelectList extends SelectList {
+	override handleInput(data: string): void {
+		super.handleInput(data === "j" ? SELECT_DOWN : data === "k" ? SELECT_UP : data);
+	}
+}
 
 /**
  * Scope tells the operator where an edit lands. Derived from the config-change
@@ -179,7 +188,6 @@ type EntrySettingId =
 	| `targets.${string}`
 	| `fleet.nodes.${string}`;
 export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID | EntrySettingId;
-const ENTRY_ROW_ID = /^(workers\.profiles|workers\.agentBindings|targets|fleet\.nodes)(\.|$)/;
 const REMOVE_PROFILE_CHOICE = "(remove profile)";
 const UNBIND_CHOICE = "(unbind)";
 const AUTO_PLACEMENT_CHOICE = "(auto placement)";
@@ -521,7 +529,7 @@ function selectListSubmenu(
 	note?: string,
 ): SettingSubmenuBuilder {
 	return (_currentValue: string, done: (val?: string) => void) => {
-		const list = new SelectList([...items], Math.min(10, Math.max(1, items.length)), DEFAULT_SELECT_THEME);
+		const list = new SettingsSelectList([...items], Math.min(10, Math.max(1, items.length)), DEFAULT_SELECT_THEME);
 		list.onSelect = (item) => done(item.value);
 		list.onCancel = () => done();
 		return new SubmenuWrapper(title, list, undefined, note);
@@ -1347,6 +1355,97 @@ function changedLeafPaths(before: Readonly<ClioSettings>, after: Readonly<ClioSe
 	return out;
 }
 
+type DeepReadonly<T> = T extends (...args: never[]) => unknown
+	? T
+	: T extends readonly (infer U)[]
+		? readonly DeepReadonly<U>[]
+		: T extends object
+			? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+			: T;
+
+export type SettingsPropagationTiming = "now" | "next-dispatch" | "next-session";
+
+export interface SettingsChangePlan {
+	readonly rowId: EditableSettingId;
+	readonly label: string;
+	readonly originalValue: string;
+	readonly selectedValue: string;
+	readonly original: DeepReadonly<ClioSettings>;
+	readonly proposed: DeepReadonly<ClioSettings>;
+	readonly leaves: readonly {
+		readonly path: string;
+		readonly before: unknown;
+		readonly after: unknown;
+	}[];
+	readonly propagation: readonly { readonly path: string; readonly timing: SettingsPropagationTiming }[];
+	readonly impact: string;
+	readonly sessionCapable: boolean;
+}
+
+function deepFreeze<T>(value: T): DeepReadonly<T> {
+	if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+		for (const child of Object.values(value)) deepFreeze(child);
+		Object.freeze(value);
+	}
+	return value as DeepReadonly<T>;
+}
+
+function propagationTiming(
+	id: string,
+	selectedValue: string,
+	path: string,
+	restartRequired: boolean,
+): SettingsPropagationTiming {
+	if (restartRequired) return "next-session";
+	if (id.startsWith("targets.")) {
+		if (selectedValue === "remove") return "next-dispatch";
+		return path.startsWith("orchestrator.") ? "now" : "next-dispatch";
+	}
+	if (path.startsWith("workers.")) return "next-dispatch";
+	return "now";
+}
+
+function impactFor(propagation: SettingsChangePlan["propagation"]): string {
+	const timings = new Set(propagation.map((entry) => entry.timing));
+	if (timings.has("now") && timings.has("next-dispatch"))
+		return "takes effect for chat now and fleet routing at the next dispatch";
+	if (timings.has("next-session")) return "takes effect next session";
+	if (timings.has("next-dispatch")) return "takes effect at the next dispatch";
+	return "takes effect now";
+}
+
+export function createSettingsChangePlan(
+	settings: Readonly<ClioSettings>,
+	item: Pick<SettingsCenterItem, "id" | "label" | "currentValue" | "scope">,
+	selectedValue: string,
+	sessionDestinationAvailable = true,
+): SettingsChangePlan | null {
+	const original = structuredClone(settings);
+	const proposed = structuredClone(original);
+	applySettingChange(proposed, item.id, selectedValue);
+	const paths = changedLeafPaths(original, proposed);
+	if (paths.length === 0) return null;
+	const restartRequired = item.scope === "restart";
+	const sessionCapable = !restartRequired && sessionDestinationAvailable;
+	const leaves = paths.map((path) => ({ path, before: getAtPath(original, path), after: getAtPath(proposed, path) }));
+	const propagation = paths.map((path) => ({
+		path,
+		timing: propagationTiming(item.id, selectedValue, path, restartRequired),
+	}));
+	return deepFreeze({
+		rowId: item.id,
+		label: item.label,
+		originalValue: item.currentValue,
+		selectedValue,
+		original,
+		proposed,
+		leaves,
+		propagation,
+		impact: impactFor(propagation),
+		sessionCapable,
+	});
+}
+
 interface RowColumns {
 	label: number;
 	path: number;
@@ -1436,7 +1535,8 @@ function formatSettingRow(
 
 export interface SettingsCenterOptions {
 	getBodyHeight: () => number;
-	onCommit: (id: string, newValue: string, scope: "session" | "global") => void;
+	prepareChange: (item: SettingsCenterItem, newValue: string) => SettingsChangePlan | null;
+	onApply: (plan: SettingsChangePlan, scope: "session" | "global") => void;
 	onCancel: () => void;
 	requestRender?: () => void;
 }
@@ -1639,52 +1739,63 @@ export class SettingsCenter implements Component {
 		if (item.submenu) {
 			this.submenuComponent = item.submenu(item.currentValue, (selectedValue) => {
 				this.submenuComponent = null;
-				if (selectedValue !== undefined) this.openScopeConfirm(item, selectedValue);
+				if (selectedValue !== undefined) this.prepareScopeConfirm(item, selectedValue);
 				this.options.requestRender?.();
 			});
 			return;
 		}
 		if (item.values && item.values.length > 0) {
-			let value = this.pendingValue;
-			if (value === null) {
-				const currentIndex = item.values.indexOf(item.currentValue);
-				value = item.values[(currentIndex + 1) % item.values.length] ?? item.currentValue;
-			}
-			this.openScopeConfirm(item, value);
+			const selectedValue = this.pendingValue ?? item.currentValue;
+			const choices = item.values.map((value) => ({ value, label: value }));
+			const list = new SettingsSelectList(choices, Math.min(10, choices.length), DEFAULT_SELECT_THEME);
+			list.setSelectedIndex(Math.max(0, item.values.indexOf(selectedValue)));
+			list.onSelect = (choice) => this.prepareScopeConfirm(item, choice.value);
+			list.onCancel = () => {
+				this.submenuComponent = null;
+				this.options.requestRender?.();
+			};
+			this.submenuComponent = new SubmenuWrapper(
+				`Select ${item.label}`,
+				list,
+				buildHint([{ key: "Enter", verb: "choose" }], "back"),
+			);
 		}
 	}
 
-	/**
-	 * After a value is chosen, apply it to the live session immediately (for
-	 * live-capable knobs) and ask whether to also save it as the global default.
-	 * Restart-required knobs cannot apply live, so they only offer a global save.
-	 */
-	private openScopeConfirm(item: SettingsCenterItem, value: string): void {
-		const restart = item.scope === "restart";
-		if (!restart) this.options.onCommit(item.id, value, "session");
-		const options = restart
+	private prepareScopeConfirm(item: SettingsCenterItem, value: string): void {
+		const plan = this.options.prepareChange(item, value);
+		if (!plan) {
+			this.submenuComponent = null;
+			this.pendingValue = null;
+			this.options.requestRender?.();
+			return;
+		}
+		this.openScopeConfirm(plan);
+	}
+
+	/** Hold one immutable plan while the operator chooses its destination. */
+	private openScopeConfirm(plan: SettingsChangePlan): void {
+		const options = plan.sessionCapable
 			? [
-					{ value: "global", label: "Save globally — restart Clio to apply" },
+					{ value: "session", label: "Apply this session" },
+					{ value: "global", label: "Apply and save globally" },
 					{ value: "cancel", label: "Cancel" },
 				]
 			: [
-					{ value: "global", label: "Save as the global default (new sessions too)" },
-					{ value: "session", label: "Keep it for this session only" },
+					{ value: "global", label: "Apply and save globally" },
+					{ value: "cancel", label: "Cancel" },
 				];
-		const list = new SelectList(options, options.length, DEFAULT_SELECT_THEME);
-		const finish = (chosen: string | null): void => {
-			if (chosen === "global") this.options.onCommit(item.id, value, "global");
+		const list = new SettingsSelectList(options, options.length, DEFAULT_SELECT_THEME);
+		const finish = (chosen: "session" | "global" | "cancel"): void => {
+			if (chosen === "session" || chosen === "global") this.options.onApply(plan, chosen);
 			this.submenuComponent = null;
 			this.pendingValue = null;
 			this.options.requestRender?.();
 		};
-		list.onSelect = (opt) => finish(opt.value);
-		// Esc keeps the live change session-only; for restart knobs nothing was applied.
-		list.onCancel = () => finish(restart ? "cancel" : "session");
-		const title = restart ? `${item.label} → ${value}` : `${item.label} = ${value} · applied to this session`;
-		const note = restart
-			? "This knob only takes effect on the next start. Save it to settings.yaml?"
-			: "Also save it to settings.yaml as the default for new sessions?";
+		list.onSelect = (opt) => finish(opt.value as "session" | "global" | "cancel");
+		list.onCancel = () => finish("cancel");
+		const title = `${plan.label}: ${plan.originalValue} → ${plan.selectedValue}`;
+		const note = `Affects ${plan.leaves.map((leaf) => leaf.path).join(", ")} · ${plan.impact}`;
 		this.submenuComponent = new SubmenuWrapper(title, list, buildHint([{ key: "Enter", verb: "choose" }], "back"), note);
 	}
 
@@ -1917,7 +2028,7 @@ export class SettingsCenter implements Component {
 	private footerScopeNote(item: SettingsCenterItem): string {
 		if (item.readOnly) return "Read-only here · managed on the surface above";
 		if (item.scope === "restart") return "Saved to settings.yaml · restart Clio to apply";
-		return "Enter applies to this session now · then choose to also save it as the global default";
+		return "Enter chooses a value · then choose session, global, or cancel before anything changes";
 	}
 
 	/**
@@ -1998,15 +2109,13 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 	const items = buildSettingItems(deps.getSettings(), buildOptions);
 	const center = new SettingsCenter(items, {
 		getBodyHeight: () => settingsBodyHeight(tui),
-		onCommit: (id: string, value: string, scope: "session" | "global") => {
-			const before = deps.getSettings();
-			const current = structuredClone(before);
-			applySettingChange(current, id, value);
+		prepareChange: (item, value) =>
+			createSettingsChangePlan(deps.getSettings(), item, value, Boolean(deps.commitSetting)),
+		onApply: (plan, scope) => {
 			if (deps.commitSetting) {
-				const paths = ENTRY_ROW_ID.test(id) ? changedLeafPaths(before, current) : [id];
-				for (const path of paths) deps.commitSetting(path, current, scope);
-			} else deps.writeSettings(current);
-			deps.notice?.("success", formatSettingChangeNotice(id, value, scope), `settings:${id}`);
+				for (const leaf of plan.leaves) deps.commitSetting(leaf.path, plan.proposed as ClioSettings, scope);
+			} else deps.writeSettings(plan.proposed as ClioSettings);
+			deps.notice?.("success", formatSettingChangeNotice(plan.rowId, plan.selectedValue, scope), `settings:${plan.rowId}`);
 			refreshRows();
 		},
 		onCancel: () => deps.onClose(),

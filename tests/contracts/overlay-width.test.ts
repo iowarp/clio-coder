@@ -247,7 +247,8 @@ function settingsCenter(bodyHeight: number): SettingsCenter {
 	settings.autonomy = "auto-edit";
 	return new SettingsCenter(buildSettingItems(settings), {
 		getBodyHeight: () => bodyHeight,
-		onCommit: () => undefined,
+		prepareChange: () => null,
+		onApply: () => undefined,
 		onCancel: () => undefined,
 	});
 }
@@ -303,7 +304,7 @@ describe("contracts/overlay width — settings overlay", () => {
 		const flat = stripAnsi(center.render(120).join(" ")).replace(/\s+/gu, " ");
 		ok(flat.includes("Autonomy level"), flat);
 		ok(flat.includes("How freely Clio acts"), `the description column lost the explanation: ${flat}`);
-		ok(flat.includes("Enter applies to this session now"), `the description column lost the scope note: ${flat}`);
+		ok(flat.includes("session, global, or cancel"), `the description column lost the scope note: ${flat}`);
 	});
 
 	it("marks the description column when the explanation outruns the height", () => {
