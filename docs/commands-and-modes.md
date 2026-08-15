@@ -128,38 +128,38 @@ clio-coder run \
 
 ## Interactive Slash Commands
 
-Slash commands are available inside the TUI. Type `/` at the start of the prompt to open autocomplete.
+Slash commands are available inside the TUI. Type `/` at the start of the prompt to open the grouped command palette autocomplete.
 
-The registry table below lists the available interactive slash commands. The "Aliases" column shows alternative command triggers that invoke the same command. The "Usage" column details the expected arguments and options, with brackets `[]` indicating optional arguments and angle brackets `<>` indicating required arguments.
+The registry table below lists the available interactive slash commands. On a bare `/`, commands are presented in groups (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Aliases are stem-gated: they are hidden by default and only surfaced when the typed stem matches the alias spelling. The "Usage" column details expected arguments, with brackets `[]` indicating optional arguments and angle brackets `<>` indicating required arguments.
 
-| Command | Aliases | Usage | Purpose |
-| --- | --- | --- | --- |
-| `/quit` | `/exit` | `/quit` | Exit Clio Coder |
-| `/help` | - | `/help [query]` | Open the interactive help center showing commands and keys |
-| `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
-| `/prompts` | - | `/prompts` | List prompt templates |
-| `/extensions` | - | `/extensions` | List installed extensions |
-| `/share` | - | `/share export <path> \| /share import [--dry-run] [--force] <path>` | Export or import Clio archives |
-| `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] <agent> <task>` | Run a fleet agent |
-| `/delegate` | - | `/delegate <agent-id> <task>` | Run an ACP delegation agent |
-| `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
-| `/targets` | - | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
-| `/cost` | - | `/cost` | Show session token and cost totals |
-| `/context` | `/ctx`, `/compact` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
-| `/fleet` | - | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
-| `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
-| `/memory` | - | `/memory seed` | Inspect task memory or seed it from the newest handoff |
-| `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
-| `/thinking` | - | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
-| `/output` | - | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
-| `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
-| `/scoped-models` | - | `/scoped-models` | Open Settings → Models: the Alt+J / Alt+K cycle set and favorites |
-| `/settings` | `/config` | `/settings [section]` | Open interactive settings |
-| `/resume` | - | `/resume` | Resume a past session |
-| `/new` | - | `/new` | Start a fresh session |
-| `/tree` | - | `/tree` | Open session tree navigator |
-| `/fork` | - | `/fork` | Fork from an assistant turn |
-| `/export` | - | `/export [path]` | Export the session transcript to Markdown |
+| Group | Command | Aliases | Usage | Purpose |
+| --- | --- | --- | --- | --- |
+| **Run** | `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] <agent> <task>` | Run a fleet agent |
+| **Run** | `/delegate` | - | `/delegate <agent-id> <task>` | Run an ACP delegation agent |
+| **Run** | `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
+| **Run** | `/targets` | - | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
+| **Inspect** | `/cost` | - | `/cost` | Show session token and cost totals |
+| **Inspect** | `/context` | `/ctx`, `/compact` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
+| **Inspect** | `/fleet` | - | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
+| **Inspect** | `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
+| **Inspect** | `/memory` | - | `/memory seed` | Inspect task memory or seed it from the newest handoff |
+| **Inspect** | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
+| **Configure** | `/thinking` | - | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
+| **Configure** | `/output` | - | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
+| **Configure** | `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
+| **Configure** | `/scoped-models` | - | `/scoped-models` | Open Settings → Models: the Alt+J / Alt+K cycle set and favorites |
+| **Configure** | `/settings` | `/config` | `/settings [section]` | Open interactive Settings Center |
+| **Configure** | `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
+| **Configure** | `/prompts` | - | `/prompts` | List prompt templates |
+| **Configure** | `/extensions` | - | `/extensions` | List installed extensions |
+| **Configure** | `/share` | - | `/share export <path> \| /share import [--dry-run] [--force] <path>` | Export or import Clio archives |
+| **Sessions** | `/quit` | `/exit` | `/quit` | Exit Clio Coder |
+| **Sessions** | `/help` | - | `/help [query]` | Open the interactive help center showing commands and keys |
+| **Sessions** | `/resume` | - | `/resume` | Resume a past session |
+| **Sessions** | `/new` | - | `/new` | Start a fresh session |
+| **Sessions** | `/tree` | - | `/tree` | Open session tree navigator |
+| **Sessions** | `/fork` | - | `/fork` | Fork from an assistant turn |
+| **Sessions** | `/export` | - | `/export [path]` | Export the session transcript to Markdown |
 
 `/context` with no arguments opens the context-window ledger overlay. The
 subcommands own the durable project-context noun: `compact` summarizes older
@@ -197,12 +197,11 @@ the help overlay.
 A rejected command stays in the input line. The error names the spelling and the
 text is still there to correct, rather than having to be retyped.
 
-
 Configuration lives in one place: the `/settings` overlay. `/targets`, `/fleet`, `/scoped-models`, bare `/thinking`, and bare `/output` are deep links that open it focused on the matching section; `/settings <section>` reaches every other section the same way. `/thinking <level>`, `/output <verbosity>`, and `/model <pattern>` stay as quick setters that apply without opening anything.
 
-Settings → Targets lists one row per configured target with its roles (chat, fleet, memory) and probe health. `Enter` on a row offers use (chat and fleet dispatch), connect (the same API-key or OAuth flow as `clio-coder auth login`, then a probe), probe, and remove; the overlay probes every target live when it opens. Adding a target stays with `clio-coder targets add`. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat action.
+Settings → Targets presents an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. `Enter` opens actions for `Use` (switches active chat target and rebases model), `Connect` (runs the API-key or OAuth flow then probes), `Probe`, and `Remove` (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via `clio-coder targets add`.
 
-Settings → Fleet holds the worker default target, model, and thinking level, one editable row per fleet profile field and per agent binding, the retry ceiling, and read-only rows for each fleet node's placement state. Running and retrying dispatches live in the `Alt+W` Fleet Runs board, which also steers and cancels them.
+Settings → Fleet is an entity workbench organized with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Dispatched worker defaults and profile rows render as compact summaries (`fast-local dynamo/qwen  high  auto`), drilling into fields (`target`, `model`, `thinkingLevel`, `node`) on `Enter`. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the `Alt+W` Fleet Runs board, which also steers and cancels them.
 
 The `/tasks` overlay shows the session task board the agent maintains through
 the `tasks` tool: every task with its status, the evidence note recorded when
@@ -213,7 +212,7 @@ board persists in the session ledger as `taskLedger` entries, so it survives
 The read-only `/memory` overlay keeps durable and session memory attributable
 in one place. It lists approved evidence-backed lessons, then the live task
 bank by private status, knowledge, and procedural class, including each
-entry's injection count and the last memory-step outcome. The welcome island
+entry's injection count and the last memory-step outcome. The welcome launchpad
 and expanded dashboard summarize whether intervention is on, its rules or LLM
 tier, and current bank size.
 After `/resume`, Clio offers `/memory seed` when the newest handoff contains a
@@ -223,33 +222,35 @@ structured snapshot. Seeding is explicit, deduplicated, and unavailable while
 ## Keybindings
 
 App bindings use `Alt + <key>` as the primary scheme, plus `Shift+Tab`,
-`Ctrl+D`, and a portable `Ctrl+G` leader. Modern terminals and Linux/meta
+`Ctrl+D`, `Shift+Enter` / `Ctrl+J`, and a portable `Ctrl+G` leader. Modern terminals and Linux/meta
 setups send Alt directly. Stock macOS Terminal.app needs **Use Option as Meta
 key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 `Ctrl+G` then the Alt binding letter.
 
 | Binding | Action |
 | --- | --- |
-| `Shift+Tab` | Cycle thinking level. |
-| `Alt+T` | Open the session tree navigator. |
-| `Alt+U` | Toggle the footer dashboard between compact and expanded layouts. |
+| `Enter` | Send draft prompt (when idle) or steer active assistant run (when streaming). |
+| `Shift+Enter` / `Ctrl+J` | Insert a newline into multiline editor input. |
+| `Alt+Enter` | Queue the current draft as a follow-up message delivered after the active run finishes. |
+| `Alt+Up` | Restore queued steering and follow-up messages to the editor. |
+| `Shift+Tab` | Cycle orchestrator thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). |
+| `Alt+T` | Open the session tree navigator (`/tree`). |
+| `Alt+U` | Toggle the footer dashboard between compact (quiet 2-zone) and expanded (4-zone urgency) layouts. |
 | `Alt+L` | Open the model and targets selector. |
-| `Alt+J` / `Alt+K` | Cycle through the scoped model set (when empty, displays a notice directing the operator to `/scoped-models`, which opens Settings → Models). |
+| `Alt+J` / `Alt+K` | Cycle forward / backward through the scoped model set (when empty, displays a notice directing the operator to `/scoped-models`). |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). |
 | `Alt+S` / `Ctrl+Alt+B` | Convert an active attached dispatch to a detached background batch. |
-| `Alt+O` | Toggle the latest tool segment between collapsed and full body. |
-| `Ctrl+Alt+O` / `Alt+Shift+O` | Toggle all tool segments between collapsed and full bodies. |
-| `Alt+P` | Toggle live partial tool output in expanded tool bodies. |
+| `Alt+O` | Toggle the latest tool segment between collapsed subline and full body. |
+| `Ctrl+Alt+O` / `Alt+Shift+O` | Toggle all tool segments between collapsed sublines and full bodies. |
+| `Alt+P` | Toggle streaming partial tool output in expanded tool bodies. |
 | `Alt+R` | Toggle the latest thinking block between hidden marker and full body. |
 | `Ctrl+Alt+R` / `Alt+Shift+R` | Toggle all thinking blocks between hidden markers and full bodies. |
 | `Alt+G` | Open the current input in an external editor. |
 | `Alt+X` | Dismiss footer notifications. |
-| `Alt+Enter` | Queue the current input as a follow-up message. |
-| `Alt+Up` | Restore queued follow-up messages to the editor. |
 | `Ctrl+G`, then a letter | Portable leader fallback for Alt-letter actions. |
-| `Ctrl+C` | With no overlay, cancel a stream, clear input, or press twice to exit. With an overlay open, close/cancel that overlay only. |
+| `Ctrl+C` | With no overlay: cancel stream, clear input, or press twice to exit. With an overlay open: close/cancel that overlay only. |
 | `Ctrl+D` | Exit when the editor is empty; otherwise delete the next character (pi-compatible). It never exits from inside an overlay. |
-| `Esc` | With an overlay open, stays inside it (list filters clear first, then close). With no overlay, cancel a stream/bash operation or collapse the dashboard. |
+| `Esc` | With an overlay open: clear non-empty filter first, move up drill-down level, then close/cancel. With no overlay: cancel stream/operation or collapse dashboard. |
 
 When scripting Clio inside tmux, prefer `tmux send-keys C-m` for submit/confirm keys instead of the literal `Enter` token; some tmux/terminal combinations do not deliver `Enter` reliably.
 
@@ -481,11 +482,15 @@ Clio Coder features direct, interactive controls for model reasoning and thinkin
 
 ## TUI Surface Refinements
 
-The Clio TUI has been enhanced to maximize readability and command discovery:
+The Clio TUI has been enhanced to maximize readability, operational focus, and command discovery:
 
-- **Redesigned Compact Footer:** The footer dashboard displays real-time token, cost, and target indicators in a single-row layout. Use `Alt+U` to toggle the footer between compact and expanded widgets.
-- **Relocated Telemetry:** Per-turn telemetry is surfaced in the footer activity area, keeping token consumption and execution costs visible without adding extra transcript noise.
-- **Overlay Navigation:** Standardized overlays are available for settings, model selection, `/help` key reference, target health, and session tracking.
+- **Adaptive Welcome Launchpad:** Before the first prompt, renders a compact launchpad with bold CAPS section tags (`WORKSPACE`, `ROUTE`, `NEXT`), honest readiness indicators, and context-sensitive next actions. Upon first prompt submission, it deliberately collapses into a single-line session header (`>C_ Clio Coder vX.Y.Z · EXPERIMENTAL · ctx ready · type a task`) so the conversation transcript owns the viewport.
+- **Unmistakable Clio Composer:** The input editor features an explicit left section tag reflecting current prompt semantics (`MESSAGE` while idle, `FOLLOW-UP` while Clio runs, and orange `STEER` when Enter steers in-flight execution). Includes the dim placeholder `Ask Clio…  / for commands` and lower-rail hint `Enter send · Shift+Enter newline` at wider widths.
+- **Progressively Disclosed Footer:** The compact footer uses a quiet two-zone status layout that suppresses idle decoration (`tools none`, `◌ idle`, and default-output tags). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge and best current/last-turn receipt. `Alt+U` toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).
+- **Footer Notification Degradation Ladder:** The footer notification badge reserves the severity head (`glyph count noun`) and `[Alt+X] dismiss` tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.
+- **Grouped Slash Command Palette:** Typing `/` opens an autocomplete command palette grouped by operational category (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Aliases are stem-gated and only surface when the typed stem matches the alias.
+- **Voice-First Transcript & Receipts:** User (`› `) and assistant (`✦ `) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor output verbosity (`minimal` none, `default` compact dim `turn · in N · out M`, `verbose` full receipt with call counts, cache reads/writes, reasoning provenance, and verification caveats).
+- **Transactional Settings Center:** Open via `/settings` (or deep links `/targets`, `/fleet`, `/scoped-models`, `/thinking`, `/output`). Grouped into `CORE`, `ROUTING`, `RUNTIME`, and `EXPERIENCE` sections. Value edits are transactional: `Enter` opens value pickers/checklists and constructs immutable change plans offering `Apply this session`, `Apply and save globally`, or `Cancel`. Includes the Fleet entity workbench, Targets console table with in-place action drawer, scoped-model checklist, and narrow-terminal drill-down navigation below 72 columns.
 
 ## Overlay and Presentation Conventions
 
@@ -505,9 +510,9 @@ Diagnostic writes in the transcript use the themed notice channel instead of raw
 
 | Level | Glyphs | Color Token | Purpose |
 | --- | --- | --- | --- |
-| `info` | `·` | `dim` | General system information and usage |
+| `info` | `ℹ` | `info` | Informational notices and general system status |
 | `success` | `✓` | `success` | Operation completed successfully |
-| `warn` | `!` | `warning` | Non-fatal issue or precaution |
+| `warn` | `⚠` | `warning` | Non-fatal issue or precaution |
 | `error` | `✗` | `error` | Fatal issue or operation failure |
 
 ### ListOverlay Behavior
@@ -525,6 +530,7 @@ The detail pane displays structured descriptions, usage, or state metadata using
 
 All TUI overlays fluidly adapt to narrow terminals down to 40 columns:
 - Split overlays such as `/view` gracefully fall back to a single-pane presentation with `[Tab]` switching between list and content panes.
+- Settings provides a drill-down navigation stack below 72 columns (sections → rows → details) with breadcrumbs and `Esc` backtracking.
 - Text content and detail descriptions wrap cleanly without line truncation.
 
 ## Troubleshooting
