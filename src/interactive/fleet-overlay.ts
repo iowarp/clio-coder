@@ -22,6 +22,7 @@ import {
 	visibleWidth,
 } from "../engine/tui.js";
 import { deriveRunEvidenceState, evidenceMarker } from "./dispatch-board.js";
+import { clockLocal } from "./format-time.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "./overlay-frame.js";
 import {
 	type SettingSubmenuBuilder,
@@ -81,10 +82,7 @@ function formatTokens(value: number): string {
 // raw ISO string. An unparseable value falls back to itself rather than an
 // empty cell.
 function formatClock(value: string): string {
-	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) return value;
-	const pad = (n: number): string => String(n).padStart(2, "0");
-	return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+	return Number.isFinite(Date.parse(value)) ? clockLocal(value) : value;
 }
 
 function dim(text: string): string {

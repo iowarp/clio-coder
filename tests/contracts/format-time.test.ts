@@ -1,18 +1,7 @@
 import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { clockLocal, dateLocal, relative } from "../../src/interactive/format-time.js";
-
-/** Runs under a pinned zone so an assertion does not depend on the runner's TZ. */
-function withTimeZone<T>(zone: string, run: () => T): T {
-	const previous = process.env.TZ;
-	process.env.TZ = zone;
-	try {
-		return run();
-	} finally {
-		if (previous === undefined) delete process.env.TZ;
-		else process.env.TZ = previous;
-	}
-}
+import { withTimeZone } from "../harness/clock.js";
 
 /** 21:30 on the 14th in Chicago, 08:00 on the 15th in Kolkata: the date differs too. */
 const INSTANT = "2026-08-15T02:30:00.000Z";

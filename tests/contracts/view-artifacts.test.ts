@@ -28,6 +28,7 @@ import {
 	VIEW_ARTIFACT_LINE_CAP,
 	verifyReceiptFile,
 } from "../../src/interactive/view/artifacts.js";
+import { withTimeZoneAsync } from "../harness/clock.js";
 
 async function scratchDir(): Promise<string> {
 	return mkdtemp(join(tmpdir(), "clio-view-artifacts-"));
@@ -484,6 +485,27 @@ describe("contracts/view-artifacts", () => {
 		ok(text.includes("cost: $0.0050"), text);
 		ok(!text.includes("costUsd: 0.005"), "dispatch load should not expose the raw costUsd field");
 		ok(text.includes("model: very-long-single"), text);
+	});
+
+	// The run started at noon UTC. An operator reading the artifact wants the
+	// clock on their wall, and the raw instant is one line away in the receipt.
+	it("stamps dispatch start and end in the operator's zone, not UTC", async () => {
+		const stateDir = await scratchDir();
+		const envelope = fixtureEnvelope(stateDir, "run-zone");
+		await mkdir(stateDir, { recursive: true });
+		await writeFile(runLedgerPath(stateDir), JSON.stringify([envelope], null, 2));
+
+		const body = async (zone: string): Promise<string> =>
+			withTimeZoneAsync(zone, async () => {
+				const provider = new DispatchArtifactProvider({ stateDir, readSessionEntries: () => [] });
+				const artifacts = await provider.list();
+				return ((await artifacts[0]?.load())?.lines ?? []).join("\n");
+			});
+
+		ok((await body("America/Chicago")).includes("started: 07:00:00"), await body("America/Chicago"));
+		ok((await body("Asia/Kolkata")).includes("started: 17:30:00"), await body("Asia/Kolkata"));
+		ok((await body("UTC")).includes("started: 12:00:00"), await body("UTC"));
+		ok((await body("America/Chicago")).includes("ended: 07:00:05"), await body("America/Chicago"));
 	});
 
 	it("loads file-backed tool outputs and caps large output files", async () => {

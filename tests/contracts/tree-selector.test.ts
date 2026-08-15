@@ -5,6 +5,7 @@ import type { TreeSnapshot } from "../../src/domains/session/tree/navigator.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import { forkParentLine, formatTreeRow, TreeOverlayView } from "../../src/interactive/overlays/tree-selector.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
+import { withTimeZone } from "../harness/clock.js";
 
 const ESC = "\x1b";
 const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
@@ -108,11 +109,42 @@ describe("contracts/tree-selector", () => {
 
 	it("aligns the timestamp column on visible width, not escape bytes", () => {
 		const node = { ...snapshot.nodesById["turn-2"], label: "checkpoint" };
-		const line = formatTreeRow({ depth: 1, node, sessionId: "session-1" } as never, { showTimestamps: true, width: 80 });
+		const line = withTimeZone("UTC", () =>
+			formatTreeRow({ depth: 1, node, sessionId: "session-1" } as never, { showTimestamps: true, width: 80 }),
+		);
 
 		strictEqual(visibleWidth(line), 80);
 		ok(stripAnsi(line).includes(`label:"checkpoint"`), stripAnsi(line));
 		ok(stripAnsi(line).trimEnd().endsWith("2026-06-11 00:00:01"), stripAnsi(line));
+	});
+
+	// Shift+T is an explicit ask to read these, and the row is the same overlay
+	// family #46 was filed against: the stamp is 2026-06-11T00:00:01Z, so an
+	// operator in Chicago is one calendar day and five hours away from it.
+	it("renders the Shift+T timestamp in the operator's zone, not UTC", () => {
+		const node = snapshot.nodesById["turn-2"];
+		const stamp = (zone: string): string =>
+			withTimeZone(zone, () =>
+				stripAnsi(
+					formatTreeRow({ depth: 0, node, sessionId: "session-1" } as never, { showTimestamps: true, width: 80 }),
+				).trimEnd(),
+			);
+
+		ok(stamp("America/Chicago").endsWith("2026-06-10 19:00:01"), stamp("America/Chicago"));
+		ok(stamp("Asia/Kolkata").endsWith("2026-06-11 05:30:01"), stamp("Asia/Kolkata"));
+		ok(stamp("UTC").endsWith("2026-06-11 00:00:01"), stamp("UTC"));
+		// The width math reads the rendered stamp, so no zone may change the column.
+		for (const zone of ["America/Chicago", "Asia/Kolkata", "UTC"]) {
+			strictEqual(
+				visibleWidth(
+					withTimeZone(zone, () =>
+						formatTreeRow({ depth: 0, node, sessionId: "session-1" } as never, { showTimestamps: true, width: 80 }),
+					),
+				),
+				80,
+				zone,
+			);
+		}
 	});
 
 	// A session is a chain: every message is a child of the one before it. The

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { escapeHtml, runPage } from "../public/app.js";
+import { adoptServerClock, escapeHtml, runPage } from "../public/app.js";
 
 describe("trace viewer client", () => {
 	it("renders waterfall, tool span, gate evidence, attempts, and truthful missing spend", () => {
@@ -180,6 +180,65 @@ describe("trace viewer client", () => {
 		assert.match(html, /1200ms|1\.2s/);
 
 		assert.doesNotMatch(html, /undefined/);
+	});
+
+	// Every other instant on the page was stamped by the orchestrator. A live
+	// span used to be measured against the browser's clock, so a machine a few
+	// minutes off drew a bar that disagreed with the timestamps beside it.
+	it("measures a live span against the server's clock, not the browser's", () => {
+		const run = {
+			run_id: "run-live",
+			status: "running",
+			agent: "coder",
+			target: "local",
+			model: "gpt",
+			node: "blade",
+			started_at: "2026-01-01T00:00:00.000Z",
+			ended_at: null,
+		};
+		const phase = {
+			phase_id: "p1",
+			run_id: "run-live",
+			seq: 0,
+			name: "build",
+			kind: "agent",
+			owner: "coder",
+			status: "running",
+			attempt: 0,
+			started_at: "2026-01-01T00:00:00.000Z",
+			ended_at: null,
+		};
+		const asHeader = (iso) => new Date(iso).toUTCString();
+
+		try {
+			adoptServerClock(asHeader("2026-01-01T00:01:00.000Z"), Date.now());
+			assert.match(runPage(run, [phase], [], []), /Run waterfall <small>1m 0s<\/small>/);
+
+			// Move only the server's clock: the rendered span must follow it.
+			adoptServerClock(asHeader("2026-01-01T01:01:00.000Z"), Date.now());
+			assert.match(runPage(run, [phase], [], []), /Run waterfall <small>61m 0s<\/small>/);
+		} finally {
+			adoptServerClock(asHeader(new Date().toISOString()), Date.now());
+		}
+	});
+
+	// A bare toLocaleString() renders "1/1/2026, 12:00:00 AM" in one browser and
+	// something else in the next. The CLI pins its rendering; so does this.
+	it("pins timestamp rendering instead of inheriting the browser locale", () => {
+		const run = {
+			run_id: "run-1",
+			status: "success",
+			agent: "coder",
+			target: "local",
+			model: "gpt",
+			node: "blade",
+			started_at: "2026-01-01T00:00:00.000Z",
+			ended_at: "2026-01-01T00:01:00.000Z",
+		};
+		const html = runPage(run, [], [], []);
+		assert.match(html, /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+		assert.doesNotMatch(html, /\d{1,2}\/\d{1,2}\/\d{4}/);
+		assert.doesNotMatch(html, /\b(AM|PM)\b/);
 	});
 
 	it("renders an honest fallback line when no receipt exists, without the word 'undefined'", () => {

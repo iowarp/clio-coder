@@ -20,6 +20,7 @@ import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
+import { dateLocal } from "./format-time.js";
 import { resolveThinkingCapability } from "./overlays/thinking-selector.js";
 import {
 	type ContextClearCommandOptions,
@@ -256,7 +257,10 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				rehydrateChatPanelFromTurns(exportPanel, turns, { unboundedToolBodies: true });
 				exportPanel.toggleAllToolsExpanded();
 				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripAnsiForExport);
-				const date = (deps.now?.() ?? new Date()).toISOString().slice(0, 10);
+				// The operator names this file by the day they ran the export, so the
+				// date in it is their calendar date. The header below keeps the ISO
+				// instant, which is the machine-readable half of the same fact.
+				const date = dateLocal(deps.now?.() ?? new Date());
 				const target = resolve(
 					pathArg && pathArg.trim().length > 0 ? pathArg.trim() : join(".clio-coder", "exports", `${sessionId}-${date}.md`),
 				);

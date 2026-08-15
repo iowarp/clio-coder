@@ -11,6 +11,7 @@ import {
 	Text,
 	type TUI,
 } from "../../engine/tui.js";
+import { clockLocal, dateLocal } from "../format-time.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { GLYPH } from "../theme/index.js";
 
@@ -95,7 +96,7 @@ function buildMessagePickerRows(turns: ReadonlyArray<MessageEntry>): MessagePick
 function formatTimestampForRow(timestamp: string): string {
 	const millis = Date.parse(timestamp);
 	if (!Number.isFinite(millis)) return "";
-	return new Date(millis).toISOString().slice(0, 16).replace("T", " ");
+	return `${dateLocal(millis)} ${clockLocal(millis)}`;
 }
 
 function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): SelectItem[] {

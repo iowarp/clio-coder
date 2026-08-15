@@ -187,15 +187,26 @@ export interface AuditWriter {
 const REDACT_KEY_RE = /(password|token|secret|key|auth|credential)/i;
 const MAX_STRING_LEN = 200;
 
+// Local-date YYYY-MM-DD. Intl.DateTimeFormat with en-CA emits ISO ordering in
+// local time, which is simpler than composing the parts manually. The formatter
+// lives at module scope because every audit row calls it and constructing one is
+// expensive enough to matter on a path this file's header says must not block.
+//
+// A formatter resolves its zone at construction and never re-reads it, so it is
+// rebuilt when process.env.TZ no longer matches the zone it was built for. This
+// is the same idiom as src/interactive/format-time.ts; it costs one string
+// comparison per row and keeps a mid-process TZ change from writing rows into
+// the previous zone's file.
+const DATE_OPTIONS: Intl.DateTimeFormatOptions = { year: "numeric", month: "2-digit", day: "2-digit" };
+let dateFormatterZone = process.env.TZ;
+let dateFormatter = new Intl.DateTimeFormat("en-CA", DATE_OPTIONS);
+
 function localDateString(d: Date): string {
-	// Local-date YYYY-MM-DD. Intl.DateTimeFormat with en-CA emits ISO ordering
-	// in local time, which is simpler than composing the parts manually.
-	const fmt = new Intl.DateTimeFormat("en-CA", {
-		year: "numeric",
-		month: "2-digit",
-		day: "2-digit",
-	});
-	return fmt.format(d);
+	if (process.env.TZ !== dateFormatterZone) {
+		dateFormatterZone = process.env.TZ;
+		dateFormatter = new Intl.DateTimeFormat("en-CA", DATE_OPTIONS);
+	}
+	return dateFormatter.format(d);
 }
 
 function newCorrelationId(): string {

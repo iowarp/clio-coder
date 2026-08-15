@@ -23,6 +23,7 @@ import {
 	ViewOverlayView,
 	viewFooterHint,
 } from "../../src/interactive/view/view-overlay.js";
+import { withTimeZone } from "../harness/clock.js";
 
 const ESC = String.fromCharCode(27);
 const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
@@ -351,6 +352,23 @@ describe("contracts/view-overlay", () => {
 		strictEqual(nextCategorySelection(artifacts, 3, 1), 0, "next wraps to the first non-empty category");
 		strictEqual(nextCategorySelection(artifacts, 0, -1), 3, "previous wraps to the last non-empty category");
 		strictEqual(nextCategorySelection(artifacts.slice(0, 2), 1, 1), 1, "one-category filters keep their selection");
+	});
+
+	// The header's clock is the operator's; the artifact body still carries the
+	// instant, so the two can be reconciled rather than merely agree.
+	it("clocks an artifact header in the operator's zone, not UTC", () => {
+		const item = artifact({
+			id: "run-zone",
+			category: "receipt",
+			title: "receipt",
+			timestamp: Date.UTC(2026, 5, 11, 12, 0, 5),
+		});
+		const header = (zone: string): string =>
+			withTimeZone(zone, () => stripAnsi(buildArtifactHeader(item, undefined, 120)));
+
+		ok(header("America/Chicago").includes("07:00:05"), header("America/Chicago"));
+		ok(header("Asia/Kolkata").includes("17:30:05"), header("Asia/Kolkata"));
+		ok(header("UTC").includes("12:00:05"), header("UTC"));
 	});
 
 	it("paints verification state into artifact headers", () => {

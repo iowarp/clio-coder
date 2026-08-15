@@ -25,6 +25,7 @@ import {
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
 import { type Component, getCapabilities, Image, type ImageTheme, truncateToWidth } from "../engine/tui.js";
+import { relative } from "./format-time.js";
 import { brandMark, type ClioTheme, clioTheme, fitUnits, formatTargetLabel, frame, GLYPH } from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
@@ -146,22 +147,6 @@ function healthReadout(status: TargetStatus | null): string | null {
 	return reason && reason !== status.health.status ? `${status.health.status}: ${reason}` : status.health.status;
 }
 
-function formatRelativeTime(mtimeMs: number, now = Date.now()): string {
-	const diffMs = now - mtimeMs;
-	if (diffMs < 0) return "just now";
-	const sec = Math.floor(diffMs / 1000);
-	if (sec < 5) return "just now";
-	if (sec < 60) return `${sec}s ago`;
-	const min = Math.floor(sec / 60);
-	if (min < 60) return `${min}m ago`;
-	const hr = Math.floor(min / 60);
-	if (hr < 24) return `${hr}h ago`;
-	const day = Math.floor(hr / 24);
-	if (day === 1) return "yesterday";
-	if (day < 7) return `${day}d ago`;
-	return new Date(mtimeMs).toISOString().slice(0, 10);
-}
-
 /**
  * Extract bare entry-point paths from the codewiki digest. The digest lists
  * `- <path> (<lang>, <loc> loc): <summary>` bullets under an `entry points:`
@@ -223,7 +208,7 @@ function handoffFacts(cwd: string): { handoffCount: number; handoffFreshness: st
 		}
 		return {
 			handoffCount: files.length,
-			handoffFreshness: newestMtime > 0 ? formatRelativeTime(newestMtime) : "none",
+			handoffFreshness: newestMtime > 0 ? relative(newestMtime) : "none",
 		};
 	} catch {
 		return { handoffCount: 0, handoffFreshness: "none" };
