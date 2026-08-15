@@ -65,11 +65,12 @@ async function route() {
 
 async function renderRuns() {
 	if (!app) return;
+	const prevQuery = document.getElementById("runSearchInput")?.value ?? "";
 	const { runs } = await api("/api/runs?limit=100");
 	app.innerHTML = `<div class="eyebrow">Durable dispatch mirror</div><div class="title-row"><h1>Recent runs</h1><p>Live and historical activity share one SQLite cursor. Select a run to inspect its phases, tool spans, evidence, and spend.</p></div>${runs.length > 3 ? '<div class="filter-bar"><input type="text" id="runSearchInput" class="search-input" placeholder="Filter runs by ID, task, agent, model, or status…"></div>' : ""}<section class="runs" id="runsList">${runs.map(runCard).join("") || '<div class="empty">No traced runs yet.</div>'}<div id="noRunsMatch" class="empty" style="display:none">No runs match filter.</div></section>`;
 	const input = document.getElementById("runSearchInput");
 	if (input) {
-		input.addEventListener("input", () => {
+		const applyFilter = () => {
 			const query = input.value.toLowerCase().trim();
 			const cards = document.querySelectorAll("#runsList .run");
 			let matchCount = 0;
@@ -81,7 +82,12 @@ async function renderRuns() {
 			}
 			const noMatch = document.getElementById("noRunsMatch");
 			if (noMatch) noMatch.style.display = matchCount === 0 && cards.length > 0 ? "" : "none";
-		});
+		};
+		if (prevQuery) {
+			input.value = prevQuery;
+			applyFilter();
+		}
+		input.addEventListener("input", applyFilter);
 	}
 	if (runs.some((run) => run.status === "running" || run.status === "queued")) state.poll = setTimeout(route, 1000);
 }
