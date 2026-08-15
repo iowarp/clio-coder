@@ -683,6 +683,41 @@ describe("chat-panel agent voice", () => {
 		}
 	});
 
+	/**
+	 * Live captures put a blank line between the suggestion and the answer. The
+	 * remainder then opened with a newline, so the answer's first rendered row
+	 * was empty and the glyph decorated that empty row instead of the prose.
+	 */
+	it("gives ✦ to the answer text when a blank line separates it from the suggestion", () => {
+		const suggestion = SKILL_SUGGESTION_ANCHOR.replace("<name>", "tui-design");
+		const answer = "The substantive answer prose follows after a blank line.";
+		for (const width of [40, 72, 80, 100]) {
+			const panel = createChatPanel({ now: frozen.now });
+			panel.applyEvent({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: `${suggestion}\n\n${answer}` }],
+					stopReason: "stop",
+				},
+			} as ChatLoopEvent);
+			panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+
+			const rows = panel.render(width).map(strip);
+			const plain = rows.join("\n");
+			const suggestionRow = rows.findIndex((row) => row.includes(SKILL_SUGGESTION_PREFIX));
+			const glyphRow = rows.findIndex((row) => row.startsWith(`${GLYPH.agent} `));
+			ok(suggestionRow >= 0, `${width}: the suggestion renders: ${plain}`);
+			ok(rows[suggestionRow]?.startsWith("  "), `${width}: the suggestion claimed the glyph: ${plain}`);
+			ok(glyphRow > suggestionRow, `${width}: the answer under the suggestion owns the glyph: ${plain}`);
+			ok(
+				rows[glyphRow]?.includes("The substantive answer"),
+				`${width}: the glyph landed on an empty row, not the answer: ${JSON.stringify(rows[glyphRow])}`,
+			);
+			strictEqual(plain.split("✦").length - 1, 1, `${width}: exactly one reply glyph in the turn: ${plain}`);
+		}
+	});
+
 	it("keeps the split shape row-stable from streaming through finalized Markdown", () => {
 		const suggestion = SKILL_SUGGESTION_ANCHOR.replace("<name>", "tui-design");
 		const chunks = [suggestion.slice(0, 28), `${suggestion.slice(28)}\nThe substantive`, " answer prose follows."];

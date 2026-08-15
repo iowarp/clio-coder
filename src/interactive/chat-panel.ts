@@ -443,7 +443,10 @@ function skillSuggestionSplit(seg: TextSegment): { suggestion: string; answer: T
 	if (!seg.text.startsWith(SKILL_SUGGESTION_PREFIX)) return null;
 	const breakIndex = seg.text.indexOf("\n");
 	if (breakIndex < 0) return null;
-	const answerText = seg.text.slice(breakIndex + 1);
+	// A model that puts a blank line between the suggestion and the answer left
+	// the remainder opening with a newline, so the first rendered row was empty
+	// and took the glyph the answer's own text row was owed.
+	const answerText = seg.text.slice(breakIndex + 1).replace(/^\n+/, "");
 	if (answerText.trim().length === 0) return null;
 	const split = seg.suggestionSplit ?? {
 		suggestion: "",
