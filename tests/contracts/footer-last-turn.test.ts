@@ -78,10 +78,10 @@ describe("footer last-turn metrics", () => {
 		ok(!withoutTurn.includes("✓ 4.0s"));
 	});
 
-	it("activity quadrant surfaces last-turn metrics below the harness state when idle", () => {
+	it("activity quadrant surfaces the last-turn receipt without narrating idleness", () => {
 		const joined = strip(activityQuadrant(idleAgent(makeSummary())).join("\n"));
 		ok(joined.includes("ACTIVITY"));
-		ok(joined.includes("◌ idle"));
+		ok(!joined.includes("idle"));
 		ok(joined.includes("✓ 4.0s"));
 		ok(joined.includes("↑11 ↓339"));
 	});

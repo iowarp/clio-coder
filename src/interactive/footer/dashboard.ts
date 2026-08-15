@@ -200,7 +200,7 @@ function renderFooterDashboardLines(
 }
 
 /**
- * Expanded footer: responsive quadrants.
+ * Expanded footer: responsive sections ordered by operational urgency.
  * Widths at 120 columns and above use four weighted horizontal sections.
  * Widths from 80 to 119 columns use a two by two grid.
  * Widths below 80 columns use a vertical stack with all sections retained.
@@ -214,11 +214,8 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 		const sep = barSep(theme);
 		const widths = expandedWideColumnWidths(safeWidth, visibleWidth(sep) * 3);
 		const blocks = [
-			workspaceQuadrant(state.workspace, { width: widths[0] }),
-			sessionQuadrant(state.session, { width: widths[1] }),
-			contextQuadrant(state.context, { width: widths[2] }),
 			activityQuadrant(state.agent, {
-				width: widths[3],
+				width: widths[0],
 				maxWorkers: 4,
 				status: state.status,
 				toolCounts: state.toolCounts,
@@ -229,6 +226,9 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 				tick: state.tick,
 				now: state.now,
 			}),
+			contextQuadrant(state.context, { width: widths[1] }),
+			sessionQuadrant(state.session, { width: widths[2] }),
+			workspaceQuadrant(state.workspace, { width: widths[3] }),
 		];
 		return [header, rule(theme, safeWidth), ...zipColumnBlocks(blocks, widths, sep)].map((line) =>
 			fitDashboardLine(line, safeWidth),
@@ -237,19 +237,11 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 
 	if (safeWidth >= EXPANDED_WIDE) {
 		const sep = barSep(theme);
-		const [topLeftWidth, topRightWidth] = expandedPairWidths(safeWidth, visibleWidth(sep), "session");
-		const [bottomLeftWidth, bottomRightWidth] = expandedPairWidths(safeWidth, visibleWidth(sep), "context");
+		const [topLeftWidth, topRightWidth] = expandedPairWidths(safeWidth, visibleWidth(sep));
+		const [bottomLeftWidth, bottomRightWidth] = expandedPairWidths(safeWidth, visibleWidth(sep));
 		const top = zipColumns(
-			workspaceQuadrant(state.workspace, { width: topLeftWidth }),
-			sessionQuadrant(state.session, { width: topRightWidth }),
-			topLeftWidth,
-			topRightWidth,
-			sep,
-		);
-		const bottom = zipColumns(
-			contextQuadrant(state.context, { width: bottomLeftWidth }),
 			activityQuadrant(state.agent, {
-				width: bottomRightWidth,
+				width: topLeftWidth,
 				maxWorkers: 4,
 				status: state.status,
 				toolCounts: state.toolCounts,
@@ -260,6 +252,14 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 				tick: state.tick,
 				now: state.now,
 			}),
+			contextQuadrant(state.context, { width: topRightWidth }),
+			topLeftWidth,
+			topRightWidth,
+			sep,
+		);
+		const bottom = zipColumns(
+			sessionQuadrant(state.session, { width: bottomLeftWidth }),
+			workspaceQuadrant(state.workspace, { width: bottomRightWidth }),
 			bottomLeftWidth,
 			bottomRightWidth,
 			sep,
@@ -268,9 +268,6 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 	}
 
 	const blocks = [
-		workspaceQuadrant(state.workspace, { width: safeWidth }),
-		sessionQuadrant(state.session, { width: safeWidth }),
-		contextQuadrant(state.context, { width: safeWidth }),
 		activityQuadrant(state.agent, {
 			width: safeWidth,
 			maxWorkers: safeWidth >= EXPANDED_MID ? 3 : 2,
@@ -283,6 +280,9 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 			tick: state.tick,
 			now: state.now,
 		}),
+		contextQuadrant(state.context, { width: safeWidth }),
+		sessionQuadrant(state.session, { width: safeWidth }),
+		workspaceQuadrant(state.workspace, { width: safeWidth }),
 	];
 	return [header, rule(theme, safeWidth), ...blocks.flatMap((block) => [...block, ""]).slice(0, -1)].map((line) =>
 		fitDashboardLine(line, safeWidth),
@@ -290,18 +290,16 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 }
 
 /**
- * Column widths for the four-section ultrawide dashboard. Growth is
- * round-robin (CONTEXT first) so every quadrant shares the surplus instead of
- * ACTIVITY absorbing it alone: CONTEXT needs the most room (meter, chips, and
- * legend rows clip earliest), SESSION and WORKSPACE carry long target ids and
- * paths, and only width beyond every cap spills into ACTIVITY.
+ * Column widths for Activity, Context, Session, and Workspace. The base makes
+ * current work the strongest column; surplus is shared by urgency until the
+ * lower-priority sections reach their caps, then spills into Activity.
  */
 export function expandedWideColumnWidths(width: number, totalSepWidth: number): [number, number, number, number] {
 	const available = Math.max(0, width - totalSepWidth);
-	const widths: [number, number, number, number] = [27, 29, 31, 24];
+	const widths: [number, number, number, number] = [32, 31, 27, 21];
 	let remaining = Math.max(0, available - widths.reduce((sum, item) => sum + item, 0));
-	const max: [number, number, number, number] = [40, 44, 56, Number.POSITIVE_INFINITY];
-	const order = [2, 1, 3, 0] as const;
+	const max: [number, number, number, number] = [Number.POSITIVE_INFINITY, 56, 44, 40];
+	const order = [0, 1, 2, 3] as const;
 	let cursor = 0;
 	while (remaining > 0) {
 		const index = order[cursor % order.length] ?? 3;
@@ -314,10 +312,9 @@ export function expandedWideColumnWidths(width: number, totalSepWidth: number): 
 	return widths;
 }
 
-function expandedPairWidths(width: number, sepWidth: number, priority: "session" | "context"): [number, number] {
+function expandedPairWidths(width: number, sepWidth: number): [number, number] {
 	const available = Math.max(0, width - sepWidth);
-	const leftWeight = priority === "context" ? 0.53 : 0.47;
-	const left = Math.floor(available * leftWeight);
+	const left = Math.floor(available * 0.53);
 	return [left, available - left];
 }
 

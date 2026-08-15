@@ -207,8 +207,8 @@ function gitChip(theme: ClioTheme, branch: string | null, dirty: boolean | null)
 	return `${theme.fg("dim", "git ")}${theme.fg("success", branch)} ${gitMarker(theme, dirty)}`;
 }
 
-function gitValue(theme: ClioTheme, branch: string | null, dirty: boolean | null): string {
-	if (!branch) return theme.fg("dim", "none");
+function gitValue(theme: ClioTheme, branch: string | null, dirty: boolean | null): string | null {
+	if (!branch) return null;
 	return `${theme.fg("success", branch)} ${gitMarker(theme, dirty)}`;
 }
 
@@ -225,9 +225,9 @@ function collapseRemote(remote: string | null): string | null {
 }
 
 /**
- * Compact primary row: workspace identity on the left, session resources on the
- * right. The editor rail owns model and thinking labels. The branch appears
- * here, and only here, across the whole screen.
+ * Compact primary row: workspace identity on the left and a meaningful work
+ * phase on the right. The editor rail owns model and thinking labels. The
+ * branch appears here, and only here, across the whole screen.
  */
 export function compactPrimaryLine(
 	workspace: WorkspaceFacts,
@@ -405,7 +405,7 @@ export function compactSecondaryLine(
 	// At the smallest widths the context meter consumes the entire secondary
 	// row, so keep a compact mode marker on the left instead of silently hiding
 	// the active transcript setting.
-	if (outputVerbosity && visibleWidth(right) === 0) {
+	if (outputVerbosity && outputVerbosity !== "default" && visibleWidth(right) === 0) {
 		const marker = outputVerbosity === "minimal" ? "m" : outputVerbosity === "verbose" ? "v" : "d";
 		left = `${left}${theme.fg("dim", ` out:${marker}`)}`;
 	}
@@ -467,10 +467,10 @@ export function workspaceQuadrant(facts: WorkspaceFacts, _options: ExpandedQuadr
 	]);
 }
 
-function sessionIdentity(facts: SessionFacts): { key: string; value: string } {
+function sessionIdentity(facts: SessionFacts): { key: string; value: string } | null {
 	if (facts.id) return { key: "id", value: facts.id };
 	if (facts.name) return { key: "name", value: facts.name };
-	return { key: "id", value: "none" };
+	return null;
 }
 
 function capabilitiesValue(theme: ClioTheme, capabilities: string[] | null): string | null {
@@ -502,7 +502,7 @@ export function sessionQuadrant(facts: SessionFacts, options: ExpandedQuadrantOp
 			)
 		: null;
 	return dashboardBlock(theme, "Session", [
-		kv(identity.key, identity.value, "accent"),
+		identity ? kv(identity.key, identity.value, "accent") : statusRow(null),
 		kv("target", facts.target, "accent"),
 		kv("think", facts.thinking, "reason"),
 		styledKv("caps", capabilitiesValue(theme, facts.capabilities)),
@@ -510,7 +510,11 @@ export function sessionQuadrant(facts: SessionFacts, options: ExpandedQuadrantOp
 		// value is a plain fact and reads muted like the other neutral values.
 		kv("autonomy", facts.safety),
 		kv("profile", facts.toolProfile),
-		kv("output", facts.outputVerbosity ?? "default", facts.outputVerbosity === "verbose" ? "accent" : "muted"),
+		kv(
+			"output",
+			facts.outputVerbosity && facts.outputVerbosity !== "default" ? facts.outputVerbosity : null,
+			facts.outputVerbosity === "verbose" ? "accent" : "muted",
+		),
 		styledKv("memory", memoryValue),
 	]);
 }
@@ -536,11 +540,12 @@ function formatCompaction(facts: ContextEngineFacts): string | null {
 	return `${facts.compactionActive ? "active " : ""}${mode} @${threshold}%`;
 }
 
-function sourceState(theme: ClioTheme, facts: ContextEngineFacts): string {
-	return joinChips(theme, [
-		theme.fg("muted", facts.clioMd ?? "CLIO-CODER.md none"),
-		theme.fg("muted", facts.memory ?? "mem none"),
+function sourceState(theme: ClioTheme, facts: ContextEngineFacts): string | null {
+	const value = joinChips(theme, [
+		facts.clioMd ? theme.fg("muted", facts.clioMd) : null,
+		facts.memory ? theme.fg("muted", facts.memory) : null,
 	]);
+	return value.length > 0 ? value : null;
 }
 
 /** Short labels for the dense footer; the overlay carries the full names. */
@@ -641,7 +646,7 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 			composition.tools > 0 ? theme.fg("warning", `tools ${formatFooterTokens(composition.tools)}`) : null,
 		]);
 		chatFree = joinChips(theme, [
-			composition.chat > 0 ? theme.fg("accent", formatFooterTokens(composition.chat)) : theme.fg("accent", "0"),
+			composition.chat > 0 ? theme.fg("accent", formatFooterTokens(composition.chat)) : null,
 			composition.free !== null
 				? theme.style("frame", `free ${formatFooterTokens(composition.free)}`, { dim: true })
 				: null,
@@ -659,8 +664,8 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 	return dashboardBlock(theme, "Context", [
 		statusRow(bar),
 		kv("used", formatUsedWindow(usedTokens, windowTokens)),
-		fill ? styledKv("fill", fill) : kv("fill", "none"),
-		chatFree ? styledKv("chat", chatFree) : kv("chat", "none"),
+		fill ? styledKv("fill", fill) : statusRow(null),
+		chatFree ? styledKv("chat", chatFree) : statusRow(null),
 		kv("compact", formatCompaction(facts)),
 		styledKv("source", sourceState(theme, facts)),
 		facts.extensions && facts.extensions.installed > 0
@@ -718,10 +723,13 @@ export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
  */
 function workerLine(theme: ClioTheme, row: DispatchBoardRow, width: number): string {
 	const presentation = dispatchStatusPresentation(row.status, { compact: true });
+	// The Activity section already promotes the fleet summary (or dispatch phase)
+	// to action orange. Worker rows remain readable without repeating that signal.
+	const token = presentation.token === "action" ? "accent" : presentation.token;
 	const units = [
 		theme.fg("muted", agentDisplayLabel(row)),
 		theme.fg("dim", row.node ?? "local"),
-		theme.fg(presentation.token, presentation.glyph),
+		theme.fg(token, presentation.glyph),
 		theme.fg("dim", formatCompactMs(row.elapsedMs)),
 		...(row.receiptId !== undefined ? [theme.fg("dim", row.receiptId)] : []),
 	];
@@ -822,9 +830,13 @@ function cumulativeTokens(sessionTokens: UsageBreakdown | null | undefined): num
 	return finiteNonNegative(sessionTokens?.totalTokens) || fallback;
 }
 
-function fleetValue(dispatchSummary: string | null, dispatchRows: ReadonlyArray<DispatchBoardRow>): string {
+function fleetValue(dispatchSummary: string | null, dispatchRows: ReadonlyArray<DispatchBoardRow>): string | null {
 	if (dispatchSummary) return dispatchSummary.replace(/^dispatch\s+/, "");
-	return dispatchRows.length > 0 ? `${dispatchRows.length} runs` : "none";
+	return dispatchRows.length > 0 ? `${dispatchRows.length} runs` : null;
+}
+
+function meaningfulToolTally(value: string): string | null {
+	return /^(?:none(?: · 0✗)?|0✗)$/u.test(value.trim()) ? null : value;
 }
 
 /** Task-board progress chips: `2/5 done`, with a warning chip when tasks are blocked. */
@@ -893,7 +905,11 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	const cost = formatCostAggregate(options.sessionCost);
 	rows.push(cost === null ? statusRow(null) : styledKv("cost", theme.fg("muted", cost)));
 	rows.push(
-		kv("fleet", fleetValue(facts.dispatchSummary, facts.dispatchRows), facts.dispatchSummary ? "action" : "dim"),
+		kv(
+			"fleet",
+			fleetValue(facts.dispatchSummary, facts.dispatchRows),
+			facts.dispatchSummary && status.phase !== "dispatching" ? "action" : "dim",
+		),
 	);
 	// Every worker up to the panel bound gets its own row; what the bound cuts is
 	// counted out loud instead of vanishing, so the row count an operator sees
@@ -906,7 +922,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 		rows.push(styledKv("tasks", taskBoardValue(theme, facts.taskBoard)));
 		rows.push(statusRow(activeTaskLine(theme, facts.taskBoard)));
 	}
-	rows.push(kv("tools", facts.toolTally));
+	rows.push(kv("tools", meaningfulToolTally(facts.toolTally)));
 	return dashboardBlock(theme, "Activity", rows);
 }
 
@@ -1013,11 +1029,9 @@ function harnessBadge(
 	const workers = activeWorkerCount(dispatchRows);
 	const activeTools = finiteNonNegative(toolCounts.active);
 	// Active fleet work is a Clio-signature state; it gets the action color.
-	if (workers > 0) return ` ${theme.fg("dim", "·")} ${theme.fg("action", `fleet ${workers}`)}`;
-	let badgeText: string | null = null;
-	if (activeTools > 0) badgeText = `tools ${activeTools}`;
-	else if (status.phase === "idle") badgeText = "tools none";
-	return badgeText ? ` ${theme.fg("dim", "·")} ${theme.fg("muted", badgeText)}` : "";
+	if (workers > 0) return theme.fg(status.phase === "dispatching" ? "muted" : "action", `fleet ${workers}`);
+	const badgeText = activeTools > 0 ? `tools ${activeTools}` : null;
+	return badgeText ? theme.fg("muted", badgeText) : "";
 }
 
 function outputVerbosityLabel(verbosity: OutputVerbosity): string {
@@ -1035,14 +1049,18 @@ export function buildHarnessStatePill(
 	showBadge = true,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
+	const badge = showBadge && safeWidth >= 48 ? harnessBadge(theme, status, toolCounts, dispatchRows) : "";
+	// Idleness is absence of work, not a phase worth narrating. If a tool or
+	// fleet remains live while the harness settles, keep that activity without
+	// prefixing it with an idle glyph.
+	if (status.phase === "idle") return badge;
 	const phase = harnessPhasePresentation(status, safeWidth, now);
 	// A live phase leads with the animated spinner; the spinner stands in for the
 	// static phase glyph rather than sitting beside it. Static glyphs render only
-	// for the non-live states (idle, the attention states, and the ended forms).
+	// for the attention states and ended forms; idle returned quietly above.
 	const lead = phase.live ? spinnerFrame(tick) : phase.glyph;
 	const mainPill = theme.style(phase.token, `${lead} ${phase.label}`);
-	const badge = showBadge && safeWidth >= 48 ? harnessBadge(theme, status, toolCounts, dispatchRows) : "";
-	return `${mainPill}${badge}`;
+	return badge ? `${mainPill} ${theme.fg("dim", "·")} ${badge}` : mainPill;
 }
 
 /**
@@ -1109,12 +1127,12 @@ export function buildMetricStrip(
 	const safeMaxWidth = Math.max(0, Math.floor(maxWidth));
 	if (safeMaxWidth <= 0) return "";
 	const isStreaming = status.phase !== "idle" && status.phase !== "ended";
-	if (!isStreaming && !lastTurn && !outputVerbosity && !leaderArmed) return "";
+	const meaningfulVerbosity = outputVerbosity && outputVerbosity !== "default" ? outputVerbosity : null;
+	if (!isStreaming && !lastTurn && !meaningfulVerbosity && !leaderArmed) return "";
 
 	const candidates: Array<string | null> = [];
 	/** Per-turn detail that ranks below the session totals when the strip is cut. */
 	const deferred: Array<string | null> = [];
-	if (outputVerbosity) candidates.push(theme.fg("muted", `out ${outputVerbosityLabel(outputVerbosity)}`));
 	if (isStreaming) {
 		const tps = finiteNonNegative(throughput?.tokensPerSecond);
 		const rounded = tps > 0 ? (tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10) : null;
@@ -1171,6 +1189,7 @@ export function buildMetricStrip(
 			deferred.push(null);
 		}
 	}
+	if (meaningfulVerbosity) deferred.push(theme.fg("muted", `out ${outputVerbosityLabel(meaningfulVerbosity)}`));
 
 	const fallbackTotal = finiteNonNegative(sessionTokens?.input) + finiteNonNegative(sessionTokens?.output);
 	const cumulativeTotal = finiteNonNegative(sessionTokens?.totalTokens) || fallbackTotal;
