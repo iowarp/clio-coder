@@ -342,19 +342,29 @@ Supporting mechanics:
 
 ## Settings Center
 
-Open `/settings` in the TUI to edit session-visible defaults in a full-screen Center. Wide terminals show sections on the left and the selected section's rows on the right. Narrow terminals stack the same sections inline. Each row shows a human label, a dim config path, the current value, and a bottom description with the edit affordance.
+Open `/settings` in the TUI to edit session-visible defaults in a full-screen transactional Center. Wide terminals (≥72 columns) show sections in a left sidebar and the selected section's rows in the main pane; ultrawide terminals (≥112 columns) expand the layout to include a dedicated right-hand inspector. Below 72 columns, the Center switches to a modal drill-down stack (section list → section rows → detail drawer) with breadcrumbs, `/` search filtering, and `Esc` backtracking.
 
-Targets are managed in `/targets` (Settings → Targets); keybindings are documented in `/help`.
+Every value change in Settings is transactional: selecting an editable row and pressing `Enter` opens a dedicated value picker, text input dialog, or provider-backed checklist (rather than immediately cycling values). Clio constructs an immutable change plan with preflight impact analysis and presents explicit destination choices:
+- `Apply this session` (for live-capable settings)
+- `Apply and save globally`
+- `Cancel` (or `Esc`)
 
-| Section | Editable rows |
-| --- | --- |
-| Autonomy & Safety | Autonomy level, Worker permission asks, Delegation governance, Safety net (read-only) |
-| Orchestrator | Thinking level, Target, Model |
-| Fleet | Default target, Default model |
-| Budget | Session ceiling (USD), Model cycle set |
-| Compaction | Auto-compact, Protected recent turns, Compaction threshold |
-| Retry | Retry transient errors, Max retries, Base delay (ms), Max delay (ms) |
-| Terminal | Terminal progress badges |
+For restart-required settings (`budget.concurrency`, `runtimePlugins`), the session-only option is suppressed and global saving announces `Saved to settings.yaml · restart Clio to apply`. For destructive actions (removing a target or fleet profile), the confirmation preflight details affected chat, fleet, and memory routes before execution.
+
+The Settings Center organizes all configuration under four non-selectable group headers:
+
+| Group | Section | Purpose & Content |
+| --- | --- | --- |
+| **CORE** | Autonomy & Safety (`safety`) | Autonomy level (`autonomy`), Worker permission asks (`workers.onPermission`), Delegation governance (`delegation.defaults.toolGovernance`), and Safety net status (read-only fact). |
+| **CORE** | Orchestrator (`orchestrator`) | Active chat target (`orchestrator.target`), model (`orchestrator.model`), and thinking level (`orchestrator.thinkingLevel`). Changing target rebases model and thinking choices. |
+| **ROUTING** | Fleet (`fleet`) | Entity workbench with group headers for `Defaults` (target, model, thinking level), `Profiles` (one-row summaries with `◆ Edit` drill-down and destructive removal preflight), `Agent routes`, and `Placement` (node status). |
+| **ROUTING** | Targets (`targets`) | Operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with in-place action/detail drawer for URL, default model, last probe, and failure reason. Actions include `Use`, `Connect`, `Probe`, and `Remove`. |
+| **ROUTING** | Models (`models`) | Provider-backed scoped model checklist with target-level and target/model entries, `Space` toggle, capability inspector, and preserved `Unavailable` group. Deep link `/scoped-models`. |
+| **RUNTIME** | Budget (`budget`) | Session ceiling USD (`budget.sessionCeilingUsd`), max output tokens (`budget.maxOutputTokens`), and worker concurrency (`budget.concurrency`, restart-required). |
+| **RUNTIME** | Compaction (`compaction`) | Auto-compact toggle (`compaction.auto`), protected recent turns (`compaction.excludeLastTurns`), and compaction threshold (`compaction.threshold`). |
+| **RUNTIME** | Retry (`retry`) | Transient error recovery toggle (`retry.enabled`), max retries (`retry.maxRetries`), base delay (`retry.baseDelayMs`), and max delay (`retry.maxDelayMs`). |
+| **EXPERIENCE** | Terminal (`terminal`) | Terminal progress badges (`terminal.showTerminalProgress`), transcript output detail (`terminal.outputVerbosity`: `minimal`, `default`, `verbose`), and inline status lines (`terminal.showInlineStatus`). |
+| **EXPERIENCE** | Advanced (`advanced`) | Notification dismiss defaults, memory intervention toggles, and runtime extension settings. |
 
 Label to config path mapping:
 
@@ -368,8 +378,14 @@ Label to config path mapping:
 | Model | `orchestrator.model` |
 | Default target | `workers.default.target` |
 | Default model | `workers.default.model` |
+| Default thinking level | `workers.default.thinkingLevel` |
+| Dispatched worker profiles | `workers.profiles.*` |
+| Agent route bindings | `workers.agentBindings.*` |
+| Scoped model set | `scope` |
+| Model favorites | `modelSelector.favorites` |
 | Session ceiling (USD) | `budget.sessionCeilingUsd` |
-| Model cycle set | `scope` |
+| Output token budget | `budget.maxOutputTokens` |
+| Worker concurrency | `budget.concurrency` (restart required) |
 | Auto-compact | `compaction.auto` |
 | Protected recent turns | `compaction.excludeLastTurns` |
 | Compaction threshold | `compaction.threshold` |
@@ -699,7 +715,7 @@ The command `clio-coder targets profile` supports several subcommands to manage 
 - **unbind**: Unbind an agent from its profile. Use `clio-coder targets profile unbind <agentId>`.
 - **bindings**: List active agent-to-profile bindings. Use `clio-coder targets profile bindings [--json]` to output details in JSON format.
 
-Inside the TUI, `/targets` opens Settings → Targets, the target management surface. Each row shows roles, health, runtime, URL, default model, and the last probe error. The row's use action switches the active orchestrator target and rebases the model to that target's default, matching `clio-coder targets use`; the fleet default is its own row in Settings → Fleet. The row's connect action runs the same API-key, OAuth, or no-auth connection flow the auth system uses, then probes.
+Inside the TUI, `/targets` opens Settings → Targets, the operational target console. Targets are rendered in a compact console table with columns for `HEALTH`, `ID`, `ROLES`, `RUNTIME`, and `LATENCY`, paired with an in-place action/detail drawer for URL, default model, last probe timestamp, and failure reason. Available actions include `Use` (switches active orchestrator target and rebases model to target default), `Connect` (executes API-key, OAuth, or no-auth setup then probes), `Probe` (runs immediate reachability probe with live activity indicator), and `Remove` (with preflight analysis of affected chat, fleet, and memory routes). Adding a target is performed via `clio-coder targets add`.
 
 ### Context-Window Provenance
 
