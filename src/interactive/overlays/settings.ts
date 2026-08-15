@@ -2074,7 +2074,8 @@ interface RowColumns {
 /** When a change reaches the running system, in the vocabulary of the config-change classification. */
 function propagationFor(id: string): string | null {
 	if (RESTART_REQUIRED_IDS.has(id)) return "takes effect next session";
-	if (id.startsWith("targets.")) return "use: chat now, workers at the next dispatch · remove: next dispatch";
+	if (id !== "targets.add-cta" && id.startsWith("targets."))
+		return "use: chat now, workers at the next dispatch · remove: next dispatch";
 	if (id.startsWith("workers.")) return "takes effect at the next dispatch";
 	return null;
 }
@@ -2196,17 +2197,30 @@ function targetConsoleColumns(
 			{ key: "latency", width: latency },
 		];
 	}
+	if (safeWidth < 56) {
+		const gaps = 6;
+		const health = 12;
+		const latency = 7;
+		const roles = 6;
+		return [
+			{ key: "health", width: health },
+			{ key: "id", width: safeWidth - gaps - health - latency - roles },
+			{ key: "roles", width: roles },
+			{ key: "latency", width: latency },
+		];
+	}
 	const gaps = 8;
-	const cells = Math.max(39, safeWidth - gaps);
+	const cells = safeWidth - gaps;
 	const health = 12;
 	const latency = 7;
-	const roles = Math.min(13, 6 + Math.floor(Math.max(0, cells - 39) * 0.2));
-	const id = Math.min(18, 8 + Math.floor(Math.max(0, cells - 39) * 0.45));
+	const extra = cells - 48;
+	const roles = Math.min(13, 6 + Math.floor(extra * 0.25));
+	const id = Math.min(18, 8 + Math.floor(extra * 0.5));
 	return [
 		{ key: "health", width: health },
 		{ key: "id", width: id },
 		{ key: "roles", width: roles },
-		{ key: "runtime", width: Math.max(5, cells - health - latency - roles - id) },
+		{ key: "runtime", width: cells - health - latency - roles - id },
 		{ key: "latency", width: latency },
 	];
 }
