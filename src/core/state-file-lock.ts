@@ -1,5 +1,7 @@
 import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, utimesSync, writeSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname } from "node:path";
+import { processAlive, processBirthToken } from "./process-identity.js";
 
 /**
  * The one cross-process advisory file lock. Every durable lock in the tree runs
@@ -7,12 +9,13 @@ import { dirname } from "node:path";
  * credentials.yaml, residency mutations) so there is a single staleness policy
  * instead of four that disagreed by a factor of 26.
  *
- * The lock is keyed by target path (`<target>.lock`) and records the owner pid.
- * A holder is presumed gone only when its pid is gone. The age of the lockfile
- * decides only for a record whose owner cannot be read, so staleness is a
- * backstop rather than a cap on how long a critical section may legitimately
- * take: the settings lock used to steal itself back from a healthy writer after
- * five seconds. Async holders additionally refresh the lockfile mtime while
+ * The lock is keyed by target path (`<target>.lock`) and records the owner's
+ * host, pid and birth token. A holder is presumed gone only when its pid is
+ * gone on this host; a record from another host is never adjudicated here. The
+ * age of the lockfile decides only for a record whose owner cannot be read, so
+ * staleness is a backstop rather than a cap on how long a critical section may
+ * legitimately take: the settings lock used to steal itself back from a healthy
+ * writer after five seconds. Async holders additionally refresh the lockfile mtime while
  * they work, so even the backstop does not fire under a live holder. The sync
  * path blocks the event loop by construction and cannot run that timer; pid
  * liveness is what protects it.
@@ -41,25 +44,36 @@ export interface StateFileLockOptions {
 	onAcquireFailure?: "throw" | "run-unlocked";
 }
 
-function isProcessAlive(pid: number): boolean {
-	if (!Number.isFinite(pid) || pid <= 0) return false;
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err) {
-		// EPERM means the PID exists but belongs to another user, so it is still alive.
-		return (err as NodeJS.ErrnoException).code === "EPERM";
-	}
+interface LockOwner {
+	/** Null on a record written before the field existed; read as this host. */
+	host: string | null;
+	pid: number;
+	birthToken: string | null;
 }
 
-function readLockOwner(lockPath: string): number | null {
+function readLockOwner(lockPath: string): LockOwner | null {
 	try {
 		const raw = readFileSync(lockPath, "utf8").trim();
-		const pid = raw.startsWith("{") ? (JSON.parse(raw) as { pid?: unknown }).pid : Number.parseInt(raw, 10);
-		return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? pid : null;
+		const record = raw.startsWith("{") ? (JSON.parse(raw) as Record<string, unknown>) : { pid: Number.parseInt(raw, 10) };
+		const { host, pid, birthToken } = record;
+		if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
+		return {
+			host: typeof host === "string" ? host : null,
+			pid,
+			birthToken: typeof birthToken === "string" ? birthToken : null,
+		};
 	} catch {
 		return null;
 	}
+}
+
+/** Mirrors compete-worktrees' ownerIsAlive: foreign hosts are never adjudicated, a null token cannot rule out pid reuse. */
+function ownerIsAlive(owner: LockOwner): boolean {
+	if (owner.host !== null && owner.host !== hostname()) return true;
+	if (!processAlive(owner.pid)) return false;
+	if (owner.birthToken === null) return true;
+	const current = processBirthToken(owner.pid);
+	return current === null || current === owner.birthToken;
 }
 
 function lockfileAgeMs(lockPath: string): number | null {
@@ -75,7 +89,10 @@ function tryAcquire(lockPath: string): boolean {
 	try {
 		const fd = openSync(lockPath, "wx", 0o600);
 		try {
-			writeSync(fd, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`);
+			writeSync(
+				fd,
+				`${JSON.stringify({ host: hostname(), pid: process.pid, birthToken: processBirthToken(), at: new Date().toISOString() })}\n`,
+			);
 		} finally {
 			closeSync(fd);
 		}
@@ -83,9 +100,9 @@ function tryAcquire(lockPath: string): boolean {
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
 	}
-	const ownerPid = readLockOwner(lockPath);
+	const owner = readLockOwner(lockPath);
 	const ageMs = lockfileAgeMs(lockPath);
-	const abandoned = ownerPid !== null ? !isProcessAlive(ownerPid) : ageMs !== null && ageMs > STALE_LOCK_MS;
+	const abandoned = owner !== null ? !ownerIsAlive(owner) : ageMs !== null && ageMs > STALE_LOCK_MS;
 	if (abandoned) {
 		try {
 			unlinkSync(lockPath);
@@ -98,7 +115,7 @@ function tryAcquire(lockPath: string): boolean {
 
 function timeoutError(lockPath: string, timeoutMs: number): Error {
 	return new Error(
-		`timed out after ${timeoutMs}ms waiting for ${lockPath} (owner pid=${readLockOwner(lockPath) ?? "?"}); delete it if no other clio process is running`,
+		`timed out after ${timeoutMs}ms waiting for ${lockPath} (owner pid=${readLockOwner(lockPath)?.pid ?? "?"}); delete it if no other clio process is running`,
 	);
 }
 
@@ -109,7 +126,8 @@ function backoffMs(attempt: number): number {
 function release(lockPath: string): void {
 	// Only unlink a lock we still own. If ours was reclaimed as abandoned and a
 	// sibling now holds a fresh one, deleting here would open their section.
-	if (readLockOwner(lockPath) !== process.pid) return;
+	const owner = readLockOwner(lockPath);
+	if (owner?.pid !== process.pid || (owner.host !== null && owner.host !== hostname())) return;
 	try {
 		unlinkSync(lockPath);
 	} catch {

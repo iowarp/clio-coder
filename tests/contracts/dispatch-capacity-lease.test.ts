@@ -1,5 +1,6 @@
 import { match, ok, strictEqual, throws } from "node:assert";
 import { fork } from "node:child_process";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { FILE_LOCK_ACQUIRE_TIMEOUT_MS } from "../../src/core/state-file-lock.js";
@@ -163,6 +164,37 @@ describe("durable dispatch capacity leases", () => {
 			probe: { birthToken: () => "birth" },
 		});
 		strictEqual(listCapacityLeases({ nowMs: 1_000, probe: { birthToken: () => null } }).length, 0);
+	});
+	it("a lease from another host is never adjudicated, and a legacy host-less lease still is", () => {
+		home();
+		const at = new Date(0).toISOString();
+		const lease = (leaseId: string, host?: string) => ({
+			leaseId,
+			assignmentId: leaseId,
+			nodeId: "local",
+			...(host === undefined ? {} : { host }),
+			ownerPid: 42,
+			processBirthToken: "birth",
+			acquiredAt: at,
+			expiresAt: new Date(10).toISOString(),
+			heartbeatAt: at,
+			reservationOwnerId: null,
+			reservationMemberId: null,
+		});
+		writeCapacityStateUnsafe({
+			version: 2,
+			draining: null,
+			reservations: [],
+			leases: [lease("foreign", `${hostname()}-elsewhere`), lease("legacy"), lease("local", hostname())],
+		});
+		// The owner is dead and the lease expired by every local measure, but only
+		// the records this host owns may be reclaimed on that evidence.
+		const kept = listCapacityLeases({ nowMs: 1_000, probe: { birthToken: () => null } });
+		strictEqual(kept.map((entry) => entry.leaseId).join(","), "foreign");
+		strictEqual(
+			acquireCapacityLease({ assignmentId: "mine", nodeId: "local", limits: { global: 2, nodes: {} } }).host,
+			hostname(),
+		);
 	});
 	it("the lock acquire budget stays under the lease ttl", () => {
 		ok(

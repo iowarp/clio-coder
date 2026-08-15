@@ -15,8 +15,10 @@
 import { emitControlFrame } from "./control-lane.js";
 
 export function startWorkerHeartbeat(intervalMs = 1000): () => void {
-	emitControlFrame({ kind: "heartbeat", at: Date.now() });
-	const id = setInterval(() => emitControlFrame({ kind: "heartbeat", at: Date.now() }), intervalMs);
+	// A beat carries no timestamp: arrival on the orchestrator's clock is the
+	// only instant liveness math may read.
+	emitControlFrame({ kind: "heartbeat" });
+	const id = setInterval(() => emitControlFrame({ kind: "heartbeat" }), intervalMs);
 	id.unref?.();
 	return () => clearInterval(id);
 }
