@@ -99,6 +99,18 @@ function view(
 	return new MemoryOverlayView(getStatus, getRecords, onClose, () => {});
 }
 
+/** Runs under a pinned zone so a row-clock assertion does not depend on the runner's TZ. */
+function withTimeZone<T>(zone: string, run: () => T): T {
+	const previous = process.env.TZ;
+	process.env.TZ = zone;
+	try {
+		return run();
+	} finally {
+		if (previous === undefined) delete process.env.TZ;
+		else process.env.TZ = previous;
+	}
+}
+
 /** The label of the row the cursor is on, without styling, columns, or padding. */
 function selectedLabel(lines: ReadonlyArray<string>): string {
 	const row = stripAnsi(lines.find((line) => stripAnsi(line).includes(GLYPH.cursor)) ?? "");
@@ -123,7 +135,7 @@ describe("contracts/memory overlay", () => {
 				},
 			],
 		};
-		const items = buildMemoryOverlayItems(status, [durableRecord(true), durableRecord(false)]);
+		const items = withTimeZone("UTC", () => buildMemoryOverlayItems(status, [durableRecord(true), durableRecord(false)]));
 		const plain = items.map((item) => ({
 			id: item.id,
 			group: stripAnsi(item.group ?? ""),
@@ -303,6 +315,42 @@ describe("contracts/memory overlay", () => {
 		const detail = stripAnsi((steps[0]?.detail?.(60) ?? []).join("\n"));
 		ok(detail.includes("rules"), detail);
 		ok(detail.includes("3ms"), detail);
+	});
+
+	it("clocks step rows in the operator's timezone while the detail pane keeps the instant", () => {
+		const status: TaskMemoryOperatorStatus = {
+			...operatorStatus(),
+			activity: [
+				{
+					at: "2026-08-15T11:18:32.810Z",
+					triggerReasons: ["interval"],
+					tier: "llm",
+					decision: "gated",
+					reason: "uncited",
+					citedEntries: 0,
+					bankWrites: 1,
+					latencyMs: 8_405,
+				},
+			],
+		};
+		const stepRow = (zone: string): { label: string; detail: string } => {
+			const items = withTimeZone(zone, () => buildMemoryOverlayItems(status, []));
+			const row = items.find((item) => (item.group ?? "").includes("recent steps"));
+			return { label: stripAnsi(row?.label ?? ""), detail: stripAnsi((row?.detail?.(60) ?? []).join("\n")) };
+		};
+
+		// America/Chicago is -0500 in August: an operator whose clock reads 06:18
+		// must not be shown 11:18 with nothing marking it as UTC.
+		const chicago = stepRow("America/Chicago");
+		ok(chicago.label.includes("06:18:32"), chicago.label);
+		ok(!chicago.label.includes("11:18:32"), chicago.label);
+		// The detail pane still carries the instant, which is what lets the two
+		// surfaces be reconciled rather than merely agree by coincidence.
+		ok(chicago.detail.includes("2026-08-15T11:18:32.810Z"), chicago.detail);
+
+		// A half-hour offset, and the zone where local and UTC coincide.
+		ok(stepRow("Asia/Kolkata").label.includes("16:48:32"), stepRow("Asia/Kolkata").label);
+		ok(stepRow("UTC").label.includes("11:18:32"), stepRow("UTC").label);
 	});
 
 	it("names the real keys in the footer and closes on Escape", () => {
