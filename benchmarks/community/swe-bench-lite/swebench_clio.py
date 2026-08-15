@@ -102,7 +102,7 @@ def run_clio(checkout: Path, task: str, events_path: Path, timeout_s: int, targe
         cmd += ["--model", model]
     cmd += [task]
     env = {**os.environ}
-    t0 = time.time()
+    t0 = time.monotonic()
     timed_out = False
     with open(events_path, "w") as ef:
         try:
@@ -113,7 +113,7 @@ def run_clio(checkout: Path, task: str, events_path: Path, timeout_s: int, targe
             code = proc.returncode
         except subprocess.TimeoutExpired:
             code, timed_out = 124, True
-    return time.time() - t0, code, timed_out
+    return time.monotonic() - t0, code, timed_out
 
 
 def diff_against_base(checkout: Path) -> str:

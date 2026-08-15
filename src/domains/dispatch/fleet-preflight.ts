@@ -14,6 +14,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { readClioVersion } from "../../core/package-root.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import { clioStateDir } from "../../core/xdg.js";
@@ -334,9 +335,11 @@ export async function runFleetNodePreflight(
 		resources: null,
 	};
 	const script = buildPreflightScript(node, projectRoot, targets);
-	const probeStartedAt = Date.now();
+	const probeStartedAt = performance.now();
 	const result = await runSsh(sshBinary, buildSshArgs(node, script), timeoutMs);
-	const probeDurationMs = Date.now() - probeStartedAt;
+	// Probe latency is durable eligibility evidence compared across nodes and
+	// across passes, so it is measured on the monotonic clock.
+	const probeDurationMs = Math.round(performance.now() - probeStartedAt);
 	if (!result.stdout.includes(PREFLIGHT_MARKER)) {
 		const stderr = result.stderr.trim().split("\n").slice(-1)[0] ?? "";
 		record.detail = `unreachable (ssh exit ${result.code}${stderr.length > 0 ? `: ${stderr}` : ""})`;

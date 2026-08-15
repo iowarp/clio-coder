@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
 import { ToolNames } from "../core/tool-names.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
@@ -167,13 +168,13 @@ async function drainDispatchEvents(
 	return { tools: completed, errors, blocked, firstBlockReason, mix };
 }
 
-function summaryDetail(summary: DispatchSummary, startedAt: number): string {
+function summaryDetail(summary: DispatchSummary, startedAtClock: number): string {
 	const blockedDetail =
 		summary.blocked > 0
 			? `; blocked=${summary.blocked}${summary.firstBlockReason ? ` (${summarizeBlockReason(summary.firstBlockReason)})` : ""}`
 			: "";
 	return (
-		`${formatElapsed(Date.now() - startedAt)}; ${summary.mix || "no tools completed"}` +
+		`${formatElapsed(performance.now() - startedAtClock)}; ${summary.mix || "no tools completed"}` +
 		`${summary.errors > 0 ? `; errors=${summary.errors}` : ""}${blockedDetail}`
 	);
 }
@@ -199,7 +200,10 @@ export async function runWikiDispatch(input: {
 	/** Liveness signal while the dispatch runs, already throttled by the caller. */
 	onHeartbeat?: (info: { elapsedMs: number; tools: number }) => void;
 }): Promise<WikiDispatchOutcome> {
+	// `startedAt` is a wall anchor because the admission deadline below is one
+	// too; every elapsed figure spans the monotonic twin instead.
 	const startedAt = Date.now();
+	const startedAtClock = performance.now();
 	let handle: Awaited<ReturnType<DispatchContract["dispatch"]>>;
 	try {
 		handle = await input.dispatch.dispatch({
@@ -232,26 +236,26 @@ export async function runWikiDispatch(input: {
 		return { ok: false, detail: err instanceof Error ? err.message : String(err) };
 	}
 	const deadline = armInternalDispatchDeadline(input.dispatch, handle.runId, input.label, process.env, input.deadlineMs);
-	let lastHeartbeatAt = startedAt;
+	let lastHeartbeatAt = startedAtClock;
 	try {
 		const summary = await drainDispatchEvents(handle.events, (tools) => {
-			const nowMs = Date.now();
+			const nowMs = performance.now();
 			if (!input.onHeartbeat || nowMs - lastHeartbeatAt < HEARTBEAT_MS) return;
 			lastHeartbeatAt = nowMs;
-			input.onHeartbeat({ elapsedMs: nowMs - startedAt, tools });
+			input.onHeartbeat({ elapsedMs: Math.round(nowMs - startedAtClock), tools });
 		});
 		const receipt = await handle.finalPromise;
-		if (deadline.timedOut()) return { ok: false, detail: `timed out; ${summaryDetail(summary, startedAt)}` };
+		if (deadline.timedOut()) return { ok: false, detail: `timed out; ${summaryDetail(summary, startedAtClock)}` };
 		if (receipt.exitCode !== 0) {
 			input.dispatch.abort(handle.runId);
-			return { ok: false, detail: `${receiptFailure(receipt)}; ${summaryDetail(summary, startedAt)}` };
+			return { ok: false, detail: `${receiptFailure(receipt)}; ${summaryDetail(summary, startedAtClock)}` };
 		}
-		return { ok: true, detail: summaryDetail(summary, startedAt) };
+		return { ok: true, detail: summaryDetail(summary, startedAtClock) };
 	} catch (err) {
 		if (!deadline.timedOut()) input.dispatch.abort(handle.runId);
 		await handle.finalPromise.catch(() => undefined);
 		const reason = deadline.timedOut() ? "timed out" : err instanceof Error ? err.message : String(err);
-		return { ok: false, detail: `${reason}; ${formatElapsed(Date.now() - startedAt)}` };
+		return { ok: false, detail: `${reason}; ${formatElapsed(performance.now() - startedAtClock)}` };
 	} finally {
 		deadline.clear();
 	}
@@ -372,7 +376,7 @@ export async function generateWikiWithDocumenter(
 	route: WikiModelRoute = {},
 	runBudgetMs: number = RUN_BUDGET_MS,
 ): Promise<void> {
-	const startedAt = Date.now();
+	const startedAtClock = performance.now();
 	const routeDetail = [route.target, route.model, route.thinkingLevel ? `thinking=${route.thinkingLevel}` : undefined]
 		.filter((value): value is string => value !== undefined)
 		.join("/");
@@ -408,13 +412,13 @@ export async function generateWikiWithDocumenter(
 		});
 	}
 	for (const [index, page] of queue.entries()) {
-		if (Date.now() - startedAt >= runBudgetMs) {
+		if (performance.now() - startedAtClock >= runBudgetMs) {
 			const left = queue.length - index;
 			input.progress?.({
 				phase: "generate",
 				status: "running",
 				message: `run budget reached with ${left} page${left === 1 ? "" : "s"} unwritten`,
-				detail: `${formatElapsed(Date.now() - startedAt)}; staged pages are kept and promoted`,
+				detail: `${formatElapsed(performance.now() - startedAtClock)}; staged pages are kept and promoted`,
 			});
 			return;
 		}

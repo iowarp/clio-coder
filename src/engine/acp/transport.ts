@@ -1,4 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { AcpProcessError, AcpProtocolError, AcpTimeoutError } from "./errors.js";
@@ -416,9 +417,11 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 	}
 
 	private async waitForTermination(timeoutMs: number): Promise<boolean> {
-		const deadline = Date.now() + timeoutMs;
+		// Monotonic deadline: a backward wall-clock step used to extend this wait
+		// past the bound the caller asked for.
+		const deadline = performance.now() + timeoutMs;
 		while (!this.terminationObserved()) {
-			const remaining = deadline - Date.now();
+			const remaining = deadline - performance.now();
 			if (remaining <= 0) return this.terminationObserved();
 			const interval = Math.min(10, remaining);
 			if (this.childHandlesClosed) {

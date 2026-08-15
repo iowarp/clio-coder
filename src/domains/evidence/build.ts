@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { rawDurationMs } from "../../core/timers.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
 import type {
 	RunEnvelope,
@@ -1638,8 +1639,10 @@ function durationMs(startedAt: string, endedAt: string | null): number {
 	if (endedAt === null) return 0;
 	const start = Date.parse(startedAt);
 	const end = Date.parse(endedAt);
-	if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0;
-	return end - start;
+	if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+	// Clamped for display, but counted first: a receipt whose endedAt precedes
+	// its startedAt is skew, not a zero-length run.
+	return Math.max(0, rawDurationMs(start, end));
 }
 
 function earliest(values: ReadonlyArray<string>): string | null {

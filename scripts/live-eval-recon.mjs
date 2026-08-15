@@ -27,6 +27,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { stringify } from "yaml";
 
 if (process.env.CLIO_CODER_LIVE_EVAL !== "1") {
@@ -216,12 +217,12 @@ function runCli(args, timeoutMs) {
 	});
 }
 
-const startedAt = Date.now();
+const startedAt = performance.now();
 console.log(
 	`Running bounded reconnaissance live suite (target=${targetId}, model=${model}, maxCostUsd=$${maxCostUsd})...`,
 );
 const run = await runCli(["eval", "run", "--suite", suitePath], 420_000);
-const durationMs = Date.now() - startedAt;
+const durationMs = Math.round(performance.now() - startedAt);
 process.stdout.write(run.stdout);
 if (run.stderr.trim().length > 0) process.stderr.write(run.stderr);
 

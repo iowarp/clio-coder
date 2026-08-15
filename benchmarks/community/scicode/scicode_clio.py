@@ -404,7 +404,7 @@ def run_clio_step(
         cmd.extend(["--agent", agent])
     cmd.append(prompt)
     env = {**os.environ}
-    started = time.time()
+    started = time.monotonic()
     timed_out = False
     stderr = ""
     with events_path.open("w", encoding="utf-8") as stdout:
@@ -419,7 +419,7 @@ def run_clio_step(
     return {
         "exit": code,
         "timed_out": timed_out,
-        "wall_s": round(time.time() - started, 3),
+        "wall_s": round(time.monotonic() - started, 3),
         "stderr": stderr[-4000:],
         "events": str(events_path),
     }
@@ -522,6 +522,8 @@ def run_problem(args: argparse.Namespace) -> int:
             step_id = step_number(step)
             prompt = render_prompt(problem, step, index, run_dir / "generated_code", template, args.with_background)
             (run_dir / "prompts" / f"{step_id}.md").write_text(prompt, encoding="utf-8")
+            # Wall clock on purpose: this is compared against st_mtime below,
+            # not used as a duration, so time.monotonic() would not be comparable.
             prompt_started = time.time()
             if args.dry_run:
                 metric = {"step_id": step_id, "dry_run": True, "exit": 0}
@@ -707,7 +709,7 @@ def run_python_script(script: str, cwd: Path, timeout: int, packages: Iterable[s
     with tempfile.TemporaryDirectory(prefix="clio-scicode-") as tmp:
         path = Path(tmp) / "assert_step.py"
         path.write_text(script, encoding="utf-8")
-        started = time.time()
+        started = time.monotonic()
         try:
             proc = subprocess.run(
                 [*uv_python_cmd(list(packages)), str(path)],
@@ -719,7 +721,7 @@ def run_python_script(script: str, cwd: Path, timeout: int, packages: Iterable[s
             return {
                 "exit": proc.returncode,
                 "timed_out": False,
-                "wall_s": round(time.time() - started, 3),
+                "wall_s": round(time.monotonic() - started, 3),
                 "stdout": proc.stdout[-4000:],
                 "stderr": proc.stderr[-4000:],
             }
@@ -727,7 +729,7 @@ def run_python_script(script: str, cwd: Path, timeout: int, packages: Iterable[s
             return {
                 "exit": 124,
                 "timed_out": True,
-                "wall_s": round(time.time() - started, 3),
+                "wall_s": round(time.monotonic() - started, 3),
                 "stdout": (exc.stdout or "")[-4000:] if isinstance(exc.stdout, str) else "",
                 "stderr": str(exc)[-4000:],
             }

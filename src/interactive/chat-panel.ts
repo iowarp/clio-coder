@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 import type { OutputVerbosity } from "../core/defaults.js";
+import { rawDurationMs } from "../core/timers.js";
 import { estimateReasoningTextTokens, extractReasoningTokens } from "../domains/session/context-accounting.js";
 import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
@@ -623,7 +624,7 @@ function renderToolSegmentLines(
 ): string[] {
 	const hintKey = seg.id === latestHintToolId ? expandKey : undefined;
 	const expanded = verbosity === "verbose" || (verbosity !== "minimal" && seg.expanded);
-	const elapsedMs = seg.startedAtMs !== undefined ? Math.max(0, nowMs - seg.startedAtMs) : undefined;
+	const elapsedMs = seg.startedAtMs !== undefined ? Math.max(0, rawDurationMs(seg.startedAtMs, nowMs)) : undefined;
 	// A parked call is not executing: the awaiting-approval line replaces the
 	// counting elapsed spinner in both collapsed and expanded form (there is no
 	// body or partial output to expand while the call sits at the gate).
@@ -786,6 +787,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let cachedExpandKey: string | undefined;
 	let cachedVerbosity: OutputVerbosity | undefined;
 	let cachedLiveToolOutput: boolean | undefined;
+	let cachedTick = 0;
+	/**
+	 * Did the last executed render put a counting elapsed line on screen? It is
+	 * what decides whether the render key carries a time tick at all, so a
+	 * transcript with nothing running keeps the old mutation-only invalidation.
+	 */
+	let renderedRunningTool = false;
 	const entryRenderCache = new Map<TranscriptEntry, { key: string; lines: string[] }>();
 	/**
 	 * The cache follows the transcript instead of stopping at a fixed 256
@@ -986,6 +994,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		entry.role === "assistant" &&
 		entry.segments.some((segment) => segment.kind === "tool" && segment.id === latestHintToolId);
 
+	/** True when the entry renders at least one counting elapsed line this frame. */
+	const entryHasRunningTool = (entry: TranscriptEntry): boolean =>
+		entry.role === "assistant" &&
+		entry.segments.some((segment) => segment.kind === "tool" && !segment.finished && segment.startedAtMs !== undefined);
+
 	/** Settled entries whose render is a pure function of the base key. */
 	const entryIsStable = (entry: TranscriptEntry): boolean =>
 		entry.role === "user" ||
@@ -998,6 +1011,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		const startedAt = performance.now();
 		const expandKey = resolveExpandKey();
 		const verbosity = options.getOutputVerbosity?.() ?? "default";
+		const nowMs = now();
+		// `dirty` is set on mutation and never on a tick, so without time in the
+		// key a running tool's elapsed counter advanced only when something
+		// unrelated invalidated the panel. The tick is the same 100 ms bucket
+		// dispatch-board.ts uses for running rows, taken off the injectable
+		// clock so a fixed clock still produces byte-stable output, and it is
+		// pinned to 0 whenever nothing is counting so a settled transcript
+		// re-renders no more often than it did before.
+		const tick = renderedRunningTool ? Math.floor(nowMs / 100) : 0;
 		// The hit guard runs before any transcript scan. latestCollapsedFinishedToolId
 		// walks the whole transcript when the newest tool is expanded or absent, and
 		// it is not part of the panel-level key, so computing it above the guard cost
@@ -1007,17 +1029,21 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			cachedWidth === width &&
 			cachedExpandKey === expandKey &&
 			cachedVerbosity === verbosity &&
-			cachedLiveToolOutput === liveToolOutput
+			cachedLiveToolOutput === liveToolOutput &&
+			cachedTick === tick
 		) {
 			options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: true, entriesRendered: 0 });
 			return cachedLines;
 		}
 		const latestHintToolId = latestCollapsedFinishedToolId();
-		const nowMs = now();
 		// The hint id is deliberately NOT part of the shared key: it changes on
 		// every finished collapsed tool, and keying every entry on it re-rendered
 		// the entire transcript per tool completion. Only the entry that contains
 		// the hint tool renders differently, so only that entry's key carries it.
+		// The tick stays out of the entry key: a settled entry renders the same
+		// bytes at every tick, and keying it on time would drop the entry cache
+		// and the frozen prefix ten times a second. Only the panel-level guard
+		// above is time-keyed, so a tick re-renders the live tail and nothing else.
 		const baseKey = `${width}|${expandKey ?? ""}|${verbosity}|${liveToolOutput}`;
 		const capacity = entryCacheCapacity();
 		if (frozen !== null && frozen.key !== baseKey) frozen = null;
@@ -1029,9 +1055,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		let freezeLineCount = out.length;
 		let freezeOpen = frozen !== null || startIndex === 0;
 		let entriesRendered = 0;
+		// Only entries at or past `startIndex` can hold a running tool: the frozen
+		// prefix is by construction a run of stable entries, and stable means no
+		// unfinished tool segment.
+		let sawRunningTool = false;
 		for (let i = startIndex; i < transcript.length; i += 1) {
 			const entry = transcript[i];
 			if (!entry) continue;
+			if (!sawRunningTool && entryHasRunningTool(entry)) sawRunningTool = true;
 			if (i > 0) out.push("");
 			const containsHint = entryContainsHint(entry, latestHintToolId);
 			const entryKey = containsHint ? `${baseKey}|hint:${latestHintToolId}` : baseKey;
@@ -1076,6 +1107,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		cachedExpandKey = expandKey;
 		cachedVerbosity = verbosity;
 		cachedLiveToolOutput = liveToolOutput;
+		cachedTick = tick;
+		renderedRunningTool = sawRunningTool;
 		dirty = false;
 		options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: false, entriesRendered });
 		return out;

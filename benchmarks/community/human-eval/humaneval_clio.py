@@ -237,7 +237,7 @@ def run_clio(prompt: str, cwd: Path, events_path: Path, timeout: int, target: st
     if model:
         cmd.extend(["--model", model])
     cmd.append(prompt)
-    started = time.time()
+    started = time.monotonic()
     timed_out = False
     stderr = ""
     with events_path.open("w", encoding="utf-8") as stdout:
@@ -260,7 +260,7 @@ def run_clio(prompt: str, cwd: Path, events_path: Path, timeout: int, target: st
     return {
         "exit": code,
         "timed_out": timed_out,
-        "wall_s": round(time.time() - started, 3),
+        "wall_s": round(time.monotonic() - started, 3),
         "stderr": stderr[-4000:],
         "events": str(events_path),
     }
@@ -414,7 +414,7 @@ def run_official_check(problem: dict[str, Any], completion: str, timeout: float)
             "official HumanEval evaluator is not installed; install "
             "`human-eval @ git+https://github.com/openai/human-eval.git` or use --evaluator subprocess"
         ) from exc
-    started = time.time()
+    started = time.monotonic()
     result = check_correctness(problem, completion, timeout=timeout, completion_id=0)
     passed = bool(result.get("passed"))
     return {
@@ -422,7 +422,7 @@ def run_official_check(problem: dict[str, Any], completion: str, timeout: float)
         "status": "pass" if passed else "fail",
         "result": result.get("result"),
         "evaluator": "human_eval.execution.check_correctness",
-        "wall_s": round(time.time() - started, 3),
+        "wall_s": round(time.monotonic() - started, 3),
     }
 
 
@@ -439,7 +439,7 @@ def build_check_program(problem: dict[str, Any], completion: str) -> str:
 
 def run_subprocess_check(problem: dict[str, Any], completion: str, timeout: float) -> dict[str, Any]:
     program = build_check_program(problem, completion)
-    started = time.time()
+    started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="clio-humaneval-") as tmp:
         path = Path(tmp) / "check.py"
         path.write_text(program, encoding="utf-8")
@@ -460,7 +460,7 @@ def run_subprocess_check(problem: dict[str, Any], completion: str, timeout: floa
                 "stdout": proc.stdout[-4000:],
                 "stderr": proc.stderr[-4000:],
                 "evaluator": "adapter.subprocess",
-                "wall_s": round(time.time() - started, 3),
+                "wall_s": round(time.monotonic() - started, 3),
             }
         except subprocess.TimeoutExpired as exc:
             return {
@@ -471,7 +471,7 @@ def run_subprocess_check(problem: dict[str, Any], completion: str, timeout: floa
                 "stdout": (exc.stdout or "")[-4000:] if isinstance(exc.stdout, str) else "",
                 "stderr": str(exc)[-4000:],
                 "evaluator": "adapter.subprocess",
-                "wall_s": round(time.time() - started, 3),
+                "wall_s": round(time.monotonic() - started, 3),
             }
 
 

@@ -44,6 +44,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -1088,7 +1089,7 @@ async function main() {
 	for (const entry of cases) {
 		// Cases 1 and 2 build the artifact and the prefix every other case uses.
 		if (ONLY && !ONLY.has(entry.id) && entry.id !== "1" && entry.id !== "2") continue;
-		const startedAt = Date.now();
+		const startedAt = performance.now();
 		let record;
 		try {
 			const result = await entry.body();
@@ -1098,7 +1099,7 @@ async function main() {
 				id: entry.id,
 				title: entry.title,
 				status: result.status ?? (failed.length === 0 ? "pass" : "fail"),
-				durationMs: Date.now() - startedAt,
+				durationMs: Math.round(performance.now() - startedAt),
 				...result,
 				checks,
 			};
@@ -1109,7 +1110,7 @@ async function main() {
 				id: entry.id,
 				title: entry.title,
 				status: "error",
-				durationMs: Date.now() - startedAt,
+				durationMs: Math.round(performance.now() - startedAt),
 				error: String(error?.stack ?? error),
 				checks: [],
 			};

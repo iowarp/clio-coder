@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { sleep } from "../../core/timers.js";
 import {
 	type ResidencyAdapter,
@@ -164,8 +165,8 @@ async function postRouterModel(fetchImpl: typeof fetch, url: string, modelId: st
 }
 
 async function waitForLoaded(input: LlamaCppResidencyInput, fetchImpl: typeof fetch, modelId: string): Promise<void> {
-	const started = Date.now();
-	while (Date.now() - started < LOAD_TIMEOUT_MS) {
+	const started = performance.now();
+	while (performance.now() - started < LOAD_TIMEOUT_MS) {
 		const models = await fetchRouterModels(input, fetchImpl);
 		const model = models.find((entry) => entry.id === modelId);
 		if (model?.state === "loaded") return;

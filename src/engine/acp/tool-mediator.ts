@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import type { DelegationToolGovernance } from "../../core/defaults.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
@@ -567,7 +568,7 @@ export class AcpToolMediator {
 	constructor(private readonly input: MediatorInput) {}
 
 	async handle(params: unknown): Promise<AcpRequestPermissionResponse> {
-		const startedAt = Date.now();
+		const startedAt = performance.now();
 		this.requested += 1;
 		const parsed = isRecord(params) ? (params as AcpRequestPermissionParams) : {};
 		const options = Array.isArray(parsed.options) ? parsed.options : [];
@@ -653,7 +654,7 @@ export class AcpToolMediator {
 			decision,
 			...(reason !== undefined ? { reason } : {}),
 			...(loggedSafety !== undefined ? { safetyDecision: loggedSafety } : {}),
-			durationMs: Math.max(0, Date.now() - startedAt),
+			durationMs: Math.round(performance.now() - startedAt),
 			timestamp: new Date().toISOString(),
 		});
 		if (decision === "denied" && reason?.startsWith("permission_required:")) {

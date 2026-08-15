@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { clampTimerDelayMs } from "./timers.js";
 
 export const SAFE_EXEC_DEFAULT_TIMEOUT_MS = 120_000;
@@ -69,7 +70,7 @@ export function runCommandVector(
 	options: RunCommandVectorOptions = {},
 ): Promise<SafeCommandResult> {
 	return new Promise((resolve) => {
-		const startedAt = Date.now();
+		const startedAt = performance.now();
 		const cwd = resolveSafeCwd(options.cwd, options.workspaceRoot);
 		const timeoutMs = clampTimerDelayMs(options.timeoutMs ?? SAFE_EXEC_DEFAULT_TIMEOUT_MS);
 		const maxOutputBytes = options.maxOutputBytes ?? SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES;
@@ -160,7 +161,7 @@ export function runCommandVector(
 				aborted,
 				timedOut,
 				outputCapped,
-				durationMs: Date.now() - startedAt,
+				durationMs: Math.round(performance.now() - startedAt),
 			});
 		});
 		child.on("close", (code, signalName) => {
@@ -180,7 +181,7 @@ export function runCommandVector(
 				aborted,
 				timedOut,
 				outputCapped,
-				durationMs: Date.now() - startedAt,
+				durationMs: Math.round(performance.now() - startedAt),
 			});
 		});
 	});

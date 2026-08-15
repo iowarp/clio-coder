@@ -17,6 +17,7 @@
  * back off replayed thinking text.
  */
 
+import { rawDurationMs } from "../core/timers.js";
 import { extractReasoningTokens } from "../domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry, SessionUsageDefaults } from "../domains/session/index.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
@@ -56,7 +57,7 @@ function millisBetween(startIso: string, endIso: string): number {
 	const start = Date.parse(startIso);
 	const end = Date.parse(endIso);
 	if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
-	return Math.max(0, end - start);
+	return Math.max(0, rawDurationMs(start, end));
 }
 
 /** The message rows of the newest turn on the branch, plus the target it ran under. */

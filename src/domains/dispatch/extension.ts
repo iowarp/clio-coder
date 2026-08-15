@@ -25,6 +25,7 @@ import {
 	UnsupportedResponseSchemaError,
 } from "../../core/response-schema.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
+import { rawDurationMs } from "../../core/timers.js";
 import { isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import {
 	type AcpDelegationRunHandle,
@@ -2445,7 +2446,7 @@ export function createDispatchBundle(
 		const startMs = Date.parse(receipt.startedAt);
 		const endMs = Date.parse(receipt.endedAt);
 		if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
-			finalizedTotals.runtimeSeconds += Math.max(0, endMs - startMs) / 1000;
+			finalizedTotals.runtimeSeconds += Math.max(0, rawDurationMs(startMs, endMs)) / 1000;
 		}
 	}
 
@@ -3718,7 +3719,8 @@ export function createDispatchBundle(
 		const emitTerminalDispatchEvent = (receipt: RunReceipt, outcome: RunOutcome): void => {
 			const startMs = Date.parse(receipt.startedAt);
 			const endMs = Date.parse(receipt.endedAt);
-			const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
+			const durationMs =
+				Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, rawDurationMs(startMs, endMs)) : 0;
 			const payload: DispatchCompletedPayload = {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -4765,7 +4767,8 @@ export function createDispatchBundle(
 		const emitTerminalDispatchEvent = (receipt: RunReceipt, outcome: RunOutcome): void => {
 			const startMs = Date.parse(receipt.startedAt);
 			const endMs = Date.parse(receipt.endedAt);
-			const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
+			const durationMs =
+				Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, rawDurationMs(startMs, endMs)) : 0;
 			const payload: DispatchCompletedPayload = {
 				runId: envelope.id,
 				agentId: req.agentId,

@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 import { combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
@@ -436,7 +437,9 @@ async function runScenario(
 	trustFixtures: boolean,
 	childEnv: NodeJS.ProcessEnv,
 ): Promise<ScenarioOutcome> {
-	const scenarioStart = Date.now();
+	// Published per-scenario figure: monotonic so a clock correction during a
+	// long sweep cannot land in one row's wall time.
+	const scenarioStart = performance.now();
 	const workspace = await mkdtemp(join(tmpdir(), "clio-skill-eval-seed-"));
 	let runWorkspaces: MaterializedSkillEvalWorkspaces | null = null;
 	try {
@@ -450,7 +453,7 @@ async function runScenario(
 				treatment: null,
 				judge: null,
 				workspace,
-				wallTimeMs: Date.now() - scenarioStart,
+				wallTimeMs: Math.round(performance.now() - scenarioStart),
 				infraError: fixtureError,
 			});
 		}
@@ -476,7 +479,7 @@ async function runScenario(
 				treatment,
 				judge: null,
 				workspace,
-				wallTimeMs: Date.now() - scenarioStart,
+				wallTimeMs: Math.round(performance.now() - scenarioStart),
 				infraError: infra,
 			});
 		}
@@ -492,7 +495,7 @@ async function runScenario(
 				treatment,
 				judge: null,
 				workspace,
-				wallTimeMs: Date.now() - scenarioStart,
+				wallTimeMs: Math.round(performance.now() - scenarioStart),
 				infraError: wall,
 			});
 		}
@@ -515,7 +518,7 @@ async function runScenario(
 				treatment,
 				judge,
 				workspace,
-				wallTimeMs: Date.now() - scenarioStart,
+				wallTimeMs: Math.round(performance.now() - scenarioStart),
 				infraError: judgeInfra,
 			});
 		}
@@ -527,7 +530,7 @@ async function runScenario(
 			treatment,
 			judge,
 			workspace,
-			wallTimeMs: Date.now() - scenarioStart,
+			wallTimeMs: Math.round(performance.now() - scenarioStart),
 			infraError: null,
 		});
 	} finally {
@@ -735,7 +738,7 @@ function captureHeadlessRun(
 	timeoutMs: number,
 	env: NodeJS.ProcessEnv,
 ): Promise<CapturedRun> {
-	const startedMs = Date.now();
+	const startedMs = performance.now();
 	return new Promise((resolvePromise) => {
 		let stdout = "";
 		let pendingStdout = "";
@@ -780,7 +783,7 @@ function captureHeadlessRun(
 				...parsedRun,
 				exitCode,
 				timedOut,
-				wallTimeMs: Date.now() - startedMs,
+				wallTimeMs: Math.round(performance.now() - startedMs),
 				stderr,
 			});
 		};
