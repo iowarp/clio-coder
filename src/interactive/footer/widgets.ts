@@ -689,7 +689,9 @@ export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
 		theme.fg(stop.token, `${stop.glyph} ${formatCompactMs(summary.elapsedMs)}`),
 		theme.fg("muted", `${GLYPH.up}${summary.inputTokens} ${GLYPH.down}${summary.outputTokens}`),
 	];
-	if (typeof summary.reasoningTokens === "number") {
+	// Zero suppresses the chip, the same rule the chat panel's turn line follows:
+	// a turn that spent no reasoning tokens states nothing by printing `r0`.
+	if (typeof summary.reasoningTokens === "number" && summary.reasoningTokens > 0) {
 		const marker =
 			summary.reasoningTokenProvenance === "estimated" || summary.reasoningTokenProvenance === "mixed" ? "≈" : "";
 		parts.push(theme.fg("reason", `r${marker}${summary.reasoningTokens}`));
@@ -792,10 +794,10 @@ function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary): string {
 			"muted",
 			`${GLYPH.up}${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down}${formatFooterTokens(lastTurn.outputTokens)}`,
 		),
-		lastTurn.reasoningTokens !== undefined
+		lastTurn.reasoningTokens !== undefined && lastTurn.reasoningTokens > 0
 			? theme.fg(
 					"reason",
-					`r${lastTurn.reasoningTokenProvenance === "estimated" || lastTurn.reasoningTokenProvenance === "mixed" ? "≈" : ""}${formatFooterTokens(lastTurn.reasoningTokens ?? 0)}`,
+					`r${lastTurn.reasoningTokenProvenance === "estimated" || lastTurn.reasoningTokenProvenance === "mixed" ? "≈" : ""}${formatFooterTokens(lastTurn.reasoningTokens)}`,
 				)
 			: null,
 		lastTurn.cacheReadTokens > 0 || lastTurn.cacheWriteTokens > 0
@@ -1140,10 +1142,10 @@ export function buildMetricStrip(
 			),
 		);
 		candidates.push(
-			lastTurn.reasoningTokens !== undefined
+			lastTurn.reasoningTokens !== undefined && lastTurn.reasoningTokens > 0
 				? theme.fg(
 						"reason",
-						`r${lastTurn.reasoningTokenProvenance === "estimated" || lastTurn.reasoningTokenProvenance === "mixed" ? "≈" : ""}${formatFooterTokens(lastTurn.reasoningTokens ?? 0)}`,
+						`r${lastTurn.reasoningTokenProvenance === "estimated" || lastTurn.reasoningTokenProvenance === "mixed" ? "≈" : ""}${formatFooterTokens(lastTurn.reasoningTokens)}`,
 					)
 				: null,
 		);
