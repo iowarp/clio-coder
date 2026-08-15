@@ -16,7 +16,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, it } from "node:test";
 import { stringify } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -173,7 +173,7 @@ describe("TUI width matrix", { concurrency: false, skip: ptySupported ? false : 
 			);
 			ok(
 				!lines.some((line) => line.includes("idle")) &&
-					lines.some((line) => line.includes("clio-coder")) &&
+					lines.some((line) => line.includes(basename(REPO_ROOT))) &&
 					lines.some((line) => line.includes("ctx ")),
 				"the idle footer stays quiet while workspace and context remain visible",
 			);
