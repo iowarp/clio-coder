@@ -93,15 +93,16 @@ describe("contracts/settings-lock", () => {
 		strictEqual(saved.orchestrator.thinkingLevel, "high");
 	});
 
-	it("times out on a fresh foreign lock instead of corrupting the file", () => {
-		writeFileSync(settingsLockPath(), `${JSON.stringify({ pid: 999999, at: new Date().toISOString() })}\n`, "utf8");
+	it("times out on a lock held by a live process instead of corrupting the file", () => {
+		// This process is the stand-in for a sibling that is alive and working.
+		writeFileSync(settingsLockPath(), `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`, "utf8");
 		throws(
 			() =>
 				updateSettings(
 					(settings) => {
 						settings.retry.maxRetries = 1;
 					},
-					{ timeoutMs: 120, pollIntervalMs: 10 },
+					{ timeoutMs: 120 },
 				),
 			/timed out .* waiting for/,
 		);
@@ -110,17 +111,40 @@ describe("contracts/settings-lock", () => {
 		rmSync(settingsLockPath(), { force: true });
 	});
 
-	it("takes over a stale lock left by a dead process", () => {
+	it("leaves a live holder's lock alone well past the retired 5s stale window", () => {
+		// The old settings policy treated a lockfile older than 5s as abandoned
+		// with no liveness check, so a settings write that stalled past five
+		// seconds on a slow filesystem had its lock stolen mid-write. Age no
+		// longer decides for a lock whose owner is demonstrably alive.
 		const lockPath = settingsLockPath();
-		writeFileSync(lockPath, `${JSON.stringify({ pid: 999999, at: new Date(0).toISOString() })}\n`, "utf8");
+		writeFileSync(lockPath, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`, "utf8");
 		const past = new Date(Date.now() - 60_000);
 		utimesSync(lockPath, past, past);
+
+		throws(
+			() =>
+				updateSettings(
+					(settings) => {
+						settings.retry.maxRetries = 1;
+					},
+					{ timeoutMs: 120 },
+				),
+			/timed out .* waiting for/,
+		);
+		strictEqual(readSettings().retry.maxRetries, 3);
+		ok(existsSync(lockPath), "the live holder's lock must survive the failed acquisition");
+		rmSync(lockPath, { force: true });
+	});
+
+	it("takes over a lock left by a dead process", () => {
+		const lockPath = settingsLockPath();
+		writeFileSync(lockPath, `${JSON.stringify({ pid: 999999, at: new Date(0).toISOString() })}\n`, "utf8");
 
 		updateSettings(
 			(settings) => {
 				settings.retry.maxRetries = 5;
 			},
-			{ timeoutMs: 1_000, staleLockMs: 5_000, pollIntervalMs: 10 },
+			{ timeoutMs: 1_000 },
 		);
 		strictEqual(readSettings().retry.maxRetries, 5);
 		strictEqual(existsSync(lockPath), false, "lock must be released after takeover");

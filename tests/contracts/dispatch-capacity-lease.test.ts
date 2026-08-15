@@ -2,9 +2,11 @@ import { match, ok, strictEqual, throws } from "node:assert";
 import { fork } from "node:child_process";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { FILE_LOCK_ACQUIRE_TIMEOUT_MS } from "../../src/core/state-file-lock.js";
 import {
 	acquireCapacityLease,
 	capacityDrain,
+	DEFAULT_CAPACITY_LEASE_TTL_MS,
 	heartbeatCapacityLease,
 	listCapacityLeases,
 	MAX_CAPACITY_LEASES,
@@ -127,6 +129,46 @@ describe("durable dispatch capacity leases", () => {
 		});
 		heartbeatCapacityLease(lease.leaseId, 50, 100);
 		strictEqual(listCapacityLeases({ nowMs: 149, probe: { birthToken: () => "birth" } }).length, 1);
+	});
+	it("a live owner keeps its lease through a lock stall longer than the ttl", () => {
+		home();
+		// Every admission mutation blocks the event loop waiting for the state
+		// lock, so a holder stuck behind one also stops heartbeating. Forty-five
+		// seconds of that used to put a 30s lease past expiry and hand the slot
+		// to a second process while the first still believed it held one.
+		const lease = acquireCapacityLease({
+			assignmentId: "a",
+			nodeId: "local",
+			limits,
+			nowMs: 0,
+			ttlMs: 30_000,
+			ownerPid: 42,
+			processBirthToken: "birth",
+			probe: { birthToken: () => "birth" },
+		});
+		const after = listCapacityLeases({ nowMs: 45_000, probe: { birthToken: () => "birth" } });
+		strictEqual(after.length, 1);
+		strictEqual(after[0]?.leaseId, lease.leaseId);
+	});
+	it("a dead owner is reclaimed even while its lease is unexpired", () => {
+		home();
+		acquireCapacityLease({
+			assignmentId: "a",
+			nodeId: "local",
+			limits,
+			nowMs: 0,
+			ttlMs: 30_000,
+			ownerPid: 42,
+			processBirthToken: "birth",
+			probe: { birthToken: () => "birth" },
+		});
+		strictEqual(listCapacityLeases({ nowMs: 1_000, probe: { birthToken: () => null } }).length, 0);
+	});
+	it("the lock acquire budget stays under the lease ttl", () => {
+		ok(
+			FILE_LOCK_ACQUIRE_TIMEOUT_MS < DEFAULT_CAPACITY_LEASE_TTL_MS,
+			`a caller may block ${FILE_LOCK_ACQUIRE_TIMEOUT_MS}ms on the admission lock, which must stay under the ${DEFAULT_CAPACITY_LEASE_TTL_MS}ms it holds a lease for`,
+		);
 	});
 	it("dead and expired owners are reclaimed", () => {
 		home();

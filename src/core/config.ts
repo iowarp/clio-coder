@@ -12,7 +12,7 @@
  * machine-owned and written whole.
  */
 
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
@@ -23,6 +23,7 @@ import {
 	THINKING_LEVELS,
 } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
+import { withStateFileLockSync } from "./state-file-lock.js";
 import { MAX_TIMER_DELAY_MS } from "./timers.js";
 import { clioConfigDir, resolveClioDirs } from "./xdg.js";
 
@@ -1388,42 +1389,10 @@ export type SettingsMutator = (settings: ClioSettings) => ClioSettings | undefin
 export interface SettingsUpdateOptions {
 	/** Total time to wait for the lock before giving up. Default 10s. */
 	timeoutMs?: number;
-	/**
-	 * A lock file older than this is considered abandoned by a dead process
-	 * and is taken over. Locked sections are a read + mutate + write of one
-	 * small YAML file, so a healthy holder releases in milliseconds. Default 5s.
-	 */
-	staleLockMs?: number;
-	/** Sleep between acquisition attempts. Default 25ms. */
-	pollIntervalMs?: number;
 }
 
 export function settingsLockPath(): string {
 	return `${settingsPath()}.lock`;
-}
-
-function sleepSync(ms: number): void {
-	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(1, ms));
-}
-
-function tryAcquireSettingsLock(lockPath: string, staleLockMs: number): boolean {
-	try {
-		writeFileSync(lockPath, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`, {
-			encoding: "utf8",
-			flag: "wx",
-			mode: 0o644,
-		});
-		return true;
-	} catch (err) {
-		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-	}
-	try {
-		if (Date.now() - statSync(lockPath).mtimeMs > staleLockMs) rmSync(lockPath, { force: true });
-	} catch {
-		// Lock vanished between the failed create and the stat: the holder
-		// released it. The caller's next attempt will race for it normally.
-	}
-	return false;
 }
 
 /**
@@ -1433,24 +1402,7 @@ function tryAcquireSettingsLock(lockPath: string, staleLockMs: number): boolean 
  * holds the same lock instead of racing updateSettings.
  */
 export function withSettingsLock<T>(fn: () => T, options: SettingsUpdateOptions = {}): T {
-	const timeoutMs = options.timeoutMs ?? 10_000;
-	const staleLockMs = options.staleLockMs ?? 5_000;
-	const pollIntervalMs = options.pollIntervalMs ?? 25;
-	const lockPath = settingsLockPath();
-	const deadline = Date.now() + timeoutMs;
-	while (!tryAcquireSettingsLock(lockPath, staleLockMs)) {
-		if (Date.now() >= deadline) {
-			throw new Error(
-				`timed out after ${timeoutMs}ms waiting for ${lockPath}; delete it if no other clio process is running`,
-			);
-		}
-		sleepSync(pollIntervalMs);
-	}
-	try {
-		return fn();
-	} finally {
-		rmSync(lockPath, { force: true });
-	}
+	return withStateFileLockSync(settingsPath(), fn, { timeoutMs: options.timeoutMs ?? 10_000 });
 }
 
 /**
