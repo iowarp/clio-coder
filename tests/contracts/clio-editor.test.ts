@@ -1,13 +1,28 @@
-import { deepStrictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { TUI } from "../../src/engine/tui.js";
-import { ClioEditor } from "../../src/interactive/clio-editor.js";
+import { type TUI, visibleWidth } from "../../src/engine/tui.js";
+import { ClioEditor, type EditorChrome } from "../../src/interactive/clio-editor.js";
+import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
+import { clioTheme } from "../../src/interactive/theme/index.js";
 
 const fakeTui = { requestRender: () => {}, terminal: { rows: 24 } } as unknown as TUI;
-const chrome = { getModelLabel: () => "mini", getThinkingLabel: () => "off" };
+const chrome: EditorChrome = {
+	getModelLabel: () => "mini",
+	getThinkingLabel: () => "off",
+	isStreaming: () => false,
+	willEnterSteer: (text) => text.trim().length > 0,
+	getSubmitKeyLabel: () => "Enter",
+	getNewlineKeyLabel: () => "Shift+Enter",
+};
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "gu");
+const CURSOR_MARKER = "\x1b_pi:c\x07";
 
-function createEditor() {
-	const editor = new ClioEditor(fakeTui, chrome);
+function plain(line: string): string {
+	return line.replace(ANSI, "").replaceAll(CURSOR_MARKER, "");
+}
+
+function createEditor(overrides: Partial<EditorChrome> = {}, tui = fakeTui) {
+	const editor = new ClioEditor(tui, { ...chrome, ...overrides });
 	const submitted: string[] = [];
 	editor.onSubmit = (text) => submitted.push(text);
 	editor.onChange = () => {};
@@ -15,6 +30,122 @@ function createEditor() {
 }
 
 describe("contracts/clio-editor", () => {
+	it("renders an idle empty composer with identity, placeholder, and real send/newline bindings", () => {
+		const { editor } = createEditor();
+		editor.focused = true;
+		const cursorBefore = editor.getCursor();
+		const lines = editor.render(80);
+
+		ok(plain(lines[0] ?? "").startsWith("MESSAGE "));
+		ok(plain(lines[0] ?? "").includes("mini · off"));
+		ok(plain(lines[1] ?? "").includes("Ask Clio…  / for commands"));
+		ok(plain(lines[2] ?? "").includes("Enter send · Shift+Enter newline"));
+		strictEqual((lines[1] ?? "").includes(CURSOR_MARKER), true, "placeholder keeps the hardware cursor marker");
+		deepStrictEqual(editor.getCursor(), cursorBefore, "placeholder rendering does not move the editor cursor");
+		for (const line of lines) strictEqual(visibleWidth(line.replaceAll(CURSOR_MARKER, "")), 80);
+	});
+
+	it("removes the placeholder for non-empty and multiline drafts without changing base layout", () => {
+		const { editor } = createEditor();
+		editor.setText("first line");
+		let lines = editor.render(80);
+		strictEqual(
+			lines.some((line) => plain(line).includes("Ask Clio")),
+			false,
+		);
+		strictEqual(lines.length, 3, "single-line draft keeps the base top/content/bottom shape");
+
+		editor.setText("first line\nsecond line");
+		lines = editor.render(80);
+		strictEqual(
+			lines.some((line) => plain(line).includes("Ask Clio")),
+			false,
+		);
+		strictEqual(lines.length, 4, "multiline draft retains both base Editor content rows");
+		ok(lines.some((line) => plain(line).includes("first line")));
+		ok(lines.some((line) => plain(line).includes("second line")));
+	});
+
+	it("drops the teaching hint at 40 columns before model identity or draft content", () => {
+		const { editor } = createEditor();
+		editor.setText("keep this draft visible");
+		const lines = editor.render(40);
+
+		ok(plain(lines[0] ?? "").startsWith("MESSAGE "));
+		ok(plain(lines[0] ?? "").includes("mini · off"));
+		ok(lines.some((line) => plain(line).includes("keep this draft visible")));
+		strictEqual(
+			lines.some((line) => plain(line).includes("Enter send")),
+			false,
+		);
+		for (const line of lines) strictEqual(visibleWidth(line), 40);
+	});
+
+	it("uses FOLLOW-UP while streaming empty and one orange STEER tag only for a steerable draft", () => {
+		let streaming = true;
+		const { editor } = createEditor({ isStreaming: () => streaming });
+		const theme = clioTheme();
+		const actionSequence = theme.fgSequence("action");
+		const actionTagOpener = theme.style("action", " ", { bold: true }).split(" ")[0] ?? "";
+		let lines = editor.render(80);
+		ok(plain(lines[0] ?? "").startsWith("FOLLOW-UP "));
+		if (actionSequence.length > 0) strictEqual((lines[0] ?? "").includes(actionTagOpener), false);
+
+		editor.setText("correct the active run");
+		lines = editor.render(80);
+		ok(plain(lines[0] ?? "").startsWith("STEER "));
+		if (actionSequence.length > 0) strictEqual(lines.join("\n").split(actionTagOpener).length - 1, 1);
+
+		streaming = false;
+		lines = editor.render(80);
+		ok(plain(lines[0] ?? "").startsWith("MESSAGE "));
+		if (actionSequence.length > 0) strictEqual((lines[0] ?? "").includes(actionTagOpener), false);
+	});
+
+	it("keeps streaming local-command drafts non-orange when Enter will not steer", () => {
+		const { editor } = createEditor({
+			isStreaming: () => true,
+			willEnterSteer: (text) => !text.startsWith("/") && !text.startsWith("!"),
+		});
+		for (const draft of ["/help", "!pwd"]) {
+			editor.setText(draft);
+			const topRail = editor.render(80)[0] ?? "";
+			ok(plain(topRail).startsWith("FOLLOW-UP "), `${draft} is not presented as a steer`);
+		}
+	});
+
+	it("leaves base scroll indicators in charge of occupied rails", () => {
+		const shortTui = { requestRender: () => {}, terminal: { rows: 10 } } as unknown as TUI;
+		const { editor } = createEditor({}, shortTui);
+		editor.setText(Array.from({ length: 8 }, (_, index) => `line ${index + 1}`).join("\n"));
+		const cursorBefore = editor.getCursor();
+		const lines = editor.render(80);
+
+		ok(plain(lines[0] ?? "").includes("↑ 3 more"), "the base top scroll indicator survives");
+		strictEqual(plain(lines[0] ?? "").includes("MESSAGE"), false, "chrome does not replace an occupied rail");
+		deepStrictEqual(editor.getCursor(), cursorBefore);
+	});
+
+	it("keeps autocomplete rows open and separate from the composer rails", async () => {
+		const { editor } = createEditor();
+		editor.setAutocompleteProvider(createSlashCommandAutocompleteProvider({ fdPath: null }));
+		editor.setText("/context ");
+		editor.handleInput("i");
+		for (let attempt = 0; attempt < 10 && editor.render(80).length < 4; attempt += 1) {
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		}
+		const lines = editor.render(80);
+
+		ok(plain(lines[0] ?? "").startsWith("MESSAGE "));
+		ok(lines.some((line) => line.includes("Initialize project context")));
+		ok(lines.some((line) => plain(line).includes("Enter send · Shift+Enter newline")));
+		strictEqual(
+			lines.some((line) => plain(line).includes("Ask Clio")),
+			false,
+		);
+		for (const line of lines) strictEqual(visibleWidth(line), 80);
+	});
+
 	it("submits a pasted slash command whose paste carried a trailing newline", () => {
 		const { editor, submitted } = createEditor();
 		editor.handleInput("\x1b[200~/model\n\x1b[201~");

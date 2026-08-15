@@ -9,7 +9,7 @@ import type { Component, TUI } from "../../src/engine/tui.js";
 import type { ChatLoop, ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import type { ChatPanel } from "../../src/interactive/chat-panel.js";
 import type { CoalescingChatRenderer } from "../../src/interactive/chat-renderer.js";
-import type { ClioEditor } from "../../src/interactive/clio-editor.js";
+import type { ClioEditor, EditorChrome } from "../../src/interactive/clio-editor.js";
 import type { DispatchBoardView } from "../../src/interactive/dispatch-board.js";
 import type { FollowUpQueuePanel } from "../../src/interactive/follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "../../src/interactive/footer/dashboard.js";
@@ -64,9 +64,13 @@ function harness() {
 	let footerRefreshes = 0;
 	let chatInvalidations = 0;
 	let workspaceRefreshes = 0;
+	let editorChrome: EditorChrome | null = null;
+	let dispatchRuns: Array<{ runId: string; agentId: string }> = [];
 
 	const keybindings = {
 		getKeys: (id: string) => {
+			if (id === "tui.input.submit") return ["enter"];
+			if (id === "tui.input.newLine") return ["shift+enter", "ctrl+j"];
 			if (id === "clio.tool.expand") return ["ctrl+o"];
 			if (id === "clio.message.dequeue") return ["alt+up"];
 			if (id === "clio.notifications.dismiss") return ["alt+x"];
@@ -170,8 +174,9 @@ function harness() {
 			footerDeps = input;
 			return footer;
 		},
-		createEditor: () => {
+		createEditor: (_tui, chrome) => {
 			log.push("editor");
+			editorChrome = chrome;
 			return editor;
 		},
 		createAutocomplete: () => {
@@ -218,7 +223,7 @@ function harness() {
 	const deps: InteractivePresentationDeps = {
 		bus: {} as SafeEventBus,
 		providers: {} as ProvidersContract,
-		dispatch: { snapshot: () => ({}) } as Pick<DispatchContract, "snapshot">,
+		dispatch: { snapshot: () => ({ running: dispatchRuns }) } as unknown as Pick<DispatchContract, "snapshot">,
 		observability,
 		chat: {
 			contextUsage: () => ({}),
@@ -255,12 +260,16 @@ function harness() {
 		firstSnapshot,
 		footer,
 		getFooterDeps: () => footerDeps,
+		getEditorChrome: () => editorChrome,
 		emitObservability: (next: ObservabilitySnapshot) => observabilityListener?.(next),
 		setStreaming: (next: boolean) => {
 			streaming = next;
 		},
 		setStatusPhase: (next: typeof statusPhase) => {
 			statusPhase = next;
+		},
+		setDispatchRuns: (next: typeof dispatchRuns) => {
+			dispatchRuns = next;
 		},
 		setExpanded: (next: boolean) => {
 			expanded = next;
@@ -305,6 +314,31 @@ describe("interactive presentation ownership", () => {
 			[120, 1_000, 5_000],
 		);
 		strictEqual(presentation.notifications.list().length, 0);
+	});
+
+	it("wires live streaming state and resolved editor bindings into composer chrome", () => {
+		const test = harness();
+		createInteractivePresentation(test.deps);
+		const chrome = test.getEditorChrome();
+		if (!chrome) throw new Error("editor chrome dependencies were not captured");
+
+		strictEqual(chrome.isStreaming?.(), false);
+		strictEqual(chrome.getSubmitKeyLabel?.(), "Enter");
+		strictEqual(chrome.getNewlineKeyLabel?.(), "Shift+Enter");
+		test.setStreaming(true);
+		strictEqual(chrome.isStreaming?.(), true, "composer reads streaming state live rather than at construction");
+		strictEqual(chrome.willEnterSteer?.("correct course"), true);
+		strictEqual(chrome.willEnterSteer?.("/help"), false, "a local slash command does not claim orange steer intent");
+		strictEqual(chrome.willEnterSteer?.("!pwd"), false, "a blocked streaming bash command is not a steer");
+		strictEqual(chrome.willEnterSteer?.("@worker correct course"), true, "without fleet work, @text steers Clio");
+		test.setDispatchRuns([{ runId: "run-123", agentId: "worker" }]);
+		strictEqual(chrome.willEnterSteer?.("@worker correct course"), true, "a unique fleet target is steerable");
+		strictEqual(chrome.willEnterSteer?.("@missing correct course"), false, "a missing fleet target only warns");
+		test.setDispatchRuns([
+			{ runId: "run-123", agentId: "worker" },
+			{ runId: "run-456", agentId: "worker" },
+		]);
+		strictEqual(chrome.willEnterSteer?.("@worker correct course"), false, "an ambiguous fleet target only warns");
 	});
 
 	it("keeps footer telemetry and the observability projection behind narrow callbacks", () => {
