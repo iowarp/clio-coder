@@ -44,19 +44,47 @@ function isStaticId(id: string): id is keyof typeof SETTINGS_LABELS_BY_ID {
 function settingsWithTargets(): ClioSettings {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = [
-		{ id: "target-a", runtime: "openai-compat", url: "http://localhost:1111", defaultModel: "model-a" },
-		{ id: "target-b", runtime: "openai-compat", url: "http://localhost:2222", defaultModel: "model-b" },
+		{
+			id: "target-a",
+			runtime: "openai-compat",
+			url: "http://localhost:1111",
+			defaultModel: "model-a",
+		},
+		{
+			id: "target-b",
+			runtime: "openai-compat",
+			url: "http://localhost:2222",
+			defaultModel: "model-b",
+		},
 	];
 	settings.autonomy = "auto-edit";
-	settings.orchestrator = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.orchestrator = {
+		target: "target-a",
+		model: "model-a",
+		thinkingLevel: "off",
+	};
 	settings.background = { target: null, model: null, thinkingLevel: "off" };
-	settings.workers.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
-	settings.workers.profiles.fast = { target: "target-b", model: "model-b", thinkingLevel: "off" };
+	settings.workers.default = {
+		target: "target-a",
+		model: "model-a",
+		thinkingLevel: "off",
+	};
+	settings.workers.profiles.fast = {
+		target: "target-b",
+		model: "model-b",
+		thinkingLevel: "off",
+	};
 	settings.workers.agentBindings.scout = "fast";
 	settings.scope = ["target-a/model-a", "target-b/model-b"];
 	settings.budget.sessionCeilingUsd = 5;
 	settings.compaction = { auto: true, threshold: 0.8, excludeLastTurns: 6 };
-	settings.retry = { enabled: true, maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 60000, streamStallMs: 180000 };
+	settings.retry = {
+		enabled: true,
+		maxRetries: 3,
+		baseDelayMs: 2000,
+		maxDelayMs: 60000,
+		streamStallMs: 180000,
+	};
 	settings.terminal.showTerminalProgress = false;
 	return settings;
 }
@@ -106,7 +134,10 @@ interface Commit {
 	scope: "session" | "global";
 }
 
-function spyingSettingsCenter(bodyHeight: number): { center: SettingsCenter; commits: Commit[] } {
+function spyingSettingsCenter(bodyHeight: number): {
+	center: SettingsCenter;
+	commits: Commit[];
+} {
 	const commits: Commit[] = [];
 	const settings = settingsWithTargets();
 	const center = new SettingsCenter(buildSettingItems(settings), {
@@ -181,7 +212,10 @@ describe("contracts/settings center", () => {
 	it("assigns explicit presentation kinds and independently semantic status segments", () => {
 		const settings = settingsWithTargets();
 		const items = buildSettingItems(settings, {
-			providers: providersWithHealth({ "target-a": "healthy", "target-b": "down" }),
+			providers: providersWithHealth({
+				"target-a": "healthy",
+				"target-b": "down",
+			}),
 			getFleetNodes: () => [
 				{
 					id: "remote-a",
@@ -200,6 +234,16 @@ describe("contracts/settings center", () => {
 		strictEqual(byId.get("autonomy")?.presentationKind, "setting");
 		strictEqual(byId.get("safetyNet")?.presentationKind, "read-only-fact");
 		strictEqual(byId.get("workers.profiles")?.presentationKind, "action");
+		strictEqual(byId.get("fleet.group.defaults")?.presentationKind, "group-header");
+		strictEqual(byId.get("fleet.group.profiles")?.presentationKind, "group-header");
+		strictEqual(byId.get("fleet.group.agent-routes")?.presentationKind, "group-header");
+		strictEqual(byId.get("fleet.group.placement")?.presentationKind, "group-header");
+		strictEqual(byId.get("workers.profiles.fast")?.presentationKind, "setting");
+		deepStrictEqual(byId.get("workers.profiles.fast")?.valueSegments, [
+			{ text: "target-b/model-b", tone: "neutral" },
+			{ text: "  off", tone: "neutral" },
+			{ text: "  auto", tone: "neutral" },
+		]);
 		strictEqual(byId.get("targets")?.presentationKind, "group-header");
 		strictEqual(byId.get("targets.target-b")?.presentationKind, "status");
 		deepStrictEqual(byId.get("targets.target-b")?.valueSegments, [{ text: "○ down", tone: "unhealthy" }]);
@@ -209,16 +253,19 @@ describe("contracts/settings center", () => {
 			{ text: " · 0/4 busy", tone: "neutral" },
 		]);
 		deepStrictEqual(
-			buildSettingItems(settings, { getTargetOperation: (targetId) => (targetId === "target-b" ? "probe" : null) }).find(
-				(item) => item.id === "targets.target-b",
-			)?.valueSegments,
+			buildSettingItems(settings, {
+				getTargetOperation: (targetId) => (targetId === "target-b" ? "probe" : null),
+			}).find((item) => item.id === "targets.target-b")?.valueSegments,
 			[{ text: `${GLYPH.running} probing`, tone: "activity" }],
 		);
 	});
 
 	it("joins every status row without doubled separators", () => {
 		const items = buildSettingItems(settingsWithTargets(), {
-			providers: providersWithHealth({ "target-a": "unknown", "target-b": "down" }),
+			providers: providersWithHealth({
+				"target-a": "unknown",
+				"target-b": "down",
+			}),
 			getFleetNodes: () => [
 				{
 					id: "remote-a",
@@ -257,12 +304,27 @@ describe("contracts/settings center", () => {
 	it("keeps selected focus teal while settled target and node health retain their own colors", () => {
 		const settings = settingsWithTargets();
 		settings.targets.push(
-			{ id: "target-c", runtime: "openai-compat", url: "http://localhost:3333", defaultModel: "model-c" },
-			{ id: "target-d", runtime: "openai-compat", url: "http://localhost:4444", defaultModel: "model-d" },
+			{
+				id: "target-c",
+				runtime: "openai-compat",
+				url: "http://localhost:3333",
+				defaultModel: "model-c",
+			},
+			{
+				id: "target-d",
+				runtime: "openai-compat",
+				url: "http://localhost:4444",
+				defaultModel: "model-d",
+			},
 		);
 		const items = buildSettingItems(settings, {
 			providers: providersWithHealth(
-				{ "target-a": "healthy", "target-b": "degraded", "target-c": "down", "target-d": "unknown" },
+				{
+					"target-a": "healthy",
+					"target-b": "degraded",
+					"target-c": "down",
+					"target-d": "unknown",
+				},
 				settings,
 			),
 			getFleetNodes: () => [
@@ -362,7 +424,7 @@ describe("contracts/settings center", () => {
 		ok(plain.includes("○ offline"), "offline node remains explicit without color");
 		const plainLines = plain.split("\n");
 		ok(
-			plainLines.some((line) => line.includes("Agent bindings") && line.includes("— (none)")),
+			plainLines.some((line) => line.includes("Add agent route") && line.includes("—")),
 			"glyph-less read-only facts retain an explicit fallback",
 		);
 		ok(
@@ -382,8 +444,16 @@ describe("contracts/settings center", () => {
 	});
 
 	it("preserves applySettingChange behavior for every editable id", () => {
-		const cases: Array<{ id: EditableSettingId; value: string; assert: (settings: ClioSettings) => void }> = [
-			{ id: "autonomy", value: "full-auto", assert: (s) => strictEqual(s.autonomy, "full-auto") },
+		const cases: Array<{
+			id: EditableSettingId;
+			value: string;
+			assert: (settings: ClioSettings) => void;
+		}> = [
+			{
+				id: "autonomy",
+				value: "full-auto",
+				assert: (s) => strictEqual(s.autonomy, "full-auto"),
+			},
 			{
 				id: "workers.onPermission",
 				value: "escalate",
@@ -478,12 +548,36 @@ describe("contracts/settings center", () => {
 				value: "medium",
 				assert: (s) => strictEqual(s.workers.default.thinkingLevel, "medium"),
 			},
-			{ id: "workers.maxRetries", value: "5", assert: (s) => strictEqual(s.workers.maxRetries, 5) },
-			{ id: "modelSelector.recentLimit", value: "20", assert: (s) => strictEqual(s.modelSelector.recentLimit, 20) },
-			{ id: "defaults.maxTokens", value: "65536", assert: (s) => strictEqual(s.defaults.maxTokens, 65536) },
-			{ id: "defaults.maxTokens", value: "0", assert: (s) => strictEqual(s.defaults.maxTokens, 0) },
-			{ id: "budget.concurrency", value: "auto", assert: (s) => strictEqual(s.budget.concurrency, "auto") },
-			{ id: "budget.concurrency", value: "4", assert: (s) => strictEqual(s.budget.concurrency, 4) },
+			{
+				id: "workers.maxRetries",
+				value: "5",
+				assert: (s) => strictEqual(s.workers.maxRetries, 5),
+			},
+			{
+				id: "modelSelector.recentLimit",
+				value: "20",
+				assert: (s) => strictEqual(s.modelSelector.recentLimit, 20),
+			},
+			{
+				id: "defaults.maxTokens",
+				value: "65536",
+				assert: (s) => strictEqual(s.defaults.maxTokens, 65536),
+			},
+			{
+				id: "defaults.maxTokens",
+				value: "0",
+				assert: (s) => strictEqual(s.defaults.maxTokens, 0),
+			},
+			{
+				id: "budget.concurrency",
+				value: "auto",
+				assert: (s) => strictEqual(s.budget.concurrency, "auto"),
+			},
+			{
+				id: "budget.concurrency",
+				value: "4",
+				assert: (s) => strictEqual(s.budget.concurrency, 4),
+			},
 			{
 				id: "budget.sessionCeilingUsd",
 				value: "12.5",
@@ -494,24 +588,56 @@ describe("contracts/settings center", () => {
 				value: "target-b/model-b, target-a/model-a",
 				assert: (s) => deepStrictEqual(s.scope, ["target-b/model-b", "target-a/model-a"]),
 			},
-			{ id: "compaction.auto", value: "false", assert: (s) => strictEqual(s.compaction.auto, false) },
+			{
+				id: "compaction.auto",
+				value: "false",
+				assert: (s) => strictEqual(s.compaction.auto, false),
+			},
 			{
 				id: "compaction.excludeLastTurns",
 				value: "10",
 				assert: (s) => strictEqual(s.compaction.excludeLastTurns, 10),
 			},
-			{ id: "compaction.threshold", value: "0.9", assert: (s) => strictEqual(s.compaction.threshold, 0.9) },
-			{ id: "compaction.model", value: "prov/sum", assert: (s) => strictEqual(s.compaction.model, "prov/sum") },
-			{ id: "compaction.model", value: "  ", assert: (s) => strictEqual("model" in s.compaction, false) },
+			{
+				id: "compaction.threshold",
+				value: "0.9",
+				assert: (s) => strictEqual(s.compaction.threshold, 0.9),
+			},
+			{
+				id: "compaction.model",
+				value: "prov/sum",
+				assert: (s) => strictEqual(s.compaction.model, "prov/sum"),
+			},
+			{
+				id: "compaction.model",
+				value: "  ",
+				assert: (s) => strictEqual("model" in s.compaction, false),
+			},
 			{
 				id: "compaction.systemPrompt",
 				value: "~/p.md",
 				assert: (s) => strictEqual(s.compaction.systemPrompt, "~/p.md"),
 			},
-			{ id: "retry.enabled", value: "false", assert: (s) => strictEqual(s.retry.enabled, false) },
-			{ id: "retry.maxRetries", value: "8", assert: (s) => strictEqual(s.retry.maxRetries, 8) },
-			{ id: "retry.baseDelayMs", value: "5000", assert: (s) => strictEqual(s.retry.baseDelayMs, 5000) },
-			{ id: "retry.maxDelayMs", value: "120000", assert: (s) => strictEqual(s.retry.maxDelayMs, 120000) },
+			{
+				id: "retry.enabled",
+				value: "false",
+				assert: (s) => strictEqual(s.retry.enabled, false),
+			},
+			{
+				id: "retry.maxRetries",
+				value: "8",
+				assert: (s) => strictEqual(s.retry.maxRetries, 8),
+			},
+			{
+				id: "retry.baseDelayMs",
+				value: "5000",
+				assert: (s) => strictEqual(s.retry.baseDelayMs, 5000),
+			},
+			{
+				id: "retry.maxDelayMs",
+				value: "120000",
+				assert: (s) => strictEqual(s.retry.maxDelayMs, 120000),
+			},
 			{
 				id: "terminal.showTerminalProgress",
 				value: "true",
@@ -522,7 +648,11 @@ describe("contracts/settings center", () => {
 				value: "verbose",
 				assert: (s) => strictEqual(s.terminal.outputVerbosity, "verbose"),
 			},
-			{ id: "identity", value: "atlas", assert: (s) => strictEqual(s.identity, "atlas") },
+			{
+				id: "identity",
+				value: "atlas",
+				assert: (s) => strictEqual(s.identity, "atlas"),
+			},
 			{
 				id: "runtimePlugins",
 				value: "@scope/a, @scope/b",
@@ -808,6 +938,74 @@ describe("contracts/settings center", () => {
 		ok(fake.renders() > 0);
 	});
 
+	it("renders non-selectable sidebar tags without adding navigation stops", () => {
+		const center = noopSettingsCenter(30);
+		const rendered = stripAnsi(center.render(112).join("\n"));
+		const tags = ["CORE", "ROUTING", "RUNTIME", "EXPERIENCE"];
+		let previous = -1;
+		for (const tag of tags) {
+			const position = rendered.indexOf(tag);
+			ok(position > previous, `${tag} is rendered in sidebar order`);
+			previous = position;
+		}
+		center.handleInput("\t");
+		const visited: string[] = [];
+		for (let index = 0; index < SETTINGS_SECTIONS.length; index += 1) {
+			visited.push(center.getSelection().section);
+			center.handleInput("j");
+		}
+		deepStrictEqual(
+			visited,
+			SETTINGS_SECTIONS.map((section) => section.id),
+		);
+	});
+
+	it("skips Fleet group headers and preserves entity plus drilled-field identity across shape refreshes", () => {
+		const settings = settingsWithTargets();
+		const items = buildSettingItems(settings);
+		const center = new SettingsCenter(items, {
+			getBodyHeight: () => 30,
+			prepareChange: () => null,
+			onApply: () => undefined,
+			onCancel: () => undefined,
+		});
+		const fleetItems = (): typeof items => items.filter((item) => item.section === "fleet");
+		center.setSelection(
+			"fleet",
+			fleetItems().findIndex((item) => item.id === "fleet.group.profiles"),
+		);
+		strictEqual(center.getSelection().rowId, "workers.profiles.fast", "a group header resolves to its first entity");
+
+		center.handleInput(ENTER);
+		center.handleInput(DOWN); // Edit model
+		settings.workers.profiles.alpha = {
+			target: "target-a",
+			model: "model-a",
+			thinkingLevel: "off",
+		};
+		items.splice(0, items.length, ...buildSettingItems(settings));
+		center.refreshItems();
+		strictEqual(center.getSelection().section, "fleet");
+		strictEqual(center.getSelection().rowId, "workers.profiles.fast", "profile identity survives an earlier insertion");
+		ok(stripAnsi(center.render(112).join("\n")).includes("❯ Edit model"), "drilled field identity survives refresh");
+
+		center.handleInput(ESC);
+		const scoutIndex = fleetItems().findIndex((item) => item.id === "workers.agentBindings.scout");
+		center.setSelection("fleet", scoutIndex);
+		settings.workers.agentBindings.alpha = "alpha";
+		items.splice(0, items.length, ...buildSettingItems(settings));
+		center.refreshItems();
+		strictEqual(
+			center.getSelection().rowId,
+			"workers.agentBindings.scout",
+			"route identity survives an earlier insertion",
+		);
+		delete settings.workers.agentBindings.alpha;
+		items.splice(0, items.length, ...buildSettingItems(settings));
+		center.refreshItems();
+		strictEqual(center.getSelection().rowId, "workers.agentBindings.scout", "route identity survives a removal");
+	});
+
 	it("opens focused on the deep-linked section", () => {
 		const live = { current: settingsWithTargets() };
 		const fake = fakeTui(24, 100);
@@ -830,7 +1028,11 @@ describe("contracts/settings center", () => {
 		const live = { current: settingsWithTargets() };
 		const fake = fakeTui(24, 100);
 		const calls: Array<{ id: string; scope: "session" | "global" }> = [];
-		const notices: Array<{ level: string; text: string; key?: string | undefined }> = [];
+		const notices: Array<{
+			level: string;
+			text: string;
+			key?: string | undefined;
+		}> = [];
 		openSettingsOverlay(fake.tui, {
 			getSettings: () => live.current,
 			writeSettings: (next) => {
@@ -878,25 +1080,26 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(ENTER); // global
 		strictEqual(writes, 1, "the fallback is explicitly global and writes exactly once");
 	});
-	it("renders fleet profiles, agent bindings, and targets as per-entry rows in their sections", () => {
+	it("renders Fleet as grouped one-row entities with explicit add actions", () => {
 		const settings = settingsWithTargets();
 		settings.workers.agentBindings.researcher = "missing";
 		const sections = new Map(buildSettingsSections(buildSettingItems(settings)).map((s) => [s.id, s.items]));
 		deepStrictEqual(
 			sections.get("fleet")?.map((item) => item.id),
 			[
+				"fleet.group.defaults",
 				"workers.default.target",
 				"workers.default.model",
 				"workers.default.thinkingLevel",
+				"workers.maxRetries",
+				"fleet.group.profiles",
+				"workers.profiles.fast",
 				"workers.profiles",
-				"workers.profiles.fast.target",
-				"workers.profiles.fast.model",
-				"workers.profiles.fast.thinkingLevel",
-				"workers.profiles.fast.node",
-				"workers.agentBindings",
+				"fleet.group.agent-routes",
 				"workers.agentBindings.researcher",
 				"workers.agentBindings.scout",
-				"workers.maxRetries",
+				"workers.agentBindings",
+				"fleet.group.placement",
 			],
 		);
 		deepStrictEqual(
@@ -904,19 +1107,22 @@ describe("contracts/settings center", () => {
 			["targets", "targets.target-a", "targets.target-b"],
 		);
 		const byId = new Map(buildSettingItems(settings).map((item) => [item.id, item]));
-		strictEqual(byId.get("workers.profiles")?.currentValue, "1 profile(s)");
+		strictEqual(byId.get("workers.profiles")?.label, "Add profile");
+		deepStrictEqual(byId.get("workers.profiles")?.valueSegments, []);
 		ok(byId.get("workers.profiles")?.submenu, "the profiles row adds a profile");
 		ok(byId.get("workers.agentBindings")?.submenu, "the bindings row binds an agent");
-		strictEqual(byId.get("workers.profiles.fast.target")?.currentValue, "target-b");
-		strictEqual(byId.get("workers.profiles.fast.model")?.currentValue, "model-b");
-		strictEqual(byId.get("workers.profiles.fast.thinkingLevel")?.currentValue, "off");
-		strictEqual(byId.get("workers.profiles.fast.node")?.currentValue, "(auto placement)");
+		strictEqual(byId.get("workers.profiles.fast")?.currentValue, "target-b/model-b  off  auto");
+		strictEqual(byId.get("workers.profiles.fast")?.configPath, "workers.profiles.fast");
+		strictEqual(
+			byId.get("workers.profiles.fast")?.help,
+			"workers.profiles.fast.target · workers.profiles.fast.model · workers.profiles.fast.thinkingLevel · workers.profiles.fast.node",
+		);
 		strictEqual(byId.get("workers.agentBindings.scout")?.currentValue, "fast");
 		ok(byId.get("workers.agentBindings.researcher")?.description.includes("does not exist"));
 		strictEqual(byId.get("targets.target-a")?.currentValue, "chat+fleet · unknown");
 		strictEqual(byId.get("targets.target-b")?.currentValue, "unknown");
 		ok(byId.get("targets")?.readOnly, "adding a target stays with `clio-coder targets add`");
-		for (const id of ["workers.profiles.fast.target", "workers.agentBindings.scout", "targets.target-a"]) {
+		for (const id of ["workers.profiles.fast", "workers.agentBindings.scout", "targets.target-a"]) {
 			const item = byId.get(id as EditableSettingId);
 			ok(item?.submenu, `${id} is editable`);
 			strictEqual(item?.configPath, id);
@@ -933,18 +1139,30 @@ describe("contracts/settings center", () => {
 	});
 
 	it("applies per-entry changes through the shared targets/fleet mutations", () => {
-		const cases: Array<{ id: string; value: string; assert: (settings: ClioSettings) => void }> = [
+		const cases: Array<{
+			id: string;
+			value: string;
+			assert: (settings: ClioSettings) => void;
+		}> = [
 			{
 				id: "workers.profiles",
 				value: "slow -> target-a",
 				assert: (s) =>
-					deepStrictEqual(s.workers.profiles.slow, { target: "target-a", model: "model-a", thinkingLevel: "off" }),
+					deepStrictEqual(s.workers.profiles.slow, {
+						target: "target-a",
+						model: "model-a",
+						thinkingLevel: "off",
+					}),
 			},
 			{
 				id: "workers.profiles.fast.target",
 				value: "target-a",
 				assert: (s) =>
-					deepStrictEqual(s.workers.profiles.fast, { target: "target-a", model: "model-a", thinkingLevel: "off" }),
+					deepStrictEqual(s.workers.profiles.fast, {
+						target: "target-a",
+						model: "model-a",
+						thinkingLevel: "off",
+					}),
 			},
 			{
 				id: "workers.profiles.fast.model",
@@ -1015,7 +1233,14 @@ describe("contracts/settings center", () => {
 		}
 		const settings = settingsWithTargets();
 		settings.delegation.agents = [
-			{ id: "acp-agent", command: "acp", args: [], env: {}, cwd: null, description: "" } as never,
+			{
+				id: "acp-agent",
+				command: "acp",
+				args: [],
+				env: {},
+				cwd: null,
+				description: "",
+			} as never,
 		];
 		applySettingChange(settings, "workers.agentBindings", "acp-agent -> fast");
 		strictEqual("acp-agent" in settings.workers.agentBindings, false, "ACP agents cannot be bound");
@@ -1069,14 +1294,14 @@ describe("contracts/settings center", () => {
 			},
 			{
 				name: "profile change",
-				id: "workers.profiles.fast.target",
-				value: "target-a",
+				id: "workers.profiles.fast",
+				value: "target -> target-a",
 				paths: ["workers.profiles.fast"],
 				assertApplied: (settings) => strictEqual(settings.workers.profiles.fast?.target, "target-a"),
 			},
 			{
 				name: "profile remove",
-				id: "workers.profiles.fast.target",
+				id: "workers.profiles.fast",
 				value: "(remove profile)",
 				paths: ["workers.agentBindings.scout", "workers.profiles.fast"],
 				assertApplied: (settings) => strictEqual("fast" in settings.workers.profiles, false),
@@ -1093,7 +1318,11 @@ describe("contracts/settings center", () => {
 				id: "workers.agentBindings.scout",
 				value: "slow",
 				setup: (settings) => {
-					settings.workers.profiles.slow = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+					settings.workers.profiles.slow = {
+						target: "target-a",
+						model: "model-a",
+						thinkingLevel: "off",
+					};
 				},
 				paths: ["workers.agentBindings.scout"],
 				assertApplied: (settings) => strictEqual(settings.workers.agentBindings.scout, "slow"),
@@ -1107,15 +1336,15 @@ describe("contracts/settings center", () => {
 			},
 			{
 				name: "node pin",
-				id: "workers.profiles.fast.node",
-				value: "local",
+				id: "workers.profiles.fast",
+				value: "node -> local",
 				paths: ["workers.profiles.fast"],
 				assertApplied: (settings) => strictEqual(settings.workers.profiles.fast?.node, "local"),
 			},
 			{
 				name: "node auto placement",
-				id: "workers.profiles.fast.node",
-				value: "(auto placement)",
+				id: "workers.profiles.fast",
+				value: "node -> (auto placement)",
 				setup: (settings) => {
 					if (settings.workers.profiles.fast) settings.workers.profiles.fast.node = "local";
 				},
@@ -1173,8 +1402,7 @@ describe("contracts/settings center", () => {
 		});
 		const overlay = fake.captured();
 		ok(overlay, "expected settings overlay component");
-		overlay.handleInput?.("j"); // targets.target-a
-		overlay.handleInput?.("j"); // targets.target-b
+		overlay.handleInput?.("j"); // targets.target-b (the group header is non-selectable)
 		overlay.handleInput?.(ENTER); // actions
 		overlay.handleInput?.(ENTER); // use (first action)
 		overlay.handleInput?.(ENTER); // Apply this session
@@ -1211,7 +1439,6 @@ describe("contracts/settings center", () => {
 			});
 			const overlay = fake.captured();
 			ok(overlay);
-			overlay.handleInput?.("j");
 			overlay.handleInput?.("j"); // targets.target-b
 			overlay.handleInput?.(ENTER); // actions
 			overlay.handleInput?.(ENTER); // use -> destination prompt
@@ -1268,7 +1495,6 @@ describe("contracts/settings center", () => {
 				?.affordance,
 			"Enter: use, connect, probe, remove",
 		);
-		overlay.handleInput?.("j"); // targets.target-a
 		overlay.handleInput?.("j"); // targets.target-b
 		overlay.handleInput?.(ENTER); // actions: use, connect, remove (no providers, so no probe)
 		overlay.handleInput?.(DOWN);
@@ -1315,7 +1541,6 @@ describe("contracts/settings center", () => {
 		});
 		const overlay = fake.captured();
 		ok(overlay);
-		overlay.handleInput?.("j");
 		overlay.handleInput?.("j"); // target-b
 		overlay.handleInput?.(ENTER); // connect, probe, remove
 		overlay.handleInput?.(ENTER); // connect
@@ -1357,7 +1582,6 @@ describe("contracts/settings center", () => {
 		});
 		const overlay = fake.captured();
 		ok(overlay);
-		overlay.handleInput?.("j");
 		overlay.handleInput?.("j"); // target-b
 		overlay.handleInput?.(ENTER); // probe, remove
 		overlay.handleInput?.(ENTER); // probe throws synchronously but the UI settles
@@ -1382,15 +1606,20 @@ describe("contracts/settings center", () => {
 		});
 		const overlay = fake.captured();
 		ok(overlay, "expected settings overlay component");
-		for (let i = 0; i < 4; i += 1) overlay.handleInput?.("j"); // workers.profiles.fast.target
-		overlay.handleInput?.(ENTER); // picker preselected to target-b: target-a, target-b, (remove profile)
-		overlay.handleInput?.(DOWN);
-		overlay.handleInput?.(ENTER); // (remove profile)
+		for (let i = 0; i < 4; i += 1) overlay.handleInput?.("j"); // one-row fast profile summary
+		overlay.handleInput?.(ENTER); // profile field workbench
+		for (let i = 0; i < 4; i += 1) overlay.handleInput?.(DOWN);
+		const destructive = overlay.render(120).join("\n");
+		ok(destructive.includes(`${clioTheme().fgSequence("error")}${GLYPH.error} Remove profile`));
+		overlay.handleInput?.(ENTER); // named destructive action -> preflight
+		const preflight = stripAnsi(overlay.render(120).join("\n"));
+		ok(preflight.includes("Affected agent routes: scout"), preflight);
+		ok(preflight.includes("workers.agentBindings.scout"), preflight);
 		overlay.handleInput?.(ENTER); // Apply this session
 		deepStrictEqual(calls.sort(), ["workers.agentBindings.scout", "workers.profiles.fast"]);
 		const rendered = stripAnsi(overlay.render(120).join("\n"));
-		ok(!rendered.includes("fast · target"), rendered);
-		ok(rendered.includes("(none)"), "the profiles row is back to none");
+		ok(!rendered.includes("target-b/model-b"), rendered);
+		ok(rendered.includes("Add profile"), "the explicit add action remains after removal");
 	});
 	it("adds a profile and a binding through the chained name-then-picker flows", () => {
 		const live = { current: settingsWithTargets() };
@@ -1410,18 +1639,26 @@ describe("contracts/settings center", () => {
 		});
 		const overlay = fake.captured();
 		ok(overlay, "expected settings overlay component");
-		for (let i = 0; i < 3; i += 1) overlay.handleInput?.("j"); // workers.profiles
+		for (let i = 0; i < 5; i += 1) overlay.handleInput?.("j"); // Add profile
 		overlay.handleInput?.(ENTER); // name input, seeded empty rather than with the row's count
 		for (const ch of "slow") overlay.handleInput?.(ch);
 		overlay.handleInput?.(ENTER); // target picker
 		overlay.handleInput?.(ENTER); // target-a
 		overlay.handleInput?.(ENTER); // Apply this session
 		deepStrictEqual(calls, ["workers.profiles.slow"]);
-		deepStrictEqual(live.current.workers.profiles.slow, { target: "target-a", model: "model-a", thinkingLevel: "off" });
+		deepStrictEqual(live.current.workers.profiles.slow, {
+			target: "target-a",
+			model: "model-a",
+			thinkingLevel: "off",
+		});
 		let rendered = stripAnsi(overlay.render(120).join("\n"));
-		ok(rendered.includes("slow · target"), rendered);
+		ok(rendered.includes("slow"), rendered);
+		strictEqual(
+			buildSettingItems(live.current).find((item) => item.id === "workers.profiles.slow")?.currentValue,
+			"target-a/model-a  off  auto",
+		);
 
-		for (let i = 0; i < 9; i += 1) overlay.handleInput?.("j"); // past the fast and slow rows to workers.agentBindings
+		for (let i = 0; i < 2; i += 1) overlay.handleInput?.("j"); // scout route, then Add agent route
 		overlay.handleInput?.(ENTER); // agent id input
 		for (const ch of "researcher") overlay.handleInput?.(ch);
 		overlay.handleInput?.(ENTER); // profile picker: fast, slow
@@ -1431,6 +1668,6 @@ describe("contracts/settings center", () => {
 		deepStrictEqual(calls, ["workers.profiles.slow", "workers.agentBindings.researcher"]);
 		strictEqual(live.current.workers.agentBindings.researcher, "slow");
 		rendered = stripAnsi(overlay.render(120).join("\n"));
-		ok(rendered.includes("researcher · p"), rendered);
+		ok(rendered.includes("researcher"), rendered);
 	});
 });
