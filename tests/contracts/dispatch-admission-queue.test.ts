@@ -8,6 +8,7 @@ import {
 } from "../../src/domains/dispatch/admission-queue.js";
 import { capacityDrain, listCapacityLeases } from "../../src/domains/dispatch/capacity-lease.js";
 import { deriveRunPhaseDurations } from "../../src/domains/dispatch/phase-timing.js";
+import { createTestClock } from "../harness/clock.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function request(id: string, overrides: Partial<AdmissionQueueRequest<string>> = {}): AdmissionQueueRequest<string> {
@@ -121,22 +122,30 @@ describe("bounded dispatch admission queue", () => {
 	 */
 	it("an admission timeout names the capacity it waited on and what would clear it", async () => {
 		const isolated = isolateClioEnv("clio-admit-");
+		// Which of the two branches below fires is decided by arithmetic on this
+		// clock, not by a 120ms real deadline racing the pump's 10ms→500ms
+		// backoff: on a loaded runner that race produced the sibling test's
+		// message here and neither test could tell you which it had run.
+		const clock = createTestClock();
 		const controller = createCapacityAdmissionController({
 			limits: () => ({ global: 1, nodes: { local: 1 } }),
 			usage: () => ({ global: 1, nodes: { local: 1 } }),
+			now: clock.now,
 		});
 		try {
-			const held = await controller.admit({ assignmentId: "held", nodeId: "local", deadlineAt: Date.now() + 10_000 });
-			await rejects(
-				controller.admit({ assignmentId: "queued", nodeId: "local", deadlineAt: Date.now() + 120 }),
-				(error: Error) => {
-					strictEqual(error.message.startsWith("dispatch: dispatch:"), false, error.message);
-					for (const fragment of ["admission timed out after", "1/1 worker slots in use on 'local'", "concurrency"]) {
-						strictEqual(error.message.includes(fragment), true, `${fragment} missing from: ${error.message}`);
-					}
-					return true;
-				},
-			);
+			const held = await controller.admit({ assignmentId: "held", nodeId: "local", deadlineAt: clock.now() + 10_000 });
+			const queued = controller.admit({ assignmentId: "queued", nodeId: "local", deadlineAt: clock.now() + 120 });
+			// enqueue ran synchronously above, so the request is queued behind the
+			// held lease with a live deadline. Spend it: the next pump reads the
+			// injected clock and times the request out on arithmetic.
+			clock.advance(200);
+			await rejects(queued, (error: Error) => {
+				strictEqual(error.message.startsWith("dispatch: dispatch:"), false, error.message);
+				for (const fragment of ["admission timed out after 200ms", "1/1 worker slots in use on 'local'", "concurrency"]) {
+					strictEqual(error.message.includes(fragment), true, `${fragment} missing from: ${error.message}`);
+				}
+				return true;
+			});
 			controller.release(held.lease.leaseId);
 		} finally {
 			controller.stop();
@@ -153,13 +162,19 @@ describe("bounded dispatch admission queue", () => {
 	 */
 	it("an already-expired deadline says so instead of blaming capacity", async () => {
 		const isolated = isolateClioEnv("clio-admit-");
+		// The other branch of the same fork, and the same reason for a clock: the
+		// deadline is 16s behind the injected now at the instant admit() reads it,
+		// so nothing about how long the runner takes can move this off the
+		// already-passed branch.
+		const clock = createTestClock();
 		const controller = createCapacityAdmissionController({
 			limits: () => ({ global: 4, nodes: { local: 4 } }),
 			usage: () => ({ global: 0, nodes: { local: 0 } }),
+			now: clock.now,
 		});
 		try {
 			await rejects(
-				controller.admit({ assignmentId: "late", nodeId: "local", deadlineAt: Date.now() - 16_000 }),
+				controller.admit({ assignmentId: "late", nodeId: "local", deadlineAt: clock.now() - 16_000 }),
 				(error: Error) => {
 					ok(error.message.includes("admission deadline had already passed"), error.message);
 					ok(error.message.includes("never waited on capacity"), error.message);

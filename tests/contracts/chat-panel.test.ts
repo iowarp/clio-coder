@@ -4,13 +4,23 @@ import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { redactToolArgs } from "../../src/interactive/renderers/tool-execution.js";
 import { fgSequence, GLYPH } from "../../src/interactive/theme/index.js";
+import { createTestClock } from "../harness/clock.js";
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
 const strip = (s: string): string => s.replace(ANSI, "");
 
+/**
+ * Every panel in this file is built on the harness clock. A panel that reads
+ * the real clock stamps a wall-clock elapsed onto whatever tool row it renders,
+ * which is how #52 turned two byte-identity assertions into a race and why
+ * three commits each hand-rolled the same fixed `now` in turn (audit F7).
+ * The tests that need time to move keep their own stepped `now` instead.
+ */
+const frozen = createTestClock();
+
 describe("chat-panel live thinking streaming", () => {
 	it("folded render shows token count when pending, shows static label when settled", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 
 		// Apply thinking_delta (pending = true)
 		panel.applyEvent({
@@ -36,7 +46,7 @@ describe("chat-panel live thinking streaming", () => {
 	});
 
 	it("expanded render is tail-anchored when streaming and head-anchored when settled", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		// Set expanded state to true
 		panel.toggleLastThinking();
 
@@ -79,7 +89,7 @@ describe("chat-panel live thinking streaming", () => {
 
 describe("chat-panel queued user turn injection", () => {
 	it("renders an injected steer as a user turn between assistant entries", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		panel.appendUser("start a long task");
 		panel.applyEvent({
 			type: "text_delta",
@@ -130,7 +140,7 @@ describe("chat-panel tool-body export rendering", () => {
 	}
 
 	it("bounded panel middle-elides a large expanded tool body (live-view default)", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		feedLargeGrep(panel);
 		const rendered = panel.render(100).join("\n");
 		// Middle-elision keeps the head and the tail and drops the middle, so a
@@ -143,7 +153,7 @@ describe("chat-panel tool-body export rendering", () => {
 
 	it("minimal output keeps tool calls collapsed while verbose output exposes the live body", () => {
 		let verbosity: "minimal" | "default" | "verbose" = "minimal";
-		const panel = createChatPanel({ getOutputVerbosity: () => verbosity });
+		const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => verbosity });
 		feedLargeGrep(panel);
 		let rendered = panel.render(100).join("\\n");
 		ok(!rendered.includes("many.txt:150:"), "minimal output hides the tool body");
@@ -153,7 +163,7 @@ describe("chat-panel tool-body export rendering", () => {
 	});
 
 	it("unboundedToolBodies renders the full expanded tool body with no middle-elision (for /export)", () => {
-		const panel = createChatPanel({ unboundedToolBodies: true });
+		const panel = createChatPanel({ now: frozen.now, unboundedToolBodies: true });
 		feedLargeGrep(panel);
 		const rendered = panel.render(100).join("\n");
 		ok(!rendered.includes("lines hidden"), "export must not carry the UI middle-elision placeholder");
@@ -321,7 +331,7 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 	});
 
 	it("labels an unfinished call aborted when the run reports an aborted assistant", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "abort-1",
@@ -423,7 +433,7 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		// every failing Node test run a permission block and, because a blocked
 		// row is rendered as a call that never executed, hid the very output
 		// that explained the failure.
-		const panel = createChatPanel({ now: () => 1000 });
+		const panel = createChatPanel({ now: frozen.now });
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "run1",
@@ -485,7 +495,7 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 describe("chat-panel agent voice", () => {
 	it("prefixes an agent reply with ✦ in accent", () => {
 		strictEqual(GLYPH.agent, "✦", "the agent glyph is the four-pointed star");
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		panel.applyEvent({
 			type: "message_end",
 			message: { role: "assistant", content: [{ type: "text", text: "Hello there" }], stopReason: "stop" },
@@ -500,7 +510,7 @@ describe("chat-panel agent voice", () => {
 	});
 
 	it("turns the reply glyph and the terminal error text red on a failed turn", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		panel.applyEvent({
 			type: "message_end",
 			message: { role: "assistant", content: [] as unknown[], stopReason: "error", errorMessage: "boom happened" },
@@ -516,7 +526,7 @@ describe("chat-panel agent voice", () => {
 	});
 
 	it("scopes a post-tool main-model timeout to the model and leaves the dispatch segment non-error", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "dispatch-1",
@@ -557,7 +567,7 @@ describe("chat-panel agent voice", () => {
 	});
 
 	it("does not claim detached continuation after a successful non-dispatch tool", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "read-1",
@@ -582,7 +592,7 @@ describe("chat-panel agent voice", () => {
 	});
 
 	it("does not claim detached continuation after an attached dispatch", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "dispatch-attached",
@@ -632,7 +642,7 @@ describe("chat-panel tool ledger subline", () => {
 	}
 
 	it("wraps the collapsed subline to two lines without splitting the status tail", () => {
-		const panel = createChatPanel({ getToolExpandKey: () => "ctrl+o" });
+		const panel = createChatPanel({ now: frozen.now, getToolExpandKey: () => "ctrl+o" });
 		feedCollapsedRead(panel);
 		const lines = panel
 			.render(80)
@@ -649,7 +659,7 @@ describe("chat-panel tool ledger subline", () => {
 
 describe("chat-panel edit diff block", () => {
 	it("suppresses the \\ No newline at end of file marker rows", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		// A fresh (non-streaming) turn expands the edit tool to its diff block.
 		panel.applyEvent({
 			type: "tool_execution_start",
@@ -673,7 +683,7 @@ describe("chat-panel edit diff block", () => {
 
 describe("chat-panel reasoning provenance and renderer controls", () => {
 	it("shows provider reasoning totals distinctly from estimated totals", () => {
-		const providerPanel = createChatPanel();
+		const providerPanel = createChatPanel({ now: frozen.now });
 		const providerMessage = {
 			role: "assistant",
 			content: [{ type: "thinking", thinking: "provider reasoning body" }],
@@ -688,7 +698,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		ok(providerText.includes("cache 3/1"), providerText);
 		ok(providerText.includes("not a verification"), providerText);
 
-		const estimatedPanel = createChatPanel();
+		const estimatedPanel = createChatPanel({ now: frozen.now });
 		estimatedPanel.applyEvent({
 			type: "message_end",
 			message: {
@@ -708,7 +718,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		// excerpt, not a verification`. The caveat is about reasoning text the
 		// panel displayed, so on a turn that displayed none it warned about
 		// something absent and cost a wrapped line per turn at 70 columns.
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "no thinking here" }],
@@ -727,7 +737,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		// nothing at all, and the panel printed `reasoning 0 provider` for it. At
 		// 71 columns that pushed the bare word `provider` onto its own line. Zero
 		// reasoning is the same story as no reasoning: say nothing.
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "answered without thinking" }],
@@ -743,7 +753,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 	});
 
 	it("pauses and resumes cumulative live tool output without changing execution state", () => {
-		const panel = createChatPanel({ getOutputVerbosity: () => "verbose" });
+		const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => "verbose" });
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "live-1",
@@ -771,6 +781,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 	it("invalidates bounded render caches and keeps every line width-safe", () => {
 		const metrics: Array<{ cacheHit: boolean; entriesRendered: number }> = [];
 		const panel = createChatPanel({
+			now: frozen.now,
 			onRenderMetrics: ({ cacheHit, entriesRendered }) => metrics.push({ cacheHit, entriesRendered }),
 		});
 		panel.appendUser("stable history");
@@ -787,6 +798,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 
 		const historyMetrics: Array<{ cacheHit: boolean; entriesRendered: number }> = [];
 		const history = createChatPanel({
+			now: frozen.now,
 			onRenderMetrics: ({ cacheHit, entriesRendered }) => historyMetrics.push({ cacheHit, entriesRendered }),
 		});
 		for (let index = 0; index < 500; index += 1) history.appendUser(`stable entry ${index}`);
@@ -816,7 +828,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 	});
 
 	it("redacts secret arguments and environment values while preserving tool structure", () => {
-		const panel = createChatPanel({ getOutputVerbosity: () => "verbose" });
+		const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => "verbose" });
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "secret-1",
@@ -850,7 +862,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 			stopReason: "stop",
 			usage: { input: 14073, output: 198, cacheRead: 10404, cacheWrite: 0 },
 		};
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		panel.appendUser("a question");
 		panel.applyEvent({ type: "text_delta", delta: "an answer" } as ChatLoopEvent);
 		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
@@ -896,9 +908,7 @@ describe("chat-panel render caching", () => {
 	};
 
 	it("renders identically after a tool event that no longer clears the whole cache", () => {
-		// Fixed clock: real elapsed time would stamp a wall-clock duration onto
-		// the tool row in whichever panel happened to run slower.
-		const cached = createChatPanel({ now: () => 1000 });
+		const cached = createChatPanel({ now: frozen.now });
 		settledTurns(cached, 12);
 		cached.render(80);
 
@@ -921,7 +931,7 @@ describe("chat-panel render caching", () => {
 		} as ChatLoopEvent);
 		cached.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 
-		const fresh = createChatPanel({ now: () => 1000 });
+		const fresh = createChatPanel({ now: frozen.now });
 		settledTurns(fresh, 12);
 		fresh.applyEvent({
 			type: "tool_execution_start",
@@ -946,7 +956,7 @@ describe("chat-panel render caching", () => {
 	});
 
 	it("renders a streaming tail identically whether or not completed lines were memoized", () => {
-		const streamed = createChatPanel();
+		const streamed = createChatPanel({ now: frozen.now });
 		const lines = [
 			"First paragraph that is long enough to wrap across more than one row at eighty columns.",
 			"Second line here.",
@@ -962,14 +972,14 @@ describe("chat-panel render caching", () => {
 		}
 
 		// Same text, delivered in one delta, so nothing was ever memoized.
-		const oneShot = createChatPanel();
+		const oneShot = createChatPanel({ now: frozen.now });
 		oneShot.applyEvent({ type: "text_delta", contentIndex: 0, delta: lines.join("\n") } as ChatLoopEvent);
 
 		strictEqual(streamed.render(80).join("\n"), oneShot.render(80).join("\n"));
 	});
 
 	it("re-wraps a memoized streaming tail when the width changes", () => {
-		const panel = createChatPanel();
+		const panel = createChatPanel({ now: frozen.now });
 		panel.applyEvent({
 			type: "text_delta",
 			contentIndex: 0,
@@ -978,7 +988,7 @@ describe("chat-panel render caching", () => {
 		const wide = panel.render(80).join("\n");
 		const narrow = panel.render(40).join("\n");
 
-		const fresh = createChatPanel();
+		const fresh = createChatPanel({ now: frozen.now });
 		fresh.applyEvent({
 			type: "text_delta",
 			contentIndex: 0,
@@ -990,7 +1000,10 @@ describe("chat-panel render caching", () => {
 
 	it("serves settled history from the frozen prefix and re-renders only the live tail", () => {
 		const rendered: number[] = [];
-		const panel = createChatPanel({ onRenderMetrics: (metrics) => rendered.push(metrics.entriesRendered) });
+		const panel = createChatPanel({
+			now: frozen.now,
+			onRenderMetrics: (metrics) => rendered.push(metrics.entriesRendered),
+		});
 		settledTurns(panel, 30);
 		panel.render(80);
 
@@ -1005,7 +1018,7 @@ describe("chat-panel render caching", () => {
 		);
 
 		// Byte identity against a from-scratch panel with the same transcript.
-		const fresh = createChatPanel();
+		const fresh = createChatPanel({ now: frozen.now });
 		settledTurns(fresh, 30);
 		fresh.applyEvent({ type: "text_delta", contentIndex: 0, delta: "streaming tail" } as ChatLoopEvent);
 		strictEqual(panel.render(80).join("\n"), fresh.render(80).join("\n"));
@@ -1013,10 +1026,8 @@ describe("chat-panel render caching", () => {
 
 	it("a finished tool moves the expand hint without re-rendering settled history", () => {
 		const rendered: number[] = [];
-		// Fixed clock: real elapsed time would stamp a wall-clock duration onto
-		// the tool row in whichever panel happened to run slower.
 		const panel = createChatPanel({
-			now: () => 1000,
+			now: frozen.now,
 			onRenderMetrics: (metrics) => rendered.push(metrics.entriesRendered),
 		});
 		const toolTurn = (id: string): void => {
@@ -1043,7 +1054,7 @@ describe("chat-panel render caching", () => {
 			`the hint move re-rendered ${dirtyRender} entries; only the old and new hint owners should re-render`,
 		);
 
-		const fresh = createChatPanel({ now: () => 1000 });
+		const fresh = createChatPanel({ now: frozen.now });
 		const freshTurn = (id: string): void => {
 			fresh.appendUser(`run ${id}`);
 			fresh.applyEvent({
@@ -1062,9 +1073,7 @@ describe("chat-panel render caching", () => {
 	it("expanding an old tool re-renders it correctly through the freeze drop", () => {
 		const toolBody = Array.from({ length: 8 }, (_, i) => `result row ${i}`).join("\n");
 		const buildPanel = (): ReturnType<typeof createChatPanel> => {
-			// Fixed clock: real elapsed time would stamp a wall-clock duration onto
-			// the tool row in whichever panel happened to run slower.
-			const built = createChatPanel({ now: () => 1000 });
+			const built = createChatPanel({ now: frozen.now });
 			built.appendUser("first");
 			built.applyEvent({
 				type: "tool_execution_start",

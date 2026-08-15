@@ -77,6 +77,35 @@ async function drain(events: AsyncIterableIterator<unknown>): Promise<unknown[]>
 	return out;
 }
 
+/**
+ * Wait for the peer to announce, upper-bounded. The announce is the transport's
+ * own report that the spec was parsed, so a test that needs that fact observes
+ * it instead of budgeting wall time for it (audit §8).
+ */
+async function waitForAttestation(worker: SpawnedWorker, timeoutMs = 5_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() <= deadline) {
+		if (worker.attestation?.() != null) return;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	throw new Error("the worker never announced");
+}
+
+/**
+ * The descendant's pid, once the stub has logged it. The announce is not this
+ * fact: it lands on the parent's pipe before the stub returns from spawning the
+ * child, so waiting on the attestation here reads an empty log.
+ */
+async function waitForDescendantPid(logPath: string, timeoutMs = 5_000): Promise<number> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() <= deadline) {
+		const pid = Number.parseInt(readFileSync(logPath, "utf8").trim().split("\n")[0] ?? "", 10);
+		if (Number.isSafeInteger(pid)) return pid;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	throw new Error("the stub never logged a descendant pid");
+}
+
 /** Liveness by signal 0: it probes without delivering anything. */
 function isProcessAlive(pid: number): boolean {
 	try {
@@ -261,8 +290,9 @@ describe("ssh worker transport channel contract", () => {
 
 	it("abort closes the channel and the remote parent-monitor exits", async () => {
 		const worker = transport("hang").spawn(TEST_SPEC, { cwd: "/w" });
-		// Wait for the spec to be consumed (announce is filtered, so poll pid liveness via a short delay).
-		await new Promise((resolve) => setTimeout(resolve, 150));
+		// The announce is filtered out of the event stream, but the transport still
+		// records the attestation, so that is what says the spec was consumed.
+		await waitForAttestation(worker);
 		worker.abort();
 		const result = await worker.promise;
 		ok(result.exitCode === 0 || result.signal === "SIGTERM", `worker settled (${result.exitCode}/${result.signal})`);
@@ -272,6 +302,8 @@ describe("ssh worker transport channel contract", () => {
 
 	it("escalates a stuck channel to SIGKILL plus a remote kill fallback", async () => {
 		const worker = transport("hang-hard", 60).spawn(TEST_SPEC, { cwd: "/w" });
+		// Real time on purpose: the stub installs the SIGTERM handler this test
+		// depends on after its announce, and exposes nothing observable between.
 		await new Promise((resolve) => setTimeout(resolve, 200));
 		worker.abort();
 		const result = await worker.promise;
@@ -583,9 +615,7 @@ describe("worker attestation and transport bounds", () => {
 	it("abort kills local and remote process-group descendants", async () => {
 		writeFileSync(fake.descendantLog, "", "utf8");
 		const worker = localWorker("group-descendant");
-		await new Promise((resolve) => setTimeout(resolve, 250));
-		const descendantPid = Number.parseInt(readFileSync(fake.descendantLog, "utf8").trim().split("\n")[0] ?? "", 10);
-		ok(Number.isSafeInteger(descendantPid), "the stub spawned a descendant in the worker's group");
+		const descendantPid = await waitForDescendantPid(fake.descendantLog);
 		ok(isProcessAlive(descendantPid), "the descendant is running before the abort");
 		worker.abort();
 		await worker.promise;
@@ -604,6 +634,8 @@ describe("worker attestation and transport bounds", () => {
 		const remote = createSshWorkerTransport(SSH_NODE, { sshBinary: fake.binary, shutdownGraceMs: 60 }).spawn(TEST_SPEC, {
 			cwd: "/w",
 		});
+		// Real time for the same reason as the SIGKILL escalation test above: the
+		// remote stub's SIGTERM handler is installed after the announce.
 		await new Promise((resolve) => setTimeout(resolve, 250));
 		remote.abort();
 		await remote.promise;

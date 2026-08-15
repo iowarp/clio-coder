@@ -588,13 +588,13 @@ describe("auto-build evidence on dispatch completion", { concurrency: false }, (
 			toolActivity: null,
 		});
 
-		// Give the fire-and-forget build a window to settle, then assert the run
-		// is unaffected: no throw escaped, no bundle, no index row.
-		await new Promise((resolve) => setTimeout(resolve, 250));
+		// stop() awaits the in-flight build (extension.ts:236), so the settled
+		// state is observable rather than guessed at with a 250ms window.
+		await bundle.extension.stop?.();
+
+		// The run is unaffected: no throw escaped, no bundle, no index row.
 		strictEqual(existsSync(join(scratch.stateDir, "evidence-index.json")), false);
 		strictEqual(existsSync(join(scratch.dataDir, "evidence", "run-does-not-exist")), false);
 		strictEqual(readEvidenceIndex(scratch.stateDir).length, 0);
-
-		await bundle.extension.stop?.();
 	});
 });
