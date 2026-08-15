@@ -33,9 +33,12 @@ export { applyModelCapabilityPatch, resolveModelCapabilities } from "./model-cap
 export {
 	canonicalizeWireModelId,
 	hasLiveModelCatalog,
+	loadedContextWindowForModel,
+	type ModelResidency,
 	modelCandidatesForStatus,
 	modelIdsForStatus,
 	modelLoadStateLabel,
+	modelResidencyForStatus,
 	type ProviderModelCandidate,
 	type ProviderModelSource,
 } from "./model-discovery.js";
@@ -80,6 +83,8 @@ export {
 	splitThinkingSuffix,
 } from "./resolver.js";
 export {
+	type ContextWindowDetails,
+	type ContextWindowSource,
 	firstRuntimeResolutionError,
 	type ResolvedRuntimeTarget,
 	type RuntimeCapabilityDecision,

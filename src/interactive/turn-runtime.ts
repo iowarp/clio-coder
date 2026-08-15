@@ -11,10 +11,12 @@ import type { ObservabilityContract } from "../domains/observability/contract.js
 import {
 	applyModelCapabilityPatch,
 	firstRuntimeResolutionError,
+	modelResidencyForStatus,
 	type ProvidersContract,
 	refineRuntimeTargetWithModelHints,
 	resolveRuntimeTarget,
 	runtimeResolutionWarnings,
+	type TargetStatus,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import type { RetrySettings } from "../domains/session/retry.js";
@@ -48,6 +50,40 @@ import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.js";
 
 const LOCAL_API_KEY_FALLBACK = "clio-local-target";
+
+/**
+ * Say that the first request will pay for a load, before it does.
+ *
+ * A self-hosted server loads a model on demand, and a 30B at 4-bit takes tens
+ * of seconds off disk. Clio sends the request and waits, which from the outside
+ * is indistinguishable from a hang: no spinner explains it, no notice names it,
+ * and the operator's next move is usually Ctrl-C. The probe already knows the
+ * model is not resident, because llama-swap and LM Studio both report per-model
+ * load state; nothing was reading it.
+ *
+ * Notice only, never a block. The server loads it either way, and a state that
+ * says `unknown` says nothing worth interrupting for. Residency comes from the
+ * same discovery view the planner budgets against, so a model Clio is planning
+ * a loaded window for is never announced as absent.
+ */
+export function coldModelNotice(
+	status: TargetStatus | null | undefined,
+	targetId: string,
+	wireModelId: string,
+): { key: string; message: string } | null {
+	const residency = modelResidencyForStatus(status, wireModelId);
+	if (residency === "loading") {
+		return {
+			key: `${targetId}|${wireModelId}|loading`,
+			message: `[Clio Coder] ${wireModelId} is still loading on ${targetId}; the first reply waits for it.`,
+		};
+	}
+	if (residency !== "absent") return null;
+	return {
+		key: `${targetId}|${wireModelId}|unloaded`,
+		message: `[Clio Coder] ${wireModelId} is not resident on ${targetId}; the first request loads it, which can take a minute.`,
+	};
+}
 
 export type AssistantDeltaEvent =
 	| {
@@ -193,35 +229,18 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		announceColdModel(status, targetId, wireModelId);
 	};
 
-	/**
-	 * Say that the first request will pay for a load, before it does.
-	 *
-	 * A self-hosted server loads a model on demand, and a 30B at 4-bit takes
-	 * tens of seconds off disk. Clio sends the request and waits, which from
-	 * the outside is indistinguishable from a hang: no spinner explains it, no
-	 * notice names it, and the operator's next move is usually Ctrl-C. The
-	 * probe already knows the model is not resident, because llama-swap and
-	 * LM Studio both report per-model load state; nothing was reading it.
-	 *
-	 * Notice only, never a block. The server loads it either way, and a state
-	 * that says `unknown` says nothing worth interrupting for.
-	 */
+	/** One notice per target+model+state, so a repeated probe stays quiet. */
 	const announcedColdModels = new Set<string>();
 	const announceColdModel = (
 		status: Awaited<ReturnType<ProvidersContract["probeTarget"]>>,
 		targetId: string,
 		wireModelId: string,
 	): void => {
-		const state = status?.discoveredModelStates?.[wireModelId]?.state;
-		if (state !== "unloaded" && state !== "loading") return;
-		const key = `${targetId}|${wireModelId}|${state}`;
-		if (announcedColdModels.has(key)) return;
-		announcedColdModels.add(key);
-		deps.emitNotice(
-			state === "loading"
-				? `[Clio Coder] ${wireModelId} is still loading on ${targetId}; the first reply waits for it.`
-				: `[Clio Coder] ${wireModelId} is not resident on ${targetId}; the first request loads it, which can take a minute.`,
-		);
+		const notice = coldModelNotice(status, targetId, wireModelId);
+		if (!notice) return;
+		if (announcedColdModels.has(notice.key)) return;
+		announcedColdModels.add(notice.key);
+		deps.emitNotice(notice.message);
 	};
 
 	const synthesizeModel = (target: ChatLoopTarget): EngineModel => {

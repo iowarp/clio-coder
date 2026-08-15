@@ -26,6 +26,45 @@ export function modelLoadStateLabel(status: TargetStatus, modelId: string): stri
 	return status.discoveredModelStates?.[modelId]?.state ?? "-";
 }
 
+/** Whether the model is serving, waiting to serve, or not on the server at all. */
+export type ModelResidency = "resident" | "loading" | "absent" | "unknown";
+
+type DiscoveryStatus = Pick<TargetStatus, "discoveredModelStates">;
+
+/**
+ * The window discovery says this model is loaded at, or null when discovery has
+ * no such number. Ranked above every declared window: `max_context_length` is
+ * what the weights allow, this is what the backend will actually serve, and a
+ * run planned against the larger one overruns before compaction ever fires.
+ */
+export function loadedContextWindowForModel(
+	status: DiscoveryStatus | null | undefined,
+	modelId: string,
+): number | null {
+	const reported = status?.discoveredModelStates?.[modelId]?.contextLength;
+	return typeof reported === "number" && Number.isFinite(reported) && reported > 0 ? reported : null;
+}
+
+/**
+ * Residency as one view, so the planner and the "not resident" notice cannot
+ * disagree about the same model. A reported loaded window settles it whatever
+ * the state field says: a server does not hold a window open for a model it has
+ * not loaded.
+ */
+export function modelResidencyForStatus(status: DiscoveryStatus | null | undefined, modelId: string): ModelResidency {
+	if (loadedContextWindowForModel(status, modelId) !== null) return "resident";
+	switch (status?.discoveredModelStates?.[modelId]?.state) {
+		case "loaded":
+			return "resident";
+		case "loading":
+			return "loading";
+		case "unloaded":
+			return "absent";
+		default:
+			return "unknown";
+	}
+}
+
 export function hasLiveModelCatalog(status: TargetStatus): boolean {
 	if (status.discoveredModelsSource === "probe" || status.discoveredModelsSource === "cache") return true;
 	// Unit-test and plugin mocks from before `discoveredModelsSource` still use

@@ -729,7 +729,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					compactionAuto,
 				});
 			}
-			const effectiveWindow = state.runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
+			const windowDetails = state.runtime.runtimeResolution.contextWindowDetails;
+			const effectiveWindow = windowDetails.effectiveContextWindow;
 
 			const provider = state.runtime.targetId ?? settings.orchestrator?.target ?? null;
 			const model = state.runtime.wireModelId ?? settings.orchestrator?.model ?? null;
@@ -739,6 +740,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					provider,
 					model,
 					contextWindow: effectiveWindow,
+					contextWindowSource: windowDetails.contextWindowSource,
 					toolCount: state.runtime.agent.state.tools.length,
 					compactionThreshold,
 					compactionAuto,
@@ -755,6 +757,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				provider,
 				model,
 				contextWindow: effectiveWindow,
+				contextWindowSource: windowDetails.contextWindowSource,
 				compactionThreshold,
 				compactionAuto,
 				systemPromptTokens: currentContextSnapshot.categories.system,

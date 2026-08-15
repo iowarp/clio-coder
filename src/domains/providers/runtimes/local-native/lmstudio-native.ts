@@ -211,6 +211,44 @@ function summaryFromV0(entry: LmStudioV0ModelEntry): LmStudioModelSummary | null
 	return summary;
 }
 
+/**
+ * Fold rows that share a wire model id into one summary.
+ *
+ * LM Studio lists one row per downloaded copy, so two quantizations of the same
+ * weights appear twice under the same `key` and only one of them is resident.
+ * Keyed by id with last-write-wins, the unloaded copy answers for the model: the
+ * per-model view then reports `unloaded` at `max_context_length` while an
+ * instance is serving at a smaller loaded window, which is a false residency
+ * warning and a planner budgeting against a window the backend does not have.
+ * The resident row wins field by field; the other fills what it left blank.
+ */
+function foldDuplicateSummaries(entries: ReadonlyArray<LmStudioModelSummary>): LmStudioModelSummary[] {
+	const byId = new Map<string, LmStudioModelSummary>();
+	for (const entry of entries) {
+		const previous = byId.get(entry.id);
+		byId.set(entry.id, previous ? mergeSummaries(previous, entry) : entry);
+	}
+	return [...byId.values()];
+}
+
+function mergeSummaries(first: LmStudioModelSummary, second: LmStudioModelSummary): LmStudioModelSummary {
+	const [primary, secondary] = second.loaded === true && first.loaded !== true ? [second, first] : [first, second];
+	const merged: LmStudioModelSummary = { id: primary.id };
+	const loaded = primary.loaded ?? secondary.loaded;
+	if (loaded !== undefined) merged.loaded = loaded;
+	const loadedContextLength = primary.loadedContextLength ?? secondary.loadedContextLength;
+	if (loadedContextLength !== undefined) merged.loadedContextLength = loadedContextLength;
+	const maxContextLength = primary.maxContextLength ?? secondary.maxContextLength;
+	if (maxContextLength !== undefined) merged.maxContextLength = maxContextLength;
+	const vision = primary.vision ?? secondary.vision;
+	if (vision !== undefined) merged.vision = vision;
+	const tools = primary.tools ?? secondary.tools;
+	if (tools !== undefined) merged.tools = tools;
+	const reasoning = primary.reasoning ?? secondary.reasoning;
+	if (reasoning !== undefined) merged.reasoning = reasoning;
+	return merged;
+}
+
 function selectCapabilityEntry(
 	entries: ReadonlyArray<LmStudioModelSummary>,
 	target: TargetDescriptor,
@@ -256,7 +294,11 @@ function modelStatesFromSummaries(
 	const out: Record<string, ProbeModelStatus> = {};
 	for (const entry of entries) {
 		if (entry.loaded === undefined) continue;
-		out[entry.id] = { state: entry.loaded ? "loaded" : "unloaded" };
+		const status: ProbeModelStatus = { state: entry.loaded ? "loaded" : "unloaded" };
+		// The window the resident instance was opened with, carried alongside the
+		// load state so the planner and the residency notice read one view.
+		if (entry.loaded && entry.loadedContextLength !== undefined) status.contextLength = entry.loadedContextLength;
+		out[entry.id] = status;
 	}
 	return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -294,10 +336,18 @@ async function probeApiV1Models(
 		? probeJson<LmStudioV1ModelsResponse>({ ...opts, signal: ctx.signal })
 		: probeJson<LmStudioV1ModelsResponse>(opts));
 	if (!result.ok) return result;
-	const entries = v1ModelEntries(result.data)
+	return probeResultFromV1Models(result.data, target, result.latencyMs);
+}
+
+/**
+ * The pure parse of an `/api/v1/models` payload, exported so the fold over
+ * duplicate model keys is testable against the shape LM Studio actually serves.
+ */
+export function probeResultFromV1Models(data: unknown, target: TargetDescriptor, latencyMs?: number): ProbeResult {
+	const entries = v1ModelEntries(data as LmStudioV1ModelsResponse | undefined)
 		.map(summaryFromV1)
 		.filter((entry): entry is LmStudioModelSummary => entry !== null);
-	return probeResultFromSummaries(entries, target, result.latencyMs);
+	return probeResultFromSummaries(entries, target, latencyMs);
 }
 
 async function probeApiV0Models(
@@ -321,10 +371,11 @@ async function probeApiV0Models(
 }
 
 function probeResultFromSummaries(
-	entries: ReadonlyArray<LmStudioModelSummary>,
+	rows: ReadonlyArray<LmStudioModelSummary>,
 	target: TargetDescriptor,
 	latencyMs: number | undefined,
 ): ProbeResult {
+	const entries = foldDuplicateSummaries(rows);
 	const models = entries.map((entry) => entry.id);
 	const capabilityEntry = selectCapabilityEntry(entries, target);
 	const discoveredCapabilities = capabilitiesFromModelEntry(capabilityEntry);

@@ -9,9 +9,13 @@ Source of truth lives in `src/domains/session/context-accounting.ts`, `src/domai
 
 ## Context window resolution
 
-Each target has a declared, desired, and effective context window. The effective window is the operating ceiling used by budget checks and compaction. It can come from a live loaded model config, a probe, a target override, a model hint, catalog knowledge, a local-native default, or a descriptor default.
+Each target has a declared, desired, and effective context window. The effective window is the operating ceiling used by budget checks and compaction. Sources rank most-live first: the window discovery reports the model is loaded at, then a probed window, then a target override, then a model hint, catalog knowledge, a local-native default, and finally a descriptor default.
+
+The loaded window outranks the declared one because it is the only figure describing what the backend will serve. LM Studio routinely opens a model well below its `max_context_length`, and a run planned against the larger number overruns the server before compaction ever fires. Discovery carries that number per model in `discoveredModelStates[<model>].contextLength`, and the residency notice reads the same entry, so a model Clio is budgeting a loaded window for is never announced as absent.
 
 Local-native runtimes use a recommended minimum desired window of 128,000 tokens. If the live model reports a smaller loaded context window, Clio re-resolves the target so accounting uses the actual ceiling.
+
+The `/context` overlay states which layer answered, next to the token total: `loaded`, `probed`, `configured`, `declared`, or `assumed`.
 
 ## Token accounting and snapshots
 

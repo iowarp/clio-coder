@@ -61,6 +61,14 @@ export interface ProbeModelStatus {
 	state: ProbeModelLoadState;
 	detail?: string;
 	/**
+	 * Context the runtime has this model loaded at, when it reports one. LM
+	 * Studio serves a loaded instance at whatever window it was opened with,
+	 * which is routinely well below the model's `max_context_length`, and that
+	 * smaller number is the one a run has to be planned against. Absent when the
+	 * model is not resident or the runtime does not report it.
+	 */
+	contextLength?: number;
+	/**
 	 * Resident footprint reported by the runtime when a model is loaded. Ollama
 	 * exposes both via `/api/ps` (`size_vram` is the GPU-resident portion,
 	 * `size` the total). Captured here so the picker and any future VRAM-fit

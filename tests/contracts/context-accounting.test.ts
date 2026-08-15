@@ -291,7 +291,10 @@ describe("contracts/context-accounting", () => {
 		const details = resolveContextWindowDetails(target, runtime, "model", null, 32000);
 		strictEqual(details.desiredContextWindow, CLIO_MIN_CONTEXT_WINDOW);
 		strictEqual(details.effectiveContextWindow, 32000);
-		strictEqual(details.contextWindowSource, "loaded");
+		// `probe`, not `loaded`: the target reported a window for this model
+		// without saying it is the one a resident instance is serving. Only
+		// discovery's per-model loaded window earns the `loaded` label.
+		strictEqual(details.contextWindowSource, "probe");
 		ok(details.warning !== null);
 		ok(details.warning.includes("32000"));
 		strictEqual(details.provenanceNotice, null, "a probed number is not an assumption");

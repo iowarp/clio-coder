@@ -5,7 +5,7 @@ import { getCatalogModelForRuntime, resolveCostProvenance } from "./catalog.js";
 import type { ProvidersContract, TargetStatus } from "./contract.js";
 import { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 import { probeCapabilitiesForModel, resolveModelCapabilities } from "./model-capabilities.js";
-import { hasLiveModelCatalog } from "./model-discovery.js";
+import { hasLiveModelCatalog, loadedContextWindowForModel } from "./model-discovery.js";
 import {
 	type ReasoningClass,
 	type ResolvedModelRuntimeCapabilities,
@@ -25,26 +25,33 @@ import type {
 } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
+/**
+ * The layer that answered `effectiveContextWindow`, most authoritative first.
+ * `loaded` is the window a backend reports having this model open at; `probe` is
+ * a window the target reported without saying it is what is serving.
+ */
+export type ContextWindowSource =
+	| "catalog"
+	| "probe"
+	| "loaded"
+	| "target-override"
+	| "model-hint"
+	| "descriptor-default"
+	| "unknown";
+
 export interface ContextWindowDetails {
 	/** Best static knowledge of the model's window (hint > KB > catalog > runtime default). */
 	declaredContextWindow: number;
 	/** Raw probe result, when the target was probed. */
 	probedContextWindow: number | null;
-	/** Context actually loaded server-side; only LM Studio reports this. */
+	/** Context the backend reports this model loaded at; only some runtimes report it. */
 	loadedContextWindow: number | null;
 	/** What Clio would like for coding; advisory only and never displayed as provider truth. */
 	desiredContextWindow: number;
 	/** What the target actually offers; live probe/config/model knowledge only. */
 	effectiveContextWindow: number;
 	/** Where `effectiveContextWindow` came from. */
-	contextWindowSource:
-		| "catalog"
-		| "probe"
-		| "loaded"
-		| "target-override"
-		| "model-hint"
-		| "descriptor-default"
-		| "unknown";
+	contextWindowSource: ContextWindowSource;
 	/** The window is below what this kind of work wants. An actionable degradation. */
 	warning: string | null;
 	/** The window is a placeholder rather than something the target reported. */
@@ -388,12 +395,17 @@ export function resolveRuntimeTarget(
 	const capabilityResolution = modelCapabilitiesFor(providers, status, wireModelId);
 	const capabilities: CapabilityFlags = { ...capabilityResolution.capabilities };
 	const probedContextWindow = probeCapabilitiesForModel(status, wireModelId)?.contextWindow ?? null;
+	// Discovery's per-model loaded window, which the probe capabilities cannot
+	// carry: `probeCapabilitiesForModel` answers for the target's default model
+	// and reports a window without saying whether it is the one being served.
+	const loadedContextWindow = loadedContextWindowForModel(status, wireModelId);
 	const contextWindowDetails = resolveContextWindowDetails(
 		target,
 		runtime,
 		wireModelId,
 		providers.knowledgeBase,
 		probedContextWindow,
+		loadedContextWindow,
 	);
 	capabilities.contextWindow = contextWindowDetails.effectiveContextWindow;
 	if (contextWindowDetails.warning) {
@@ -496,6 +508,10 @@ export function refineRuntimeTargetWithModelHints(
 		target.wireModelId,
 		knowledgeBase ?? null,
 		target.contextWindowDetails.probedContextWindow,
+		// A synthesized model hint carries the model's declared window, never the
+		// one the backend has open. Re-resolving without the loaded number would
+		// hand the planner the declared window back on the first refinement.
+		target.contextWindowDetails.loadedContextWindow,
 		modelHintContextWindow,
 	);
 	capabilities.contextWindow = contextWindowDetails.effectiveContextWindow;
@@ -587,10 +603,15 @@ function positiveWindow(value: number | null | undefined): number | undefined {
  *  - `desired`: what Clio wants for coding. Local-native tiers still get a
  *    128k recommendation, but this is advisory only.
  *  - `effective`: what the target actually offers, most live source first:
- *    probe/loaded > target config override > model-specific knowledge >
+ *    loaded > probe > target config override > model-specific knowledge >
  *    runtime descriptor default. Clio no longer invents a 128k effective
  *    window for unknown local models; providers must probe it or users must
  *    configure an explicit override.
+ *
+ * The loaded window outranks everything below it because it is the only figure
+ * that describes what the backend will serve this turn. A model whose weights
+ * allow 262k but which is open at 100k fails at 100k, so planning against the
+ * declared number means autocompact never fires in time.
  *
  * Warns when a local-native target's effective window is below the 128k recommendation.
  */
@@ -600,6 +621,7 @@ export function resolveContextWindowDetails(
 	wireModelId: string,
 	knowledgeBase: KnowledgeBase | null,
 	probedContextWindow: number | null,
+	loadedContextWindow: number | null = null,
 	modelHintContextWindow?: number,
 ): ContextWindowDetails {
 	const catalogModel = getCatalogModelForRuntime(runtime.id, wireModelId);
@@ -627,13 +649,20 @@ export function resolveContextWindowDetails(
 
 	const desired = Math.max(declaredContextWindow, DESIRED_CONTEXT_WINDOW);
 
+	const loadedWindow = positiveWindow(loadedContextWindow);
 	const probeWindow = positiveWindow(probedContextWindow);
 	const overrideWindow = positiveWindow(target.capabilities?.contextWindow);
 	let effective: number;
-	let source: ContextWindowDetails["contextWindowSource"];
-	if (probeWindow !== undefined) {
+	let source: ContextWindowSource;
+	if (loadedWindow !== undefined) {
+		effective = loadedWindow;
+		source = "loaded";
+	} else if (probeWindow !== undefined) {
 		effective = probeWindow;
-		source = runtime.id === "lmstudio-native" ? "loaded" : "probe";
+		// Not "loaded": a probed window is what the target reported for the
+		// model, and only a runtime that names its resident instance's window
+		// has said anything about what is serving right now.
+		source = "probe";
 	} else if (overrideWindow !== undefined) {
 		effective = overrideWindow;
 		source = "target-override";
@@ -681,7 +710,7 @@ export function resolveContextWindowDetails(
 	return {
 		declaredContextWindow,
 		probedContextWindow,
-		loadedContextWindow: runtime.id === "lmstudio-native" ? probedContextWindow : null,
+		loadedContextWindow: loadedWindow ?? null,
 		desiredContextWindow: desired,
 		effectiveContextWindow: effective,
 		contextWindowSource: source,

@@ -187,8 +187,11 @@ describe("contracts/providers", () => {
 		ok(resolution.ok);
 		if (resolution.ok) {
 			strictEqual(resolution.target.capabilityDecisions.contextWindow, 128000);
-			strictEqual(resolution.target.contextWindowDetails.contextWindowSource, "loaded");
-			strictEqual(resolution.target.contextWindowDetails.loadedContextWindow, 128000);
+			// The catalog row for the selected model, which is not a claim about
+			// what the server has open: only a per-model loaded window from
+			// discovery reads as `loaded`.
+			strictEqual(resolution.target.contextWindowDetails.contextWindowSource, "probe");
+			strictEqual(resolution.target.contextWindowDetails.loadedContextWindow, null);
 			strictEqual(resolution.target.contextWindowDetails.warning, null);
 		}
 	});
