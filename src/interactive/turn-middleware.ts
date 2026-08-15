@@ -135,7 +135,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 
 	const applyRequestContinuation = (message: string): void => {
 		if (state.stalledTurnNudgeSpent) {
-			deps.emitFooterNotice("warning", "model stalled again after a nudge; waiting for you", "nudge.stalled-turn.spent");
+			// One continuation per user prompt, and that cap is all this branch
+			// knows. It cannot tell whether the model stalled, answered, or was
+			// carried here by a second producer entirely, so it reports the cap and
+			// leaves any claim about a stall to the watchdog that measures one.
+			deps.emitFooterNotice("warning", "turn still has open work; this turn's nudge is spent", "nudge.continuation.spent");
 			return;
 		}
 		state.stalledTurnNudgeSpent = true;
@@ -144,7 +148,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		// Producer-neutral wording: stalled-turn, the high-rigor finish contract,
 		// and the open-tasks nudge all arrive here, and the buffered reminder
 		// already carries each producer's specific message into the transcript.
-		deps.emitFooterNotice("info", "turn ended with open work; nudge sent", "nudge.stalled-turn.sent");
+		deps.emitFooterNotice("info", "turn ended with open work; nudge sent", "nudge.continuation.sent");
 	};
 
 	const lastAssistantMessage = (messages: ReadonlyArray<AgentMessage>): AgentMessage | null => {

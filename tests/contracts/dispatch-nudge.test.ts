@@ -85,7 +85,7 @@ function terminalEnvelope(runId: string, outcome: RunOutcome): RunEnvelope {
 }
 
 describe("contracts/read-only exploration dispatch nudge", () => {
-	it("fires once after the named read-only call threshold without dispatch", () => {
+	it("advises once after the named read-only call threshold, never carrying the turn onward", () => {
 		const registration = createReadOnlyExplorationNudgeRegistration();
 		strictEqual(registration.id, READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID);
 		crossThreshold("turn-fire-user", registration);
@@ -93,19 +93,28 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 		const effects = registration.evaluate(turnEnd("turn-fire-assistant", undefined, "turn-fire-user"));
 		deepStrictEqual(
 			effects.map((effect) => effect.kind),
-			["request_continuation", "inject_reminder"],
+			["inject_reminder"],
+			"reading is the requested work; the finding is advisory, not a forced extra model round",
 		);
-		const continuation = effects[0];
-		ok(continuation?.kind === "request_continuation");
-		match(continuation.message, /This continuation used/);
-		match(continuation.message, /without a successful Scout dispatch in this continuation/);
-		strictEqual(continuation.message.includes("This turn"), false, continuation.message);
-		match(continuation.message, /Scout/);
+		const advisory = effects[0];
+		ok(advisory?.kind === "inject_reminder");
+		match(advisory.message, /This continuation used/);
+		match(advisory.message, /without a successful Scout dispatch in this continuation/);
+		strictEqual(advisory.message.includes("This turn"), false, advisory.message);
+		match(advisory.message, /Scout/);
 
 		deepStrictEqual(
 			registration.evaluate(turnEnd("turn-fire-assistant", undefined, "turn-fire-user")),
 			[],
 			"same turn cannot nudge twice",
+		);
+		// A later model round of the same user turn re-counts its own calls, but
+		// the operator has already been told once.
+		crossThreshold("turn-fire-user", registration);
+		deepStrictEqual(
+			registration.evaluate(turnEnd("turn-fire-assistant-2", undefined, "turn-fire-user")),
+			[],
+			"one advisory per user turn",
 		);
 	});
 
@@ -119,7 +128,7 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 		});
 		deepStrictEqual(
 			effects.map((effect) => effect.kind),
-			["request_continuation", "inject_reminder"],
+			["inject_reminder"],
 		);
 	});
 
@@ -135,7 +144,7 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 		registration.evaluate(afterTool("turn-listed", ToolNames.Dispatch, { list: true }));
 		strictEqual(
 			registration.evaluate(turnEnd("turn-listed"))[0]?.kind,
-			"request_continuation",
+			"inject_reminder",
 			"list:true is not a Scout dispatch",
 		);
 
@@ -162,7 +171,7 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 		const effects = registration.evaluate(turnEnd("turn-failed"));
 		deepStrictEqual(
 			effects.map((effect) => effect.kind),
-			["request_continuation", "inject_reminder"],
+			["inject_reminder"],
 		);
 	});
 
@@ -200,7 +209,7 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 			const turnId = `not-credited-${index}`;
 			crossThreshold(turnId, registration);
 			registration.evaluate(afterTool(turnId, ToolNames.Dispatch, args));
-			strictEqual(registration.evaluate(turnEnd(turnId))[0]?.kind, "request_continuation", JSON.stringify(args));
+			strictEqual(registration.evaluate(turnEnd(turnId))[0]?.kind, "inject_reminder", JSON.stringify(args));
 		}
 	});
 

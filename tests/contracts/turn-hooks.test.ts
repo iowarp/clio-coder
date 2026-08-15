@@ -3,6 +3,12 @@ import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
+import {
+	buildReadOnlyExplorationMessage,
+	createReadOnlyExplorationNudgeRegistration,
+	READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD,
+} from "../../src/domains/middleware/dispatch-nudge.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { runMiddlewareHook, runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
 import {
@@ -24,6 +30,7 @@ import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from 
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { createChatLoop } from "../../src/interactive/chat-loop.js";
+import { createStatusController, type TurnSummary } from "../../src/interactive/status/index.js";
 import { createToolProseRegistration } from "../../src/interactive/tool-prose-registration.js";
 
 function settings(): ClioSettings {
@@ -239,6 +246,49 @@ function dispatchOnlyRegistry(invocations?: unknown[]): unknown {
 			return { kind: "ok", result: { kind: "ok", output: "unused" }, decision: {} };
 		},
 	};
+}
+
+/**
+ * Read + dispatch surface whose invoke fires the middleware tool hooks the real
+ * registry fires, carrying the turn id the loop stamps onto every invoke. The
+ * read-only exploration nudge counts calls through exactly that path.
+ */
+function readAndDispatchRegistry(middleware: MiddlewareContract): unknown {
+	const specs = [ToolNames.Read, ToolNames.Dispatch].map((name) => ({
+		name,
+		description: `${name} test tool`,
+		parameters: { type: "object", properties: {} },
+		baseActionClass: name === ToolNames.Read ? "read" : "dispatch",
+		run: async () => ({ kind: "ok", output: "file contents" }),
+	}));
+	return {
+		listRegistered: () => specs.map((spec) => spec.name),
+		get: (name: string) => specs.find((spec) => spec.name === name),
+		invoke: async (call: { tool: string; args?: Record<string, unknown> }, options?: { turnId?: string }) => {
+			middleware.runHook({
+				hook: "before_tool",
+				toolName: call.tool,
+				...(call.args ? { toolArgs: call.args } : {}),
+				...(options?.turnId ? { turnId: options.turnId } : {}),
+				metadata: { decisionKind: "allow" },
+			});
+			return {
+				kind: "ok",
+				result: { kind: "ok", output: "file contents" },
+				decision: { kind: "allow", classification: { actionClass: call.tool === ToolNames.Read ? "read" : "dispatch" } },
+			};
+		},
+	};
+}
+
+function assistantStopMessageWithUsage(text: string, input: number, output: number): AgentMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "text", text }],
+		stopReason: "stop",
+		usage: { input, output },
+		timestamp: Date.now(),
+	} as unknown as AgentMessage;
 }
 
 async function emitAssistantTurn(agent: FakeAgent, message: AgentMessage): Promise<void> {
@@ -632,7 +682,7 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		ok(notices.some((notice) => notice.level === "info" && notice.text === "turn ended with open work; nudge sent"));
 	});
 
-	it("warns and stops when the model stalls again after the one-shot nudge", async () => {
+	it("stops at one continuation per prompt and reports the spent cap, not a stall", async () => {
 		const entries: SessionEntry[] = [];
 		const middleware = createMiddlewareBundle().contract;
 		const prompts: string[] = [];
@@ -663,8 +713,13 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		strictEqual(prompts.length, 2, "the second stalled turn must not resubmit again");
 		ok(
 			notices.some(
-				(notice) => notice.level === "warning" && notice.text === "model stalled again after a nudge; waiting for you",
+				(notice) => notice.level === "warning" && notice.text === "turn still has open work; this turn's nudge is spent",
 			),
+		);
+		strictEqual(
+			notices.some((notice) => /stall/i.test(notice.text)),
+			false,
+			"the cap knows a nudge was spent, not how the model behaved",
 		);
 	});
 
@@ -740,6 +795,88 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 			notices.filter((notice) => notice.level === "info" && notice.text === "turn ended with open work; nudge sent")
 				.length,
 			2,
+		);
+	});
+
+	it("advises after ten read-only calls without a second model call, a stall warning, or a chip rewrite", async () => {
+		const entries: SessionEntry[] = [];
+		const middleware = createMiddlewareBundle().contract;
+		middleware.registerHook(createReadOnlyExplorationNudgeRegistration());
+		const prompts: string[] = [];
+		const notices: Array<{ level: string; surface: string; text: string }> = [];
+		const reads = READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD + 1;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			middleware,
+			toolRegistry: readAndDispatchRegistry(middleware),
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				prompts.push(String(input));
+				const tools = agent.state.tools as ReadonlyArray<{
+					name: string;
+					execute(toolCallId: string, params: unknown): Promise<unknown>;
+				}>;
+				const read = tools.find((tool) => tool.name === ToolNames.Read);
+				ok(read, "the loop should resolve the read tool onto the agent surface");
+				for (let call = 0; call < reads; call += 1) {
+					await read.execute(`read-${call}`, { path: `src/file-${call}.ts` });
+					await emitReadToolCall(agent, `read-${call}`);
+				}
+				// The user turn the footer chip has to keep, with issue #45's numbers.
+				await emitAssistantTurn(
+					agent,
+					assistantStopMessageWithUsage("Read all ten files you named; here is the summary.", 25186, 1859),
+				);
+			}, []),
+		} as never);
+		loop.onEvent((event) => {
+			if (event.type === "notice") notices.push({ level: event.level, surface: event.surface, text: event.text });
+		});
+		const summaries: TurnSummary[] = [];
+		const status = createStatusController({
+			chat: loop,
+			providers: providers(),
+			getSettings: () => settings(),
+			setInterval: () => 0,
+			clearInterval: () => {},
+			setTimeout: () => 0,
+			clearTimeout: () => {},
+		});
+		// Every ended status overwrites the footer's last-turn chip, so counting
+		// distinct ended summaries counts chip writes.
+		status.subscribe((current) => {
+			if (current.phase !== "ended" || !current.summary) return;
+			if (summaries.at(-1) !== current.summary) summaries.push(current.summary);
+		});
+
+		await loop.submit("read these ten files and summarize them");
+		status.dispose();
+
+		strictEqual(prompts.length, 1, "an advisory nudge must not cost a second model call");
+		ok(
+			notices.some((notice) => notice.surface === "transcript" && notice.text === buildReadOnlyExplorationMessage()),
+			"the advisory should reach the operator's transcript",
+		);
+		deepStrictEqual(
+			notices.filter((notice) => notice.surface === "footer"),
+			[],
+			"no continuation was requested, so the footer carries no nudge notice",
+		);
+		strictEqual(
+			notices.some((notice) => /stall/i.test(notice.text)),
+			false,
+			"the model answered inside one turn; nothing may report a stall",
+		);
+		strictEqual(summaries.length, 1, "one user turn, one last-turn chip write");
+		strictEqual(summaries[0]?.inputTokens, 25186);
+		strictEqual(summaries[0]?.outputTokens, 1859);
+		const reminder = entries.find((entry) => entry.kind === "custom" && entry.customType === "middlewareReminder");
+		ok(
+			reminder && JSON.stringify(reminder).includes("read-only exploration calls"),
+			"the advisory persists as a middlewareReminder entry",
 		);
 	});
 
