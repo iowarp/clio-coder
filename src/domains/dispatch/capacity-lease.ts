@@ -1,9 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
+import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
 import { FILE_LOCK_ACQUIRE_TIMEOUT_MS, withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
+
+export { processBirthToken } from "../../core/process-identity.js";
 
 export const MAX_CAPACITY_LEASES = 1_000;
 export const DEFAULT_CAPACITY_LEASE_TTL_MS = 30_000;
@@ -26,6 +30,8 @@ export interface CapacityLease {
 	leaseId: string;
 	assignmentId: string;
 	nodeId: string;
+	/** Owner host. Absent only on records written before the field existed; those are read as this host. */
+	host?: string;
 	ownerPid: number;
 	processBirthToken: string;
 	acquiredAt: string;
@@ -75,6 +81,7 @@ function valid(value: unknown): value is CapacityLease {
 		typeof lease.leaseId === "string" &&
 		typeof lease.assignmentId === "string" &&
 		typeof lease.nodeId === "string" &&
+		(lease.host === undefined || typeof lease.host === "string") &&
 		Number.isInteger(lease.ownerPid) &&
 		typeof lease.processBirthToken === "string" &&
 		typeof lease.acquiredAt === "string" &&
@@ -129,38 +136,6 @@ export function writeCapacityStateUnsafe(file: CapacityStateFile): void {
 	atomicWrite(capacityStatePath(), JSON.stringify(file, null, 2));
 }
 
-function readProcStartTime(pid: number): string | null {
-	try {
-		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-		const close = stat.lastIndexOf(")");
-		const fields = stat.slice(close + 2).split(" ");
-		return fields[19] ?? null; // field 22; slice begins at field 3
-	} catch {
-		return null;
-	}
-}
-/**
- * True when this platform can distinguish "pid is gone" from "pid cannot be
- * inspected". Where it can, a missing token proves the owner is dead. Where it
- * cannot, a missing token proves nothing, so reclamation falls back to a
- * liveness signal and the lease expiry rather than assuming the owner died.
- */
-const BIRTH_TOKEN_SOURCE_AVAILABLE = readProcStartTime(process.pid) !== null;
-
-export function processBirthToken(pid = process.pid): string | null {
-	const started = readProcStartTime(pid);
-	if (started !== null) return started;
-	return BIRTH_TOKEN_SOURCE_AVAILABLE ? null : `pid-${pid}`;
-}
-function processAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		// EPERM means the pid exists but belongs to another user.
-		return (error as NodeJS.ErrnoException).code === "EPERM";
-	}
-}
 const defaultProbe: LeaseOwnerProbe = {
 	birthToken: processBirthToken,
 	tokenProvesDeath: BIRTH_TOKEN_SOURCE_AVAILABLE,
@@ -177,6 +152,9 @@ function ownerHoldsLease(lease: CapacityLease, probe: LeaseOwnerProbe): boolean 
 }
 function reclaim(file: CapacityStateFile, nowMs: number, probe: LeaseOwnerProbe): void {
 	file.leases = file.leases.filter((lease) => {
+		// A lease from another host is never adjudicated here: on a shared state
+		// dir a local pid probe would inspect the wrong process.
+		if (lease.host !== undefined && lease.host !== hostname()) return true;
 		if (!ownerHoldsLease(lease, probe)) return false;
 		// A real birth token identifies this exact process, so it outranks the
 		// expiry: an owner that missed heartbeats because it sat blocked on the
@@ -300,6 +278,7 @@ export function acquireCapacityLease(input: {
 			leaseId: `lease-${nowMs.toString(36)}-${randomBytes(6).toString("hex")}`,
 			assignmentId: input.assignmentId,
 			nodeId: input.nodeId,
+			host: hostname(),
 			ownerPid: input.ownerPid ?? process.pid,
 			processBirthToken: token,
 			acquiredAt: at,

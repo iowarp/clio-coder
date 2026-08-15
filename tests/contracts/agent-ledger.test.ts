@@ -509,6 +509,15 @@ describe("contracts/agent-ledger control lane", () => {
 		strictEqual(bad.ok, false);
 	});
 
+	it("a heartbeat frame carries no timestamp, and a legacy `at` is ignored rather than read", () => {
+		const bare = parseControlFrame(`@clio-control/1 ${JSON.stringify({ kind: "heartbeat" })}`);
+		ok(bare.ok);
+		deepStrictEqual(bare.value, { kind: "heartbeat" });
+		const legacy = parseControlFrame(`@clio-control/1 ${JSON.stringify({ kind: "heartbeat", at: 1 })}`);
+		ok(legacy.ok);
+		deepStrictEqual(legacy.value, { kind: "heartbeat" });
+	});
+
 	it("drops a ledger_post that arrives before announce acceptance", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-agent-ledger-lane-"));
 		const stubEntry = join(scratch, "stub-entry.js");

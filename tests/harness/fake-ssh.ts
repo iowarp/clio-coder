@@ -185,7 +185,7 @@ rl.on("line", (line) => {
 			// Saturate stdout, then prove the control lane still answers by
 			// beating and acknowledging a cancellation on stderr.
 			for (let i = 0; i < 4000; i += 1) emit({ type: "message_update", index: i, filler: "y".repeat(512) });
-			control({ kind: "heartbeat", at: Date.now() });
+			control({ kind: "heartbeat" });
 			control({ kind: "cancel_ack", at: Date.now() });
 			assistant("flood done");
 			exitFlushed(0);

@@ -1,8 +1,9 @@
 import { ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { processBirthToken } from "../../src/core/process-identity.js";
 import { withStateFileLock, withStateFileLockSync } from "../../src/core/state-file-lock.js";
 
 // One implementation now backs settings.yaml, the dispatch admission state
@@ -23,8 +24,10 @@ describe("contracts/state-file-lock", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	function holdLock(pid: number, ageMs = 0): void {
-		writeFileSync(lockPath, `${JSON.stringify({ pid, at: new Date().toISOString() })}\n`, "utf8");
+	// Legacy record shape: no host, no birth token. It must keep adjudicating as
+	// a record from this host, so the tests below that use it pin that path.
+	function holdLock(pid: number, ageMs = 0, extra: { host?: string; birthToken?: string } = {}): void {
+		writeFileSync(lockPath, `${JSON.stringify({ ...extra, pid, at: new Date().toISOString() })}\n`, "utf8");
 		if (ageMs > 0) {
 			const past = new Date(Date.now() - ageMs);
 			utimesSync(lockPath, past, past);
@@ -34,10 +37,31 @@ describe("contracts/state-file-lock", () => {
 	it("takes and releases the lock around the critical section", () => {
 		const seen = withStateFileLockSync(target, () => {
 			ok(existsSync(lockPath), "the lock exists while the section runs");
-			return JSON.parse(readFileSync(lockPath, "utf8")) as { pid: number };
+			return JSON.parse(readFileSync(lockPath, "utf8")) as { host: string; pid: number; birthToken: string | null };
 		});
 		strictEqual(seen.pid, process.pid);
+		strictEqual(seen.host, hostname());
+		strictEqual(seen.birthToken, processBirthToken());
 		strictEqual(existsSync(lockPath), false);
+	});
+
+	it("never adjudicates a record from another host, even for a pid that is dead here", () => {
+		holdLock(999999, 120_000, { host: `${hostname()}-elsewhere`, birthToken: "foreign" });
+		throws(() => withStateFileLockSync(target, () => "unreachable", { timeoutMs: 50 }), /timed out .* waiting for/);
+		ok(existsSync(lockPath), "a foreign host's lock is that host's to reclaim");
+	});
+
+	it("reclaims a same-host record whose pid was reused by another process", () => {
+		const token = processBirthToken();
+		if (token === null || token.startsWith("pid-")) return; // no birth-token source on this platform
+		holdLock(process.pid, 0, { host: hostname(), birthToken: `${token}-earlier-incarnation` });
+		strictEqual(
+			withStateFileLockSync(target, () => "taken", { timeoutMs: 50 }),
+			"taken",
+		);
+		// And a matching token still identifies a live holder.
+		holdLock(process.pid, 0, { host: hostname(), birthToken: token });
+		throws(() => withStateFileLockSync(target, () => "unreachable", { timeoutMs: 50 }), /timed out .* waiting for/);
 	});
 
 	it("releases the lock when the critical section throws", () => {

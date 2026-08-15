@@ -274,7 +274,7 @@ export interface AgentLedgerPort {
 
 export type WorkerControlFrame =
 	| { kind: "announce"; attestation: WorkerAttestation }
-	| { kind: "heartbeat"; at: number }
+	| { kind: "heartbeat" }
 	| { kind: "cancel_ack"; at: number }
 	| { kind: "ledger_post"; body: AgentLedgerBody };
 
@@ -482,11 +482,9 @@ export function parseControlFrame(line: string): FrameParseResult<WorkerControlF
 			if (!attestation.ok) return attestation;
 			return { ok: true, value: { kind: "announce", attestation: attestation.value } };
 		}
-		case "heartbeat": {
-			const at = readFiniteNumber(record, "at");
-			if (at === null) return { ok: false, reason: "heartbeat frame requires a finite at" };
-			return { ok: true, value: { kind: "heartbeat", at } };
-		}
+		case "heartbeat":
+			// Legacy workers still send `at`; nothing reads it, so it is ignored.
+			return { ok: true, value: { kind: "heartbeat" } };
 		case "cancel_ack": {
 			const at = readFiniteNumber(record, "at");
 			if (at === null) return { ok: false, reason: "cancel_ack frame requires a finite at" };
