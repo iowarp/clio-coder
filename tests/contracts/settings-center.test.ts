@@ -8,6 +8,7 @@ import {
 	applySettingChange,
 	buildSettingItems,
 	buildSettingsSections,
+	createSettingsChangePlan,
 	type EditableSettingId,
 	openSettingsOverlay,
 	SETTINGS_LABELS_BY_ID,
@@ -20,7 +21,7 @@ const ESC = String.fromCharCode(27);
 const ENTER = "\r";
 const DOWN = `${ESC}[B`;
 const SGR_PATTERN = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
-const SCOPE_NOTE = "this session";
+const SCOPE_NOTE = "session, global, or cancel";
 
 /** Rows the overlay deliberately surfaces read-only; they are managed elsewhere. */
 const READ_ONLY_IDS = new Set<EditableSettingId>([
@@ -64,7 +65,8 @@ function stripAnsi(value: string): string {
 function noopSettingsCenter(bodyHeight: number): SettingsCenter {
 	return new SettingsCenter(buildSettingItems(settingsWithTargets()), {
 		getBodyHeight: () => bodyHeight,
-		onCommit: () => undefined,
+		prepareChange: () => null,
+		onApply: () => undefined,
 		onCancel: () => undefined,
 	});
 }
@@ -77,9 +79,11 @@ interface Commit {
 
 function spyingSettingsCenter(bodyHeight: number): { center: SettingsCenter; commits: Commit[] } {
 	const commits: Commit[] = [];
-	const center = new SettingsCenter(buildSettingItems(settingsWithTargets()), {
+	const settings = settingsWithTargets();
+	const center = new SettingsCenter(buildSettingItems(settings), {
 		getBodyHeight: () => bodyHeight,
-		onCommit: (id, value, scope) => commits.push({ id, value, scope }),
+		prepareChange: (item, value) => createSettingsChangePlan(settings, item, value),
+		onApply: (plan, scope) => commits.push({ id: plan.rowId, value: plan.selectedValue, scope }),
 		onCancel: () => undefined,
 		requestRender: () => undefined,
 	});
@@ -412,14 +416,18 @@ describe("contracts/settings center", () => {
 		strictEqual(center.render(40).length, 6);
 	});
 
-	it("Space previews a value without committing; Enter commits it", () => {
+	it("Space previews a value; Enter opens a picker and an explicit destination commits it", () => {
 		const { center, commits } = spyingSettingsCenter(26);
 		center.setSelection("safety", 0); // autonomy = auto-edit
 		center.handleInput(" "); // preview → full-auto
 		strictEqual(commits.length, 0, "preview must not commit");
 		const previewed = stripAnsi(center.render(112).join("\n"));
 		ok(previewed.includes("full-auto"), "preview value is shown");
-		center.handleInput(ENTER); // commit pending → applies to session, opens scope confirm
+		center.handleInput(ENTER); // value picker preselected to the preview
+		strictEqual(commits.length, 0, "opening the picker must not commit");
+		center.handleInput(ENTER); // choose full-auto and open the destination prompt
+		strictEqual(commits.length, 0, "choosing a value must not commit");
+		center.handleInput(ENTER); // Apply this session
 		deepStrictEqual(commits, [{ id: "autonomy", value: "full-auto", scope: "session" }]);
 	});
 
@@ -435,7 +443,9 @@ describe("contracts/settings center", () => {
 		center.handleInput(" "); // preview -> escalate
 		const previewed = stripAnsi(center.render(112).join("\n"));
 		ok(previewed.includes("escalate"), "preview reaches escalate");
-		center.handleInput(ENTER);
+		center.handleInput(ENTER); // picker preselected to escalate
+		center.handleInput(ENTER); // destination prompt
+		center.handleInput(ENTER); // session
 		deepStrictEqual(commits, [{ id: "workers.onPermission", value: "escalate", scope: "session" }]);
 
 		applySettingChange(settings, "workers.onPermission", "escalate");
@@ -444,30 +454,38 @@ describe("contracts/settings center", () => {
 		strictEqual(reloaded?.currentValue, "escalate");
 	});
 
-	it("a live knob applies to the session immediately, then offers a global save", () => {
+	it("Enter opens an enum picker and global apply performs no preliminary session commit", () => {
 		const { center, commits } = spyingSettingsCenter(26);
 		center.setSelection("safety", 0); // autonomy
-		center.handleInput(ENTER); // advance one + commit session + open confirm
-		deepStrictEqual(commits, [{ id: "autonomy", value: "full-auto", scope: "session" }]);
-		center.handleInput(ENTER); // choose the default option: save globally
-		deepStrictEqual(commits, [
-			{ id: "autonomy", value: "full-auto", scope: "session" },
-			{ id: "autonomy", value: "full-auto", scope: "global" },
-		]);
+		center.handleInput(ENTER); // picker, preselected to auto-edit
+		strictEqual(commits.length, 0);
+		center.handleInput(DOWN); // full-auto
+		center.handleInput(ENTER); // destination prompt, still unchanged
+		strictEqual(commits.length, 0);
+		center.handleInput(DOWN); // Apply and save globally
+		center.handleInput(ENTER);
+		deepStrictEqual(commits, [{ id: "autonomy", value: "full-auto", scope: "global" }]);
 	});
 
-	it("Esc on the confirm dialog keeps a live edit session-only", () => {
+	it("Esc cancels both the enum picker and the destination prompt without mutation", () => {
 		const { center, commits } = spyingSettingsCenter(26);
 		center.setSelection("safety", 0);
-		center.handleInput(ENTER); // session apply + confirm
-		center.handleInput(ESC); // decline global
-		deepStrictEqual(commits, [{ id: "autonomy", value: "full-auto", scope: "session" }]);
+		center.handleInput(ENTER); // picker
+		center.handleInput(ESC);
+		strictEqual(commits.length, 0, "picker Esc is inert");
+		center.handleInput(ENTER);
+		center.handleInput(DOWN);
+		center.handleInput(ENTER); // destination prompt
+		center.handleInput(ESC);
+		strictEqual(commits.length, 0, "destination Esc is Cancel");
 	});
 
 	it("a restart-required knob is global-only and never applies to the session", () => {
 		const { center, commits } = spyingSettingsCenter(26);
 		center.setSelection("budget", 2); // budget.concurrency = auto
-		center.handleInput(ENTER); // open confirm; no session apply for restart knobs
+		center.handleInput(ENTER); // value picker preselected to auto
+		center.handleInput(DOWN); // 1
+		center.handleInput(ENTER); // global-only destination prompt
 		strictEqual(commits.length, 0, "restart knobs do not apply live");
 		center.handleInput(ENTER); // choose: save globally
 		deepStrictEqual(commits, [{ id: "budget.concurrency", value: "1", scope: "global" }]);
@@ -520,7 +538,7 @@ describe("contracts/settings center", () => {
 		ok(rendered.includes("retry.enabled"), rendered);
 	});
 
-	it("routes session vs global commits through commitSetting and emits a scoped notice", () => {
+	it("routes one explicit global commit through commitSetting and emits a scoped notice", () => {
 		const live = { current: settingsWithTargets() };
 		const fake = fakeTui(24, 100);
 		const calls: Array<{ id: string; scope: "session" | "global" }> = [];
@@ -540,16 +558,16 @@ describe("contracts/settings center", () => {
 		const overlay = fake.captured();
 		ok(overlay, "expected settings overlay component");
 
-		overlay.handleInput?.(ENTER); // autonomy: session apply + confirm
-		overlay.handleInput?.(ENTER); // save globally
+		overlay.handleInput?.(ENTER); // autonomy value picker
+		overlay.handleInput?.(DOWN); // full-auto
+		overlay.handleInput?.(ENTER); // destination prompt
+		overlay.handleInput?.(DOWN); // Apply and save globally
+		overlay.handleInput?.(ENTER);
 
-		deepStrictEqual(calls, [
-			{ id: "autonomy", scope: "session" },
-			{ id: "autonomy", scope: "global" },
-		]);
-		strictEqual(notices.length, 2);
-		strictEqual(notices[1]?.text, "autonomy set to full-auto (saved globally)");
-		strictEqual(notices[1]?.key, "settings:autonomy");
+		deepStrictEqual(calls, [{ id: "autonomy", scope: "global" }]);
+		strictEqual(notices.length, 1);
+		strictEqual(notices[0]?.text, "autonomy set to full-auto (saved globally)");
+		strictEqual(notices[0]?.key, "settings:autonomy");
 	});
 
 	it("falls back to writeSettings when no scoped commit handler is wired", () => {
@@ -566,9 +584,11 @@ describe("contracts/settings center", () => {
 		});
 		const overlay = fake.captured();
 		ok(overlay, "expected settings overlay component");
-		overlay.handleInput?.(ENTER); // commit (session → writeSettings fallback)
-		overlay.handleInput?.(ENTER); // global → writeSettings
-		ok(writes >= 1, "edits persist through writeSettings when commitSetting is absent");
+		overlay.handleInput?.(ENTER); // picker, current value
+		overlay.handleInput?.(DOWN); // full-auto
+		overlay.handleInput?.(ENTER); // global-only destination prompt
+		overlay.handleInput?.(ENTER); // global
+		strictEqual(writes, 1, "the fallback is explicitly global and writes exactly once");
 	});
 	it("renders fleet profiles, agent bindings, and targets as per-entry rows in their sections", () => {
 		const settings = settingsWithTargets();
@@ -713,6 +733,140 @@ describe("contracts/settings center", () => {
 		strictEqual("acp-agent" in settings.workers.agentBindings, false, "ACP agents cannot be bound");
 	});
 
+	it("keeps dynamic target, profile, binding, and node plans immutable across session/global/cancel reopen", () => {
+		type Destination = "session" | "global" | "cancel";
+		interface PlanCase {
+			name: string;
+			id: EditableSettingId;
+			value: string;
+			setup?: (settings: ClioSettings) => void;
+			paths: string[];
+			assertApplied: (settings: ClioSettings) => void;
+		}
+		const cases: PlanCase[] = [
+			{
+				name: "target use",
+				id: "targets.target-b",
+				value: "use",
+				paths: ["orchestrator.model", "orchestrator.target", "workers.default.model", "workers.default.target"],
+				assertApplied: (settings) => {
+					strictEqual(settings.orchestrator.target, "target-b");
+					strictEqual(settings.workers.default.target, "target-b");
+				},
+			},
+			{
+				name: "target remove",
+				id: "targets.target-a",
+				value: "remove",
+				paths: [
+					"orchestrator.model",
+					"orchestrator.target",
+					"scope",
+					"targets",
+					"workers.default.model",
+					"workers.default.target",
+				],
+				assertApplied: (settings) =>
+					deepStrictEqual(
+						settings.targets.map((target) => target.id),
+						["target-b"],
+					),
+			},
+			{
+				name: "profile add",
+				id: "workers.profiles",
+				value: "slow -> target-a",
+				paths: ["workers.profiles.slow"],
+				assertApplied: (settings) => strictEqual(settings.workers.profiles.slow?.target, "target-a"),
+			},
+			{
+				name: "profile change",
+				id: "workers.profiles.fast.target",
+				value: "target-a",
+				paths: ["workers.profiles.fast"],
+				assertApplied: (settings) => strictEqual(settings.workers.profiles.fast?.target, "target-a"),
+			},
+			{
+				name: "profile remove",
+				id: "workers.profiles.fast.target",
+				value: "(remove profile)",
+				paths: ["workers.agentBindings.scout", "workers.profiles.fast"],
+				assertApplied: (settings) => strictEqual("fast" in settings.workers.profiles, false),
+			},
+			{
+				name: "binding add",
+				id: "workers.agentBindings",
+				value: "researcher -> fast",
+				paths: ["workers.agentBindings.researcher"],
+				assertApplied: (settings) => strictEqual(settings.workers.agentBindings.researcher, "fast"),
+			},
+			{
+				name: "binding change",
+				id: "workers.agentBindings.scout",
+				value: "slow",
+				setup: (settings) => {
+					settings.workers.profiles.slow = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+				},
+				paths: ["workers.agentBindings.scout"],
+				assertApplied: (settings) => strictEqual(settings.workers.agentBindings.scout, "slow"),
+			},
+			{
+				name: "binding unbind",
+				id: "workers.agentBindings.scout",
+				value: "(unbind)",
+				paths: ["workers.agentBindings.scout"],
+				assertApplied: (settings) => strictEqual("scout" in settings.workers.agentBindings, false),
+			},
+			{
+				name: "node pin",
+				id: "workers.profiles.fast.node",
+				value: "local",
+				paths: ["workers.profiles.fast"],
+				assertApplied: (settings) => strictEqual(settings.workers.profiles.fast?.node, "local"),
+			},
+			{
+				name: "node auto placement",
+				id: "workers.profiles.fast.node",
+				value: "(auto placement)",
+				setup: (settings) => {
+					if (settings.workers.profiles.fast) settings.workers.profiles.fast.node = "local";
+				},
+				paths: ["workers.profiles.fast"],
+				assertApplied: (settings) => strictEqual("node" in (settings.workers.profiles.fast ?? {}), false),
+			},
+		];
+
+		for (const testCase of cases) {
+			for (const destination of ["session", "global", "cancel"] as const satisfies readonly Destination[]) {
+				const original = settingsWithTargets();
+				testCase.setup?.(original);
+				const saved = structuredClone(original);
+				const item = buildSettingItems(original).find((candidate) => candidate.id === testCase.id);
+				ok(item, `${testCase.name}: editable row exists`);
+				const plan = createSettingsChangePlan(original, item, testCase.value);
+				ok(plan, `${testCase.name}: change produces a plan`);
+				deepStrictEqual(
+					plan.leaves.map((leaf) => leaf.path).sort(),
+					[...testCase.paths].sort(),
+					`${testCase.name}: exact leaves`,
+				);
+				ok(Object.isFrozen(plan) && Object.isFrozen(plan.original) && Object.isFrozen(plan.proposed));
+
+				let effective = structuredClone(original);
+				let persisted = saved;
+				if (destination === "session") effective = structuredClone(plan.proposed) as ClioSettings;
+				if (destination === "global") {
+					effective = structuredClone(plan.proposed) as ClioSettings;
+					persisted = structuredClone(plan.proposed) as ClioSettings;
+				}
+				const reopened = destination === "session" ? effective : structuredClone(persisted);
+				if (destination === "cancel") deepStrictEqual(reopened, original, `${testCase.name}: cancel is inert`);
+				else testCase.assertApplied(reopened);
+				if (destination === "session") deepStrictEqual(persisted, saved, `${testCase.name}: session is not saved`);
+			}
+		}
+	});
+
 	it("commits every leaf a per-entry action touches and refreshes the rows", () => {
 		const live = { current: settingsWithTargets() };
 		const fake = fakeTui(30, 120);
@@ -735,7 +889,7 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.("j"); // targets.target-b
 		overlay.handleInput?.(ENTER); // actions
 		overlay.handleInput?.(ENTER); // use (first action)
-		overlay.handleInput?.(ESC); // session only
+		overlay.handleInput?.(ENTER); // Apply this session
 		deepStrictEqual(calls.map((call) => call.id).sort(), [
 			"orchestrator.model",
 			"orchestrator.target",
@@ -747,6 +901,52 @@ describe("contracts/settings center", () => {
 		ok(rendered.includes("target-b"), rendered);
 		ok(rendered.includes("chat+fleet"), "the target row shows the roles it now serves");
 		ok(rendered.includes("next dispatch"), "propagation shows inline");
+	});
+
+	it("reuses the target plan for global apply and makes confirmation Esc a true cancellation", () => {
+		for (const destination of ["global", "cancel"] as const) {
+			const live = { current: settingsWithTargets() };
+			const original = structuredClone(live.current);
+			const fake = fakeTui(30, 120);
+			const calls: Array<{ id: string; scope: "session" | "global" }> = [];
+			openSettingsOverlay(fake.tui, {
+				getSettings: () => live.current,
+				writeSettings: (next) => {
+					live.current = next;
+				},
+				commitSetting: (id, next, scope) => {
+					calls.push({ id, scope });
+					live.current = next;
+				},
+				section: "targets",
+				onClose: () => undefined,
+			});
+			const overlay = fake.captured();
+			ok(overlay);
+			overlay.handleInput?.("j");
+			overlay.handleInput?.("j"); // targets.target-b
+			overlay.handleInput?.(ENTER); // actions
+			overlay.handleInput?.(ENTER); // use -> destination prompt
+			if (destination === "global") {
+				overlay.handleInput?.(DOWN);
+				overlay.handleInput?.(ENTER);
+				deepStrictEqual(calls.map((call) => call.id).sort(), [
+					"orchestrator.model",
+					"orchestrator.target",
+					"workers.default.model",
+					"workers.default.target",
+				]);
+				ok(
+					calls.every((call) => call.scope === "global"),
+					"no preliminary session pass",
+				);
+				strictEqual(live.current.orchestrator.target, "target-b");
+			} else {
+				overlay.handleInput?.(ESC);
+				deepStrictEqual(calls, []);
+				deepStrictEqual(live.current, original);
+			}
+		}
 	});
 
 	it("runs the connect flow from a target row without committing, then refreshes the rows", async () => {
@@ -817,7 +1017,7 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(DOWN);
 		overlay.handleInput?.(DOWN);
 		overlay.handleInput?.(ENTER); // (remove profile)
-		overlay.handleInput?.(ESC); // session only
+		overlay.handleInput?.(ENTER); // Apply this session
 		deepStrictEqual(calls.sort(), ["workers.agentBindings.scout", "workers.profiles.fast"]);
 		const rendered = stripAnsi(overlay.render(120).join("\n"));
 		ok(!rendered.includes("fast · target"), rendered);
@@ -846,7 +1046,7 @@ describe("contracts/settings center", () => {
 		for (const ch of "slow") overlay.handleInput?.(ch);
 		overlay.handleInput?.(ENTER); // target picker
 		overlay.handleInput?.(ENTER); // target-a
-		overlay.handleInput?.(ESC); // session only
+		overlay.handleInput?.(ENTER); // Apply this session
 		deepStrictEqual(calls, ["workers.profiles.slow"]);
 		deepStrictEqual(live.current.workers.profiles.slow, { target: "target-a", model: "model-a", thinkingLevel: "off" });
 		let rendered = stripAnsi(overlay.render(120).join("\n"));
@@ -858,7 +1058,7 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(ENTER); // profile picker: fast, slow
 		overlay.handleInput?.(DOWN);
 		overlay.handleInput?.(ENTER); // slow
-		overlay.handleInput?.(ESC);
+		overlay.handleInput?.(ENTER); // Apply this session
 		deepStrictEqual(calls, ["workers.profiles.slow", "workers.agentBindings.researcher"]);
 		strictEqual(live.current.workers.agentBindings.researcher, "slow");
 		rendered = stripAnsi(overlay.render(120).join("\n"));
