@@ -1257,6 +1257,7 @@ describe("contracts/chat-loop locked-turn markup sanitation", () => {
 function createSilentStreamAgentFactory(
 	record: { starts: number; aborts: number; abortedDuringTool: boolean },
 	holdToolMs = 0,
+	dropToolEnd = false,
 ) {
 	let listener: ((event: AgentEvent, signal: AbortSignal) => Promise<void> | void) | null = null;
 	const state = {
@@ -1282,14 +1283,26 @@ function createSilentStreamAgentFactory(
 			toolRunning = true;
 			await emit({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash" } as never);
 			await new Promise((resolve) => setTimeout(resolve, holdToolMs));
-			await emit({
-				type: "tool_execution_end",
-				toolCallId: "call-1",
-				toolName: "bash",
-				isError: false,
-				result: { content: [{ type: "text", text: "suite passed" }] },
-			} as never);
-			toolRunning = false;
+			if (dropToolEnd) {
+				toolRunning = false;
+				// The mediator died with the call in flight, so the end event is
+				// never emitted. The engine settles the turn anyway, which is the
+				// only evidence the runtime gets that nothing is still executing.
+				await emit({
+					type: "turn_end",
+					message: { role: "assistant", content: [], stopReason: "toolUse", timestamp: Date.now() },
+					toolResults: [],
+				} as never);
+			} else {
+				await emit({
+					type: "tool_execution_end",
+					toolCallId: "call-1",
+					toolName: "bash",
+					isError: false,
+					result: { content: [{ type: "text", text: "suite passed" }] },
+				} as never);
+				toolRunning = false;
+			}
 		}
 		await new Promise<void>((resolve) => {
 			release = resolve;
@@ -1331,6 +1344,88 @@ function createSilentStreamAgentFactory(
 		state: () => state,
 	})) as never;
 	return factory;
+}
+
+/**
+ * A healthy stream on a host whose wall clock jumps forward mid-run: an NTP
+ * correction on a node that booted without an RTC battery, or a laptop resuming
+ * from suspend. Deltas keep arriving the whole time, so there is no silence to
+ * escalate on; only `Date.now()` moves.
+ *
+ * The timeline is laid out against a 500ms threshold: deltas at 100/200/300ms,
+ * the step at 400ms, the next delta at 650ms. The watchdog's first fire lands at
+ * 500ms, inside the 350ms gap and after the step, which is exactly the window
+ * where a wall-clock-measured idle reads +200s and aborts a live run.
+ */
+function createClockStepAgentFactory(record: { starts: number; aborts: number }, stepClock: () => void) {
+	let listener: ((event: AgentEvent, signal: AbortSignal) => Promise<void> | void) | null = null;
+	const state = {
+		systemPrompt: "",
+		model: undefined,
+		thinkingLevel: "off",
+		tools: [] as unknown[],
+		messages: [] as AgentMessage[],
+		errorMessage: undefined as string | undefined,
+	};
+	const controller = new AbortController();
+	const emit = async (event: AgentEvent): Promise<void> => {
+		await listener?.(event, controller.signal);
+	};
+	const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+	const message = {
+		role: "assistant",
+		content: [{ type: "text", text: "still streaming" }],
+		stopReason: "stop",
+		timestamp: Date.now(),
+	} as unknown as AgentMessage;
+	const delta = async (): Promise<void> => {
+		await emit({
+			type: "message_update",
+			message,
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "token ", partial: message },
+		} as never);
+	};
+	const run = async (): Promise<void> => {
+		record.starts += 1;
+		await emit({ type: "agent_start" } as never);
+		await emit({ type: "message_start", message } as never);
+		await sleep(100);
+		await delta();
+		await sleep(100);
+		await delta();
+		await sleep(100);
+		await delta();
+		await sleep(100);
+		stepClock();
+		await sleep(250);
+		await delta();
+		state.messages.push(message);
+		await emit({ type: "message_end", message } as never);
+		await emit({ type: "agent_end", messages: [message] } as never);
+	};
+	return (() => ({
+		agent: {
+			state,
+			sessionId: undefined,
+			maxRetryDelayMs: undefined,
+			prepareNextTurn: undefined,
+			subscribe(l: (event: AgentEvent, signal: AbortSignal) => Promise<void> | void) {
+				listener = l;
+				return () => {};
+			},
+			emit,
+			prompt: run,
+			continue: run,
+			followUp() {},
+			abort() {
+				record.aborts += 1;
+			},
+			clearAllQueues() {},
+			clearFollowUpQueue() {},
+			clearSteeringQueue() {},
+		},
+		state: () => state,
+	})) as never;
 }
 
 describe("contracts/chat-loop stream stall escalation", () => {
@@ -1396,5 +1491,72 @@ describe("contracts/chat-loop stream stall escalation", () => {
 
 		strictEqual(record.abortedDuringTool, false, "a tool running past the threshold is not a stalled stream");
 		strictEqual(record.aborts, 2, "the watchdog still escalates on the silence that follows the tool");
+	});
+
+	it("survives a forward wall-clock step of 200s while the stream is producing output", async () => {
+		const cfg = settings();
+		cfg.retry = { enabled: true, maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 500 };
+		const record = { starts: 0, aborts: 0 };
+		const entries: SessionEntry[] = [];
+		const realNow = Date.now;
+		let clockOffsetMs = 0;
+		Date.now = () => realNow() + clockOffsetMs;
+		try {
+			const loop = createChatLoop({
+				getSettings: () => cfg,
+				providers: providers(),
+				knownTargets: () => new Set(["test-target"]),
+				session: createSession(entries),
+				readSessionEntries: () => entries,
+				createAgent: createClockStepAgentFactory(record, () => {
+					clockOffsetMs = 200_000;
+				}),
+			} as never);
+
+			await loop.submit("summarize these files");
+		} finally {
+			Date.now = realNow;
+		}
+
+		strictEqual(record.aborts, 0, "a wall-clock step is not stream silence and must not abort a live run");
+		strictEqual(record.starts, 1, "no spurious stall means no trip through the retry ladder");
+		ok(
+			!entries
+				.filter(isAssistantMessageEntry)
+				.some((entry) =>
+					String((entry.payload as { errorMessage?: unknown }).errorMessage ?? "").includes("stream stalled"),
+				),
+			"no fabricated stall is recorded in the transcript",
+		);
+	});
+
+	// The timeout is the assertion's safety net: a watchdog left suspended by the
+	// lost end event never fires, so the run never settles and the test would
+	// otherwise hang instead of failing.
+	it("fires on a later stall even when a tool's end event never arrived", { timeout: 5_000 }, async () => {
+		const cfg = settings();
+		cfg.retry = { enabled: true, maxRetries: 0, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 40 };
+		const record = { starts: 0, aborts: 0, abortedDuringTool: false };
+		const entries: SessionEntry[] = [];
+		const loop = createChatLoop({
+			getSettings: () => cfg,
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			createAgent: createSilentStreamAgentFactory(record, 20, true),
+		} as never);
+
+		await loop.submit("run the suite");
+
+		strictEqual(record.aborts, 1, "the lost end event must not disable the watchdog for the rest of the run");
+		ok(
+			entries
+				.filter(isAssistantMessageEntry)
+				.some((entry) =>
+					String((entry.payload as { errorMessage?: unknown }).errorMessage ?? "").includes("stream stalled"),
+				),
+			"the abort is classified as a stall, not as an operator cancel",
+		);
 	});
 });

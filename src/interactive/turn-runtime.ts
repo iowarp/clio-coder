@@ -5,6 +5,7 @@
  * engine events with timing, observability, persistence, and honesty facts.
  */
 
+import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
@@ -455,13 +456,24 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// hands the failure to the transient retry ladder, while an operator
 		// cancel still ends the turn.
 		//
-		// `stallSuspendDepth` covers the windows where silence is expected and
-		// the stream is not the thing we are waiting on: a tool executing (a
-		// `npm run ci` that takes ten minutes is not a stalled stream) and the
-		// post-tool continuation guard, whose auto-compaction is its own model
-		// call. The watchdog re-arms instead of firing while the depth is above
-		// zero.
-		let lastActivityAt = 0;
+		// Idle is measured on `performance.now()`. Wall time is not a duration:
+		// a forward step of one threshold or more (NTP correcting a node that
+		// booted without an RTC battery, a laptop resuming from suspend) would
+		// otherwise make a healthy stream look silent and abort it through the
+		// operator-cancel path.
+		//
+		// `toolsInFlight` and `stallSuspendDepth` cover the windows where silence
+		// is expected and the stream is not the thing we are waiting on: a tool
+		// executing (a `npm run ci` that takes ten minutes is not a stalled
+		// stream) and the post-tool continuation guard, whose auto-compaction is
+		// its own model call. The watchdog re-arms instead of firing while either
+		// is above zero. They are counted apart because only the tool half can
+		// leak: the guard's depth is a try/finally around one await, while a
+		// `tool_execution_end` that never arrives would disable the watchdog for
+		// the rest of the run. The engine settles an entire tool batch before it
+		// emits `turn_end`, so that event bounds the tool suspension below.
+		let lastActivityAt = performance.now();
+		let toolsInFlight = 0;
 		let stallSuspendDepth = 0;
 		let stallTimer: ReturnType<typeof setTimeout> | null = null;
 		const clearStallTimer = (): void => {
@@ -477,11 +489,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					// Zero disables the escalation; an operator who wants a stream to
 					// hang forever keeps that by setting `retry.streamStallMs: 0`.
 					if (stallMs <= 0) return;
-					if (stallSuspendDepth > 0) {
+					if (stallSuspendDepth > 0 || toolsInFlight > 0) {
 						armStallTimer(stallMs);
 						return;
 					}
-					const idleMs = Date.now() - lastActivityAt;
+					const idleMs = performance.now() - lastActivityAt;
 					if (idleMs < stallMs) {
 						armStallTimer(stallMs - idleMs);
 						return;
@@ -502,7 +514,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				return await context.postToolContinuationGuard(localRuntime, signal);
 			} finally {
 				stallSuspendDepth -= 1;
-				lastActivityAt = Date.now();
+				lastActivityAt = performance.now();
 			}
 		};
 
@@ -532,15 +544,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 
 		handle.agent.subscribe(async (event) => {
 			const eventAt = Date.now();
-			lastActivityAt = eventAt;
+			lastActivityAt = performance.now();
 			let enrichedEvent = event;
 			if (event.type === "tool_execution_start") {
-				stallSuspendDepth += 1;
+				toolsInFlight += 1;
 				middlewareToolChoice.toolStarted(event.toolName);
 				deps.toolStartTimes.set(event.toolCallId, eventAt);
 				state.turnToolCalls += 1;
 			} else if (event.type === "tool_execution_end") {
-				stallSuspendDepth = Math.max(0, stallSuspendDepth - 1);
+				toolsInFlight = Math.max(0, toolsInFlight - 1);
 				const startedAt = deps.toolStartTimes.get(event.toolCallId);
 				deps.toolStartTimes.delete(event.toolCallId);
 				const durationMs = startedAt === undefined ? undefined : Math.max(0, eventAt - startedAt);
@@ -594,11 +606,18 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				runFirstCallVerdict = null;
 				pendingTerminalToolResult = null;
 				clearStallTimer();
+				toolsInFlight = 0;
 				stallSuspendDepth = 0;
 				state.streamStallReason = null;
 				const stallMs = deps.retrySettings().streamStallMs;
 				if (stallMs > 0) armStallTimer(stallMs);
 			}
+			// The engine runs the whole tool batch to settlement before it emits
+			// `turn_end`, so nothing from this turn can still be executing here.
+			// A call whose `tool_execution_end` was never emitted (a crashed
+			// mediator, a dropped frame) therefore stops suspending the watchdog
+			// at the turn that issued it instead of for the rest of the run.
+			if (publicEvent?.type === "turn_end") toolsInFlight = 0;
 			if (publicEvent?.type === "message_start" && publicEvent.message?.role === "assistant") {
 				apiCallStartedAt = eventAt;
 				apiCallFirstDeltaAt = null;
