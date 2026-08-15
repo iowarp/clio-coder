@@ -16,6 +16,7 @@
  * proportional reconciliation the footer bar already performs.
  */
 
+import type { ContextWindowSource } from "../providers/index.js";
 import { DEFAULT_COMPACTION_THRESHOLD } from "./compaction/auto.js";
 
 /** Distinct buckets a context window is divided into for display. */
@@ -43,6 +44,8 @@ export interface BuildContextLedgerInput {
 	model: string | null;
 	/** Reported model context window in tokens; 0 or null when unknown. */
 	contextWindow: number | null;
+	/** Which layer answered `contextWindow`; omitted before a runtime resolves. */
+	contextWindowSource?: ContextWindowSource | null;
 	/**
 	 * Per-segment token estimates from the prompt compiler's segment manifest.
 	 * When empty, `systemPromptTokens` is used as a single opaque system bucket.
@@ -128,6 +131,13 @@ export interface ContextLedger {
 	model: string | null;
 	/** Context window in tokens; 0 when unknown. */
 	contextWindow: number;
+	/**
+	 * Which layer answered `contextWindow`. Null when the ledger was built
+	 * without a resolved runtime. The overlay states it: a window read off a
+	 * loaded instance and one assumed from a catalog are different claims, and
+	 * the difference decides whether autocompact fires in time.
+	 */
+	contextWindowSource: ContextWindowSource | null;
 	/** Sum of every content category (system..pending). */
 	usedTokens: number;
 	/** Autocompact headroom held in reserve above the conversation. */
@@ -320,6 +330,7 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		provider: input.provider ?? null,
 		model: input.model ?? null,
 		contextWindow: window,
+		contextWindowSource: input.contextWindowSource ?? null,
 		usedTokens,
 		reserveTokens,
 		freeTokens,

@@ -14,6 +14,32 @@ function formatTokens(n: number): string {
 	return Math.round(Math.max(0, n)).toLocaleString("en-US");
 }
 
+/**
+ * One word for where the window came from. `loaded` is the window the backend
+ * has this model open at, `declared` is what a catalog or the model's own
+ * metadata claims it could support, and the two differ often enough on
+ * self-hosted targets that reading a percentage without knowing which one it is
+ * measured against tells the operator nothing.
+ */
+function contextWindowProvenanceLabel(source: ContextLedger["contextWindowSource"]): string | null {
+	switch (source) {
+		case "loaded":
+			return "loaded";
+		case "probe":
+			return "probed";
+		case "target-override":
+			return "configured";
+		case "catalog":
+		case "model-hint":
+			return "declared";
+		case "descriptor-default":
+		case "unknown":
+			return "assumed";
+		default:
+			return null;
+	}
+}
+
 function gridDimensions(ledger: ContextLedger, contentWidth: number): { cols: number; rows: number } {
 	const cols = Math.max(12, Math.min(contentWidth, 40));
 	const rows = ledger.contextWindow >= 200_000 ? 8 : 6;
@@ -50,7 +76,9 @@ function renderContextLedgerLines(ledger: ContextLedger, contentWidth: number): 
 	if (ledger.contextWindow > 0) {
 		const source = ledger.measured ? "measured" : "≈ estimated";
 		const summary = `${formatTokens(ledger.usedTokens)} / ${formatTokens(ledger.contextWindow)} tokens (${formatContextPercent(ledger.percent)})`;
-		lines.push(`${theme.fg("title", summary)} ${theme.fg("dim", "·")} ${theme.fg("muted", source)}`);
+		const provenance = contextWindowProvenanceLabel(ledger.contextWindowSource);
+		const trailer = provenance ? `${provenance} window · ${source}` : source;
+		lines.push(`${theme.fg("title", summary)} ${theme.fg("dim", "·")} ${theme.fg("muted", trailer)}`);
 	} else {
 		lines.push(
 			theme.fg("warning", `context window unknown · ${formatTokens(ledger.usedTokens)} tokens estimated in context`),

@@ -81,9 +81,14 @@ export async function probeOpenAIModelCatalog(
 			...capabilitiesFromOpenAIModelEntry(row),
 		};
 		if (Object.keys(caps).length > 0) modelCapabilities[row.id] = caps;
+		const loadedContext = loadedContextFromEntry(row) ?? (detailRow ? loadedContextFromEntry(detailRow) : undefined);
 		const state =
-			modelStateFromOpenAIModelEntry(row) ?? (detailRow ? modelStateFromOpenAIModelEntry(detailRow) : undefined);
-		if (state) modelStates[row.id] = state;
+			modelStateFromOpenAIModelEntry(row) ??
+			(detailRow ? modelStateFromOpenAIModelEntry(detailRow) : undefined) ??
+			// A reported loaded context is itself the residency answer: nothing
+			// serves a window for a model it has not loaded.
+			(loadedContext !== undefined ? { state: "loaded" as const } : undefined);
+		if (state) modelStates[row.id] = loadedContext === undefined ? state : { ...state, contextLength: loadedContext };
 	}
 	return { models, modelCapabilities, modelStates };
 }
@@ -181,6 +186,16 @@ function modelStateFromOpenAIModelEntry(row: Record<string, unknown>): ProbeMode
 	if (loaded === true) return { state: "loaded" };
 	if (loaded === false) return { state: "unloaded" };
 	return undefined;
+}
+
+/**
+ * The window a server has this model open at, as distinct from the window the
+ * model could support. Only the loaded keys count here: `max_context_length` is
+ * a fact about the weights, not about what is serving.
+ */
+function loadedContextFromEntry(row: Record<string, unknown>): number | undefined {
+	const reported = firstPositiveNumber(row, ["loaded_context_length", "loadedContextLength"]);
+	return reported === undefined ? undefined : Math.floor(reported);
 }
 
 function statusArgsFromEntry(row: Record<string, unknown>): string[] {
