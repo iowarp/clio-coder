@@ -118,6 +118,32 @@ function mergeRunsById(disk: RunEnvelope[], memory: RunEnvelope[]): RunEnvelope[
 	return all;
 }
 
+/**
+ * Ring eviction takes finished rows only. Rows sort `startedAt` DESC, so a run
+ * that has been executing for hours sits at the bottom and a plain
+ * `slice(0, maxRuns)` drops the process's own live state while maxRuns newer,
+ * already-finished rows survive. Live rows (`endedAt === null`) are therefore
+ * kept unconditionally and the cap is spent on the finished remainder. Order
+ * inside the kept set is unchanged, still `startedAt` DESC.
+ */
+function capRuns(all: RunEnvelope[], maxRuns: number): RunEnvelope[] {
+	if (all.length <= maxRuns) return all;
+	const live = all.filter((r) => r.endedAt === null);
+	if (live.length === 0) return all.slice(0, maxRuns);
+	let finishedBudget = Math.max(0, maxRuns - live.length);
+	const kept: RunEnvelope[] = [];
+	for (const run of all) {
+		if (run.endedAt === null) {
+			kept.push(run);
+			continue;
+		}
+		if (finishedBudget === 0) continue;
+		finishedBudget -= 1;
+		kept.push(run);
+	}
+	return kept;
+}
+
 export function openLedger(opts?: LedgerOptions): Ledger {
 	const maxRuns = resolveMaxRuns(opts?.maxRuns);
 	let runs: RunEnvelope[] = readRuns();
@@ -238,7 +264,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				if (stateRootRemoved()) return;
 				const diskRuns = readRuns();
 				const merged = mergeRunsById(diskRuns, runs);
-				const capped = merged.slice(0, maxRuns);
+				const capped = capRuns(merged, maxRuns);
 				runs = capped;
 				atomicWrite(target, JSON.stringify(capped, null, 2));
 			});

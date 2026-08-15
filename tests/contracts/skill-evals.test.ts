@@ -463,6 +463,9 @@ describe("contracts/skill-evals CLI argument contract", () => {
 			strictEqual(rows[0]?.verdict, "pass");
 			const evalId = rows[0]?.evalId;
 			strictEqual(typeof evalId, "string");
+			// The id is the artifact filename, so the stamp plus content hash alone
+			// would let two same-millisecond workers clobber each other's file.
+			ok(/-[0-9a-f]{12}$/.test(evalId as string), `expected a random suffix on the eval id, got ${String(evalId)}`);
 			const artifact = JSON.parse(readFileSync(join(scratch.dir, "data", "evals", `${evalId}.json`), "utf8")) as {
 				summary: { tokens: number; harness: { receiptCount: number } };
 				results: Array<{ tokens: number; harness: { receiptCount: number } }>;

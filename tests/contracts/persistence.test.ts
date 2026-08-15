@@ -10,6 +10,7 @@ import { createSessionBundle } from "../../src/domains/session/extension.js";
 import {
 	appendPromptCompileRecord,
 	getPromptManifestFilePath,
+	readPromptCompileManifest,
 	readPromptCompileRecords,
 } from "../../src/domains/session/prompt-manifest.js";
 import {
@@ -307,6 +308,95 @@ describe("contracts/persistence", () => {
 		// A torn trailing line must not break provenance reads.
 		writeFileSync(manifestPath, `${readFileSync(manifestPath, "utf8")}{"truncated`, "utf8");
 		strictEqual(readPromptCompileRecords(meta).length, 2);
+	});
+
+	/**
+	 * Manifest records are read back in file order and compared as strings. An
+	 * offset instant parses fine and then sorts before every `Z` row of the same
+	 * hour, so the reader takes canonical UTC only, the rule capacity-lease.ts and
+	 * memory/validate.ts already enforce.
+	 */
+	it("rejects a prompt-manifest record whose timestamp is a valid instant but not canonical UTC", () => {
+		const bundle = createSessionBundle(stubContext());
+		const meta = bundle.contract.create({ cwd: scratch });
+		const record = {
+			at: "2026-07-03T00:00:00.000Z",
+			previousHash: null,
+			systemPromptHash: "b".repeat(64),
+			tokenEstimate: 1234,
+			thinkingLevel: "off",
+			projectPreload: null,
+			sections: [{ id: "identity", tokenEstimate: 200 }],
+			fragments: [],
+		};
+		appendPromptCompileRecord(meta, record);
+
+		const manifestPath = getPromptManifestFilePath(meta);
+		for (const at of ["2026-07-02T19:00:00.000-05:00", "2026-07-03T00:00:00Z", "2026-07-03"]) {
+			appendFileSync(manifestPath, `${JSON.stringify({ ...record, at })}\n`, "utf8");
+		}
+
+		const result = readPromptCompileManifest(meta);
+		deepStrictEqual(
+			result.records.map((r) => r.at),
+			["2026-07-03T00:00:00.000Z"],
+		);
+		strictEqual(result.errors.length, 3);
+		ok(result.errors.every((e) => e.message === "invalid prompt manifest record"));
+	});
+
+	/**
+	 * runs.json sorts `startedAt` DESC and the ring used to truncate on that order
+	 * alone, so a run executing for hours was dropped from the process's own live
+	 * state while maxRuns newer finished rows survived. Eviction takes finished
+	 * rows only.
+	 */
+	it("never evicts a still-running row below finished ones when the runs ring overflows", async () => {
+		const ledger = openLedger({ maxRuns: 3 });
+		const base = (task: string) => ({
+			agentId: "coder",
+			executionRole: "builder" as const,
+			task,
+			targetId: "anthropic-default",
+			wireModelId: "claude-sonnet-4-6",
+			runtimeId: "anthropic",
+			runtimeKind: "http" as const,
+			sessionId: null,
+			cwd: process.cwd(),
+		});
+
+		// The oldest row is the live one, so it sorts last and is the first casualty
+		// of a plain slice.
+		const live = ledger.create(base("long-running"));
+		ledger.update(live.id, { startedAt: "2026-01-01T00:00:00.000Z", status: "running" });
+		const finished: string[] = [];
+		for (let i = 0; i < 5; i += 1) {
+			const run = ledger.create(base(`finished-${i}`));
+			ledger.update(run.id, {
+				startedAt: `2026-06-0${i + 1}T00:00:00.000Z`,
+				status: "completed",
+				endedAt: `2026-06-0${i + 1}T00:00:01.000Z`,
+			});
+			finished.push(run.id);
+		}
+
+		await ledger.persist();
+
+		const persisted = JSON.parse(readFileSync(join(scratch, "state", "runs.json"), "utf8")) as Array<{
+			id: string;
+			endedAt: string | null;
+		}>;
+		strictEqual(persisted.length, 3);
+		ok(
+			persisted.some((r) => r.id === live.id && r.endedAt === null),
+			"the running row survives the cap",
+		);
+		// The cap is spent on the newest finished rows; the oldest finished ones go.
+		deepStrictEqual(
+			persisted.map((r) => r.id),
+			[finished[4], finished[3], live.id],
+		);
+		strictEqual(openLedger().get(live.id)?.task, "long-running");
 	});
 
 	it("fd-appends turns without close and they are immediately readable", () => {

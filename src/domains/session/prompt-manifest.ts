@@ -51,7 +51,18 @@ export interface PromptManifestReadResult {
 }
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
-const ISO_8601_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * Canonical UTC only, the same rule capacity-lease.ts and memory/validate.ts
+ * enforce. The previous regex accepted `+05:30` offsets, which parse to a valid
+ * instant but sort wrong against a `Z` row, and manifest records are read back
+ * in file order and compared as strings.
+ */
+function isCanonicalUtcTimestamp(value: unknown): value is string {
+	if (typeof value !== "string") return false;
+	const timestamp = Date.parse(value);
+	return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -94,9 +105,7 @@ function isProjectPreloadClass(value: unknown): value is ProjectPreloadClass {
 function isSessionPromptCompileRecord(value: unknown): value is SessionPromptCompileRecord {
 	if (!isRecord(value)) return false;
 	return (
-		typeof value.at === "string" &&
-		ISO_8601_TIMESTAMP.test(value.at) &&
-		Number.isFinite(Date.parse(value.at)) &&
+		isCanonicalUtcTimestamp(value.at) &&
 		(value.previousHash === null || isSha256(value.previousHash)) &&
 		isSha256(value.systemPromptHash) &&
 		isNonNegativeInteger(value.tokenEstimate) &&
