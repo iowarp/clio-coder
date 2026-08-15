@@ -499,6 +499,24 @@ describe("contracts/settings center", () => {
 		ok(fake.renders() > 0);
 	});
 
+	it("opens focused on the deep-linked section", () => {
+		const live = { current: settingsWithTargets() };
+		const fake = fakeTui(24, 100);
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			section: "retry",
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay, "expected settings overlay component");
+		const rendered = stripAnsi(overlay.render(120).join("\n"));
+		ok(rendered.includes("❯ Retry transien"), rendered);
+		ok(rendered.includes("retry.enabled"), rendered);
+	});
+
 	it("routes session vs global commits through commitSetting and emits a scoped notice", () => {
 		const live = { current: settingsWithTargets() };
 		const fake = fakeTui(24, 100);

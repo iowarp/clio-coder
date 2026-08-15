@@ -21,6 +21,7 @@ import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
 import { dateLocal } from "./format-time.js";
+import type { SettingsSectionId } from "./overlays/settings.js";
 import { resolveThinkingCapability } from "./overlays/thinking-selector.js";
 import {
 	type ContextClearCommandOptions,
@@ -95,7 +96,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openThinking: () => void;
 	openModel: () => void;
 	openScopedModels: () => void;
-	openSettings: () => void;
+	openSettings: (section?: SettingsSectionId) => void;
 	openResume: () => void;
 	startNewSession: () => void;
 	openTree: () => void;

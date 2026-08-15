@@ -518,7 +518,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
 		openScopedModels: () => openScopedModelsOverlayState(),
-		openSettings: () => openSettingsOverlayState(),
+		openSettings: (section) => openSettingsOverlayState(section),
 		openResume: () => openResumeOverlayState(),
 		startNewSession: () => startNewSession(),
 		openTree: () => openTreeOverlayState(),

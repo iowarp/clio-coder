@@ -510,7 +510,18 @@ describe("contracts/slash-spec", () => {
 			["/thinking query", { kind: "thinking-set", level: "query" }],
 			["/thinking off extra", { kind: "usage-error", command: "thinking", reason: "Unexpected argument: extra" }],
 			["/scoped-models query", { kind: "usage-error", command: "scoped-models", reason: "Unexpected argument: query" }],
-			["/settings query", { kind: "usage-error", command: "settings", reason: "Unexpected argument: query" }],
+			["/settings fleet", { kind: "settings", section: "fleet" }],
+			["/config retry", { kind: "settings", section: "retry" }],
+			[
+				"/settings query",
+				{
+					kind: "usage-error",
+					command: "settings",
+					reason:
+						"Unknown section: query (one of safety, orchestrator, fleet, models, budget, compaction, retry, terminal, advanced)",
+				},
+			],
+			["/settings fleet extra", { kind: "usage-error", command: "settings", reason: "Unexpected argument: extra" }],
 			["/resume query", { kind: "usage-error", command: "resume", reason: "Unexpected argument: query" }],
 			["/new query", { kind: "usage-error", command: "new", reason: "Unexpected argument: query" }],
 			["/tree query", { kind: "usage-error", command: "tree", reason: "Unexpected argument: query" }],
@@ -652,7 +663,7 @@ describe("contracts/slash-spec", () => {
 		const routed: string[] = [];
 		const ctx = {
 			shutdown: () => routed.push("quit"),
-			openSettings: () => routed.push("settings"),
+			openSettings: (section?: string) => routed.push(section ? `settings:${section}` : "settings"),
 			runCompact: (instructions?: string) => routed.push(`compact:${instructions ?? ""}`),
 			openContextView: () => routed.push("context-view"),
 			submitChat: (text: string) => routed.push(`chat:${text}`),
@@ -662,10 +673,11 @@ describe("contracts/slash-spec", () => {
 
 		dispatchSlashCommand(parseSlashCommand("/exit"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/config"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/settings fleet"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/compact"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/compact drop the old turns"), ctx);
 
-		deepStrictEqual(routed, ["quit", "settings", "compact:", "compact:drop the old turns"]);
+		deepStrictEqual(routed, ["quit", "settings", "settings:fleet", "compact:", "compact:drop the old turns"]);
 
 		// /clear names nothing here: session reset is /new and context reset is
 		// /context reset, and neither is what an operator typing /clear means.
