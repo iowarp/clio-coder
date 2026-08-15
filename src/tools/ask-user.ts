@@ -4,6 +4,7 @@ import path from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
+import { type AutonomyExposure, DEFAULT_AUTONOMY_EXPOSURE } from "../domains/safety/autonomy.js";
 import type {
 	AskUserToolPolicy,
 	AskUserTranscriptAnswer,
@@ -116,6 +117,12 @@ export const askUserParameters = Type.Object({
 		),
 	),
 	summary: Type.Optional(Type.String({ description: "Short closeout summary for action=complete." })),
+	exposure: Type.Optional(
+		stringEnum(
+			["local", "outward"],
+			"Blast radius of this gate. local (default) stays inside the workspace. outward means answering it publishes or sends something the operator cannot take back (filing an issue or PR, posting a comment, pushing, releasing); at autonomy auto-edit an outward gate parks for the operator instead of being answered automatically.",
+		),
+	),
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -139,6 +146,25 @@ function normalizeAskUserMode(value: unknown): { mode?: AskUserMode; error?: str
 		return { mode: "single_question" };
 	}
 	return { error: "mode must be round or single_question" };
+}
+
+function normalizeExposure(value: unknown): { exposure?: AutonomyExposure; error?: string } {
+	if (value === undefined) return { exposure: DEFAULT_AUTONOMY_EXPOSURE };
+	const raw = trimOptionalString(value)?.toLowerCase();
+	if (raw === "local" || raw === "outward") return { exposure: raw };
+	return { error: "exposure must be local or outward" };
+}
+
+/**
+ * Exposure tier of an ask_user call, read by registry admission from the raw
+ * args before `run` validates them. A value the schema does not recognize
+ * reads as `outward` so the two layers can never disagree in the unsafe
+ * direction; `run` then rejects the call, so a misspelled tier costs one
+ * approval prompt rather than an ungated answer.
+ */
+export function askUserExposure(args: Record<string, unknown> | undefined): AutonomyExposure {
+	if (args?.exposure === undefined) return DEFAULT_AUTONOMY_EXPOSURE;
+	return normalizeExposure(args.exposure).exposure === "local" ? "local" : "outward";
 }
 
 function normalizeMaxRounds(value: unknown): { maxRounds?: number; error?: string } {
@@ -227,6 +253,11 @@ export function normalizeAskUserCall(args: Record<string, unknown>): { call?: As
 	}
 	const mode = normalizeAskUserMode(args.mode);
 	if (mode.error) return { error: mode.error };
+	// The tier itself is consumed at admission, not here. Validating it anyway
+	// keeps a misspelled value from reading as the default `local` on the next
+	// call the model makes.
+	const exposure = normalizeExposure(args.exposure);
+	if (exposure.error) return { error: exposure.error };
 	const maxRounds = normalizeMaxRounds(args.max_rounds);
 	if (maxRounds.error) return { error: maxRounds.error };
 	const decisions = normalizeDecisions(args.decisions);

@@ -8,11 +8,14 @@ export const SafetyDomainModule: DomainModule = {
 };
 
 export {
+	AUTONOMY_EXPOSURES,
 	AUTONOMY_LEVELS,
 	type AutonomyDisposition,
+	type AutonomyExposure,
 	type AutonomyLevel,
 	autonomyAskRejection,
 	autonomyDenyRejection,
+	DEFAULT_AUTONOMY_EXPOSURE,
 	DEFAULT_AUTONOMY_LEVEL,
 	isAutonomyLevel,
 	mapAutonomy,

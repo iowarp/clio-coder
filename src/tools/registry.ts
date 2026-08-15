@@ -13,15 +13,18 @@ import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } f
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import { approvalAxisId } from "../domains/safety/approval-axis.js";
 import {
+	type AutonomyExposure,
 	type AutonomyLevel,
 	autonomyAskRejection,
 	autonomyDenyRejection,
+	DEFAULT_AUTONOMY_EXPOSURE,
 	DEFAULT_AUTONOMY_LEVEL,
 	mapAutonomy,
 } from "../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
+import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import { shapeToolResult } from "./result-shaping.js";
 
@@ -480,9 +483,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				? (spec.describeDispatchPlan?.(call.args ?? {}) ?? describeDispatchPlan(call.args))
 				: null;
 		const planScale = dispatchPlan?.planScale === true;
+		// The exposure tier rides on the args of the gate that raised it, so the
+		// workflow author, not the classifier, decides what counts as outward.
+		// ask_user is the only tool that declares one today.
+		const exposure = call.tool === ToolNames.AskUser ? askUserExposure(call.args) : DEFAULT_AUTONOMY_EXPOSURE;
 		const disposition = mapAutonomy(level, actionClass, {
 			executeRecognized: decision.policy?.execRecognition !== "unrecognized",
 			...(planScale ? { dispatchPlanScale: true } : {}),
+			...(exposure === "outward" ? { exposure } : {}),
 		});
 		if (disposition === "deny") {
 			const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass);
@@ -494,7 +502,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const askDecision =
 				planScale && dispatchPlan !== null
 					? toDispatchPlanAskDecision(decision, level, dispatchPlan)
-					: toAutonomyAskDecision(decision, level, call.tool, actionClass);
+					: toAutonomyAskDecision(decision, level, call.tool, actionClass, exposure);
 			return { kind: "park", decision: askDecision, axis: approvalAxisId(askDecision, level) };
 		}
 		recordRegistryDisposition(call, decision, "allowed");
@@ -966,18 +974,20 @@ function autonomyDenyVerdict(
 /**
  * Park-shaped decision for an autonomy `ask` disposition. The engine passed
  * the call, so the rejection names the level as the asking axis; overlays and
- * non-interactive deniers read it from here.
+ * non-interactive deniers read it from here. An outward-exposure park names
+ * the tier instead of the action class, because the class is not why it asked.
  */
 function toAutonomyAskDecision(
 	decision: SafetyDecision,
 	level: AutonomyLevel,
 	tool: string,
 	actionClass: ActionClass,
+	exposure: AutonomyExposure = DEFAULT_AUTONOMY_EXPOSURE,
 ): SafetyDecision {
 	return {
 		kind: "ask",
 		classification: decision.classification,
-		rejection: autonomyAskRejection(level, tool, actionClass),
+		rejection: autonomyAskRejection(level, tool, actionClass, exposure),
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
 }

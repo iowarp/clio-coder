@@ -27,11 +27,14 @@ In Clio Coder v0.3.0, effective autonomy resolution is strictly centralized in `
 | `system_modify` | deny | ask | ask | ask |
 | `git_destructive` | net block | net block | net block | net block |
 | `unknown` | deny | ask | ask | ask |
+| `read`: a gate declaring `exposure: outward` | allow | allow | ask | allow |
 
 - **`read-only`**: Clio inspects and answers. Mutating calls are auto-denied with a rejection telling the model to propose the change instead; approvals are never invoked. Denials render as `[autonomy]` notices.
 - **`suggest`**: every non-read action parks for one-shot approval. The operator drives.
 - **`auto-edit`**: workspace edits and recognized commands run; unrecognized bash asks instead of blocking.
 - **`full-auto`**: bash runs without prompting; the net is the protection, not the prompt. `system_modify` still asks because it reaches outside the workspace; `unknown` still asks because the net cannot reason about calls it cannot classify.
+
+The exposure tier is the one row keyed by the call rather than by its action class. A call may declare `exposure: outward` when answering it publishes or sends something the operator cannot quietly take back: filing an issue or a PR, posting a comment, pushing a branch, cutting a release. Today `ask_user` is the only tool that declares one, so a skill marks its own confirmation step outward and `auto-edit` parks that gate for the operator instead of answering it. Acting on the workspace without asking is not the same permission as publishing without asking. `full-auto` answers outward gates like everything else, the two supervised levels are unchanged, and the tier only ever adds an ask: it never widens a row the action class already denied. The tier is declared, never inferred, because only the caller knows whether the step it is confirming leaves the machine; a value the schema does not recognize reads as `outward` and the call is then rejected, so a misspelled tier costs one prompt rather than silently downgrading the gate.
 
 The `system_modify` confirm is level-invariant, so it is enforced and attributed as a safety-net confirm rail: the overlay, notices, and audit ledger name the net (reason code `system-modify-confirm`, policy source `builtin-classifier`), not the autonomy level. The matrix row above is unchanged in outcome at every level; only `read-only` converts the ask to a denial. `unknown` remains in the autonomy mapping because the registry substitutes a registered tool's base action class after the net evaluates.
 
