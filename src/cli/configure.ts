@@ -1,6 +1,12 @@
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
-import { type ClioSettings, readSettings, settingsPath, updateSettings } from "../core/config.js";
+import {
+	type ClioSettings,
+	readSettings,
+	removeTargetFromSettings,
+	settingsPath,
+	updateSettings,
+} from "../core/config.js";
 import { initializeClioHome } from "../core/init.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import { getCatalogModelForRuntime } from "../domains/providers/catalog.js";
@@ -1371,26 +1377,7 @@ export function runTargetRemove(id: string): number {
 		return 1;
 	}
 	updateSettings((settings) => {
-		settings.targets = settings.targets.filter((e) => e.id !== id);
-		if (settings.orchestrator.target === id) {
-			settings.orchestrator.target = null;
-			settings.orchestrator.model = null;
-		}
-		if (settings.background.target === id) {
-			settings.background.target = null;
-			settings.background.model = null;
-		}
-		if (settings.workers.default.target === id) {
-			settings.workers.default.target = null;
-			settings.workers.default.model = null;
-		}
-		for (const [name, profile] of Object.entries(settings.workers.profiles)) {
-			if (profile.target === id) delete settings.workers.profiles[name];
-		}
-		settings.scope = settings.scope.filter((entry) => {
-			const [head] = entry.split("/");
-			return head !== id;
-		});
+		removeTargetFromSettings(settings, id);
 	});
 	printOk(`removed target ${id}`);
 	return 0;

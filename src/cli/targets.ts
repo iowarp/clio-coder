@@ -1,5 +1,13 @@
 import chalk from "chalk";
-import { type ClioSettings, readSettings, updateSettings } from "../core/config.js";
+import {
+	bindAgentProfileInSettings,
+	type ClioSettings,
+	readSettings,
+	removeFleetProfileFromSettings,
+	setFleetProfileInSettings,
+	updateSettings,
+	useTargetInSettings,
+} from "../core/config.js";
 import { THINKING_LEVELS, type ThinkingLevel } from "../core/defaults.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -290,32 +298,24 @@ function runUse(args: ReadonlyArray<string>): number {
 		);
 		return 1;
 	}
-	// A worker target of its own is the split topology: one node orchestrates
-	// and another runs the workers. Its model defaults to that node's own
-	// default, because the orchestrator's model id means nothing on it.
 	let workerTarget = target;
 	if (parsed.workerTarget !== undefined && parsed.workerTarget !== target.id) {
 		const resolved = resolveDispatchProfileTarget(settings, parsed.workerTarget, "fleet worker target");
 		if ("exitCode" in resolved) return resolved.exitCode;
 		workerTarget = resolved.target;
 	}
-	const sharedModel = parsed.model ?? target.defaultModel ?? null;
-	const orchestratorModel = parsed.orchestratorModel ?? sharedModel;
-	const workerModel =
-		parsed.workerModel ?? (workerTarget === target ? sharedModel : (workerTarget.defaultModel ?? null));
 	const backgroundModel = parsed.backgroundModel;
 	// Locked read-modify-write so a concurrent session's field-level
 	// write-through (Shift+Tab, Alt+L, …) cannot be lost between our read
 	// above and this save.
 	updateSettings((fresh) => {
-		fresh.orchestrator.target = target.id;
-		fresh.orchestrator.model = orchestratorModel;
-		fresh.workers.default.target = workerTarget.id;
-		fresh.workers.default.model = workerModel;
-		if (backgroundModel !== undefined) {
-			fresh.background.target = target.id;
-			fresh.background.model = backgroundModel;
-		}
+		useTargetInSettings(fresh, target.id, {
+			...(parsed.model !== undefined ? { model: parsed.model } : {}),
+			...(parsed.orchestratorModel !== undefined ? { orchestratorModel: parsed.orchestratorModel } : {}),
+			...(parsed.workerModel !== undefined ? { workerModel: parsed.workerModel } : {}),
+			workerTargetId: workerTarget.id,
+			...(backgroundModel !== undefined ? { backgroundModel } : {}),
+		});
 	});
 	const dispatchWhere = workerTarget === target ? "" : ` and ${workerTarget.id} for fleet dispatch`;
 	const chatWhere = workerTarget === target ? "for chat and fleet dispatch" : "for chat";
@@ -441,15 +441,11 @@ function runProfileSet(
 	const resolved = resolveDispatchProfileTarget(settings, parsed.targetId);
 	if ("exitCode" in resolved) return resolved.exitCode;
 	const { target } = resolved;
-	const existing = settings.workers.profiles[parsed.name];
-	const profileName = parsed.name;
-	const profile = {
-		target: target.id,
-		model: parsed.model ?? target.defaultModel ?? null,
-		thinkingLevel: parsed.thinkingLevel ?? existing?.thinkingLevel ?? "off",
-	};
 	updateSettings((fresh) => {
-		fresh.workers.profiles[profileName] = profile;
+		setFleetProfileInSettings(fresh, parsed.name, target.id, {
+			...(parsed.model !== undefined ? { model: parsed.model } : {}),
+			...(parsed.thinkingLevel !== undefined ? { thinkingLevel: parsed.thinkingLevel } : {}),
+		});
 	});
 	printOk(`fleet profile ${parsed.name} -> ${target.id}`);
 	return 0;
@@ -486,12 +482,7 @@ function runProfileRemove(args: ReadonlyArray<string>): number {
 	}
 	let removedBindings = 0;
 	updateSettings((fresh) => {
-		delete fresh.workers.profiles[parsed.name];
-		for (const [agentId, profileName] of Object.entries(fresh.workers.agentBindings)) {
-			if (profileName !== parsed.name) continue;
-			delete fresh.workers.agentBindings[agentId];
-			removedBindings += 1;
-		}
+		removedBindings = removeFleetProfileFromSettings(fresh, parsed.name);
 	});
 	printOk(
 		`removed fleet profile ${parsed.name} (${removedBindings} binding${removedBindings === 1 ? "" : "s"} removed)`,
@@ -571,7 +562,7 @@ function runProfileBind(args: ReadonlyArray<string>): number {
 		);
 	}
 	updateSettings((fresh) => {
-		fresh.workers.agentBindings[parsed.agentId] = parsed.profileName;
+		bindAgentProfileInSettings(fresh, parsed.agentId, parsed.profileName);
 	});
 	printOk(`bound agent ${parsed.agentId} -> fleet profile ${parsed.profileName}`);
 	return 0;

@@ -518,7 +518,7 @@ describe("contracts/slash-spec", () => {
 					kind: "usage-error",
 					command: "settings",
 					reason:
-						"Unknown section: query (one of safety, orchestrator, fleet, models, budget, compaction, retry, terminal, advanced)",
+						"Unknown section: query (one of safety, orchestrator, fleet, targets, models, budget, compaction, retry, terminal, advanced)",
 				},
 			],
 			["/settings fleet extra", { kind: "usage-error", command: "settings", reason: "Unexpected argument: extra" }],
