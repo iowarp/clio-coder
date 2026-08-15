@@ -979,6 +979,64 @@ describe("contracts/worker-steer", () => {
 			}
 		});
 
+		it("stops synthesis=false only on the armed tool result, not on an unrelated sibling result", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-no-synthesis-armed-id-"));
+			const paths = ["unrelated.md", "final.md", "blocked.md"].map((name) => join(scratch, name));
+			for (const [index, path] of paths.entries()) writeFileSync(path, `evidence ${index}\n`);
+			const toolResultIds = (events: unknown[]): unknown[] =>
+				events
+					.filter((event) => {
+						const candidate = event as { type?: unknown; message?: { role?: unknown } };
+						return candidate.type === "message_end" && candidate.message?.role === "toolResult";
+					})
+					.map((event) => (event as { message: { toolCallId?: unknown } }).message.toolCallId);
+			const runBatch = async (ids: string[]): Promise<{ result: { exitCode: number }; events: unknown[] }> => {
+				const events: unknown[] = [];
+				const { input, unregister } = fauxRuntimeInput(
+					[
+						fauxAssistantMessage(
+							ids.map((id, index) => fauxToolCall("read", { path: paths[index] }, { id })),
+							{ stopReason: "toolUse" },
+						),
+						fauxAssistantMessage("must not receive a synthesis round"),
+					],
+					{
+						agentId: "custom-stop-armed",
+						budget: { toolCalls: 2, readReserve: 0, synthesis: false, hardCap: 10 },
+						task: "perform two bounded reads",
+						allowedTools: [ToolNames.Read],
+						autonomy: "read-only",
+					},
+				);
+				try {
+					const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+					return { result, events };
+				} finally {
+					unregister();
+				}
+			};
+			try {
+				// Exact id: reads run in parallel, so the unrelated first result reaches
+				// the runtime after the second call armed the stop; the run still ends
+				// only after the armed result, with the over-budget sibling denied.
+				const exact = await runBatch(["unrelated-first", "final-admitted", "blocked-sibling"]);
+				strictEqual(exact.result.exitCode, 1);
+				deepStrictEqual(toolResultIds(exact.events), ["unrelated-first", "final-admitted", "blocked-sibling"]);
+				strictEqual(toolFinishes(exact.events).filter((finish) => finish.outcome === "ok").length, 2);
+				strictEqual(toolFinishes(exact.events).filter((finish) => finish.outcome === "blocked").length, 1);
+				strictEqual(lastAssistantText(exact.events).includes("must not receive"), false);
+				// Wildcard: an admitted final call without a provider id (an empty id is
+				// dropped before admission) still stops after the next tool result.
+				const wildcard = await runBatch(["before-wildcard", ""]);
+				strictEqual(wildcard.result.exitCode, 1);
+				deepStrictEqual(toolResultIds(wildcard.events), ["before-wildcard", ""]);
+				strictEqual(toolFinishes(wildcard.events).filter((finish) => finish.outcome === "ok").length, 2);
+				strictEqual(lastAssistantText(wildcard.events).includes("must not receive"), false);
+			} finally {
+				rmSync(scratch, { recursive: true, force: true });
+			}
+		});
+
 		it("waits for a slow final admitted native tool result before stopping synthesis=false", async () => {
 			const scratch = mkdtempSync(join(tmpdir(), "clio-no-synthesis-slow-final-"));
 			const releasePath = join(scratch, "release");
