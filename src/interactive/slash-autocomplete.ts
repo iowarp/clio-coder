@@ -8,7 +8,7 @@ import {
 	type SlashCommand,
 } from "../engine/tui.js";
 import { resolveFdBinary } from "../tools/executables.js";
-import { commandReference } from "./slash-commands.js";
+import { commandReference, SLASH_COMMAND_GROUPS } from "./slash-commands.js";
 import { type CommandArgsSpec, completeArgs, renderArgsSpec } from "./slash-spec.js";
 
 export type SlashAutocompleteCommand = SlashCommand;
@@ -119,7 +119,8 @@ function aliasCompletionEntries(): SlashAutocompleteCommand[] {
 }
 
 export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
-	const canonical = commandReference().map((ref) => {
+	const reference = commandReference();
+	return SLASH_COMMAND_GROUPS.flatMap((group) => reference.filter((ref) => ref.group === group)).map((ref) => {
 		const argumentHint = compactArgumentHint(ref.args);
 		const args = ref.args;
 		return {
@@ -134,9 +135,16 @@ export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
 				: {}),
 		};
 	});
-	// Canonical names first so a prefix matching both ranks the primary spelling
-	// above the alias that stands for it.
-	return [...canonical, ...aliasCompletionEntries()];
+}
+
+function commandCompletionItem(command: SlashAutocompleteCommand): AutocompleteItem {
+	const hint = command.argumentHint;
+	const description = hint ? `${hint} — ${command.description}` : command.description;
+	return {
+		value: command.name,
+		label: command.name,
+		...(description ? { description } : {}),
+	};
 }
 
 /**
@@ -177,6 +185,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 	private readonly provider: CombinedAutocompleteProvider;
 	private readonly listSkills: (() => { installed: Skill[]; marketplace: MarketplaceSkill[] }) | undefined;
 	private readonly aliases: Map<string, string>;
+	private readonly aliasCommands: SlashAutocompleteCommand[];
 
 	constructor(
 		commands: SlashAutocompleteCommand[],
@@ -184,10 +193,12 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		fdPath: string | null,
 		listSkills?: () => { installed: Skill[]; marketplace: MarketplaceSkill[] },
 		aliases: Map<string, string> = commandAliasMap(),
+		aliasCommands: SlashAutocompleteCommand[] = aliasCompletionEntries(),
 	) {
 		this.provider = new CombinedAutocompleteProvider(commands, basePath, fdPath);
 		this.listSkills = listSkills;
 		this.aliases = aliases;
+		this.aliasCommands = aliasCommands;
 	}
 
 	/**
@@ -271,6 +282,17 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 
 		const canonical = this.canonicalizeAlias(lines, cursorLine, cursorCol);
 		const suggestions = await this.provider.getSuggestions(canonical.lines, cursorLine, canonical.cursorCol, options);
+		const commandPrefix = isSlashCommandPrefix(lines, cursorLine, cursorCol);
+		if (commandPrefix !== null) {
+			const canonicalItems = (suggestions?.items ?? []).filter((item) => item.value.startsWith(commandPrefix));
+			const aliasItems =
+				commandPrefix.length === 0
+					? []
+					: this.aliasCommands.filter((command) => command.name.startsWith(commandPrefix)).map(commandCompletionItem);
+			const items = [...canonicalItems, ...aliasItems];
+			if (items.length === 0) return null;
+			return { items, prefix: suggestions?.prefix ?? textBeforeCursor };
+		}
 		// Enter accepts the open completion instead of submitting, so a suggestion
 		// the input already equals costs a keystroke that changes no pixel: typing
 		// `/memory seed` and pressing Enter accepted "seed" and submitted nothing,
@@ -280,10 +302,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		if (suggestions && options.force !== true && suggestions.items.some((item) => item.value === suggestions.prefix)) {
 			return null;
 		}
-		const commandPrefix = isSlashCommandPrefix(lines, cursorLine, cursorCol);
-		if (!suggestions || commandPrefix === null) return suggestions;
-		const items = suggestions.items.filter((item) => item.value.startsWith(commandPrefix));
-		return items.length > 0 ? { ...suggestions, items } : null;
+		return suggestions;
 	}
 
 	applyCompletion(
