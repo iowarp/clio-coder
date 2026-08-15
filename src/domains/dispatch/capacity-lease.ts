@@ -1,12 +1,19 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { withStateFileLockSync } from "../../core/state-file-lock.js";
+import { FILE_LOCK_ACQUIRE_TIMEOUT_MS, withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 
 export const MAX_CAPACITY_LEASES = 1_000;
 export const DEFAULT_CAPACITY_LEASE_TTL_MS = 30_000;
+// Every admission mutation blocks the event loop while it waits for the lock,
+// which stalls this process's own 10s lease heartbeat. If a caller could wait
+// longer than a lease lives, a live holder would watch its own lease expire.
+if (FILE_LOCK_ACQUIRE_TIMEOUT_MS >= DEFAULT_CAPACITY_LEASE_TTL_MS)
+	throw new Error(
+		`dispatch: lock acquire timeout (${FILE_LOCK_ACQUIRE_TIMEOUT_MS}ms) must stay under the capacity lease TTL (${DEFAULT_CAPACITY_LEASE_TTL_MS}ms)`,
+	);
 /**
  * An operator drain outlives the process that asked for it, so it cannot be
  * owner-scoped, but an unbounded durable flag would wedge every future dispatch
@@ -169,7 +176,15 @@ function ownerHoldsLease(lease: CapacityLease, probe: LeaseOwnerProbe): boolean 
 	return true;
 }
 function reclaim(file: CapacityStateFile, nowMs: number, probe: LeaseOwnerProbe): void {
-	file.leases = file.leases.filter((lease) => ownerHoldsLease(lease, probe) && Date.parse(lease.expiresAt) > nowMs);
+	file.leases = file.leases.filter((lease) => {
+		if (!ownerHoldsLease(lease, probe)) return false;
+		// A real birth token identifies this exact process, so it outranks the
+		// expiry: an owner that missed heartbeats because it sat blocked on the
+		// admission lock is alive, not gone, and taking its slot would put two
+		// processes over the same cap. Where the token is synthetic it proves
+		// nothing about pid reuse, so there the expiry still decides.
+		return probe.tokenProvesDeath !== false || Date.parse(lease.expiresAt) > nowMs;
+	});
 }
 /** Inspect/expire the drain inside an admission-state transaction. The caller persists the mutated state. */
 export function activeCapacityDrainUnsafe(file: CapacityStateFile, nowMs: number): CapacityDrain | null {
