@@ -126,15 +126,6 @@ function routeModelOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean 
 	return false;
 }
 
-/** Pure overlay key router for the /settings overlay. */
-function routeSettingsOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
-	if (isEscapeKey(data)) {
-		deps.closeOverlay();
-		return true;
-	}
-	return false;
-}
-
 /** Pure overlay key router for the /fork message-picker. */
 function routeMessagePickerOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
@@ -191,7 +182,10 @@ export function routeOverlayKey(
 	if (overlayState === "memory") return false;
 	if (overlayState === "view") return false;
 	if (overlayState === "model") return routeModelOverlayKey(data, deps);
-	if (overlayState === "settings") return routeSettingsOverlayKey(data, deps);
+	// Settings owns Esc itself: its stack is sections → rows → detail, and a
+	// router-level close made every Esc leave the overlay from wherever the
+	// operator was, so a cancelled picker and a finished visit looked the same.
+	if (overlayState === "settings") return false;
 	if (overlayState === "resume") return false;
 	if (overlayState === "tree") return false;
 	if (overlayState === "message-picker") return routeMessagePickerOverlayKey(data, deps);

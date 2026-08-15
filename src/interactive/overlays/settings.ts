@@ -25,6 +25,7 @@ import {
 	type Component,
 	getKeybindings,
 	Input,
+	isKeyRelease,
 	matchesKey,
 	type OverlayHandle,
 	SelectList,
@@ -70,6 +71,16 @@ const ULTRAWIDE_LAYOUT_MIN_WIDTH = 112;
  */
 const WIDE_LAYOUT_MIN_WIDTH = 72;
 const DROP_PATH_COLUMN_WIDTH = 52;
+/**
+ * Terminal width below which Settings drops its two-cell side margins.
+ *
+ * The engine composites an overlay only across the columns its region covers,
+ * and a left/right margin shrinks that region, so at 40 columns four of them
+ * kept showing the transcript beside a modal that owns the keyboard. Above this
+ * width the margins are cheap and the box reads better inset; below it the
+ * overlay claims every terminal column instead.
+ */
+const ULTRA_NARROW_TERMINAL_WIDTH = 60;
 /** Shown when no runtime is resolvable, so it offers the full vocabulary. */
 const FALLBACK_THINKING_VALUES: ReadonlyArray<string> = THINKING_LEVELS;
 const ROW_GAP = "  ";
@@ -375,6 +386,12 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 
 export type SettingSubmenuBuilder = NonNullable<SettingItem["submenu"]>;
 type SettingsCenterLane = "sections" | "rows";
+/**
+ * Where the operator is in the Settings stack, independent of width. Narrow
+ * terminals render one level at a time and wide ones render adjacent context,
+ * but both share this state so Esc walks the same chain everywhere.
+ */
+export type SettingsNavigationDepth = "sections" | "rows" | "detail";
 
 export type SettingsPresentationKind =
 	| "setting"
@@ -426,10 +443,12 @@ export interface SettingsCenterSection {
 
 export interface SettingsCenterSelection {
 	lane: SettingsCenterLane;
+	depth: SettingsNavigationDepth;
 	section: SettingsSectionId;
 	rowIndex: number;
 	rowId: SettingsCenterRowId | null;
 	submenuOpen: boolean;
+	filter: string;
 }
 
 interface BuildSettingItemsOptions {
@@ -2086,6 +2105,12 @@ function fixedLines(lines: readonly string[], width: number, height: number): st
 	return out;
 }
 
+/** Typed text, as opposed to an escape sequence or a control byte. */
+function isPrintableInput(data: string): boolean {
+	if (data.length === 0 || data.startsWith("\u001b")) return false;
+	return Array.from(data).every((character) => character >= " " && character !== "\u007f");
+}
+
 function scrollWindow(total: number, selected: number, height: number): [number, number] {
 	if (height <= 0 || total <= height) return [0, total];
 	const clamped = Math.max(0, Math.min(selected, total - 1));
@@ -2332,13 +2357,17 @@ export interface SettingsCenterOptions {
 }
 
 export class SettingsCenter implements Component {
-	private focusedLane: SettingsCenterLane = "rows";
-	private selectedSectionIndex = 0;
+	/** The stack level that owns input; "detail" is implied by an open submenu. */
+	private level: SettingsCenterLane = "rows";
+	private selectedSectionId: SettingsSectionId = SETTINGS_SECTIONS[0].id;
 	private readonly rowIndexBySection = new Map<SettingsSectionId, number>();
 	/** Semantic anchors survive rows being inserted, removed, or reordered during refresh. */
 	private readonly rowIdBySection = new Map<SettingsSectionId, SettingsCenterRowId>();
 	private submenuComponent: Component | null = null;
-	private narrowMode = false;
+	/** Committed catalog filter; empty means unfiltered. */
+	private filterQuery = "";
+	/** Draft while the filter editor owns input; null when it is closed. */
+	private filterDraft: string | null = null;
 	/** Local cycle preview for the selected row; committed on Enter. */
 	private pendingValue: string | null = null;
 
@@ -2349,24 +2378,24 @@ export class SettingsCenter implements Component {
 
 	getSelection(): SettingsCenterSelection {
 		const section = this.currentSection();
-		const rowIndex = this.rowIndex(section.id);
-		const row = section.items[rowIndex] ?? null;
+		const rowIndex = section ? this.rowIndex(section.id) : 0;
+		const row = section?.items[rowIndex] ?? null;
 		return {
-			lane: this.focusedLane,
-			section: section.id,
+			lane: this.level,
+			depth: this.depth(),
+			section: section?.id ?? this.selectedSectionId,
 			rowIndex,
 			rowId: row?.id ?? null,
 			submenuOpen: this.submenuComponent !== null,
+			filter: this.filterQuery,
 		};
 	}
 
 	setSelection(sectionId: SettingsSectionId, rowIndex: number, lane: SettingsCenterLane = "rows"): void {
-		const sections = this.sections();
-		const nextSectionIndex = sections.findIndex((section) => section.id === sectionId);
-		if (nextSectionIndex >= 0) this.selectedSectionIndex = nextSectionIndex;
+		if (this.sections().some((section) => section.id === sectionId)) this.selectedSectionId = sectionId;
 		const section = this.currentSection();
-		this.setRowIndex(section, this.selectableRowIndex(section, rowIndex));
-		this.focusedLane = lane;
+		if (section) this.setRowIndex(section, this.selectableRowIndex(section, rowIndex));
+		this.level = lane;
 		this.submenuComponent = null;
 		this.pendingValue = null;
 	}
@@ -2378,32 +2407,53 @@ export class SettingsCenter implements Component {
 	render(width: number): string[] {
 		const bodyHeight = Math.max(1, this.options.getBodyHeight());
 		this.normalizeSelection();
-		this.narrowMode = width < WIDE_LAYOUT_MIN_WIDTH;
-		const lines = this.narrowMode
-			? this.renderStacked(width, bodyHeight)
-			: width >= ULTRAWIDE_LAYOUT_MIN_WIDTH
-				? this.renderUltraWide(width, bodyHeight)
-				: this.renderWide(width, bodyHeight);
+		const lines =
+			width < WIDE_LAYOUT_MIN_WIDTH
+				? this.renderNarrow(width, bodyHeight)
+				: width >= ULTRAWIDE_LAYOUT_MIN_WIDTH
+					? this.renderUltraWide(width, bodyHeight)
+					: this.renderWide(width, bodyHeight);
 		return fixedLines(lines, width, bodyHeight);
 	}
 
+	/**
+	 * Settings is component-owned for Esc: the application router forwards it
+	 * here instead of closing the overlay, so one press moves up exactly one
+	 * level. Every physical encoding (raw, Kitty CSI-u, modifyOtherKeys) is
+	 * recognized before any delegation, which is what lets the parent pop a
+	 * submenu whose own cancel binding has been customized. Key releases are not
+	 * presses and do nothing.
+	 */
 	handleInput(data: string): void {
+		if (isKeyRelease(data)) return;
+		if (matchesKey(data, "escape")) {
+			this.back();
+			return;
+		}
+		if (this.filterDraft !== null) {
+			this.handleFilterKey(data);
+			return;
+		}
 		if (this.submenuComponent) {
 			this.submenuComponent.handleInput?.(data);
 			return;
 		}
 		const kb = getKeybindings();
+		if (data === "/") {
+			this.filterDraft = this.filterQuery;
+			return;
+		}
 		if (matchesKey(data, "tab")) {
-			this.toggleLane();
+			this.toggleLevel();
 			return;
 		}
 		if (matchesKey(data, "left")) {
-			this.focusedLane = "sections";
+			this.level = "sections";
 			this.pendingValue = null;
 			return;
 		}
 		if (matchesKey(data, "right")) {
-			this.focusedLane = "rows";
+			this.level = "rows";
 			return;
 		}
 		if (kb.matches(data, "tui.select.up") || data === "k") {
@@ -2414,36 +2464,117 @@ export class SettingsCenter implements Component {
 			this.moveSelection(1);
 			return;
 		}
-		if (data === " " && this.focusedLane === "rows") {
+		if (data === " " && this.level === "rows") {
 			this.cyclePreview();
 			return;
 		}
-		if ((kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter")) && this.focusedLane === "rows") {
+		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter")) {
+			if (this.level === "sections") {
+				this.level = "rows";
+				return;
+			}
 			this.activateSelectedItem();
 			return;
 		}
-		if (kb.matches(data, "tui.select.cancel")) {
-			if (this.pendingValue !== null) {
-				this.pendingValue = null;
-				return;
-			}
-			this.options.onCancel();
-		}
+		if (kb.matches(data, "tui.select.cancel")) this.back();
 	}
 
 	invalidate(): void {
 		this.submenuComponent?.invalidate?.();
 	}
 
-	private sections(): SettingsCenterSection[] {
-		return buildSettingsSections(this.items);
+	/**
+	 * One level up, at every width: cancel the filter editor, then the open
+	 * submenu, then the rows page, and only from the section list does Esc close
+	 * Settings. A pending Space preview is part of the row context, so leaving
+	 * rows discards it rather than costing an extra press.
+	 */
+	private back(): void {
+		if (this.filterDraft !== null) {
+			this.filterDraft = null;
+			this.options.requestRender?.();
+			return;
+		}
+		if (this.submenuComponent) {
+			this.submenuComponent = null;
+			this.pendingValue = null;
+			this.options.requestRender?.();
+			return;
+		}
+		if (this.level === "rows" && this.sections().length > 0) {
+			this.level = "sections";
+			this.pendingValue = null;
+			this.options.requestRender?.();
+			return;
+		}
+		this.options.onCancel();
 	}
 
-	private currentSection(): SettingsCenterSection {
+	private depth(): SettingsNavigationDepth {
+		return this.submenuComponent ? "detail" : this.level;
+	}
+
+	private handleFilterKey(data: string): void {
+		const draft = this.filterDraft ?? "";
+		const kb = getKeybindings();
+		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter")) {
+			this.filterQuery = draft.trim();
+			this.filterDraft = null;
+			this.normalizeSelection();
+			this.options.requestRender?.();
+			return;
+		}
+		if (data === "\x7f" || data === "\b") {
+			this.filterDraft = draft.slice(0, -1);
+			return;
+		}
+		if (isPrintableInput(data)) this.filterDraft = draft + data;
+	}
+
+	private matchesFilter(item: SettingsCenterItem): boolean {
+		const query = this.filterQuery.trim().toLowerCase();
+		if (query.length === 0) return true;
+		return (
+			item.label.toLowerCase().includes(query) ||
+			item.configPath.toLowerCase().includes(query) ||
+			item.description.toLowerCase().includes(query)
+		);
+	}
+
+	/**
+	 * The catalog the operator can currently reach. Group headers survive only as
+	 * context for a matching row beneath them, never as results or stops, and a
+	 * section with no matching row disappears from the list entirely.
+	 */
+	private sections(): SettingsCenterSection[] {
+		const all = buildSettingsSections(this.items);
+		if (this.filterQuery.trim().length === 0) return all;
+		return all
+			.map((section) => ({ ...section, items: this.filterSectionItems(section.items) }))
+			.filter((section) => section.items.some((item) => this.isSelectableRow(item)));
+	}
+
+	private filterSectionItems(items: readonly SettingsCenterItem[]): SettingsCenterItem[] {
+		const kept: SettingsCenterItem[] = [];
+		let pendingHeader: SettingsCenterItem | null = null;
+		for (const item of items) {
+			if (!this.isSelectableRow(item)) {
+				pendingHeader = item;
+				continue;
+			}
+			if (!this.matchesFilter(item)) continue;
+			if (pendingHeader) {
+				kept.push(pendingHeader);
+				pendingHeader = null;
+			}
+			kept.push(item);
+		}
+		return kept;
+	}
+
+	private currentSection(): SettingsCenterSection | null {
 		const sections = this.sections();
-		const section = sections[this.selectedSectionIndex] ?? sections[0];
-		if (!section) throw new Error("settings center requires sections");
-		return section;
+		return sections.find((section) => section.id === this.selectedSectionId) ?? sections[0] ?? null;
 	}
 
 	private rowIndex(sectionId: SettingsSectionId): number {
@@ -2481,7 +2612,15 @@ export class SettingsCenter implements Component {
 
 	private normalizeSelection(): void {
 		const sections = this.sections();
-		this.selectedSectionIndex = Math.max(0, Math.min(this.selectedSectionIndex, Math.max(0, sections.length - 1)));
+		// A filter that hides everything leaves nowhere to drill into, so the stack
+		// sits at its top level and one Esc closes Settings from the empty state.
+		if (sections.length === 0) {
+			this.level = "sections";
+			return;
+		}
+		if (!sections.some((section) => section.id === this.selectedSectionId)) {
+			this.selectedSectionId = sections[0]?.id ?? this.selectedSectionId;
+		}
 		for (const section of sections) {
 			this.setRowIndex(section, this.rowIndex(section.id));
 		}
@@ -2489,25 +2628,26 @@ export class SettingsCenter implements Component {
 
 	private selectedItem(): SettingsCenterItem | null {
 		const section = this.currentSection();
+		if (!section) return null;
 		return section.items[this.rowIndex(section.id)] ?? null;
 	}
 
-	private toggleLane(): void {
-		this.focusedLane = this.focusedLane === "sections" ? "rows" : "sections";
+	private toggleLevel(): void {
+		this.level = this.level === "sections" ? "rows" : "sections";
 		this.pendingValue = null;
 	}
 
 	private moveSelection(delta: -1 | 1): void {
 		this.pendingValue = null;
-		if (this.focusedLane === "sections") {
+		if (this.level === "sections") {
 			this.moveSection(delta);
 			return;
 		}
-		if (this.narrowMode) {
-			this.moveRowAcrossSections(delta);
-			return;
-		}
+		// Rows are the section's own rows at every width. Flattening the catalog
+		// on narrow terminals meant an operator scrolling Retry fell into Terminal
+		// with nothing in the frame saying they had left the section they opened.
 		const section = this.currentSection();
+		if (!section) return;
 		const selectable = section.items
 			.map((item, index) => (this.isSelectableRow(item) ? index : -1))
 			.filter((index) => index >= 0);
@@ -2520,33 +2660,13 @@ export class SettingsCenter implements Component {
 	private moveSection(delta: -1 | 1): void {
 		const sections = this.sections();
 		if (sections.length === 0) return;
-		this.selectedSectionIndex = (this.selectedSectionIndex + delta + sections.length) % sections.length;
-		this.normalizeSelection();
-	}
-
-	private moveRowAcrossSections(delta: -1 | 1): void {
-		const flat = this.sections().flatMap((section) =>
-			section.items
-				.map((item, rowIndex) => ({
-					sectionId: section.id,
-					rowIndex,
-					id: item.id,
-					selectable: this.isSelectableRow(item),
-				}))
-				.filter((entry) => entry.selectable),
-		);
-		if (flat.length === 0) return;
-		const selected = this.selectedItem();
 		const current = Math.max(
 			0,
-			flat.findIndex((entry) => entry.id === selected?.id),
+			sections.findIndex((section) => section.id === this.selectedSectionId),
 		);
-		const next = flat[(current + delta + flat.length) % flat.length];
-		if (!next) return;
-		const sectionIndex = this.sections().findIndex((section) => section.id === next.sectionId);
-		if (sectionIndex >= 0) this.selectedSectionIndex = sectionIndex;
-		const section = this.sections().find((entry) => entry.id === next.sectionId);
-		if (section) this.setRowIndex(section, next.rowIndex);
+		const next = sections[(current + delta + sections.length) % sections.length];
+		if (next) this.selectedSectionId = next.id;
+		this.normalizeSelection();
 	}
 
 	/** Space cycles a local preview of an enum/bool row without committing. */
@@ -2660,21 +2780,60 @@ export class SettingsCenter implements Component {
 	 * between sections and rows.
 	 */
 	private renderUltraWide(width: number, bodyHeight: number): string[] {
+		const head = this.filterEditorLines(width);
+		const bodyRows = Math.max(1, bodyHeight - head.length);
+		if (this.sections().length === 0) return [...head, ...this.emptyFilterLines(width, bodyRows)];
 		const theme = clioTheme();
 		const separator = barSep(theme);
 		const separatorWidth = visibleWidth(" │ ");
 		const leftWidth = Math.min(SECTION_LANE_WIDTH, Math.max(16, Math.floor(width * 0.28)));
+		const left = this.renderSectionLane(leftWidth, bodyRows);
+		// A detail page owns the work area: the description column would be a second
+		// readout beside a submenu that already carries its own title and note.
+		if (this.submenuComponent) {
+			const workWidth = Math.max(1, width - leftWidth - separatorWidth);
+			const work = this.renderRightLane(workWidth, bodyRows);
+			return [
+				...head,
+				...Array.from(
+					{ length: bodyRows },
+					(_, index) =>
+						`${padAnsi(left[index] ?? "", leftWidth, ELLIPSIS)}${separator}${padAnsi(work[index] ?? "", workWidth, ELLIPSIS)}`,
+				),
+			];
+		}
 		const detailWidth = Math.max(28, Math.min(44, Math.floor(width * 0.3)));
 		const centerWidth = Math.max(1, width - leftWidth - detailWidth - separatorWidth * 2);
-		const left = this.renderSectionLane(leftWidth, bodyHeight);
-		const center = this.renderRightLane(centerWidth, bodyHeight);
-		const right = this.renderDetailLane(detailWidth, bodyHeight);
-		return Array.from({ length: bodyHeight }, (_, index) =>
+		const center = this.renderRightLane(centerWidth, bodyRows);
+		const right = this.renderDetailLane(detailWidth, bodyRows);
+		return [
+			...head,
+			...Array.from({ length: bodyRows }, (_, index) =>
+				[
+					padAnsi(left[index] ?? "", leftWidth, ELLIPSIS),
+					padAnsi(center[index] ?? "", centerWidth, ELLIPSIS),
+					padAnsi(right[index] ?? "", detailWidth, ELLIPSIS),
+				].join(separator),
+			),
+		];
+	}
+
+	/** The one-line filter editor, shown at every width while it owns input. */
+	private filterEditorLines(width: number): string[] {
+		if (this.filterDraft === null) return [];
+		const theme = clioTheme();
+		return [truncateToWidth(theme.fg("accent", `Filter settings: ${this.filterDraft}_`), width, ELLIPSIS, true)];
+	}
+
+	private emptyFilterLines(width: number, height: number): string[] {
+		const theme = clioTheme();
+		return fixedLines(
 			[
-				padAnsi(left[index] ?? "", leftWidth, ELLIPSIS),
-				padAnsi(center[index] ?? "", centerWidth, ELLIPSIS),
-				padAnsi(right[index] ?? "", detailWidth, ELLIPSIS),
-			].join(separator),
+				theme.fg("muted", truncateToWidth(`No settings match “${this.filterQuery}”`, width, ELLIPSIS, true)),
+				theme.fg("dim", truncateToWidth("/ edit filter · empty Enter clears", width, ELLIPSIS, true)),
+			],
+			width,
+			height,
 		);
 	}
 
@@ -2688,7 +2847,8 @@ export class SettingsCenter implements Component {
 		const theme = clioTheme();
 		const section = this.currentSection();
 		const item = this.selectedItem();
-		if (this.focusedLane === "sections" || !item) {
+		if (!section) return fixedLines([], width, height);
+		if (this.level === "sections" || !item) {
 			const rows = [
 				screenTitle(theme, section.label),
 				"",
@@ -2722,8 +2882,13 @@ export class SettingsCenter implements Component {
 	}
 
 	private renderWide(width: number, bodyHeight: number): string[] {
-		const footer = this.renderFooter(width, bodyHeight);
-		const contentHeight = Math.max(1, bodyHeight - footer.length);
+		const head = this.filterEditorLines(width);
+		const available = Math.max(1, bodyHeight - head.length);
+		if (this.sections().length === 0) return [...head, ...this.emptyFilterLines(width, available)];
+		// A detail page owns the work area, and the footer describes the row the
+		// operator has already left, so it is suppressed while a submenu is open.
+		const footer = this.submenuComponent ? [] : this.renderFooter(width, this.footerBudget(available));
+		const contentHeight = Math.max(1, available - footer.length);
 		const leftWidth = Math.min(SECTION_LANE_WIDTH, Math.max(16, Math.floor(width * 0.28)));
 		const separator = barSep(clioTheme());
 		const separatorWidth = visibleWidth(" │ ");
@@ -2735,42 +2900,25 @@ export class SettingsCenter implements Component {
 			(_, index) =>
 				`${padAnsi(left[index] ?? "", leftWidth, ELLIPSIS)}${separator}${padAnsi(right[index] ?? "", rightWidth, ELLIPSIS)}`,
 		);
-		return [...body, ...footer];
+		return [...head, ...body, ...footer];
+	}
+
+	/**
+	 * The footer is help, and the list is the work. A fixed six-line ceiling spent
+	 * a third of a 20-row body on prose, so the budget is what the body can spare
+	 * once the list keeps six rows.
+	 */
+	private footerBudget(bodyHeight: number): number {
+		return Math.min(4, Math.max(0, bodyHeight - 6));
 	}
 
 	private renderSectionLane(width: number, height: number): string[] {
 		const theme = clioTheme();
-		const sections = this.sections();
-		const rows: Array<{ line: string; sectionIndex: number | null }> = [
-			{ line: theme.fg("dim", "Sections"), sectionIndex: null },
-		];
-		let previousGroup: string | null = null;
-		for (const [index, section] of sections.entries()) {
-			const group = SETTINGS_SECTIONS[index]?.group;
-			if (group && group !== previousGroup) {
-				rows.push({
-					line: theme.style("accentDeep", group, { bold: true }),
-					sectionIndex: null,
-				});
-				previousGroup = group;
-			}
-			rows.push({
-				sectionIndex: index,
-				line: (() => {
-					const selected = index === this.selectedSectionIndex;
-					const cursor = selected && this.focusedLane === "sections" ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
-					const modifiedCount = section.items.filter(
-						(item) => !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue,
-					).length;
-					const badge = modifiedCount > 0 ? theme.fg("accent", ` ${GLYPH.scoped}${modifiedCount}`) : "";
-					const label = selected ? theme.style("accent", section.label, { bold: true }) : section.label;
-					return `${cursor}${label}${badge}`;
-				})(),
-			});
-		}
+		const rows = [{ line: theme.fg("dim", "Sections"), sectionId: null as SettingsSectionId | null }];
+		rows.push(...this.sectionCatalogRows());
 		const selectedLine = Math.max(
 			0,
-			rows.findIndex((row) => row.sectionIndex === this.selectedSectionIndex),
+			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
 		);
 		const [start, end] = scrollWindow(rows.length, selectedLine, height);
 		return fixedLines(
@@ -2780,6 +2928,38 @@ export class SettingsCenter implements Component {
 		);
 	}
 
+	/**
+	 * The section catalog, shared by the wide lane and the narrow sections page.
+	 * Group tags stay visual separators: they carry no cursor and are never a stop.
+	 */
+	private sectionCatalogRows(): Array<{ line: string; sectionId: SettingsSectionId | null }> {
+		const theme = clioTheme();
+		const filtering = this.filterQuery.trim().length > 0;
+		const rows: Array<{ line: string; sectionId: SettingsSectionId | null }> = [];
+		let previousGroup: string | null = null;
+		for (const section of this.sections()) {
+			const group = SETTINGS_SECTIONS.find((entry) => entry.id === section.id)?.group;
+			if (group && group !== previousGroup) {
+				rows.push({ line: theme.style("accentDeep", group, { bold: true }), sectionId: null });
+				previousGroup = group;
+			}
+			const selected = section.id === this.selectedSectionId;
+			const cursor = selected && this.level === "sections" ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+			const matchCount = section.items.filter((item) => this.isSelectableRow(item)).length;
+			const modifiedCount = section.items.filter(
+				(item) => !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue,
+			).length;
+			const badge = filtering
+				? theme.fg("accent", ` ${matchCount}`)
+				: modifiedCount > 0
+					? theme.fg("accent", ` ${GLYPH.scoped}${modifiedCount}`)
+					: "";
+			const label = selected ? theme.style("accent", section.label, { bold: true }) : section.label;
+			rows.push({ line: `${cursor}${label}${badge}`, sectionId: section.id });
+		}
+		return rows;
+	}
+
 	private renderRightLane(width: number, height: number): string[] {
 		if (this.submenuComponent) {
 			const lines = this.submenuComponent.render(width);
@@ -2787,79 +2967,115 @@ export class SettingsCenter implements Component {
 		}
 		const theme = clioTheme();
 		const section = this.currentSection();
+		if (!section) return fixedLines([], width, height);
 		const rowBudget = Math.max(0, height - 1);
 		const selected = this.rowIndex(section.id);
 		const [start, end] = scrollWindow(section.items.length, selected, rowBudget);
 		const columns = rowColumns(section.items, width, 0);
 		const rows = section.items.slice(start, end).map((item, offset) => {
-			const isSelected = start + offset === selected && this.focusedLane === "rows";
+			const isSelected = start + offset === selected && this.level === "rows";
 			const display = this.displayValueFor(item, isSelected);
 			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending);
 		});
 		return fixedLines([screenTitle(theme, section.label), ...rows], width, height);
 	}
 
-	private renderStacked(width: number, bodyHeight: number): string[] {
-		const footer = this.renderFooter(width, bodyHeight);
-		const contentHeight = Math.max(1, bodyHeight - footer.length);
+	/**
+	 * The narrow stack: one page at a time under a breadcrumb. The flattened
+	 * catalog it replaces rendered every section and every row into one scroll,
+	 * so a 40-column terminal showed six sections' worth of context and no way to
+	 * tell which one owned the cursor.
+	 */
+	private renderNarrow(width: number, bodyHeight: number): string[] {
+		const head = [this.breadcrumbLine(width), ...this.filterEditorLines(width)];
+		const available = Math.max(1, bodyHeight - head.length);
+		if (this.sections().length === 0) return [...head, ...this.emptyFilterLines(width, available)];
 		if (this.submenuComponent) {
-			return [...fixedLines(this.submenuComponent.render(width), width, contentHeight), ...footer];
+			return [...head, ...fixedLines(this.submenuComponent.render(width), width, available)];
 		}
-		const theme = clioTheme();
-		const columns = rowColumns(this.items, width, 2);
-		const rows: Array<{ line: string; selected: boolean }> = [];
-		let selectedLine = 0;
-		let previousGroup: string | null = null;
-		for (const [sectionIndex, section] of this.sections().entries()) {
-			const group = SETTINGS_SECTIONS[sectionIndex]?.group;
-			if (group && group !== previousGroup) {
-				rows.push({
-					line: theme.style("accentDeep", group, { bold: true }),
-					selected: false,
-				});
-				previousGroup = group;
-			}
-			const sectionSelected = sectionIndex === this.selectedSectionIndex;
-			const sectionFocused = sectionSelected && this.focusedLane === "sections";
-			if (sectionFocused) selectedLine = rows.length;
-			const cursor = sectionFocused ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
-			const label = sectionSelected
-				? theme.style("accent", section.label, { bold: true })
-				: theme.fg("dim", section.label);
-			rows.push({ line: `${cursor}${label}`, selected: sectionFocused });
-			for (const [rowIndex, item] of section.items.entries()) {
-				const rowSelected = sectionSelected && rowIndex === this.rowIndex(section.id) && this.focusedLane === "rows";
-				if (rowSelected) selectedLine = rows.length;
-				const display = this.displayValueFor(item, rowSelected);
-				rows.push({
-					line: formatSettingRow(item, width, rowSelected, columns, 2, display.value, display.pending),
-					selected: rowSelected,
-				});
-			}
-		}
-		const [start, end] = scrollWindow(rows.length, selectedLine, contentHeight);
-		return [
-			...fixedLines(
-				rows.slice(start, end).map((row) => row.line),
-				width,
-				contentHeight,
-			),
-			...footer,
-		];
+		const inspector = this.narrowInspector(width, bodyHeight);
+		const listHeight = Math.max(1, available - inspector.length);
+		const list =
+			this.level === "sections" ? this.renderSectionsPage(width, listHeight) : this.renderRowsPage(width, listHeight);
+		return [...head, ...list, ...inspector];
 	}
 
-	private renderFooter(width: number, bodyHeight: number): string[] {
+	private breadcrumbLine(width: number): string {
 		const theme = clioTheme();
-		const maxFooterLines = Math.min(bodyHeight, bodyHeight >= 12 ? 6 : bodyHeight >= 8 ? 5 : bodyHeight >= 6 ? 4 : 3);
+		const section = this.currentSection();
+		const trail: string[] = ["Settings"];
+		if (this.level === "sections" && !this.submenuComponent) trail.push("Sections");
+		else if (section) trail.push(section.label);
+		if (this.submenuComponent) {
+			const item = this.selectedItem();
+			if (item) trail.push(item.label);
+		}
+		const query = this.filterQuery.trim().length > 0 ? theme.fg("accent", `  /${this.filterQuery}`) : "";
+		return truncateToWidth(`${screenTitle(theme, trail.join(" › "))}${query}`, width, ELLIPSIS, true);
+	}
+
+	/**
+	 * Prose is the first thing a short terminal can spare. Sixteen body rows keep
+	 * two inspector rows, ten keep one, and anything shorter gives every row to
+	 * the list; the description stays reachable at wider widths and through the
+	 * filter.
+	 */
+	private narrowInspector(width: number, bodyHeight: number): string[] {
+		const budget = bodyHeight >= 16 ? 2 : bodyHeight >= 10 ? 1 : 0;
+		if (budget === 0) return [];
+		const theme = clioTheme();
+		const section = this.currentSection();
+		if (!section) return [];
+		const item = this.level === "rows" ? this.selectedItem() : null;
+		const text = item ? item.description : SETTINGS_SECTION_DESCRIPTIONS[section.id];
+		const wrapped = wrapTextWithAnsi(theme.fg("muted", text), Math.max(1, width));
+		const kept = wrapped.slice(0, budget);
+		const last = kept.at(-1);
+		return wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${ELLIPSIS}`] : kept;
+	}
+
+	private renderSectionsPage(width: number, height: number): string[] {
+		const rows = this.sectionCatalogRows();
+		const selectedLine = Math.max(
+			0,
+			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
+		);
+		const [start, end] = scrollWindow(rows.length, selectedLine, height);
+		return fixedLines(
+			rows.slice(start, end).map((row) => row.line),
+			width,
+			height,
+		);
+	}
+
+	private renderRowsPage(width: number, height: number): string[] {
+		const section = this.currentSection();
+		if (!section) return fixedLines([], width, height);
+		const selected = this.rowIndex(section.id);
+		const [start, end] = scrollWindow(section.items.length, selected, height);
+		const columns = rowColumns(section.items, width, 0);
+		const rows = section.items.slice(start, end).map((item, offset) => {
+			const isSelected = start + offset === selected;
+			const display = this.displayValueFor(item, isSelected);
+			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending);
+		});
+		return fixedLines(rows, width, height);
+	}
+
+	private renderFooter(width: number, maxFooterLines: number): string[] {
+		const theme = clioTheme();
 		if (maxFooterLines <= 0) return [];
 		const safeWidth = Math.max(1, width);
 		const separator = rule(theme, safeWidth);
 		const sections = this.sections();
 		const section = this.currentSection();
 		const item = this.selectedItem();
-		const positionText = theme.fg("dim", `section ${this.selectedSectionIndex + 1}/${sections.length}`);
+		if (!section) return [];
+		const position = sections.findIndex((entry) => entry.id === section.id) + 1;
+		const query = this.filterQuery.trim().length > 0 ? `  ${theme.fg("accent", `/${this.filterQuery}`)}` : "";
+		const positionText = `${theme.fg("dim", `section ${position}/${sections.length}`)}${query}`;
 
-		if (this.focusedLane === "sections") {
+		if (this.level === "sections") {
 			const breadcrumb = `${screenTitle(theme, section.label)}  ${theme.fg("dim", "·")}  ${positionText}`;
 			const body = wrapTextWithAnsi(theme.fg("muted", SETTINGS_SECTION_DESCRIPTIONS[section.id]), safeWidth);
 			const note = theme.fg("dim", "Tab or → to edit its settings");
@@ -3024,17 +3240,42 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		center.refreshItems();
 		tui.requestRender();
 	};
+	// The engine composites an overlay across the columns its region covers, and
+	// side margins shrink that region, so this margin is re-read every frame and
+	// drops to zero on an ultra-narrow terminal rather than leaving transcript
+	// columns beside a modal that owns the keyboard.
+	const margin: { top: number; right: number; bottom: number; left: number } = { ...SETTINGS_OVERLAY_MARGIN };
 	const handle = showClioOverlayFrame(tui, center, {
 		anchor: "top-left",
 		width: SETTINGS_OVERLAY_WIDTH,
 		maxHeight: SETTINGS_OVERLAY_MAX_HEIGHT,
-		margin: SETTINGS_OVERLAY_MARGIN,
+		margin,
+		visible: (terminalWidth) => {
+			const side = terminalWidth < ULTRA_NARROW_TERMINAL_WIDTH ? 0 : SETTINGS_OVERLAY_MARGIN.left;
+			margin.left = side;
+			margin.right = side;
+			return true;
+		},
 		title: "Settings",
-		footerHint: buildHint([
-			{ key: "Tab", verb: "switch lane" },
-			{ key: "Space", verb: "preview" },
-			{ key: "Enter", verb: "open" },
-		]),
+		footerHint: (innerWidth) =>
+			innerWidth < WIDE_LAYOUT_MIN_WIDTH
+				? buildHint(
+						[
+							{ key: "↑↓", verb: "move" },
+							{ key: "Enter", verb: "open" },
+							{ key: "/", verb: "filter" },
+						],
+						"back",
+					)
+				: buildHint(
+						[
+							{ key: "Tab", verb: "switch level" },
+							{ key: "Space", verb: "preview" },
+							{ key: "Enter", verb: "open" },
+							{ key: "/", verb: "filter" },
+						],
+						"back",
+					),
 	});
 	return Object.assign(handle, { refreshRows });
 }

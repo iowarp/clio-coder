@@ -1,6 +1,10 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
+import {
+	type ApplicationControllerDeps,
+	createApplicationController,
+} from "../../src/interactive/application-controller.js";
 import {
 	dispatchInteractiveAction,
 	isEscapeKey,
@@ -103,6 +107,42 @@ function makeDeps(): {
 }
 
 const neverMatches = () => false;
+
+/** A controller wired to nothing but the routing seam under test. */
+function applicationDeps(overrides: Partial<ApplicationControllerDeps>): ApplicationControllerDeps {
+	const noop = (): void => undefined;
+	return {
+		clock: { now: () => 1_000 },
+		signals: { takeInterruptOwnership: () => noop, on: noop, off: noop },
+		intervals: { setInterval: () => ({ unref: noop }), clearInterval: noop },
+		intervalsToClear: [],
+		leaderKeys: { isPending: () => false, route: () => false, reset: noop, dispose: noop },
+		getOverlayState: () => "closed",
+		routeOverlayKey: () => false,
+		matchesAction: () => false,
+		dispatchAction: () => false,
+		cancelActiveEditorBash: () => false,
+		isStreaming: () => false,
+		cancelActiveRun: noop,
+		getEditorText: () => "",
+		clearEditor: noop,
+		requestRender: noop,
+		closeOverlay: noop,
+		listNotifications: () => [],
+		dismissNotification: noop,
+		dismissAllNotifications: noop,
+		toggleLastToolExpanded: () => false,
+		toggleAllToolsExpanded: () => false,
+		toggleLastThinking: () => false,
+		toggleAllThinking: () => false,
+		shutdownDisposers: [],
+		stopUi: noop,
+		cancelParkedCalls: noop,
+		onShutdown: () => Promise.resolve(),
+		reportShutdownFailure: noop,
+		...overrides,
+	};
+}
 
 describe("modal precedence", () => {
 	it("keeps every open overlay ahead of the editor and active run", () => {
@@ -233,13 +273,45 @@ describe("list-overlay key routing", () => {
 			"cost",
 			"context-view",
 			"model",
-			"settings",
 			"message-picker",
 		] satisfies ReadonlyArray<OverlayState>) {
 			const { deps, closed } = makeDeps();
 			strictEqual(routeOverlayKey(KITTY_ESC, state, deps, neverMatches), true, state);
 			strictEqual(closed(), 1, state);
 		}
+	});
+
+	/**
+	 * Settings is component-owned for Esc. The router used to close the overlay
+	 * on every encoding, so a cancelled picker and a finished visit were the same
+	 * key, and SettingsCenter's own back reducer never saw the press. Direct
+	 * component tests missed it because they bypass this router.
+	 */
+	it("forwards every Escape encoding to the Settings component instead of closing", () => {
+		for (const key of [ESC, KITTY_ESC, MODIFY_OTHER_ESC, KITTY_ESC_RELEASE, "\x1b[A", "j", "/"]) {
+			const { deps, closed } = makeDeps();
+			strictEqual(routeOverlayKey(key, "settings", deps, neverMatches), false, JSON.stringify(key));
+			strictEqual(closed(), 0, "the router never closes Settings");
+		}
+	});
+
+	it("leaves an unconsumed Settings Escape for the focused overlay frame", () => {
+		const routed: string[] = [];
+		const { deps: overlayDeps, closed } = makeDeps();
+		const controller = createApplicationController(
+			applicationDeps({
+				getOverlayState: () => "settings",
+				routeOverlayKey: (data) => {
+					routed.push(data);
+					return routeOverlayKey(data, "settings", overlayDeps, neverMatches);
+				},
+			}),
+		);
+		strictEqual(controller.handleInput(ESC), undefined, "the application must not consume a Settings Esc");
+		strictEqual(controller.handleInput(KITTY_ESC), undefined);
+		deepStrictEqual(routed, [ESC, KITTY_ESC]);
+		strictEqual(closed(), 0);
+		void controller.shutdown();
 	});
 
 	it("routes dispatch-board navigation, steer, and cancel actions", () => {

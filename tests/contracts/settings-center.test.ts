@@ -10,7 +10,13 @@ import type {
 	TargetHealth,
 	TargetStatus,
 } from "../../src/domains/providers/index.js";
-import type { Component, OverlayHandle, TUI } from "../../src/engine/tui.js";
+import {
+	type Component,
+	type OverlayHandle,
+	type OverlayOptions,
+	type TUI,
+	visibleWidth,
+} from "../../src/engine/tui.js";
 import {
 	applySettingChange,
 	buildSettingItems,
@@ -27,6 +33,9 @@ import {
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
+const KITTY_ESC = `${ESC}[27u`;
+const KITTY_ESC_RELEASE = `${ESC}[27;1:3u`;
+const MODIFY_OTHER_ESC = `${ESC}[27;1;27~`;
 const ENTER = "\r";
 const DOWN = `${ESC}[B`;
 const SGR_PATTERN = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
@@ -180,8 +189,25 @@ function spyingSettingsCenter(bodyHeight: number): {
 	return { center, commits };
 }
 
-function fakeTui(rows: number, columns: number): { tui: TUI; captured: () => Component | null; renders: () => number } {
+/** Open the filter editor, type a query, and commit it. */
+function applyFilter(center: SettingsCenter, query: string): void {
+	center.handleInput("/");
+	for (let index = 0; index < 64; index += 1) center.handleInput("\x7f");
+	for (const character of query) center.handleInput(character);
+	center.handleInput(ENTER);
+}
+
+function fakeTui(
+	rows: number,
+	columns: number,
+): {
+	tui: TUI;
+	captured: () => Component | null;
+	options: () => OverlayOptions | null;
+	renders: () => number;
+} {
 	let overlay: Component | null = null;
+	let overlayOptions: OverlayOptions | null = null;
 	let renderCount = 0;
 	const handle: OverlayHandle = {
 		hide: () => undefined,
@@ -196,12 +222,13 @@ function fakeTui(rows: number, columns: number): { tui: TUI; captured: () => Com
 		requestRender: () => {
 			renderCount += 1;
 		},
-		showOverlay: (component: Component) => {
+		showOverlay: (component: Component, options?: OverlayOptions) => {
 			overlay = component;
+			overlayOptions = options ?? null;
 			return handle;
 		},
 	} as unknown as TUI;
-	return { tui, captured: () => overlay, renders: () => renderCount };
+	return { tui, captured: () => overlay, options: () => overlayOptions, renders: () => renderCount };
 }
 
 describe("contracts/settings center", () => {
@@ -884,14 +911,15 @@ describe("contracts/settings center", () => {
 		ok(rendered.includes("│"), "an 80-column terminal gets the two-lane layout");
 	});
 
-	it("renders a stacked center below the two-lane floor (76-column terminal)", () => {
+	it("drills down instead of flattening below the two-lane floor (76-column terminal)", () => {
 		const center = noopSettingsCenter(16);
 		const lines = center.render(68);
 		const rendered = stripAnsi(lines.join("\n"));
 		strictEqual(lines.length, 16);
-		ok(rendered.includes("Autonomy"));
+		ok(rendered.includes("Settings › Autonomy & Safety"), rendered);
 		ok(rendered.includes("Autonomy level"));
 		ok(!rendered.includes("│"), "narrow layout should not include the lane divider");
+		ok(!rendered.includes("Max retries"), "another section's rows must not share the page");
 	});
 
 	it("stays legible on an extremely narrow terminal by dropping the path column", () => {
@@ -906,6 +934,413 @@ describe("contracts/settings center", () => {
 		const center = noopSettingsCenter(6);
 		strictEqual(center.render(100).length, 6);
 		strictEqual(center.render(40).length, 6);
+	});
+
+	it("picks one layout per width and never renders two stack levels at once", () => {
+		for (const { width, dividers, narrow } of [
+			{ width: 40, dividers: 0, narrow: true },
+			{ width: 71, dividers: 0, narrow: true },
+			{ width: 72, dividers: 1, narrow: false },
+			{ width: 111, dividers: 1, narrow: false },
+			{ width: 112, dividers: 2, narrow: false },
+			{ width: 160, dividers: 2, narrow: false },
+		]) {
+			const center = noopSettingsCenter(26);
+			const lines = center.render(width);
+			strictEqual(lines.length, 26, `${width} keeps the body budget`);
+			const first = stripAnsi(lines[0] ?? "");
+			strictEqual(first.split("│").length - 1, dividers, `${width} lane dividers:\n${first}`);
+			const rendered = stripAnsi(lines.join("\n"));
+			if (!narrow) {
+				ok(rendered.includes("Sections"), `${width} keeps the section lane`);
+				continue;
+			}
+			ok(rendered.includes("Settings › Autonomy & Safety"), `${width} breadcrumb:\n${rendered}`);
+			ok(rendered.includes("Autonomy level"), `${width} rows page`);
+			ok(!rendered.includes("Compaction threshold"), `${width} must not flatten other sections`);
+			center.handleInput(ESC);
+			const sectionsPage = stripAnsi(center.render(width).join("\n"));
+			ok(sectionsPage.includes("Settings › Sections"), sectionsPage);
+			ok(sectionsPage.includes("Autonomy & Safety") && sectionsPage.includes("CORE"), sectionsPage);
+			ok(!sectionsPage.includes("Autonomy level"), `${width} section list must carry no setting rows`);
+		}
+	});
+
+	it("moves sections to rows on Enter or Right and keeps narrow row motion inside the section", () => {
+		const center = noopSettingsCenter(20);
+		center.render(40);
+		center.handleInput(ESC); // rows → sections
+		strictEqual(center.getSelection().depth, "sections");
+		center.handleInput(ENTER);
+		strictEqual(center.getSelection().depth, "rows");
+		center.handleInput(ESC);
+		center.handleInput(`${ESC}[C`); // right
+		strictEqual(center.getSelection().depth, "rows");
+
+		center.setSelection("fleet", 0);
+		const visited: string[] = [];
+		for (let index = 0; index < 24; index += 1) {
+			const selection = center.getSelection();
+			strictEqual(selection.section, "fleet", "narrow row motion stays in the opened section");
+			ok(!String(selection.rowId).startsWith("fleet.group."), "group headers are never a stop");
+			visited.push(String(selection.rowId));
+			center.handleInput("j");
+		}
+		ok(new Set(visited).size > 1, "rows cycle within the section");
+	});
+
+	it("gives a narrow detail page the whole work area and leaves read-only leaves inert", () => {
+		const center = noopSettingsCenter(20);
+		center.setSelection("targets", 0);
+		strictEqual(center.getSelection().rowId, "targets.target-a");
+		center.handleInput(ENTER);
+		strictEqual(center.getSelection().depth, "detail");
+		const detail = stripAnsi(center.render(40).join("\n"));
+		ok(detail.includes("Settings › Targets › target-a"), detail);
+		ok(detail.includes("Remove target"), detail);
+		ok(!detail.includes("Autonomy level"), "the catalog must not render behind the detail page");
+
+		center.handleInput(ESC);
+		center.setSelection("terminal", 2); // theme, read-only
+		strictEqual(center.getSelection().rowId, "theme");
+		center.handleInput(ENTER);
+		strictEqual(center.getSelection().depth, "rows", "a read-only leaf opens nothing");
+	});
+
+	it("keeps the narrow inspector inside its height budget and gives the rest to the list", () => {
+		for (const { bodyHeight, inspectorRows } of [
+			{ bodyHeight: 20, inspectorRows: 2 },
+			{ bodyHeight: 12, inspectorRows: 1 },
+			{ bodyHeight: 8, inspectorRows: 0 },
+		]) {
+			const center = noopSettingsCenter(bodyHeight);
+			const lines = center.render(40).map(stripAnsi);
+			strictEqual(lines.length, bodyHeight);
+			const prose = lines.filter((line) => line.includes("How freely Clio acts") || line.includes("safety net"));
+			ok(prose.length <= inspectorRows, `${bodyHeight} rows kept ${prose.length} inspector rows:\n${lines.join("\n")}`);
+			const rows = lines.filter((line) => line.includes("❯") || line.includes("Autonomy level"));
+			ok(rows.length > 0, "the list keeps the rest of the body");
+		}
+	});
+
+	it("caps the two-lane footer so the list keeps its rows", () => {
+		for (const { bodyHeight, footerMax } of [
+			{ bodyHeight: 26, footerMax: 4 },
+			{ bodyHeight: 8, footerMax: 2 },
+			{ bodyHeight: 6, footerMax: 0 },
+		]) {
+			const center = noopSettingsCenter(bodyHeight);
+			const lines = center.render(100).map(stripAnsi);
+			strictEqual(lines.length, bodyHeight);
+			const footerStart = lines.findIndex((line) => !line.includes("│"));
+			const footerRows = footerStart < 0 ? 0 : lines.length - footerStart;
+			ok(footerRows <= footerMax, `${bodyHeight} rows spent ${footerRows} footer rows:\n${lines.join("\n")}`);
+			const listRows = footerStart < 0 ? lines.length : footerStart;
+			ok(listRows >= Math.min(6, bodyHeight), `${bodyHeight} rows left ${listRows} list rows`);
+		}
+	});
+
+	it("suppresses the ordinary inspector while a detail page is open at every width", () => {
+		for (const width of [40, 72, 112, 160]) {
+			const center = noopSettingsCenter(26);
+			center.setSelection("safety", 0);
+			center.handleInput(ENTER);
+			const rendered = stripAnsi(center.render(width).join("\n"));
+			ok(rendered.includes("Select Autonomy level"), `${width}:\n${rendered}`);
+			ok(!rendered.includes(SCOPE_NOTE), `${width} still rendered the row footer:\n${rendered}`);
+		}
+	});
+
+	it("walks Esc up exactly one level from every submenu kind, at 40 and 160 inner columns", () => {
+		const submenus: Array<{ name: string; section: Parameters<SettingsCenter["setSelection"]>[0]; row: number }> = [
+			{ name: "enum picker", section: "safety", row: 0 },
+			{ name: "text editor", section: "advanced", row: 0 },
+			{ name: "number editor", section: "budget", row: 0 },
+			{ name: "target actions", section: "targets", row: 0 },
+			{ name: "profile workbench", section: "fleet", row: 4 },
+		];
+		for (const width of [40, 160]) {
+			for (const submenu of submenus) {
+				const settings = settingsWithTargets();
+				const commits: Commit[] = [];
+				let closed = 0;
+				const center = new SettingsCenter(buildSettingItems(settings), {
+					getBodyHeight: () => 24,
+					prepareChange: (item, value) => createSettingsChangePlan(settings, item, value),
+					onApply: (plan, scope) => commits.push({ id: plan.rowId, value: plan.selectedValue, scope }),
+					onCancel: () => {
+						closed += 1;
+					},
+				});
+				center.setSelection(submenu.section, submenu.row);
+				const rowId = center.getSelection().rowId;
+				center.handleInput(ENTER);
+				strictEqual(center.getSelection().depth, "detail", `${submenu.name} at ${width} opens a detail page`);
+				center.render(width);
+
+				center.handleInput(ESC);
+				strictEqual(center.getSelection().depth, "rows", `${submenu.name} at ${width}: first Esc returns to the row`);
+				strictEqual(center.getSelection().rowId, rowId, "the originating row keeps the cursor");
+				strictEqual(closed, 0);
+
+				center.handleInput(ESC);
+				strictEqual(center.getSelection().depth, "sections", `${submenu.name} at ${width}: second Esc reaches sections`);
+				strictEqual(closed, 0);
+
+				center.handleInput(ESC);
+				strictEqual(closed, 1, `${submenu.name} at ${width}: third Esc closes exactly once`);
+				deepStrictEqual(commits, [], `${submenu.name} cancelled without mutation`);
+				deepStrictEqual(settings, settingsWithTargets(), `${submenu.name} left settings untouched`);
+			}
+		}
+	});
+
+	it("treats the destination prompt as one more level and cancels it without committing", () => {
+		const { center, commits } = spyingSettingsCenter(24);
+		center.setSelection("safety", 0);
+		center.handleInput(ENTER); // value picker
+		center.handleInput(DOWN);
+		center.handleInput(ENTER); // destination prompt
+		strictEqual(center.getSelection().depth, "detail");
+		center.handleInput(ESC);
+		strictEqual(center.getSelection().depth, "rows", "cancelling the destination returns to the row");
+		deepStrictEqual(commits, []);
+	});
+
+	it("accepts every Escape encoding, ignores releases, and drops a pending preview on the way out", () => {
+		for (const escapeKey of [ESC, KITTY_ESC, MODIFY_OTHER_ESC]) {
+			const { center, commits } = spyingSettingsCenter(24);
+			center.setSelection("safety", 0);
+			center.handleInput(" "); // preview full-auto
+			ok(stripAnsi(center.render(112).join("\n")).includes("full-auto"));
+			center.handleInput(KITTY_ESC_RELEASE);
+			strictEqual(center.getSelection().depth, "rows", "a key release is not a press");
+			center.handleInput(escapeKey);
+			strictEqual(center.getSelection().depth, "sections", "one Esc leaves the row context");
+			const afterBack = stripAnsi(center.render(112).join("\n"));
+			ok(!afterBack.includes("❯ Autonomy level  autonomy  ⊙ full-auto"), afterBack);
+			deepStrictEqual(commits, [], "an abandoned preview never commits");
+		}
+	});
+
+	it("drives the whole back chain through the framed overlay without closing early", () => {
+		for (const columns of [44, 164]) {
+			let closes = 0;
+			const fake = fakeTui(24, columns);
+			openSettingsOverlay(fake.tui, {
+				getSettings: settingsWithTargets,
+				writeSettings: () => undefined,
+				onClose: () => {
+					closes += 1;
+				},
+			});
+			const overlay = fake.captured();
+			ok(overlay);
+			overlay.handleInput?.(ENTER); // autonomy picker
+			overlay.handleInput?.(ESC);
+			strictEqual(closes, 0, `${columns}: the picker Esc stayed inside Settings`);
+			overlay.handleInput?.(ESC);
+			strictEqual(closes, 0, `${columns}: the rows Esc stayed inside Settings`);
+			overlay.handleInput?.(ESC);
+			strictEqual(closes, 1, `${columns}: the sections Esc closed once`);
+		}
+	});
+
+	it("filters the catalog by label, path, and description across widths", () => {
+		for (const width of [40, 71, 72, 160]) {
+			const center = noopSettingsCenter(24);
+			applyFilter(center, "trustproject"); // configPath only; the path column is dropped at 40
+			let rendered = stripAnsi(center.render(width).join("\n"));
+			ok(rendered.includes("Trust project"), `${width} path match:\n${rendered}`);
+			ok(!rendered.includes("Autonomy level"), `${width} kept a non-match:\n${rendered}`);
+
+			applyFilter(center, "masks stale"); // description only
+			rendered = stripAnsi(center.render(width).join("\n"));
+			ok(rendered.includes("Compaction thresh"), `${width} description match:\n${rendered}`);
+
+			applyFilter(center, "MAX RETRIES"); // case-insensitive label
+			rendered = stripAnsi(center.render(width).join("\n"));
+			ok(rendered.includes("Max retries"), `${width} case-insensitive match:\n${rendered}`);
+
+			applyFilter(center, "zzzznotasetting");
+			rendered = stripAnsi(center.render(width).join("\n"));
+			ok(rendered.includes("No settings match"), `${width} empty state:\n${rendered}`);
+			ok(rendered.includes("empty Enter clears"), rendered);
+		}
+	});
+
+	it("keeps section context, headers, and counts honest while filtering", () => {
+		const center = noopSettingsCenter(24);
+		applyFilter(center, "retry");
+		strictEqual(center.getSelection().filter, "retry");
+		center.handleInput(ESC); // sections page
+		const sections = stripAnsi(center.render(40).join("\n"));
+		ok(sections.includes("Retry"), sections);
+		ok(!sections.includes("Compaction"), `a section with no match must disappear:\n${sections}`);
+		ok(/Retry\s+\d/.test(sections), `filtered sections carry a match count:\n${sections}`);
+
+		center.setSelection("fleet", 0);
+		applyFilter(center, "profile");
+		const rows = stripAnsi(center.render(40).join("\n")).split("\n");
+		ok(
+			rows.some((line) => line.trim() === "Profiles"),
+			`the matching group header stays as context:\n${rows.join("\n")}`,
+		);
+		ok(!rows.some((line) => line.trim() === "Placement"), "a header with no matching row below it is dropped");
+		for (let index = 0; index < 6; index += 1) {
+			ok(!String(center.getSelection().rowId).startsWith("fleet.group."), "headers are never navigation stops");
+			center.handleInput("j");
+		}
+	});
+
+	it("keeps a committed filter across drilling and clears it on an empty submit", () => {
+		const center = noopSettingsCenter(24);
+		applyFilter(center, "retry");
+		center.setSelection("retry", 0);
+		center.handleInput(ENTER); // detail page for the matched row
+		strictEqual(center.getSelection().depth, "detail");
+		center.handleInput(ESC);
+		center.handleInput(ESC);
+		strictEqual(center.getSelection().filter, "retry", "inspecting a result must not change the result set");
+
+		applyFilter(center, "");
+		strictEqual(center.getSelection().filter, "");
+		ok(stripAnsi(center.render(40).join("\n")).includes("Autonomy"), "an empty submit restores the catalog");
+	});
+
+	it("restores the previous query when filter editing is cancelled", () => {
+		const center = noopSettingsCenter(24);
+		applyFilter(center, "retry");
+		center.handleInput("/");
+		for (const character of "xyz") center.handleInput(character);
+		ok(stripAnsi(center.render(40).join("\n")).includes("Filter settings: retryxyz"));
+		center.handleInput(ESC);
+		strictEqual(center.getSelection().filter, "retry", "Esc while editing restores the committed query");
+		strictEqual(center.getSelection().depth, "rows", "cancelling the editor is not a navigation level");
+	});
+
+	it("starts a reopened Settings overlay unfiltered", () => {
+		const first = noopSettingsCenter(24);
+		applyFilter(first, "retry");
+		strictEqual(first.getSelection().filter, "retry");
+		strictEqual(noopSettingsCenter(24).getSelection().filter, "", "a fresh instance carries no filter");
+	});
+
+	it("normalizes a filtered selection when a refresh removes the matching row", () => {
+		const settings = settingsWithTargets();
+		const items = buildSettingItems(settings);
+		const center = new SettingsCenter(items, {
+			getBodyHeight: () => 24,
+			prepareChange: () => null,
+			onApply: () => undefined,
+			onCancel: () => undefined,
+		});
+		applyFilter(center, "fast");
+		center.setSelection("fleet", 0);
+		strictEqual(center.getSelection().rowId, "workers.profiles.fast");
+		delete settings.workers.profiles.fast;
+		items.splice(0, items.length, ...buildSettingItems(settings));
+		center.refreshItems();
+		const rendered = stripAnsi(center.render(40).join("\n"));
+		ok(rendered.includes("No settings match") || center.getSelection().rowId !== "workers.profiles.fast", rendered);
+	});
+
+	it("carries section, row, filter, and depth across every resize boundary", () => {
+		for (const widths of [
+			[71, 72, 71],
+			[111, 112, 111],
+			[40, 160, 40],
+		]) {
+			const center = noopSettingsCenter(24);
+			applyFilter(center, "retry");
+			center.setSelection("retry", 1);
+			const before = center.getSelection();
+			for (const width of widths) center.render(width);
+			const after = center.getSelection();
+			strictEqual(after.section, before.section, `${widths.join("→")} kept the section`);
+			strictEqual(after.rowId, before.rowId, `${widths.join("→")} kept the row`);
+			strictEqual(after.filter, "retry", `${widths.join("→")} kept the filter`);
+			strictEqual(after.depth, before.depth, `${widths.join("→")} kept the depth`);
+		}
+	});
+
+	it("keeps an open submenu and its unsaved state alive across a resize, then unwinds one level at a time", () => {
+		for (const widths of [
+			[71, 72, 71],
+			[111, 112, 111],
+			[40, 160, 40],
+		]) {
+			const settings = settingsWithTargets();
+			let closed = 0;
+			const center = new SettingsCenter(buildSettingItems(settings), {
+				getBodyHeight: () => 24,
+				prepareChange: (item, value) => createSettingsChangePlan(settings, item, value),
+				onApply: () => undefined,
+				onCancel: () => {
+					closed += 1;
+				},
+			});
+			center.setSelection("advanced", 0); // identity, a text editor
+			center.handleInput(ENTER);
+			for (const character of "draft") center.handleInput(character);
+			for (const width of widths) {
+				const rendered = stripAnsi(center.render(width).join("\n"));
+				ok(rendered.includes("draft"), `${widths.join("→")} lost the unsaved text at ${width}:\n${rendered}`);
+				strictEqual(center.getSelection().depth, "detail", `${widths.join("→")} kept the submenu open at ${width}`);
+			}
+			center.handleInput(ESC);
+			strictEqual(center.getSelection().depth, "rows");
+			strictEqual(center.getSelection().rowId, "identity");
+			center.handleInput(ESC);
+			strictEqual(center.getSelection().depth, "sections");
+			center.handleInput(ESC);
+			strictEqual(closed, 1, `${widths.join("→")} closed exactly once`);
+		}
+	});
+
+	it("claims every terminal row it covers, with no side margin at ultra-narrow widths", () => {
+		for (const { columns, sideMargin } of [
+			{ columns: 40, sideMargin: 0 },
+			{ columns: 100, sideMargin: 2 },
+		]) {
+			const fake = fakeTui(24, columns);
+			openSettingsOverlay(fake.tui, {
+				getSettings: settingsWithTargets,
+				writeSettings: () => undefined,
+				onClose: () => undefined,
+			});
+			const options = fake.options();
+			ok(options?.visible);
+			options.visible(columns, 24);
+			const margin = options.margin as { left: number; right: number };
+			strictEqual(margin.left, sideMargin, `${columns} columns left margin`);
+			strictEqual(margin.right, sideMargin, `${columns} columns right margin`);
+
+			const overlay = fake.captured();
+			ok(overlay);
+			const inner = columns - sideMargin * 2;
+			for (const line of overlay.render(inner)) {
+				strictEqual(visibleWidth(line), inner, `every covered row is opaque: ${JSON.stringify(stripAnsi(line))}`);
+			}
+		}
+	});
+
+	it("keeps the way out on screen on short terminals at every width", () => {
+		for (const rows of [24, 12]) {
+			for (const columns of [40, 75, 76, 116, 164]) {
+				const fake = fakeTui(rows, columns);
+				openSettingsOverlay(fake.tui, {
+					getSettings: settingsWithTargets,
+					writeSettings: () => undefined,
+					onClose: () => undefined,
+				});
+				const overlay = fake.captured();
+				ok(overlay);
+				const lines = overlay.render(columns - 4).map(stripAnsi);
+				ok(lines.length <= rows, `${columns}x${rows} rendered ${lines.length} rows`);
+				ok(lines.at(-1)?.includes("Esc"), `${columns}x${rows} lost the frame hint:\n${lines.at(-1) ?? "(no rows)"}`);
+			}
+		}
 	});
 
 	it("Space previews a value; Enter opens a picker and an explicit destination commits it", () => {
@@ -1275,7 +1710,9 @@ describe("contracts/settings center", () => {
 			);
 			center.handleInput(ENTER);
 			center.handleInput(ENTER);
-			return stripAnsi(center.render(112).join("\n"));
+			// Two-lane width: wide enough for a clean title, narrow enough that the
+			// origin still has to give way to the destination.
+			return stripAnsi(center.render(72).join("\n"));
 		};
 
 		const cases = [
