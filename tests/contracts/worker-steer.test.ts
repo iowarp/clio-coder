@@ -1135,7 +1135,7 @@ describe("contracts/worker-steer", () => {
 				strictEqual(lastAssistantText(events), finalResult);
 				const repairs = result.messages.filter(
 					(message) =>
-						message.role === "user" &&
+						message.role === "toolResult" &&
 						Array.isArray(message.content) &&
 						message.content.some(
 							(block) => block.type === "text" && block.text.includes("did not satisfy this run's result contract"),
@@ -1149,7 +1149,7 @@ describe("contracts/worker-steer", () => {
 				ok(
 					result.messages.some(
 						(message) =>
-							message.role === "user" &&
+							message.role === "toolResult" &&
 							Array.isArray(message.content) &&
 							message.content.some((block) => block.type === "text" && block.text.includes("scout-17.md:1-1")),
 					),
@@ -1158,11 +1158,71 @@ describe("contracts/worker-steer", () => {
 				ok(
 					result.messages.some(
 						(message) =>
-							message.role === "user" &&
+							message.role === "toolResult" &&
 							Array.isArray(message.content) &&
 							message.content.some((block) => block.type === "text" && block.text.includes('"findings"')),
 					),
 					"the repair prompt quotes the exact terminal shape the validator accepts",
+				);
+			} finally {
+				unregister();
+				rmSync(scratch, { recursive: true, force: true });
+			}
+		});
+
+		it("appends the repair directive as a tool result, never as a user turn", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-result-contract-role-"));
+			const events: unknown[] = [];
+			const calls = Array.from({ length: 3 }, (_, index) => {
+				const path = join(scratch, `scout-${index}.md`);
+				writeFileSync(path, `evidence ${index}\n`);
+				return fauxToolCall("read", { path }, { id: `scout-role-${index}` });
+			});
+			const finalResult = JSON.stringify({
+				findings: [{ claim: "evidence 1 is present", path: "scout-1.md", line: 1 }],
+				needsSplit: false,
+				proposedSubtasks: [],
+			});
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage(calls, { stopReason: "toolUse" }),
+					fauxAssistantMessage("I have the complete picture. Let me compile the findings."),
+					fauxAssistantMessage(finalResult),
+				],
+				{
+					agentId: "scout",
+					budget: SCOUT_BUDGET,
+					task: "map one bounded area",
+					allowedTools: [ToolNames.Read],
+					autonomy: "read-only",
+					resultContract: { kind: "scout-report" },
+					cwd: scratch,
+				},
+			);
+			try {
+				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+				strictEqual(result.exitCode, 0);
+				const carriesRepair = (message: (typeof result.messages)[number]): boolean =>
+					"content" in message &&
+					Array.isArray(message.content) &&
+					message.content.some(
+						(block: unknown) =>
+							typeof block === "object" &&
+							block !== null &&
+							(block as { type?: unknown }).type === "text" &&
+							String((block as { text?: unknown }).text).includes("did not satisfy this run's result contract"),
+					);
+				const repairs = result.messages.filter(carriesRepair);
+				strictEqual(repairs.length, 1, "the run takes exactly one repair round");
+				// A `user` message moves the chat template's last-user index, which
+				// re-renders every earlier assistant turn and drops the prompt cache
+				// for the whole history. Measured on Nemotron: 11,352 tokens
+				// reprocessed as `user` against 407 as a tool result (issue #55).
+				strictEqual(repairs[0]?.role, "toolResult", "the repair is a history-append, not a new user turn");
+				strictEqual(
+					result.messages.filter((message) => message.role === "user" && carriesRepair(message)).length,
+					0,
+					"no repair directive reaches the model as a user turn",
 				);
 			} finally {
 				unregister();
@@ -1209,7 +1269,7 @@ describe("contracts/worker-steer", () => {
 				strictEqual(
 					result.messages.filter(
 						(message) =>
-							message.role === "user" &&
+							message.role === "toolResult" &&
 							Array.isArray(message.content) &&
 							message.content.some(
 								(block) => block.type === "text" && block.text.includes("did not satisfy this run's result contract"),
@@ -1258,7 +1318,7 @@ describe("contracts/worker-steer", () => {
 				strictEqual(
 					result.messages.filter(
 						(message) =>
-							message.role === "user" &&
+							message.role === "toolResult" &&
 							Array.isArray(message.content) &&
 							message.content.some(
 								(block) => block.type === "text" && block.text.includes("did not satisfy this run's result contract"),

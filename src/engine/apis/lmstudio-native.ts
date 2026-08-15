@@ -729,14 +729,20 @@ export function runStream(
 		api: model.api,
 		provider: model.provider,
 		model: model.id,
+		// `cacheRead` is deliberately absent. LM Studio reports no cached-token
+		// stat on either surface: the SDK's PredictionStats has no such field and
+		// its OpenAI-compat `usage` carries no `prompt_tokens_details`. Reporting 0
+		// reads as "measured no reuse" when the truth is "not measured", which is
+		// how #55 mistook a working prompt cache for a broken one. Undefined until
+		// a response actually carries the stat; consumers already treat it as
+		// optional.
 		usage: {
 			input: 0,
 			output: 0,
-			cacheRead: 0,
 			cacheWrite: 0,
 			totalTokens: 0,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
+		} as Usage,
 		stopReason: "stop",
 		timestamp: Date.now(),
 	};
@@ -1324,13 +1330,21 @@ export function runStream(
 			closeActiveThinking();
 			// Write usage before any throw so the error path (tool-extraction failure,
 			// post-result aborts) still surfaces real token counts to dispatch and the TUI.
-			output.usage.input = result.stats.promptTokensCount ?? 0;
+			// Probed off the raw stats rather than PredictionStatsLike: no LM Studio
+			// build ships a cached-token count today, so the field only exists for
+			// the runtime that starts sending one. Anything else stays undefined.
+			const reportedCache = asRecord(result.stats).cachedTokensCount;
+			const cacheRead = typeof reportedCache === "number" && reportedCache >= 0 ? reportedCache : undefined;
+			output.usage.input = Math.max(0, (result.stats.promptTokensCount ?? 0) - (cacheRead ?? 0));
 			output.usage.output = result.stats.predictedTokensCount ?? 0;
+			output.usage.cacheRead = cacheRead as number;
 			output.usage.totalTokens = result.stats.totalTokensCount ?? output.usage.input + output.usage.output;
 			if (reasoningTokensAccum > 0) {
 				(output.usage as Usage & { reasoningTokens?: number }).reasoningTokens = reasoningTokensAccum;
 			}
-			calculateEngineCost(model, output.usage);
+			// Costed against a numeric view: pi's cost math multiplies `cacheRead`
+			// directly, so handing it undefined would make every total NaN.
+			output.usage.cost = calculateEngineCost(model, { ...output.usage, cacheRead: cacheRead ?? 0 });
 			if (aborted) throw new Error("Request was aborted");
 			if (toolExtractionError) throw toolExtractionError;
 			const hadToolCall = output.content.some((block) => block.type === "toolCall");
