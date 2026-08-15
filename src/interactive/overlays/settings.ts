@@ -1,8 +1,17 @@
-import type { ClioSettings } from "../../core/config.js";
+import {
+	bindAgentProfileInSettings,
+	type ClioSettings,
+	removeFleetProfileFromSettings,
+	removeTargetFromSettings,
+	setFleetProfileInSettings,
+	useTargetInSettings,
+} from "../../core/config.js";
 import { DEFAULT_SETTINGS, THINKING_LEVELS } from "../../core/defaults.js";
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import {
+	isDispatchEligibleRuntime,
+	isOrchestratorEligibleRuntime,
 	type ProvidersContract,
 	resolveModelRuntimeCapabilitiesForProviders,
 	thinkingLevelChoiceLabel,
@@ -79,6 +88,7 @@ export const SETTINGS_SECTIONS = [
 	{ id: "safety", label: "Autonomy & Safety" },
 	{ id: "orchestrator", label: "Orchestrator" },
 	{ id: "fleet", label: "Fleet" },
+	{ id: "targets", label: "Targets" },
 	{ id: "models", label: "Models" },
 	{ id: "budget", label: "Budget" },
 	{ id: "compaction", label: "Compaction" },
@@ -93,6 +103,7 @@ const SETTINGS_SECTION_DESCRIPTIONS = {
 	safety: "How freely Clio acts, and how delegated agents' tools are governed.",
 	orchestrator: "Interactive chat routing and the optional proactive-memory model plane.",
 	fleet: "Defaults, profiles, and agent bindings applied to dispatched workers.",
+	targets: "Configured inference targets: which one chat and the fleet use, and whether each answers.",
 	models: "The /models picker, favorites, and Alt+J / Alt+K cycling.",
 	budget: "Cost ceiling, per-turn output budget, and worker concurrency.",
 	compaction: "When and how the context window is summarized under pressure.",
@@ -156,7 +167,12 @@ export const SETTINGS_LABELS_BY_ID = {
 	"delegation.agents": "Delegation agents",
 } as const;
 
-export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID;
+/** Entry rows (one per fleet profile field, agent binding, target) are keyed by the config path they edit. */
+type EntrySettingId = `workers.profiles.${string}` | `workers.agentBindings.${string}` | `targets.${string}`;
+export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID | EntrySettingId;
+const ENTRY_ROW_ID = /^(workers\.profiles|workers\.agentBindings|targets)(\.|$)/;
+const REMOVE_PROFILE_CHOICE = "(remove profile)";
+const UNBIND_CHOICE = "(unbind)";
 
 export const SETTINGS_SECTION_ROWS = {
 	safety: [
@@ -200,10 +216,10 @@ export const SETTINGS_SECTION_ROWS = {
 		"delegation.defaults.connectTimeoutMs",
 		"delegation.defaults.turnTimeoutMs",
 		"delegation.defaults.permissionTimeoutMs",
-		"targets",
 		"keybindings",
 		"delegation.agents",
 	],
+	targets: ["targets"],
 } as const satisfies Record<SettingsSectionId, readonly EditableSettingId[]>;
 
 const SETTINGS_DESCRIPTIONS_BY_ID = {
@@ -227,8 +243,8 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"workers.default.target": "Default /run target id.",
 	"workers.default.model": "Default /run wire model id.",
 	"workers.default.thinkingLevel": "Reasoning budget for dispatched workers.",
-	"workers.profiles": "Named target/model/thinking choices that native workers can use.",
-	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles.",
+	"workers.profiles": "Named target/model/thinking choices that native workers can use. Enter adds one.",
+	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles. Enter adds one.",
 	"workers.maxRetries": "Automatic retries for a retryable worker outcome.",
 	scope: "Alt+J and Alt+K model cycle set.",
 	"modelSelector.recentLimit": "How many recently used models /models remembers.",
@@ -253,7 +269,7 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"delegation.defaults.connectTimeoutMs": "How long to wait for a delegated agent to connect.",
 	"delegation.defaults.turnTimeoutMs": "How long a single delegated turn may run.",
 	"delegation.defaults.permissionTimeoutMs": "How long a delegated permission ask may wait.",
-	targets: "Inference targets available for chat and workers.",
+	targets: "Inference targets available for chat and workers. Add one with `clio-coder targets add`.",
 	keybindings: "Custom key overrides layered on the defaults.",
 	"delegation.agents": "External ACP agents available to /delegate.",
 } as const satisfies Record<EditableSettingId, string>;
@@ -272,7 +288,7 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 	"workers.onPermission":
 		"deny turns the ask into a tool denial and the run continues; fail stops the run as permission_required; escalate forwards the ask to you and falls back per workers.escalation on timeout.",
 	"workers.agentBindings":
-		"Use /fleet to bind base, custom, and shadow native agents such as scout, researcher, and provenance to profiles.",
+		"Bind base, custom, and shadow native agents such as scout, researcher, and provenance to profiles. ACP delegation agents cannot be bound.",
 	"delegation.defaults.toolGovernance":
 		"clio-policy gates the agent through Clio's safety net; agent-managed trusts the agent; deny-all blocks every tool.",
 	scope: "Comma-separated target or target/model refs. Alt+J / Alt+K step the chat target through this list.",
@@ -365,6 +381,8 @@ interface BuildSettingItemsOptions {
 	 * changing target, then picking model lists models for the new target.
 	 */
 	getSettings?: () => Readonly<ClioSettings>;
+	/** Re-derive rows after an action that changes what they show without a commit (a health probe). */
+	requestRefresh?: () => void;
 }
 
 export class SubmenuWrapper implements Component {
@@ -421,10 +439,7 @@ export function selectTargetSubmenu(providers: ProvidersContract): SettingSubmen
 			value: status.target.id,
 			label: `${status.target.id} (${status.target.url ?? "no url"})`,
 		}));
-		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
-		list.onSelect = (item) => done(item.value);
-		list.onCancel = () => done();
-		return new SubmenuWrapper("Select target", list);
+		return selectListSubmenu("Select target", items)(currentValue, done);
 	};
 }
 
@@ -438,10 +453,8 @@ function selectOptionalBackgroundTargetSubmenu(providers: ProvidersContract): Se
 				label: `${status.target.id} (${status.target.url ?? "no url"})`,
 			})),
 		];
-		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
-		list.onSelect = (item) => done(item.value);
-		list.onCancel = () => done();
-		return new SubmenuWrapper("Select memory target", list, undefined, "Unset keeps the zero-cost rules-only tier.");
+		const note = "Unset keeps the zero-cost rules-only tier.";
+		return selectListSubmenu("Select memory target", items, note)(_currentValue, done);
 	};
 }
 
@@ -457,10 +470,7 @@ export function selectModelSubmenu(
 			return textInputSubmenu("Type model name")(currentValue, done);
 		}
 		const items = models.map((m) => ({ value: m, label: m }));
-		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
-		list.onSelect = (item) => done(item.value);
-		list.onCancel = () => done();
-		return new SubmenuWrapper(`Select model for ${targetId}`, list);
+		return selectListSubmenu(`Select model for ${targetId}`, items)(currentValue, done);
 	};
 }
 
@@ -491,7 +501,89 @@ function editNumberSubmenu(title: string): SettingSubmenuBuilder {
 	};
 }
 
+function selectListSubmenu(
+	title: string,
+	items: ReadonlyArray<{ value: string; label: string }>,
+	note?: string,
+): SettingSubmenuBuilder {
+	return (_currentValue: string, done: (val?: string) => void) => {
+		const list = new SelectList([...items], Math.min(10, Math.max(1, items.length)), DEFAULT_SELECT_THEME);
+		list.onSelect = (item) => done(item.value);
+		list.onCancel = () => done();
+		return new SubmenuWrapper(title, list, undefined, note);
+	};
+}
+
+/** Two pickers in sequence joined into one committed value; Esc at either step cancels. */
+function chainSubmenus(
+	first: SettingSubmenuBuilder,
+	second: (firstValue: string) => SettingSubmenuBuilder,
+	join: (first: string, second: string) => string,
+): SettingSubmenuBuilder {
+	return (_currentValue: string, done: (val?: string) => void) => {
+		let active: Component = first("", (head) => {
+			const trimmed = head?.trim() ?? "";
+			if (!trimmed) return done();
+			active = second(trimmed)("", (tail) => done(tail?.trim() ? join(trimmed, tail.trim()) : undefined));
+		});
+		return {
+			render: (width: number) => active.render(width),
+			handleInput: (data: string) => active.handleInput?.(data),
+			invalidate: () => active.invalidate?.(),
+		};
+	};
+}
+
+/** Dispatch-eligible targets for a fleet profile; every configured target when no provider domain is wired. */
+function profileTargetChoices(
+	live: () => Readonly<ClioSettings>,
+	providers: ProvidersContract | undefined,
+): Array<{ value: string; label: string }> {
+	if (!providers) return live().targets.map((target) => ({ value: target.id, label: target.id }));
+	return providers
+		.list()
+		.filter((status) => status.runtime !== null && isDispatchEligibleRuntime(status.runtime))
+		.map((status) => ({ value: status.target.id, label: `${status.target.id} (${status.target.url ?? "no url"})` }));
+}
+
+function profileNameChoices(live: () => Readonly<ClioSettings>): Array<{ value: string; label: string }> {
+	const names = Object.keys(live().workers.profiles).sort();
+	return names.map((name) => ({ value: name, label: name }));
+}
+
+/** Per-target actions. A probe is not a settings change: it runs, then the rows refresh; only use/remove commit. */
+function targetActionsSubmenu(
+	targetId: string,
+	providers: ProvidersContract | undefined,
+	requestRefresh: (() => void) | undefined,
+): SettingSubmenuBuilder {
+	return (currentValue: string, done: (val?: string) => void) => {
+		const runtime = providers?.list().find((entry) => entry.target.id === targetId)?.runtime ?? null;
+		const chatEligible = !providers || (runtime !== null && isOrchestratorEligibleRuntime(runtime));
+		const items = [
+			...(chatEligible ? [{ value: "use", label: "Use for chat and fleet dispatch" }] : []),
+			...(providers ? [{ value: "probe", label: "Probe health now" }] : []),
+			{ value: "remove", label: "Remove target" },
+		];
+		const note = chatEligible ? undefined : "Not chat-eligible: its runtime is not HTTP/native.";
+		return selectListSubmenu(
+			`Target ${targetId}`,
+			items,
+			note,
+		)(currentValue, (value) => {
+			if (value !== "probe" || !providers) return done(value);
+			done();
+			void providers.probeTarget(targetId).then(
+				() => requestRefresh?.(),
+				() => requestRefresh?.(),
+			);
+		});
+	};
+}
+
 function sectionForSetting(id: EditableSettingId): SettingsSectionId {
+	if (id.startsWith("workers.profiles.") || id.startsWith("workers.agentBindings.")) return "fleet";
+	if (id.startsWith("targets.")) return "targets";
 	for (const section of SETTINGS_SECTIONS) {
 		if ((SETTINGS_SECTION_ROWS[section.id] as readonly EditableSettingId[]).includes(id)) return section.id;
 	}
@@ -522,13 +614,15 @@ function settingItem(
 		submenu?: SettingSubmenuBuilder;
 		affordance?: string;
 		readOnly?: boolean;
+		label?: string;
+		description?: string;
 	},
 ): SettingsCenterItem {
 	const item: SettingsCenterItem = {
 		id,
-		label: SETTINGS_LABELS_BY_ID[id],
+		label: options.label ?? SETTINGS_LABELS_BY_ID[id as keyof typeof SETTINGS_LABELS_BY_ID],
 		currentValue,
-		description: SETTINGS_DESCRIPTIONS_BY_ID[id],
+		description: options.description ?? SETTINGS_DESCRIPTIONS_BY_ID[id as keyof typeof SETTINGS_LABELS_BY_ID],
 		section: sectionForSetting(id),
 		configPath: id,
 		affordance: options.affordance ?? (options.values ? cycleAffordance(options.values) : "opens picker"),
@@ -597,6 +691,16 @@ export function buildSettingItems(
 	);
 	const profileCount = Object.keys(settings.workers.profiles ?? {}).length;
 	const bindingCount = Object.keys(settings.workers.agentBindings ?? {}).length;
+	const addProfileSubmenu = chainSubmenus(
+		textInputSubmenu("New profile name"),
+		() => selectListSubmenu("Select the profile's target", profileTargetChoices(live, options?.providers)),
+		(name, target) => `${name} -> ${target}`,
+	);
+	const addBindingSubmenu = chainSubmenus(
+		textInputSubmenu("Agent id to bind", "Native agents only, such as scout, researcher, or provenance."),
+		(agentId) => selectListSubmenu(`Select the profile for ${agentId}`, profileNameChoices(live)),
+		(agentId, profile) => `${agentId} -> ${profile}`,
+	);
 	const targetSubmenu = options?.providers ? selectTargetSubmenu(options.providers) : editTextSubmenu("Type target id");
 	const orchestratorModelSubmenu = options?.providers
 		? selectModelSubmenu(options.providers, () => live().orchestrator.target ?? undefined)
@@ -679,16 +783,23 @@ export function buildSettingItems(
 			values: workerThinking.values,
 		}),
 		settingItem("workers.profiles", profileCount > 0 ? `${profileCount} profile(s)` : "(none)", {
-			affordance: "manage in /fleet profiles",
-			readOnly: true,
+			submenu: addProfileSubmenu,
+			affordance: "Enter adds a profile",
 		}),
+		...fleetProfileRows(settings, live, options),
 		settingItem("workers.agentBindings", bindingCount > 0 ? `${bindingCount} binding(s)` : "(none)", {
-			affordance: "manage in /fleet bindings",
-			readOnly: true,
+			...(profileCount > 0 ? { submenu: addBindingSubmenu } : { readOnly: true }),
+			affordance: profileCount > 0 ? "Enter binds an agent" : "create a profile first",
 		}),
+		...agentBindingRows(settings, live),
 		settingItem("workers.maxRetries", String(settings.workers.maxRetries), {
 			values: ["0", "1", "2", "3", "5", "8"],
 		}),
+		settingItem("targets", settings.targets.length > 0 ? `${settings.targets.length} configured` : "(none)", {
+			affordance: "add with `clio-coder targets add`",
+			readOnly: true,
+		}),
+		...targetRows(settings, options),
 		settingItem("scope", scopeText, {
 			submenu: editTextSubmenu("Edit model cycle scope comma-separated list"),
 			affordance: "free text",
@@ -769,10 +880,6 @@ export function buildSettingItems(
 			submenu: editNumberSubmenu("Edit delegate permission timeout (ms)"),
 			affordance: "free text",
 		}),
-		settingItem("targets", settings.targets.length > 0 ? `${settings.targets.length} configured` : "(none)", {
-			affordance: "manage in /targets and /fleet",
-			readOnly: true,
-		}),
 		settingItem("keybindings", keybindingCount > 0 ? `${keybindingCount} override(s)` : "(defaults)", {
 			affordance: "edit settings.yaml",
 			readOnly: true,
@@ -782,6 +889,88 @@ export function buildSettingItems(
 			readOnly: true,
 		}),
 	];
+}
+
+function fleetProfileRows(
+	settings: Readonly<ClioSettings>,
+	live: () => Readonly<ClioSettings>,
+	options: BuildSettingItemsOptions | undefined,
+): SettingsCenterItem[] {
+	const providers = options?.providers;
+	return Object.entries(settings.workers.profiles)
+		.sort(([a], [b]) => a.localeCompare(b))
+		.flatMap(([name, profile]) => {
+			const thinking = thinkingChoices(providers, profile.target, profile.model, profile.thinkingLevel);
+			const targetSubmenu = selectListSubmenu(
+				`Target for profile ${name}`,
+				[...profileTargetChoices(live, providers), { value: REMOVE_PROFILE_CHOICE, label: REMOVE_PROFILE_CHOICE }],
+				"Changing the target rebases the model on that target's default. Removing the profile drops its agent bindings.",
+			);
+			const modelSubmenu = providers
+				? selectModelSubmenu(providers, () => live().workers.profiles[name]?.target ?? undefined)
+				: editTextSubmenu("Type model name");
+			return [
+				settingItem(`workers.profiles.${name}.target`, profile.target ?? "(unset)", {
+					label: `${name} · target`,
+					description: `Target that workers on profile ${name} dispatch to.`,
+					submenu: targetSubmenu,
+				}),
+				settingItem(`workers.profiles.${name}.model`, profile.model ?? "(unset)", {
+					label: `${name} · model`,
+					description: `Wire model id for profile ${name}.`,
+					submenu: modelSubmenu,
+					affordance: providers ? "opens picker" : "free text",
+				}),
+				settingItem(`workers.profiles.${name}.thinkingLevel`, thinking.display, {
+					label: `${name} · thinking`,
+					description: `Reasoning budget for profile ${name}.`,
+					values: thinking.values,
+				}),
+			];
+		});
+}
+
+function agentBindingRows(settings: Readonly<ClioSettings>, live: () => Readonly<ClioSettings>): SettingsCenterItem[] {
+	return Object.entries(settings.workers.agentBindings)
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([agentId, profileName]) => {
+			const missing = !settings.workers.profiles[profileName];
+			return settingItem(`workers.agentBindings.${agentId}`, profileName, {
+				label: `${agentId} · profile`,
+				description: missing
+					? `Agent ${agentId} is bound to profile ${profileName}, which does not exist; it dispatches on the fleet default until the profile is created.`
+					: `Profile agent ${agentId} dispatches with.`,
+				submenu: selectListSubmenu(`Profile for ${agentId}`, [
+					...profileNameChoices(live),
+					{ value: UNBIND_CHOICE, label: UNBIND_CHOICE },
+				]),
+			});
+		});
+}
+
+function targetRows(
+	settings: Readonly<ClioSettings>,
+	options: BuildSettingItemsOptions | undefined,
+): SettingsCenterItem[] {
+	const providers = options?.providers;
+	const statuses = new Map(providers?.list().map((status) => [status.target.id, status] as const) ?? []);
+	return settings.targets.map((target) => {
+		const status = statuses.get(target.id);
+		const roles = [
+			settings.orchestrator.target === target.id ? "chat" : null,
+			settings.workers.default.target === target.id ? "fleet" : null,
+			settings.background.target === target.id ? "memory" : null,
+		].filter((role) => role !== null);
+		const health = status?.health.status ?? "unknown";
+		// Roles lead: the value column shows about twelve cells at 120 columns.
+		const value = roles.length > 0 ? `${roles.join("+")} · ${health}` : health;
+		return settingItem(`targets.${target.id}`, value, {
+			label: target.id,
+			description: `${target.runtime} · ${target.url ?? "no url"} · default model ${target.defaultModel ?? "(none)"}${status?.health.lastError ? ` · ${status.health.lastError}` : ""}`,
+			submenu: targetActionsSubmenu(target.id, providers, options?.requestRefresh),
+			affordance: "Enter: use, probe, remove",
+		});
+	});
 }
 
 export function buildSettingsSections(items: readonly SettingsCenterItem[]): SettingsCenterSection[] {
@@ -794,6 +983,9 @@ export function buildSettingsSections(items: readonly SettingsCenterItem[]): Set
 
 function refreshSettingItemsInPlace(items: SettingsCenterItem[], next: readonly SettingsCenterItem[]): void {
 	const byId = new Map(next.map((item) => [item.id, item] as const));
+	// Entry rows come and go with their profiles, bindings, and targets; surviving row objects keep their identity.
+	const existing = new Map(items.map((item) => [item.id, item] as const));
+	items.splice(0, items.length, ...next.map((item) => existing.get(item.id) ?? item));
 	for (const item of items) {
 		const updated = byId.get(item.id);
 		if (!updated) continue;
@@ -836,6 +1028,7 @@ function applyPositiveInteger(value: string, set: (next: number) => void): void 
  * Pure mutation applied in place for Settings Center editable rows.
  */
 export function applySettingChange(settings: ClioSettings, id: string, value: string): void {
+	if (applyEntrySettingChange(settings, id, value)) return;
 	switch (id) {
 		case "autonomy":
 			if (value === "read-only" || value === "suggest" || value === "auto-edit" || value === "full-auto")
@@ -1029,9 +1222,82 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 	}
 }
 
+/** Per-entry rows route to the same mutations the `clio-coder targets` CLI applies. */
+function applyEntrySettingChange(settings: ClioSettings, id: string, value: string): boolean {
+	if (id === "workers.profiles" || id === "workers.agentBindings") {
+		// `name -> target` / `agent -> profile`: the encoding the chained add pickers produce.
+		const [head = "", tail = ""] = value.split(" -> ").map((part) => part.trim());
+		if (!head || !tail) return true;
+		if (id === "workers.profiles") setFleetProfileInSettings(settings, head, tail);
+		else bindAgentProfileInSettings(settings, head, tail);
+		return true;
+	}
+	if (id.startsWith("workers.profiles.")) {
+		const segments = id.split(".");
+		const field = segments.at(-1);
+		const name = segments.slice(2, -1).join(".");
+		const profile = settings.workers.profiles[name];
+		if (!profile) return true;
+		if (field === "target") {
+			if (value === REMOVE_PROFILE_CHOICE) removeFleetProfileFromSettings(settings, name);
+			else if (value !== profile.target) setFleetProfileInSettings(settings, name, value);
+		} else if (field === "model") {
+			profile.model = value === "(unset)" || value === "" ? null : value;
+		} else if (field === "thinkingLevel") {
+			profile.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? profile.thinkingLevel;
+		}
+		return true;
+	}
+	if (id.startsWith("workers.agentBindings.")) {
+		const agentId = id.slice("workers.agentBindings.".length);
+		if (value === UNBIND_CHOICE) delete settings.workers.agentBindings[agentId];
+		else bindAgentProfileInSettings(settings, agentId, value);
+		return true;
+	}
+	if (id.startsWith("targets.")) {
+		const targetId = id.slice("targets.".length);
+		if (value === "use") useTargetInSettings(settings, targetId);
+		else if (value === "remove") removeTargetFromSettings(settings, targetId);
+		return true;
+	}
+	return false;
+}
+
+/**
+ * The scoped commit persists one dotted leaf per call and an entry action can
+ * touch several (`use` moves chat and fleet routing; removing a profile drops
+ * its bindings), so diff the blobs. Profile objects and arrays are leaves.
+ */
+function changedLeafPaths(before: Readonly<ClioSettings>, after: Readonly<ClioSettings>): string[] {
+	const out: string[] = [];
+	const isRecord = (v: unknown): v is Record<string, unknown> =>
+		v !== null && typeof v === "object" && !Array.isArray(v);
+	const visit = (a: unknown, b: unknown, path: string): void => {
+		if (a === b) return;
+		const profileLeaf = path.startsWith("workers.profiles.") && path.split(".").length === 3;
+		if (!isRecord(a) || !isRecord(b) || profileLeaf) {
+			if (JSON.stringify(a) !== JSON.stringify(b)) out.push(path);
+			return;
+		}
+		for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+			visit(a[key], b[key], path ? `${path}.${key}` : key);
+		}
+	};
+	visit(before, after, "");
+	return out;
+}
+
 interface RowColumns {
 	label: number;
 	path: number;
+}
+
+/** When a change reaches the running system, in the vocabulary of the config-change classification. */
+function propagationFor(id: string): string | null {
+	if (RESTART_REQUIRED_IDS.has(id)) return "takes effect next session";
+	if (id.startsWith("targets.")) return "use: chat now, workers at the next dispatch · remove: next dispatch";
+	if (id.startsWith("workers.")) return "takes effect at the next dispatch";
+	return null;
 }
 
 function fixedLines(lines: readonly string[], width: number, height: number): string[] {
@@ -1583,6 +1849,8 @@ export class SettingsCenter implements Component {
 		}
 		const valueMeaning = item.valueHelp?.[item.currentValue];
 		if (!item.readOnly && valueMeaning) parts.push(theme.fg("muted", valueMeaning));
+		const propagation = propagationFor(item.id);
+		if (propagation) parts.push(theme.fg("dim", propagation));
 		return parts.join(theme.fg("frame", "  ·  "));
 	}
 
@@ -1661,16 +1929,19 @@ function settingsBodyHeight(tui: TUI): number {
 }
 
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): SettingsOverlayHandle {
-	const buildOptions: BuildSettingItemsOptions = { getSettings: deps.getSettings };
+	const buildOptions: BuildSettingItemsOptions = { getSettings: deps.getSettings, requestRefresh: () => refreshRows() };
 	if (deps.providers) buildOptions.providers = deps.providers;
 	const items = buildSettingItems(deps.getSettings(), buildOptions);
 	const center = new SettingsCenter(items, {
 		getBodyHeight: () => settingsBodyHeight(tui),
 		onCommit: (id: string, value: string, scope: "session" | "global") => {
-			const current = structuredClone(deps.getSettings());
+			const before = deps.getSettings();
+			const current = structuredClone(before);
 			applySettingChange(current, id, value);
-			if (deps.commitSetting) deps.commitSetting(id, current, scope);
-			else deps.writeSettings(current);
+			if (deps.commitSetting) {
+				const paths = ENTRY_ROW_ID.test(id) ? changedLeafPaths(before, current) : [id];
+				for (const path of paths) deps.commitSetting(path, current, scope);
+			} else deps.writeSettings(current);
 			deps.notice?.("success", formatSettingChangeNotice(id, value, scope), `settings:${id}`);
 			refreshRows();
 		},

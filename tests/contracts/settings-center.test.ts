@@ -18,6 +18,7 @@ import {
 
 const ESC = String.fromCharCode(27);
 const ENTER = "\r";
+const DOWN = `${ESC}[B`;
 const SGR_PATTERN = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
 const SCOPE_NOTE = "this session";
 
@@ -26,12 +27,15 @@ const READ_ONLY_IDS = new Set<EditableSettingId>([
 	"safetyNet",
 	"modelSelector.favorites",
 	"theme",
-	"workers.profiles",
-	"workers.agentBindings",
 	"targets",
 	"keybindings",
 	"delegation.agents",
 ]);
+
+/** The static knob rows; per-entry profile, binding, and target rows are checked separately. */
+function isStaticId(id: string): id is keyof typeof SETTINGS_LABELS_BY_ID {
+	return id in SETTINGS_LABELS_BY_ID;
+}
 
 function settingsWithTargets(): ClioSettings {
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -110,10 +114,7 @@ describe("contracts/settings center", () => {
 	it("partitions every knob into sections and keeps pointer rows read-only", () => {
 		const items = buildSettingItems(settingsWithTargets());
 		const expectedIds = SETTINGS_SECTIONS.flatMap((section) => [...SETTINGS_SECTION_ROWS[section.id]]);
-		deepStrictEqual(
-			items.map((item) => item.id),
-			expectedIds,
-		);
+		deepStrictEqual(items.map((item) => item.id).filter(isStaticId), expectedIds);
 
 		const sections = buildSettingsSections(items);
 		deepStrictEqual(
@@ -121,11 +122,9 @@ describe("contracts/settings center", () => {
 			SETTINGS_SECTIONS.map((section) => section.id),
 		);
 		for (const section of sections) {
-			deepStrictEqual(
-				section.items.map((item) => item.id),
-				[...SETTINGS_SECTION_ROWS[section.id]],
-			);
+			deepStrictEqual(section.items.map((item) => item.id).filter(isStaticId), [...SETTINGS_SECTION_ROWS[section.id]]);
 			for (const item of section.items) {
+				if (!isStaticId(item.id)) continue;
 				if (READ_ONLY_IDS.has(item.id)) {
 					ok(item.readOnly, `${item.id} must be read-only`);
 					ok(!item.values && !item.submenu, `${item.id} must not be editable`);
@@ -147,7 +146,11 @@ describe("contracts/settings center", () => {
 	});
 
 	it("keeps the human label to setting id mapping explicit", () => {
-		const labels = Object.fromEntries(buildSettingItems(settingsWithTargets()).map((item) => [item.id, item.label]));
+		const labels = Object.fromEntries(
+			buildSettingItems(settingsWithTargets())
+				.filter((item) => isStaticId(item.id))
+				.map((item) => [item.id, item.label]),
+		);
 		deepStrictEqual(labels, SETTINGS_LABELS_BY_ID);
 	});
 
@@ -485,7 +488,7 @@ describe("contracts/settings center", () => {
 
 		// Navigate to Retry → Max retries by driving keys through the frame.
 		overlay.handleInput?.("\t"); // sections lane
-		for (let i = 0; i < 6; i += 1) overlay.handleInput?.("j"); // safety→…→retry
+		for (let i = 0; i < 7; i += 1) overlay.handleInput?.("j"); // safety→…→targets→…→retry
 		overlay.handleInput?.("\t"); // rows lane
 		overlay.handleInput?.("j"); // → Max retries
 
@@ -566,5 +569,242 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(ENTER); // commit (session → writeSettings fallback)
 		overlay.handleInput?.(ENTER); // global → writeSettings
 		ok(writes >= 1, "edits persist through writeSettings when commitSetting is absent");
+	});
+	it("renders fleet profiles, agent bindings, and targets as per-entry rows in their sections", () => {
+		const settings = settingsWithTargets();
+		settings.workers.agentBindings.researcher = "missing";
+		const sections = new Map(buildSettingsSections(buildSettingItems(settings)).map((s) => [s.id, s.items]));
+		deepStrictEqual(
+			sections.get("fleet")?.map((item) => item.id),
+			[
+				"workers.default.target",
+				"workers.default.model",
+				"workers.default.thinkingLevel",
+				"workers.profiles",
+				"workers.profiles.fast.target",
+				"workers.profiles.fast.model",
+				"workers.profiles.fast.thinkingLevel",
+				"workers.agentBindings",
+				"workers.agentBindings.researcher",
+				"workers.agentBindings.scout",
+				"workers.maxRetries",
+			],
+		);
+		deepStrictEqual(
+			sections.get("targets")?.map((item) => item.id),
+			["targets", "targets.target-a", "targets.target-b"],
+		);
+		const byId = new Map(buildSettingItems(settings).map((item) => [item.id, item]));
+		strictEqual(byId.get("workers.profiles")?.currentValue, "1 profile(s)");
+		ok(byId.get("workers.profiles")?.submenu, "the profiles row adds a profile");
+		ok(byId.get("workers.agentBindings")?.submenu, "the bindings row binds an agent");
+		strictEqual(byId.get("workers.profiles.fast.target")?.currentValue, "target-b");
+		strictEqual(byId.get("workers.profiles.fast.model")?.currentValue, "model-b");
+		strictEqual(byId.get("workers.profiles.fast.thinkingLevel")?.currentValue, "off");
+		strictEqual(byId.get("workers.agentBindings.scout")?.currentValue, "fast");
+		ok(byId.get("workers.agentBindings.researcher")?.description.includes("does not exist"));
+		strictEqual(byId.get("targets.target-a")?.currentValue, "chat+fleet · unknown");
+		strictEqual(byId.get("targets.target-b")?.currentValue, "unknown");
+		ok(byId.get("targets")?.readOnly, "adding a target stays with `clio-coder targets add`");
+		for (const id of ["workers.profiles.fast.target", "workers.agentBindings.scout", "targets.target-a"]) {
+			const item = byId.get(id as EditableSettingId);
+			ok(item?.submenu, `${id} is editable`);
+			strictEqual(item?.configPath, id);
+		}
+	});
+
+	it("bindings cannot be added until a profile exists", () => {
+		const settings = settingsWithTargets();
+		settings.workers.profiles = {};
+		settings.workers.agentBindings = {};
+		const row = buildSettingItems(settings).find((item) => item.id === "workers.agentBindings");
+		ok(row?.readOnly);
+		strictEqual(row?.affordance, "create a profile first");
+	});
+
+	it("applies per-entry changes through the shared targets/fleet mutations", () => {
+		const cases: Array<{ id: string; value: string; assert: (settings: ClioSettings) => void }> = [
+			{
+				id: "workers.profiles",
+				value: "slow -> target-a",
+				assert: (s) =>
+					deepStrictEqual(s.workers.profiles.slow, { target: "target-a", model: "model-a", thinkingLevel: "off" }),
+			},
+			{
+				id: "workers.profiles.fast.target",
+				value: "target-a",
+				assert: (s) =>
+					deepStrictEqual(s.workers.profiles.fast, { target: "target-a", model: "model-a", thinkingLevel: "off" }),
+			},
+			{
+				id: "workers.profiles.fast.model",
+				value: "model-x",
+				assert: (s) => strictEqual(s.workers.profiles.fast?.model, "model-x"),
+			},
+			{
+				id: "workers.profiles.fast.thinkingLevel",
+				value: "high",
+				assert: (s) => strictEqual(s.workers.profiles.fast?.thinkingLevel, "high"),
+			},
+			{
+				id: "workers.profiles.fast.target",
+				value: "(remove profile)",
+				assert: (s) => {
+					strictEqual("fast" in s.workers.profiles, false);
+					strictEqual("scout" in s.workers.agentBindings, false, "bindings to the removed profile go with it");
+				},
+			},
+			{
+				id: "workers.agentBindings",
+				value: "researcher -> fast",
+				assert: (s) => strictEqual(s.workers.agentBindings.researcher, "fast"),
+			},
+			{
+				id: "workers.agentBindings.scout",
+				value: "(unbind)",
+				assert: (s) => strictEqual("scout" in s.workers.agentBindings, false),
+			},
+			{
+				id: "targets.target-b",
+				value: "use",
+				assert: (s) => {
+					strictEqual(s.orchestrator.target, "target-b");
+					strictEqual(s.orchestrator.model, "model-b");
+					strictEqual(s.workers.default.target, "target-b");
+					strictEqual(s.workers.default.model, "model-b");
+				},
+			},
+			{
+				id: "targets.target-a",
+				value: "remove",
+				assert: (s) => {
+					deepStrictEqual(
+						s.targets.map((t) => t.id),
+						["target-b"],
+					);
+					strictEqual(s.orchestrator.target, null);
+					strictEqual(s.workers.default.target, null);
+					deepStrictEqual(s.scope, ["target-b/model-b"]);
+				},
+			},
+		];
+		for (const testCase of cases) {
+			const settings = settingsWithTargets();
+			applySettingChange(settings, testCase.id, testCase.value);
+			testCase.assert(settings);
+		}
+		const settings = settingsWithTargets();
+		settings.delegation.agents = [
+			{ id: "acp-agent", command: "acp", args: [], env: {}, cwd: null, description: "" } as never,
+		];
+		applySettingChange(settings, "workers.agentBindings", "acp-agent -> fast");
+		strictEqual("acp-agent" in settings.workers.agentBindings, false, "ACP agents cannot be bound");
+	});
+
+	it("commits every leaf a per-entry action touches and refreshes the rows", () => {
+		const live = { current: settingsWithTargets() };
+		const fake = fakeTui(30, 120);
+		const calls: Array<{ id: string; scope: "session" | "global" }> = [];
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			commitSetting: (id, next, scope) => {
+				calls.push({ id, scope });
+				live.current = next;
+			},
+			section: "targets",
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay, "expected settings overlay component");
+		overlay.handleInput?.("j"); // targets.target-a
+		overlay.handleInput?.("j"); // targets.target-b
+		overlay.handleInput?.(ENTER); // actions
+		overlay.handleInput?.(ENTER); // use (first action)
+		overlay.handleInput?.(ESC); // session only
+		deepStrictEqual(calls.map((call) => call.id).sort(), [
+			"orchestrator.model",
+			"orchestrator.target",
+			"workers.default.model",
+			"workers.default.target",
+		]);
+		ok(calls.every((call) => call.scope === "session"));
+		const rendered = stripAnsi(overlay.render(120).join("\n"));
+		ok(rendered.includes("target-b"), rendered);
+		ok(rendered.includes("chat+fleet"), "the target row shows the roles it now serves");
+		ok(rendered.includes("next dispatch"), "propagation shows inline");
+	});
+
+	it("removing a profile through its row also drops its bindings on refresh", () => {
+		const live = { current: settingsWithTargets() };
+		const fake = fakeTui(30, 120);
+		const calls: string[] = [];
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			commitSetting: (id, next) => {
+				calls.push(id);
+				live.current = next;
+			},
+			section: "fleet",
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay, "expected settings overlay component");
+		for (let i = 0; i < 4; i += 1) overlay.handleInput?.("j"); // workers.profiles.fast.target
+		overlay.handleInput?.(ENTER); // target picker: target-a, target-b, (remove profile)
+		overlay.handleInput?.(DOWN);
+		overlay.handleInput?.(DOWN);
+		overlay.handleInput?.(ENTER); // (remove profile)
+		overlay.handleInput?.(ESC); // session only
+		deepStrictEqual(calls.sort(), ["workers.agentBindings.scout", "workers.profiles.fast"]);
+		const rendered = stripAnsi(overlay.render(120).join("\n"));
+		ok(!rendered.includes("fast · target"), rendered);
+		ok(rendered.includes("(none)"), "the profiles row is back to none");
+	});
+	it("adds a profile and a binding through the chained name-then-picker flows", () => {
+		const live = { current: settingsWithTargets() };
+		const fake = fakeTui(30, 120);
+		const calls: string[] = [];
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			commitSetting: (id, next) => {
+				calls.push(id);
+				live.current = next;
+			},
+			section: "fleet",
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay, "expected settings overlay component");
+		for (let i = 0; i < 3; i += 1) overlay.handleInput?.("j"); // workers.profiles
+		overlay.handleInput?.(ENTER); // name input, seeded empty rather than with the row's count
+		for (const ch of "slow") overlay.handleInput?.(ch);
+		overlay.handleInput?.(ENTER); // target picker
+		overlay.handleInput?.(ENTER); // target-a
+		overlay.handleInput?.(ESC); // session only
+		deepStrictEqual(calls, ["workers.profiles.slow"]);
+		deepStrictEqual(live.current.workers.profiles.slow, { target: "target-a", model: "model-a", thinkingLevel: "off" });
+		let rendered = stripAnsi(overlay.render(120).join("\n"));
+		ok(rendered.includes("slow · target"), rendered);
+
+		for (let i = 0; i < 7; i += 1) overlay.handleInput?.("j"); // past the fast and slow rows to workers.agentBindings
+		overlay.handleInput?.(ENTER); // agent id input
+		for (const ch of "researcher") overlay.handleInput?.(ch);
+		overlay.handleInput?.(ENTER); // profile picker: fast, slow
+		overlay.handleInput?.(DOWN);
+		overlay.handleInput?.(ENTER); // slow
+		overlay.handleInput?.(ESC);
+		deepStrictEqual(calls, ["workers.profiles.slow", "workers.agentBindings.researcher"]);
+		strictEqual(live.current.workers.agentBindings.researcher, "slow");
+		rendered = stripAnsi(overlay.render(120).join("\n"));
+		ok(rendered.includes("researcher · p"), rendered);
 	});
 });

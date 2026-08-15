@@ -21,6 +21,7 @@ import {
 	ACTIVE_ROUTING_ROLES,
 	DEFAULT_SETTINGS,
 	THINKING_LEVELS,
+	type ThinkingLevel,
 } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
@@ -1426,4 +1427,104 @@ export function updateSettings(mutate: SettingsMutator, options: SettingsUpdateO
 		persistSettings(revalidated.settings);
 		return revalidated.settings;
 	}, options);
+}
+
+/**
+ * Settings mutations shared by the `clio-coder targets …` CLI (inside
+ * updateSettings) and the settings overlay's Fleet and Targets rows (on the
+ * effective view, committed per leaf). Registry-backed eligibility checks stay with the caller.
+ */
+export interface UseTargetOptions {
+	model?: string;
+	orchestratorModel?: string;
+	workerModel?: string;
+	workerTargetId?: string;
+	backgroundModel?: string;
+}
+
+/** Route chat (and fleet dispatch, unless split) to `targetId`. Null when a named target is missing. */
+export function useTargetInSettings(
+	settings: ClioSettings,
+	targetId: string,
+	options: UseTargetOptions = {},
+): { workerTargetId: string } | null {
+	const target = settings.targets.find((entry) => entry.id === targetId);
+	if (!target) return null;
+	// A worker target of its own is the split topology; its model defaults to that node's own default.
+	const workerTarget =
+		options.workerTargetId !== undefined && options.workerTargetId !== target.id
+			? settings.targets.find((entry) => entry.id === options.workerTargetId)
+			: target;
+	if (!workerTarget) return null;
+	const sharedModel = options.model ?? target.defaultModel ?? null;
+	settings.orchestrator.target = target.id;
+	settings.orchestrator.model = options.orchestratorModel ?? sharedModel;
+	settings.workers.default.target = workerTarget.id;
+	settings.workers.default.model =
+		options.workerModel ?? (workerTarget === target ? sharedModel : (workerTarget.defaultModel ?? null));
+	if (options.backgroundModel !== undefined) {
+		settings.background.target = target.id;
+		settings.background.model = options.backgroundModel;
+	}
+	return { workerTargetId: workerTarget.id };
+}
+
+/** Drop a target and every routing field, profile, and scope entry that named it. */
+export function removeTargetFromSettings(settings: ClioSettings, id: string): boolean {
+	if (!settings.targets.some((entry) => entry.id === id)) return false;
+	settings.targets = settings.targets.filter((entry) => entry.id !== id);
+	if (settings.orchestrator.target === id) {
+		settings.orchestrator.target = null;
+		settings.orchestrator.model = null;
+	}
+	if (settings.background.target === id) {
+		settings.background.target = null;
+		settings.background.model = null;
+	}
+	if (settings.workers.default.target === id) {
+		settings.workers.default.target = null;
+		settings.workers.default.model = null;
+	}
+	for (const [name, profile] of Object.entries(settings.workers.profiles)) {
+		if (profile.target === id) delete settings.workers.profiles[name];
+	}
+	settings.scope = settings.scope.filter((entry) => entry.split("/")[0] !== id);
+	return true;
+}
+
+/** Create or repoint a fleet profile; the model rebases on the target default unless given. */
+export function setFleetProfileInSettings(
+	settings: ClioSettings,
+	name: string,
+	targetId: string,
+	options: { model?: string; thinkingLevel?: ThinkingLevel } = {},
+): boolean {
+	const target = settings.targets.find((entry) => entry.id === targetId);
+	if (!target) return false;
+	const existing = settings.workers.profiles[name];
+	settings.workers.profiles[name] = {
+		target: target.id,
+		model: options.model ?? target.defaultModel ?? null,
+		thinkingLevel: options.thinkingLevel ?? existing?.thinkingLevel ?? "off",
+	};
+	return true;
+}
+
+/** Remove a fleet profile and its agent bindings; returns how many bindings went with it. */
+export function removeFleetProfileFromSettings(settings: ClioSettings, name: string): number {
+	delete settings.workers.profiles[name];
+	let removedBindings = 0;
+	for (const [agentId, profileName] of Object.entries(settings.workers.agentBindings)) {
+		if (profileName !== name) continue;
+		delete settings.workers.agentBindings[agentId];
+		removedBindings += 1;
+	}
+	return removedBindings;
+}
+
+/** Bind a native agent to a profile. False for an ACP delegation agent, which ignores native routing. */
+export function bindAgentProfileInSettings(settings: ClioSettings, agentId: string, profileName: string): boolean {
+	if (settings.delegation.agents.some((agent) => agent.id === agentId)) return false;
+	settings.workers.agentBindings[agentId] = profileName;
+	return true;
 }
