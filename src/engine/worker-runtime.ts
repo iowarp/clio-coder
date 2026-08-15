@@ -418,7 +418,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// rejecting later siblings immediately. The runtime stops only after pi has
 	// emitted that call's tool-result message, so a slow tool is never aborted
 	// merely because its before_tool admission reached the agent boundary.
-	let stopAfterToolResultCallId: string | null = null;
+	// Unset (null) never matches. A call admitted without a provider id arms
+	// the explicit wildcard, which cannot collide with any real result id.
+	const STOP_AFTER_ANY_TOOL_RESULT = Symbol("stop-after-any-tool-result");
+	let stopAfterToolResultCallId: string | typeof STOP_AFTER_ANY_TOOL_RESULT | null = null;
 	const workerBudget = resolveWorkerRuntimeBudget(input);
 	const readReserve = input.allowedTools.includes(ToolNames.Read) ? workerBudget.readReserve : 0;
 	// The reserve ends discovery, not the run's own product. An agent that was
@@ -473,10 +476,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 								if (workerBoundFailure === null) {
 									workerBoundFailure = `worker agent budget reached (${workerBudget.toolCalls}); synthesis is disabled`;
 								}
-								// Native agent tool calls carry a stable provider id. The empty
-								// sentinel keeps even an invariant violation on the post-result
-								// path instead of reintroducing a before_tool abort.
-								stopAfterToolResultCallId = toolCallId ?? "";
+								// Native agent tool calls carry a stable provider id. The wildcard
+								// keeps even an invariant violation on the post-result path
+								// instead of reintroducing a before_tool abort.
+								stopAfterToolResultCallId = toolCallId ?? STOP_AFTER_ANY_TOOL_RESULT;
 							},
 						}
 					: {}),
@@ -714,7 +717,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			stopAfterToolResultCallId !== null &&
 			event.type === "message_end" &&
 			event.message.role === "toolResult" &&
-			(stopAfterToolResultCallId.length === 0 || event.message.toolCallId === stopAfterToolResultCallId)
+			(stopAfterToolResultCallId === STOP_AFTER_ANY_TOOL_RESULT || event.message.toolCallId === stopAfterToolResultCallId)
 		) {
 			stopAfterToolResultCallId = null;
 			workerBoundAborted = true;
