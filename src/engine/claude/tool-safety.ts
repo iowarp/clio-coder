@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import {
@@ -318,7 +319,7 @@ function finishDecision(decision: SafetyDecision): NonNullable<ToolFinishEvent["
 function emitToolFinish(
 	emit: (event: ClioWorkerEvent) => void,
 	mapped: MappedClaudeToolCall,
-	startedAt: number,
+	startedAtClock: number,
 	decision: SafetyDecision,
 	outcome: ToolFinishEvent["outcome"],
 	reason: string,
@@ -327,7 +328,7 @@ function emitToolFinish(
 	const event: ToolFinishEvent = {
 		tool: mapped.clioToolName,
 		posture: "operating",
-		durationMs: Date.now() - startedAt,
+		durationMs: Math.round(performance.now() - startedAtClock),
 		outcome,
 		actionClass: decision.classification.actionClass,
 		decision: finishDecision(decision),
@@ -344,7 +345,10 @@ function emitToolFinish(
 }
 
 export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermissionInput): ClaudeToolPermissionDecision {
+	// Wall read anchors the instant the start event carries; the monotonic twin
+	// spans the decision, so the duration survives a clock correction.
 	const startedAt = Date.now();
+	const startedAtClock = performance.now();
 	const decision = evaluateClaudeToolPermission(input);
 	const start: ToolStartEvent = {
 		tool: decision.mapped.clioToolName,
@@ -353,7 +357,15 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	};
 	input.emit({ type: "clio_tool_start", payload: start });
 	if (decision.kind === "allow") {
-		emitToolFinish(input.emit, decision.mapped, startedAt, decision.decision, "ok", decision.reason, decision.reasonCode);
+		emitToolFinish(
+			input.emit,
+			decision.mapped,
+			startedAtClock,
+			decision.decision,
+			"ok",
+			decision.reason,
+			decision.reasonCode,
+		);
 		return decision;
 	}
 	if (decision.permissionRequired) {
@@ -374,7 +386,7 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	emitToolFinish(
 		input.emit,
 		decision.mapped,
-		startedAt,
+		startedAtClock,
 		decision.decision,
 		"blocked",
 		decision.reason,

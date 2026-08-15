@@ -60,6 +60,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { createServer, get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { tsImport } from "tsx/esm/api";
 import { stringify } from "yaml";
 
@@ -997,7 +998,7 @@ function activeDispatchPrompt() {
 }
 
 async function probeActiveTarget() {
-	const started = Date.now();
+	const started = performance.now();
 	const reachable = await new Promise((resolvePromise) => {
 		const request = get(`${ACTIVE_URL}/v1/models`, { timeout: 5000 }, (response) => {
 			response.resume();
@@ -1009,7 +1010,7 @@ async function probeActiveTarget() {
 		});
 		request.on("error", () => resolvePromise(false));
 	});
-	return { reachable, durationMs: Math.max(0, Date.now() - started) };
+	return { reachable, durationMs: Math.round(performance.now() - started) };
 }
 
 async function seedActiveReadiness(calibration, count, probeDurationMs) {

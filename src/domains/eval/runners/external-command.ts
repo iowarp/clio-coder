@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { performance } from "node:perf_hooks";
 import {
 	addChaosObservations,
 	chaosMetricEntries,
@@ -139,7 +140,10 @@ export function runShellCommand(
 	timeoutMs: number,
 	env?: NodeJS.ProcessEnv,
 ): Promise<ShellCommandResult> {
-	const started = Date.now();
+	// `wallTimeMs` is published and compared across runs and machines, so it is
+	// measured on the monotonic clock: an NTP correction mid-suite would
+	// otherwise corrupt one row with no marker on it.
+	const started = performance.now();
 	return new Promise((resolve) => {
 		let stdout = "";
 		let stderr = "";
@@ -190,7 +194,7 @@ export function runShellCommand(
 				chaos: chaosFold.observation(),
 				fleetLoops: fleetLoopFold.observation(),
 				stderr,
-				wallTimeMs: Math.max(0, Date.now() - started),
+				wallTimeMs: Math.round(performance.now() - started),
 				timedOut,
 			});
 		};

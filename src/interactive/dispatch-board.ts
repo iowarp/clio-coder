@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import {
 	BusChannels,
 	type DispatchCompletedPayload,
@@ -6,6 +7,7 @@ import {
 	type DispatchRunIdentity,
 } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { rawDurationMs } from "../core/timers.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
 import {
@@ -128,6 +130,12 @@ interface DispatchBoardEntry
 	sequence: number;
 	enqueuedAtMs: number;
 	startedAtMs: number | null;
+	/**
+	 * The monotonic twin of `startedAtMs`, set from the same observation. TTFT
+	 * is a span, so it is measured against this and never against the wall
+	 * stamps, which exist to order and label rows.
+	 */
+	startedAtClockMs: number | null;
 	finishedAtMs: number | null;
 	durationMs: number | null;
 	lastContextTokens: number;
@@ -876,7 +884,7 @@ function resolveElapsedMs(entry: DispatchBoardEntry, now: number): number {
 	const startedAtMs = entry.startedAtMs ?? entry.enqueuedAtMs;
 	if (entry.durationMs !== null) return entry.durationMs;
 	const endMs = entry.finishedAtMs ?? now;
-	return Math.max(0, endMs - startedAtMs);
+	return Math.max(0, rawDurationMs(startedAtMs, endMs));
 }
 
 function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
@@ -985,6 +993,7 @@ export function createDispatchBoardStore(
 			sequence: previous?.sequence ?? nextSequence++,
 			enqueuedAtMs: previous?.enqueuedAtMs ?? now,
 			startedAtMs: previous?.startedAtMs ?? null,
+			startedAtClockMs: previous?.startedAtClockMs ?? null,
 			finishedAtMs: previous?.finishedAtMs ?? null,
 			durationMs: previous?.durationMs ?? null,
 			inputTokens: previous?.inputTokens ?? 0,
@@ -1017,6 +1026,7 @@ export function createDispatchBoardStore(
 			const entry = upsertBase(raw ?? {}, "running", now);
 			if (!entry) return;
 			entry.startedAtMs ??= now;
+			entry.startedAtClockMs ??= performance.now();
 			entry.finishedAtMs = null;
 			entry.durationMs = null;
 			delete entry.retry;
@@ -1028,7 +1038,7 @@ export function createDispatchBoardStore(
 			if (!entry) return;
 			entry.startedAtMs ??= entry.enqueuedAtMs;
 			entry.finishedAtMs = now;
-			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, now - entry.startedAtMs));
+			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, rawDurationMs(entry.startedAtMs, now)));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
 			entry.costProvenance = payload.costProvenance ?? "unknown";
@@ -1056,7 +1066,7 @@ export function createDispatchBoardStore(
 			if (!entry) return;
 			entry.startedAtMs ??= entry.enqueuedAtMs;
 			entry.finishedAtMs = now;
-			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, now - entry.startedAtMs));
+			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, rawDurationMs(entry.startedAtMs, now)));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
 			entry.costProvenance = payload.costProvenance ?? "unknown";
@@ -1124,6 +1134,7 @@ export function createDispatchBoardStore(
 			}
 			if (type === "agent_start") {
 				entry.startedAtMs = Date.now();
+				entry.startedAtClockMs = performance.now();
 			}
 			if (type === "message_update") {
 				const assistantEvent =
@@ -1137,8 +1148,8 @@ export function createDispatchBoardStore(
 					assistantEvent.type === "thinking_delta" ||
 					assistantEvent.type === "toolcall_start" ||
 					assistantEvent.type === "toolcall_delta";
-				if (hasDelta && entry.ttftMs === null && entry.startedAtMs !== null) {
-					entry.ttftMs = Date.now() - entry.startedAtMs;
+				if (hasDelta && entry.ttftMs === null && entry.startedAtClockMs !== null) {
+					entry.ttftMs = Math.round(performance.now() - entry.startedAtClockMs);
 				}
 			}
 			if (type === "clio_tool_start") {

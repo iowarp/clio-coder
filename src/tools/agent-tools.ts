@@ -16,6 +16,7 @@
  * validates first and then funnels into the same shared executor as the loop.
  */
 
+import { performance } from "node:perf_hooks";
 import type { TSchema } from "typebox";
 import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
@@ -44,6 +45,12 @@ export type ToolOutcome = "ok" | "error" | "blocked";
 export interface ToolStartEvent {
 	tool: string;
 	posture: "operating";
+	/**
+	 * Wall-clock anchor for the instant the call began, for a human correlating
+	 * it against other records. It is stamped by whichever process ran the tool,
+	 * so it is never an endpoint for a span: `durationMs` on the matching finish
+	 * event is measured on that process's monotonic clock instead.
+	 */
 	startedAt: number;
 }
 
@@ -104,7 +111,10 @@ interface RunValidatedToolCallInput {
 
 async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<WorkerAgentToolResult> {
 	const { spec, args, registry, signal, telemetry } = input;
+	// Wall read anchors the instant the start event carries; the monotonic twin
+	// spans the call, so `durationMs` survives a clock correction mid-tool.
 	const startedAt = Date.now();
+	const startedAtClock = performance.now();
 	telemetry?.onStart?.({ tool: spec.name, posture: "operating", startedAt });
 	// Stamped onto every finish event so a consumer can join this authoritative
 	// outcome to the engine's `tool_execution_end` for the same call.
@@ -118,18 +128,18 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	try {
 		verdictPromise = registry.invoke({ tool: spec.name, args }, hasInvokeOpts ? invokeOpts : undefined);
 	} catch (err) {
-		emitFinish(telemetry, spec.name, startedAt, "error", { ...withCallId, reason: errorMessage(err) });
+		emitFinish(telemetry, spec.name, startedAtClock, "error", { ...withCallId, reason: errorMessage(err) });
 		throw err;
 	}
 	let verdict: Awaited<typeof verdictPromise>;
 	try {
 		verdict = await verdictPromise;
 	} catch (err) {
-		emitFinish(telemetry, spec.name, startedAt, "error", { ...withCallId, reason: errorMessage(err) });
+		emitFinish(telemetry, spec.name, startedAtClock, "error", { ...withCallId, reason: errorMessage(err) });
 		throw err;
 	}
 	if (verdict.kind !== "ok") {
-		emitFinish(telemetry, spec.name, startedAt, "blocked", {
+		emitFinish(telemetry, spec.name, startedAtClock, "blocked", {
 			...withCallId,
 			reason: verdict.reason,
 			...(verdict.kind === "blocked" ? { decision: verdict.decision } : {}),
@@ -143,7 +153,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		throw new Error(formatModelRejection(verdict.reason, rejection));
 	}
 	if (verdict.result.kind === "error") {
-		emitFinish(telemetry, spec.name, startedAt, "error", {
+		emitFinish(telemetry, spec.name, startedAtClock, "error", {
 			...withCallId,
 			reason: verdict.result.message,
 			decision: verdict.decision,
@@ -159,14 +169,14 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	};
 	if (verdict.result.terminate === true) {
 		result.terminate = true;
-		emitFinish(telemetry, spec.name, startedAt, "ok", {
+		emitFinish(telemetry, spec.name, startedAtClock, "ok", {
 			...withCallId,
 			terminate: true,
 			decision: verdict.decision,
 			...(skillActivation ? { skillActivation } : {}),
 		});
 	} else {
-		emitFinish(telemetry, spec.name, startedAt, "ok", {
+		emitFinish(telemetry, spec.name, startedAtClock, "ok", {
 			...withCallId,
 			decision: verdict.decision,
 			...(skillActivation ? { skillActivation } : {}),
@@ -178,7 +188,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 function emitFinish(
 	telemetry: ToolTelemetry | undefined,
 	tool: string,
-	startedAt: number,
+	startedAtClock: number,
 	outcome: ToolOutcome,
 	extra?: {
 		reason?: string;
@@ -192,7 +202,7 @@ function emitFinish(
 	const event: ToolFinishEvent = {
 		tool,
 		posture: "operating",
-		durationMs: Date.now() - startedAt,
+		durationMs: Math.round(performance.now() - startedAtClock),
 		outcome,
 	};
 	if (extra?.toolCallId !== undefined) event.toolCallId = extra.toolCallId;

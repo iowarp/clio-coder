@@ -1,10 +1,14 @@
+import { rawDurationMs } from "../../core/timers.js";
 import type { RunEnvelope, RunPhaseDurations, RunPhaseMarks } from "./types.js";
 
 function duration(start: string | undefined, end: string | null | undefined): number | null {
 	if (start === undefined || end == null) return null;
 	const startMs = Date.parse(start);
 	const endMs = Date.parse(end);
-	return Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : null;
+	// The clamp is the presentation contract (no negative phase renders), but
+	// the subtraction goes through rawDurationMs so a backwards mark is counted
+	// instead of silently reading as an unusually fast phase.
+	return Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, rawDurationMs(startMs, endMs)) : null;
 }
 
 /** Derive non-overlapping routing-system phases plus execution and total wall time. */

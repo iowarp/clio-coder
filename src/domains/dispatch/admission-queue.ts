@@ -1,3 +1,5 @@
+import { rawDurationMs } from "../../core/timers.js";
+
 export interface AdmissionQueueRequest<T> {
 	requestId: string;
 	assignmentId: string;
@@ -129,7 +131,7 @@ export function createAdmissionQueue<T>(options: {
 					state: "admitted",
 					request,
 					admittedAt: nowMs,
-					queueWaitMs: Math.max(0, nowMs - request.queuedAt),
+					queueWaitMs: Math.max(0, rawDurationMs(request.queuedAt, nowMs)),
 				});
 				return request;
 			}

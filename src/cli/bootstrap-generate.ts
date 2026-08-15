@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
 import { isResponseSchemaRejection, UnsupportedResponseSchemaError } from "../core/response-schema.js";
@@ -171,7 +172,7 @@ function durationFromReceipt(receipt: RunReceipt): number | undefined {
 function bootstrapTelemetry(
 	prompt: string,
 	output: string,
-	startedAt: number,
+	startedAtClock: number,
 	structuredOutputMode: BootstrapRunTelemetry["structuredOutputMode"],
 	runId?: string,
 	receipt?: RunReceipt,
@@ -182,8 +183,8 @@ function bootstrapTelemetry(
 		promptBytes: Buffer.byteLength(prompt, "utf8"),
 		outputBytes: observedOutputBytes ?? Buffer.byteLength(output, "utf8"),
 		durationMs: receipt
-			? (durationFromReceipt(receipt) ?? Math.max(0, Date.now() - startedAt))
-			: Math.max(0, Date.now() - startedAt),
+			? (durationFromReceipt(receipt) ?? Math.round(performance.now() - startedAtClock))
+			: Math.round(performance.now() - startedAtClock),
 		...(runId ? { runId } : {}),
 	};
 	if (!receipt) return telemetry;
@@ -299,7 +300,7 @@ async function attemptBootstrapDispatch(
 	dispatch: DispatchContract,
 	input: BootstrapGenerateInput,
 	prompt: string,
-	startedAt: number,
+	startedAtClock: number,
 	structuredOutputMode: BootstrapRunTelemetry["structuredOutputMode"],
 	dispatchBootstrap: (nativeSchema: boolean) => ReturnType<DispatchContract["dispatch"]>,
 ): Promise<BootstrapStructuredOutput> {
@@ -312,7 +313,11 @@ async function attemptBootstrapDispatch(
 		// travels untouched. Everything else is this attempt's failure.
 		if (nativeSchema && err instanceof UnsupportedResponseSchemaError) throw err;
 		const error = err instanceof Error ? err : new Error(String(err));
-		throw new BootstrapAttemptError(error, "not-run", bootstrapTelemetry(prompt, "", startedAt, structuredOutputMode));
+		throw new BootstrapAttemptError(
+			error,
+			"not-run",
+			bootstrapTelemetry(prompt, "", startedAtClock, structuredOutputMode),
+		);
 	}
 	// No product cap. The bootstrap agent explores the repository with code_nav, and a
 	// 30s ceiling clamped over the operator's guardrail aborted every real run
@@ -344,7 +349,7 @@ async function attemptBootstrapDispatch(
 		input.reportGeneration?.({
 			mode: "model",
 			parserOutcome: "parsed",
-			run: bootstrapTelemetry(prompt, text, startedAt, structuredOutputMode, handle.runId, receipt),
+			run: bootstrapTelemetry(prompt, text, startedAtClock, structuredOutputMode, handle.runId, receipt),
 		});
 		return output;
 	} catch (err) {
@@ -361,7 +366,7 @@ async function attemptBootstrapDispatch(
 			bootstrapTelemetry(
 				prompt,
 				text,
-				startedAt,
+				startedAtClock,
 				structuredOutputMode,
 				handle.runId,
 				receipt,
@@ -379,7 +384,7 @@ async function generateBootstrapWithModel(
 	route?: BootstrapRoute,
 ): Promise<BootstrapStructuredOutput> {
 	const prompt = buildBootstrapPrompt(input);
-	const startedAt = Date.now();
+	const startedAtClock = performance.now();
 	input.progress?.({
 		phase: "generate",
 		status: "running",
@@ -400,7 +405,7 @@ async function generateBootstrapWithModel(
 			...(route?.model ? { model: route.model } : {}),
 		});
 	try {
-		return await attemptBootstrapDispatch(dispatch, input, prompt, startedAt, "native-schema", dispatchBootstrap);
+		return await attemptBootstrapDispatch(dispatch, input, prompt, startedAtClock, "native-schema", dispatchBootstrap);
 	} catch (err) {
 		const refusal = responseSchemaRefusal(err);
 		if (refusal === null) throw err;
@@ -410,7 +415,7 @@ async function generateBootstrapWithModel(
 			message: "native schema unavailable; using bounded output parser",
 			detail: refusal,
 		});
-		return await attemptBootstrapDispatch(dispatch, input, prompt, startedAt, "prompt-parser", dispatchBootstrap);
+		return await attemptBootstrapDispatch(dispatch, input, prompt, startedAtClock, "prompt-parser", dispatchBootstrap);
 	}
 }
 

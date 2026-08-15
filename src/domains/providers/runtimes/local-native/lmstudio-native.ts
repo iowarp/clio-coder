@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { LMStudioClient } from "@lmstudio/sdk";
 import { CLIO_MIN_CONTEXT_WINDOW, CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../../../core/context-floor.js";
 import type { Api, Model } from "../../../../engine/types.js";
@@ -404,13 +405,13 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 		const built = buildClient(target, ctx);
 		if ("error" in built) return { ok: false, error: built.error };
 		const client = built;
-		const started = Date.now();
+		const started = performance.now();
 		try {
 			const [version, apiModels] = await Promise.all([
 				withTimeout(client.system.getLMStudioVersion(), ctx.httpTimeoutMs, ctx.signal),
 				probeApiModels(target, ctx),
 			]);
-			const latencyMs = Date.now() - started;
+			const latencyMs = Math.round(performance.now() - started);
 			const result: ProbeResult = { ok: true, latencyMs, serverVersion: version.version };
 			if (apiModels.ok) {
 				if (apiModels.models) result.models = apiModels.models;
@@ -423,7 +424,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 		} catch (err) {
 			return {
 				ok: false,
-				latencyMs: Date.now() - started,
+				latencyMs: Math.round(performance.now() - started),
 				error: err instanceof Error ? err.message : String(err),
 			};
 		}

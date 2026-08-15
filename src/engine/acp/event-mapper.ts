@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import type { AgentEvent, AgentMessage } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 import type { AcpPromptResponse, AcpSessionUpdateParams, AcpToolCallUpdate } from "./types.js";
@@ -40,6 +41,7 @@ export class AcpEventMapper {
 	private messageStarted = false;
 	private assistantText = "";
 	private assistantThinking = "";
+	/** Tool-call id to its `performance.now()` start mark; spans only, never an instant. */
 	private readonly toolStarts = new Map<string, number>();
 
 	mapUpdate(params: unknown): Array<AgentEvent | ClioWorkerEvent> {
@@ -105,13 +107,16 @@ export class AcpEventMapper {
 		const status = update.status ?? "pending";
 		const out: Array<AgentEvent | ClioWorkerEvent> = [];
 		if (!this.toolStarts.has(toolCallId) && (status === "pending" || status === "in_progress")) {
-			this.toolStarts.set(toolCallId, Date.now());
+			// The wall read anchors the instant the start event reports; the map
+			// keeps the monotonic twin, which is what the duration below spans.
+			const startedAt = Date.now();
+			this.toolStarts.set(toolCallId, performance.now());
 			out.push({
 				type: "clio_tool_start",
 				payload: {
 					tool: update.kind ?? title,
 					posture: "operating",
-					startedAt: this.toolStarts.get(toolCallId) ?? Date.now(),
+					startedAt,
 				},
 			});
 			out.push({
@@ -122,7 +127,7 @@ export class AcpEventMapper {
 			} as unknown as AgentEvent);
 		}
 		if (status === "completed" || status === "failed" || status === "cancelled") {
-			const startedAt = this.toolStarts.get(toolCallId) ?? Date.now();
+			const startedAtClock = this.toolStarts.get(toolCallId) ?? performance.now();
 			this.toolStarts.delete(toolCallId);
 			const isError = status !== "completed";
 			const result = toolContentText(update.content) || update.rawOutput || status;
@@ -138,7 +143,7 @@ export class AcpEventMapper {
 				payload: {
 					tool: update.kind ?? title,
 					posture: "operating",
-					durationMs: Math.max(0, Date.now() - startedAt),
+					durationMs: Math.round(performance.now() - startedAtClock),
 					outcome: isError ? "error" : "ok",
 					decision: "allowed",
 				},

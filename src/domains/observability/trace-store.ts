@@ -1174,8 +1174,25 @@ function recordProgress(
 	if ((type === "tool_execution_end" || type === "clio_tool_finish") && toolCallId !== null) {
 		const key = `${payload.runId}:${toolCallId}`;
 		const start = starts.get(key);
+		// One clock frame per row. The worker measures `durationMs` on its own
+		// clock while the mirror stamps `at` on the orchestrator's, so storing
+		// both as independent endpoints made `endedAt - startedAt` and
+		// `duration_ms` disagree by transport and queue latency: the viewer read
+		// the first for tick geometry and the second for the duration label.
+		// When the worker reports a span, the mirror's observed start anchors it
+		// and the far endpoint is derived, so the two agree by construction; the
+		// mirror's own read of the end is dropped rather than co-stored. With no
+		// observed start, `at` anchors the end and the start is derived backwards
+		// instead. With no reported span there is only one measurement to begin
+		// with, and both stamps stay as the mirror read them.
 		const duration = finiteNonNegative(event.durationMs);
-		const startedAt = start?.startedAt ?? (duration === null ? at : new Date(Date.parse(at) - duration).toISOString());
+		const observedStart = start?.startedAt;
+		const startedAt = observedStart ?? (duration === null ? at : new Date(Date.parse(at) - duration).toISOString());
+		const startedAtMs = Date.parse(startedAt);
+		const endedAt =
+			duration !== null && observedStart !== undefined && Number.isFinite(startedAtMs)
+				? new Date(startedAtMs + duration).toISOString()
+				: at;
 		const tool = start?.tool ?? stringValue(event.toolName) ?? stringValue(event.tool) ?? "tool";
 		const args = start?.args ?? event.args ?? null;
 		const result = event.result ?? event.resultSnippet ?? null;
@@ -1197,7 +1214,7 @@ function recordProgress(
 				agent: payload.agentId,
 			},
 			startedAt,
-			endedAt: at,
+			endedAt,
 		});
 		starts.delete(key);
 		return;

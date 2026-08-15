@@ -25,6 +25,7 @@
  * runtime.
  */
 
+import { performance } from "node:perf_hooks";
 import type { RetrySettings } from "../../core/defaults.js";
 
 export type { RetrySettings } from "../../core/defaults.js";
@@ -153,7 +154,11 @@ export interface RetryCountdownOptions {
 	setTimer?: (cb: () => void, ms: number) => unknown;
 	/** Mirror of `clearTimeout`. Paired with `setTimer`. */
 	clearTimer?: (id: unknown) => void;
-	/** Source of "now" in milliseconds. Defaults to `Date.now`. */
+	/**
+	 * Monotonic millisecond source for the countdown. Defaults to
+	 * `performance.now`: the remaining wait is a span, so a clock correction
+	 * mid-countdown must not shorten or extend it.
+	 */
 	now?: () => number;
 }
 
@@ -175,7 +180,7 @@ export interface RetryCountdownHandle {
 export function createRetryCountdown(options: RetryCountdownOptions): RetryCountdownHandle {
 	const setTimer = options.setTimer ?? ((cb, ms) => setTimeout(cb, ms));
 	const clearTimer = options.clearTimer ?? ((id) => clearTimeout(id as ReturnType<typeof setTimeout>));
-	const now = options.now ?? (() => Date.now());
+	const now = options.now ?? (() => performance.now());
 
 	const start = now();
 	const deadline = start + Math.max(0, options.delayMs);

@@ -114,6 +114,7 @@ export interface TurnRuntimeDeps {
 	retrySettings: () => RetrySettings;
 	emit: (event: AgentEvent | AssistantDeltaEvent) => void;
 	emitNotice: (text: string) => void;
+	/** Tool-call id to its `performance.now()` start mark; spans only, never an instant. */
 	toolStartTimes: Map<string, number>;
 }
 
@@ -543,19 +544,23 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let runStartMessageCount = 0;
 
 		handle.agent.subscribe(async (event) => {
+			// Wall anchor for the one field a human reads back (`recordedAt`);
+			// every span below is measured on the monotonic frame instead, so an
+			// NTP correction mid-turn cannot corrupt a tool duration or a TTFT.
 			const eventAt = Date.now();
-			lastActivityAt = performance.now();
+			const eventClock = performance.now();
+			lastActivityAt = eventClock;
 			let enrichedEvent = event;
 			if (event.type === "tool_execution_start") {
 				toolsInFlight += 1;
 				middlewareToolChoice.toolStarted(event.toolName);
-				deps.toolStartTimes.set(event.toolCallId, eventAt);
+				deps.toolStartTimes.set(event.toolCallId, eventClock);
 				state.turnToolCalls += 1;
 			} else if (event.type === "tool_execution_end") {
 				toolsInFlight = Math.max(0, toolsInFlight - 1);
 				const startedAt = deps.toolStartTimes.get(event.toolCallId);
 				deps.toolStartTimes.delete(event.toolCallId);
-				const durationMs = startedAt === undefined ? undefined : Math.max(0, eventAt - startedAt);
+				const durationMs = startedAt === undefined ? undefined : Math.round(Math.max(0, eventClock - startedAt));
 				// Carry the registry's verdict alongside the engine's result. The
 				// panel classifies settlement from `outcome`; without it the only
 				// available signal is result text, and grepping that text for
@@ -599,7 +604,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			const publicEvent = enrichedEvent;
 			if (publicEvent?.type === "agent_start") {
 				runStartMessageCount = localRuntime.agent.state.messages.length;
-				streamStartedAt = eventAt;
+				streamStartedAt = eventClock;
 				firstAssistantDeltaAt = null;
 				apiCallStartedAt = null;
 				apiCallFirstDeltaAt = null;
@@ -619,7 +624,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// at the turn that issued it instead of for the rest of the run.
 			if (publicEvent?.type === "turn_end") toolsInFlight = 0;
 			if (publicEvent?.type === "message_start" && publicEvent.message?.role === "assistant") {
-				apiCallStartedAt = eventAt;
+				apiCallStartedAt = eventClock;
 				apiCallFirstDeltaAt = null;
 			}
 			if (publicEvent?.type === "message_update") {
@@ -629,8 +634,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					assistantEvent.type === "thinking_delta" ||
 					assistantEvent.type === "toolcall_start" ||
 					assistantEvent.type === "toolcall_delta";
-				if (hasDelta && firstAssistantDeltaAt === null) firstAssistantDeltaAt = eventAt;
-				if (hasDelta && apiCallFirstDeltaAt === null) apiCallFirstDeltaAt = eventAt;
+				if (hasDelta && firstAssistantDeltaAt === null) firstAssistantDeltaAt = eventClock;
+				if (hasDelta && apiCallFirstDeltaAt === null) apiCallFirstDeltaAt = eventClock;
 			}
 			if (publicEvent?.type === "agent_end") {
 				context.noteRunCacheSummary(publicEvent.messages, runFirstCallVerdict);
@@ -656,12 +661,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					);
 				}
 				if (summary.output > 0 && firstAssistantDeltaAt !== null) {
-					const durationMs = Math.max(1, eventAt - firstAssistantDeltaAt);
+					const durationMs = Math.round(Math.max(1, eventClock - firstAssistantDeltaAt));
 					deps.observability.recordTokenThroughput({
 						tokensPerSecond: summary.output / (durationMs / 1000),
 						outputTokens: summary.output,
 						durationMs,
-						...(streamStartedAt !== null ? { ttftMs: firstAssistantDeltaAt - streamStartedAt } : {}),
+						...(streamStartedAt !== null ? { ttftMs: Math.round(firstAssistantDeltaAt - streamStartedAt) } : {}),
 						providerId: localRuntime.targetId,
 						modelId: localRuntime.wireModelId,
 						recordedAt: eventAt,
@@ -732,8 +737,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const timing: AssistantCallTiming | null =
 					isAssistant && apiCallStartedAt !== null
 						? {
-								ttftMs: apiCallFirstDeltaAt !== null ? Math.max(0, apiCallFirstDeltaAt - apiCallStartedAt) : null,
-								apiMs: Math.max(0, eventAt - apiCallStartedAt),
+								ttftMs: apiCallFirstDeltaAt !== null ? Math.round(Math.max(0, apiCallFirstDeltaAt - apiCallStartedAt)) : null,
+								apiMs: Math.round(Math.max(0, eventClock - apiCallStartedAt)),
 							}
 						: null;
 				persistence.appendAssistantTurn(enrichedEvent.message, timing);

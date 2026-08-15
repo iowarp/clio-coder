@@ -134,6 +134,13 @@ const NON_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["queued", "running",
  * receipt to seal (the run never finalized), so the row is closed in place
  * with outcome "stalled" rather than left as a permanent ghost in status
  * output.
+ *
+ * `endedAt` is the last instant the run was observed alive, not the instant
+ * recovery noticed it was gone. Stamping recovery time made every phase
+ * duration derived from the row (`executionMs`, `totalEndToEndMs`) span the
+ * whole orchestrator downtime, which is not a measurement of anything. The
+ * last heartbeat is the honest bound; a row that never heartbeat has only its
+ * own start, which reads as a zero-length run rather than an invented one.
  */
 function closeAbandonedRows(ledger: Ledger): number {
 	let closed = 0;
@@ -152,7 +159,7 @@ function closeAbandonedRows(ledger: Ledger): number {
 			status: "dead",
 			outcome: "stalled",
 			outcomeDetail: "abandoned: orchestrator exited before the run finalized",
-			endedAt: new Date().toISOString(),
+			endedAt: row.heartbeatAt ?? row.startedAt,
 			exitCode: row.exitCode ?? 1,
 		});
 		closed += 1;
