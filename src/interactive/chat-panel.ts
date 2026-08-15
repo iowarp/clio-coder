@@ -575,8 +575,13 @@ function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number): string[]
 	// reported a total, which is the common case, and rendered `reason0 provider`.
 	// The field is named for reasoning tokens rather than `reason`, which the
 	// memory step rows already use for a fixed decision vocabulary.
+	//
+	// A turn that spent no reasoning tokens states nothing by naming the
+	// provenance of zero, and at narrow widths `reasoning 0 provider` orphaned
+	// the word `provider` on its own line. Zero suppresses the whole suffix, the
+	// same rule the caveat below already follows.
 	const reason =
-		usage.reasoningTokens !== undefined
+		usage.reasoningTokens !== undefined && usage.reasoningTokens > 0
 			? ` reasoning ${usage.reasoningTokenProvenance === "provider" ? `${usage.reasoningTokens} provider` : `≈${usage.reasoningTokens} estimated`}`
 			: "";
 	const cache =
