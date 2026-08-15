@@ -230,9 +230,23 @@ export function formatNotificationBadge(
 	const hint = theme.fg("dim", `[${dismiss}] dismiss`);
 	const safeWidth = Math.max(1, Math.floor(width));
 	const minimum = `${compactHead}${separator}${hint}`;
+	const compactHint = `${compactHead}${separator}${theme.fg("dim", `[${dismiss}]`)}`;
+	const fallback = [minimum, compactHint, compactHead, theme.fg(token, glyph)].find(
+		(candidate) => visibleWidth(candidate) <= safeWidth,
+	);
 	const messageWidth = safeWidth - visibleWidth(head) - visibleWidth(separator) * 2 - visibleWidth(hint);
-	if (messageWidth < 1) return fitFooterText(minimum, safeWidth);
-	const body = theme.fg("muted", truncateToWidth(lead, messageWidth, "…", false));
+	// A one-column message can show only an ellipsis, which says less than the
+	// compact head/action fallback. The explicit ladder also keeps narrow
+	// footers from hard-clipping the dismiss key in the middle of a word.
+	if (messageWidth < 2) return fallback ?? theme.fg(token, glyph);
+	let body: string;
+	if (visibleWidth(lead) <= messageWidth) {
+		body = theme.fg("muted", lead);
+	} else {
+		const clipped = truncateToWidth(lead, messageWidth - 1, "", false);
+		if (visibleWidth(clipped) === 0) return fallback ?? theme.fg(token, glyph);
+		body = `${theme.fg("muted", clipped)}${theme.fg("muted", "…")}`;
+	}
 	return `${head}${separator}${body}${separator}${hint}`;
 }
 
