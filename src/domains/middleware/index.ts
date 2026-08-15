@@ -26,14 +26,18 @@ export type { MiddlewareContract } from "./contract.js";
 export {
 	buildDetachedBatchesMessage,
 	buildReadOnlyExplorationMessage,
+	buildUnbackedWorkerClaimMessage,
 	type CreateDetachedDispatchNudgeRegistrationOptions,
+	claimsWorkerResults,
 	createDetachedDispatchNudgeRegistration,
 	createReadOnlyExplorationNudgeRegistration,
+	createUnbackedWorkerClaimRegistration,
 	DETACHED_DISPATCH_NUDGE_REGISTRATION_ID,
 	type DetachedBatchNudgeView,
 	openDetachedBatchViews,
 	READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD,
 	READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
+	UNBACKED_WORKER_CLAIM_REGISTRATION_ID,
 } from "./dispatch-nudge.js";
 export type { MiddlewareBundleOptions } from "./extension.js";
 export { createEnvHookBudgetTracker, createMiddlewareBundle } from "./extension.js";
