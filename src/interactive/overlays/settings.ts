@@ -429,9 +429,11 @@ interface BuildSettingItemsOptions {
 	onTargetOperationChange?: (targetId: string, operation: "connect" | "probe" | null, operationToken: object) => void;
 }
 
+type SubmenuTitle = string | ((width: number) => string);
+
 export class SubmenuWrapper implements Component {
 	constructor(
-		private readonly title: string,
+		private readonly title: SubmenuTitle,
 		private readonly child: Component,
 		private readonly hint: string = buildHint([{ key: "Enter", verb: "confirm" }], "back"),
 		private readonly note?: string,
@@ -440,7 +442,9 @@ export class SubmenuWrapper implements Component {
 	render(width: number): string[] {
 		const theme = clioTheme();
 		const lines: string[] = [];
-		lines.push(screenTitle(theme, `  ${this.title}`));
+		const titleWidth = Math.max(1, width - 2);
+		const title = typeof this.title === "function" ? this.title(titleWidth) : this.title;
+		lines.push(screenTitle(theme, `  ${title}`));
 		if (this.note) {
 			for (const line of wrapTextWithAnsi(this.note, Math.max(1, width - 2))) {
 				lines.push(theme.fg("dim", `  ${line}`));
@@ -488,7 +492,7 @@ function selectTargetSubmenu(providers: ProvidersContract): SettingSubmenuBuilde
 }
 
 function selectOptionalBackgroundTargetSubmenu(providers: ProvidersContract): SettingSubmenuBuilder {
-	return (_currentValue: string, done: (val?: string) => void) => {
+	return (currentValue: string, done: (val?: string) => void) => {
 		const statuses = providers.list();
 		const items = [
 			{ value: "(unset)", label: "(unset — rules-only)" },
@@ -498,7 +502,7 @@ function selectOptionalBackgroundTargetSubmenu(providers: ProvidersContract): Se
 			})),
 		];
 		const note = "Unset keeps the zero-cost rules-only tier.";
-		return selectListSubmenu("Select memory target", items, note)(_currentValue, done);
+		return selectListSubmenu("Select memory target", items, note)(currentValue, done);
 	};
 }
 
@@ -550,7 +554,7 @@ function selectListSubmenu(
 	items: ReadonlyArray<{ value: string; label: string; presentationKind?: SettingsPresentationKind }>,
 	note?: string,
 ): SettingSubmenuBuilder {
-	return (_currentValue: string, done: (val?: string) => void) => {
+	return (currentValue: string, done: (val?: string) => void) => {
 		const theme = clioTheme();
 		const presented = items.map((item) => ({
 			value: item.value,
@@ -562,6 +566,8 @@ function selectListSubmenu(
 						: item.label,
 		}));
 		const list = new SettingsSelectList(presented, Math.min(10, Math.max(1, items.length)), DEFAULT_SELECT_THEME);
+		const currentIndex = items.findIndex((item) => item.value === currentValue);
+		if (currentIndex >= 0) list.setSelectedIndex(currentIndex);
 		list.onSelect = (item) => done(item.value);
 		list.onCancel = () => done();
 		return new SubmenuWrapper(title, list, undefined, note);
@@ -1549,6 +1555,31 @@ export function createSettingsChangePlan(
 	});
 }
 
+/** Keep the destination—the value the operator is about to commit—visible as confirmation titles narrow. */
+function formatScopeConfirmTitle(plan: SettingsChangePlan, width: number): string {
+	const full = `${plan.label}: ${plan.originalValue} → ${plan.selectedValue}`;
+	if (visibleWidth(full) <= width) return full;
+	const destinationFirst = `${plan.label}: → ${plan.selectedValue}`;
+	if (visibleWidth(destinationFirst) <= width) return destinationFirst;
+	return ellipsizeFromLeft(destinationFirst, width);
+}
+
+function ellipsizeFromLeft(text: string, width: number): string {
+	const safeWidth = Math.max(1, width);
+	if (visibleWidth(text) <= safeWidth) return text;
+	if (safeWidth <= visibleWidth(ELLIPSIS)) return ELLIPSIS;
+	const suffixWidth = safeWidth - visibleWidth(ELLIPSIS);
+	const suffix: string[] = [];
+	let used = 0;
+	for (const character of Array.from(text).reverse()) {
+		const characterWidth = visibleWidth(character);
+		if (used + characterWidth > suffixWidth) break;
+		suffix.unshift(character);
+		used += characterWidth;
+	}
+	return `${ELLIPSIS}${suffix.join("")}`;
+}
+
 interface RowColumns {
 	label: number;
 	path: number;
@@ -1962,7 +1993,7 @@ export class SettingsCenter implements Component {
 		};
 		list.onSelect = (opt) => finish(opt.value as "session" | "global" | "cancel");
 		list.onCancel = () => finish("cancel");
-		const title = `${plan.label}: ${plan.originalValue} → ${plan.selectedValue}`;
+		const title = (width: number): string => formatScopeConfirmTitle(plan, width);
 		const note = `Affects ${plan.leaves.map((leaf) => leaf.path).join(", ")} · ${plan.impact}`;
 		this.submenuComponent = new SubmenuWrapper(title, list, buildHint([{ key: "Enter", verb: "choose" }], "back"), note);
 	}

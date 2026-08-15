@@ -612,6 +612,71 @@ describe("contracts/settings center", () => {
 		deepStrictEqual(commits, [{ id: "autonomy", value: "full-auto", scope: "session" }]);
 	});
 
+	it("keeps the destination tail visible in narrow and long confirmation titles", () => {
+		const live = { current: settingsWithTargets() };
+		const fake = fakeTui(24, 40);
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay);
+		overlay.handleInput?.(ENTER); // value picker, preselected to auto-edit
+		overlay.handleInput?.(DOWN); // full-auto
+		overlay.handleInput?.(ENTER); // destination prompt
+		const narrowTitle = stripAnsi(overlay.render(40).join("\n"));
+		ok(narrowTitle.includes("Autonomy level: → full-auto"), narrowTitle);
+		ok(!narrowTitle.includes("auto-edit →"), "the origin is dropped before the destination");
+
+		const settings = settingsWithTargets();
+		settings.orchestrator.model = "origin-model-id-that-must-drop-before-the-new-value";
+		const item = buildSettingItems(settings).find((candidate) => candidate.id === "orchestrator.model");
+		ok(item);
+		const destination = "provider/model-with-a-long-destination-ending-in-KEEP-DESTINATION-TAIL";
+		delete item.submenu;
+		item.values = [destination];
+		const wide = new SettingsCenter(
+			buildSettingItems(settings).map((candidate) => (candidate.id === item.id ? item : candidate)),
+			{
+				getBodyHeight: () => 26,
+				prepareChange: (candidate, value) => createSettingsChangePlan(settings, candidate, value),
+				onApply: () => undefined,
+				onCancel: () => undefined,
+			},
+		);
+		wide.setSelection("orchestrator", 2);
+		wide.handleInput(ENTER); // one-entry value picker
+		wide.handleInput(ENTER); // destination prompt
+		const wideTitle = stripAnsi(wide.render(120)[0] ?? "");
+		ok(wideTitle.includes("KEEP-DESTINATION-TAIL"), wideTitle);
+		ok(!wideTitle.includes("origin-model-id"), "the long origin cannot consume the destination");
+	});
+
+	it("opens provider-backed model pickers on their current values", () => {
+		const settings = settingsWithTargets();
+		settings.orchestrator.model = "model-25";
+		settings.workers.default.model = "model-25";
+		const models = Array.from({ length: 36 }, (_, index) => `model-${String(index).padStart(2, "0")}`);
+		const base = providersWithHealth({ "target-a": "healthy", "target-b": "healthy" }, settings);
+		const statuses = base.list().map((status) => ({
+			...status,
+			discoveredModels: status.target.id === "target-a" ? models : status.discoveredModels,
+			discoveredModelsSource: status.target.id === "target-a" ? ("probe" as const) : status.discoveredModelsSource,
+		}));
+		const providers = { ...base, list: () => statuses } as ProvidersContract;
+		const byId = new Map(buildSettingItems(settings, { providers }).map((item) => [item.id, item]));
+		for (const id of ["orchestrator.model", "workers.default.model"] as const) {
+			const item = byId.get(id);
+			ok(item?.submenu);
+			const picker = item.submenu(item.currentValue, () => undefined);
+			const rendered = stripAnsi(picker.render(80).join("\n"));
+			ok(rendered.includes(`${GLYPH.cursor} model-25`), `${id} cursor:\n${rendered}`);
+		}
+	});
+
 	it("cycles worker approvals routing to escalate and persists it", () => {
 		const settings = settingsWithTargets();
 		const workerRouting = buildSettingItems(settings).find((item) => item.id === "workers.onPermission");
@@ -1276,8 +1341,7 @@ describe("contracts/settings center", () => {
 		const overlay = fake.captured();
 		ok(overlay, "expected settings overlay component");
 		for (let i = 0; i < 4; i += 1) overlay.handleInput?.("j"); // workers.profiles.fast.target
-		overlay.handleInput?.(ENTER); // target picker: target-a, target-b, (remove profile)
-		overlay.handleInput?.(DOWN);
+		overlay.handleInput?.(ENTER); // picker preselected to target-b: target-a, target-b, (remove profile)
 		overlay.handleInput?.(DOWN);
 		overlay.handleInput?.(ENTER); // (remove profile)
 		overlay.handleInput?.(ENTER); // Apply this session
