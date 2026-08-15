@@ -114,15 +114,23 @@ describe("contracts/clio-editor", () => {
 		}
 	});
 
-	it("leaves base scroll indicators in charge of occupied rails", () => {
+	it("folds a streaming STEER tag into an occupied scroll-indicator rail", () => {
 		const shortTui = { requestRender: () => {}, terminal: { rows: 10 } } as unknown as TUI;
-		const { editor } = createEditor({}, shortTui);
+		const { editor } = createEditor({ isStreaming: () => true }, shortTui);
 		editor.setText(Array.from({ length: 8 }, (_, index) => `line ${index + 1}`).join("\n"));
 		const cursorBefore = editor.getCursor();
 		const lines = editor.render(80);
+		const theme = clioTheme();
+		const actionSequence = theme.fgSequence("action");
+		const actionTagOpener = theme.style("action", " ", { bold: true }).split(" ")[0] ?? "";
 
+		ok(plain(lines[0] ?? "").startsWith("STEER "), "the mode remains the first rail signal");
 		ok(plain(lines[0] ?? "").includes("↑ 3 more"), "the base top scroll indicator survives");
-		strictEqual(plain(lines[0] ?? "").includes("MESSAGE"), false, "chrome does not replace an occupied rail");
+		if (actionSequence.length > 0) {
+			ok((lines[0] ?? "").includes(actionTagOpener), "STEER keeps the action token in the indicator row");
+			strictEqual(lines.join("\n").split(actionTagOpener).length - 1, 1, "the editor has only one orange element");
+		}
+		for (const line of lines) strictEqual(visibleWidth(line), 80);
 		deepStrictEqual(editor.getCursor(), cursorBefore);
 	});
 

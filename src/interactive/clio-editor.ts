@@ -112,7 +112,13 @@ export class ClioEditor extends Editor {
 		const text = this.getText();
 		const mode = composerMode(this.chrome, text);
 
-		if (!hasScrollIndicator(lines[0] ?? "")) {
+		if (hasScrollIndicator(lines[0] ?? "")) {
+			// The base editor has already fitted the scroll indicator to this width.
+			// Prefix the mode and trim only the indicator rail's trailing fill, keeping
+			// its direction/count text and its own narrow-width fallback intact.
+			const modeLabel = theme.style(mode === "STEER" ? "action" : "accentDeep", mode, { bold: true });
+			lines[0] = truncateToWidth(`${modeLabel} ${lines[0] ?? ""}`, safeWidth, "", true);
+		} else {
 			lines[0] = rule(theme, safeWidth, {
 				left: mode,
 				leftToken: mode === "STEER" ? "action" : "accentDeep",
