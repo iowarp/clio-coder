@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Skill } from "../../src/domains/resources/index.js";
 import type { MarketplaceSkill } from "../../src/domains/resources/skills/marketplace.js";
+import { visibleWidth } from "../../src/engine/tui.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
 import { commandReference, SLASH_COMMAND_GROUPS } from "../../src/interactive/slash-commands.js";
 
@@ -110,6 +111,24 @@ describe("contracts/slash-autocomplete", () => {
 		const unrelated = ((await suggestionsFor("/c"))?.items ?? []).map((item) => item.value);
 		ok(unrelated.includes("compact"), `matching alias remains visible: ${unrelated.join(", ")}`);
 		ok(!unrelated.includes("exit"), `unmatched alias stays hidden: ${unrelated.join(", ")}`);
+	});
+
+	it("ellipsizes composed command and alias descriptions before the popup can hard-clip them", async () => {
+		const items = [
+			...((await suggestionsFor("/"))?.items ?? []),
+			...((await suggestionsFor("/c"))?.items ?? []).filter((item) => item.value === "ctx"),
+		];
+		const descriptions = items.flatMap((item) => (item.description ? [item.description] : []));
+		ok(descriptions.length > 0);
+		for (const description of descriptions) {
+			ok(visibleWidth(description) <= 80, `description exceeds the 80-column popup budget: ${description}`);
+		}
+		const truncated = descriptions.filter((description) => description.endsWith("…"));
+		ok(truncated.length > 0, "the contract exercises composed-description truncation");
+		for (const name of ["context", "output", "ctx"]) {
+			const description = items.find((item) => item.value === name)?.description;
+			ok(description?.endsWith("…"), `/${name} truncation ends in an ellipsis instead of a mid-token hard clip`);
+		}
 	});
 
 	it("preserves canonical subcommand and alias argument-stem completion", async () => {
