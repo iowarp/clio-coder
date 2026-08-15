@@ -9,6 +9,9 @@ import type { RejectionMessage } from "./rejection-feedback.js";
  * mapping applies only to level-dependent rows after the net passed.
  * Level-independent rails such as system_modify belong to the policy engine.
  *
+ * One call-level tier crosses the action classes: a gate can declare its
+ * exposure, and an `outward` gate parks at `auto-edit` (#32).
+ *
  * The mapping is pure. The registry (orchestrator and worker) and the ACP
  * delegation mediator are the only consumers; each resolves an `ask`
  * disposition through its own approvals context (interactive park, headless
@@ -27,6 +30,21 @@ export function isAutonomyLevel(value: unknown): value is AutonomyLevel {
 
 export type AutonomyDisposition = "allow" | "ask" | "deny";
 
+/**
+ * Exposure tier of a call, orthogonal to its action class. `local` is the
+ * default and means the effect stays inside the workspace, where the operator
+ * can undo it. `outward` means answering the call publishes or sends something
+ * the operator cannot quietly take back: a filed issue, a pushed branch, a
+ * posted comment, a cut release. Only the caller knows which it is, so the
+ * tier is declared on the call (today: the `exposure` argument of `ask_user`),
+ * not inferred by the classifier.
+ */
+export const AUTONOMY_EXPOSURES = ["local", "outward"] as const;
+
+export type AutonomyExposure = (typeof AUTONOMY_EXPOSURES)[number];
+
+export const DEFAULT_AUTONOMY_EXPOSURE: AutonomyExposure = "local";
+
 export interface AutonomyMappingOptions {
 	/**
 	 * Execute-class calls only: true when the command is in the no-prompt set
@@ -42,6 +60,11 @@ export interface AutonomyMappingOptions {
 	 * stop (the dispatch tool logs the plan into the receipt chain instead).
 	 */
 	dispatchPlanScale?: boolean;
+	/**
+	 * Exposure tier declared by the call. Absent means `local`, which is the
+	 * behavior every call had before the tier existed.
+	 */
+	exposure?: AutonomyExposure;
 }
 
 /**
@@ -54,8 +77,14 @@ export function mapAutonomy(
 	actionClass: ActionClass,
 	options: AutonomyMappingOptions = {},
 ): AutonomyDisposition {
-	if (actionClass === "read") return "allow";
 	if (actionClass === "git_destructive") return "deny";
+	// The exposure tier. `auto-edit` means "act on the workspace without
+	// asking", not "publish without asking", so an outward gate parks for the
+	// operator here even though its action class would have run. Every other
+	// level is unchanged: `full-auto` auto-answers (auto means auto), and the
+	// two supervised levels already ask or deny everything the dial gates.
+	if (level === "auto-edit" && options.exposure === "outward") return "ask";
+	if (actionClass === "read") return "allow";
 	if (level === "read-only") return "deny";
 	if (level === "suggest") return "ask";
 	// auto-edit and full-auto from here.
@@ -99,7 +128,24 @@ export function autonomyDenyRejection(level: AutonomyLevel, tool: string, action
  * decision so overlays and non-interactive deniers can explain which axis
  * asked (the level, not a safety-net rail).
  */
-export function autonomyAskRejection(level: AutonomyLevel, tool: string, actionClass: ActionClass): RejectionMessage {
+export function autonomyAskRejection(
+	level: AutonomyLevel,
+	tool: string,
+	actionClass: ActionClass,
+	exposure: AutonomyExposure = DEFAULT_AUTONOMY_EXPOSURE,
+): RejectionMessage {
+	if (exposure === "outward") {
+		return {
+			short: `${tool} needs approval: outward-facing gate at autonomy ${level}`,
+			detail:
+				`The call declared exposure=outward, so answering it publishes or sends something outside the workspace. ` +
+				`Autonomy ${level} auto-answers local gates and parks outward-facing ones for the operator.`,
+			hints: [
+				"Approving resumes only this call.",
+				"Autonomy full-auto answers outward gates too; the safety net still applies there.",
+			],
+		};
+	}
 	return {
 		short: `${tool} needs approval (${actionClass}) at autonomy ${level}`,
 		detail:

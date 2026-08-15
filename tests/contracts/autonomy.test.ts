@@ -11,8 +11,10 @@ import { resetXdgCache } from "../../src/core/xdg.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 import type { ToolCallAuditRecord } from "../../src/domains/safety/audit.js";
 import {
+	AUTONOMY_EXPOSURES,
 	AUTONOMY_LEVELS,
 	type AutonomyDisposition,
+	type AutonomyExposure,
 	type AutonomyLevel,
 	autonomyAskRejection,
 	mapAutonomy,
@@ -34,6 +36,7 @@ import {
 	describeCallTarget,
 	sanitizeCallTargetText,
 } from "../../src/interactive/permission-overlay.js";
+import { askUserExposure, createAskUserTool, normalizeAskUserCall } from "../../src/tools/ask-user.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 function mockSpec(name: string, baseActionClass: ActionClass): ToolSpec {
@@ -67,6 +70,54 @@ function registerMockTools(registry: ToolRegistry): void {
 
 const bashCall = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
 const writeCall = (filePath: string) => ({ tool: ToolNames.Write, args: { file_path: filePath, content: "x" } });
+
+/** An ask_user round carrying the exposure tier under test, or none at all. */
+const askUserCall = (exposure: string | undefined) => ({
+	tool: ToolNames.AskUser,
+	args: {
+		action: "ask",
+		questions: [{ question: "File the issue now?" }],
+		...(exposure === undefined ? {} : { exposure }),
+	},
+});
+
+/** A registry holding the real ask_user tool with a counting answer handler. */
+function askUserRegistryAt(level: AutonomyLevel): { registry: ToolRegistry; answered: () => number } {
+	let answered = 0;
+	const registry = createRegistry({
+		safety: createWorkerSafety({ cwd: process.cwd() }),
+		autonomy: () => level,
+	});
+	registry.register(
+		createAskUserTool({
+			askUser: async (questions) => {
+				answered += 1;
+				return { answers: questions.map((question) => ({ question: question.question, answer: "yes" })) };
+			},
+		}),
+	);
+	return { registry, answered: () => answered };
+}
+
+/**
+ * Point the state dir at scratch for tests whose tool body runs: ask_user
+ * persists an interview transcript under it, and a contract test has no
+ * business writing into the operator's real state directory.
+ */
+async function withScratchState(fn: () => Promise<void>): Promise<void> {
+	const previous = process.env.CLIO_CODER_STATE_DIR;
+	const scratch = mkdtempSync(join(tmpdir(), "clio-autonomy-exposure-"));
+	process.env.CLIO_CODER_STATE_DIR = join(scratch, "state");
+	resetXdgCache();
+	try {
+		await fn();
+	} finally {
+		if (previous === undefined) Reflect.deleteProperty(process.env, "CLIO_CODER_STATE_DIR");
+		else process.env.CLIO_CODER_STATE_DIR = previous;
+		resetXdgCache();
+		rmSync(scratch, { recursive: true, force: true });
+	}
+}
 
 async function settle(): Promise<void> {
 	await Promise.resolve();
@@ -170,6 +221,124 @@ describe("contracts/autonomy mapping matrix", () => {
 				);
 			}
 		}
+	});
+});
+
+describe("contracts/autonomy exposure tier", () => {
+	// The tier is orthogonal to the action class. ask_user, the only tool that
+	// declares one today, is read class, so `local` is the read row and exactly
+	// one cell moves: auto-edit parks an outward gate instead of answering it.
+	const expected: Record<AutonomyExposure, Record<AutonomyLevel, AutonomyDisposition>> = {
+		local: { "read-only": "allow", suggest: "allow", "auto-edit": "allow", "full-auto": "allow" },
+		outward: { "read-only": "allow", suggest: "allow", "auto-edit": "ask", "full-auto": "allow" },
+	};
+
+	it("maps the exposure × level matrix for a read-class gate", () => {
+		for (const exposure of AUTONOMY_EXPOSURES) {
+			for (const level of AUTONOMY_LEVELS) {
+				strictEqual(
+					mapAutonomy(level, "read", { exposure }),
+					expected[exposure][level],
+					`expected exposure ${exposure} at ${level} to be ${expected[exposure][level]}`,
+				);
+			}
+		}
+	});
+
+	it("declaring a tier never widens what the action class already gated", () => {
+		// The tier only ever adds an ask. A denied or blocked row stays denied at
+		// every level, and an omitted tier is the pre-tier behavior exactly.
+		strictEqual(mapAutonomy("read-only", "write", { exposure: "outward" }), "deny");
+		strictEqual(mapAutonomy("auto-edit", "git_destructive", { exposure: "outward" }), "deny");
+		strictEqual(mapAutonomy("suggest", "write", { exposure: "outward" }), "ask");
+		for (const level of AUTONOMY_LEVELS) {
+			strictEqual(mapAutonomy(level, "read", { exposure: "local" }), mapAutonomy(level, "read"));
+			strictEqual(mapAutonomy(level, "write", { exposure: "local" }), mapAutonomy(level, "write"));
+		}
+	});
+
+	it("parks an outward ask_user gate at auto-edit and answers it after one approval", async () => {
+		await withScratchState(async () => {
+			const gate = askUserRegistryAt("auto-edit");
+			const parked: SafetyDecision[] = [];
+			gate.registry.onPermissionRequired((_call, decision) => {
+				parked.push(decision);
+			});
+			const pending = gate.registry.invoke(askUserCall("outward"));
+			await settle();
+			strictEqual(gate.registry.hasParkedCalls(), true);
+			strictEqual(gate.answered(), 0);
+			strictEqual(parked.length, 1);
+			const rejection = parked[0]?.kind === "ask" ? parked[0].rejection : null;
+			ok(rejection, "the parked decision carries an ask rejection");
+			match(rejection.short, /outward-facing gate at autonomy auto-edit/);
+			match(rejection.detail, /exposure=outward/);
+
+			await gate.registry.resumeParkedCalls({ actionClass: "read", requestedBy: "test" });
+			strictEqual((await pending).kind, "ok");
+			strictEqual(gate.answered(), 1);
+		});
+	});
+
+	it("denying the parked outward gate blocks the call instead of answering it", async () => {
+		await withScratchState(async () => {
+			const gate = askUserRegistryAt("auto-edit");
+			const pending = gate.registry.invoke(askUserCall("outward"));
+			await settle();
+			gate.registry.cancelParkedCalls("operator declined");
+			const verdict = await pending;
+			strictEqual(verdict.kind, "blocked");
+			strictEqual(gate.answered(), 0);
+		});
+	});
+
+	it("answers a local gate at auto-edit and an outward gate at full-auto without parking", async () => {
+		await withScratchState(async () => {
+			const local = askUserRegistryAt("auto-edit");
+			strictEqual((await local.registry.invoke(askUserCall("local"))).kind, "ok");
+			strictEqual((await local.registry.invoke(askUserCall(undefined))).kind, "ok");
+			strictEqual(local.registry.hasParkedCalls(), false);
+			strictEqual(local.answered(), 2);
+
+			// full-auto is unchanged by the tier: auto means auto.
+			const auto = askUserRegistryAt("full-auto");
+			strictEqual((await auto.registry.invoke(askUserCall("outward"))).kind, "ok");
+			strictEqual(auto.registry.hasParkedCalls(), false);
+			strictEqual(auto.answered(), 1);
+		});
+	});
+
+	it("reads an unrecognized tier as outward and then rejects the call", async () => {
+		await withScratchState(async () => {
+			const gate = askUserRegistryAt("auto-edit");
+			const pending = gate.registry.invoke({
+				tool: ToolNames.AskUser,
+				args: { action: "ask", exposure: "public", questions: [{ question: "File the issue?" }] },
+			});
+			await settle();
+			// Fail closed at admission: a tier the schema does not know must not
+			// read as the default `local` and skip the operator.
+			strictEqual(gate.registry.hasParkedCalls(), true);
+			await gate.registry.resumeParkedCalls({ actionClass: "read", requestedBy: "test" });
+			const verdict = await pending;
+			ok(verdict.kind === "ok" && verdict.result.kind === "error");
+			match(verdict.result.message, /exposure must be local or outward/);
+			strictEqual(gate.answered(), 0);
+		});
+	});
+
+	it("normalizes the declared tier and rejects values outside it", () => {
+		strictEqual(askUserExposure(undefined), "local");
+		strictEqual(askUserExposure({}), "local");
+		strictEqual(askUserExposure({ exposure: "local" }), "local");
+		strictEqual(askUserExposure({ exposure: " OUTWARD " }), "outward");
+		strictEqual(askUserExposure({ exposure: "public" }), "outward");
+		strictEqual(askUserExposure({ exposure: 7 }), "outward");
+		strictEqual(normalizeAskUserCall({ action: "complete", exposure: "outward" }).error, undefined);
+		strictEqual(
+			normalizeAskUserCall({ action: "complete", exposure: "public" }).error,
+			"exposure must be local or outward",
+		);
 	});
 });
 

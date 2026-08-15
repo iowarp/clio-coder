@@ -495,6 +495,7 @@ Arguments:
 - `decisions` (optional array). For `action="complete"`, key-value objects representing settled configurations.
 - `summary` (optional). Closeout explanation for `action="complete"`.
 - `max_rounds` (optional number). Round limit for this interview (default 6, max 24).
+- `exposure` (optional). `local` (default) or `outward`. `outward` marks a gate whose answer publishes or sends something outside the workspace (filing an issue or PR, posting a comment, pushing, releasing). At autonomy `auto-edit` an outward gate parks for the operator instead of being answered automatically; `full-auto` answers it. See [safety-model.md](safety-model.md).
 
 The tool manages a stateful operator interview. The UI presents choices (with an implicit "Other" option for custom text input). Once completed, the final decisions are persisted as standard configurations in the session ledger, allowing the agent to proceed with operators' inputs or defaults.
 
