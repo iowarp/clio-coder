@@ -1,7 +1,7 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
-import { readClioVersion, resolvePackageRoot } from "../core/package-root.js";
+import { readClioVersion } from "../core/package-root.js";
 import { EXPERIMENTAL_RELEASE_WARNING } from "../core/release.js";
 import {
 	listWikiPages,
@@ -24,9 +24,9 @@ import {
 } from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
-import { type Component, getCapabilities, Image, type ImageTheme, truncateToWidth } from "../engine/tui.js";
+import { type Component, truncateToWidth } from "../engine/tui.js";
 import { relative } from "./format-time.js";
-import { brandMark, type ClioTheme, clioTheme, fitUnits, formatTargetLabel, frame, GLYPH } from "./theme/index.js";
+import { brandMark, clioTheme, formatTargetLabel, frame, GLYPH, sectionTag } from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
 	providers: ProvidersContract;
@@ -335,189 +335,68 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	};
 }
 
-const WIDE_MIN = 90;
 const MID_MIN = 64;
-/** Widest banner key (`Context`, `Memory`), so every value starts in one column. */
-const WELCOME_KEY_WIDTH = 7;
-const LOGO_ASSET_PATH = "assets/clio-coder-logo-128.webp";
 
-let cachedLogoBase64: string | null | undefined;
+export type WelcomeDashboardMode = "launchpad" | "session";
 
-function clioLogoBase64(): string | null {
-	if (cachedLogoBase64 !== undefined) return cachedLogoBase64;
-	const path = join(resolvePackageRoot(), LOGO_ASSET_PATH);
-	if (!existsSync(path)) {
-		cachedLogoBase64 = null;
-		return cachedLogoBase64;
+export interface WelcomeDashboardComponent extends Component {
+	collapseToSessionHeader(): boolean;
+	resetToLaunchpad(): boolean;
+}
+
+function workspaceValue(stats: WelcomeDashboardStats): string {
+	const workspace = stats.workspace;
+	const location = basename(stats.cwd) || stats.cwd;
+	if (!workspace) return location;
+	const branch = workspace.branch ? ` · git ${workspace.branch}${workspace.dirty ? "*" : ""}` : "";
+	return `${location}${branch}`;
+}
+
+function routeValue(stats: WelcomeDashboardStats): string {
+	const target = formatTargetLabel(stats.targetLabel, stats.modelLabel);
+	if (stats.currentAvailable) {
+		const health = stats.targetHealthLabel ? ` · ${stats.targetHealthLabel}` : "";
+		return `${target} · ready${health}`;
 	}
-	cachedLogoBase64 = readFileSync(path).toString("base64");
-	return cachedLogoBase64;
+	return `${target} · unavailable`;
 }
 
-function createLogoImage(theme: ClioTheme): Component | null {
-	const base64 = clioLogoBase64();
-	if (!base64) return null;
-	const imageTheme: ImageTheme = {
-		fallbackColor: (text) => theme.fg("dim", text),
-	};
-	return new Image(base64, "image/webp", imageTheme, {
-		filename: "clio-coder-logo-128.webp",
-		maxWidthCells: 8,
-		maxHeightCells: 4,
-	});
+function nextValue(stats: WelcomeDashboardStats): string {
+	if (stats.factsPending === true) return `ctx checking ${GLYPH.ellipsis}`;
+	if (stats.clioMdStatus !== "ok") return "ctx missing · /context init";
+	return "ctx ready · type a task";
 }
 
-export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: number): string[] {
+/**
+ * The launchpad has one fixed row per decision the operator needs to make.
+ * Repository facts may replace text inside NEXT, never rows. After submission,
+ * the session header is exactly one line for every width and fact state.
+ */
+export function buildWelcomeDashboardLines(
+	stats: WelcomeDashboardStats,
+	width: number,
+	mode: WelcomeDashboardMode = "launchpad",
+): string[] {
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
-	const contentWidth = safeWidth - 4;
-
-	/**
-	 * Section 2.4: a key-value key is dim, bare of punctuation, and padded to one
-	 * column width so every value starts in the same place. These labels used to
-	 * carry a colon and the `muted` body token, which put them in the same voice
-	 * as the values they introduce and made each row's alignment a hand-counted
-	 * run of spaces.
-	 */
-	const kvKey = (label: string): string => `  ${theme.fg("dim", label.padEnd(WELCOME_KEY_WIDTH))}  `;
-
-	// The whole styled title (logotype, bold name, dim version) is handed to
-	// the canonical island frame, which places it with one space on each side.
 	const title = `${brandMark(theme)} ${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${readClioVersion()}`)}`;
-	const experimentalLine = `  ${theme.style("warning", EXPERIMENTAL_RELEASE_WARNING, { bold: true })}`;
+	const experimental = theme.fg("warning", EXPERIMENTAL_RELEASE_WARNING);
+	const tag = (label: string): string => sectionTag(theme, "accentDeep", label, 9);
+	const row = (label: string, value: string): string => `  ${tag(label)}  ${value}`;
 
-	const targetVal = theme.fg("accent", formatTargetLabel(stats.targetLabel, stats.modelLabel));
-	const thinkVal = `think ${theme.fg("reason", stats.thinkingLevel)}`;
-
-	let clioMdStr = `CLIO-CODER.md ${stats.clioMdStatus}`;
-	if (stats.clioMdStatus === "ok") {
-		clioMdStr = `${theme.fg("success", "CLIO-CODER.md ok")}`;
-	} else if (stats.clioMdStatus === "stale") {
-		clioMdStr = `${theme.fg("warning", "CLIO-CODER.md stale")}`;
-	} else {
-		clioMdStr = `${theme.fg("dim", "CLIO-CODER.md none")}`;
+	if (mode === "session") {
+		const header = `${title} · ${experimental} · ${theme.fg("muted", nextValue(stats))}`;
+		return [truncateToWidth(header, safeWidth, GLYPH.ellipsis, true)];
 	}
 
-	// While the probe is in flight these rows say "reading", not "none": a dim
-	// placeholder is honest about not knowing yet, where "no codewiki" would be a
-	// wrong answer that corrects itself a moment later.
-	const pending = stats.factsPending === true;
-	const placeholder = (label: string): string => theme.fg("dim", `${label} ${GLYPH.ellipsis}`);
-
-	const codewikiStr = pending
-		? placeholder("codewiki")
-		: stats.codewikiCount > 0
-			? `${theme.fg("info", `${stats.codewikiCount} modules`)}`
-			: `${theme.fg("dim", "no codewiki")}`;
-
-	const handoffStr = pending
-		? placeholder("handoff")
-		: stats.handoffCount > 0
-			? `${theme.fg("muted", `handoff ${stats.handoffFreshness}`)}`
-			: `${theme.fg("dim", "no handoff")}`;
-
-	const safetyStr = `autonomy ${theme.fg("accentDeep", stats.autonomy)}`;
-	const profileStr = `profile ${theme.fg("dim", stats.toolProfile)}`;
-	const compactStr = `compact @${theme.fg("muted", stats.compactionThreshold)}`;
-	const wikiStateStr = pending
-		? placeholder("wiki")
-		: stats.wikiStatus === NO_WIKI_STATUS
-			? theme.fg("dim", stats.wikiStatus)
-			: `${theme.fg("info", `${stats.wikiPageCount} page${stats.wikiPageCount === 1 ? "" : "s"}`)} · ${theme.fg(
-					stats.wikiStatus === "fresh" ? "success" : "warning",
-					stats.wikiStatus,
-				)}`;
-	const wikiUnits = pending
-		? [wikiStateStr, theme.fg("dim", `entry points ${GLYPH.ellipsis}`)]
-		: [
-				wikiStateStr,
-				...(stats.wikiDigestExcerpt.length > 0
-					? stats.wikiDigestExcerpt.map((path, index) => theme.fg("muted", index === 0 ? `entry points: ${path}` : path))
-					: [theme.fg("muted", "entry points: none")]),
-			];
-
-	// Section 2.5 grammar: an affordance is `[Key] verb`, the same shape the
-	// overlay footers use, so the banner teaches the vocabulary the rest of the
-	// TUI speaks. These used to be prose ("Type /settings to edit").
-	const hintKey = (key: string): string => theme.fg("dim", `[${key}]`);
-	const hintUnits = [
-		`${hintKey("type")} ${theme.fg("accent", "/settings")} ${theme.fg("muted", "to configure")}`,
-		`${hintKey("type")} ${theme.fg("accent", "/context init")} ${theme.fg("muted", "to bootstrap")}`,
-		`${hintKey("Alt+U")} ${theme.fg("muted", "toggle dashboard")}`,
+	const body = [
+		`  ${experimental}`,
+		row("WORKSPACE", theme.fg("muted", workspaceValue(stats))),
+		row("ROUTE", theme.fg(stats.currentAvailable ? "success" : "warning", routeValue(stats))),
+		row("NEXT", theme.fg(stats.clioMdStatus === "ok" && !stats.factsPending ? "success" : "warning", nextValue(stats))),
 	];
-	const memoryUnits = stats.taskMemory
-		? [
-				theme.fg(stats.taskMemory.enabled ? "success" : "dim", stats.taskMemory.enabled ? "on" : "off"),
-				theme.fg(
-					stats.taskMemory.tier === "llm" ? "reason" : "muted",
-					`tier ${stats.taskMemory.tier === "llm" ? "LLM" : "rules"}`,
-				),
-				theme.fg("muted", `bank ${stats.taskMemory.size}`),
-			]
-		: [];
-
-	// The wiki and hint rows are the lines long enough to overflow. fitUnits
-	// drops whole ` · `-separated units and closes with a dim ellipsis instead of
-	// cutting a path or phrase mid-glyph, so a truncated row still reads as facts.
-	if (safeWidth >= WIDE_MIN) {
-		const healthStr = stats.targetHealthLabel ? ` · health ${theme.fg("success", stats.targetHealthLabel)}` : "";
-		const targetLine = `${kvKey("Target")}${targetVal} · ${thinkVal}${healthStr}`;
-		const contextLine = `${kvKey("Context")}${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
-		const wikiLine = fitUnits(theme, kvKey("Wiki"), wikiUnits, contentWidth);
-		const settingsLine = `${kvKey("Config")}${safetyStr} · ${profileStr} · ${compactStr}`;
-		const memoryLine = fitUnits(theme, kvKey("Memory"), memoryUnits, contentWidth);
-		const hintLine = fitUnits(theme, kvKey("Hint"), hintUnits, contentWidth);
-
-		return frame(
-			theme,
-			title,
-			[
-				experimentalLine,
-				targetLine,
-				contextLine,
-				...(stats.hasCodewiki ? [wikiLine] : []),
-				settingsLine,
-				...(memoryUnits.length > 0 ? [memoryLine] : []),
-				hintLine,
-			],
-			safeWidth,
-		);
-	} else if (safeWidth >= MID_MIN) {
-		const targetLine = `${kvKey("Target")}${targetVal} · ${thinkVal}`;
-		const contextLine = `${kvKey("Context")}${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
-		const wikiLine = fitUnits(theme, kvKey("Wiki"), wikiUnits, contentWidth);
-		const configLine = `${kvKey("Config")}${safetyStr} · ${profileStr}`;
-		const memoryLine = fitUnits(theme, kvKey("Memory"), memoryUnits, contentWidth);
-		const hintLine = fitUnits(theme, kvKey("Hint"), hintUnits, contentWidth);
-
-		return frame(
-			theme,
-			title,
-			[
-				experimentalLine,
-				targetLine,
-				contextLine,
-				...(stats.hasCodewiki ? [wikiLine] : []),
-				configLine,
-				...(memoryUnits.length > 0 ? [memoryLine] : []),
-				hintLine,
-			],
-			safeWidth,
-		);
-	} else {
-		return [
-			title,
-			`  ${theme.style("warning", "EXPERIMENTAL", { bold: true })}`,
-			`  ${theme.fg("warning", "May break or change.")}`,
-			`  ${targetVal} · ${thinkVal}`,
-			`  ${clioMdStr} · ${codewikiStr}`,
-			...(stats.hasCodewiki ? [`  wiki ${pending ? GLYPH.ellipsis : stats.wikiStatus}`] : []),
-			`  ${safetyStr} · ${hintKey("Alt+U")} ${theme.fg("muted", "toggle")}`,
-			...(memoryUnits.length > 0 ? [fitUnits(theme, kvKey("Memory"), memoryUnits, safeWidth)] : []),
-			// A cut with no marker presents the fragment as the whole value, which is
-			// the rule the 40/80/120 sweep was written against.
-		].map((line) => truncateToWidth(line, safeWidth, GLYPH.ellipsis, true));
-	}
+	if (safeWidth >= MID_MIN) return frame(theme, title, body, safeWidth);
+	return [title, ...body].map((line) => truncateToWidth(line, safeWidth, GLYPH.ellipsis, true));
 }
 
 /**
@@ -567,30 +446,42 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 	].join("\0");
 }
 
-export class WelcomeDashboard implements Component {
-	private readonly logo: Component | null;
+export class WelcomeDashboard implements WelcomeDashboardComponent {
 	private cachedFacts: { cwd: string; at: number; facts: WelcomeRepositoryFacts } | null = null;
 	private cachedRender: { width: number; signature: string; lines: string[] } | null = null;
 	/** Single-flight latch: a probe slower than the TTL must not stack refreshes. */
 	private refreshing = false;
+	private mode: WelcomeDashboardMode = "launchpad";
 
 	constructor(
 		private readonly deps: WelcomeDashboardDeps,
 		private readonly now: () => number = () => Date.now(),
-	) {
-		this.logo = createLogoImage(clioTheme());
-	}
+	) {}
 
 	render(width: number): string[] {
 		const stats = deriveWelcomeDashboardStats({ ...this.deps, readRepositoryFacts: (cwd) => this.facts(cwd) });
-		const signature = statsSignature(stats);
+		const signature = `${this.mode}\0${statsSignature(stats)}`;
 		const cached = this.cachedRender;
 		if (cached !== null && cached.width === width && cached.signature === signature) return cached.lines;
-		const body = buildWelcomeDashboardLines(stats, width);
-		const lines =
-			width < WIDE_MIN || !getCapabilities().images || !this.logo ? body : [...this.logo.render(width), ...body];
+		const lines = buildWelcomeDashboardLines(stats, width, this.mode);
 		this.cachedRender = { width, signature, lines };
 		return lines;
+	}
+
+	/** Collapse once, before first-submit dispatch can append transcript output. */
+	collapseToSessionHeader(): boolean {
+		if (this.mode === "session") return false;
+		this.mode = "session";
+		this.cachedRender = null;
+		return true;
+	}
+
+	/** A genuinely new session gets a fresh launchpad and a fresh one-time transition. */
+	resetToLaunchpad(): boolean {
+		if (this.mode === "launchpad") return false;
+		this.mode = "launchpad";
+		this.cachedRender = null;
+		return true;
 	}
 
 	/** Drops the repository probe and the rendered lines so the next frame re-reads both. */
@@ -640,6 +531,6 @@ export class WelcomeDashboard implements Component {
 	}
 }
 
-export function createWelcomeDashboard(deps: WelcomeDashboardDeps): Component {
+export function createWelcomeDashboard(deps: WelcomeDashboardDeps): WelcomeDashboard {
 	return new WelcomeDashboard(deps);
 }

@@ -77,6 +77,8 @@ export interface EditorSubmitDeps {
 	sessionTranscript: EditorSubmitSessionTranscript;
 	chatPanel: Pick<ChatPanel, "appendReplayBlock">;
 	dispatchCommand: (text: string) => void;
+	/** Idempotently collapses a fresh-session launchpad before any handler can append output. */
+	collapseLaunchpadBeforeSubmit?: () => void;
 	expandSubmit: (text: string) => Promise<EditorSubmitExpansion>;
 	notify: (level: "info" | "warning" | "error", text: string, key: string) => void;
 	getCwd?: () => string;
@@ -226,6 +228,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 	const submitEditorText = (text: string): void => {
 		const trimmed = text.trim();
 		if (trimmed.length === 0) return;
+		deps.collapseLaunchpadBeforeSubmit?.();
 		if (parseEditorBashCommand(text)) {
 			if (!deps.chat.isStreaming() && !activeEditorBash) deps.editor.setText("");
 			if (runEditorBash(text)) deps.ui.requestRender();

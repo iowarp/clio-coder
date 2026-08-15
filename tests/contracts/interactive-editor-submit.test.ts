@@ -99,6 +99,31 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 }
 
 describe("contracts/interactive editor submit", () => {
+	it("collapses exactly once before the first non-empty submit can dispatch output", () => {
+		const harness = createHarness();
+		let launchpad = true;
+		harness.deps.collapseLaunchpadBeforeSubmit = () => {
+			if (!launchpad) return;
+			launchpad = false;
+			harness.events.push("collapse");
+		};
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.submitEditorText("   ");
+		controller.submitEditorText("first prompt");
+		controller.submitEditorText("second prompt");
+
+		deepStrictEqual(harness.events, [
+			"collapse",
+			"set:",
+			"dispatch:first prompt",
+			"render",
+			"set:",
+			"dispatch:second prompt",
+			"render",
+		]);
+	});
+
 	it("clears the editor before dispatching trimmed command text", () => {
 		const harness = createHarness();
 		const controller = createEditorSubmitController(harness.deps);

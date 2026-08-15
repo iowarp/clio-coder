@@ -28,7 +28,7 @@ import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js"
 import type { RunIo } from "./slash-commands.js";
 import { createStatusController, type StatusController, type TurnSummary } from "./status/index.js";
 import { formatTargetLabel } from "./theme/index.js";
-import { createWelcomeDashboard } from "./welcome-dashboard.js";
+import { createWelcomeDashboard, type WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
 
 export interface PresentationTickerHandle {
@@ -41,7 +41,7 @@ type AutocompleteProvider = ReturnType<typeof createSlashCommandAutocompleteProv
 
 export interface InteractivePresentationFactories {
 	createKeybindings: typeof createKeybindingManager;
-	createBanner: typeof createWelcomeDashboard;
+	createBanner: (deps: Parameters<typeof createWelcomeDashboard>[0]) => WelcomeDashboardComponent;
 	createChatPanel: typeof createChatPanel;
 	createFollowUpQueuePanel: typeof createFollowUpQueuePanel;
 	createStatusController: typeof createStatusController;
@@ -92,7 +92,7 @@ export interface PresentationToolEnd {
 
 export interface InteractivePresentation {
 	keybindings: ClioKeybindingManager;
-	banner: Component;
+	banner: WelcomeDashboardComponent;
 	chatPanel: ChatPanel;
 	followUpQueuePanel: FollowUpQueuePanel;
 	statusController: StatusController;
@@ -103,6 +103,7 @@ export interface InteractivePresentation {
 	notify(level: InteractiveNoticeLevel, text: string, key?: string): void;
 	dismissContextBootstrapNotices(): void;
 	announceTaskMemorySeedOffer(): void;
+	collapseWelcomeDashboard(): void;
 	editor: ClioEditor;
 	dispatchBoard: DispatchBoardView;
 	chatRenderer: CoalescingChatRenderer;
@@ -387,6 +388,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		notify,
 		dismissContextBootstrapNotices,
 		announceTaskMemorySeedOffer,
+		collapseWelcomeDashboard: () => {
+			if (banner.collapseToSessionHeader()) requestRender();
+		},
 		editor,
 		dispatchBoard,
 		chatRenderer,
@@ -406,6 +410,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			lastTurnSummary = summary;
 		},
 		resetForNewSession: () => {
+			banner.resetToLaunchpad();
 			footerToolCounts.clear();
 			footerActiveTools.clear();
 			footerToolErrors = 0;

@@ -160,18 +160,6 @@ function dashboardStatsFor(cwd: string) {
 	});
 }
 
-function strippedDashboardRow(
-	stats: ReturnType<typeof deriveWelcomeDashboardStats>,
-	width: number,
-	label: string,
-): string {
-	const row = buildWelcomeDashboardLines(stats, width)
-		.map(stripAnsi)
-		.find((line) => line.includes(label));
-	if (!row) throw new Error(`missing dashboard row ${label}`);
-	return row;
-}
-
 describe("welcome-dashboard and footer integration tests", () => {
 	it("derives stats correctly from providers and settings", () => {
 		const stats = deriveWelcomeDashboardStats({
@@ -196,7 +184,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 		strictEqual(abbreviateModelId("verylongsinglemodelidentifierwithoutdashes").length, 18);
 	});
 
-	it("formats welcome dashboard lines with correct components in wide mode", () => {
+	it("renders the adaptive launchpad with only WORKSPACE, ROUTE, and NEXT decision rows", () => {
 		const stats = deriveWelcomeDashboardStats({
 			providers: mockProviders,
 			observability: mockObservability,
@@ -204,68 +192,51 @@ describe("welcome-dashboard and footer integration tests", () => {
 		});
 
 		const lines = buildWelcomeDashboardLines(stats, 100);
-		// The key is padded inside its own color run, so the label and the two
-		// spaces after it are only adjacent once the escapes are gone.
 		const joined = lines.map(stripAnsi).join("\n");
 
-		// Section 2.4 keys are bare and dim, padded to one column width. They used
-		// to carry a colon and the `muted` body token, which gave a label the same
-		// voice as the value it introduces.
-		for (const key of ["Target", "Context", "Config", "Hint"]) {
-			ok(joined.includes(`  ${key.padEnd(7)}  `), `banner lost the ${key} key: ${joined}`);
-			ok(!joined.includes(`${key}:`), `banner key ${key} still carries a colon`);
-		}
-		// Section 2.5: affordances read `[Key] verb`, not prose. The row fits two
-		// units at 100 columns and all three at 120; `fitUnits` drops whole units
-		// off the end, so the check for the last one runs at the wider size.
-		ok(joined.includes("[type] /settings to configure"), joined);
-		ok(!/Type \/settings/u.test(joined), "the hint row is no longer prose");
-		const wide = buildWelcomeDashboardLines(stats, 130).map(stripAnsi).join("\n");
-		ok(wide.includes("[Alt+U] toggle dashboard"), wide);
-		// abbreviateModelId now keeps whole dash-separated parts under 18 chars,
-		// so the version suffix survives instead of being clipped to "gemini-3.5".
-		ok(joined.includes("gemini-3.5-flash"), `model label should keep its version suffix, got: ${joined}`);
+		for (const tag of ["WORKSPACE", "ROUTE", "NEXT"]) ok(joined.includes(tag), `launchpad lost ${tag}: ${joined}`);
+		for (const retired of ["Context", "Wiki", "Config", "Memory", "Hint", "think on"])
+			ok(!joined.includes(retired), `launchpad repeats permanent-dashboard fact ${retired}: ${joined}`);
+		ok(joined.includes("mock-target · gemini-3.5-flash · ready"), joined);
+		ok(joined.includes("ctx missing · /context init"), joined);
+
+		const theme = clioTheme();
+		for (const tag of ["WORKSPACE", "ROUTE", "NEXT"])
+			ok(lines.join("\n").includes(theme.style("accentDeep", tag.padEnd(9), { bold: true })));
+		ok(!joined.includes(stats.autonomy), "autonomy is already owned by the footer and must not be repainted here");
 	});
 
-	it("shows the experimental warning across wide, mid, and narrow startup dashboards", () => {
+	it("retains EXPERIMENTAL as warning metadata in launchpad and session modes", () => {
 		const stats = deriveWelcomeDashboardStats({
 			providers: mockProviders,
 			observability: mockObservability,
 			getSettings: () => mockSettings,
 		});
 
-		for (const width of [100, 64, 30]) {
-			const rendered = buildWelcomeDashboardLines(stats, width).map(stripAnsi).join("\n");
-			ok(rendered.includes("EXPERIMENTAL"), `width ${width}: ${rendered}`);
-			ok(rendered.includes("break or change"), `width ${width}: ${rendered}`);
+		for (const width of [120, 80, 40]) {
+			for (const mode of ["launchpad", "session"] as const) {
+				const rendered = buildWelcomeDashboardLines(stats, width, mode).map(stripAnsi).join("\n");
+				ok(rendered.includes("EXPERIMENTAL"), `${mode} width ${width}: ${rendered}`);
+			}
 		}
 	});
 
-	it("shows truthful proactive-memory status and drops narrow facts whole", () => {
-		const bank = { version: 1 as const, status: null, knowledge: [], procedural: [] };
-		const stats = deriveWelcomeDashboardStats({
+	it("chooses one honest NEXT action from repository readiness", () => {
+		const missing = deriveWelcomeDashboardStats({
 			providers: mockProviders,
 			observability: mockObservability,
 			getSettings: () => mockSettings,
-			getTaskMemoryStatus: () => ({
-				enabled: true,
-				tier: "llm",
-				size: 3,
-				lastDecision: "injected",
-				bank,
-				activity: [],
-				stepInFlight: false,
-			}),
+			readRepositoryFacts: () => {
+				const { pending: _pending, ...facts } = placeholderRepositoryFacts(process.cwd());
+				return facts;
+			},
 		});
+		const ready = { ...missing, clioMdStatus: "ok" };
+		const pending = { ...missing, factsPending: true };
 
-		const wide = strippedDashboardRow(stats, 100, "Memory ");
-		ok(wide.includes("Memory   on · tier LLM · bank 3"), wide);
-		const narrow = buildWelcomeDashboardLines(stats, 30)
-			.map(stripAnsi)
-			.find((line) => line.includes("Memory   on"));
-		ok(narrow, "expected a narrow memory status row");
-		ok(narrow.includes("Memory   on · tier LLM …"), narrow);
-		ok(!narrow.includes("ban"), `a bank fact must be retained whole or dropped: ${narrow}`);
+		ok(stripAnsi(buildWelcomeDashboardLines(missing, 100).join("\n")).includes("ctx missing · /context init"));
+		ok(stripAnsi(buildWelcomeDashboardLines(ready, 100).join("\n")).includes("ctx ready · type a task"));
+		ok(stripAnsi(buildWelcomeDashboardLines(pending, 100).join("\n")).includes("ctx checking …"));
 	});
 
 	// Handoff freshness ages out to a calendar date past 30 days, and that date
@@ -288,30 +259,26 @@ describe("welcome-dashboard and footer integration tests", () => {
 		strictEqual(freshness("UTC"), "2026-06-15");
 	});
 
-	it("renders a no-wiki dashboard row when codewiki exists without Markdown wiki", async () => {
+	it("derives no-wiki repository facts without promoting them to permanent launchpad rows", async () => {
 		const cwd = scratchDashboardProject();
 		await writeDashboardCodewiki(cwd);
 
 		const stats = dashboardStatsFor(cwd);
-		const row = strippedDashboardRow(stats, 120, "Wiki ");
-
-		ok(row.includes("no wiki; run clio-coder context wiki"), row);
-		ok(row.includes("entry points:"), row);
-		ok(row.includes("src/index.ts"), row);
+		strictEqual(stats.wikiStatus, "no wiki; run clio-coder context wiki");
+		ok(stats.wikiDigestExcerpt.includes("src/index.ts"));
+		ok(!stripAnsi(buildWelcomeDashboardLines(stats, 120).join("\n")).includes("entry points:"));
 	});
 
-	it("renders wiki page count, staleness, and digest excerpt in the dashboard row", async () => {
+	it("keeps wiki facts available to refresh logic without adding launchpad height", async () => {
 		const cwd = scratchDashboardProject();
 		await writeDashboardCodewiki(cwd);
 		writeDashboardWiki(cwd);
 
 		const stats = dashboardStatsFor(cwd);
-		const row = strippedDashboardRow(stats, 120, "Wiki ");
-
-		ok(row.includes("1 page"), row);
-		ok(row.includes("fresh"), row);
-		ok(row.includes("entry points:"), row);
-		ok(row.includes("src/index.ts"), row);
+		strictEqual(stats.wikiPageCount, 1);
+		strictEqual(stats.wikiStatus, "fresh");
+		ok(stats.wikiDigestExcerpt.includes("src/index.ts"));
+		strictEqual(buildWelcomeDashboardLines(stats, 120).length, 6);
 	});
 
 	it("renders every framed line at exactly the requested width (border alignment)", () => {
@@ -366,19 +333,17 @@ describe("welcome-dashboard and footer integration tests", () => {
 		);
 	});
 
-	it("truncates the width-80 hint row with a trailing ellipsis instead of a mid-word cut", () => {
+	it("pins launchpad and session mode heights across the width matrix", () => {
 		const stats = deriveWelcomeDashboardStats({
 			providers: mockProviders,
 			observability: mockObservability,
 			getSettings: () => mockSettings,
 		});
 
-		const hintRow = buildWelcomeDashboardLines(stats, 80)
-			.map(stripAnsi)
-			.find((line) => line.includes("Hint "));
-		ok(hintRow, "expected a Hint row");
-		ok(hintRow.includes("…"), `hint row should end in an ellipsis, got: ${hintRow}`);
-		ok(!hintRow.includes("…dashboard"), "the full hint must not survive the ellipsis at width 80");
+		for (const width of [40, 80, 120]) {
+			strictEqual(buildWelcomeDashboardLines(stats, width).length, width < 64 ? 5 : 6, `launchpad width ${width}`);
+			strictEqual(buildWelcomeDashboardLines(stats, width, "session").length, 1, `session width ${width}`);
+		}
 	});
 
 	it("never exceeds the requested width in narrow mode", () => {
@@ -506,22 +471,20 @@ describe("welcome-dashboard and footer integration tests", () => {
 		});
 
 		for (const width of [60, 80, 100, 120, 160]) {
-			const pending = buildWelcomeDashboardLines(placeholderStats, width);
-			const settled = buildWelcomeDashboardLines(settledStats, width);
-			strictEqual(
-				pending.length,
-				settled.length,
-				`width ${width}: placeholder banner must be the same height as the filled banner`,
-			);
-			for (const line of pending) {
-				strictEqual(visibleWidth(line) <= width, true, `width ${width}: placeholder line overflows`);
+			for (const mode of ["launchpad", "session"] as const) {
+				const pending = buildWelcomeDashboardLines(placeholderStats, width, mode);
+				const settled = buildWelcomeDashboardLines(settledStats, width, mode);
+				strictEqual(pending.length, settled.length, `${mode} width ${width}: async facts must not change mode height`);
+				for (const line of pending) {
+					strictEqual(visibleWidth(line) <= width, true, `${mode} width ${width}: placeholder line overflows`);
+				}
 			}
 		}
 
 		// A placeholder says it does not know yet; it must not assert a wrong fact.
 		const pendingText = stripAnsi(buildWelcomeDashboardLines(placeholderStats, 120).join("\n"));
-		ok(pendingText.includes("codewiki"), "the pending context row names what it is still reading");
-		ok(!pendingText.includes("no codewiki"), "a repository that has a codewiki must never be told it has none");
+		ok(pendingText.includes("ctx checking …"), "the pending NEXT row is honest about readiness");
+		ok(!pendingText.includes("ctx missing"), "an in-flight probe must not claim project context is missing");
 	});
 
 	it("keeps the repository probe off the render call stack", async () => {
@@ -537,18 +500,19 @@ describe("welcome-dashboard and footer integration tests", () => {
 		// First frame: nothing has been probed, so the banner is placeholders and
 		// render() returned without touching git or parsing the codewiki.
 		const first = stripAnsi(dashboard.render(120).join("\n"));
-		ok(first.includes("codewiki"), "the first frame renders before any probe has run");
+		ok(first.includes("ctx checking …"), "the first frame renders before any probe has run");
+		const launchpadHeight = dashboard.render(120).length;
 
 		// Let the scheduled probe land, then the banner fills in.
 		for (let i = 0; i < 50; i += 1) {
 			await new Promise((resolve) => setTimeout(resolve, 20));
 			const text = stripAnsi(dashboard.render(120).join("\n"));
-			if (/\d+ modules/u.test(text)) {
-				strictEqual(
-					dashboard.render(120).length,
-					dashboard.render(120).length,
-					"a settled banner renders at a stable height",
-				);
+			if (!text.includes("ctx checking")) {
+				strictEqual(dashboard.render(120).length, launchpadHeight, "the settled launchpad keeps its pending height");
+				dashboard.collapseToSessionHeader();
+				strictEqual(dashboard.render(120).length, 1, "the deliberate mode transition collapses to one line");
+				dashboard.collapseToSessionHeader();
+				strictEqual(dashboard.render(120).length, 1, "the mode transition is idempotent");
 				return;
 			}
 		}
