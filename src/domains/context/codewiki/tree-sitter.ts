@@ -1,11 +1,12 @@
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import TreeSitter, {
 	type Parser as ParserInstance,
 	type Node as SyntaxNode,
 	type Tree,
 } from "@vscode/tree-sitter-wasm";
 import { classifyCHeaderLanguage, isAmbiguousHeaderPath } from "../../../core/c-header-language.js";
+import { resolvePackageRoot } from "../../../core/package-root.js";
+import { TREE_SITTER_RUNTIME_WASM } from "./grammar-assets.js";
 import type {
 	CodewikiLanguage,
 	CodewikiSymbolKind,
@@ -14,9 +15,17 @@ import type {
 	LanguageExtractor,
 } from "./indexer.js";
 
-const require = createRequire(import.meta.url);
 const { Language, Parser } = TreeSitter;
-const VSCODE_WASM_DIR = dirname(require.resolve("@vscode/tree-sitter-wasm"));
+
+/**
+ * Every wasm file lives in the package's own dist/assets/grammars/, vendored
+ * there at build from the list in grammar-assets.ts. Nothing resolves through
+ * node_modules: the grammar packages are devDependencies and are not installed
+ * with the package.
+ */
+function grammarAssetPath(file: string): string {
+	return join(resolvePackageRoot(), "dist", "assets", "grammars", file);
+}
 
 type GrammarName =
 	| "typescript"
@@ -32,19 +41,17 @@ type GrammarName =
 	| "c_sharp";
 
 const WASM_BY_GRAMMAR: Record<GrammarName, string> = {
-	typescript: join(VSCODE_WASM_DIR, "tree-sitter-typescript.wasm"),
-	tsx: join(VSCODE_WASM_DIR, "tree-sitter-tsx.wasm"),
-	javascript: join(VSCODE_WASM_DIR, "tree-sitter-javascript.wasm"),
-	python: join(VSCODE_WASM_DIR, "tree-sitter-python.wasm"),
-	go: join(VSCODE_WASM_DIR, "tree-sitter-go.wasm"),
-	rust: join(VSCODE_WASM_DIR, "tree-sitter-rust.wasm"),
-	// VS Code does not currently ship a C grammar; its runtime accepts this
-	// ABI-compatible compact C side module from tree-sitter-wasms.
-	c: require.resolve("tree-sitter-wasms/out/tree-sitter-c.wasm"),
-	cpp: join(VSCODE_WASM_DIR, "tree-sitter-cpp.wasm"),
-	java: join(VSCODE_WASM_DIR, "tree-sitter-java.wasm"),
-	ruby: join(VSCODE_WASM_DIR, "tree-sitter-ruby.wasm"),
-	c_sharp: join(VSCODE_WASM_DIR, "tree-sitter-c-sharp.wasm"),
+	typescript: "tree-sitter-typescript.wasm",
+	tsx: "tree-sitter-tsx.wasm",
+	javascript: "tree-sitter-javascript.wasm",
+	python: "tree-sitter-python.wasm",
+	go: "tree-sitter-go.wasm",
+	rust: "tree-sitter-rust.wasm",
+	c: "tree-sitter-c.wasm",
+	cpp: "tree-sitter-cpp.wasm",
+	java: "tree-sitter-java.wasm",
+	ruby: "tree-sitter-ruby.wasm",
+	c_sharp: "tree-sitter-c-sharp.wasm",
 };
 
 const NAME_NODE_TYPES = new Set([
@@ -84,7 +91,7 @@ let parserInit: Promise<void> | null = null;
 function ensureParserInit(): Promise<void> {
 	parserInit ??= Parser.init({
 		locateFile() {
-			return join(VSCODE_WASM_DIR, "tree-sitter.wasm");
+			return grammarAssetPath(TREE_SITTER_RUNTIME_WASM);
 		},
 	});
 	return parserInit;
@@ -700,7 +707,7 @@ export async function createTreeSitterExtractor(): Promise<TreeSitterExtractor> 
 		if (parsers.has(grammar)) return Promise.resolve();
 		let pending = loading.get(grammar);
 		if (!pending) {
-			pending = Language.load(WASM_BY_GRAMMAR[grammar])
+			pending = Language.load(grammarAssetPath(WASM_BY_GRAMMAR[grammar]))
 				.then((language) => {
 					const parser = new Parser();
 					parser.setLanguage(language);
