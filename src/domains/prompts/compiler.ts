@@ -451,8 +451,11 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	let identityBody = identity.body;
 	const selfAwareness = identity.id === "identity.clio" ? table.byId.get("identity.self-awareness") : undefined;
 	if (selfAwareness) {
-		const docsPath = join(resolvePackageRoot(), "docs");
-		const rendered = selfAwareness.body.replace("{CLIO_DOCS_PATH}", docsPath);
+		const packageRoot = resolvePackageRoot();
+		const rendered = selfAwareness.body
+			.replace("{CLIO_DOCS_PATH}", join(packageRoot, "docs"))
+			.replace("{CLIO_SRC_PATH}", join(packageRoot, "src"))
+			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codewiki.json"));
 		identityBody = `${identity.body.trim()}\n\n${rendered.trim()}`;
 	}
 

@@ -281,6 +281,9 @@ describe("contracts/prompts identity anti-leak safety", () => {
 		strictEqual(selfAwareness.dynamic, false);
 		ok(selfAwareness.body.includes("# Clio's own harness"));
 		ok(selfAwareness.body.includes("Installed documentation: {CLIO_DOCS_PATH}"));
+		ok(selfAwareness.body.includes("Installed source: {CLIO_SRC_PATH}"));
+		ok(selfAwareness.body.includes("Code map: {CLIO_CODEWIKI_PATH}"));
+		ok(selfAwareness.body.includes("Documentation routes, code decides"));
 		ok(selfAwareness.body.includes("~/.config/clio-coder/settings.yaml"));
 		ok(selfAwareness.body.includes("docs/extensions-and-sharing.md"));
 		ok(selfAwareness.body.includes("docs/skills-marketplace.md"));
@@ -310,8 +313,12 @@ describe("contracts/prompts compiler logic", () => {
 			safety: "safety.auto-edit",
 			sessionInputs: { provider: "p", model: "m" },
 		});
-		const expectedDocsPath = join(resolvePackageRoot(), "docs");
-		ok(result.systemPrompt.includes(`Installed documentation: ${expectedDocsPath}`));
+		const packageRoot = resolvePackageRoot();
+		ok(result.systemPrompt.includes(`Installed documentation: ${join(packageRoot, "docs")}`));
+		ok(result.systemPrompt.includes(`Installed source: ${join(packageRoot, "src")}`));
+		ok(result.systemPrompt.includes(`Code map: ${join(packageRoot, "dist", "assets", "codewiki.json")}`));
+		strictEqual(result.systemPrompt.includes("{CLIO_SRC_PATH}"), false);
+		strictEqual(result.systemPrompt.includes("{CLIO_CODEWIKI_PATH}"), false);
 		ok(result.systemPrompt.includes("# Clio's own harness"));
 		ok(result.systemPrompt.includes("~/.config/clio-coder/settings.yaml"));
 		ok(result.systemPrompt.includes("docs/extensions-and-sharing.md"));
@@ -335,6 +342,8 @@ describe("contracts/prompts compiler logic", () => {
 		strictEqual(result.systemPrompt.includes("Clio's own harness"), false);
 		strictEqual(result.systemPrompt.includes("Installed documentation"), false);
 		strictEqual(result.systemPrompt.includes("{CLIO_DOCS_PATH}"), false);
+		strictEqual(result.systemPrompt.includes("Installed source"), false);
+		strictEqual(result.systemPrompt.includes("Code map"), false);
 		strictEqual(result.systemPrompt.includes("settings.yaml"), false);
 		strictEqual(
 			result.fragmentManifest.some((f) => f.id === "identity.self-awareness"),

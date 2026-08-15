@@ -3,6 +3,7 @@
 	"requiredFiles": [
 		"dist/cli/index.js",
 		"dist/worker/entry.js",
+		"dist/assets/codewiki.json",
 		"src/domains/prompts/fragments/identity/clio.md",
 		"src/domains/prompts/fragments/identity/clio-worker.md",
 		"assets/clio-coder-logo-128.webp",
