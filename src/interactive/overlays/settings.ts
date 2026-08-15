@@ -39,7 +39,12 @@ import { modelsForTarget } from "./model-selector.js";
 
 export const SETTINGS_OVERLAY_WIDTH = "100%";
 export const SETTINGS_OVERLAY_MAX_HEIGHT = "100%";
-export const SETTINGS_OVERLAY_MARGIN = { top: 1, right: 2, bottom: 1, left: 2 } as const;
+export const SETTINGS_OVERLAY_MARGIN = {
+	top: 1,
+	right: 2,
+	bottom: 1,
+	left: 2,
+} as const;
 
 const SECTION_LANE_WIDTH = 24;
 /**
@@ -97,16 +102,16 @@ type SettingScope = "live" | "restart";
 const RESTART_REQUIRED_IDS = new Set<string>(["budget.concurrency", "runtimePlugins"]);
 
 export const SETTINGS_SECTIONS = [
-	{ id: "safety", label: "Autonomy & Safety" },
-	{ id: "orchestrator", label: "Orchestrator" },
-	{ id: "fleet", label: "Fleet" },
-	{ id: "targets", label: "Targets" },
-	{ id: "models", label: "Models" },
-	{ id: "budget", label: "Budget" },
-	{ id: "compaction", label: "Compaction" },
-	{ id: "retry", label: "Retry" },
-	{ id: "terminal", label: "Terminal" },
-	{ id: "advanced", label: "Advanced" },
+	{ id: "safety", label: "Autonomy & Safety", group: "CORE" },
+	{ id: "orchestrator", label: "Orchestrator", group: "CORE" },
+	{ id: "fleet", label: "Fleet", group: "ROUTING" },
+	{ id: "targets", label: "Targets", group: "ROUTING" },
+	{ id: "models", label: "Models", group: "ROUTING" },
+	{ id: "budget", label: "Budget", group: "RUNTIME" },
+	{ id: "compaction", label: "Compaction", group: "RUNTIME" },
+	{ id: "retry", label: "Retry", group: "RUNTIME" },
+	{ id: "terminal", label: "Terminal", group: "EXPERIENCE" },
+	{ id: "advanced", label: "Advanced", group: "EXPERIENCE" },
 ] as const;
 
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
@@ -148,8 +153,8 @@ export const SETTINGS_LABELS_BY_ID = {
 	"workers.default.target": "Default target",
 	"workers.default.model": "Default model",
 	"workers.default.thinkingLevel": "Default thinking level",
-	"workers.profiles": "Fleet profiles",
-	"workers.agentBindings": "Agent bindings",
+	"workers.profiles": "Add profile",
+	"workers.agentBindings": "Add agent route",
 	"workers.maxRetries": "Fleet retries",
 	scope: "Model cycle set",
 	"modelSelector.recentLimit": "Recent models kept",
@@ -189,9 +194,12 @@ type EntrySettingId =
 	| `targets.${string}`
 	| `fleet.nodes.${string}`;
 export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID | EntrySettingId;
+type FleetGroupHeaderId = `fleet.group.${"defaults" | "profiles" | "agent-routes" | "placement"}`;
+export type SettingsCenterRowId = EditableSettingId | FleetGroupHeaderId;
 const REMOVE_PROFILE_CHOICE = "(remove profile)";
 const UNBIND_CHOICE = "(unbind)";
 const AUTO_PLACEMENT_CHOICE = "(auto placement)";
+const PROFILE_FIELD_SEPARATOR = " -> ";
 
 export const SETTINGS_SECTION_ROWS = {
 	safety: [
@@ -218,9 +226,9 @@ export const SETTINGS_SECTION_ROWS = {
 		"workers.default.target",
 		"workers.default.model",
 		"workers.default.thinkingLevel",
+		"workers.maxRetries",
 		"workers.profiles",
 		"workers.agentBindings",
-		"workers.maxRetries",
 	],
 	models: ["scope", "modelSelector.recentLimit", "modelSelector.favorites"],
 	budget: ["budget.sessionCeilingUsd", "defaults.maxTokens", "budget.concurrency"],
@@ -380,11 +388,11 @@ export interface SettingsValueSegment {
 }
 
 export interface SettingsCenterItem extends SettingItem {
-	id: EditableSettingId;
+	id: SettingsCenterRowId;
 	label: string;
 	description: string;
 	section: SettingsSectionId;
-	configPath: EditableSettingId;
+	configPath: SettingsCenterRowId;
 	affordance: string;
 	scope: SettingScope;
 	readOnly: boolean;
@@ -405,7 +413,7 @@ export interface SettingsCenterSelection {
 	lane: SettingsCenterLane;
 	section: SettingsSectionId;
 	rowIndex: number;
-	rowId: EditableSettingId | null;
+	rowId: SettingsCenterRowId | null;
 	submenuOpen: boolean;
 }
 
@@ -551,7 +559,11 @@ function editNumberSubmenu(title: string): SettingSubmenuBuilder {
 
 function selectListSubmenu(
 	title: string,
-	items: ReadonlyArray<{ value: string; label: string; presentationKind?: SettingsPresentationKind }>,
+	items: ReadonlyArray<{
+		value: string;
+		label: string;
+		presentationKind?: SettingsPresentationKind;
+	}>,
 	note?: string,
 ): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
@@ -599,11 +611,18 @@ function profileTargetChoices(
 	live: () => Readonly<ClioSettings>,
 	providers: ProvidersContract | undefined,
 ): Array<{ value: string; label: string }> {
-	if (!providers) return live().targets.map((target) => ({ value: target.id, label: target.id }));
+	if (!providers)
+		return live().targets.map((target) => ({
+			value: target.id,
+			label: target.id,
+		}));
 	return providers
 		.list()
 		.filter((status) => status.runtime !== null && isDispatchEligibleRuntime(status.runtime))
-		.map((status) => ({ value: status.target.id, label: `${status.target.id} (${status.target.url ?? "no url"})` }));
+		.map((status) => ({
+			value: status.target.id,
+			label: `${status.target.id} (${status.target.url ?? "no url"})`,
+		}));
 }
 
 function profileNameChoices(live: () => Readonly<ClioSettings>): Array<{ value: string; label: string }> {
@@ -624,13 +643,37 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 		const chatEligible = !providers || (runtime !== null && isOrchestratorEligibleRuntime(runtime));
 		const items = [
 			...(chatEligible
-				? [{ value: "use", label: "Use for chat and fleet dispatch", presentationKind: "action" as const }]
+				? [
+						{
+							value: "use",
+							label: "Use for chat and fleet dispatch",
+							presentationKind: "action" as const,
+						},
+					]
 				: []),
 			...(connectTarget
-				? [{ value: "connect", label: "Connect (API key or OAuth), then probe", presentationKind: "action" as const }]
+				? [
+						{
+							value: "connect",
+							label: "Connect (API key or OAuth), then probe",
+							presentationKind: "action" as const,
+						},
+					]
 				: []),
-			...(providers ? [{ value: "probe", label: "Probe health now", presentationKind: "action" as const }] : []),
-			{ value: "remove", label: "Remove target", presentationKind: "destructive-action" as const },
+			...(providers
+				? [
+						{
+							value: "probe",
+							label: "Probe health now",
+							presentationKind: "action" as const,
+						},
+					]
+				: []),
+			{
+				value: "remove",
+				label: "Remove target",
+				presentationKind: "destructive-action" as const,
+			},
 		];
 		const note = chatEligible ? undefined : "Not chat-eligible: its runtime is not HTTP/native.";
 		return selectListSubmenu(
@@ -712,6 +755,7 @@ function settingItem(
 		valueSegments?: readonly SettingsValueSegment[];
 		label?: string;
 		description?: string;
+		help?: string;
 	},
 ): SettingsCenterItem {
 	const item: SettingsCenterItem = {
@@ -727,7 +771,7 @@ function settingItem(
 		presentationKind: options.presentationKind ?? (options.readOnly ? "read-only-fact" : "setting"),
 		valueSegments: options.valueSegments ?? [{ text: currentValue, tone: "neutral" }],
 	};
-	const help = SETTINGS_HELP_BY_ID[id];
+	const help = options.help ?? SETTINGS_HELP_BY_ID[id];
 	if (help) item.help = help;
 	const valueHelp = SETTINGS_VALUE_HELP_BY_ID[id];
 	if (valueHelp) item.valueHelp = valueHelp;
@@ -736,6 +780,22 @@ function settingItem(
 	if (options.values) item.values = [...options.values];
 	if (options.submenu) item.submenu = options.submenu;
 	return item;
+}
+
+function fleetGroupHeader(id: FleetGroupHeaderId, label: string): SettingsCenterItem {
+	return {
+		id,
+		label,
+		currentValue: "",
+		description: `${label} in the Fleet workbench.`,
+		section: "fleet",
+		configPath: id,
+		affordance: "group heading",
+		scope: "live",
+		readOnly: true,
+		presentationKind: "group-header",
+		valueSegments: [],
+	};
 }
 
 function thinkingChoices(
@@ -788,7 +848,6 @@ export function buildSettingItems(
 		settings.background.thinkingLevel,
 	);
 	const profileCount = Object.keys(settings.workers.profiles ?? {}).length;
-	const bindingCount = Object.keys(settings.workers.agentBindings ?? {}).length;
 	const addProfileSubmenu = chainSubmenus(
 		textInputSubmenu("New profile name"),
 		() => selectListSubmenu("Select the profile's target", profileTargetChoices(live, options?.providers)),
@@ -869,6 +928,7 @@ export function buildSettingItems(
 		settingItem("memory.intervention.timeoutMs", String(settings.memory.intervention.timeoutMs), {
 			values: ["5000", "10000", "20000", "30000", "60000"],
 		}),
+		fleetGroupHeader("fleet.group.defaults", "Defaults"),
 		settingItem("workers.default.target", settings.workers.default.target ?? "(unset)", {
 			submenu: targetSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
@@ -880,21 +940,28 @@ export function buildSettingItems(
 		settingItem("workers.default.thinkingLevel", workerThinking.display, {
 			values: workerThinking.values,
 		}),
-		settingItem("workers.profiles", profileCount > 0 ? `${profileCount} profile(s)` : "(none)", {
-			submenu: addProfileSubmenu,
-			affordance: "Enter adds a profile",
-			presentationKind: "action",
-		}),
-		...fleetProfileRows(settings, live, options),
-		settingItem("workers.agentBindings", bindingCount > 0 ? `${bindingCount} binding(s)` : "(none)", {
-			...(profileCount > 0 ? { submenu: addBindingSubmenu } : { readOnly: true }),
-			affordance: profileCount > 0 ? "Enter binds an agent" : "create a profile first",
-			presentationKind: profileCount > 0 ? "action" : "read-only-fact",
-		}),
-		...agentBindingRows(settings, live),
 		settingItem("workers.maxRetries", String(settings.workers.maxRetries), {
 			values: ["0", "1", "2", "3", "5", "8"],
 		}),
+		fleetGroupHeader("fleet.group.profiles", "Profiles"),
+		...fleetProfileRows(settings, live, options),
+		settingItem("workers.profiles", "", {
+			label: "Add profile",
+			submenu: addProfileSubmenu,
+			affordance: "Enter: name and route a new profile",
+			presentationKind: "action",
+			valueSegments: [],
+		}),
+		fleetGroupHeader("fleet.group.agent-routes", "Agent routes"),
+		...agentBindingRows(settings, live),
+		settingItem("workers.agentBindings", "", {
+			label: "Add agent route",
+			...(profileCount > 0 ? { submenu: addBindingSubmenu } : { readOnly: true }),
+			affordance: profileCount > 0 ? "Enter binds an agent" : "create a profile first",
+			presentationKind: profileCount > 0 ? "action" : "read-only-fact",
+			valueSegments: [],
+		}),
+		fleetGroupHeader("fleet.group.placement", "Placement"),
 		...fleetNodeRows(options?.getFleetNodes?.() ?? []),
 		settingItem("targets", settings.targets.length > 0 ? `${settings.targets.length} configured` : "(none)", {
 			affordance: "add with `clio-coder targets add`",
@@ -1001,43 +1068,98 @@ function fleetProfileRows(
 	const providers = options?.providers;
 	return Object.entries(settings.workers.profiles)
 		.sort(([a], [b]) => a.localeCompare(b))
-		.flatMap(([name, profile]) => {
+		.map(([name, profile]) => {
 			const thinking = thinkingChoices(providers, profile.target, profile.model, profile.thinkingLevel);
-			const targetSubmenu = selectListSubmenu(
-				`Target for profile ${name}`,
-				[
-					...profileTargetChoices(live, providers),
-					{ value: REMOVE_PROFILE_CHOICE, label: REMOVE_PROFILE_CHOICE, presentationKind: "destructive-action" as const },
+			const target = profile.target ?? "(unset)";
+			const model = profile.model ?? "(unset)";
+			const placement = profile.node ?? "auto";
+			const summary = `${target}/${model}  ${thinking.display}  ${placement}`;
+			return settingItem(`workers.profiles.${name}`, summary, {
+				label: name,
+				description: `Profile ${name}. Enter to edit its target, model, thinking level, placement, or remove it.`,
+				help: ["target", "model", "thinkingLevel", "node"].map((field) => `workers.profiles.${name}.${field}`).join(" · "),
+				submenu: profileWorkbenchSubmenu(name, settings, live, options),
+				affordance: "Enter: drill into profile fields",
+				valueSegments: [
+					{ text: `${target}/${model}`, tone: "neutral" },
+					{ text: `  ${thinking.display}`, tone: "neutral" },
+					{ text: `  ${placement}`, tone: "neutral" },
 				],
-				"Changing the target rebases the model on that target's default. Removing the profile drops its agent bindings.",
-			);
-			const modelSubmenu = providers
-				? selectModelSubmenu(providers, () => live().workers.profiles[name]?.target ?? undefined)
-				: editTextSubmenu("Type model name");
-			return [
-				settingItem(`workers.profiles.${name}.target`, profile.target ?? "(unset)", {
-					label: `${name} · target`,
-					description: `Target that workers on profile ${name} dispatch to.`,
-					submenu: targetSubmenu,
-				}),
-				settingItem(`workers.profiles.${name}.model`, profile.model ?? "(unset)", {
-					label: `${name} · model`,
-					description: `Wire model id for profile ${name}.`,
-					submenu: modelSubmenu,
-					affordance: providers ? "opens picker" : "free text",
-				}),
-				settingItem(`workers.profiles.${name}.thinkingLevel`, thinking.display, {
-					label: `${name} · thinking`,
-					description: `Reasoning budget for profile ${name}.`,
-					values: thinking.values,
-				}),
-				settingItem(`workers.profiles.${name}.node`, profile.node ?? AUTO_PLACEMENT_CHOICE, {
-					label: `${name} · node`,
-					description: `Fleet node workers on profile ${name} are pinned to; auto placement picks per dispatch.`,
-					submenu: selectListSubmenu(`Node for profile ${name}`, profileNodeChoices(settings, options)),
-				}),
-			];
+			});
 		});
+}
+
+function profileWorkbenchSubmenu(
+	name: string,
+	settings: Readonly<ClioSettings>,
+	live: () => Readonly<ClioSettings>,
+	options: BuildSettingItemsOptions | undefined,
+): SettingSubmenuBuilder {
+	return (_currentValue: string, done: (value?: string) => void): Component => {
+		const fields = [
+			{ value: "target", label: "Edit target" },
+			{ value: "model", label: "Edit model" },
+			{ value: "thinkingLevel", label: "Edit thinking level" },
+			{ value: "node", label: "Edit placement" },
+			{
+				value: "remove",
+				label: "Remove profile",
+				presentationKind: "destructive-action" as const,
+			},
+		];
+		let active: Component;
+		const openField = (field?: string): void => {
+			if (!field) {
+				done();
+				return;
+			}
+			const profile = live().workers.profiles[name];
+			if (!profile) {
+				done();
+				return;
+			}
+			if (field === "remove") {
+				done(REMOVE_PROFILE_CHOICE);
+				return;
+			}
+			const finish = (value?: string): void =>
+				done(value === undefined ? undefined : `${field}${PROFILE_FIELD_SEPARATOR}${value}`);
+			if (field === "target") {
+				active = selectListSubmenu(
+					`Target for profile ${name}`,
+					profileTargetChoices(live, options?.providers),
+					"Changing the target rebases the model on that target's default.",
+				)(profile.target ?? "(unset)", finish);
+				return;
+			}
+			if (field === "model") {
+				const submenu = options?.providers
+					? selectModelSubmenu(options.providers, () => live().workers.profiles[name]?.target ?? undefined)
+					: editTextSubmenu("Type model name");
+				active = submenu(profile.model ?? "(unset)", finish);
+				return;
+			}
+			if (field === "thinkingLevel") {
+				const thinking = thinkingChoices(options?.providers, profile.target, profile.model, profile.thinkingLevel);
+				active = selectListSubmenu(
+					`Thinking level for profile ${name}`,
+					thinking.values.map((value) => ({ value, label: value })),
+				)(thinking.display, finish);
+				return;
+			}
+			active = selectListSubmenu(`Placement for profile ${name}`, profileNodeChoices(settings, options))(
+				profile.node ?? AUTO_PLACEMENT_CHOICE,
+				finish,
+			);
+		};
+		const picker = selectListSubmenu(`Profile ${name}`, fields)("", openField);
+		active = picker;
+		return {
+			render: (width: number) => active.render(width),
+			handleInput: (data: string) => active.handleInput?.(data),
+			invalidate: () => active.invalidate?.(),
+		};
+	};
 }
 
 /** Pin choices: auto placement, never-remote local, then every declared node (with live state when known). */
@@ -1051,7 +1173,10 @@ function profileNodeChoices(
 		{ value: "local", label: "local (never remote)" },
 		...settings.fleet.nodes.map((node) => {
 			const state = live.get(node.id);
-			return { value: node.id, label: `${node.id} (${node.host}${state ? `, ${state.state}` : ""})` };
+			return {
+				value: node.id,
+				label: `${node.id} (${node.host}${state ? `, ${state.state}` : ""})`,
+			};
 		}),
 	];
 }
@@ -1093,7 +1218,10 @@ function targetRows(
 		const roleText = roles.length > 0 ? `${roles.join("+")} · ` : "";
 		const healthSegment = targetHealthSegment(health);
 		const activitySegment: SettingsValueSegment | null = operation
-			? { text: `${GLYPH.running} ${operation === "connect" ? "connecting" : "probing"}`, tone: "activity" }
+			? {
+					text: `${GLYPH.running} ${operation === "connect" ? "connecting" : "probing"}`,
+					tone: "activity",
+				}
 			: null;
 		const valueSegments = [
 			...(roleText ? [{ text: roleText, tone: "neutral" as const }] : []),
@@ -1407,21 +1535,28 @@ function applyEntrySettingChange(settings: ClioSettings, id: string, value: stri
 		return true;
 	}
 	if (id.startsWith("workers.profiles.")) {
-		const segments = id.split(".");
-		const field = segments.at(-1);
-		const name = segments.slice(2, -1).join(".");
+		const encoded = value.split(PROFILE_FIELD_SEPARATOR);
+		const summaryName = id.slice("workers.profiles.".length);
+		const legacySegments = id.split(".");
+		const legacyField = legacySegments.at(-1);
+		const usesLegacyField =
+			!settings.workers.profiles[summaryName] && ["target", "model", "thinkingLevel", "node"].includes(legacyField ?? "");
+		const field = usesLegacyField ? legacyField : encoded.shift();
+		const name = usesLegacyField ? legacySegments.slice(2, -1).join(".") : summaryName;
+		const fieldValue = usesLegacyField ? value : encoded.join(PROFILE_FIELD_SEPARATOR);
 		const profile = settings.workers.profiles[name];
 		if (!profile) return true;
-		if (field === "target") {
-			if (value === REMOVE_PROFILE_CHOICE) removeFleetProfileFromSettings(settings, name);
-			else if (value !== profile.target) setFleetProfileInSettings(settings, name, value);
+		if (value === REMOVE_PROFILE_CHOICE) {
+			removeFleetProfileFromSettings(settings, name);
+		} else if (field === "target") {
+			if (fieldValue !== profile.target) setFleetProfileInSettings(settings, name, fieldValue);
 		} else if (field === "model") {
-			profile.model = value === "(unset)" || value === "" ? null : value;
+			profile.model = fieldValue === "(unset)" || fieldValue === "" ? null : fieldValue;
 		} else if (field === "thinkingLevel") {
-			profile.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? profile.thinkingLevel;
+			profile.thinkingLevel = thinkingLevelFromChoiceLabel(fieldValue) ?? profile.thinkingLevel;
 		} else if (field === "node") {
-			if (value === AUTO_PLACEMENT_CHOICE || value === "") delete profile.node;
-			else profile.node = value;
+			if (fieldValue === AUTO_PLACEMENT_CHOICE || fieldValue === "") delete profile.node;
+			else profile.node = fieldValue;
 		}
 		return true;
 	}
@@ -1486,7 +1621,10 @@ export interface SettingsChangePlan {
 		readonly before: unknown;
 		readonly after: unknown;
 	}[];
-	readonly propagation: readonly { readonly path: string; readonly timing: SettingsPropagationTiming }[];
+	readonly propagation: readonly {
+		readonly path: string;
+		readonly timing: SettingsPropagationTiming;
+	}[];
 	readonly impact: string;
 	readonly sessionCapable: boolean;
 }
@@ -1529,20 +1667,26 @@ export function createSettingsChangePlan(
 	selectedValue: string,
 	sessionDestinationAvailable = true,
 ): SettingsChangePlan | null {
+	if (item.id.startsWith("fleet.group.")) return null;
+	const rowId = item.id as EditableSettingId;
 	const original = structuredClone(settings);
 	const proposed = structuredClone(original);
-	applySettingChange(proposed, item.id, selectedValue);
+	applySettingChange(proposed, rowId, selectedValue);
 	const paths = changedLeafPaths(original, proposed);
 	if (paths.length === 0) return null;
 	const restartRequired = item.scope === "restart";
 	const sessionCapable = !restartRequired && sessionDestinationAvailable;
-	const leaves = paths.map((path) => ({ path, before: getAtPath(original, path), after: getAtPath(proposed, path) }));
+	const leaves = paths.map((path) => ({
+		path,
+		before: getAtPath(original, path),
+		after: getAtPath(proposed, path),
+	}));
 	const propagation = paths.map((path) => ({
 		path,
-		timing: propagationTiming(item.id, selectedValue, path, restartRequired),
+		timing: propagationTiming(rowId, selectedValue, path, restartRequired),
 	}));
 	return deepFreeze({
-		rowId: item.id,
+		rowId,
 		label: item.label,
 		originalValue: item.currentValue,
 		selectedValue,
@@ -1644,9 +1788,14 @@ function formatSettingRow(
 	const labelText = padAnsi(item.label, columns.label, ELLIPSIS);
 	const label = selected
 		? theme.style("accent", labelText, { bold: true })
-		: item.presentationKind === "group-header" || item.presentationKind === "action"
-			? theme.style("accentDeep", labelText, { bold: true })
-			: labelText;
+		: item.presentationKind === "group-header"
+			? theme.style("dim", labelText, { bold: true })
+			: item.presentationKind === "action"
+				? theme.style("accentDeep", labelText, { bold: true })
+				: labelText;
+	if (item.presentationKind === "group-header") {
+		return truncateToWidth(`${indent}  ${label}`, width, ELLIPSIS, true);
+	}
 	const modified = !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue;
 	const marker = pending
 		? theme.fg("accent", `${GLYPH.scoped} `)
@@ -1706,7 +1855,10 @@ function renderSettingValue(
 						},
 					]
 				: []),
-			{ ...semantic, text: truncateToWidth(semantic.text, semanticWidth, ELLIPSIS, true) },
+			{
+				...semantic,
+				text: truncateToWidth(semantic.text, semanticWidth, ELLIPSIS, true),
+			},
 		];
 	}
 	let remaining = width;
@@ -1748,6 +1900,8 @@ export class SettingsCenter implements Component {
 	private focusedLane: SettingsCenterLane = "rows";
 	private selectedSectionIndex = 0;
 	private readonly rowIndexBySection = new Map<SettingsSectionId, number>();
+	/** Semantic anchors survive rows being inserted, removed, or reordered during refresh. */
+	private readonly rowIdBySection = new Map<SettingsSectionId, SettingsCenterRowId>();
 	private submenuComponent: Component | null = null;
 	private narrowMode = false;
 	/** Local cycle preview for the selected row; committed on Enter. */
@@ -1776,7 +1930,7 @@ export class SettingsCenter implements Component {
 		const nextSectionIndex = sections.findIndex((section) => section.id === sectionId);
 		if (nextSectionIndex >= 0) this.selectedSectionIndex = nextSectionIndex;
 		const section = this.currentSection();
-		this.rowIndexBySection.set(section.id, this.clampRowIndex(section, rowIndex));
+		this.setRowIndex(section, this.selectableRowIndex(section, rowIndex));
 		this.focusedLane = lane;
 		this.submenuComponent = null;
 		this.pendingValue = null;
@@ -1860,18 +2014,41 @@ export class SettingsCenter implements Component {
 	private rowIndex(sectionId: SettingsSectionId): number {
 		const section = this.sections().find((entry) => entry.id === sectionId);
 		if (!section) return 0;
-		return this.clampRowIndex(section, this.rowIndexBySection.get(sectionId) ?? 0);
+		const rowId = this.rowIdBySection.get(sectionId);
+		const identityIndex = rowId ? section.items.findIndex((item) => item.id === rowId) : -1;
+		if (identityIndex >= 0 && this.isSelectableRow(section.items[identityIndex])) return identityIndex;
+		return this.selectableRowIndex(section, this.rowIndexBySection.get(sectionId) ?? 0);
 	}
 
-	private clampRowIndex(section: SettingsCenterSection, rowIndex: number): number {
-		return Math.max(0, Math.min(rowIndex, Math.max(0, section.items.length - 1)));
+	private isSelectableRow(item: SettingsCenterItem | undefined): boolean {
+		return item !== undefined && item.presentationKind !== "group-header";
+	}
+
+	private selectableRowIndex(section: SettingsCenterSection, rowIndex: number): number {
+		if (section.items.length === 0) return 0;
+		const clamped = Math.max(0, Math.min(rowIndex, section.items.length - 1));
+		if (this.isSelectableRow(section.items[clamped])) return clamped;
+		for (let distance = 1; distance < section.items.length; distance += 1) {
+			const after = clamped + distance;
+			if (this.isSelectableRow(section.items[after])) return after;
+			const before = clamped - distance;
+			if (this.isSelectableRow(section.items[before])) return before;
+		}
+		return 0;
+	}
+
+	private setRowIndex(section: SettingsCenterSection, rowIndex: number): void {
+		const next = this.selectableRowIndex(section, rowIndex);
+		this.rowIndexBySection.set(section.id, next);
+		const item = section.items[next];
+		if (item && this.isSelectableRow(item)) this.rowIdBySection.set(section.id, item.id);
 	}
 
 	private normalizeSelection(): void {
 		const sections = this.sections();
 		this.selectedSectionIndex = Math.max(0, Math.min(this.selectedSectionIndex, Math.max(0, sections.length - 1)));
 		for (const section of sections) {
-			this.rowIndexBySection.set(section.id, this.clampRowIndex(section, this.rowIndexBySection.get(section.id) ?? 0));
+			this.setRowIndex(section, this.rowIndex(section.id));
 		}
 	}
 
@@ -1896,10 +2073,13 @@ export class SettingsCenter implements Component {
 			return;
 		}
 		const section = this.currentSection();
-		const current = this.rowIndex(section.id);
-		const total = section.items.length;
-		if (total === 0) return;
-		this.rowIndexBySection.set(section.id, (current + delta + total) % total);
+		const selectable = section.items
+			.map((item, index) => (this.isSelectableRow(item) ? index : -1))
+			.filter((index) => index >= 0);
+		if (selectable.length === 0) return;
+		const current = selectable.indexOf(this.rowIndex(section.id));
+		const next = selectable[(Math.max(0, current) + delta + selectable.length) % selectable.length];
+		if (next !== undefined) this.setRowIndex(section, next);
 	}
 
 	private moveSection(delta: -1 | 1): void {
@@ -1911,7 +2091,14 @@ export class SettingsCenter implements Component {
 
 	private moveRowAcrossSections(delta: -1 | 1): void {
 		const flat = this.sections().flatMap((section) =>
-			section.items.map((item, rowIndex) => ({ sectionId: section.id, rowIndex, id: item.id })),
+			section.items
+				.map((item, rowIndex) => ({
+					sectionId: section.id,
+					rowIndex,
+					id: item.id,
+					selectable: this.isSelectableRow(item),
+				}))
+				.filter((entry) => entry.selectable),
 		);
 		if (flat.length === 0) return;
 		const selected = this.selectedItem();
@@ -1923,7 +2110,8 @@ export class SettingsCenter implements Component {
 		if (!next) return;
 		const sectionIndex = this.sections().findIndex((section) => section.id === next.sectionId);
 		if (sectionIndex >= 0) this.selectedSectionIndex = sectionIndex;
-		this.rowIndexBySection.set(next.sectionId, next.rowIndex);
+		const section = this.sections().find((entry) => entry.id === next.sectionId);
+		if (section) this.setRowIndex(section, next.rowIndex);
 	}
 
 	/** Space cycles a local preview of an enum/bool row without committing. */
@@ -1998,7 +2186,14 @@ export class SettingsCenter implements Component {
 		list.onSelect = (opt) => finish(opt.value as "session" | "global" | "cancel");
 		list.onCancel = () => finish("cancel");
 		const title = (width: number): string => formatScopeConfirmTitle(plan, width);
-		const note = `Affects ${plan.leaves.map((leaf) => leaf.path).join(", ")} · ${plan.impact}`;
+		const affectedBindings = plan.leaves
+			.filter((leaf) => leaf.path.startsWith("workers.agentBindings."))
+			.map((leaf) => leaf.path.slice("workers.agentBindings.".length));
+		const bindingPreflight =
+			plan.selectedValue === REMOVE_PROFILE_CHOICE
+				? `Affected agent routes: ${affectedBindings.length > 0 ? affectedBindings.join(", ") : "none"} · `
+				: "";
+		const note = `${bindingPreflight}Affects ${plan.leaves.map((leaf) => leaf.path).join(", ")} · ${plan.impact}`;
 		this.submenuComponent = new SubmenuWrapper(title, list, buildHint([{ key: "Enter", verb: "choose" }], "back"), note);
 	}
 
@@ -2102,22 +2297,43 @@ export class SettingsCenter implements Component {
 	private renderSectionLane(width: number, height: number): string[] {
 		const theme = clioTheme();
 		const sections = this.sections();
-		const rows = [
-			theme.fg("dim", "Sections"),
-			...sections.map((section, index) => {
-				const selected = index === this.selectedSectionIndex;
-				const cursor = selected && this.focusedLane === "sections" ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
-				const modifiedCount = section.items.filter(
-					(item) => !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue,
-				).length;
-				const badge = modifiedCount > 0 ? theme.fg("accent", ` ${GLYPH.scoped}${modifiedCount}`) : "";
-				const label = selected ? theme.style("accent", section.label, { bold: true }) : section.label;
-				return `${cursor}${label}${badge}`;
-			}),
+		const rows: Array<{ line: string; sectionIndex: number | null }> = [
+			{ line: theme.fg("dim", "Sections"), sectionIndex: null },
 		];
-		const selectedLine = this.selectedSectionIndex + 1;
+		let previousGroup: string | null = null;
+		for (const [index, section] of sections.entries()) {
+			const group = SETTINGS_SECTIONS[index]?.group;
+			if (group && group !== previousGroup) {
+				rows.push({
+					line: theme.style("accentDeep", group, { bold: true }),
+					sectionIndex: null,
+				});
+				previousGroup = group;
+			}
+			rows.push({
+				sectionIndex: index,
+				line: (() => {
+					const selected = index === this.selectedSectionIndex;
+					const cursor = selected && this.focusedLane === "sections" ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+					const modifiedCount = section.items.filter(
+						(item) => !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue,
+					).length;
+					const badge = modifiedCount > 0 ? theme.fg("accent", ` ${GLYPH.scoped}${modifiedCount}`) : "";
+					const label = selected ? theme.style("accent", section.label, { bold: true }) : section.label;
+					return `${cursor}${label}${badge}`;
+				})(),
+			});
+		}
+		const selectedLine = Math.max(
+			0,
+			rows.findIndex((row) => row.sectionIndex === this.selectedSectionIndex),
+		);
 		const [start, end] = scrollWindow(rows.length, selectedLine, height);
-		return fixedLines(rows.slice(start, end), width, height);
+		return fixedLines(
+			rows.slice(start, end).map((row) => row.line),
+			width,
+			height,
+		);
 	}
 
 	private renderRightLane(width: number, height: number): string[] {
@@ -2149,7 +2365,16 @@ export class SettingsCenter implements Component {
 		const columns = rowColumns(this.items, width, 2);
 		const rows: Array<{ line: string; selected: boolean }> = [];
 		let selectedLine = 0;
+		let previousGroup: string | null = null;
 		for (const [sectionIndex, section] of this.sections().entries()) {
+			const group = SETTINGS_SECTIONS[sectionIndex]?.group;
+			if (group && group !== previousGroup) {
+				rows.push({
+					line: theme.style("accentDeep", group, { bold: true }),
+					selected: false,
+				});
+				previousGroup = group;
+			}
 			const sectionSelected = sectionIndex === this.selectedSectionIndex;
 			const sectionFocused = sectionSelected && this.focusedLane === "sections";
 			if (sectionFocused) selectedLine = rows.length;
