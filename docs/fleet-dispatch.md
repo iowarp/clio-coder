@@ -39,10 +39,10 @@ for bounded abort escalation.
 
 Scout routing is advisory rather than forced: the worker operating contract
 steers explicit broad repository exploration to the read-only `scout` recipe,
-and middleware emits a continuation nudge after nine or more manual
-read-only exploration calls without a successful Scout dispatch. Direct reads
-remain allowed; Clio does not automatically rewrite a broad request into a
-Scout run.
+and middleware emits one advisory notice after nine or more manual
+read-only exploration calls without a successful Scout dispatch. The advisory
+costs no extra model round. Direct reads remain allowed; Clio does not
+automatically rewrite a broad request into a Scout run.
 
 Design decisions that shape everything else:
 

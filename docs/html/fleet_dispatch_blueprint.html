@@ -164,12 +164,12 @@
         <div class="tab-pane" id="pane-scout">
           <div class="interactive-panel">
             <h3>Advisory Scout Reconnaissance &amp; Bounded Synthesis</h3>
-            <p>The operating contract steers explicit broad repository exploration to the read-only Scout recipe. After nine or more manual read-only exploration calls without a successful Scout dispatch, middleware emits a continuation nudge; direct reads remain allowed.</p>
+            <p>The operating contract steers explicit broad repository exploration to the read-only Scout recipe. After nine or more manual read-only exploration calls without a successful Scout dispatch, middleware emits one advisory notice; direct reads remain allowed.</p>
             <div class="terminal-window" id="scoutTerminal">
               <div class="term-line"><span class="term-prompt">orchestrator$</span> clio-coder dispatch --query "explore repository architecture and dependencies"</div>
               <div class="term-line term-out">[dispatch] evaluating task profile: broad reconnaissance query detected.</div>
               <div class="term-line term-out">[dispatch] broad exploration is advisory-routed to the read-only Scout recipe.</div>
-              <div class="term-line term-out">[middleware] 9+ manual read-only calls without Scout: continuation nudge emitted.</div>
+              <div class="term-line term-out">[middleware] 9+ manual read-only calls without Scout: advisory notice emitted.</div>
               <div class="term-line term-success">[scout-1] launched on node-login-01 (SSH). Exploration budget: 18 calls; read reserve: 4.</div>
               <div class="term-line term-success">[scout-1] synthesis phase: text-only handoff with live path:line citations.</div>
             </div>

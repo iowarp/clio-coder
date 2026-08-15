@@ -45,6 +45,8 @@ const READ_ONLY_SHELL_COMMAND_PATTERN = /^\s*(?:awk|cat|fd|find|git|grep|head|jq
 interface ExplorationTurnState {
 	readOnlyCalls: number;
 	scoutSucceeded: boolean;
+	/** The advisory already reached the operator for this user turn. */
+	advised: boolean;
 }
 
 export function buildReadOnlyExplorationMessage(): string {
@@ -138,10 +140,11 @@ function hasActiveTool(input: MiddlewareHookInput, toolName: string): boolean {
 	);
 }
 
-function newExplorationTurnState(): ExplorationTurnState {
+function newExplorationTurnState(advised = false): ExplorationTurnState {
 	return {
 		readOnlyCalls: 0,
 		scoutSucceeded: false,
+		advised,
 	};
 }
 
@@ -152,6 +155,13 @@ function markScoutSuccess(state: ExplorationTurnState): void {
 /**
  * Advises the main agent to use Scout after a long read-only exploration turn.
  * Only a successful Scout dispatch suppresses the advisory for that turn.
+ *
+ * The advisory is a notice, never a `request_continuation`. Reading is the work
+ * the operator asked for, so the finding is worth one line in the transcript
+ * and the next request's reminder block, not a forced extra model round that
+ * spends a full context window to be told the reads were intended. One
+ * advisory per user turn: a later model round of the same turn re-counts its
+ * own calls but stays silent once the operator has been told.
  */
 export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegistration {
 	const byTurn = new Map<string, ExplorationTurnState>();
@@ -171,10 +181,17 @@ export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegi
 	};
 	const stateForTool = (key: string): ExplorationTurnState =>
 		byTurn.get(key) ?? remember(key, newExplorationTurnState());
+	// Counts restart for the next model round of the same user turn; whether the
+	// advisory is already spent carries across those rounds.
 	const takeTurnEndState = (key: string): ExplorationTurnState | null => {
 		const bound = byTurn.get(key);
-		byTurn.delete(key);
-		return bound ?? null;
+		if (bound === undefined) return null;
+		byTurn.set(key, newExplorationTurnState(bound.advised));
+		return bound;
+	};
+	const markAdvised = (key: string): void => {
+		const carried = byTurn.get(key);
+		if (carried) carried.advised = true;
 	};
 	return {
 		id: READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
@@ -199,14 +216,16 @@ export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegi
 			const stopReason = input.metadata?.stopReason;
 			if (stopReason !== undefined && stopReason !== "stop") return [];
 			if (!hasActiveTool(input, ToolNames.Dispatch)) return [];
-			if (!state || state.scoutSucceeded || state.readOnlyCalls < READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD) {
+			if (
+				!state ||
+				state.advised ||
+				state.scoutSucceeded ||
+				state.readOnlyCalls < READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD
+			) {
 				return [];
 			}
-			const message = buildReadOnlyExplorationMessage();
-			return [
-				{ kind: "request_continuation", message },
-				{ kind: "inject_reminder", message, severity: "info" },
-			];
+			markAdvised(key);
+			return [{ kind: "inject_reminder", message: buildReadOnlyExplorationMessage(), severity: "info" }];
 		},
 	};
 }
