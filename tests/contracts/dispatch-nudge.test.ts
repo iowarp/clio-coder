@@ -98,9 +98,13 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 		);
 		const advisory = effects[0];
 		ok(advisory?.kind === "inject_reminder");
-		match(advisory.message, /This continuation used/);
-		match(advisory.message, /without a successful Scout dispatch in this continuation/);
-		strictEqual(advisory.message.includes("This turn"), false, advisory.message);
+		// The threshold counts one user turn, so the copy names a turn, and names
+		// it once: the pre-#58 wording said "continuation" twice about a turn that
+		// was not one.
+		match(advisory.message, /This turn used/);
+		match(advisory.message, /without a successful Scout dispatch; delegate/);
+		strictEqual(advisory.message.includes("continuation"), false, advisory.message);
+		strictEqual(advisory.message.match(/this turn/gi)?.length, 1, advisory.message);
 		match(advisory.message, /Scout/);
 
 		deepStrictEqual(
