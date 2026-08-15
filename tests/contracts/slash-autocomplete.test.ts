@@ -1,8 +1,9 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Skill } from "../../src/domains/resources/index.js";
 import type { MarketplaceSkill } from "../../src/domains/resources/skills/marketplace.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
+import { commandReference, SLASH_COMMAND_GROUPS } from "../../src/interactive/slash-commands.js";
 
 function makeSkill(overrides: Partial<Skill> & { name: string }): Skill {
 	const base = {
@@ -90,6 +91,33 @@ describe("contracts/slash-autocomplete", () => {
 			const values = ((await suggestionsFor(typed))?.items ?? []).map((item) => item.value);
 			ok(values.includes(alias), `${typed} does not offer ${alias}: ${values.join(", ")}`);
 		}
+	});
+
+	it("presents bare slash as canonical commands ordered by command group", async () => {
+		const values = ((await suggestionsFor("/"))?.items ?? []).map((item) => item.value);
+		const expected = SLASH_COMMAND_GROUPS.flatMap((group) =>
+			commandReference()
+				.filter((command) => command.group === group)
+				.map((command) => command.name),
+		);
+		deepStrictEqual(values, expected, "the palette contains canonical commands in group order");
+		for (const alias of ["exit", "ctx", "compact", "models"]) {
+			ok(!values.includes(alias), `bare slash does not list alias /${alias}`);
+		}
+	});
+
+	it("surfaces an alias only when the typed command stem matches it", async () => {
+		const unrelated = ((await suggestionsFor("/c"))?.items ?? []).map((item) => item.value);
+		ok(unrelated.includes("compact"), `matching alias remains visible: ${unrelated.join(", ")}`);
+		ok(!unrelated.includes("exit"), `unmatched alias stays hidden: ${unrelated.join(", ")}`);
+	});
+
+	it("preserves canonical subcommand and alias argument-stem completion", async () => {
+		const canonical = ((await suggestionsFor("/context in"))?.items ?? []).map((item) => item.value);
+		deepStrictEqual(canonical, ["init"], "canonical subcommand stem completes");
+
+		const alias = ((await suggestionsFor("/ctx re"))?.items ?? []).map((item) => item.value);
+		deepStrictEqual(alias, ["refresh", "reset"], "alias invocation preserves argument-stem completion");
 	});
 
 	it("ranks the canonical spelling above the alias that stands for it", async () => {
