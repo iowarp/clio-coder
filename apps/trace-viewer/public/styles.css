@@ -785,6 +785,10 @@ main,
 .phase span {
 	position: relative;
 	z-index: 2;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .tool-tick {
@@ -1234,6 +1238,7 @@ pre {
 	margin-bottom: 0.75rem;
 	font-size: 0.825rem;
 	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
 }
 
 .tools th {
@@ -1246,6 +1251,11 @@ pre {
 	letter-spacing: 0.05em;
 }
 
+.tools th:nth-child(n+2),
+.tools td:nth-child(n+2) {
+	text-align: right;
+}
+
 .tools td {
 	padding: 0.5rem;
 	border-bottom: 1px solid rgba(255, 255, 255, 0.03);
@@ -1254,8 +1264,10 @@ pre {
 
 .tools td.ok {
 	color: var(--color-emerald);
+	font-weight: 600;
 }
 
 .tools td.fail {
 	color: var(--color-rose);
+	font-weight: 600;
 }

@@ -66,16 +66,21 @@ async function route() {
 async function renderRuns() {
 	if (!app) return;
 	const { runs } = await api("/api/runs?limit=100");
-	app.innerHTML = `<div class="eyebrow">Durable dispatch mirror</div><div class="title-row"><h1>Recent runs</h1><p>Live and historical activity share one SQLite cursor. Select a run to inspect its phases, tool spans, evidence, and spend.</p></div>${runs.length > 3 ? '<div class="filter-bar"><input type="text" id="runSearchInput" class="search-input" placeholder="Filter runs by ID, task, agent, model, or status…"></div>' : ""}<section class="runs" id="runsList">${runs.map(runCard).join("") || '<div class="empty">No traced runs yet.</div>'}</section>`;
+	app.innerHTML = `<div class="eyebrow">Durable dispatch mirror</div><div class="title-row"><h1>Recent runs</h1><p>Live and historical activity share one SQLite cursor. Select a run to inspect its phases, tool spans, evidence, and spend.</p></div>${runs.length > 3 ? '<div class="filter-bar"><input type="text" id="runSearchInput" class="search-input" placeholder="Filter runs by ID, task, agent, model, or status…"></div>' : ""}<section class="runs" id="runsList">${runs.map(runCard).join("") || '<div class="empty">No traced runs yet.</div>'}<div id="noRunsMatch" class="empty" style="display:none">No runs match filter.</div></section>`;
 	const input = document.getElementById("runSearchInput");
 	if (input) {
 		input.addEventListener("input", () => {
 			const query = input.value.toLowerCase().trim();
 			const cards = document.querySelectorAll("#runsList .run");
+			let matchCount = 0;
 			for (const card of cards) {
 				const text = card.textContent.toLowerCase();
-				card.style.display = text.includes(query) ? "" : "none";
+				const matches = text.includes(query);
+				card.style.display = matches ? "" : "none";
+				if (matches) matchCount += 1;
 			}
+			const noMatch = document.getElementById("noRunsMatch");
+			if (noMatch) noMatch.style.display = matchCount === 0 && cards.length > 0 ? "" : "none";
 		});
 	}
 	if (runs.some((run) => run.status === "running" || run.status === "queued")) state.poll = setTimeout(route, 1000);
@@ -625,7 +630,11 @@ function formatTokens(value) {
 	return value == null ? "not recorded" : Number(value).toLocaleString("en-US");
 }
 function formatCost(value) {
-	return value == null ? "not recorded" : `$${Number(value).toFixed(Number(value) < 0.01 ? 4 : 2)}`;
+	if (value == null) return "not recorded";
+	const num = Number(value);
+	if (!Number.isFinite(num)) return "not recorded";
+	if (num === 0) return "$0.00";
+	return `$${num.toFixed(num > 0 && num < 0.01 ? 4 : 2)}`;
 }
 // Pinned rather than defaulted: the CLI renders `YYYY-MM-DD` (en-CA) and
 // `HH:MM:SS` (en-GB, h23) and an operator reads the two surfaces side by side.
