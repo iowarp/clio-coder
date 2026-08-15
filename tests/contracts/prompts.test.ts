@@ -1,11 +1,12 @@
 import { notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { DomainContext, DomainContract } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { resolvePackageRoot } from "../../src/core/package-root.js";
 import {
 	buildCodewiki,
 	ContextDomainModule,
@@ -271,9 +272,75 @@ describe("contracts/prompts identity anti-leak safety", () => {
 		strictEqual(identity.dynamic, false);
 		strictEqual(/\{\{[A-Za-z][A-Za-z0-9]*\}\}/.test(identity.body), false);
 	});
+
+	it("loads identity.self-awareness with valid structure and budget", () => {
+		const table = loadFragments();
+		const selfAwareness = table.byId.get("identity.self-awareness");
+		ok(selfAwareness, "identity.self-awareness must be registered");
+		strictEqual(selfAwareness.version, 1);
+		strictEqual(selfAwareness.dynamic, false);
+		ok(selfAwareness.body.includes("# Clio's own harness"));
+		ok(selfAwareness.body.includes("Installed documentation: {CLIO_DOCS_PATH}"));
+		ok(selfAwareness.body.includes("~/.config/clio-coder/settings.yaml"));
+		ok(selfAwareness.body.includes("docs/extensions-and-sharing.md"));
+		ok(selfAwareness.body.includes("docs/skills-marketplace.md"));
+	});
+
+	it("every docs/*.md path named in identity.self-awareness exists in the checkout and matches the pack manifest", () => {
+		const table = loadFragments();
+		const selfAwareness = table.byId.get("identity.self-awareness");
+		ok(selfAwareness, "identity.self-awareness must be registered");
+		const matches = [...selfAwareness.body.matchAll(/docs\/[a-zA-Z0-9_-]+\.md/g)].map((m) => m[0]);
+		ok(matches.length >= 40, `expected at least 40 doc links, found ${matches.length}`);
+		const root = resolvePackageRoot();
+		const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { files: string[] };
+		for (const docRel of matches) {
+			ok(existsSync(join(root, docRel)), `${docRel} must exist in the checkout`);
+		}
+		ok(pkg.files.includes("docs/*.md"), "package.json files must include docs/*.md");
+	});
 });
 
 describe("contracts/prompts compiler logic", () => {
+	it("orchestrator prompt contains resolved absolute docs path and self-awareness routing", () => {
+		const table = loadFragments();
+		const result = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			sessionInputs: { provider: "p", model: "m" },
+		});
+		const expectedDocsPath = join(resolvePackageRoot(), "docs");
+		ok(result.systemPrompt.includes(`Installed documentation: ${expectedDocsPath}`));
+		ok(result.systemPrompt.includes("# Clio's own harness"));
+		ok(result.systemPrompt.includes("~/.config/clio-coder/settings.yaml"));
+		ok(result.systemPrompt.includes("docs/extensions-and-sharing.md"));
+		ok(result.systemPrompt.includes("docs/skills-marketplace.md"));
+		strictEqual(result.systemPrompt.includes("{CLIO_DOCS_PATH}"), false);
+		ok(result.fragmentManifest.some((f) => f.id === "identity.self-awareness"));
+	});
+
+	it("worker prompt bytes are untouched by self-awareness", () => {
+		const table = loadFragments();
+		const result = compileWorker(table, {
+			autonomy: "read-only",
+			providerSupportsTools: true,
+			toolNames: ["read", "grep"],
+			toolPromptHints: [
+				{ tool: "read", hint: "Read admitted files precisely." },
+				{ tool: "grep", hint: "Search admitted text precisely." },
+			],
+			persona: workerPersona(),
+		});
+		strictEqual(result.systemPrompt.includes("Clio's own harness"), false);
+		strictEqual(result.systemPrompt.includes("Installed documentation"), false);
+		strictEqual(result.systemPrompt.includes("{CLIO_DOCS_PATH}"), false);
+		strictEqual(result.systemPrompt.includes("settings.yaml"), false);
+		strictEqual(
+			result.fragmentManifest.some((f) => f.id === "identity.self-awareness"),
+			false,
+		);
+	});
 	it("compiles the worker harness in canonical section order", () => {
 		const result = compileWorker(loadFragments(), {
 			autonomy: "read-only",

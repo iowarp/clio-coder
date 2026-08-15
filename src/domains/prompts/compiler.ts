@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { resolvePackageRoot } from "../../core/package-root.js";
 import type { ToolName } from "../../core/tool-names.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import { ceilChars } from "../session/context-accounting.js";
@@ -446,7 +448,15 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		sections.push({ id, tokenEstimate: estimatePromptTokens(trimmed) });
 	};
 
-	push("identity", identity.body);
+	let identityBody = identity.body;
+	const selfAwareness = identity.id === "identity.clio" ? table.byId.get("identity.self-awareness") : undefined;
+	if (selfAwareness) {
+		const docsPath = join(resolvePackageRoot(), "docs");
+		const rendered = selfAwareness.body.replace("{CLIO_DOCS_PATH}", docsPath);
+		identityBody = `${identity.body.trim()}\n\n${rendered.trim()}`;
+	}
+
+	push("identity", identityBody);
 	push("operating-contract", operatingContract.body);
 	push("safety", renderSafetySection(safety, autonomyLevel));
 	push("runtime", renderRuntimeBlock(session));
@@ -460,7 +470,8 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	}
 
 	const systemPrompt = parts.join("\n\n");
-	const fragmentManifest: FragmentManifestEntry[] = [identity, operatingContract, safety].map((f) => ({
+	const baseFragments = [identity, ...(selfAwareness ? [selfAwareness] : []), operatingContract, safety];
+	const fragmentManifest: FragmentManifestEntry[] = baseFragments.map((f) => ({
 		id: f.id,
 		relPath: f.relPath,
 		contentHash: f.contentHash,

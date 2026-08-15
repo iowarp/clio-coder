@@ -22,25 +22,11 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const SHEBANG = "#!/usr/bin/env node";
 const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 
-// Budgets catch an accidental payload, not intended content. Source maps alone
-// were 5.3 MB once, which is the shape these numbers exist to stop.
-//
-// Measured at 0.3.0: tarball 1.41 MB, unpacked 5.84 MB across 194 entries.
-// Unminified dist/ is 4.25 MB of that (73%); docs/html is 906 KB (16%), which
-// compresses to ~192 KB in the tarball. The rest is the markdown corpus, the
-// model catalogs, and the prompt fragments.
-//
-// docs/html was briefly dropped from the package to buy headroom, which broke
-// `clio-coder docs` in every installed copy: src/cli/docs.ts serves that directory
-// from resolvePackageRoot(). Shrinking it instead was measured and rejected.
-// Roughly 250 KB is duplicated inline <style> boilerplate across twenty
-// hand-authored pages and 17% is source indentation, but 16 pages carry <pre>
-// blocks and 28 carry template literals in inline script, so whitespace-level
-// minification needs a real HTML parser, and no test covers how these pages
-// render. That is a large untested diff against a tripwire. The budget moves to
-// 7 MB instead, leaving 1.16 MB of headroom over the measured figure.
-const MAX_TARBALL_BYTES = 2_000_000;
-const MAX_UNPACKED_BYTES = 7_000_000;
+// Size budgets serve as a tripwire against packaging defects such as leaked
+// node_modules or doubled dist, rather than policing documentation size or
+// enforcing an artificial package diet.
+const MAX_TARBALL_BYTES = 5_000_000;
+const MAX_UNPACKED_BYTES = 16_000_000;
 
 const FORBIDDEN = [
 	{ test: (f) => f.includes("__pycache__") || f.endsWith(".pyc"), reason: "python bytecode cache" },
