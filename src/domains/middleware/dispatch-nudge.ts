@@ -50,7 +50,7 @@ interface ExplorationTurnState {
 }
 
 export function buildReadOnlyExplorationMessage(): string {
-	return `[Clio Coder] This continuation used ${READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD}+ read-only exploration calls without a successful Scout dispatch in this continuation; delegate broad repository reconnaissance to Scout.`;
+	return `[Clio Coder] This turn used ${READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD}+ read-only exploration calls without a successful Scout dispatch; delegate broad repository reconnaissance to Scout.`;
 }
 
 function stringValue(value: unknown): string | null {
