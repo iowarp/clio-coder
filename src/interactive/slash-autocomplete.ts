@@ -6,6 +6,8 @@ import {
 	type AutocompleteSuggestions,
 	CombinedAutocompleteProvider,
 	type SlashCommand,
+	truncateToWidth,
+	visibleWidth,
 } from "../engine/tui.js";
 import { resolveFdBinary } from "../tools/executables.js";
 import { commandReference, SLASH_COMMAND_GROUPS } from "./slash-commands.js";
@@ -20,6 +22,9 @@ export type SlashAutocompleteCommand = SlashCommand;
  * per-token argument completions.
  */
 const ARGUMENT_HINT_BUDGET = 44;
+
+/** Fits the narrowest description column the slash popup grants at 120 cols. */
+const COMPLETION_DESCRIPTION_BUDGET = 80;
 
 export interface SlashAutocompleteOptions {
 	basePath?: string;
@@ -139,12 +144,18 @@ export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
 
 function commandCompletionItem(command: SlashAutocompleteCommand): AutocompleteItem {
 	const hint = command.argumentHint;
-	const description = hint ? `${hint} — ${command.description}` : command.description;
+	const description = compactCompletionDescription(hint ? `${hint} — ${command.description}` : command.description);
 	return {
 		value: command.name,
 		label: command.name,
 		...(description ? { description } : {}),
 	};
+}
+
+function compactCompletionDescription(description: string | undefined): string | undefined {
+	if (!description || visibleWidth(description) <= COMPLETION_DESCRIPTION_BUDGET) return description;
+	const clipped = truncateToWidth(description, COMPLETION_DESCRIPTION_BUDGET - 1, "", false).trimEnd();
+	return `${clipped}…`;
 }
 
 /**
@@ -284,7 +295,13 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		const suggestions = await this.provider.getSuggestions(canonical.lines, cursorLine, canonical.cursorCol, options);
 		const commandPrefix = isSlashCommandPrefix(lines, cursorLine, cursorCol);
 		if (commandPrefix !== null) {
-			const canonicalItems = (suggestions?.items ?? []).filter((item) => item.value.startsWith(commandPrefix));
+			const canonicalItems = (suggestions?.items ?? [])
+				.filter((item) => item.value.startsWith(commandPrefix))
+				.map((item) => {
+					const description = compactCompletionDescription(item.description);
+					if (description === item.description || description === undefined) return item;
+					return { ...item, description };
+				});
 			const aliasItems =
 				commandPrefix.length === 0
 					? []
