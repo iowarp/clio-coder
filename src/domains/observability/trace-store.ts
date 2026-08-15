@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type {
@@ -18,6 +19,7 @@ import type {
 	DispatchProgressPayload,
 	DispatchStartedPayload,
 } from "../../core/bus-events.js";
+import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 
 export const TRACE_SCHEMA_VERSION = 1;
@@ -319,6 +321,8 @@ export interface TraceProcessRow {
 	command_digest: string;
 	started_at: string;
 	ended_at: string | null;
+	host: string | null;
+	birth_token: string | null;
 }
 
 function applyConnectionPragmas(db: DatabaseSync): void {
@@ -445,10 +449,48 @@ CREATE TABLE processes (
   command TEXT NOT NULL,
   command_digest TEXT NOT NULL,
   started_at TEXT NOT NULL,
-  ended_at TEXT
+  ended_at TEXT,
+  host TEXT,
+  birth_token TEXT
 );
 CREATE INDEX processes_run_live ON processes(run_id, ended_at);
 `;
+
+/** Additive owner-identity columns; older version-1 databases gain them in place. */
+function ensureProcessOwnerColumns(db: DatabaseSync): void {
+	const columns = db.prepare("PRAGMA table_info(processes)").all() as { name: string }[];
+	if (columns.some((column) => column.name === "host")) return;
+	db.exec("ALTER TABLE processes ADD COLUMN host TEXT; ALTER TABLE processes ADD COLUMN birth_token TEXT;");
+}
+
+/**
+ * Finalize `running` rows whose recorded owner is on this host and provably
+ * dead (pid gone, or alive under a different birth token, i.e. reused). Rows
+ * with no owner identity, or an owner recorded by another host, are left for
+ * that host's own pass. `ended_at` is the last recorded event for the run,
+ * never reconciliation time (the honest F18 pattern).
+ */
+function reconcileAbandonedRuns(db: DatabaseSync): void {
+	const owners = db
+		.prepare(`SELECT r.run_id, r.started_at, p.pid, p.host, p.birth_token FROM runs r
+      JOIN processes p ON p.id = (SELECT MAX(id) FROM processes WHERE run_id = r.run_id AND host IS NOT NULL)
+      WHERE r.status = 'running'`)
+		.all() as { run_id: string; started_at: string; pid: number; host: string; birth_token: string | null }[];
+	const lastEvent = db.prepare(
+		"SELECT COALESCE(ended_at, started_at) AS at FROM events WHERE run_id = ? ORDER BY rowid DESC LIMIT 1",
+	);
+	for (const owner of owners) {
+		if (owner.host !== hostname()) continue;
+		if (processAlive(owner.pid) && (owner.birth_token === null || processBirthToken(owner.pid) === owner.birth_token))
+			continue;
+		const endedAt = (lastEvent.get(owner.run_id) as { at: string } | undefined)?.at ?? owner.started_at;
+		db.prepare("UPDATE runs SET status='fail', ended_at=? WHERE run_id=?").run(endedAt, owner.run_id);
+		db
+			.prepare("UPDATE phases SET status='fail', ended_at=?, error=? WHERE run_id=? AND status='running'")
+			.run(endedAt, "abandoned: owner process exited before the run finalized", owner.run_id);
+		db.prepare("UPDATE processes SET ended_at=? WHERE run_id=? AND ended_at IS NULL").run(endedAt, owner.run_id);
+	}
+}
 
 export class TraceStore {
 	readonly db: DatabaseSync;
@@ -460,6 +502,10 @@ export class TraceStore {
 		const version = readVersion(this.db);
 		if (version === null) this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA_SQL} COMMIT;`);
 		else if (version !== TRACE_SCHEMA_VERSION) throw new TraceSchemaVersionError(version);
+		this.transaction(() => {
+			ensureProcessOwnerColumns(this.db);
+			reconcileAbandonedRuns(this.db);
+		});
 	}
 
 	close(): void {
@@ -527,8 +573,8 @@ export class TraceStore {
 			});
 			if (input.pid !== null) {
 				this.db
-					.prepare(`INSERT INTO processes(run_id, kind, name, pid, command, command_digest, started_at)
-            VALUES (?, 'worker', ?, ?, ?, ?, ?)`)
+					.prepare(`INSERT INTO processes(run_id, kind, name, pid, command, command_digest, started_at, host, birth_token)
+            VALUES (?, 'worker', ?, ?, ?, ?, ?, ?, ?)`)
 					.run(
 						input.runId,
 						input.agentId,
@@ -536,6 +582,8 @@ export class TraceStore {
 						traceText(input.processCommand ?? "[]", 2000),
 						sha256(input.processCommand ?? "[]"),
 						at,
+						hostname(),
+						processBirthToken(input.pid),
 					);
 			}
 			this.db
