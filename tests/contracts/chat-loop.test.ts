@@ -1246,3 +1246,155 @@ describe("contracts/chat-loop locked-turn markup sanitation", () => {
 		strictEqual((assistants[1]?.payload as { text?: string }).text, MARKUP, "next turn is unlocked again");
 	});
 });
+
+/**
+ * A stream that goes silent and never comes back. The fake mirrors
+ * pi-agent-core's `runWithLifecycle`: `abort()` does not reject `prompt()`, it
+ * settles the run with an `stopReason: "aborted"` assistant message and
+ * resolves. That distinction is the whole reason the escalation hangs off the
+ * post-resolve failure path rather than the catch arm.
+ */
+function createSilentStreamAgentFactory(
+	record: { starts: number; aborts: number; abortedDuringTool: boolean },
+	holdToolMs = 0,
+) {
+	let listener: ((event: AgentEvent, signal: AbortSignal) => Promise<void> | void) | null = null;
+	const state = {
+		systemPrompt: "",
+		model: undefined,
+		thinkingLevel: "off",
+		tools: [] as unknown[],
+		messages: [] as AgentMessage[],
+		errorMessage: undefined as string | undefined,
+	};
+	const controller = new AbortController();
+	const emit = async (event: AgentEvent): Promise<void> => {
+		await listener?.(event, controller.signal);
+	};
+	let release: (() => void) | null = null;
+	let toolRunning = false;
+	const run = async (): Promise<void> => {
+		record.starts += 1;
+		await emit({ type: "agent_start" } as never);
+		if (holdToolMs > 0) {
+			// A tool that runs longer than the stall threshold: the stream is
+			// quiet, but the silence belongs to the tool, not the backend.
+			toolRunning = true;
+			await emit({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash" } as never);
+			await new Promise((resolve) => setTimeout(resolve, holdToolMs));
+			await emit({
+				type: "tool_execution_end",
+				toolCallId: "call-1",
+				toolName: "bash",
+				isError: false,
+				result: { content: [{ type: "text", text: "suite passed" }] },
+			} as never);
+			toolRunning = false;
+		}
+		await new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const failure = {
+			role: "assistant",
+			content: [{ type: "text", text: "" }],
+			stopReason: "aborted",
+			errorMessage: "Request was aborted.",
+			timestamp: Date.now(),
+		} as unknown as AgentMessage;
+		state.messages.push(failure);
+		await emit({ type: "agent_end", messages: [failure] } as never);
+	};
+	const factory = (() => ({
+		agent: {
+			state,
+			sessionId: undefined,
+			maxRetryDelayMs: undefined,
+			prepareNextTurn: undefined,
+			subscribe(l: (event: AgentEvent, signal: AbortSignal) => Promise<void> | void) {
+				listener = l;
+				return () => {};
+			},
+			emit,
+			prompt: run,
+			continue: run,
+			followUp() {},
+			abort() {
+				record.aborts += 1;
+				if (toolRunning) record.abortedDuringTool = true;
+				release?.();
+				release = null;
+			},
+			clearAllQueues() {},
+			clearFollowUpQueue() {},
+			clearSteeringQueue() {},
+		},
+		state: () => state,
+	})) as never;
+	return factory;
+}
+
+describe("contracts/chat-loop stream stall escalation", () => {
+	it("aborts a silently stalled stream, retries the ladder, and exhausts into a typed failure", async () => {
+		const cfg = settings();
+		cfg.retry = { enabled: true, maxRetries: 2, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 40 };
+		const record = { starts: 0, aborts: 0, abortedDuringTool: false };
+		const entries: SessionEntry[] = [];
+		const loop = createChatLoop({
+			getSettings: () => cfg,
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			createAgent: createSilentStreamAgentFactory(record),
+		} as never);
+		const events: ChatLoopEvent[] = [];
+		loop.onEvent((event) => events.push(event));
+
+		await loop.submit("summarize these files");
+
+		strictEqual(record.starts, 3, "the first attempt plus both retries each stalled and restarted");
+		strictEqual(record.aborts, 3, "every stall aborts through the same agent.abort() the Esc path uses");
+		const statuses = events
+			.filter((event): event is Extract<ChatLoopEvent, { type: "retry_status" }> => event.type === "retry_status")
+			.map((event) => event.status);
+		deepStrictEqual(
+			statuses.filter((status) => status.phase === "retrying").map((status) => status.attempt),
+			[1, 2],
+			"the ladder walks attempt 1 then attempt 2",
+		);
+		const exhausted = statuses.find((status) => status.phase === "exhausted");
+		ok(exhausted, "exhaustion is reported as a typed retry_status, not a silent hang");
+		strictEqual(exhausted?.attempt, 2, "exhaustion lands on the configured last attempt");
+		ok(
+			exhausted?.errorMessage?.includes("stream stalled"),
+			`the stall reason survives into the typed failure, got: ${exhausted?.errorMessage}`,
+		);
+		ok(
+			entries
+				.filter(isAssistantMessageEntry)
+				.some((entry) =>
+					String((entry.payload as { errorMessage?: unknown }).errorMessage ?? "").includes("stream stalled"),
+				),
+			"the transcript records the stall rather than a bare aborted turn",
+		);
+	});
+
+	it("leaves a long-running tool alone: silence during tool execution is not a stalled stream", async () => {
+		const cfg = settings();
+		cfg.retry = { enabled: true, maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 30 };
+		const record = { starts: 0, aborts: 0, abortedDuringTool: false };
+		const loop = createChatLoop({
+			getSettings: () => cfg,
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(),
+			readSessionEntries: () => [],
+			createAgent: createSilentStreamAgentFactory(record, 90),
+		} as never);
+
+		await loop.submit("run the suite");
+
+		strictEqual(record.abortedDuringTool, false, "a tool running past the threshold is not a stalled stream");
+		strictEqual(record.aborts, 2, "the watchdog still escalates on the silence that follows the tool");
+	});
+});

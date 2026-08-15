@@ -425,8 +425,67 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			runtimeResolution: target.runtimeResolution,
 		};
 		emitThinkingClampNotice(target.runtimeResolution);
-		handle.agent.prepareNextTurn = async (signal?: AbortSignal) =>
-			context.postToolContinuationGuard(localRuntime, signal);
+
+		// Stall watchdog. `agent_start` arms a timer for `retry.streamStallMs`;
+		// every later engine event counts as progress and pushes the deadline
+		// out. When the deadline passes with nothing from the stream, the
+		// backend is presumed wedged (the server answers /health while its slot
+		// is dead) and the run is aborted through the same `agent.abort()` call
+		// Esc uses. `state.streamStallReason` is what tells the two aborts apart
+		// once the run settles: `turn-recovery.reclassifyStallAbort` reads it and
+		// hands the failure to the transient retry ladder, while an operator
+		// cancel still ends the turn.
+		//
+		// `stallSuspendDepth` covers the windows where silence is expected and
+		// the stream is not the thing we are waiting on: a tool executing (a
+		// `npm run ci` that takes ten minutes is not a stalled stream) and the
+		// post-tool continuation guard, whose auto-compaction is its own model
+		// call. The watchdog re-arms instead of firing while the depth is above
+		// zero.
+		let lastActivityAt = 0;
+		let stallSuspendDepth = 0;
+		let stallTimer: ReturnType<typeof setTimeout> | null = null;
+		const clearStallTimer = (): void => {
+			if (stallTimer === null) return;
+			clearTimeout(stallTimer);
+			stallTimer = null;
+		};
+		const armStallTimer = (delayMs: number): void => {
+			stallTimer = setTimeout(
+				() => {
+					stallTimer = null;
+					const stallMs = deps.retrySettings().streamStallMs;
+					// Zero disables the escalation; an operator who wants a stream to
+					// hang forever keeps that by setting `retry.streamStallMs: 0`.
+					if (stallMs <= 0) return;
+					if (stallSuspendDepth > 0) {
+						armStallTimer(stallMs);
+						return;
+					}
+					const idleMs = Date.now() - lastActivityAt;
+					if (idleMs < stallMs) {
+						armStallTimer(stallMs - idleMs);
+						return;
+					}
+					state.streamStallReason = `stream stalled: no output from ${localRuntime.targetId} for ${Math.round(idleMs / 1000)}s, aborting (stream timeout)`;
+					localRuntime.agent.abort();
+				},
+				Math.max(1, delayMs),
+			);
+			// The in-flight request already holds the event loop open; this timer
+			// must not keep a settled headless run alive on its own.
+			stallTimer.unref?.();
+		};
+
+		handle.agent.prepareNextTurn = async (signal?: AbortSignal) => {
+			stallSuspendDepth += 1;
+			try {
+				return await context.postToolContinuationGuard(localRuntime, signal);
+			} finally {
+				stallSuspendDepth -= 1;
+				lastActivityAt = Date.now();
+			}
+		};
 
 		let streamStartedAt: number | null = null;
 		let firstAssistantDeltaAt: number | null = null;
@@ -454,12 +513,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 
 		handle.agent.subscribe(async (event) => {
 			const eventAt = Date.now();
+			lastActivityAt = eventAt;
 			let enrichedEvent = event;
 			if (event.type === "tool_execution_start") {
+				stallSuspendDepth += 1;
 				middlewareToolChoice.toolStarted(event.toolName);
 				deps.toolStartTimes.set(event.toolCallId, eventAt);
 				state.turnToolCalls += 1;
 			} else if (event.type === "tool_execution_end") {
+				stallSuspendDepth = Math.max(0, stallSuspendDepth - 1);
 				const startedAt = deps.toolStartTimes.get(event.toolCallId);
 				deps.toolStartTimes.delete(event.toolCallId);
 				const durationMs = startedAt === undefined ? undefined : Math.max(0, eventAt - startedAt);
@@ -512,6 +574,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				apiCallFirstDeltaAt = null;
 				runFirstCallVerdict = null;
 				pendingTerminalToolResult = null;
+				clearStallTimer();
+				stallSuspendDepth = 0;
+				state.streamStallReason = null;
+				const stallMs = deps.retrySettings().streamStallMs;
+				if (stallMs > 0) armStallTimer(stallMs);
 			}
 			if (publicEvent?.type === "message_start" && publicEvent.message?.role === "assistant") {
 				apiCallStartedAt = eventAt;
@@ -654,6 +721,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						: null;
 			}
 			if (enrichedEvent.type === "agent_end") {
+				clearStallTimer();
 				const terminal = pendingTerminalToolResult;
 				pendingTerminalToolResult = null;
 				if (terminal) {

@@ -58,7 +58,7 @@ import { createTurnContext } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
 import { createTurnPersistence } from "./turn-persistence.js";
 import { createTurnQueues, type QueuedChatMessage, type QueuedMessagesSnapshot } from "./turn-queues.js";
-import { createTurnRecovery, type RetryStatusEvent } from "./turn-recovery.js";
+import { createTurnRecovery, type RetryStatusEvent, reclassifyStallAbort } from "./turn-recovery.js";
 import { type AssistantDeltaEvent, createTurnRuntime } from "./turn-runtime.js";
 import { type AgentRuntime, type ChatLoopRunSnapshot, createTurnState } from "./turn-state.js";
 
@@ -657,11 +657,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (overflowPostResolve) {
 					await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflowPostResolve, images);
 				} else {
-					const failure = detectTerminalFailureFromState(agentRuntime.agent);
-					if (failure) {
-						if (state.toolProseAbortReason && failure.message) {
-							(failure.message as { errorMessage?: string }).errorMessage = state.toolProseAbortReason;
+					const settled = detectTerminalFailureFromState(agentRuntime.agent);
+					if (settled) {
+						if (state.toolProseAbortReason && settled.message) {
+							(settled.message as { errorMessage?: string }).errorMessage = state.toolProseAbortReason;
 						}
+						// A stalled stream settles here, not in the catch arm: the engine's
+						// runWithLifecycle swallows the abort and resolves with an aborted
+						// assistant message. Reclassify before the ladder's gate so the
+						// watchdog's abort retries and an operator cancel still does not.
+						const failure = reclassifyStallAbort(state, settled);
 						recovery.ensureFailureVisibleAndPersisted(failure);
 						await recovery.runTransientRetryChain(agentRuntime, runtimePromptText, failure);
 					}

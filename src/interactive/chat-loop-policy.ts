@@ -13,5 +13,6 @@ export function normalizeRetrySettings(raw: RawRetrySettings): RetrySettings {
 		maxRetries: normalizeNonNegativeInteger(raw?.maxRetries, DEFAULT_RETRY_SETTINGS.maxRetries),
 		baseDelayMs: normalizeNonNegativeInteger(raw?.baseDelayMs, DEFAULT_RETRY_SETTINGS.baseDelayMs),
 		maxDelayMs: normalizeNonNegativeInteger(raw?.maxDelayMs, DEFAULT_RETRY_SETTINGS.maxDelayMs),
+		streamStallMs: normalizeNonNegativeInteger(raw?.streamStallMs, DEFAULT_RETRY_SETTINGS.streamStallMs),
 	};
 }

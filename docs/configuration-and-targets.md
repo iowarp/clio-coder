@@ -215,6 +215,7 @@ retry:
   maxRetries: 3
   baseDelayMs: 2000
   maxDelayMs: 60000
+  streamStallMs: 180000
 guardrails:
   turnToolCallBudget: 60
   workerToolCallCap: 150
@@ -445,6 +446,9 @@ Every one of these has an environment override for a single process; see [enviro
 | `retry.maxRetries` | `3` | integer ≥ 0 | next turn |
 | `retry.baseDelayMs` | `2000` | integer ≥ 0 | next turn |
 | `retry.maxDelayMs` | `60000` | integer ≥ 0 | next turn |
+| `retry.streamStallMs` | `180000` | integer ≥ 0, `0` disables | next turn |
+
+`retry.streamStallMs` covers the failure a request error never reports: the backend answers `/health` while the slot behind the stream is dead. A run whose stream produces nothing for that long is aborted and handed to the same retry ladder as any transient error, so a headless run or a fleet worker recovers without a human pressing Esc. Time inside a tool call and inside the post-tool compaction guard does not count against it, so a long build is never mistaken for a wedged stream. Set it to `0` to keep the old behavior, where a stalled stream waits forever.
 
 ### Proactive memory
 

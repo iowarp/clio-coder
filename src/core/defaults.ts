@@ -108,6 +108,8 @@ export interface RetrySettings {
 	maxRetries: number;
 	baseDelayMs: number;
 	maxDelayMs: number;
+	/** Silence on an in-flight stream past this many ms is treated as a wedged backend: abort and retry. */
+	streamStallMs: number;
 }
 
 export type OutputVerbosity = "minimal" | "default" | "verbose";
@@ -341,6 +343,7 @@ export const DEFAULT_SETTINGS = {
 		maxRetries: 3,
 		baseDelayMs: 2000,
 		maxDelayMs: 60000,
+		streamStallMs: 180000,
 	} as RetrySettings,
 	// Numeric backstops that bound runaway agent behavior. Settings are the
 	// primary home; each value also has a per-process env override for CI and
@@ -597,6 +600,7 @@ retry:
   maxRetries: 3
   baseDelayMs: 2000
   maxDelayMs: 60000
+  streamStallMs: 180000
 
 # Guardrails: numeric backstops that bound runaway agent behavior.
 #   turnToolCallBudget          orchestrator per-turn soft tool-call budget;
