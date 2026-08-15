@@ -66,7 +66,18 @@ async function route() {
 async function renderRuns() {
 	if (!app) return;
 	const { runs } = await api("/api/runs?limit=100");
-	app.innerHTML = `<div class="eyebrow">Durable dispatch mirror</div><div class="title-row"><h1>Recent runs</h1><p>Live and historical activity share one SQLite cursor. Select a run to inspect its phases, tool spans, evidence, and spend.</p></div><section class="runs">${runs.map(runCard).join("") || '<div class="empty">No traced runs yet.</div>'}</section>`;
+	app.innerHTML = `<div class="eyebrow">Durable dispatch mirror</div><div class="title-row"><h1>Recent runs</h1><p>Live and historical activity share one SQLite cursor. Select a run to inspect its phases, tool spans, evidence, and spend.</p></div>${runs.length > 3 ? '<div class="filter-bar"><input type="text" id="runSearchInput" class="search-input" placeholder="Filter runs by ID, task, agent, model, or status…"></div>' : ""}<section class="runs" id="runsList">${runs.map(runCard).join("") || '<div class="empty">No traced runs yet.</div>'}</section>`;
+	const input = document.getElementById("runSearchInput");
+	if (input) {
+		input.addEventListener("input", () => {
+			const query = input.value.toLowerCase().trim();
+			const cards = document.querySelectorAll("#runsList .run");
+			for (const card of cards) {
+				const text = card.textContent.toLowerCase();
+				card.style.display = text.includes(query) ? "" : "none";
+			}
+		});
+	}
 	if (runs.some((run) => run.status === "running" || run.status === "queued")) state.poll = setTimeout(route, 1000);
 }
 
