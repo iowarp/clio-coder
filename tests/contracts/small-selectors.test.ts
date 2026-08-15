@@ -1,31 +1,12 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ThinkingLevel } from "../../src/domains/providers/index.js";
 import type { SessionMeta } from "../../src/domains/session/contract.js";
 import { relative } from "../../src/interactive/format-time.js";
 import { buildSessionItems, formatRelativeTime } from "../../src/interactive/overlays/session-selector.js";
-import { buildThinkingItems } from "../../src/interactive/overlays/thinking-selector.js";
 import { GLYPH } from "../../src/interactive/theme/index.js";
 import { withTimeZone } from "../harness/clock.js";
 
 describe("contracts/small selectors", () => {
-	it("the thinking picker marks the current level with the active mark, not the running dot", () => {
-		const levels: ThinkingLevel[] = ["off", "low", "medium", "high"];
-		const items = buildThinkingItems("medium", levels);
-
-		const current = items.find((item) => item.value === "medium");
-		ok(current, "expected a row for the current level");
-		ok(current.label.startsWith(GLYPH.active), current.label);
-		ok(!current.label.includes(GLYPH.running), current.label);
-
-		// Every other level leads with a blank marker column, never a glyph.
-		for (const item of items) {
-			if (item.value === "medium") continue;
-			ok(item.label.startsWith(" "), item.label);
-			ok(!item.label.includes(GLYPH.active), item.label);
-		}
-	});
-
 	it("the resume picker glyphs an ended session ok and an open session running", () => {
 		const base = {
 			cwd: "/tmp/project",

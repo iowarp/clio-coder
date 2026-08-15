@@ -242,7 +242,7 @@ interface OverlayRuntimeResolution {
 }
 
 /** Resolve the same runtime/capability descriptor used by the footer and chat loop for one overlay row. */
-export function resolveOverlayRuntimeTarget(input: {
+function resolveOverlayRuntimeTarget(input: {
 	providers: ProvidersContract;
 	status: TargetStatus;
 	wireModelId: string;
@@ -277,19 +277,6 @@ export function resolveOverlayRuntimeTarget(input: {
 		thinking: "unresolved",
 		streaming: decisions.streaming,
 	};
-}
-
-export function runtimeCapabilitySummary(resolution: OverlayRuntimeResolution): string {
-	const caps = resolution.capabilityDecisions;
-	const parts = [
-		`${compactTokenCount(caps.contextWindow)}ctx`,
-		`${compactTokenCount(caps.maxTokens)}max`,
-		`thinking:${resolution.thinking}`,
-		`streaming:${caps.streaming ? "yes" : "no"}`,
-	];
-	if (caps.tools) parts.push("tools");
-	if (caps.vision) parts.push("vision");
-	return parts.join("  ");
 }
 
 function modelBucket(status: TargetStatus): ModelBucket {

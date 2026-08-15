@@ -344,17 +344,6 @@ function evidenceStatePresentation(state: EvidenceState): EvidenceGlyphPresentat
 	}
 }
 
-/**
- * A compact trailing proof marker (`✓ proof`) for tight tables like /fleet where
- * a full proof line does not fit. Returns null when no evidence state is known.
- */
-export function evidenceMarker(evidence: RunEvidencePresentation | undefined): string | null {
-	if (!evidence) return null;
-	const presentation = evidenceStatePresentation(evidence.state);
-	if (!presentation) return null;
-	return clioTheme().fg(presentation.token, `${presentation.glyph} proof`);
-}
-
 // Dispatch card rows follow the footer dashboard key-value grammar: a dim key
 // padded to a shared column, then one trailing space before the value. The
 // widest key ("telemetry") sets the column so every value starts aligned.

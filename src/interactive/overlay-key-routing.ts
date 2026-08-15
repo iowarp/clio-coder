@@ -5,18 +5,14 @@ export type OverlayState =
 	| "closed"
 	| "permission-confirm"
 	| "dispatch-board"
-	| "providers"
 	| "auth"
 	| "cost"
 	| "context-view"
 	| "context-reset"
-	| "fleet"
 	| "tasks"
 	| "memory"
 	| "view"
-	| "thinking"
 	| "model"
-	| "scoped-models"
 	| "settings"
 	| "resume"
 	| "tree"
@@ -103,15 +99,6 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 	return false;
 }
 
-/** Pure overlay key router for the target hub. Esc closes; hub keys fall through to the focused view. */
-function routeProvidersOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
-	if (isEscapeKey(data)) {
-		deps.closeOverlay();
-		return true;
-	}
-	return false;
-}
-
 /** Pure overlay key router for auth overlays. Esc closes; input handles Enter itself. */
 function routeAuthOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
@@ -130,26 +117,8 @@ function routeCostOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	return false;
 }
 
-/** Pure overlay key router for the /thinking overlay. Esc closes; arrows and Enter fall through. */
-function routeThinkingOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
-	if (isEscapeKey(data)) {
-		deps.closeOverlay();
-		return true;
-	}
-	return false;
-}
-
 /** Pure overlay key router for the /model overlay. Esc closes; arrows and Enter fall through. */
 function routeModelOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
-	if (isEscapeKey(data)) {
-		deps.closeOverlay();
-		return true;
-	}
-	return false;
-}
-
-/** Pure overlay key router for the /scoped-models overlay. */
-function routeScopedModelsOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
@@ -198,7 +167,7 @@ export function routeOverlayKey(
 	if (
 		(overlayState === "dispatch-board" && matches(data, "clio.dispatchBoard.toggle")) ||
 		(overlayState === "tree" && matches(data, "clio.session.tree")) ||
-		((overlayState === "model" || overlayState === "scoped-models") && matches(data, "clio.model.select")) ||
+		(overlayState === "model" && matches(data, "clio.model.select")) ||
 		(overlayState === "help" && matches(data, "clio.leader"))
 	) {
 		deps.closeOverlay();
@@ -208,7 +177,6 @@ export function routeOverlayKey(
 		routePermissionOverlayKey(data, deps);
 		return true;
 	}
-	if (overlayState === "providers") return routeProvidersOverlayKey(data, deps);
 	if (overlayState === "auth") return routeAuthOverlayKey(data, deps);
 	if (overlayState === "cost") {
 		routeCostOverlayKey(data, deps);
@@ -219,13 +187,10 @@ export function routeOverlayKey(
 		return true;
 	}
 	if (overlayState === "context-reset") return false;
-	if (overlayState === "fleet") return false;
 	if (overlayState === "tasks") return false;
 	if (overlayState === "memory") return false;
 	if (overlayState === "view") return false;
-	if (overlayState === "thinking") return routeThinkingOverlayKey(data, deps);
 	if (overlayState === "model") return routeModelOverlayKey(data, deps);
-	if (overlayState === "scoped-models") return routeScopedModelsOverlayKey(data, deps);
 	if (overlayState === "settings") return routeSettingsOverlayKey(data, deps);
 	if (overlayState === "resume") return false;
 	if (overlayState === "tree") return false;

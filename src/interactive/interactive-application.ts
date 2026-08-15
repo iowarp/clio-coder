@@ -29,11 +29,10 @@ import { createInteractiveEventProjection } from "./interactive-event-projection
 import { createInteractiveInputRuntime } from "./interactive-input-runtime.js";
 import { createInteractivePresentation } from "./interactive-presentation.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
-import { createInteractiveSlashRuntime } from "./interactive-slash-runtime.js";
+import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
-import { resolveAvailableThinkingLevels } from "./overlays/thinking-selector.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import type {
 	ContextClearCommandOptions,
@@ -146,14 +145,12 @@ export interface InteractiveDeps {
 	registerAskUserHandler?: (handler: AskUserHandler) => () => void;
 	/** Live CLIO-CODER.md and memory state for the footer Context quadrant. */
 	getContextState?: (cwd?: string) => ContextState;
-	/** Persist a thinking level chosen in the /thinking overlay. */
+	/** Persist a thinking level set by `/thinking <level>` or `/model <pattern>:<level>`. */
 	onSetThinkingLevel?: (level: ThinkingLevel) => void;
 	/** Persist the next thinking level when Shift+Tab is pressed. */
 	onCycleThinking?: () => void;
 	/** Persist the orchestrator target selected in /model. */
 	onSelectModel?: (ref: { target: string; model: string }) => void;
-	/** Persist the next `provider.scope` list committed in /scoped-models. */
-	onSetScope?: (scope: string[]) => void;
 	/** Write handler the /settings overlay uses to persist cycled values. */
 	writeSettings?: (next: ClioSettings) => void;
 	/**
@@ -507,17 +504,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
 		openSkillsHub: () => openSkillsHubState(),
-		openProviders: () => openProvidersOverlayState(),
 		openCost: () => openCostOverlayState(),
 		openContextView: () => openContextViewOverlayState(),
-		openFleet: () => openFleetOverlayState(),
 		openTasks: () => openTasksOverlayState(),
 		openMemory: () => openMemoryOverlayState(),
 		...(deps.seedTaskMemory ? { seedTaskMemory: deps.seedTaskMemory } : {}),
 		openView: (filter) => openViewOverlayState(filter),
-		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
-		openScopedModels: () => openScopedModelsOverlayState(),
 		openSettings: (section) => openSettingsOverlayState(section),
 		openResume: () => openResumeOverlayState(),
 		startNewSession: () => startNewSession(),
@@ -564,7 +557,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		notify,
 		terminal,
 		dispatchBoard,
-		getObservabilitySnapshot: presentation.getObservabilitySnapshot,
 		chatPanel,
 		io,
 		readStructuredEntries,
@@ -577,17 +569,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const {
 		closeOverlay,
 		openAskUserOverlayState,
-		openProvidersOverlayState,
 		openCostOverlayState,
 		openContextViewOverlayState,
 		openContextResetOverlayState,
 		openTasksOverlayState,
 		openMemoryOverlayState,
-		openFleetOverlayState,
 		openViewOverlayState,
-		openThinkingOverlayState,
 		openModelOverlayState,
-		openScopedModelsOverlayState,
 		openSettingsOverlayState,
 		openResumeOverlayState,
 		openTreeOverlayState,

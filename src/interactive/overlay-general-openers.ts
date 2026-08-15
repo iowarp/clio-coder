@@ -1,11 +1,7 @@
-import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type { AgentsContract } from "../domains/agents/index.js";
 import type { DispatchContract } from "../domains/dispatch/index.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
-import type { ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
-import type { ProvidersContract } from "../domains/providers/index.js";
-import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
+import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
 import type { TUI } from "../engine/tui.js";
@@ -16,7 +12,6 @@ import {
 	isDispatchBoardRowCancellable,
 	isDispatchBoardRowSteerable,
 } from "./dispatch-board.js";
-import { type OpenFleetOverlayOptions, openFleetOverlay } from "./fleet-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
@@ -49,12 +44,6 @@ export interface OverlayGeneralOpenersDeps {
 	dataDir: string;
 	notify: (level: "info" | "success" | "warning" | "error", text: string, key?: string) => void;
 	dispatch: DispatchContract;
-	providers: ProvidersContract;
-	getObservabilitySnapshot: () => ObservabilitySnapshot;
-	agents?: AgentsContract;
-	getSettings?: () => Readonly<ClioSettings> | undefined;
-	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
-	writeSettings?: (next: ClioSettings) => void;
 	stateDir: string;
 	getSessionMeta: () => SessionMeta | null;
 	readSessionEntries?: ArtifactProviderDeps["readSessionEntries"];
@@ -68,7 +57,6 @@ export interface OverlayGeneralOpenersDeps {
 	openContextResetOverlay?: typeof openContextResetOverlay;
 	openTasksOverlay?: typeof openTasksOverlay;
 	openMemoryOverlay?: typeof openMemoryOverlay;
-	openFleetOverlay?: typeof openFleetOverlay;
 	openViewOverlay?: typeof openViewOverlay;
 }
 
@@ -79,7 +67,6 @@ export interface OverlayGeneralOpeners {
 	toggleFooter(): void;
 	openTasks(): void;
 	openMemory(): void;
-	openFleet(): void;
 	openView(initialFilter?: string): void;
 	toggleDispatchBoard(): void;
 }
@@ -90,7 +77,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const openContextResetOverlayFactory = deps.openContextResetOverlay ?? openContextResetOverlay;
 	const openTasksOverlayFactory = deps.openTasksOverlay ?? openTasksOverlay;
 	const openMemoryOverlayFactory = deps.openMemoryOverlay ?? openMemoryOverlay;
-	const openFleetOverlayFactory = deps.openFleetOverlay ?? openFleetOverlay;
 	const openViewOverlayFactory = deps.openViewOverlay ?? openViewOverlay;
 	const showOverlayFrameFactory = deps.showOverlayFrame ?? showClioOverlayFrame;
 
@@ -174,31 +160,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.requestRender();
 	};
 
-	const openFleet = (): void => {
-		if (deps.transitions.state !== "closed") return;
-		deps.transitions.state = "fleet";
-		const options: OpenFleetOverlayOptions = {
-			bus: deps.bus,
-			providers: deps.providers,
-			getObservability: deps.getObservabilitySnapshot,
-			...(deps.agents ? { agents: deps.agents } : {}),
-			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
-			...(deps.getFleetNodes ? { getFleetNodes: deps.getFleetNodes } : {}),
-			...(deps.writeSettings
-				? {
-						writeSettings: (next) => {
-							deps.writeSettings?.(next);
-							deps.refreshFooter();
-						},
-					}
-				: {}),
-			notice: deps.notify,
-			onClose: deps.closeOverlay,
-		};
-		deps.transitions.handle = openFleetOverlayFactory(deps.tui, deps.dispatch, options);
-		deps.requestRender();
-	};
-
 	const openView = (initialFilter?: string): void => {
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "view";
@@ -250,7 +211,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		toggleFooter,
 		openTasks,
 		openMemory,
-		openFleet,
 		openView,
 		toggleDispatchBoard,
 	};

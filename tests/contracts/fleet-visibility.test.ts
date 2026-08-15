@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { FleetNodeSnapshot } from "../../src/domains/scheduling/cluster.js";
 import { visibleWidth } from "../../src/engine/tui.js";
@@ -15,7 +16,7 @@ import {
 	formatDispatchBoardLines,
 	renderDispatchCard,
 } from "../../src/interactive/dispatch-board.js";
-import { formatFleetNodesBodyLines, formatFleetOverlayBodyLines } from "../../src/interactive/fleet-overlay.js";
+import { buildSettingItems } from "../../src/interactive/overlays/settings.js";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI stripping needs the escape byte.
 const ANSI = /\[[0-9;]*m/g;
@@ -176,35 +177,8 @@ describe("dispatch board fleet visibility", () => {
 	});
 });
 
-describe("fleet overlay fleet visibility", () => {
-	it("shows the node column on running rows", () => {
-		const body = strip(
-			formatFleetOverlayBodyLines({
-				generatedAt: "2026-07-10T00:00:00.000Z",
-				running: [
-					{
-						runId: "run-abcdef123456",
-						agentId: "coder",
-						runtimeKind: "subprocess",
-						outcomePhase: "running",
-						heartbeat: "alive",
-						lineage: { parentRunId: null, rootRunId: "run-abcdef123456", attempt: 0, depth: 0 },
-						startedAt: "2026-07-10T00:00:00.000Z",
-						elapsedMs: 1000,
-						tokens: { input: 10, output: 2, total: 12 },
-						costUsd: 0,
-						node: { id: "blade", kind: "ssh", host: "blade.lan" },
-					},
-				],
-				retrying: [],
-				totals: { inputTokens: 10, outputTokens: 2, totalTokens: 12, costUsd: 0, runtimeSeconds: 1 },
-			}).join("\n"),
-		);
-		ok(/\bnode\b/.test(body), "node header renders");
-		ok(body.includes("blade"), "node id renders on the row");
-	});
-
-	it("renders the nodes view with state coloring and the empty-state hint", () => {
+describe("settings fleet node rows", () => {
+	it("renders live node placement as read-only rows in Settings → Fleet", () => {
 		const nodes: FleetNodeSnapshot[] = [
 			{
 				id: "local",
@@ -229,14 +203,22 @@ describe("fleet overlay fleet visibility", () => {
 				lastSeenAt: "2026-07-10T00:00:00.000Z",
 			},
 		];
-		const body = strip(formatFleetNodesBodyLines(nodes, 120).join("\n"));
-		ok(body.includes("nodes (2)"));
-		ok(body.includes("blade.lan"));
-		ok(body.includes("offline"));
-		ok(body.includes("2 consecutive channel"), "state reason renders (clipped to its column)");
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		const rows = buildSettingItems(settings, { getFleetNodes: () => nodes }).filter((item) =>
+			item.id.startsWith("fleet.nodes."),
+		);
+		deepStrictEqual(
+			rows.map((row) => [row.id, row.section, row.readOnly, row.currentValue]),
+			[
+				["fleet.nodes.local", "fleet", true, "online · 1 busy"],
+				["fleet.nodes.blade", "fleet", true, "offline · 0/2 busy"],
+			],
+		);
+		ok(rows[1]?.description.includes("blade.lan"));
+		ok(rows[1]?.description.includes("2 consecutive channel failures"), "state reason renders");
+		ok(rows[1]?.affordance.includes("clio-coder doctor"));
 
-		const empty = strip(formatFleetNodesBodyLines([], 100).join("\n"));
-		ok(empty.includes("no fleet nodes configured"));
-		ok(empty.includes("clio-coder doctor"));
+		// Without a scheduler snapshot the section carries no node rows at all.
+		ok(!buildSettingItems(settings).some((item) => item.id.startsWith("fleet.nodes.")));
 	});
 });

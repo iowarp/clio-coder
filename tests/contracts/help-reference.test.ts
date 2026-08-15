@@ -1,11 +1,11 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioKeybinding } from "../../src/domains/config/keybindings.js";
 import type { Component, OverlayOptions, TUI } from "../../src/engine/tui.js";
 import type { ClioKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import { openHelpOverlay } from "../../src/interactive/overlays/help-reference.js";
 import type { ListOverlayOptions } from "../../src/interactive/overlays/list-overlay.js";
-import { commandReference, parseSlashCommand } from "../../src/interactive/slash-commands.js";
+import { commandReference, parseSlashCommand, SLASH_COMMAND_GROUPS } from "../../src/interactive/slash-commands.js";
 
 describe("contracts/help-reference", () => {
 	it("ensures /hotkeys is no longer a command and fails rather than reaching the model", () => {
@@ -62,9 +62,18 @@ describe("contracts/help-reference", () => {
 		ok(overlayOptions);
 		const items = (overlayOptions as ListOverlayOptions).items;
 
-		// 1. Commands group row count equals commandReference() length
-		const commandsItems = items.filter((item) => item.group === "Commands");
+		// 1. Commands are grouped by verb, in SLASH_COMMAND_GROUPS order, and every
+		//    registry entry appears exactly once.
+		const commandsItems = items.filter((item) => SLASH_COMMAND_GROUPS.some((group) => group === item.group));
 		strictEqual(commandsItems.length, commandReference().length);
+		const groupOrder = commandsItems.map((item) => SLASH_COMMAND_GROUPS.indexOf(item.group as never));
+		deepStrictEqual(
+			groupOrder,
+			[...groupOrder].sort((a, b) => a - b),
+		);
+		strictEqual(new Set(commandsItems.map((item) => item.group)).size, SLASH_COMMAND_GROUPS.length);
+		strictEqual(commandsItems.find((item) => item.id === "targets")?.group, "Configure");
+		strictEqual(commandsItems.find((item) => item.id === "run")?.group, "Run");
 
 		// 2. Keys group rows are populated
 		const keysItems = items.filter((item) => item.group === "Keys");

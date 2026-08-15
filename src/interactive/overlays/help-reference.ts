@@ -1,6 +1,6 @@
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
-import { commandReference } from "../slash-commands.js";
+import { commandReference, SLASH_COMMAND_GROUPS } from "../slash-commands.js";
 import { formatKeybindingDetailBodyLines } from "./keybinding-detail.js";
 import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
@@ -26,29 +26,34 @@ export function openHelpOverlay(
 	onClose: () => void,
 	initialFilter?: string,
 ): OverlayHandle {
-	const commands: ListOverlayItem[] = commandReference().map((ref) => {
-		const usagePart = ref.usage.length >= 30 ? `${ref.usage} ` : ref.usage.padEnd(30);
-		const label = `${usagePart}${ref.description}`;
-		const item: ListOverlayItem = {
-			id: ref.name,
-			label,
-			group: "Commands",
-			// Overlay key actions are deliberately not duplicated here: each
-			// overlay's footer hint is the live source of its keys, and a static
-			// copy would rot exactly like the old SLASH_HOTKEYS table did.
-			detail: () => {
-				const lines = [`# Command: /${ref.name}`, `**Usage:** \`${ref.usage}\``, `**Description:** ${ref.description}`];
-				if (ref.aliases.length > 0) {
-					lines.push(`**Aliases:** ${ref.aliases.map((a) => `/${a}`).join(", ")}`);
-				}
-				return lines;
-			},
-		};
-		if (ref.aliases.length > 0) {
-			item.meta = ref.aliases.join(", ");
-		}
-		return item;
-	});
+	// Commands are grouped by the verb they perform, in SLASH_COMMAND_GROUPS
+	// order, and keep registry order inside each group.
+	const groupRank = new Map(SLASH_COMMAND_GROUPS.map((group, index) => [group, index] as const));
+	const commands: ListOverlayItem[] = [...commandReference()]
+		.sort((a, b) => (groupRank.get(a.group) ?? 0) - (groupRank.get(b.group) ?? 0))
+		.map((ref) => {
+			const usagePart = ref.usage.length >= 30 ? `${ref.usage} ` : ref.usage.padEnd(30);
+			const label = `${usagePart}${ref.description}`;
+			const item: ListOverlayItem = {
+				id: ref.name,
+				label,
+				group: ref.group,
+				// Overlay key actions are deliberately not duplicated here: each
+				// overlay's footer hint is the live source of its keys, and a static
+				// copy would rot exactly like the old SLASH_HOTKEYS table did.
+				detail: () => {
+					const lines = [`# Command: /${ref.name}`, `**Usage:** \`${ref.usage}\``, `**Description:** ${ref.description}`];
+					if (ref.aliases.length > 0) {
+						lines.push(`**Aliases:** ${ref.aliases.map((a) => `/${a}`).join(", ")}`);
+					}
+					return lines;
+				},
+			};
+			if (ref.aliases.length > 0) {
+				item.meta = ref.aliases.join(", ");
+			}
+			return item;
+		});
 
 	const conflicts = manager.getConflicts();
 	const keys: ListOverlayItem[] = manager.hotkeyEntries().map((row) => {

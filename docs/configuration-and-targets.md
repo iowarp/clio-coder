@@ -102,7 +102,7 @@ Inside the TUI, verify the local surface with:
 /skill
 ```
 
-The `/targets` overlay is the interactive target hub. It shows one compact row per configured target, streams live probe updates, and keeps target actions on the selected row. Use `Enter` to show details, `u` to use the target for chat, `f` to set the target as the fleet default, `b` to set an eligible target as the background-memory default, `c` to connect or authorize it, `r` to probe the selected target, and `R` to probe all targets.
+`/targets` opens Settings → Targets: one row per configured target with its roles (chat, fleet, memory) and probe health, probed live when the section opens. `Enter` on a row offers use for chat and fleet dispatch, connect (API key or OAuth, then a probe), probe, and remove. The chat, fleet, and memory targets are also individual rows in the Orchestrator and Fleet sections.
 
 Only add `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` when you have runtime/model-specific values that should override live probe results.
 
@@ -344,7 +344,7 @@ Supporting mechanics:
 
 Open `/settings` in the TUI to edit session-visible defaults in a full-screen Center. Wide terminals show sections on the left and the selected section's rows on the right. Narrow terminals stack the same sections inline. Each row shows a human label, a dim config path, the current value, and a bottom description with the edit affordance.
 
-Targets are managed in `/targets`; keybindings are documented in `/help`.
+Targets are managed in `/targets` (Settings → Targets); keybindings are documented in `/help`.
 
 | Section | Editable rows |
 | --- | --- |
@@ -699,7 +699,7 @@ The command `clio-coder targets profile` supports several subcommands to manage 
 - **unbind**: Unbind an agent from its profile. Use `clio-coder targets profile unbind <agentId>`.
 - **bindings**: List active agent-to-profile bindings. Use `clio-coder targets profile bindings [--json]` to output details in JSON format.
 
-Inside the TUI, `/targets` is the target management surface. The hub lists health, auth, runtime, model, capabilities, ready or unavailable reason, URL, and discovered models. Press `u` on a row to switch the active orchestrator target; the model is rebased to that target's default, matching `/settings` and `clio-coder targets use`. Press `f` to set the selected target as the fleet default. Press `c` on a row for the same API-key, OAuth, or no-auth connection flow used by the auth system.
+Inside the TUI, `/targets` opens Settings → Targets, the target management surface. Each row shows roles, health, runtime, URL, default model, and the last probe error. The row's use action switches the active orchestrator target and rebases the model to that target's default, matching `clio-coder targets use`; the fleet default is its own row in Settings → Fleet. The row's connect action runs the same API-key, OAuth, or no-auth connection flow the auth system uses, then probes.
 
 ### Context-Window Provenance
 

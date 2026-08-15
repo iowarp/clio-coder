@@ -8,9 +8,9 @@ import {
 } from "../domains/providers/index.js";
 import type { OAuthSelectPrompt } from "../engine/oauth.js";
 import type { OverlayHandle, TUI } from "../engine/tui.js";
+import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { OverlayState } from "./overlay-key-routing.js";
 import { type AuthDialogHandle, openAuthDialog } from "./overlays/auth-dialog.js";
-import type { TargetsHubNoticeLevel } from "./providers-overlay.js";
 
 type AuthProviders = Pick<ProvidersContract, "getRuntime" | "probeTarget"> & {
 	auth: Pick<ProvidersContract["auth"], "statusForTarget" | "setApiKey" | "login" | "damageReason">;
@@ -20,7 +20,7 @@ export interface OverlayAuthLifecycleDeps {
 	tui: TUI;
 	providers: AuthProviders;
 	getSettings?: () => Readonly<ClioSettings> | undefined;
-	notify: (level: TargetsHubNoticeLevel, text: string, key?: string) => void;
+	notify: (level: InteractiveNoticeLevel, text: string, key?: string) => void;
 	refreshFooter: () => void;
 	renderContextIsland: () => void;
 	renderTaskIsland: () => void;
@@ -78,7 +78,9 @@ function assertCredentialStored(auth: AuthProviders["auth"], providerId: string)
 
 export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): OverlayAuthLifecycle {
 	let authDialogDismiss: (() => void) | null = null;
-	let authReturnOverlayHandle: OverlayHandle | null = null;
+	// The overlay the connect flow was started from (Settings → Targets), restored
+	// when the dialog closes; null when it was started from the closed state.
+	let authReturn: { state: OverlayState; handle: OverlayHandle | null } | null = null;
 	let authCloseResolve: (() => void) | null = null;
 	const openAuthDialogFactory = deps.openAuthDialog ?? openAuthDialog;
 
@@ -87,10 +89,10 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 		if (dismiss) authDialogDismiss?.();
 		authDialogDismiss = null;
 		const authHandle = deps.getOverlayHandle();
-		const returnHandle = authReturnOverlayHandle;
-		authReturnOverlayHandle = null;
-		deps.setOverlayHandle(returnHandle);
-		deps.setOverlayState(returnHandle ? "providers" : "closed");
+		const returnTo = authReturn;
+		authReturn = null;
+		deps.setOverlayHandle(returnTo?.handle ?? null);
+		deps.setOverlayState(returnTo?.state ?? "closed");
 		authHandle?.hide();
 		const resolveAuthClose = authCloseResolve;
 		authCloseResolve = null;
@@ -112,8 +114,9 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 	};
 
 	const openConnectFlow = async (reference: string): Promise<void> => {
-		if (deps.getOverlayState() !== "closed" && deps.getOverlayState() !== "providers") return;
-		const returnHandle = deps.getOverlayState() === "providers" ? deps.getOverlayHandle() : null;
+		const fromState = deps.getOverlayState();
+		if (fromState !== "closed" && fromState !== "settings") return;
+		const returnTo = fromState === "settings" ? { state: fromState, handle: deps.getOverlayHandle() } : null;
 		const resolved = resolveConnectionReference(reference);
 		if (!resolved?.target) {
 			deps.notify(
@@ -130,7 +133,7 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 		const runtimeId = runtime.id;
 		await new Promise<void>((resolveAuthFlow) => {
 			const dialog = openAuthDialogFactory(deps.tui, `Connect ${targetId}`, () => finish(true));
-			authReturnOverlayHandle = returnHandle;
+			authReturn = returnTo;
 			authCloseResolve = resolveAuthFlow;
 			deps.setOverlayState("auth");
 			deps.setOverlayHandle(dialog.handle);

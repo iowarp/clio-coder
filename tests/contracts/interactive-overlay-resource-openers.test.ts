@@ -56,7 +56,6 @@ function makeLifecycle(events: string[], factories: ResourceFactories): ReturnTy
 		notify: () => {},
 		terminal: { columns: 100 },
 		dispatchBoard: {},
-		getObservabilitySnapshot: () => ({}),
 		chatPanel: {},
 		io: { stdout: () => {}, stderr: () => {} },
 		readStructuredEntries: () => [],

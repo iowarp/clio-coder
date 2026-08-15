@@ -1,7 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
-import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
 import type { CostEntry, ObservabilityContract, ObservabilitySnapshot } from "../../src/domains/observability/index.js";
 import {
 	EMPTY_CAPABILITIES,
@@ -14,7 +13,6 @@ import { type Component, type OverlayHandle, type TUI, visibleWidth } from "../.
 import { emitCommandNotice, runCompactWithNotice } from "../../src/interactive/command-fallbacks.js";
 import type { NoticeLevel } from "../../src/interactive/command-output.js";
 import { openCostOverlay } from "../../src/interactive/cost-overlay.js";
-import { openFleetOverlay } from "../../src/interactive/fleet-overlay.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import {
 	type AgentWorkFacts,
@@ -23,7 +21,6 @@ import {
 } from "../../src/interactive/footer/widgets.js";
 import { createMessagePickerContent } from "../../src/interactive/overlays/message-picker.js";
 import { buildModelItems, ModelOverlayView, openModelOverlay } from "../../src/interactive/overlays/model-selector.js";
-import { commitScopedModelSelection } from "../../src/interactive/overlays/scoped-models.js";
 import { createSessionOverlayBox } from "../../src/interactive/overlays/session-selector.js";
 import type { AgentStatus } from "../../src/interactive/status/types.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
@@ -265,15 +262,6 @@ function observability(entries: CostEntry[]): {
 	return { contract, emit };
 }
 
-function emptyDispatchSnapshot(): DispatchSnapshot {
-	return {
-		generatedAt: "2026-06-11T00:00:00.000Z",
-		running: [],
-		retrying: [],
-		totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
-	};
-}
-
 describe("milestone 08 overlay polish regressions", () => {
 	it("/model leaves nonselectable no-model rows open and reports a consistent model count", () => {
 		const result = buildModelItems({
@@ -403,15 +391,6 @@ describe("milestone 08 overlay polish regressions", () => {
 		handle.hide();
 	});
 
-	it("/scoped-models preserves selected scope entries that match no current row", () => {
-		const next = commitScopedModelSelection(
-			["old-target/old-model", "mock/model-a"],
-			[{ value: "mock/model-a", label: "[x] mock/model-a" }],
-			new Set(["old-target/old-model", "mock/model-a"]),
-		);
-		deepStrictEqual(next, ["mock/model-a", "old-target/old-model"]);
-	});
-
 	it("/cost refreshes from observability projection updates and renders at the clamped frame width", () => {
 		const entries: CostEntry[] = [];
 		const obs = observability(entries);
@@ -433,35 +412,6 @@ describe("milestone 08 overlay polish regressions", () => {
 		handle.hide();
 		obs.emit();
 		strictEqual(harness.renderRequests(), baseline + 1);
-	});
-
-	it("/fleet renders fixed rows at the clamped frame width", () => {
-		const harness = fakeTui(80);
-		const dispatch = {
-			snapshot: () => ({
-				...emptyDispatchSnapshot(),
-				running: [
-					{
-						runId: "run-abcdef123456",
-						agentId: "coder-with-a-very-long-name",
-						runtimeKind: "http",
-						outcomePhase: "running-for-a-long-time",
-						heartbeat: "alive",
-						lineage: { parentRunId: null, rootRunId: "run-abcdef123456", attempt: 12, depth: 3 },
-						startedAt: "2026-06-11T00:00:00.000Z",
-						elapsedMs: 12_345,
-						tokens: { input: 1000, output: 2000, total: 3000 },
-						costUsd: 0.1234,
-					},
-				],
-			}),
-		} as unknown as DispatchContract;
-		const handle = openFleetOverlay(harness.tui, dispatch);
-
-		const lines = harness.component().render(80);
-		ok(lines.some((line) => line.includes("─".repeat(76))));
-		for (const line of lines) strictEqual(visibleWidth(line), 80);
-		handle.hide();
 	});
 
 	it("/resume clears the pending bare-Escape timer on external hide", async () => {

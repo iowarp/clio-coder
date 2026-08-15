@@ -204,12 +204,12 @@ All other code elements (identifiers, types, function names, punctuation) remain
 
 ### 7.1 Fleet Visibility Across Surfaces
 - **Dispatch Board**: Displays per-run status cards with node assignments (`local` vs remote node ID), reroute badges, gate indicators (`gate reviewer c2`), live tool activity, and context occupancy meters.
-- **`/fleet` Overlay**: Modal overlay allowing operators to view running dispatches, inspect node capabilities, edit profile node pins, and monitor worker heartbeats.
+- **Settings → Fleet** (`/fleet`): Editable fleet defaults, profile rows including node pins, agent bindings, and read-only node placement rows.
 - **Parked Tools & Approvals**: Parked tool calls awaiting permission are rendered as `⏸ awaiting approval` with explicit approval prompts. Input overlays stay modal during active runs so background completions do not displace open dialogs.
 
 ### 7.2 Cost Provenance & Evidence Rendering
-- **Session vs Run Provenance**: The Activity footer renders session token/cost totals, while the dispatch board and `/fleet` overlay render per-run worker tokens and cost with `known`, `estimated`, or `unknown` provenance markers. The current surfaces do not present a separate orchestrator-versus-worker algebra.
-- **Proof Markers**: Dispatch cards and `/fleet` rows render evidence readiness as `proof` markers (`pending`, `ready`, or `failed`) from the observability projection. Model-facing dispatch and monitor output use `receipt_integrity=verified/v15/sha256` and a separate `evidence_verification` label; the TUI does not emit a `[VERIFIED_RECEIPT_OK]` badge.
+- **Session vs Run Provenance**: The Activity footer renders session token/cost totals, while the dispatch board renders per-run worker tokens and cost with `known`, `estimated`, or `unknown` provenance markers. The current surfaces do not present a separate orchestrator-versus-worker algebra.
+- **Proof Markers**: Dispatch cards render evidence readiness as `proof` markers (`pending`, `ready`, or `failed`) from the observability projection. Model-facing dispatch and monitor output use `receipt_integrity=verified/v15/sha256` and a separate `evidence_verification` label; the TUI does not emit a `[VERIFIED_RECEIPT_OK]` badge.
 
 ---
 

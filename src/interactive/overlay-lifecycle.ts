@@ -14,7 +14,6 @@ import {
 	permissionOverlayHint,
 	permissionOverlayTitle,
 } from "./permission-overlay.js";
-import { openProvidersOverlay } from "./providers-overlay.js";
 
 export * from "./overlay-key-routing.js";
 
@@ -25,7 +24,6 @@ import type { SettingsSectionId } from "./overlays/settings.js";
 // application composition root no longer owns the mutable overlay state.
 export type OverlayLifecycleApplicationDeps = Pick<
 	import("./interactive-application.js").InteractiveDeps,
-	| "agents"
 	| "bus"
 	| "chat"
 	| "commitSetting"
@@ -41,8 +39,6 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "onForkSession"
 	| "onResumeSession"
 	| "onSelectModel"
-	| "onSetScope"
-	| "onSetThinkingLevel"
 	| "providers"
 	| "readSessionEntries"
 	| "registerAskUserHandler"
@@ -60,10 +56,9 @@ export interface OverlayLifecycleRuntimeDeps {
 	interactiveTickers: import("./interactive-tickers.js").InteractiveTickers;
 	busNoticeSink: Parameters<typeof import("./command-output.js").appendNotice>[2];
 	chatRenderer: { applyEvent(event: import("./chat-loop.js").ToolApprovalStateEvent): void };
-	notify: (level: import("./providers-overlay.js").TargetsHubNoticeLevel, text: string, key?: string) => void;
+	notify: (level: import("./interactive-subscriptions.js").InteractiveNoticeLevel, text: string, key?: string) => void;
 	terminal: Pick<import("../engine/tui.js").ProcessTerminal, "columns">;
 	dispatchBoard: ReturnType<typeof import("./dispatch-board.js").createDispatchBoardView>;
-	getObservabilitySnapshot: () => import("../domains/observability/index.js").ObservabilitySnapshot;
 	chatPanel: import("./chat-panel.js").ChatPanel;
 	io: import("./slash-commands.js").RunIo;
 	readStructuredEntries: (sessionId: string) => import("../domains/session/index.js").SessionEntry[];
@@ -75,11 +70,8 @@ export interface OverlayLifecycleRuntimeDeps {
 	getSlashContext: () => import("./slash-commands.js").SlashCommandContext;
 	showOverlayFrame?: typeof showClioOverlayFrame;
 	openAuthDialog?: typeof import("./overlays/auth-dialog.js").openAuthDialog;
-	openProvidersOverlay?: typeof openProvidersOverlay;
 	openAskUserOverlay?: typeof import("./overlays/ask-user.js").openAskUserOverlay;
-	openThinkingOverlay?: typeof import("./overlays/thinking-selector.js").openThinkingOverlay;
 	openModelOverlay?: typeof import("./overlays/model-selector.js").openModelOverlay;
-	openScopedOverlay?: typeof import("./overlays/scoped-models.js").openScopedOverlay;
 	openSettingsOverlay?: typeof import("./overlays/settings.js").openSettingsOverlay;
 	openSessionOverlay?: typeof import("./overlays/session-selector.js").openSessionOverlay;
 	openTreeOverlay?: typeof import("./overlays/tree-selector.js").openTreeOverlay;
@@ -90,7 +82,6 @@ export interface OverlayLifecycleRuntimeDeps {
 	openContextResetOverlay?: typeof import("./overlays/context-reset.js").openContextResetOverlay;
 	openTasksOverlay?: typeof import("./tasks-overlay.js").openTasksOverlay;
 	openMemoryOverlay?: typeof import("./memory-overlay.js").openMemoryOverlay;
-	openFleetOverlay?: typeof import("./fleet-overlay.js").openFleetOverlay;
 	openViewOverlay?: typeof import("./view/view-overlay.js").openViewOverlay;
 	openHelpOverlay?: typeof import("./overlays/help-reference.js").openHelpOverlay;
 	openAgentsOverlay?: typeof import("./overlays/agents.js").openAgentsOverlay;
@@ -108,18 +99,14 @@ export interface OverlayLifecycleController {
 	isAskUserWaiting(): boolean;
 	resetAskUserCancellation(): void;
 	refreshSettingsOverlay(): void;
-	openProvidersOverlayState(): void;
 	openCostOverlayState(): void;
 	openContextViewOverlayState(): void;
 	openContextResetOverlayState(): void;
 	toggleFooterDashboardState(): void;
 	openTasksOverlayState(): void;
 	openMemoryOverlayState(): void;
-	openFleetOverlayState(): void;
 	openViewOverlayState(initialFilter?: string): void;
-	openThinkingOverlayState(): void;
 	openModelOverlayState(): void;
-	openScopedModelsOverlayState(): void;
 	openSettingsOverlayState(section?: SettingsSectionId): void;
 	openResumeOverlayState(): void;
 	openTreeOverlayState(): void;
@@ -155,11 +142,8 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		editor,
 		showOverlayFrame = showClioOverlayFrame,
 		openAuthDialog: openAuthDialogFactory,
-		openProvidersOverlay: openProvidersOverlayFactory = openProvidersOverlay,
 		openAskUserOverlay: openAskUserOverlayFactory,
-		openThinkingOverlay: openThinkingOverlayFactory,
 		openModelOverlay: openModelOverlayFactory,
-		openScopedOverlay: openScopedOverlayFactory,
 		openSettingsOverlay: openSettingsOverlayFactory,
 		openSessionOverlay: openSessionOverlayFactory,
 		openTreeOverlay: openTreeOverlayFactory,
@@ -170,7 +154,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openContextResetOverlay: openContextResetOverlayFactory,
 		openTasksOverlay: openTasksOverlayFactory,
 		openMemoryOverlay: openMemoryOverlayFactory,
-		openFleetOverlay: openFleetOverlayFactory,
 		openViewOverlay: openViewOverlayFactory,
 		openHelpOverlay: openHelpOverlayFactory,
 		openAgentsOverlay: openAgentsOverlayFactory,
@@ -272,11 +255,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.writeSettings ? { writeSettings: deps.app.writeSettings } : {}),
 		...(deps.app.commitSetting ? { commitSetting: deps.app.commitSetting } : {}),
 		...(deps.app.onSelectModel ? { onSelectModel: deps.app.onSelectModel } : {}),
-		...(deps.app.onSetScope ? { onSetScope: deps.app.onSetScope } : {}),
-		...(deps.app.onSetThinkingLevel ? { onSetThinkingLevel: deps.app.onSetThinkingLevel } : {}),
-		...(openThinkingOverlayFactory ? { openThinkingOverlay: openThinkingOverlayFactory } : {}),
+		...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
+		connectTarget: (targetId) => overlayAuth.openConnectFlow(targetId),
 		...(openModelOverlayFactory ? { openModelOverlay: openModelOverlayFactory } : {}),
-		...(openScopedOverlayFactory ? { openScopedOverlay: openScopedOverlayFactory } : {}),
 		...(openSettingsOverlayFactory ? { openSettingsOverlay: openSettingsOverlayFactory } : {}),
 	});
 
@@ -337,12 +318,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		dataDir: deps.app.dataDir,
 		notify,
 		dispatch: deps.app.dispatch,
-		providers: deps.app.providers,
-		getObservabilitySnapshot: deps.getObservabilitySnapshot,
-		...(deps.app.agents ? { agents: deps.app.agents } : {}),
-		...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
-		...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
-		...(deps.app.writeSettings ? { writeSettings: deps.app.writeSettings } : {}),
 		stateDir: deps.app.stateDir,
 		getSessionMeta: () => deps.app.session?.current() ?? null,
 		...(deps.app.readSessionEntries ? { readSessionEntries: deps.app.readSessionEntries } : {}),
@@ -356,29 +331,8 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openContextResetOverlayFactory ? { openContextResetOverlay: openContextResetOverlayFactory } : {}),
 		...(openTasksOverlayFactory ? { openTasksOverlay: openTasksOverlayFactory } : {}),
 		...(openMemoryOverlayFactory ? { openMemoryOverlay: openMemoryOverlayFactory } : {}),
-		...(openFleetOverlayFactory ? { openFleetOverlay: openFleetOverlayFactory } : {}),
 		...(openViewOverlayFactory ? { openViewOverlay: openViewOverlayFactory } : {}),
 	});
-
-	const openProvidersOverlayState = (): void => {
-		if (overlayTransitions.state !== "closed") return;
-		overlayTransitions.state = "providers";
-		overlayTransitions.handle = openProvidersOverlayFactory(tui, deps.app.providers, {
-			bus: deps.app.bus,
-			...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
-			...(deps.app.writeSettings
-				? {
-						writeSettings: (next) => {
-							deps.app.writeSettings?.(next);
-							footer.refresh();
-						},
-					}
-				: {}),
-			connectTarget: (targetId) => overlayAuth.openConnectFlow(targetId),
-			notice: notify,
-		});
-		tui.requestRender();
-	};
 
 	const openResumeOverlayState = overlaySessions.openResume;
 	const openTreeOverlayState = overlaySessions.openTree;
@@ -389,7 +343,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const toggleFooterDashboardState = overlayGeneralOpeners.toggleFooter;
 	const openTasksOverlayState = overlayGeneralOpeners.openTasks;
 	const openMemoryOverlayState = overlayGeneralOpeners.openMemory;
-	const openFleetOverlayState = overlayGeneralOpeners.openFleet;
 	const openViewOverlayState = overlayGeneralOpeners.openView;
 	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
 
@@ -402,18 +355,14 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		isAskUserWaiting: overlayAskUser.isWaiting,
 		resetAskUserCancellation: overlayAskUser.resetCancellation,
 		refreshSettingsOverlay: overlayModelSelectors.refreshSettingsOverlay,
-		openProvidersOverlayState,
 		openCostOverlayState,
 		openContextViewOverlayState,
 		openContextResetOverlayState,
 		toggleFooterDashboardState,
 		openTasksOverlayState,
 		openMemoryOverlayState,
-		openFleetOverlayState,
 		openViewOverlayState,
-		openThinkingOverlayState: overlayModelSelectors.openThinkingOverlayState,
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,
-		openScopedModelsOverlayState: overlayModelSelectors.openScopedModelsOverlayState,
 		openSettingsOverlayState: overlayModelSelectors.openSettingsOverlayState,
 		openResumeOverlayState,
 		openTreeOverlayState,

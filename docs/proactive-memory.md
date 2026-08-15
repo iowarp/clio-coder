@@ -265,10 +265,10 @@ steps with their trigger, decision, write count, cited-entry count, tier, and
 latency. That history is the only place a capture, a gate, or a timeout becomes
 visible, since those outcomes produce no transcript entry by design; only an
 actual injection reaches the transcript. It carries counts and outcomes only,
-never bank or trajectory text. `/settings` exposes every key above. In
-`/targets`, select an eligible local target and press `b` to make it the saved
-background-memory default; this is independent of `u` for chat and `f` for the
-fleet default. A running session owns its routing snapshot, while the saved
+never bank or trajectory text. `/settings` exposes every key above; the saved
+background-memory target is the Memory target row in Settings → Orchestrator,
+independent of the chat target and the fleet default. A running session owns
+its routing snapshot, while the saved
 selection becomes the default for new sessions.
 
 The reference live configuration is an LM Studio server on the `zbook` node with

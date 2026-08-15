@@ -143,17 +143,17 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] <agent> <task>` | Run a fleet agent |
 | `/delegate` | - | `/delegate <agent-id> <task>` | Run an ACP delegation agent |
 | `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
-| `/targets` | - | `/targets` | Show target hub for health, auth, models, and actions |
+| `/targets` | - | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
 | `/cost` | - | `/cost` | Show session token and cost totals |
 | `/context` | `/ctx`, `/compact` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
-| `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
+| `/fleet` | - | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
 | `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
 | `/memory` | - | `/memory seed` | Inspect task memory or seed it from the newest handoff |
 | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
-| `/thinking` | - | `/thinking [level]` | Open thinking-level selector, or set a level directly |
-| `/output` | - | `/output <verbosity>` | Set transcript detail: minimal, default, or verbose |
+| `/thinking` | - | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
+| `/output` | - | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
 | `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
-| `/scoped-models` | - | `/scoped-models` | Edit the Alt+J / Alt+K model cycle set |
+| `/scoped-models` | - | `/scoped-models` | Open Settings → Models: the Alt+J / Alt+K cycle set and favorites |
 | `/settings` | `/config` | `/settings [section]` | Open interactive settings |
 | `/resume` | - | `/resume` | Resume a past session |
 | `/new` | - | `/new` | Start a fresh session |
@@ -198,9 +198,11 @@ A rejected command stays in the input line. The error names the spelling and the
 text is still there to correct, rather than having to be retyped.
 
 
-The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `f` to set the selected target as the fleet default, `c` to connect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.
+Configuration lives in one place: the `/settings` overlay. `/targets`, `/fleet`, `/scoped-models`, bare `/thinking`, and bare `/output` are deep links that open it focused on the matching section; `/settings <section>` reaches every other section the same way. `/thinking <level>`, `/output <verbosity>`, and `/model <pattern>` stay as quick setters that apply without opening anything.
 
-The `/fleet` overlay displays current running and retrying fleet state. It includes four tabs: Status, Nodes, Profiles, and Bindings; cycle with `Tab`. Status shows active runs, aggregate execution stats, and scheduled retries with backoff times. Nodes shows fleet placement health. Profiles supports creating, editing, renaming, and deleting worker profiles. Bindings supports binding or unbinding agents to profiles. Recent terminal run cards live in the `Alt+W` Fleet Runs board.
+Settings → Targets lists one row per configured target with its roles (chat, fleet, memory) and probe health. `Enter` on a row offers use (chat and fleet dispatch), connect (the same API-key or OAuth flow as `clio-coder auth login`, then a probe), probe, and remove; the overlay probes every target live when it opens. Adding a target stays with `clio-coder targets add`. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat action.
+
+Settings → Fleet holds the worker default target, model, and thinking level, one editable row per fleet profile field and per agent binding, the retry ceiling, and read-only rows for each fleet node's placement state. Running and retrying dispatches live in the `Alt+W` Fleet Runs board, which also steers and cancels them.
 
 The `/tasks` overlay shows the session task board the agent maintains through
 the `tasks` tool: every task with its status, the evidence note recorded when
@@ -232,7 +234,7 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Alt+T` | Open the session tree navigator. |
 | `Alt+U` | Toggle the footer dashboard between compact and expanded layouts. |
 | `Alt+L` | Open the model and targets selector. |
-| `Alt+J` / `Alt+K` | Cycle through the scoped model set (when empty, displays a notice directing the operator to run `/scoped-models`). |
+| `Alt+J` / `Alt+K` | Cycle through the scoped model set (when empty, displays a notice directing the operator to `/scoped-models`, which opens Settings → Models). |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). |
 | `Alt+S` / `Ctrl+Alt+B` | Convert an active attached dispatch to a detached background batch. |
 | `Alt+O` | Toggle the latest tool segment between collapsed and full body. |

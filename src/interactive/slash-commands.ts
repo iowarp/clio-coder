@@ -47,22 +47,18 @@ type SlashCommandVariant =
 	| { kind: "delegate"; agentId: string; task: string }
 	| { kind: "delegate-usage" }
 	| { kind: "agents" }
-	| { kind: "providers" }
 	| { kind: "cost" }
 	| { kind: "context-view" }
-	| { kind: "fleet" }
 	| { kind: "tasks" }
 	| { kind: "memory" }
 	| { kind: "memory-seed" }
 	| { kind: "view"; filter?: string }
 	| { kind: "view-verify"; runId: string }
 	| { kind: "view-usage" }
-	| { kind: "thinking" }
 	| { kind: "thinking-set"; level: string }
-	| { kind: "output"; verbosity?: "minimal" | "default" | "verbose" }
+	| { kind: "output-set"; verbosity: string }
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
-	| { kind: "scoped-models" }
 	| { kind: "settings"; section?: SettingsSectionId }
 	| { kind: "resume" }
 	| { kind: "new" }
@@ -87,6 +83,11 @@ export interface RunIo {
 export type SetThinkingLevelResult =
 	| { status: "applied"; level: string; display: string }
 	| { status: "unsupported"; level: string; supported: ReadonlyArray<string> }
+	| { status: "unavailable" };
+
+export type SetOutputVerbosityResult =
+	| { status: "applied"; verbosity: string }
+	| { status: "unsupported"; verbosity: string; supported: ReadonlyArray<string> }
 	| { status: "unavailable" };
 
 export type TaskMemorySeedCommandResult =
@@ -253,12 +254,9 @@ export interface SlashCommandContext {
 	}>;
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
-	openProviders: () => void;
 	openCost: () => void;
 	/** Open the read-only `/context` overlay: categorized context-window ledger. */
 	openContextView: () => void;
-	/** Open `/fleet`: running workers plus worker profile and agent-binding settings. */
-	openFleet: () => void;
 	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
 	openTasks: () => void;
 	/** Open the read-only `/memory` overlay: approved lessons and the live task bank. */
@@ -267,20 +265,19 @@ export interface SlashCommandContext {
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	/** Open `/view`, the full observability artifact viewer. */
 	openView: (filter?: string) => void;
-	openThinking: () => void;
 	/**
 	 * Apply a thinking level named on the command line. Returns why it was
 	 * refused so the caller can say so, because the level the operator typed may
 	 * not be one the active target supports.
 	 */
 	setThinkingLevel?: (level: string) => SetThinkingLevelResult;
-	setOutputVerbosity?: (verbosity?: "minimal" | "default" | "verbose") => void;
+	/** Apply a transcript verbosity named on the command line; refused values are reported by the caller. */
+	setOutputVerbosity?: (verbosity: string) => SetOutputVerbosityResult;
 	openModel: () => void;
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
 	providers: ProvidersContract;
 	/** Apply a resolved model reference to settings (and optionally thinking level). */
 	applyModelRef: (ref: ResolvedModelRef) => void;
-	openScopedModels: () => void;
 	openSettings: (section?: SettingsSectionId) => void;
 	openResume: () => void;
 	startNewSession: () => void;
@@ -315,9 +312,14 @@ export interface SlashCommandContext {
 	render: () => void;
 }
 
+/** The verb a command performs, in the order /help lists the groups. */
+export const SLASH_COMMAND_GROUPS = ["Run", "Inspect", "Configure", "Sessions"] as const;
+export type SlashCommandGroup = (typeof SLASH_COMMAND_GROUPS)[number];
+
 export interface BuiltinSlashCommand {
 	name: string;
 	description: string;
+	group: SlashCommandGroup;
 	aliases?: ReadonlyArray<string>;
 	/**
 	 * Argument text an alias stands in for, prepended to whatever the operator
@@ -366,6 +368,23 @@ function fromArgsOrUsage(name: string, command: SlashCommand): (parsed: ParsedAr
 	return (parsed) => (parsed.error ? { kind: "usage-error", command: name, reason: parsed.error } : command);
 }
 
+/**
+ * A configuration-shaped command that is a shortcut into one settings section.
+ * It parses to the same `settings` command `/settings <section>` produces, so
+ * the settings entry dispatches it and this entry owns no kind of its own.
+ */
+function settingsDeepLink(name: string, section: SettingsSectionId, description: string): BuiltinSlashCommand {
+	return {
+		name,
+		description,
+		group: "Configure",
+		kinds: [],
+		args: {},
+		fromArgs: fromArgsOrUsage(name, { kind: "settings", section }),
+		handle: () => undefined,
+	};
+}
+
 function usageNotice(entry: BuiltinSlashCommand, subcommand?: string): string {
 	return usageLine(entry, subcommand).trim();
 }
@@ -374,6 +393,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "quit",
 		description: "Exit Clio Coder",
+		group: "Sessions",
 		aliases: ["exit"],
 		kinds: ["quit"],
 		args: {},
@@ -385,6 +405,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "help",
 		description: "Open the interactive help center showing commands and keys",
+		group: "Inspect",
 		kinds: ["help"],
 		args: {
 			positionals: [{ name: "query", required: false, rest: true }],
@@ -399,6 +420,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "skill",
 		description: "Open the Skills Hub or invoke a skill",
+		group: "Run",
 		aliases: ["skill:", "skills:"],
 		kinds: ["skill-selector", "skill-invocation"],
 		args: {
@@ -428,6 +450,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "prompts",
 		description: "List prompt templates",
+		group: "Inspect",
 		kinds: ["prompts"],
 		args: {},
 		fromArgs: fromArgsOrUsage("prompts", { kind: "prompts" }),
@@ -438,6 +461,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "extensions",
 		description: "List installed extensions",
+		group: "Inspect",
 		kinds: ["extensions"],
 		args: {},
 		fromArgs: fromArgsOrUsage("extensions", { kind: "extensions" }),
@@ -448,6 +472,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "share",
 		description: "Export or import Clio archives",
+		group: "Sessions",
 		kinds: ["share"],
 		args: {
 			subcommands: {
@@ -524,6 +549,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "run",
 		description: "Run a fleet agent",
+		group: "Run",
 		kinds: ["run", "run-usage"],
 		args: {
 			parseFlagsBeforeRest: true,
@@ -609,6 +635,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "delegate",
 		description: "Run an ACP delegation agent",
+		group: "Run",
 		kinds: ["delegate", "delegate-usage"],
 		args: {
 			positionals: [
@@ -645,6 +672,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "agents",
 		description: "List Clio agents and ACP delegation agents",
+		group: "Inspect",
 		kinds: ["agents"],
 		args: {},
 		fromArgs: fromArgsOrUsage("agents", { kind: "agents" }),
@@ -652,19 +680,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			ctx.openAgents();
 		},
 	},
-	{
-		name: "targets",
-		description: "Show target hub for health, auth, models, and actions",
-		kinds: ["providers"],
-		args: {},
-		fromArgs: fromArgsOrUsage("targets", { kind: "providers" }),
-		handle(_command, ctx) {
-			ctx.openProviders();
-		},
-	},
+	settingsDeepLink("targets", "targets", "Open Settings → Targets: health, use, connect, probe, remove"),
 	{
 		name: "cost",
 		description: "Show session token and cost totals",
+		group: "Inspect",
 		kinds: ["cost"],
 		args: {},
 		fromArgs: fromArgsOrUsage("cost", { kind: "cost" }),
@@ -675,6 +695,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "context",
 		description: "Context hub: window overlay plus compact, init, refresh, and reset",
+		group: "Inspect",
 		aliases: ["ctx", "compact"],
 		aliasArgs: { compact: "compact" },
 		kinds: ["context-view", "compact", "init", "context-clear", "context-refresh"],
@@ -733,19 +754,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 		},
 	},
-	{
-		name: "fleet",
-		description: "Show in-process dispatch running/retry status",
-		kinds: ["fleet"],
-		args: {},
-		fromArgs: fromArgsOrUsage("fleet", { kind: "fleet" }),
-		handle(_command, ctx) {
-			ctx.openFleet();
-		},
-	},
+	settingsDeepLink("fleet", "fleet", "Open Settings → Fleet: defaults, profiles, agent bindings, nodes"),
 	{
 		name: "tasks",
 		description: "Show the session task board the agent tracks with the tasks tool",
+		group: "Inspect",
 		kinds: ["tasks"],
 		args: {},
 		fromArgs: fromArgsOrUsage("tasks", { kind: "tasks" }),
@@ -756,6 +769,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "memory",
 		description: "Inspect task memory or seed it from the newest handoff",
+		group: "Inspect",
 		kinds: ["memory", "memory-seed"],
 		subcommandDescriptions: { seed: "Seed the task bank from the newest handoff" },
 		args: { subcommands: { seed: {} } },
@@ -788,6 +802,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "view",
 		description: "Browse session artifacts and verify receipts",
+		group: "Inspect",
 		kinds: ["view", "view-verify", "view-usage"],
 		args: {
 			positionals: [{ name: "filter", required: false, rest: true }],
@@ -827,19 +842,16 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "thinking",
-		description: "Open thinking-level selector, or set a level directly",
-		kinds: ["thinking", "thinking-set"],
+		description: "Set the chat thinking level, or open Settings → Orchestrator",
+		group: "Configure",
+		kinds: ["thinking-set"],
 		args: { positionals: [{ name: "level", required: false }] },
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "thinking", reason: parsed.error };
 			const level = parsed.positionals[0];
-			return level ? { kind: "thinking-set", level } : { kind: "thinking" };
+			return level ? { kind: "thinking-set", level } : { kind: "settings", section: "orchestrator" };
 		},
 		handle(command, ctx) {
-			if (command.kind === "thinking") {
-				ctx.openThinking();
-				return;
-			}
 			if (command.kind !== "thinking-set") return;
 			const result = ctx.setThinkingLevel?.(command.level) ?? { status: "unavailable" as const };
 			if (result.status === "applied") {
@@ -854,26 +866,32 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "output",
-		description: "Set transcript detail: minimal, default, or verbose",
-		kinds: ["output"],
-		// Required, so the help center renders `<verbosity>`. It read `[verbosity]`
-		// while the bare form was rejected, which advertised an optional argument
-		// the command does not have; `/thinking [level]` is the sibling that really
-		// does open a selector when bare.
-		args: { positionals: [{ name: "verbosity", required: true }] },
+		description: "Set transcript detail (minimal, default, verbose), or open Settings → Terminal",
+		group: "Configure",
+		kinds: ["output-set"],
+		args: { positionals: [{ name: "verbosity", required: false }] },
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "output", reason: parsed.error };
-			const value = parsed.positionals[0];
-			return { kind: "output", ...(value ? { verbosity: value as "minimal" | "default" | "verbose" } : {}) };
+			const verbosity = parsed.positionals[0];
+			return verbosity ? { kind: "output-set", verbosity } : { kind: "settings", section: "terminal" };
 		},
 		handle(command, ctx) {
-			if (command.kind !== "output") return;
-			ctx.setOutputVerbosity?.(command.verbosity);
+			if (command.kind !== "output-set") return;
+			const result = ctx.setOutputVerbosity?.(command.verbosity) ?? { status: "unavailable" as const };
+			if (result.status === "applied") {
+				ctx.notice("success", `output detail: ${result.verbosity}`);
+			} else if (result.status === "unsupported") {
+				ctx.notice("error", `output detail "${result.verbosity}" is not one of ${result.supported.join(", ")}`);
+			} else {
+				ctx.notice("error", "output detail cannot be set right now");
+			}
+			ctx.render();
 		},
 	},
 	{
 		name: "model",
 		description: "Open model selector or set a model",
+		group: "Configure",
 		aliases: ["models"],
 		kinds: ["model", "model-set"],
 		args: {
@@ -913,19 +931,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			})();
 		},
 	},
-	{
-		name: "scoped-models",
-		description: "Edit the Alt+J / Alt+K model cycle set",
-		kinds: ["scoped-models"],
-		args: {},
-		fromArgs: fromArgsOrUsage("scoped-models", { kind: "scoped-models" }),
-		handle(_command, ctx) {
-			ctx.openScopedModels();
-		},
-	},
+	settingsDeepLink("scoped-models", "models", "Open Settings → Models: the Alt+J / Alt+K cycle set and favorites"),
 	{
 		name: "settings",
 		description: "Open interactive settings",
+		group: "Configure",
 		aliases: ["config"],
 		kinds: ["settings"],
 		args: { positionals: [{ name: "section", required: false }] },
@@ -946,6 +956,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "resume",
 		description: "Resume a past session",
+		group: "Sessions",
 		kinds: ["resume"],
 		args: {},
 		fromArgs: fromArgsOrUsage("resume", { kind: "resume" }),
@@ -956,6 +967,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "new",
 		description: "Start a fresh session",
+		group: "Sessions",
 		kinds: ["new"],
 		args: {},
 		fromArgs: fromArgsOrUsage("new", { kind: "new" }),
@@ -966,6 +978,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "tree",
 		description: "Open session tree navigator",
+		group: "Sessions",
 		kinds: ["tree"],
 		args: {},
 		fromArgs: fromArgsOrUsage("tree", { kind: "tree" }),
@@ -976,6 +989,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "fork",
 		description: "Fork from an assistant turn",
+		group: "Sessions",
 		kinds: ["fork"],
 		args: {},
 		fromArgs: fromArgsOrUsage("fork", { kind: "fork" }),
@@ -986,6 +1000,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "export",
 		description: "Export the session transcript to Markdown",
+		group: "Sessions",
 		kinds: ["export"],
 		args: {
 			positionals: [{ name: "path", required: false }],
@@ -1108,6 +1123,7 @@ export interface CommandReferenceEntry {
 	aliasArgs?: Readonly<Record<string, string>>;
 	usage: string;
 	description: string;
+	group: SlashCommandGroup;
 	/** The command's args grammar, carried through for argument autocomplete. */
 	args?: CommandArgsSpec;
 	/** Stable copy shown beside first-token subcommand completions. */
@@ -1125,6 +1141,7 @@ export function commandReference(): ReadonlyArray<CommandReferenceEntry> {
 			...(entry.aliasArgs ? { aliasArgs: entry.aliasArgs } : {}),
 			usage,
 			description: entry.description,
+			group: entry.group,
 			...(entry.args ? { args: entry.args } : {}),
 			...(entry.subcommandDescriptions ? { subcommandDescriptions: entry.subcommandDescriptions } : {}),
 		};

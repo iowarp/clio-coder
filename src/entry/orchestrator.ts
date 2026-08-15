@@ -1789,9 +1789,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			updateSessionRouting({ orchestrator: { target, model } });
 			rememberRecentModel(`${target}/${model}`, getCurrentSettings().modelSelector.recentLimit);
 		},
-		onSetScope: (scope) => {
-			updateSessionRouting({ scope: Array.from(scope) });
-		},
 		writeSettings: (next) => applySettingsBlob(next),
 		commitSetting: (id, next, scope) => commitSetting(id, next, scope),
 		...(session
