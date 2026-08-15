@@ -77,11 +77,11 @@ describe("contracts/agents", () => {
 		strictEqual(gitMaster?.capabilityClass, "workspace-edit");
 		deepStrictEqual(gitMaster?.resultContract, { kind: "mutation-report" });
 		strictEqual(
-			gitMaster?.boundSkillPaths.some((path) => path.endsWith("skills/git/commit-crafting/SKILL.md")),
+			gitMaster?.boundSkillPaths.some((path) => path.endsWith("skills/git/ship/SKILL.md")),
 			true,
 		);
 		const coder = recipes.find((entry) => entry.id === "coder");
-		deepStrictEqual(coder?.skills, ["commit-crafting", "review-changes"]);
+		deepStrictEqual(coder?.skills, ["fix-issue", "ship"]);
 	});
 
 	it("keeps display metadata visible while policy reads hard semantics", () => {

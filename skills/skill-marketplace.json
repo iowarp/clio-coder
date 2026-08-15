@@ -50,34 +50,18 @@
 			"category": "context"
 		},
 		{
-			"name": "commit-crafting",
-			"description": "Use when the user asks to commit the current work — \"commit this\", \"make a commit\", \"commit what we did\" — and the changes are complete. Stages reviewed files, writes one atomic conventional-tagged commit, and reports what changed. Local commit only; never pushes. Not for opening a PR; use create-pr.",
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/commit-crafting",
-			"version": "0.2.0",
-			"audit": "pass",
-			"category": "git"
-		},
-		{
-			"name": "create-pr",
-			"description": "Use when the user asks to push the current branch and open a pull request — \"open a PR\", \"create the pull request\", \"ship this for review\". Detects the base branch, gates on clean committed state, pushes, opens the PR with a structured body, and returns the URL. Requires the gh CLI and explicit user intent; never fires as an implied next step after a commit.",
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/create-pr",
-			"version": "0.2.0",
-			"audit": "pass",
-			"category": "git"
-		},
-		{
 			"name": "file-ticket",
-			"description": "Use when something noticed mid-session must become a tracker issue — \"file a ticket\", \"open an issue for this\", \"log this bug\", \"ticket this behavior\". Captures evidence from the live session, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Filing only; never fixes. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use investigate-issue.",
+			"description": "Use when something noticed mid-session must become a tracker issue — \"file a ticket\", \"open an issue for this\", \"log this bug\", \"ticket this behavior\". Captures evidence from the live session, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Filing only; never fixes. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use fix-issue.",
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/file-ticket",
 			"version": "0.1.0",
 			"audit": "pass",
 			"category": "git"
 		},
 		{
-			"name": "investigate-issue",
-			"description": "Use when a GitHub issue needs diagnosis before any fix — \"investigate issue 123\", \"root-cause this bug\", \"what's behind this issue\". Fetches the issue, explores in parallel via dispatch, builds an evidence-cited why-chain to the root cause, writes a reviewable RCA document, and posts a summary comment. Diagnosis only; the fix is a separate task. Not for failures without an issue; use scientific-debugging.",
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/investigate-issue",
-			"version": "0.2.0",
+			"name": "fix-issue",
+			"description": "Use when a tracker issue should be resolved end to end — \"fix issue 123\", \"take this ticket\", \"resolve the bug in",
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/fix-issue",
+			"version": "0.1.0",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -90,10 +74,10 @@
 			"category": "git"
 		},
 		{
-			"name": "review-changes",
-			"description": "Use before committing, when the user asks to review the uncommitted work — \"review my changes\", \"check this before I commit\", \"pre-commit review\". Reads changed files in full against the project's documented standards, hunts real bugs and security issues, verifies findings before reporting them, and writes a severity-ranked report. Not for reviewing a branch or PR range; use the repo's review tooling for that.",
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/review-changes",
-			"version": "0.2.0",
+			"name": "ship",
+			"description": "Use when finished work should leave the machine — \"ship this\", \"commit and open the PR\", \"get this up for review\". Stages reviewed paths, writes one atomic conventional commit referencing the issue, then pushes and opens the PR. Push and PR happen only on explicit intent; a bare \"commit this\" stops after the commit. Not for producing the change; use fix-issue.",
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/skills/git/ship",
+			"version": "0.1.0",
 			"audit": "pass",
 			"category": "git"
 		},

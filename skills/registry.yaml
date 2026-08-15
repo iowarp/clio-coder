@@ -30,30 +30,22 @@ skills:
     version: 0.2.2
     sha256: 1228302e03b86bcf829ac0016441f408f78b05c4658085d65628cf05fd282f8b
   # ── git ──
-  - name: commit-crafting
-    path: git/commit-crafting
-    version: 0.2.0
-    sha256: b634c602e3433504c5c0f8e6803b05a85819eb99e44844a5bee63b2d5f3d4a93
-  - name: create-pr
-    path: git/create-pr
-    version: 0.2.0
-    sha256: 8baa650a83bda09338bc1c52e40a3eb4f3de832464c51e2679295b4ac8414253
   - name: file-ticket
     path: git/file-ticket
     version: 0.1.0
-    sha256: d829650a113acf19f9f1bfe9e09d05f160d6d4640987fd5f733b9ea724f1f5fc
-  - name: investigate-issue
-    path: git/investigate-issue
-    version: 0.2.0
-    sha256: 19f2d041eb10be3068096581fc25d0a4c5b3bee2913ff3dcf885b0dd9c7b483c
+    sha256: 0532ac43ffacbfe3cbc681e68b2cbb7816751d9041b6f1f365e3d43a106a0e91
+  - name: fix-issue
+    path: git/fix-issue
+    version: 0.1.0
+    sha256: 2c1a7d9c252dd8e0c9512b9610e1c467020fd2948d8d189d594e33e87e2d6fce
   - name: resolve-merge-conflicts
     path: git/resolve-merge-conflicts
     version: 0.2.0
     sha256: 7974a394b560de7e8995a59e7f15fbbb7d6481d2cfdf12238d854cb9278675a0
-  - name: review-changes
-    path: git/review-changes
-    version: 0.2.0
-    sha256: a3fb3538132df310becce85584af0d05feceae9bc003e41c6a23da44efb2475b
+  - name: ship
+    path: git/ship
+    version: 0.1.0
+    sha256: 58b76f46629562310f833beb2adebe3cc91a078d2d84523608797ee1b53bb445
   - name: worktree-create
     path: git/worktree-create
     version: 0.2.0

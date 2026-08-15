@@ -58,10 +58,8 @@ folder is presentation and provenance, not a namespace.
 | Skill | Type | Use when |
 |---|---|---|
 | [`file-ticket`](git/file-ticket/) | workflow | Something noticed mid-session must become a tracker issue: capture evidence, dedup, compose, confirm, create via gh. |
-| [`commit-crafting`](git/commit-crafting/) | workflow | The user asks to commit finished work. One atomic conventional commit, explicit-path staging, no push. |
-| [`review-changes`](git/review-changes/) | workflow | Pre-commit review of uncommitted work: real bugs and security, verified findings, severity-ranked report. |
-| [`create-pr`](git/create-pr/) | workflow | The user asks to push the branch and open a PR. Base detection, state gates, structured body, URL back. |
-| [`investigate-issue`](git/investigate-issue/) | workflow | A GitHub issue needs diagnosis before a fix: parallel exploration, evidence-cited why-chain, reviewable RCA. |
+| [`fix-issue`](git/fix-issue/) | workflow | A tracker issue should be resolved: diagnose only the unknown, fix test-first, self-review against the issue's acceptance criteria. |
+| [`ship`](git/ship/) | workflow | Finished work leaves the machine: one atomic conventional commit referencing the issue, gated push, PR on explicit intent. |
 | [`worktree-create`](git/worktree-create/) | workflow | Stand up isolated worktrees for parallel branches: detected install/config/health-check, per-worktree verification. |
 | [`worktree-merge`](git/worktree-merge/) | workflow | Integrate finished worktree branches through a throwaway integration branch with per-merge tests and a full final gate. |
 | [`resolve-merge-conflicts`](git/resolve-merge-conflicts/) | workflow | A merge/rebase is stopped on conflicts. Resolves from both sides' reconstructed intent, validates, completes the operation. |
@@ -317,7 +315,7 @@ hash is exact, and drift detection uses the hash.
 
 The invariant is that a catalog skill dropped unmodified into `.claude/skills`
 loads and runs in Claude Code. Verified against Claude Code 2.1.231:
-`skills/git/commit-crafting` copied into a scratch project's
+`skills/git/ship` copied into a scratch project's
 `.claude/skills/`, invoked headlessly, loaded through the `Skill` tool and
 answered a question about its own body. The `clio:` block is an unknown
 frontmatter key there and is ignored.
@@ -363,7 +361,7 @@ The rest of the surface, read from the same build:
 Degradation summary for a catalog skill running under Claude Code: it loads,
 its body drives the workflow, and its tool narrowing does not apply. A skill
 whose safety argument rests on narrowing (`ast-grep` is search-only,
-`review-changes` does not write) is advisory there and enforced here.
+`ship` cannot edit source) is advisory there and enforced here.
 
 ## Contributing / approval
 
