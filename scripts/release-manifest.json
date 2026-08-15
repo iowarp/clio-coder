@@ -16,7 +16,6 @@
 	"requiredPrefixes": [
 		"src/domains/prompts/fragments/",
 		"src/domains/agents/builtins/",
-		"dist/domains/agents/builtins/",
 		"skills/workflow/cut-it/",
 		"skills/git/",
 		"src/domains/providers/models/",
