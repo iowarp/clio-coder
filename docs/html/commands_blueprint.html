@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Commands &amp; Modes Blueprint (v0.3.0)</title>
+  <title>Clio Coder Commands &amp; Modes Blueprint (v0.3.1)</title>
   
   <style>
     :root {
@@ -541,6 +541,22 @@
         
         <div class="key-grid">
           <div class="key-card">
+            <span>Send prompt / Steer active run</span>
+            <span class="kbd-tag">Enter</span>
+          </div>
+          <div class="key-card">
+            <span>Insert newline in draft</span>
+            <span class="kbd-tag">Shift+Enter / Ctrl+J</span>
+          </div>
+          <div class="key-card">
+            <span>Queue after-run follow-up</span>
+            <span class="kbd-tag">Alt+Enter</span>
+          </div>
+          <div class="key-card">
+            <span>Restore queued messages to editor</span>
+            <span class="kbd-tag">Alt+Up</span>
+          </div>
+          <div class="key-card">
             <span>Cycle thinking levels</span>
             <span class="kbd-tag">Shift+Tab</span>
           </div>
@@ -565,12 +581,32 @@
             <span class="kbd-tag">Alt+W</span>
           </div>
           <div class="key-card">
-            <span>Steer active stream from editor</span>
-            <span class="kbd-tag">Enter</span>
+            <span>Send dispatch to background</span>
+            <span class="kbd-tag">Alt+S / Ctrl+Alt+B</span>
           </div>
           <div class="key-card">
-            <span>Queue after-run follow-up</span>
-            <span class="kbd-tag">Alt+Enter</span>
+            <span>Toggle tool segment body</span>
+            <span class="kbd-tag">Alt+O / Ctrl+Alt+O</span>
+          </div>
+          <div class="key-card">
+            <span>Toggle live tool output</span>
+            <span class="kbd-tag">Alt+P</span>
+          </div>
+          <div class="key-card">
+            <span>Toggle thinking blocks</span>
+            <span class="kbd-tag">Alt+R / Ctrl+Alt+R</span>
+          </div>
+          <div class="key-card">
+            <span>Open external editor</span>
+            <span class="kbd-tag">Alt+G</span>
+          </div>
+          <div class="key-card">
+            <span>Dismiss footer notifications</span>
+            <span class="kbd-tag">Alt+X</span>
+          </div>
+          <div class="key-card">
+            <span>Leader key fallback for Alt</span>
+            <span class="kbd-tag">Ctrl+G</span>
           </div>
         </div>
 
@@ -578,6 +614,7 @@
         <table class="ref-table">
           <thead>
             <tr>
+              <th>Group</th>
               <th>Command</th>
               <th>Usage</th>
               <th>Purpose</th>
@@ -585,54 +622,160 @@
           </thead>
           <tbody>
             <tr>
+              <td><span class="badge">Run</span></td>
+              <td><code>/run</code></td>
+              <td><code>/run &lt;agent&gt; &lt;task&gt;</code></td>
+              <td>Run a fleet agent locally or on remote node</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Run</span></td>
+              <td><code>/delegate</code></td>
+              <td><code>/delegate &lt;agent-id&gt; &lt;task&gt;</code></td>
+              <td>Run an ACP delegation agent</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Run</span></td>
+              <td><code>/agents</code></td>
+              <td><code>/agents</code></td>
+              <td>List Clio agents and ACP delegation agents</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Run</span></td>
+              <td><code>/targets</code></td>
+              <td><code>/targets</code></td>
+              <td>Open Settings → Targets console: health, use, connect, probe, remove</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Inspect</span></td>
+              <td><code>/cost</code></td>
+              <td><code>/cost</code></td>
+              <td>Show session token and cost totals</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Inspect</span></td>
+              <td><code>/context</code></td>
+              <td><code>/context [compact|init|refresh|reset]</code></td>
+              <td>Context hub: window ledger overlay plus compact, init, refresh, reset</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Inspect</span></td>
+              <td><code>/fleet</code></td>
+              <td><code>/fleet</code></td>
+              <td>Open Settings → Fleet workbench: defaults, profiles, agent routes, nodes</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Inspect</span></td>
+              <td><code>/tasks</code></td>
+              <td><code>/tasks</code></td>
+              <td>Show session task board tracked with tasks tool</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Inspect</span></td>
+              <td><code>/memory</code></td>
+              <td><code>/memory [seed]</code></td>
+              <td>Inspect task memory or seed from newest handoff</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Inspect</span></td>
+              <td><code>/view</code></td>
+              <td><code>/view [filter] | /view verify &lt;runId&gt;</code></td>
+              <td>Browse artifacts and verify receipt integrity</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Configure</span></td>
+              <td><code>/settings</code></td>
+              <td><code>/settings [section]</code></td>
+              <td>Open interactive transactional Settings Center</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Configure</span></td>
+              <td><code>/thinking</code></td>
+              <td><code>/thinking [level]</code></td>
+              <td>Set chat thinking level or open Settings → Orchestrator</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Configure</span></td>
+              <td><code>/output</code></td>
+              <td><code>/output [verbosity]</code></td>
+              <td>Set transcript detail (minimal, default, verbose) or open Settings → Terminal</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Configure</span></td>
+              <td><code>/model</code></td>
+              <td><code>/model [pattern]</code></td>
+              <td>Open model selector or set model</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Configure</span></td>
+              <td><code>/scoped-models</code></td>
+              <td><code>/scoped-models</code></td>
+              <td>Open Settings → Models: Alt+J / Alt+K cycle set checklist</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Configure</span></td>
+              <td><code>/skill</code></td>
+              <td><code>/skill [name] [task]</code></td>
+              <td>Open Skills Hub or invoke a skill</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Configure</span></td>
+              <td><code>/prompts</code></td>
+              <td><code>/prompts</code></td>
+              <td>List prompt templates</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Configure</span></td>
+              <td><code>/extensions</code></td>
+              <td><code>/extensions</code></td>
+              <td>List installed extensions</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Configure</span></td>
+              <td><code>/share</code></td>
+              <td><code>/share export | import &lt;path&gt;</code></td>
+              <td>Export or import Clio archives</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Sessions</span></td>
               <td><code>/quit</code></td>
               <td><code>/quit</code></td>
               <td>Exit Clio Coder</td>
             </tr>
             <tr>
+              <td><span class="badge">Sessions</span></td>
               <td><code>/help</code></td>
               <td><code>/help [query]</code></td>
               <td>Open interactive help center and key reference</td>
             </tr>
             <tr>
-              <td><code>/settings</code></td>
-              <td><code>/settings</code></td>
-              <td>Open interactive full-screen Settings Center</td>
-            </tr>
-            <tr>
-              <td><code>/targets</code></td>
-              <td><code>/targets</code></td>
-              <td>Manage target connections, health check, and live probes</td>
-            </tr>
-            <tr>
-              <td><code>/model</code></td>
-              <td><code>/model [pattern]</code></td>
-              <td>Open model selector or set a model from the live/catalog list</td>
-            </tr>
-            <tr>
-              <td><code>/skill</code></td>
-              <td><code>/skill [name] [task]</code></td>
-              <td>Open the Skills Hub or invoke a skill</td>
-            </tr>
-            <tr>
-              <td><code>/view</code></td>
-              <td><code>/view [filter] | /view verify &lt;runId&gt;</code></td>
-              <td>Browse artifacts and verify receipts</td>
-            </tr>
-            <tr>
-              <td><code>/run</code></td>
-              <td><code>/run &lt;agent&gt; &lt;task&gt;</code></td>
-              <td>Deploy worker agent locally</td>
-            </tr>
-            <tr>
-              <td><code>/context</code></td>
-              <td><code>/context [compact|init|refresh|reset]</code></td>
-              <td>Context hub: window ledger overlay plus compact, init, refresh, and reset</td>
-            </tr>
-            <tr>
+              <td><span class="badge">Sessions</span></td>
               <td><code>/resume</code></td>
               <td><code>/resume</code></td>
               <td>Resume a past session from history ledger</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Sessions</span></td>
+              <td><code>/new</code></td>
+              <td><code>/new</code></td>
+              <td>Start a fresh session</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Sessions</span></td>
+              <td><code>/tree</code></td>
+              <td><code>/tree</code></td>
+              <td>Open session tree navigator</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Sessions</span></td>
+              <td><code>/fork</code></td>
+              <td><code>/fork</code></td>
+              <td>Fork from an assistant turn</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Sessions</span></td>
+              <td><code>/export</code></td>
+              <td><code>/export [path]</code></td>
+              <td>Export session transcript to Markdown</td>
             </tr>
           </tbody>
         </table>
@@ -640,7 +783,7 @@
     </main>
 
     <footer>
-      <p>Clio Coder UI Command specs &bull; Version 0.3.0</p>
+      <p>Clio Coder UI Command specs &bull; Version 0.3.1</p>
     </footer>
   </div>
 
@@ -661,34 +804,36 @@
 
     // Command registry
     const commandsList = [
-      { cmd: "/settings", usage: "/settings", desc: "Opens the TUI settings screen to modify autonomy level, worker permission modes, thinking levels, compaction thresholds, and retries." },
-      { cmd: "/targets", usage: "/targets", desc: "Inspects live target probes, switches the default orchestrator (key 'u'), connects credentials (key 'c'), or probes targets." },
+      { cmd: "/settings", usage: "/settings [section]", desc: "Opens the transactional Settings Center with CORE, ROUTING, RUNTIME, and EXPERIENCE sections." },
+      { cmd: "/targets", usage: "/targets", desc: "Opens Settings → Targets console table with in-place action drawer (Use, Connect, Probe, Remove)." },
+      { cmd: "/fleet", usage: "/fleet", desc: "Opens Settings → Fleet workbench for worker defaults, profile drilling, and agent route bindings." },
+      { cmd: "/scoped-models", usage: "/scoped-models", desc: "Opens Settings → Models provider-backed cycle set checklist with Space toggle." },
+      { cmd: "/thinking", usage: "/thinking [level]", desc: "Sets thinking level directly or opens Settings → Orchestrator." },
+      { cmd: "/output", usage: "/output [verbosity]", desc: "Sets transcript detail (minimal, default, verbose) or opens Settings → Terminal." },
       { cmd: "/run", usage: "/run <agent> <task>", desc: "Spawns a fleet agent locally to implement changes, verify code, debug unit errors, or update developer docs." },
+      { cmd: "/delegate", usage: "/delegate <agent-id> <task>", desc: "Run an ACP delegation agent." },
+      { cmd: "/agents", usage: "/agents", desc: "List Clio agents and ACP delegation agents." },
       { cmd: "/model", usage: "/model [pattern]", desc: "Opens the model selector or sets a model from live and configured catalog rows." },
       { cmd: "/skill", usage: "/skill [name] [task]", desc: "Opens the Skills Hub or invokes a selected skill." },
       { cmd: "/view", usage: "/view [filter] | /view verify <runId>", desc: "Browses receipts, dispatch outputs, durable tool output, and compaction summaries." },
       { cmd: "/context", usage: "/context", desc: "Visualizes token sliding window and compaction breakdown." },
-      { cmd: "/help", usage: "/help [query]", desc: "Searches available shortcuts and operating posture documentation." },
-      { cmd: "/quit", usage: "/quit", desc: "Exits clio-coder process cleanly." },
+      { cmd: "/context compact", usage: "/context compact [instructions]", desc: "Compact earlier context turns." },
       { cmd: "/context init", usage: "/context init [flags]", desc: "Explore the repo and bootstrap project context: CLIO-CODER.md and codewiki." },
       { cmd: "/context refresh", usage: "/context refresh", desc: "Re-index the codewiki and restamp the CLIO-CODER.md fingerprint footer." },
       { cmd: "/context reset", usage: "/context reset [--all]", desc: "Clear accumulated project context artifacts (CLIO-CODER.md preserved without --all)." },
+      { cmd: "/tasks", usage: "/tasks", desc: "Read-only overlay of the session task board with per-task receipts." },
+      { cmd: "/memory", usage: "/memory [seed]", desc: "Inspect task memory or seed from newest handoff." },
+      { cmd: "/cost", usage: "/cost", desc: "Show session token and cost totals." },
       { cmd: "/prompts", usage: "/prompts", desc: "List prompt templates." },
       { cmd: "/extensions", usage: "/extensions", desc: "List installed extensions." },
       { cmd: "/share", usage: "/share export <path> | /share import <path>", desc: "Export or import Clio archives." },
-      { cmd: "/delegate", usage: "/delegate <agent-id> <task>", desc: "Run an ACP delegation agent." },
-      { cmd: "/agents", usage: "/agents", desc: "List Clio agents and ACP delegation agents." },
-      { cmd: "/cost", usage: "/cost", desc: "Show session token and cost totals." },
-      { cmd: "/fleet", usage: "/fleet", desc: "Show in-process dispatch running/retry status." },
-      { cmd: "/thinking", usage: "/thinking", desc: "Open thinking-level selector." },
-      { cmd: "/scoped-models", usage: "/scoped-models", desc: "Edit the Alt+J / Alt+K model cycle set." },
-      { cmd: "/resume", usage: "/resume", desc: "Resume a past session." },
+      { cmd: "/help", usage: "/help [query]", desc: "Searches available shortcuts and operating posture documentation." },
+      { cmd: "/resume", usage: "/resume", desc: "Resume a past session from history ledger." },
       { cmd: "/new", usage: "/new", desc: "Start a fresh session." },
       { cmd: "/tree", usage: "/tree", desc: "Open session tree navigator." },
       { cmd: "/fork", usage: "/fork", desc: "Fork from an assistant turn." },
-      { cmd: "/context compact", usage: "/context compact [instructions]", desc: "Compact earlier context." },
-      { cmd: "/tasks", usage: "/tasks", desc: "Read-only overlay of the session task board with per-task receipts." },
-      { cmd: "/export", usage: "/export [path]", desc: "Write the session transcript to Markdown with tool segments expanded." }
+      { cmd: "/export", usage: "/export [path]", desc: "Export session transcript to Markdown." },
+      { cmd: "/quit", usage: "/quit", desc: "Exits clio-coder process cleanly." }
     ];
 
     let selectedIndex = 0;
