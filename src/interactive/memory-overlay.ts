@@ -95,11 +95,30 @@ function bankItems(entries: ReadonlyArray<TaskMemoryEntry>, group: string): List
 	}));
 }
 
+/**
+ * The row clock, in the timezone the operator's own clock is in.
+ *
+ * `event.at` is an ISO-8601 UTC instant, so slicing `HH:MM:SS` out of it
+ * printed a UTC clock with no marker saying so: a step captured at 06:18 CDT
+ * rendered as 11:18 and read as five hours stale. The detail pane keeps the
+ * ISO string, so converting here is what makes the two surfaces agree.
+ */
+function rowClock(at: string): string {
+	const instant = new Date(at);
+	if (Number.isNaN(instant.getTime())) return at;
+	return instant.toLocaleTimeString("en-GB", {
+		hourCycle: "h23",
+		hour: "2-digit",
+		minute: "2-digit",
+		second: "2-digit",
+	});
+}
+
 function activityItems(events: ReadonlyArray<TaskMemoryActivityEvent>, group: string): ListOverlayItem[] {
 	const theme = clioTheme();
 	return events.map((event, index) => ({
 		id: `step:${index}:${event.at}`,
-		label: `${theme.fg("dim", event.at.slice(11, 19))} ${theme.fg(
+		label: `${theme.fg("dim", rowClock(event.at))} ${theme.fg(
 			decisionToken(event.decision),
 			describeTaskMemoryActivity(event),
 		)}`,
