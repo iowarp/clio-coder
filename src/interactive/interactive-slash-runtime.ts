@@ -74,6 +74,12 @@ export interface InteractiveSlashRuntimeDeps {
 	share?: SlashShare;
 	getSettings?: () => Readonly<ClioSettings>;
 	writeSettings?: (next: ClioSettings) => void;
+	/**
+	 * Scoped commit of one settings leaf, the same path /settings edits take.
+	 * Slash commands use scope "session": they change the running session, and
+	 * making a value permanent stays the Settings overlay's explicit choice.
+	 */
+	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "global") => void;
 	onSelectModel?: (ref: { target: string; model: string }) => void;
 	onSetThinkingLevel?: (level: ThinkingLevel) => void;
 	onCompact?: (instructions: string | undefined) => Promise<void>;
@@ -228,18 +234,30 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			if (!match) {
 				return { status: "unsupported", level, supported: supported.map(labelFor) };
 			}
-			deps.onSetThinkingLevel(match);
+			// Session scope, like /output: onSetThinkingLevel writes the level
+			// through to settings.yaml as the new default, which a slash command
+			// has no mandate to do.
+			if (deps.commitSetting) {
+				const next = structuredClone(settings) as ClioSettings;
+				next.orchestrator.thinkingLevel = match;
+				deps.commitSetting("orchestrator.thinkingLevel", next, "session");
+			} else {
+				deps.onSetThinkingLevel(match);
+			}
 			deps.refreshFooter();
 			return { status: "applied", level: match, display: labelFor(match) };
 		},
 		setOutputVerbosity: (verbosity) => {
-			if (!deps.getSettings || !deps.writeSettings) return { status: "unavailable" };
+			if (!deps.getSettings || !(deps.commitSetting || deps.writeSettings)) return { status: "unavailable" };
 			const requested = verbosity.trim().toLowerCase();
 			const match = OUTPUT_VERBOSITIES.find((candidate) => candidate === requested);
 			if (!match) return { status: "unsupported", verbosity, supported: OUTPUT_VERBOSITIES };
 			const next = structuredClone(deps.getSettings()) as ClioSettings;
 			next.terminal.outputVerbosity = match;
-			deps.writeSettings(next);
+			// Session scope: /output changes this session and leaves settings.yaml
+			// alone. Saving it as the default is what Settings → Terminal is for.
+			if (deps.commitSetting) deps.commitSetting("terminal.outputVerbosity", next, "session");
+			else deps.writeSettings?.(next);
 			return { status: "applied", verbosity: match };
 		},
 		openModel: deps.openModel,

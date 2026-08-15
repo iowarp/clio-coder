@@ -3,7 +3,10 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import type { ClioSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { SafeEventBus } from "../../src/core/event-bus.js";
+import { getAtPath } from "../../src/core/session-routing.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
@@ -225,6 +228,32 @@ describe("contracts/interactive slash runtime", () => {
 		resolveInit?.();
 		await flushAsync();
 		deepStrictEqual(harness.events, ["dismiss-bootstrap", "footer", "render"]);
+	});
+
+	// A slash command changes the running session. Making a value the saved
+	// default is the Settings overlay's explicit Apply-and-save-globally choice,
+	// so /output and /thinking must never reach settings.yaml on their own.
+	it("applies /output and /thinking to the session, never to saved settings", () => {
+		const harness = createHarness();
+		const commits: Array<{ id: string; scope: string; value: unknown }> = [];
+		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
+		harness.deps.getSettings = () => settings;
+		harness.deps.writeSettings = () => harness.events.push("write-settings");
+		harness.deps.onSetThinkingLevel = () => harness.events.push("write-thinking");
+		harness.deps.commitSetting = (id, next, scope) => {
+			commits.push({ id, scope, value: getAtPath(next, id) });
+		};
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+
+		runtime.dispatchCommand("/output verbose");
+		runtime.dispatchCommand("/thinking off");
+
+		deepStrictEqual(commits, [
+			{ id: "terminal.outputVerbosity", scope: "session", value: "verbose" },
+			{ id: "orchestrator.thinkingLevel", scope: "session", value: "off" },
+		]);
+		ok(!harness.events.includes("write-settings"), "/output wrote saved settings");
+		ok(!harness.events.includes("write-thinking"), "/thinking wrote saved settings");
 	});
 
 	it("records and paints an expanded chat submission before awaiting the chat loop", async () => {
