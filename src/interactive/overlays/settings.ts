@@ -493,7 +493,13 @@ export class SubmenuWrapper implements Component {
 			}
 		}
 		lines.push("");
-		lines.push(...this.child.render(width).map((line) => `  ${line}`));
+		// The two-column indent is this wrapper's to spend, so the child is told
+		// what is left. Handing it the full width made every row that pads itself
+		// arrive two columns over budget: the checklist's entries came back at
+		// `width`, the indent pushed them to `width + 2`, and the panel then cut
+		// two columns off each one and marked the cut, so every entry wore a
+		// trailing … it had not earned.
+		lines.push(...this.child.render(Math.max(1, width - 2)).map((line) => `  ${line}`));
 		lines.push("");
 		lines.push(theme.fg("dim", `  ${this.hint}`));
 		return lines;
@@ -775,7 +781,14 @@ class ScopedModelChecklist implements Component {
 		const selected = this.rows[this.selectedRow];
 		if (selected?.kind === "entry") {
 			const detail = selected.available ? selected.detail : `Unavailable · ${selected.detail}`;
-			lines.push("", ...wrapTextWithAnsi(theme.fg("dim", detail), Math.max(1, width)).slice(0, 3));
+			const wrapped = wrapTextWithAnsi(theme.fg("dim", detail), Math.max(1, width));
+			const kept = wrapped.slice(0, 3);
+			// A capability sentence that stops at "context 131" reads as the whole
+			// fact, so the line that survives the clip says it is not.
+			const last = kept.at(-1);
+			const marked =
+				wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${ELLIPSIS}`] : kept;
+			lines.push("", ...marked);
 		}
 		return lines;
 	}
@@ -2023,8 +2036,25 @@ export function createSettingsChangePlan(
 	});
 }
 
+/**
+ * A selection of several model references is a set, not a destination.
+ * Spelling it out produced `…_K_M-262K, mini/Gemma-…`, a left-chopped ref dump
+ * with the row label pushed off the front, so a multi-reference selection is
+ * summarized by count and the note beneath the title carries the leaves.
+ */
+function scopedSelectionSummary(plan: SettingsChangePlan): string | null {
+	if (plan.rowId !== "scope") return null;
+	const refs = parseScopedModelSelection(plan.selectedValue);
+	return refs && refs.length >= 2 ? `${refs.length} changes` : null;
+}
+
 /** Keep the destination—the value the operator is about to commit—visible as confirmation titles narrow. */
 function formatScopeConfirmTitle(plan: SettingsChangePlan, width: number): string {
+	const summary = scopedSelectionSummary(plan);
+	if (summary !== null) {
+		const title = `${plan.label}: ${summary}`;
+		return visibleWidth(title) <= width ? title : ellipsizeFromLeft(title, width);
+	}
 	const selectedValue = humanizeChangePlanValue(plan);
 	const full = plan.originalValue.trim()
 		? `${plan.label}: ${plan.originalValue} → ${selectedValue}`
@@ -2039,6 +2069,8 @@ function formatScopeConfirmTitle(plan: SettingsChangePlan, width: number): strin
 
 function humanizeChangePlanValue(plan: SettingsChangePlan): string {
 	if (plan.rowId === "scope") {
+		const summary = scopedSelectionSummary(plan);
+		if (summary !== null) return summary;
 		const refs = parseScopedModelSelection(plan.selectedValue);
 		if (refs) return refs.length > 0 ? refs.join(", ") : "(empty)";
 	}

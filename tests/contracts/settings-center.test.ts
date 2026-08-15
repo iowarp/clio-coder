@@ -1486,6 +1486,112 @@ describe("contracts/settings center", () => {
 		ok(reopened.includes("[x] retired,Legacy@2025"), reopened);
 	});
 
+	/**
+	 * SubmenuWrapper spends two columns indenting its child, so the child must be
+	 * rendered at what is left. It was rendered at the full width, so every
+	 * checklist entry (which pads itself) arrived two columns over budget, lost
+	 * its last two columns, and wore a trailing marker it had not earned.
+	 */
+	it("keeps checklist entries inside the submenu's indent instead of marking every row as cut", () => {
+		const settings = settingsWithTargets();
+		const longModel = "Qwen3.8-27B-Instruct-IQ4_NL-262K-TAIL";
+		settings.targets = [{ id: "mini", runtime: "openai-compat", url: "http://localhost:3333", defaultModel: longModel }];
+		settings.scope = [`mini/${longModel}`];
+		const providers = providersWithCatalog(settings);
+		const item = buildSettingItems(settings, { providers }).find((candidate) => candidate.id === "scope");
+		ok(item?.submenu);
+		const checklist = item.submenu(item.currentValue, () => undefined);
+		for (const width of [120, 72]) {
+			const lines = stripAnsi(checklist.render(width).join("\n")).split("\n");
+			for (const line of lines) {
+				ok(visibleWidth(line) <= width, `${width}: a row ran past the panel: ${JSON.stringify(line)}`);
+			}
+			const entries = lines.filter((line) => line.includes("[x]") || line.includes("[ ]"));
+			ok(entries.length > 0, `${width} rendered no entries:\n${lines.join("\n")}`);
+			for (const entry of entries) {
+				const fits = visibleWidth(`${entry.replace(/…\s*$/u, "").trimEnd()}`) + 2 <= width;
+				if (fits) ok(!entry.includes("…"), `${width}: an entry that fits was marked as cut: ${JSON.stringify(entry)}`);
+			}
+			const longEntry = entries.find((entry) => entry.includes("mini/Qwen3.8"));
+			ok(longEntry, `${width} lost the long entry:\n${lines.join("\n")}`);
+			if (visibleWidth(longEntry) + 2 <= width) {
+				ok(longEntry.includes("TAIL"), `${width}: the long label lost its final columns: ${JSON.stringify(longEntry)}`);
+			}
+		}
+	});
+
+	it("marks the capability detail when it outruns its three lines", () => {
+		const settings = settingsWithTargets();
+		settings.scope = ["target-a/model-a"];
+		const providers = providersWithCatalog(settings);
+		const item = buildSettingItems(settings, { providers }).find((candidate) => candidate.id === "scope");
+		ok(item?.submenu);
+		for (const width of [28, 40]) {
+			const lines = stripAnsi(
+				item
+					.submenu(item.currentValue, () => undefined)
+					.render(width)
+					.join("\n"),
+			).split("\n");
+			const detailStart = lines.findIndex((line) => line.includes("Capabilities:"));
+			ok(detailStart >= 0, `${width}: no capability detail:\n${lines.join("\n")}`);
+			const detailLines: string[] = [];
+			for (const line of lines.slice(detailStart)) {
+				if (line.trim().length === 0) break;
+				detailLines.push(line);
+			}
+			const detail = detailLines.join(" ").replace(/\s+/gu, " ").trim();
+			// The selected row is the target-level entry, whose sentence ends here.
+			if (!detail.includes("when switching targets")) {
+				ok(detail.endsWith("…"), `${width}: the capability sentence stopped without a marker: ${JSON.stringify(detail)}`);
+			}
+		}
+	});
+
+	/**
+	 * A multi-reference selection is a set, not a destination. Spelling every ref
+	 * into the title produced `…_K_M-262K, mini/Gemma-…`: a left-chopped dump with
+	 * the row label pushed off the front, so the operator could not see which row
+	 * they were about to change.
+	 */
+	it("summarizes a multi-reference scope confirmation by count and keeps a single ref verbatim", () => {
+		const settings = settingsWithTargets();
+		settings.scope = ["target-a/model-a"];
+		const item = buildSettingItems(settings).find((candidate) => candidate.id === "scope");
+		ok(item);
+		const titleFor = (refs: readonly string[], width: number): string => {
+			const encoded = `__clio_scope_v1__:${JSON.stringify(refs)}`;
+			const titled = { ...item, values: [encoded] };
+			delete titled.submenu;
+			const center = new SettingsCenter(
+				buildSettingItems(settings).map((candidate) => (candidate.id === item.id ? titled : candidate)),
+				{
+					getBodyHeight: () => 26,
+					prepareChange: (candidate, value) => createSettingsChangePlan(settings, candidate, value),
+					onApply: () => undefined,
+					onCancel: () => undefined,
+				},
+			);
+			center.setSelection("models", 0);
+			center.handleInput(ENTER); // one-entry value picker
+			center.handleInput(ENTER); // destination prompt
+			return stripAnsi(center.render(width).join("\n"));
+		};
+
+		const single = titleFor(["target-b/model-b"], 120);
+		ok(single.includes("target-b/model-b"), `a single ref stays verbatim:\n${single}`);
+		ok(!single.includes("changes"), single);
+
+		for (const width of [120, 40]) {
+			const many = titleFor(["target-a", "target-a/model-a", "target-b/model-b"], width);
+			const title = many.split("\n").find((line) => line.includes("Model cycle set:")) ?? "";
+			ok(title.includes("Model cycle set"), `${width} lost the row label:\n${many}`);
+			ok(title.includes("3 changes"), `${width} lost the count:\n${many}`);
+			ok(!title.includes("target-b/model-b"), `${width} still dumps the refs into the title:\n${many}`);
+			ok(many.includes("Affects scope"), `${width} lost the leaf detail beneath the title:\n${many}`);
+		}
+	});
+
 	it("cancels scoped checklist edits and only drops an unavailable ref when explicitly unchecked", () => {
 		const settings = settingsWithTargets();
 		settings.scope = ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"];
