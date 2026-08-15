@@ -3,6 +3,7 @@ import {
 	Input,
 	matchesKey,
 	type OverlayHandle,
+	type OverlayOptions,
 	type SelectItem,
 	SelectList,
 	type TUI,
@@ -15,29 +16,88 @@ import { ASK_USER_OTHER_LABEL, cancelledAskUserResult } from "../../tools/ask-us
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
 import { type ClioToken, clioTheme, dotSep, GLYPH, screenTitle } from "../theme/index.js";
 
-export const ASK_USER_OVERLAY_WIDTH = "94%";
-export const ASK_USER_OVERLAY_MIN_WIDTH = 72;
-export const ASK_USER_OVERLAY_MAX_HEIGHT = "92%";
-
 /**
  * The border and title token while a decision is pending.
  *
  * Orange is the token that means Clio is acting, and a prompt holding the
  * keyboard is the moment the operator has to act with it. Everything
  * informational keeps the teal frame, so the one border that is not teal is the
- * one asking for an answer.
+ * one asking for an answer. All three surfaces carry it: what changes between
+ * them is the size and the place, never the signal.
  */
 export const ASK_USER_DECISION_TONE: ClioToken = "action";
 export const ASK_USER_DECISION_TITLE = "Decision required";
 export const ASK_USER_WAITING_TITLE = "Ask User";
 
-const ASK_USER_MIN_INNER_ROWS = 12;
-const ASK_USER_FALLBACK_INNER_ROWS = 20;
-const ASK_USER_MAX_INNER_ROWS = 42;
+/**
+ * The shape a request draws itself in.
+ *
+ * One overlay served three interactions through one centered full-height modal,
+ * so a two-option confirmation arrived as a thirty-five-row box with twenty-five
+ * blank rows under the options. The surfaces differ in size and placement:
+ *
+ * - `compact` is a small bar low on the screen, where the operator's eyes
+ *   already are, for one question with a handful of choices.
+ * - `panel` is a medium centered box for one question whose option list is too
+ *   long to read in a bar.
+ * - `interview` is the full surface with the round strip and the answer ledger,
+ *   for a round of several questions or any round after the first.
+ */
+export type AskUserSurface = "compact" | "panel" | "interview";
+
+/** Options a single question may carry and still be answered in the bar. */
+export const ASK_USER_COMPACT_MAX_OPTIONS = 3;
+
+/** The surface an overlay waits on before its first round decides one. */
+export const ASK_USER_DEFAULT_SURFACE: AskUserSurface = "panel";
+
+interface AskUserSurfaceGeometry {
+	/** Box width in columns; zero fills the row. The frame clamps to the terminal. */
+	width: number;
+	/** Rows the body may use, before the borders. */
+	maxInnerRows: number;
+	anchor: NonNullable<OverlayOptions["anchor"]>;
+	margin: NonNullable<OverlayOptions["margin"]>;
+}
+
+/**
+ * Where each surface sits and how big it is allowed to get.
+ *
+ * The compact bar anchors to the bottom because a decision that has taken the
+ * keyboard should appear where the operator was already typing, not in the
+ * middle of the transcript. It covers the composer, which is honest: the
+ * composer accepts nothing while a decision is pending.
+ *
+ * Every surface's margin is one row top and bottom, which is what
+ * `ASK_USER_FRAME_AND_MARGIN_ROWS` counts alongside the two border rows.
+ */
+export const ASK_USER_SURFACE_GEOMETRY: Record<AskUserSurface, AskUserSurfaceGeometry> = {
+	compact: { width: 68, maxInnerRows: 10, anchor: "bottom-center", margin: { top: 1, right: 2, bottom: 1, left: 2 } },
+	panel: { width: 88, maxInnerRows: 18, anchor: "center", margin: 1 },
+	interview: { width: 0, maxInnerRows: 42, anchor: "center", margin: 1 },
+};
+
+const ASK_USER_FRAME_ROWS = 2;
 const ASK_USER_FRAME_AND_MARGIN_ROWS = 4;
 const MIN_VISIBLE_OPTIONS = 3;
 const MAX_VISIBLE_OPTIONS = 12;
 const ELLIPSIS = "…";
+
+/**
+ * The surface a request renders on, from the request shape alone.
+ *
+ * `priorRounds` is what makes an interview an interview. The tool's `mode`
+ * cannot answer this: `single_question` is the mode an interview asks its
+ * rounds in, and a first single question is exactly the confirmation that
+ * should not take the screen. A round that follows an answered one has captured
+ * answers to keep on screen, which is the full surface's whole job.
+ */
+export function askUserSurface(questions: ReadonlyArray<AskUserQuestion>, priorRounds = 0): AskUserSurface {
+	if (priorRounds > 0 || questions.length !== 1) return "interview";
+	const question = questions[0];
+	if (!question) return "interview";
+	return (question.options?.length ?? 0) <= ASK_USER_COMPACT_MAX_OPTIONS ? "compact" : "panel";
+}
 
 export interface OpenAskUserOverlayDeps {
 	onCancel: () => void;
@@ -65,6 +125,8 @@ interface QuestionState {
 interface AskUserOverlayViewDeps extends OpenAskUserOverlayDeps {
 	getTerminalRows: () => number;
 	requestRender: () => void;
+	/** Called when the request shape moves the body to a differently sized box. */
+	onSurface: (surface: AskUserSurface) => void;
 }
 
 function questionHasOptions(question: AskUserQuestion): boolean {
@@ -156,6 +218,7 @@ function compactTitle(question: AskUserQuestion): string {
 
 class AskUserOverlayView implements Component {
 	private phase: InterviewPhase = "waiting";
+	private surface: AskUserSurface = ASK_USER_DEFAULT_SURFACE;
 	private index = 0;
 	private status = "";
 	private questions: ReadonlyArray<AskUserQuestion> = [];
@@ -177,6 +240,9 @@ class AskUserOverlayView implements Component {
 		this.states = this.questions.map((question) => createQuestionState(question));
 		this.list = null;
 		this.input = null;
+		// Before the controls, because how many option rows fit is a property of
+		// the box this round is about to be drawn in.
+		this.setSurface(askUserSurface(this.questions, this.history.length));
 		this.rebuildControl();
 		this.deps.requestRender();
 		return new Promise<AskUserResult>((resolve) => {
@@ -200,6 +266,10 @@ class AskUserOverlayView implements Component {
 	/** True while the overlay is holding a question the operator has to answer. */
 	isDecisionPending(): boolean {
 		return this.phase === "asking";
+	}
+
+	currentSurface(): AskUserSurface {
+		return this.surface;
 	}
 
 	invalidate(): void {
@@ -245,35 +315,37 @@ class AskUserOverlayView implements Component {
 		this.list?.handleInput(data);
 	}
 
+	/**
+	 * The body, sized to what it has to say.
+	 *
+	 * Nothing pads to a target height any more. A two-option confirmation is six
+	 * rows and draws six rows; the round strip and the answer ledger are what
+	 * make an interview tall, not filler. The trailing slice is the guarantee the
+	 * compact bar rests on: whatever the question and its options come to, the
+	 * body never returns more rows than its surface owns.
+	 */
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
-		const targetRows = this.targetInnerRows();
-		if (this.phase !== "asking") return this.renderWaiting(safeWidth, targetRows);
+		const maxRows = this.maxInnerRows();
+		if (this.phase !== "asking") return this.renderWaiting(safeWidth, maxRows);
 		const question = this.currentQuestion();
-		if (!question) return this.padLines([clioTheme().fg("muted", "No questions.")], targetRows);
+		if (!question) return [clioTheme().fg("muted", "No questions.")];
 
+		const interview = this.surface === "interview";
 		const controlLines = this.renderControlLines(safeWidth);
-		const summaryLines = this.renderAnswerSummary(
-			safeWidth,
-			this.states.map((state) => state.answer),
-		);
+		const ledgerLines = interview ? this.renderAnswerLedger(safeWidth) : [];
 		const statusLines = this.status.length > 0 ? ["", fitLine(clioTheme().fg("dim", this.status), safeWidth)] : [];
+		const stripLines = interview ? [this.renderQuestionStrip(safeWidth), ""] : [];
 		const headerLine = this.renderQuestionHeader(question, safeWidth);
-		const baseRows = 1 + 1 + 1 + statusLines.length + 1 + controlLines.length + summaryLines.length;
-		const questionBudget = Math.max(2, targetRows - baseRows);
-		const questionLines = wrapTextWithAnsi(question.question, safeWidth).slice(0, questionBudget);
+		const headerLines = headerLine.length > 0 ? [headerLine] : [];
+		const spent =
+			stripLines.length + headerLines.length + statusLines.length + 1 + controlLines.length + ledgerLines.length;
+		const questionLines = wrapTextWithAnsi(question.question, safeWidth).slice(0, Math.max(1, maxRows - spent));
 
-		const lines = [
-			this.renderQuestionStrip(safeWidth),
-			"",
-			headerLine,
-			...questionLines,
-			...statusLines,
-			"",
-			...controlLines,
-			...summaryLines,
-		];
-		return this.padLines(lines, targetRows).slice(0, targetRows);
+		return [...stripLines, ...headerLines, ...questionLines, ...statusLines, "", ...controlLines, ...ledgerLines].slice(
+			0,
+			maxRows,
+		);
 	}
 
 	footerHint(): string {
@@ -315,6 +387,12 @@ class AskUserOverlayView implements Component {
 			: buildHint([{ key: "Enter", verb: "accept" }]);
 	}
 
+	private setSurface(next: AskUserSurface): void {
+		if (this.surface === next) return;
+		this.surface = next;
+		this.deps.onSurface(next);
+	}
+
 	private finish(result: AskUserResult): void {
 		const resolve = this.resolveCurrent;
 		this.resolveCurrent = null;
@@ -323,11 +401,15 @@ class AskUserOverlayView implements Component {
 		this.status = "";
 		if (result.cancelled !== true) this.history.push(...result.answers);
 		if (this.phase !== "closed") this.phase = "waiting";
+		// A round that follows an answered one is an interview, so the box grows
+		// here rather than at the next `begin`. The waiting frame between rounds
+		// is then already the size of the round it is waiting for.
+		if (this.history.length > 0) this.setSurface("interview");
 		this.deps.requestRender();
 		resolve?.(result);
 	}
 
-	private renderWaiting(width: number, targetRows: number): string[] {
+	private renderWaiting(width: number, maxRows: number): string[] {
 		const theme = clioTheme();
 		const lines = [
 			screenTitle(theme, "Interview"),
@@ -347,23 +429,33 @@ class AskUserOverlayView implements Component {
 				lines.push(fitLine(`${theme.fg("dim", `${index + 1}.`)} ${theme.fg("muted", answer.answer)}`, width));
 			}
 		}
-		return this.padLines(
-			lines.map((line) => fitLine(line, width)),
-			targetRows,
-		).slice(0, targetRows);
+		return lines.map((line) => fitLine(line, width)).slice(0, maxRows);
 	}
 
-	private targetInnerRows(): number {
+	/**
+	 * Rows the body may draw on this surface.
+	 *
+	 * The frame budgets the same number, because its `maxHeight` is this cap plus
+	 * the two border rows and both clamp to the terminal the same way. That is
+	 * what keeps `fitBody`'s "… N more rows" off the compact bar: the body never
+	 * hands the frame more than the frame is prepared to draw.
+	 */
+	private maxInnerRows(): number {
+		const cap = ASK_USER_SURFACE_GEOMETRY[this.surface].maxInnerRows;
 		const rows = this.deps.getTerminalRows();
-		if (!Number.isFinite(rows) || rows <= 0) return ASK_USER_FALLBACK_INNER_ROWS;
-		return Math.max(
-			ASK_USER_MIN_INNER_ROWS,
-			Math.min(ASK_USER_MAX_INNER_ROWS, Math.floor(rows) - ASK_USER_FRAME_AND_MARGIN_ROWS),
-		);
+		if (!Number.isFinite(rows) || rows <= 0) return cap;
+		return Math.max(1, Math.min(cap, Math.floor(rows) - ASK_USER_FRAME_AND_MARGIN_ROWS));
 	}
 
 	private maxVisibleOptions(): number {
-		return Math.max(MIN_VISIBLE_OPTIONS, Math.min(MAX_VISIBLE_OPTIONS, this.targetInnerRows() - 12));
+		const inner = this.maxInnerRows();
+		// The interview surface spends rows on the round strip and the ledger
+		// before an option ever renders. The other two spend them on a header, a
+		// question, and a separator, so the options get nearly everything.
+		if (this.surface === "interview") {
+			return Math.max(MIN_VISIBLE_OPTIONS, Math.min(MAX_VISIBLE_OPTIONS, inner - 12));
+		}
+		return Math.max(1, Math.min(MAX_VISIBLE_OPTIONS, inner - 4));
 	}
 
 	private currentQuestion(): AskUserQuestion | null {
@@ -390,18 +482,32 @@ class AskUserOverlayView implements Component {
 		return this.questions.length > 1 && (matchesKey(data, "alt+right") || matchesKey(data, "ctrl+right"));
 	}
 
+	/**
+	 * The row above the question, or nothing.
+	 *
+	 * `Question 1/1` was a counter over a set of one, printed on every single
+	 * confirmation. A one-question surface shows the question's own header if it
+	 * has one and skips the row entirely if it does not.
+	 */
 	private renderQuestionHeader(question: AskUserQuestion, width: number): string {
 		const theme = clioTheme();
-		const parts = [theme.fg("dim", `Question ${this.index + 1}/${this.questions.length}`)];
+		const parts: string[] = [];
+		if (this.questions.length > 1) parts.push(theme.fg("dim", `Question ${this.index + 1}/${this.questions.length}`));
 		if (question.header) parts.push(screenTitle(theme, question.header));
 		if (this.currentState()?.answer.trim()) parts.push(theme.fg("muted", "answered"));
-		return fitLine(parts.join(dotSep(theme)), width);
+		return parts.length > 0 ? fitLine(parts.join(dotSep(theme)), width) : "";
 	}
 
 	private renderQuestionStrip(width: number): string {
 		const theme = clioTheme();
 		const total = this.questions.length;
-		if (total <= 1) return fitLine(screenTitle(theme, "Interview"), width);
+		// A single-question interview round is the phased shape: one question per
+		// round, several rounds. Its position is the round number, since there is
+		// no set of siblings to draw a strip across.
+		if (total <= 1) {
+			const round = theme.fg("dim", `Round ${this.history.length + 1}`);
+			return fitLine(`${screenTitle(theme, "Interview")}${dotSep(theme)}${round}`, width);
+		}
 		const gap = "  ";
 		const slotWidth = Math.max(10, Math.floor((width - visibleWidth(gap) * (total - 1)) / total));
 		const parts = this.questions.map((question, index) => {
@@ -424,16 +530,33 @@ class AskUserOverlayView implements Component {
 		return this.renderSelectControl(width);
 	}
 
-	private renderAnswerSummary(width: number, answers: ReadonlyArray<string>): string[] {
-		if (this.questions.length <= 1) return [];
+	/**
+	 * Everything this interview has captured, rounds already answered first.
+	 *
+	 * The ledger used to read only the current round's states, so a phased
+	 * interview asking one question per round showed nothing at all: each round
+	 * was a set of one and the summary bailed out. What the operator has already
+	 * told Clio is the reason the full surface exists.
+	 */
+	private renderAnswerLedger(width: number): string[] {
 		const theme = clioTheme();
-		const lines = ["", fitLine(theme.fg("dim", "── Answers"), width)];
-		for (let index = 0; index < this.questions.length; index += 1) {
-			const answer = answers[index]?.trim();
-			const value = answer && answer.length > 0 ? theme.fg("muted", answer) : theme.fg("dim", "pending");
-			lines.push(fitLine(`${theme.fg("dim", `Q${index + 1}`)} ${value}`, width));
+		const rows: string[] = [];
+		for (let index = 0; index < this.history.length; index += 1) {
+			const answer = this.history[index];
+			if (!answer) continue;
+			rows.push(fitLine(`${theme.fg("dim", `${index + 1}.`)} ${theme.fg("muted", answer.answer)}`, width));
 		}
-		return lines;
+		// A round of one question needs no per-question roll: the strip already
+		// names the round and the question is on screen above this.
+		if (this.questions.length > 1) {
+			for (let index = 0; index < this.questions.length; index += 1) {
+				const answer = this.states[index]?.answer.trim();
+				const value = answer && answer.length > 0 ? theme.fg("muted", answer) : theme.fg("dim", "pending");
+				rows.push(fitLine(`${theme.fg("dim", `Q${index + 1}`)} ${value}`, width));
+			}
+		}
+		if (rows.length === 0) return [];
+		return ["", fitLine(theme.fg("dim", "── Answers"), width), ...rows];
 	}
 
 	private renderTextInput(width: number): string[] {
@@ -511,11 +634,6 @@ class AskUserOverlayView implements Component {
 		}
 
 		return fitLine(`${prefix}${body}${affordance}`, width);
-	}
-
-	private padLines(lines: string[], targetRows: number): string[] {
-		while (lines.length < targetRows) lines.push("");
-		return lines;
 	}
 
 	private ensureControl(): void {
@@ -741,28 +859,59 @@ class AskUserOverlayView implements Component {
 	}
 }
 
+/**
+ * Show the ask_user overlay, on whichever surface the request calls for.
+ *
+ * A box's anchor, width, and height budget are fixed when the engine mounts it,
+ * so moving between surfaces means mounting a new frame around the same body and
+ * dropping the old one. That happens at most once per round, when the shape of
+ * the request actually changes; the new frame is shown before the old one is
+ * hidden so the keyboard passes straight across instead of returning to the
+ * composer for a frame.
+ */
 export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskUserOverlaySession {
+	let handle: OverlayHandle | null = null;
+	let mounted: AskUserSurface | null = null;
+	let closed = false;
+
 	const view = new AskUserOverlayView({
 		...deps,
 		getTerminalRows: () => tui.terminal?.rows ?? 0,
 		requestRender: () => tui.requestRender(),
+		onSurface: (surface) => mount(surface),
 	});
-	const handle = showClioOverlayFrame(tui, view, {
-		anchor: "center",
-		width: ASK_USER_OVERLAY_WIDTH,
-		minWidth: ASK_USER_OVERLAY_MIN_WIDTH,
-		maxHeight: ASK_USER_OVERLAY_MAX_HEIGHT,
-		margin: 1,
-		title: () => (view.isDecisionPending() ? ASK_USER_DECISION_TITLE : ASK_USER_WAITING_TITLE),
-		tone: () => (view.isDecisionPending() ? ASK_USER_DECISION_TONE : undefined),
-		footerHint: () => view.footerHint(),
-	});
+
+	const mount = (surface: AskUserSurface): void => {
+		if (closed || mounted === surface) return;
+		const geometry = ASK_USER_SURFACE_GEOMETRY[surface];
+		const previous = handle;
+		handle = showClioOverlayFrame(tui, view, {
+			anchor: geometry.anchor,
+			width: geometry.width,
+			maxHeight: geometry.maxInnerRows + ASK_USER_FRAME_ROWS,
+			margin: geometry.margin,
+			title: () => (view.isDecisionPending() ? ASK_USER_DECISION_TITLE : ASK_USER_WAITING_TITLE),
+			tone: () => (view.isDecisionPending() ? ASK_USER_DECISION_TONE : undefined),
+			footerHint: () => view.footerHint(),
+		});
+		mounted = surface;
+		previous?.hide();
+	};
+
+	mount(view.currentSurface());
+
 	const close = (): void => {
+		closed = true;
 		view.close();
-		handle.hide();
+		handle?.hide();
+		handle = null;
 	};
 	return {
-		...handle,
+		setHidden: (hidden) => handle?.setHidden(hidden),
+		isHidden: () => handle?.isHidden() ?? true,
+		focus: () => handle?.focus(),
+		unfocus: (options) => (options ? handle?.unfocus(options) : handle?.unfocus()),
+		isFocused: () => handle?.isFocused() ?? false,
 		ask: (questions) => view.begin(questions),
 		cancel: () => view.cancel(),
 		close,

@@ -12,8 +12,11 @@ import {
 	visibleWidth,
 } from "../../src/engine/tui.js";
 import {
+	ASK_USER_COMPACT_MAX_OPTIONS,
 	ASK_USER_DECISION_TITLE,
 	ASK_USER_DECISION_TONE,
+	ASK_USER_SURFACE_GEOMETRY,
+	askUserSurface,
 	openAskUserOverlay,
 } from "../../src/interactive/overlays/ask-user.js";
 import { clioTheme, fgSequence, GLYPH } from "../../src/interactive/theme/index.js";
@@ -56,12 +59,18 @@ function askUserPolicy(maxCalls = 6): AskUserToolPolicy {
 	};
 }
 
-function askOverlay(rows = 30): {
+function askOverlay(
+	rows = 30,
+	columns = 120,
+): {
 	session: ReturnType<typeof openAskUserOverlay>;
 	child: () => Component;
 	frame: () => Component;
+	options: () => OverlayOptions | undefined;
+	renderFrame: (width?: number) => string[];
 } {
 	let mounted: Component | null = null;
+	let mountedOptions: OverlayOptions | undefined;
 	const handle: OverlayHandle = {
 		hide() {},
 		setHidden() {},
@@ -71,23 +80,32 @@ function askOverlay(rows = 30): {
 		isFocused: () => true,
 	};
 	const tui = {
-		terminal: { rows, columns: 120 },
-		showOverlay(component: Component, _options?: OverlayOptions): OverlayHandle {
+		terminal: { rows, columns },
+		showOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
 			mounted = component;
+			mountedOptions = options;
 			return handle;
 		},
 		requestRender() {},
 	} as unknown as TUI;
 	const session = openAskUserOverlay(tui, { onCancel: () => {} });
+	const mountedFrame = (): Component => {
+		if (!mounted) throw new Error("ask-user overlay was not mounted");
+		return mounted;
+	};
 	return {
 		session,
-		child: () => {
-			if (!mounted) throw new Error("ask-user overlay was not mounted");
-			return (mounted as unknown as { child: Component }).child;
-		},
-		frame: () => {
-			if (!mounted) throw new Error("ask-user overlay was not mounted");
-			return mounted;
+		child: () => (mountedFrame() as unknown as { child: Component }).child,
+		frame: mountedFrame,
+		options: () => mountedOptions,
+		// The engine evaluates `visible` with the live terminal size in the same
+		// pass that composites the overlay, and that call is where the frame
+		// learns its row budget. A test that renders without it is measuring an
+		// unbudgeted frame.
+		renderFrame: (width = columns) => {
+			const frame = mountedFrame();
+			mountedOptions?.visible?.(columns, rows);
+			return frame.render(width);
 		},
 	};
 }
@@ -436,5 +454,166 @@ describe("contracts/ask-user decision visibility", () => {
 				options: [{ label: "Targeted contracts" }, { label: "Full suite" }],
 			},
 		);
+	});
+});
+
+/**
+ * One overlay served a permission confirmation, a quick question, and a
+ * multi-round interview through the same centered full-height modal. The
+ * operator report is the case for this block: a single two-option ask_user
+ * arrived as a thirty-five-row box with the options at the top and twenty-five
+ * blank rows under them.
+ */
+describe("contracts/ask-user surfaces", () => {
+	const answer = (mounted: ReturnType<typeof askOverlay>): void => {
+		mounted.child().handleInput?.("\r");
+	};
+
+	it("picks the surface from the request shape", () => {
+		const small: AskUserQuestion = {
+			question: "Which implementation should Clio assume?",
+			options: [{ label: "Shared frame" }, { label: "Local chrome" }],
+		};
+		const wide: AskUserQuestion = {
+			question: "Which runtime should this target?",
+			options: Array.from({ length: ASK_USER_COMPACT_MAX_OPTIONS + 1 }, (_, index) => ({
+				label: `Runtime ${index + 1}`,
+			})),
+		};
+
+		strictEqual(askUserSurface([small]), "compact");
+		// A single free-text question is the other quick shape, not an interview:
+		// one line of typing does not earn the screen.
+		strictEqual(askUserSurface([{ question: "What should Clio optimize for?" }]), "compact");
+		strictEqual(askUserSurface([wide]), "panel");
+		strictEqual(askUserSurface([small, wide]), "interview");
+		// The same small question, once a round has already been answered. The
+		// captured answers are what make it an interview.
+		strictEqual(askUserSurface([small], 1), "interview");
+	});
+
+	it("anchors a small decision at the composer and a round in the middle", async () => {
+		const compact = askOverlay();
+		const compactPending = compact.session.ask([
+			{ question: "Which implementation should Clio assume?", options: [{ label: "Shared frame" }] },
+		]);
+		const interview = askOverlay();
+		const interviewPending = interview.session.ask([
+			{ header: "Scope", question: "Which implementation?", options: [{ label: "Shared frame" }] },
+			{ header: "Checks", question: "Which checks run before commit?", options: [{ label: "Targeted contracts" }] },
+		]);
+		try {
+			strictEqual(compact.options()?.anchor, ASK_USER_SURFACE_GEOMETRY.compact.anchor);
+			strictEqual(compact.options()?.anchor, "bottom-center");
+			strictEqual(interview.options()?.anchor, "center");
+
+			// The box paints its own width inside a row it claims whole, so the
+			// surface widths are read off the rendered border, not off the options.
+			const compactBorder = stripAnsi(compact.renderFrame()[0] ?? "").trim();
+			const interviewBorder = stripAnsi(interview.renderFrame()[0] ?? "").trim();
+			strictEqual(visibleWidth(compactBorder), ASK_USER_SURFACE_GEOMETRY.compact.width);
+			ok(
+				visibleWidth(interviewBorder) > visibleWidth(compactBorder),
+				`the interview surface is the wider one: ${visibleWidth(interviewBorder)} vs ${visibleWidth(compactBorder)}`,
+			);
+		} finally {
+			compact.session.cancel();
+			interview.session.cancel();
+			await compactPending;
+			await interviewPending;
+		}
+	});
+
+	it("sizes a small decision to its content instead of padding to the terminal", async () => {
+		const mounted = askOverlay(40);
+		const pending = mounted.session.ask([
+			{
+				header: "Scope",
+				question: "Which implementation should Clio assume for this pass?",
+				options: [{ label: "Shared frame" }, { label: "Local chrome" }],
+			},
+		]);
+		try {
+			const lines = mounted.renderFrame();
+			ok(lines.length <= 10, `a two-option decision on a 40-row terminal draws ${lines.length} rows`);
+			const body = lines.slice(1, -1).map((line) => stripAnsi(line).trim());
+			strictEqual(body[body.length - 1]?.length === 0, false, `the last body row is not filler: ${body.join(" | ")}`);
+		} finally {
+			mounted.session.cancel();
+			await pending;
+		}
+	});
+
+	it("keeps every option and its accept key inside the compact panel", async () => {
+		const question: AskUserQuestion = {
+			header: "Scope",
+			question:
+				"Which implementation should Clio assume for this pass, given that the shared overlay frame already carries the decision tone and the local chrome would have to reproduce it by hand?",
+			options: Array.from({ length: ASK_USER_COMPACT_MAX_OPTIONS }, (_, index) => ({
+				label: `Implementation choice number ${index + 1} with a deliberately long label`,
+				description: `A description long enough to compete with the label for the row it shares with it (${index + 1}).`,
+			})),
+		};
+		// A roomy terminal and a cramped one: the compact panel is a cap on both.
+		for (const rows of [40, 14]) {
+			const mounted = askOverlay(rows);
+			const pending = mounted.session.ask([question]);
+			try {
+				const lines = mounted.renderFrame();
+				const body = lines.map((line) => stripAnsi(line));
+				ok(
+					lines.length <= ASK_USER_SURFACE_GEOMETRY.compact.maxInnerRows + 2,
+					`at ${rows} rows the compact panel drew ${lines.length} rows`,
+				);
+				for (const line of lines) {
+					strictEqual(visibleWidth(line) <= 120, true, `at ${rows} rows a line overflows the terminal: ${stripAnsi(line)}`);
+				}
+				ok(
+					!body.some((line) => line.includes("more rows")),
+					`at ${rows} rows the frame had to drop body rows: ${body.join(" | ")}`,
+				);
+				ok(
+					body.some((line) => line.includes("[Enter]")),
+					`the accept key survives at ${rows} rows`,
+				);
+			} finally {
+				mounted.session.cancel();
+				await pending;
+			}
+		}
+	});
+
+	it("keeps the round and the captured answers on screen once an interview has one", async () => {
+		const mounted = askOverlay(40);
+		const first = mounted.session.ask([
+			{ header: "Scope", question: "First root decision?", options: [{ label: "Narrow" }, { label: "Wide" }] },
+		]);
+		strictEqual(mounted.options()?.anchor, "bottom-center");
+		answer(mounted);
+		deepStrictEqual(await first, { answers: [{ question: "First root decision?", answer: "Narrow" }] });
+
+		const second = mounted.session.ask([
+			{ header: "Depth", question: "Second root decision?", options: [{ label: "Shallow" }, { label: "Deep" }] },
+		]);
+		try {
+			// The same single question, one round later, on the full surface.
+			strictEqual(mounted.options()?.anchor, "center");
+			const body = mounted.renderFrame().map((line) => stripAnsi(line));
+			ok(
+				body.some((line) => line.includes("Round 2")),
+				`the round position renders: ${body.join(" | ")}`,
+			);
+			ok(
+				body.some((line) => line.includes("── Answers")),
+				`the ledger renders: ${body.join(" | ")}`,
+			);
+			ok(
+				body.some((line) => line.includes("1. Narrow")),
+				`with the answer already captured: ${body.join(" | ")}`,
+			);
+		} finally {
+			mounted.session.cancel();
+			await second;
+		}
 	});
 });
