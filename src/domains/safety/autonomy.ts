@@ -10,7 +10,8 @@ import type { RejectionMessage } from "./rejection-feedback.js";
  * Level-independent rails such as system_modify belong to the policy engine.
  *
  * One call-level tier crosses the action classes: a gate can declare its
- * exposure, and an `outward` gate parks at `auto-edit` (#32).
+ * exposure, and an `outward` gate parks at `auto-edit` (#32) and at the
+ * stricter `suggest` (#50).
  *
  * The mapping is pure. The registry (orchestrator and worker) and the ACP
  * delegation mediator are the only consumers; each resolves an `ask`
@@ -80,10 +81,14 @@ export function mapAutonomy(
 	if (actionClass === "git_destructive") return "deny";
 	// The exposure tier. `auto-edit` means "act on the workspace without
 	// asking", not "publish without asking", so an outward gate parks for the
-	// operator here even though its action class would have run. Every other
-	// level is unchanged: `full-auto` auto-answers (auto means auto), and the
-	// two supervised levels already ask or deny everything the dial gates.
-	if (level === "auto-edit" && options.exposure === "outward") return "ask";
+	// operator here even though its action class would have run. `suggest` parks
+	// it too (#50): the dial is ordered, so a stricter level cannot gate less
+	// than auto-edit at the same surface, and a read-class gate would otherwise
+	// have been auto-answered there by the row below. `full-auto` is untouched
+	// (auto means auto), and `read-only` keeps answering the gate, because the
+	// level it describes is "inspect and answer" and the outward effect it is
+	// confirming is itself denied there.
+	if ((level === "auto-edit" || level === "suggest") && options.exposure === "outward") return "ask";
 	if (actionClass === "read") return "allow";
 	if (level === "read-only") return "deny";
 	if (level === "suggest") return "ask";

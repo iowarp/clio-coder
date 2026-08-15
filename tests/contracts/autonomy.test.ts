@@ -226,11 +226,12 @@ describe("contracts/autonomy mapping matrix", () => {
 
 describe("contracts/autonomy exposure tier", () => {
 	// The tier is orthogonal to the action class. ask_user, the only tool that
-	// declares one today, is read class, so `local` is the read row and exactly
-	// one cell moves: auto-edit parks an outward gate instead of answering it.
+	// declares one today, is read class, so `local` is the read row and the
+	// outward row parks at both supervised-and-above levels that would otherwise
+	// answer the gate: auto-edit and suggest.
 	const expected: Record<AutonomyExposure, Record<AutonomyLevel, AutonomyDisposition>> = {
 		local: { "read-only": "allow", suggest: "allow", "auto-edit": "allow", "full-auto": "allow" },
-		outward: { "read-only": "allow", suggest: "allow", "auto-edit": "ask", "full-auto": "allow" },
+		outward: { "read-only": "allow", suggest: "ask", "auto-edit": "ask", "full-auto": "allow" },
 	};
 
 	it("maps the exposure × level matrix for a read-class gate", () => {
@@ -243,6 +244,22 @@ describe("contracts/autonomy exposure tier", () => {
 				);
 			}
 		}
+	});
+
+	it("reads the outward column monotonically down the dial", () => {
+		// #50: the dial is ordered, so no level may gate an outward gate less than
+		// the looser level below it. suggest is stricter than auto-edit and must
+		// not answer a gate auto-edit parks.
+		const strictness: Record<AutonomyDisposition, number> = { allow: 0, ask: 1, deny: 2 };
+		strictEqual(
+			strictness[expected.outward.suggest] >= strictness[expected.outward["auto-edit"]],
+			true,
+			"suggest must gate an outward gate at least as hard as auto-edit",
+		);
+		strictEqual(mapAutonomy("suggest", "read", { exposure: "outward" }), "ask");
+		// The two ends of the dial are the ones #50 leaves alone.
+		strictEqual(mapAutonomy("read-only", "read", { exposure: "outward" }), "allow");
+		strictEqual(mapAutonomy("full-auto", "read", { exposure: "outward" }), "allow");
 	});
 
 	it("declaring a tier never widens what the action class already gated", () => {
@@ -277,6 +294,34 @@ describe("contracts/autonomy exposure tier", () => {
 			await gate.registry.resumeParkedCalls({ actionClass: "read", requestedBy: "test" });
 			strictEqual((await pending).kind, "ok");
 			strictEqual(gate.answered(), 1);
+		});
+	});
+
+	it("parks an outward ask_user gate at suggest through the same approvals context", async () => {
+		await withScratchState(async () => {
+			const gate = askUserRegistryAt("suggest");
+			const parked: SafetyDecision[] = [];
+			gate.registry.onPermissionRequired((_call, decision) => {
+				parked.push(decision);
+			});
+			const pending = gate.registry.invoke(askUserCall("outward"));
+			await settle();
+			strictEqual(gate.registry.hasParkedCalls(), true);
+			strictEqual(gate.answered(), 0);
+			const rejection = parked[0]?.kind === "ask" ? parked[0].rejection : null;
+			ok(rejection, "the parked decision carries an ask rejection");
+			match(rejection.short, /outward-facing gate at autonomy suggest/);
+
+			await gate.registry.resumeParkedCalls({ actionClass: "read", requestedBy: "test" });
+			strictEqual((await pending).kind, "ok");
+			strictEqual(gate.answered(), 1);
+
+			// A local gate at suggest is still answered without parking: the tier is
+			// what moved, not the read row.
+			const local = askUserRegistryAt("suggest");
+			strictEqual((await local.registry.invoke(askUserCall("local"))).kind, "ok");
+			strictEqual(local.registry.hasParkedCalls(), false);
+			strictEqual(local.answered(), 1);
 		});
 	});
 
