@@ -6,6 +6,7 @@ import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { type FooterDashboardRenderState, renderFooterStatusLines } from "../../src/interactive/footer/dashboard.js";
 import {
 	type AgentWorkFacts,
+	activityQuadrant,
 	buildHarnessStatePill,
 	buildMetricStrip,
 	type ContextEngineFacts,
@@ -13,7 +14,9 @@ import {
 	compactSecondaryLine,
 	contextQuadrant,
 	type SessionFacts,
+	sessionQuadrant,
 	type WorkspaceFacts,
+	workspaceQuadrant,
 	zipColumns,
 } from "../../src/interactive/footer/widgets.js";
 import { buildSegmentedContextBar } from "../../src/interactive/footer-panel.js";
@@ -119,8 +122,9 @@ describe("IT2: Harness-state pill", () => {
 
 	it("leads every phase with a spinner or static glyph, then label and color token", () => {
 		// Live phases lead with the animated spinner in place of the static phase
-		// glyph. Idle, the attention states (blocked, retry, stuck), and the ended
-		// state stay static, so their glyph anchors the pill.
+		// glyph. Attention states (blocked, retry, stuck) and the ended state stay
+		// static, so their glyph anchors the pill. Idle is tested separately because
+		// it deliberately has no pill.
 		const testPhases: Array<{
 			phase: AgentStatus["phase"];
 			label: string;
@@ -128,7 +132,6 @@ describe("IT2: Harness-state pill", () => {
 			staticGlyph: string;
 			token: Parameters<typeof theme.fgSequence>[0];
 		}> = [
-			{ phase: "idle", label: "idle", live: false, staticGlyph: "◌", token: "muted" },
 			{ phase: "preparing", label: "prep", live: true, staticGlyph: "◔", token: "info" },
 			{ phase: "waiting_model", label: "waiting", live: true, staticGlyph: "◔", token: "info" },
 			{ phase: "thinking", label: "thinking", live: true, staticGlyph: "◐", token: "reason" },
@@ -174,7 +177,7 @@ describe("IT2: Harness-state pill", () => {
 		const idleStatus: AgentStatus = { ...baseStatus, phase: "idle" };
 		const idlePill = buildHarnessStatePill(theme, idleStatus, toolCounts, dispatchRows, 0, 1000, 80, false);
 		const idleStripped = strip(idlePill);
-		ok(!idleStripped.startsWith("⣾"), `idle pill should not start with spinner`);
+		strictEqual(idleStripped, "", "idle has no decorative pill");
 
 		const endedStatus: AgentStatus = { ...baseStatus, phase: "ended" };
 		const endedPill = buildHarnessStatePill(theme, endedStatus, toolCounts, dispatchRows, 0, 1000, 80, false);
@@ -196,7 +199,7 @@ describe("IT2: Harness-state pill", () => {
 		}
 	});
 
-	it("applies badge priority: fleet > tools > none", () => {
+	it("shows live fleet or tools without synthesizing an idle badge", () => {
 		const idleStatus: AgentStatus = { ...baseStatus, phase: "idle" };
 
 		const rows: DispatchBoardRow[] = [
@@ -217,13 +220,13 @@ describe("IT2: Harness-state pill", () => {
 			},
 		];
 		const p1 = buildHarnessStatePill(theme, idleStatus, { tools: {}, errors: 0, active: 3 }, rows, 0, 1000, 80, true);
-		ok(strip(p1).includes("· fleet 1"), `should show fleet badge, got "${strip(p1)}"`);
+		strictEqual(strip(p1), "fleet 1", `idle fleet work should stand alone, got "${strip(p1)}"`);
 
 		const p2 = buildHarnessStatePill(theme, idleStatus, { tools: {}, errors: 0, active: 3 }, [], 0, 1000, 80, true);
-		ok(strip(p2).includes("· tools 3"), `should show tools count, got "${strip(p2)}"`);
+		strictEqual(strip(p2), "tools 3", `idle tool work should stand alone, got "${strip(p2)}"`);
 
 		const p3 = buildHarnessStatePill(theme, idleStatus, { tools: {}, errors: 0, active: 0 }, [], 0, 1000, 80, true);
-		ok(strip(p3).includes("· tools none"), `should show tools none, got "${strip(p3)}"`);
+		strictEqual(strip(p3), "", `idle with no work should stay quiet, got "${strip(p3)}"`);
 
 		const activeStatus: AgentStatus = { ...baseStatus, phase: "thinking" };
 		const p4 = buildHarnessStatePill(theme, activeStatus, { tools: {}, errors: 0, active: 0 }, [], 0, 1000, 80, true);
@@ -500,6 +503,16 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		}
 	});
 
+	it("keeps an idle compact footer to workspace and context only", () => {
+		const idle = { ...status, phase: "idle" as const };
+		const primary = strip(compactPrimaryLine(workspace, session, 120, theme, idle, { tools: {}, errors: 0 }, []));
+		const secondary = strip(compactSecondaryLine(context, { ...agent, lastTurn: null }, 120, theme, idle));
+		ok(primary.includes(workspace.cwd), primary);
+		ok(!primary.includes("idle"), primary);
+		ok(!primary.includes("tools none"), primary);
+		ok(secondary.includes("50.0%"), secondary);
+	});
+
 	it("renders compactSecondaryLine at exact requested widths and does not overflow", () => {
 		const throughput = {
 			tokensPerSecond: 45,
@@ -539,14 +552,14 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 				72,
 				theme,
 				{ ...status, phase: "idle" },
-				{ tools: {}, errors: 0, active: 99 },
+				{ tools: {}, errors: 0, active: 999_999 },
 				[],
 				0,
 				2000,
 			),
 		);
 		ok(line.includes("git feature/main"), `git should remain visible, got "${line}"`);
-		ok(!line.includes("tools 99"), `badge should be dropped first, got "${line}"`);
+		ok(!line.includes("tools 999999"), `badge should be dropped first, got "${line}"`);
 	});
 
 	it("shows the active output mode in both compact and expanded footer states", () => {
@@ -572,6 +585,24 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 			).join("\n"),
 		);
 		ok(/output\s+minimal/.test(expanded), expanded);
+
+		const compactDefault = strip(
+			compactSecondaryLine(context, agent, 80, theme, { ...status, phase: "idle" }, null, null, null, "default"),
+		);
+		ok(!compactDefault.includes("out default"), compactDefault);
+		const expandedDefault = strip(
+			renderFooterStatusLines(
+				expandedRenderState({
+					workspace,
+					session: { ...session, outputVerbosity: "default" },
+					context,
+					agent: { ...agent, statusText: null, toolTally: "none · 0✗" },
+					status: { ...status, phase: "idle" },
+				}),
+				120,
+			).join("\n"),
+		);
+		ok(!/output\s+default/.test(expandedDefault), expandedDefault);
 	});
 
 	it("keeps the context bar before metrics on narrow secondary lines", () => {
@@ -690,7 +721,7 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		}
 	});
 
-	it("uses four deliberate wide sections and renames AGENT to ACTIVITY", () => {
+	it("orders all four wide sections by urgency", () => {
 		const lines = renderFooterStatusLines(
 			expandedRenderState({
 				workspace,
@@ -708,6 +739,68 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		ok(headerRow.includes("ACTIVITY"), `wide header should include ACTIVITY, got "${headerRow}"`);
 		ok(!headerRow.includes("AGENT"), `wide header should not include AGENT, got "${headerRow}"`);
 		strictEqual(headerRow.split("│").length, 4, `wide header should have four columns, got "${headerRow}"`);
+		ok(
+			headerRow.indexOf("ACTIVITY") < headerRow.indexOf("CONTEXT") &&
+				headerRow.indexOf("CONTEXT") < headerRow.indexOf("SESSION") &&
+				headerRow.indexOf("SESSION") < headerRow.indexOf("WORKSPACE"),
+			`wide sections should read Activity, Context, Session, Workspace: "${headerRow}"`,
+		);
+	});
+
+	it("keeps urgency order in grid and stacked expanded modes", () => {
+		const state = expandedRenderState({
+			workspace,
+			session,
+			context,
+			agent,
+			status,
+		});
+		for (const width of [70, 100, 134]) {
+			const text = strip(renderFooterStatusLines(state, width).join("\n"));
+			const positions = ["ACTIVITY", "CONTEXT", "SESSION", "WORKSPACE"].map((label) => text.indexOf(label));
+			ok(
+				positions.every((position, index) => position >= 0 && (index === 0 || position > (positions[index - 1] ?? -1))),
+				`width ${width} should preserve Activity, Context, Session, Workspace: "${text}"`,
+			);
+		}
+	});
+
+	it("collapses synthesized empty rows in expanded sections", () => {
+		const emptyWorkspace = strip(
+			workspaceQuadrant({ cwd: "/work", branch: null, dirty: null, projectType: null, remote: null }).join("\n"),
+		);
+		ok(!emptyWorkspace.includes("git none"), emptyWorkspace);
+
+		const emptySession = strip(
+			sessionQuadrant({ ...session, id: null, name: null, outputVerbosity: "default" }).join("\n"),
+		);
+		ok(!/\bid\s+none\b/u.test(emptySession), emptySession);
+		ok(!/\boutput\s+default\b/u.test(emptySession), emptySession);
+
+		const emptyContext = strip(
+			contextQuadrant({
+				label: null,
+				used: null,
+				contextWindow: null,
+				toolSchemaTokens: null,
+				compactionThreshold: null,
+				compactionAuto: null,
+				clioMd: null,
+				memory: null,
+				extensions: null,
+			}).join("\n"),
+		);
+		ok(!emptyContext.includes("fill none"), emptyContext);
+		ok(!emptyContext.includes("chat 0"), emptyContext);
+		ok(!emptyContext.includes("CLIO-CODER.md none"), emptyContext);
+
+		const emptyActivity = strip(
+			activityQuadrant(
+				{ statusText: null, dispatchSummary: null, toolTally: "none · 0✗", dispatchRows: [], lastTurn: null },
+				{ status: { ...status, phase: "idle" }, toolCounts: { tools: {}, errors: 0 } },
+			).join("\n"),
+		);
+		strictEqual(emptyActivity, "ACTIVITY");
 	});
 
 	it("paints the dashboard header wordmark as a logotype: dim scaffolding around a bold accent C", () => {
@@ -750,7 +843,7 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		ok(joined.includes("▱ free"), "expanded context should include free legend");
 		ok(!joined.includes("ctx ░"), `expanded dashboard should not include old ctx bar, got "${joined}"`);
 		ok(!joined.includes("tools no tools"), `expanded dashboard should not say tools no tools, got "${joined}"`);
-		ok(/\btools\s+none · 0✗/.test(joined), `expanded activity should say tools none, got "${joined}"`);
+		ok(!/\btools\s+none · 0✗/.test(joined), `expanded activity should suppress empty tools, got "${joined}"`);
 	});
 
 	it("keeps live telemetry out of SESSION and in ACTIVITY", () => {
@@ -764,8 +857,8 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 			}),
 			134,
 		);
-		const sessionText = wideColumnText(lines, 1);
-		const activityText = wideColumnText(lines, 3);
+		const activityText = wideColumnText(lines, 0);
+		const sessionText = wideColumnText(lines, 2);
 		ok(sessionText.includes("target"), `SESSION should include target, got "${sessionText}"`);
 		ok(sessionText.includes("caps"), `SESSION should include caps, got "${sessionText}"`);
 		ok(
@@ -817,6 +910,27 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 			!joined.includes(theme.fgSequence("action")),
 			`idle dashboard must contain no action orange, got "${strip(joined)}"`,
 		);
+	});
+
+	it("uses at most one action-orange element for active fleet dispatch", () => {
+		const dispatching = { ...status, phase: "dispatching" as const };
+		const countAction = (value: string): number => value.split(theme.fgSequence("action")).length - 1;
+		const compact = compactPrimaryLine(
+			workspace,
+			session,
+			120,
+			theme,
+			dispatching,
+			{ tools: {}, errors: 0 },
+			agent.dispatchRows,
+		);
+		strictEqual(countAction(compact), 1, `compact dispatch should use one orange signal: "${strip(compact)}"`);
+
+		const expanded = renderFooterStatusLines(
+			expandedRenderState({ workspace, session, context, agent, status: dispatching }),
+			134,
+		).join("\n");
+		strictEqual(countAction(expanded), 1, `expanded dispatch should use one orange signal: "${strip(expanded)}"`);
 	});
 
 	it("never paints a dashboard value in the accentDeep structure color", () => {

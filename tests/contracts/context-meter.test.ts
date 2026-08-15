@@ -122,7 +122,7 @@ describe("ultrawide dashboard column shares", () => {
 	const SEPS = 9; // three " │ " separators
 
 	it("keeps the base allocation when there is no surplus", () => {
-		strictEqual(expandedWideColumnWidths(120, SEPS).join(","), "27,29,31,24");
+		strictEqual(expandedWideColumnWidths(120, SEPS).join(","), "32,31,27,21");
 	});
 
 	it("always fills the available width exactly", () => {
@@ -136,20 +136,20 @@ describe("ultrawide dashboard column shares", () => {
 		}
 	});
 
-	it("shares surplus across quadrants instead of letting ACTIVITY hog it", () => {
-		const [workspace, session, context, activity] = expandedWideColumnWidths(200, SEPS);
-		strictEqual(context, 56, "CONTEXT grows to its cap at 200 columns");
-		strictEqual(workspace, 40);
+	it("keeps urgent sections strongest while sharing surplus", () => {
+		const [activity, context, session, workspace] = expandedWideColumnWidths(200, SEPS);
+		strictEqual(activity, 54);
+		strictEqual(context, 53);
 		strictEqual(session, 44);
-		strictEqual(activity, 51);
-		ok(context >= activity, "CONTEXT is not narrower than ACTIVITY at 200 columns");
+		strictEqual(workspace, 40);
+		ok(activity >= context && context >= session, "column widths follow the footer's urgency order");
 	});
 
 	it("spills into ACTIVITY only after every other cap is reached", () => {
-		const [workspace, session, context, activity] = expandedWideColumnWidths(240, SEPS);
-		strictEqual(workspace, 40);
-		strictEqual(session, 44);
+		const [activity, context, session, workspace] = expandedWideColumnWidths(240, SEPS);
 		strictEqual(context, 56);
+		strictEqual(session, 44);
+		strictEqual(workspace, 40);
 		strictEqual(activity, 240 - SEPS - 140);
 	});
 });

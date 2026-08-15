@@ -158,12 +158,13 @@ describe("contracts/cost truth across the footer and /cost", () => {
 	 */
 	it("keeps the session total at every compact width where it fits", () => {
 		for (const width of [80, 100, 120]) {
-			// `out default` rides at the head of the strip on a real session, and it
-			// was one of the four chips that crowded the total off the line.
+			// The default output mode is configuration noise, so it must not compete
+			// with the receipt for this measured session.
 			const line = strip(
 				compactSecondaryLine(CONTEXT, WORK, width, theme, IDLE, null, SESSION_TOKENS, UNPRICED, "default"),
 			);
 			ok(line.includes("Σ24.7k"), `at ${width} columns the total is on screen: "${line}"`);
+			ok(!line.includes("out default"), `at ${width} columns the default output label stays hidden: "${line}"`);
 			ok(!line.includes("cost"), `and nothing claims a price for it: "${line}"`);
 		}
 	});
