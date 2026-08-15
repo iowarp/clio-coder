@@ -650,6 +650,78 @@ describe("chat-panel agent voice", () => {
 		}
 	});
 
+	/**
+	 * The shape the prompt actually asks for: the reply *begins* with the
+	 * suggestion, so the line and the answer arrive in one text segment. Judging
+	 * that whole segment advisory by its prefix left the turn with no glyph at
+	 * all — the suggestion declined it and the answer never got the chance.
+	 */
+	it("splits a one-segment suggestion so the answer under it still owns ✦", () => {
+		const suggestion = SKILL_SUGGESTION_ANCHOR.replace("<name>", "tui-design");
+		const answer = "The substantive answer prose follows on its own line.";
+		for (const width of [40, 72, 80, 100]) {
+			const panel = createChatPanel({ now: frozen.now });
+			panel.applyEvent({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: `${suggestion}\n${answer}` }],
+					stopReason: "stop",
+				},
+			} as ChatLoopEvent);
+			panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+
+			const rows = panel.render(width).map(strip);
+			const plain = rows.join("\n");
+			const suggestionRow = rows.findIndex((row) => row.includes(SKILL_SUGGESTION_PREFIX));
+			const answerRow = rows.findIndex((row) => row.startsWith(`${GLYPH.agent} `));
+			ok(suggestionRow >= 0, `${width}: the suggestion renders: ${plain}`);
+			ok(rows[suggestionRow]?.startsWith("  "), `${width}: the suggestion claimed the glyph: ${plain}`);
+			ok(answerRow > suggestionRow, `${width}: the answer under the suggestion owns the glyph: ${plain}`);
+			ok(rows[answerRow]?.includes("The substantive answer"), `${width}: the glyph landed off the answer: ${plain}`);
+			strictEqual(plain.split("✦").length - 1, 1, `${width}: exactly one reply glyph in the turn: ${plain}`);
+		}
+	});
+
+	it("keeps the split shape row-stable from streaming through finalized Markdown", () => {
+		const suggestion = SKILL_SUGGESTION_ANCHOR.replace("<name>", "tui-design");
+		const chunks = [suggestion.slice(0, 28), `${suggestion.slice(28)}\nThe substantive`, " answer prose follows."];
+		const panel = createChatPanel({ now: frozen.now });
+		let partial = "";
+		for (const delta of chunks) {
+			partial += delta;
+			panel.applyEvent({ type: "text_delta", contentIndex: 0, delta, partialText: partial } as ChatLoopEvent);
+		}
+		const streaming = panel.render(80).map(strip);
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: partial }], stopReason: "stop" },
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		const finalized = panel.render(80).map(strip);
+		strictEqual(finalized.join("\n"), streaming.join("\n"), "the split shape changed when the segment finalized");
+		ok(
+			finalized.some((row) => row.startsWith(`${GLYPH.agent} The substantive answer`)),
+			`the answer owns the glyph while streaming: ${finalized.join("\n")}`,
+		);
+	});
+
+	it("leaves a suggestion-only reply entirely unglyphed", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: SKILL_SUGGESTION_ANCHOR.replace("<name>", "tui-design") }],
+				stopReason: "stop",
+			},
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		const plain = strip(panel.render(80).join("\n"));
+		ok(plain.includes(SKILL_SUGGESTION_PREFIX), plain);
+		strictEqual(plain.split("✦").length - 1, 0, `an advisory-only turn claims no glyph: ${plain}`);
+	});
+
 	it("turns the reply glyph and the terminal error text red on a failed turn", () => {
 		const panel = createChatPanel({ now: frozen.now });
 		panel.applyEvent({
