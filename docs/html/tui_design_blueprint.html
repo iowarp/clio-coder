@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TUI Design System Blueprint (v0.3.0)</title>
+  <title>TUI Design System Blueprint (v0.3.1)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Terminal custom styles */
@@ -30,6 +30,8 @@
     }
     
     .tui-accent { color: #46e5d0; }
+    .tui-accent-deep { color: #1fb7a6; font-weight: bold; }
+    .tui-action { color: #ff7e29; }
     .tui-success { color: #57e389; }
     .tui-warn { color: #ffb454; }
     .tui-error { color: #ff5c66; }
@@ -67,7 +69,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.0</span>
+        <span class="version-badge">Clio Coder v0.3.1</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -88,7 +90,7 @@
       <main>
         <div class="glass-card">
           <h2>Overview Summary</h2>
-          <p>Clio's interactive TUI operates under the core design tenet: color indicates state, boxes outline structure, and brand icons represent identity.</p>
+          <p>Clio's interactive TUI operates under the core design tenet: color indicates state, boxes outline structure, and brand icons represent identity. Everything that is not state or structure remains visually quiet.</p>
         </div>
 
         <div class="tabs-nav">
@@ -120,32 +122,47 @@
                     <tr onclick="previewToken('accent')">
                       <td class="env-name" style="color:#46e5d0;">accent</td>
                       <td><span class="color-swatch" style="background:#46e5d0;"></span> #46E5D0</td>
-                      <td>Brand headers, cursor, tool actions</td>
+                      <td>Brand headers, cursor, tool actions, interactive prompts</td>
+                    </tr>
+                    <tr onclick="previewToken('accentDeep')">
+                      <td class="env-name" style="color:#1fb7a6;">accentDeep</td>
+                      <td><span class="color-swatch" style="background:#1fb7a6;"></span> #1FB7A6</td>
+                      <td>Structural emphasis only: bold CAPS section tags (WORKSPACE, ROUTE, NEXT)</td>
+                    </tr>
+                    <tr onclick="previewToken('action')">
+                      <td class="env-name" style="color:#ff7e29;">action</td>
+                      <td><span class="color-swatch" style="background:#ff7e29;"></span> #FF7E29</td>
+                      <td>Active operations only: dispatching, running connect/probe, STEER mode tag</td>
                     </tr>
                     <tr onclick="previewToken('success')">
                       <td class="env-name" style="color:#57e389;">success</td>
                       <td><span class="color-swatch" style="background:#57e389;"></span> #57E389</td>
-                      <td>Success ticks, clean state status</td>
+                      <td>Success ticks, clean state status, verified health</td>
                     </tr>
                     <tr onclick="previewToken('warning')">
                       <td class="env-name" style="color:#ffb454;">warning</td>
                       <td><span class="color-swatch" style="background:#ffb454;"></span> #FFB454</td>
-                      <td>Warnings, truncations, cache issues</td>
+                      <td>Warnings, truncations, cache issues, retry state</td>
                     </tr>
                     <tr onclick="previewToken('error')">
                       <td class="env-name" style="color:#ff5c66;">error</td>
                       <td><span class="color-swatch" style="background:#ff5c66;"></span> #FF5C66</td>
-                      <td>Failures, bad loops, errors</td>
+                      <td>Failures, bad loops, errors, critical alerts</td>
                     </tr>
                     <tr onclick="previewToken('reason')">
                       <td class="env-name" style="color:#9d8cff;">reason</td>
                       <td><span class="color-swatch" style="background:#9d8cff;"></span> #9D8CFF</td>
-                      <td>Purple reasoning fields and thinking states</td>
+                      <td>Purple reasoning fields, thinking rails, compacting state</td>
                     </tr>
                     <tr onclick="previewToken('dim')">
                       <td class="env-name" style="color:#6a7a85;">dim</td>
                       <td><span class="color-swatch" style="background:#6a7a85;"></span> #6A7A85</td>
-                      <td>Keys, delimiters, separators</td>
+                      <td>Keys, delimiters, separators, usage receipts</td>
+                    </tr>
+                    <tr onclick="previewToken('muted')">
+                      <td class="env-name" style="color:#8a99a4;">muted</td>
+                      <td><span class="color-swatch" style="background:#8a99a4;"></span> #8A99A4</td>
+                      <td>Secondary content, paths, previews, telemetry values</td>
                     </tr>
                   </tbody>
                 </table>
@@ -169,12 +186,12 @@
                     <tr>
                       <td style="font-size:1.1rem; text-align:center;"><code>✦</code></td>
                       <td><code>agent</code></td>
-                      <td>Voice character for Clio Agent response lines</td>
+                      <td>Voice character for Clio Agent response lines (accent; red on error)</td>
                     </tr>
                     <tr>
                       <td style="font-size:1.1rem; text-align:center;"><code>›</code></td>
                       <td><code>user</code></td>
-                      <td>Voice character for user prompts</td>
+                      <td>Voice character for user prompts (accent)</td>
                     </tr>
                     <tr>
                       <td style="font-size:1.1rem; text-align:center;"><code>✓</code></td>
@@ -187,9 +204,19 @@
                       <td>Failure indicator cross</td>
                     </tr>
                     <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>▰</code></td>
-                      <td><code>contextFull</code></td>
-                      <td>Context window gauge meter cell</td>
+                      <td style="font-size:1.1rem; text-align:center;"><code>▸</code></td>
+                      <td><code>toolHeader</code></td>
+                      <td>Tool ledger header and subline indicator</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:1.1rem; text-align:center;"><code>◆</code></td>
+                      <td><code>active</code></td>
+                      <td>Active/selected entity mark (Settings profile workbench)</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:1.1rem; text-align:center;"><code>▰ ▒ ▱</code></td>
+                      <td><code>contextMeters</code></td>
+                      <td>Context gauge cells (used, reserve, free)</td>
                     </tr>
                   </tbody>
                 </table>
@@ -209,16 +236,17 @@
                 <div class="form-group">
                   <label for="stepState">Active Step State</label>
                   <select id="stepState" onchange="renderTerminalSim()">
+                    <option value="launchpad">Launchpad (Pre-Submit)</option>
                     <option value="thinking">Model Thinking (reasoning Purple)</option>
                     <option value="executing">Tool Executing (gear Cyan)</option>
-                    <option value="success">Success Final (tick Green)</option>
+                    <option value="success">Success Final (Voice Turn + Hanging Indent)</option>
                     <option value="error">Failure Blocked (cross Red)</option>
                   </select>
                 </div>
 
                 <div class="form-group">
                   <label for="inputText">Simulated Prompt</label>
-                  <input type="text" id="inputText" value="npm run build" oninput="renderTerminalSim()">
+                  <input type="text" id="inputText" value="Summarize repository boundaries and verify compilation." oninput="renderTerminalSim()">
                 </div>
               </div>
             </div>
@@ -250,7 +278,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder TUI Blueprint &bull; Version 0.3.0 &bull; Gnosis Research Center</p>
+      <p>Clio Coder TUI Blueprint &bull; Version 0.3.1 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
@@ -265,36 +293,68 @@
       const cmd = document.getElementById("inputText").value;
       const container = document.getElementById("terminalSim");
 
-      let html = `<div class="terminal-header"><span>clio-coder-tui</span><span>v0.3.0</span></div>`;
-      html += `<div><span class="tui-accent">›</span> <span style="color:#fff;">${cmd}</span></div>`;
+      let html = "";
 
-      if (state === 'thinking') {
+      if (state === 'launchpad') {
         html += `
-          <div style="margin-top:0.5rem;"><span class="tui-reason">⣾</span> <span class="tui-reason">Thinking...</span></div>
-          <div style="margin-top:0.25rem; border-left: 2px solid #9d8cff; padding-left: 0.5rem; color:#888;">
-            Analyzing repository boundaries...<br>
-            Checking compilation states...
+          <div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.1</span><span class="tui-warn">EXPERIMENTAL</span></div>
+          <div style="margin-bottom:0.75rem;">
+            <div>&nbsp;&nbsp;<span class="tui-accent-deep">WORKSPACE</span>&nbsp;&nbsp;<span class="tui-muted">clio-coder &middot; git v0.3.1</span></div>
+            <div>&nbsp;&nbsp;<span class="tui-accent-deep">ROUTE</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tui-success">local-lmstudio/qwen &middot; ready</span></div>
+            <div>&nbsp;&nbsp;<span class="tui-accent-deep">NEXT</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tui-success">ctx ready &middot; type a task</span></div>
+          </div>
+          <div style="border-top:1px solid #1f354f; padding-top:0.5rem; color:#6a7c85;">
+            Ask Clio&hellip; &nbsp;/ for commands
+          </div>
+          <div style="margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid #1f354f; font-size:0.75rem; color:#8a99a4;">
+            clio-coder &middot; git v0.3.1<br>
+            <span class="tui-dim">ctx 8k/128k &middot; turn &middot; in 0 &middot; out 0</span>
           </div>
         `;
-      } else if (state === 'executing') {
+      } else {
+        html += `<div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.1 &middot; EXPERIMENTAL &middot; ctx ready</span></div>`;
+        html += `<div><span class="tui-accent">›</span> <span style="color:#fff;">${cmd}</span></div>`;
+
+        if (state === 'thinking') {
+          html += `
+            <div style="margin-top:0.5rem;"><span class="tui-dim">Thinking (142 tokens)&hellip;</span></div>
+            <div style="margin-top:0.25rem; border-left: 2px solid #9d8cff; padding-left: 0.5rem; color:#888;">
+              Analyzing source module boundaries and key contracts&hellip;<br>
+              Checking compilation targets under dist/&hellip;
+            </div>
+          `;
+        } else if (state === 'executing') {
+          html += `
+            <div style="margin-top:0.5rem; color:#8a99a4;">
+              <span class="tui-accent">▸</span> <strong class="tui-accent">bash</strong> command="npm run build" &middot; 240ms <span class="tui-success">✓</span>
+            </div>
+          `;
+        } else if (state === 'success') {
+          html += `
+            <div style="margin-top:0.5rem; color:#8a99a4;">
+              <span class="tui-accent">▸</span> <strong class="tui-accent">read_file</strong> path="docs/tui-design.md" &middot; 14kB <span class="tui-success">✓</span>
+            </div>
+            <div style="margin-top:0.5rem; line-height: 1.4;">
+              <div><span class="tui-accent">✦</span> The codebase enforces strict separation between interactive presentation layers</div>
+              <div style="padding-left: 1rem; color: #b0c4de;">and core domain primitives. All 12 revamped TUI surfaces are fully aligned.</div>
+            </div>
+            <div style="margin-top:0.4rem; font-size:0.75rem; color:#6a7a85;">
+              &nbsp;&nbsp;turn &middot; in 1.4k &middot; out 420
+            </div>
+          `;
+        } else if (state === 'error') {
+          html += `
+            <div style="margin-top:0.5rem; line-height: 1.4;">
+              <div><span class="tui-error">✦</span> Build verification failed with unresolved type errors.</div>
+              <div style="padding-left: 1rem; color: #ff5c66;">Error: Cannot find module './missing-component.js'</div>
+            </div>
+          `;
+        }
+
         html += `
-          <div style="margin-top:0.5rem;"><span class="tui-accent">⚙</span> <span class="tui-accent">Tool Executing...</span></div>
-          <div style="margin-top:0.25rem; color:#8a99a4;">
-            ▸ bash(command="npm run build")
-          </div>
-        `;
-      } else if (state === 'success') {
-        html += `
-          <div style="margin-top:0.5rem;"><span class="tui-success">✓</span> <span class="tui-success">Build completed successfully</span></div>
-          <div style="margin-top:0.25rem; color:#8a99a4;">
-            Checked 787 files. Output directory generated at dist/
-          </div>
-        `;
-      } else if (state === 'error') {
-        html += `
-          <div style="margin-top:0.5rem;"><span class="tui-error">✗</span> <span class="tui-error">Compilation failed</span></div>
-          <div style="margin-top:0.25rem; color:#ff5c66;">
-            Error: Cannot find module './missing-file.js'
+          <div style="margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid #1f354f; font-size:0.75rem; color:#8a99a4;">
+            clio-coder &middot; git v0.3.1<br>
+            <span class="tui-dim">ctx 14k/128k &middot; turn &middot; in 1.4k &middot; out 420</span>
           </div>
         `;
       }
