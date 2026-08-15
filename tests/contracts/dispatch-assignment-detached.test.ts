@@ -156,6 +156,9 @@ describe("assignment-aware detached, batch, and pipeline dispatch", () => {
 			const [terminal] = await handle.finalPromise;
 			strictEqual(terminal?.runId, assignmentId);
 			strictEqual(bundle.contract.assignments?.getStored(assignmentId)?.status, "canceled");
+			// Real time, deliberately: proving no retry fires means outliving the
+			// queued retry's own 500ms backoff timer (extension.ts:2553), and that
+			// timer takes no injected clock.
 			await new Promise((resolve) => setTimeout(resolve, 600));
 			strictEqual(spawns, 1);
 		} finally {

@@ -449,6 +449,9 @@ describe("dispatch assignments", () => {
 			const terminal = await handle.finalPromise;
 			strictEqual(terminal.outcome, "canceled");
 			strictEqual(bundle.contract.assignments?.get(handle.runId)?.status, "canceled");
+			// Real time, deliberately: proving no retry fires means outliving the
+			// 500ms first-attempt backoff (extension.ts:2553), and that timer takes
+			// no injected clock.
 			await new Promise((resolve) => setTimeout(resolve, 600));
 			strictEqual(spawns, 1);
 		} finally {
