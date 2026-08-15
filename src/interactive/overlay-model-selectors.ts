@@ -7,7 +7,7 @@ import type { FooterDashboardPanel } from "./footer/dashboard.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
-import { openSettingsOverlay, type SettingsSectionId } from "./overlays/settings.js";
+import { openSettingsOverlay, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
 
 export interface OverlayModelSelectorsDeps {
 	tui: TUI;
@@ -31,7 +31,7 @@ export interface OverlayModelSelectorsDeps {
 
 export interface OverlayModelSelectors {
 	openModelOverlayState(): void;
-	openSettingsOverlayState(section?: SettingsSectionId): void;
+	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
 	refreshSettingsOverlay(): void;
 }
 
@@ -73,13 +73,14 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 		deps.tui.requestRender();
 	};
 
-	const openSettingsOverlayState = (section?: SettingsSectionId): void => {
+	const openSettingsOverlayState = (section?: SettingsSectionId, rowId?: SettingsCenterRowId): void => {
 		if (deps.transitions.state !== "closed" || !deps.getSettings || !deps.writeSettings) return;
 		deps.transitions.state = "settings";
 		const handle = openSettings(deps.tui, {
 			getSettings: deps.getSettings,
 			providers: deps.providers,
 			...(section ? { section } : {}),
+			...(rowId ? { rowId } : {}),
 			...(deps.getFleetNodes ? { getFleetNodes: deps.getFleetNodes } : {}),
 			...(deps.connectTarget ? { connectTarget: deps.connectTarget } : {}),
 			writeSettings: (next) => {

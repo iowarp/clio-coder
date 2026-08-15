@@ -15,7 +15,7 @@ import { parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
 import type { NoticeLevel } from "./command-output.js";
-import { SETTINGS_SECTIONS, type SettingsSectionId } from "./overlays/settings.js";
+import { SETTINGS_SECTIONS, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
 
@@ -59,7 +59,7 @@ type SlashCommandVariant =
 	| { kind: "output-set"; verbosity: string }
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
-	| { kind: "settings"; section?: SettingsSectionId }
+	| { kind: "settings"; section?: SettingsSectionId; rowId?: SettingsCenterRowId }
 	| { kind: "resume" }
 	| { kind: "new" }
 	| { kind: "tree" }
@@ -278,7 +278,7 @@ export interface SlashCommandContext {
 	providers: ProvidersContract;
 	/** Apply a resolved model reference to settings (and optionally thinking level). */
 	applyModelRef: (ref: ResolvedModelRef) => void;
-	openSettings: (section?: SettingsSectionId) => void;
+	openSettings: (section?: SettingsSectionId, rowId?: SettingsCenterRowId) => void;
 	openResume: () => void;
 	startNewSession: () => void;
 	openTree: () => void;
@@ -373,14 +373,19 @@ function fromArgsOrUsage(name: string, command: SlashCommand): (parsed: ParsedAr
  * It parses to the same `settings` command `/settings <section>` produces, so
  * the settings entry dispatches it and this entry owns no kind of its own.
  */
-function settingsDeepLink(name: string, section: SettingsSectionId, description: string): BuiltinSlashCommand {
+function settingsDeepLink(
+	name: string,
+	section: SettingsSectionId,
+	description: string,
+	rowId?: SettingsCenterRowId,
+): BuiltinSlashCommand {
 	return {
 		name,
 		description,
 		group: "Configure",
 		kinds: [],
 		args: {},
-		fromArgs: fromArgsOrUsage(name, { kind: "settings", section }),
+		fromArgs: fromArgsOrUsage(name, { kind: "settings", section, ...(rowId ? { rowId } : {}) }),
 		handle: () => undefined,
 	};
 }
@@ -849,7 +854,9 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "thinking", reason: parsed.error };
 			const level = parsed.positionals[0];
-			return level ? { kind: "thinking-set", level } : { kind: "settings", section: "orchestrator" };
+			return level
+				? { kind: "thinking-set", level }
+				: { kind: "settings", section: "orchestrator", rowId: "orchestrator.thinkingLevel" };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "thinking-set") return;
@@ -873,7 +880,9 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "output", reason: parsed.error };
 			const verbosity = parsed.positionals[0];
-			return verbosity ? { kind: "output-set", verbosity } : { kind: "settings", section: "terminal" };
+			return verbosity
+				? { kind: "output-set", verbosity }
+				: { kind: "settings", section: "terminal", rowId: "terminal.outputVerbosity" };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "output-set") return;
@@ -931,7 +940,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			})();
 		},
 	},
-	settingsDeepLink("scoped-models", "models", "Open Settings → Models: the Alt+J / Alt+K cycle set and favorites"),
+	settingsDeepLink(
+		"scoped-models",
+		"models",
+		"Open Settings → Models: the Alt+J / Alt+K cycle set and favorites",
+		"scope",
+	),
 	{
 		name: "settings",
 		description: "Open interactive settings",
@@ -950,7 +964,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return { kind: "settings", section };
 		},
 		handle(command, ctx) {
-			if (command.kind === "settings") ctx.openSettings(command.section);
+			if (command.kind === "settings") ctx.openSettings(command.section, command.rowId);
 		},
 	},
 	{

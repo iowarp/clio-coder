@@ -27,7 +27,7 @@ import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
 import { dateLocal } from "./format-time.js";
-import type { SettingsSectionId } from "./overlays/settings.js";
+import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
 import {
 	type ContextClearCommandOptions,
 	dispatchSlashCommand,
@@ -97,7 +97,7 @@ export interface InteractiveSlashRuntimeDeps {
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	openView: (filter?: string) => void;
 	openModel: () => void;
-	openSettings: (section?: SettingsSectionId) => void;
+	openSettings: (section?: SettingsSectionId, rowId?: SettingsCenterRowId) => void;
 	openResume: () => void;
 	startNewSession: () => void;
 	openTree: () => void;
