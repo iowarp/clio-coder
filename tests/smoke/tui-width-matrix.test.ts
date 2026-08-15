@@ -31,7 +31,7 @@ const CTRL_C = String.fromCharCode(3);
  * instead of sleeping long enough for the slowest machine takes each case from
  * nine seconds to about two.
  */
-const READY = /idle/;
+const READY = /ctx /;
 
 /** The release width matrix, plus an ultrawide terminal. */
 const SIZES: ReadonlyArray<{ cols: number; rows: number }> = [
@@ -172,8 +172,10 @@ describe("TUI width matrix", { concurrency: false, skip: ptySupported ? false : 
 				"the banner is still readable without color",
 			);
 			ok(
-				lines.some((line) => line.includes("idle")),
-				"status is still carried by text, not by color alone",
+				!lines.some((line) => line.includes("idle")) &&
+					lines.some((line) => line.includes("clio-coder")) &&
+					lines.some((line) => line.includes("ctx ")),
+				"the idle footer stays quiet while workspace and context remain visible",
 			);
 		} finally {
 			scratch.cleanup();
