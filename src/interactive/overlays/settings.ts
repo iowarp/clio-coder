@@ -10,11 +10,13 @@ import { DEFAULT_SETTINGS, THINKING_LEVELS } from "../../core/defaults.js";
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import {
+	type CapabilityFlags,
 	isDispatchEligibleRuntime,
 	isOrchestratorEligibleRuntime,
 	type ProvidersContract,
 	resolveModelRuntimeCapabilitiesForProviders,
 	type TargetHealth,
+	type TargetStatus,
 	thinkingLevelChoiceLabel,
 	thinkingLevelFromChoiceLabel,
 } from "../../domains/providers/index.js";
@@ -320,7 +322,7 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"Bind base, custom, and shadow native agents such as scout, researcher, and provenance to profiles. ACP delegation agents cannot be bound.",
 	"delegation.defaults.toolGovernance":
 		"clio-policy gates the agent through Clio's safety net; agent-managed trusts the agent; deny-all blocks every tool.",
-	scope: "Comma-separated target or target/model refs. Alt+J / Alt+K step the chat target through this list.",
+	scope: "Choose target-level or exact target/model refs. Alt+J / Alt+K step the chat target through this list.",
 	runtimePlugins: "Comma-separated package names, loaded at startup. Restart Clio after changing.",
 	keybindings:
 		"Renderer controls: Alt+O latest tool, Ctrl+Alt+O or Alt+Shift+O all tools, Alt+P live tool output, Alt+R latest reasoning, Ctrl+Alt+R or Alt+Shift+R all reasoning. Override these in settings.yaml or use /help.",
@@ -597,6 +599,238 @@ function selectListSubmenu(
 		list.onCancel = () => done();
 		return new SubmenuWrapper(title, list, undefined, note);
 	};
+}
+
+interface ScopedModelChecklistEntry {
+	kind: "entry";
+	key: string;
+	ref: string;
+	label: string;
+	detail: string;
+	available: boolean;
+}
+
+interface ScopedModelChecklistGroup {
+	kind: "group";
+	label: string;
+}
+
+type ScopedModelChecklistRow = ScopedModelChecklistEntry | ScopedModelChecklistGroup;
+const SCOPED_MODEL_SELECTION_PREFIX = "__clio_scope_v1__:";
+
+function serializeScopedModelSelection(refs: readonly string[]): string {
+	return `${SCOPED_MODEL_SELECTION_PREFIX}${JSON.stringify(refs)}`;
+}
+
+function parseScopedModelSelection(value: string): string[] | null {
+	if (!value.startsWith(SCOPED_MODEL_SELECTION_PREFIX)) return null;
+	try {
+		const parsed: unknown = JSON.parse(value.slice(SCOPED_MODEL_SELECTION_PREFIX.length));
+		return Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string") ? parsed : null;
+	} catch {
+		return null;
+	}
+}
+
+function compactCapabilityCount(value: number): string {
+	if (!Number.isFinite(value) || value <= 0) return "unknown";
+	if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}m`;
+	if (value >= 1000) return `${Math.round(value / 1000)}k`;
+	return String(Math.round(value));
+}
+
+function scopedModelCapabilityDetail(caps: CapabilityFlags, thinking?: string): string {
+	const enabled = [
+		caps.chat ? "chat" : null,
+		caps.tools ? "tools" : null,
+		caps.reasoning ? "reasoning" : null,
+		caps.vision ? "vision" : null,
+		caps.audio ? "audio" : null,
+		caps.embeddings ? "embeddings" : null,
+		caps.rerank ? "rerank" : null,
+		caps.fim ? "fim" : null,
+	].filter((value): value is string => value !== null);
+	return `Capabilities: ${enabled.length > 0 ? enabled.join(", ") : "none reported"} · context ${compactCapabilityCount(caps.contextWindow)} · max output ${compactCapabilityCount(caps.maxTokens)}${thinking ? ` · thinking ${thinking}` : ""}`;
+}
+
+function scopedModelEntryDetail(providers: ProvidersContract, status: TargetStatus, model: string | null): string {
+	if (!model) {
+		return `${scopedModelCapabilityDetail(status.capabilities)} · target-level scope uses this target's default model when switching targets`;
+	}
+	const resolved = resolveModelRuntimeCapabilitiesForProviders(providers, status.target.id, model);
+	return resolved
+		? scopedModelCapabilityDetail(resolved.capabilities, resolved.thinking.display)
+		: `${scopedModelCapabilityDetail(status.capabilities)} · model details unresolved`;
+}
+
+function buildScopedModelChecklistRows(
+	selectedRefs: readonly string[],
+	providers: ProvidersContract | undefined,
+): { rows: ScopedModelChecklistRow[]; availableRefs: ReadonlySet<string> } {
+	const rows: ScopedModelChecklistRow[] = [];
+	const availableRefs = new Set<string>();
+	if (providers) {
+		for (const status of providers.list()) {
+			const targetRef = status.target.id;
+			rows.push({ kind: "group", label: `Target · ${targetRef}` });
+			availableRefs.add(targetRef);
+			rows.push({
+				kind: "entry",
+				key: `available:${targetRef}`,
+				ref: targetRef,
+				label: `${targetRef} (all models)`,
+				detail: scopedModelEntryDetail(providers, status, null),
+				available: true,
+			});
+			for (const model of modelsForTarget(status)) {
+				const ref = `${targetRef}/${model}`;
+				if (availableRefs.has(ref)) continue;
+				availableRefs.add(ref);
+				rows.push({
+					kind: "entry",
+					key: `available:${ref}`,
+					ref,
+					label: ref,
+					detail: scopedModelEntryDetail(providers, status, model),
+					available: true,
+				});
+			}
+		}
+	}
+	const unavailable = [...new Set(selectedRefs.filter((ref) => !availableRefs.has(ref.trim())))];
+	if (unavailable.length > 0) {
+		rows.push({ kind: "group", label: "Unavailable" });
+		for (const ref of unavailable) {
+			rows.push({
+				kind: "entry",
+				key: `unavailable:${ref}`,
+				ref,
+				label: ref,
+				detail:
+					"Not present in the current provider catalog. It remains selected and will be preserved unchanged unless you uncheck it.",
+				available: false,
+			});
+		}
+	}
+	if (rows.length === 0) rows.push({ kind: "group", label: "No configured targets or scoped references" });
+	return { rows, availableRefs };
+}
+
+class ScopedModelChecklist implements Component {
+	private readonly rows: ScopedModelChecklistRow[];
+	private readonly availableRefs: ReadonlySet<string>;
+	private readonly selectedKeys = new Set<string>();
+	private selectedRow = 0;
+
+	constructor(
+		private readonly originalRefs: readonly string[],
+		providers: ProvidersContract | undefined,
+		private readonly done: (value?: string) => void,
+	) {
+		const built = buildScopedModelChecklistRows(originalRefs, providers);
+		this.rows = built.rows;
+		this.availableRefs = built.availableRefs;
+		for (const ref of originalRefs) {
+			const trimmed = ref.trim();
+			this.selectedKeys.add(this.availableRefs.has(trimmed) ? `available:${trimmed}` : `unavailable:${ref}`);
+		}
+		this.selectedRow = this.nextEntryIndex(0, 1);
+	}
+
+	render(width: number): string[] {
+		const theme = clioTheme();
+		if (!this.rows.some((row) => row.kind === "entry")) {
+			return [theme.fg("dim", "No models are available to select.")];
+		}
+		const visibleRows = Math.min(10, this.rows.length);
+		const [start, end] = scrollWindow(this.rows.length, this.selectedRow, visibleRows);
+		const lines = this.rows.slice(start, end).map((row, offset) => {
+			if (row.kind === "group") return theme.style("dim", row.label, { bold: true });
+			const selected = start + offset === this.selectedRow;
+			const checked = this.selectedKeys.has(row.key);
+			const pointer = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+			const check = theme.fg(checked ? "accent" : "dim", checked ? "[x]" : "[ ]");
+			const label = selected ? theme.style("accent", row.label, { bold: true }) : theme.fg("muted", row.label);
+			return truncateToWidth(`${pointer}${check} ${label}`, Math.max(1, width), ELLIPSIS, true);
+		});
+		const selected = this.rows[this.selectedRow];
+		if (selected?.kind === "entry") {
+			const detail = selected.available ? selected.detail : `Unavailable · ${selected.detail}`;
+			lines.push("", ...wrapTextWithAnsi(theme.fg("dim", detail), Math.max(1, width)).slice(0, 3));
+		}
+		return lines;
+	}
+
+	handleInput(data: string): void {
+		const kb = getKeybindings();
+		if (kb.matches(data, "tui.select.up") || data === "k") {
+			this.selectedRow = this.nextEntryIndex(this.selectedRow - 1, -1);
+			return;
+		}
+		if (kb.matches(data, "tui.select.down") || data === "j") {
+			this.selectedRow = this.nextEntryIndex(this.selectedRow + 1, 1);
+			return;
+		}
+		if (data === " ") {
+			const row = this.rows[this.selectedRow];
+			if (row?.kind !== "entry") return;
+			if (this.selectedKeys.has(row.key)) this.selectedKeys.delete(row.key);
+			else this.selectedKeys.add(row.key);
+			return;
+		}
+		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter")) {
+			this.done(serializeScopedModelSelection(this.selectedRefs()));
+			return;
+		}
+		if (kb.matches(data, "tui.select.cancel")) this.done();
+	}
+
+	invalidate(): void {}
+
+	private nextEntryIndex(from: number, direction: -1 | 1): number {
+		if (!this.rows.some((row) => row.kind === "entry")) return 0;
+		let index = from;
+		for (let attempts = 0; attempts < this.rows.length; attempts += 1) {
+			if (index < 0) index = this.rows.length - 1;
+			if (index >= this.rows.length) index = 0;
+			if (this.rows[index]?.kind === "entry") return index;
+			index += direction;
+		}
+		return 0;
+	}
+
+	private selectedRefs(): string[] {
+		const preserved = this.originalRefs.filter((ref) => {
+			const trimmed = ref.trim();
+			const key = this.availableRefs.has(trimmed) ? `available:${trimmed}` : `unavailable:${ref}`;
+			return this.selectedKeys.has(key);
+		});
+		const selectedOriginalRefs = new Set(this.originalRefs.map((ref) => ref.trim()));
+		const additions = this.rows
+			.filter((row): row is ScopedModelChecklistEntry => row.kind === "entry" && row.available)
+			.filter((row) => this.selectedKeys.has(row.key) && !selectedOriginalRefs.has(row.ref))
+			.map((row) => row.ref);
+		return [...preserved, ...additions];
+	}
+}
+
+function scopedModelsSubmenu(
+	selectedRefs: readonly string[],
+	providers: ProvidersContract | undefined,
+): SettingSubmenuBuilder {
+	return (_currentValue, done) =>
+		new SubmenuWrapper(
+			"Choose the model cycle set",
+			new ScopedModelChecklist(selectedRefs, providers, done),
+			buildHint(
+				[
+					{ key: "Space", verb: "toggle" },
+					{ key: "Enter", verb: "continue" },
+				],
+				"back",
+			),
+			"Target entries cycle by target, using its default model when switching targets. Model entries pin one exact target/model reference.",
+		);
 }
 
 /** Two pickers in sequence joined into one committed value; Esc at either step cancels. */
@@ -1005,8 +1239,8 @@ export function buildSettingItems(
 		...targetRows(settings, options),
 		targetAddCta(),
 		settingItem("scope", scopeText, {
-			submenu: editTextSubmenu("Edit model cycle scope comma-separated list"),
-			affordance: "free text",
+			submenu: scopedModelsSubmenu(scopeList, options?.providers),
+			affordance: "opens provider-backed checklist",
 		}),
 		settingItem("modelSelector.recentLimit", String(settings.modelSelector.recentLimit), {
 			values: ["6", "12", "20", "50"],
@@ -1580,10 +1814,12 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			settings.workers.default.model = value === "(unset)" || value === "" ? null : value;
 			return;
 		case "scope":
-			settings.scope = value
-				.split(",")
-				.map((v) => v.trim())
-				.filter(Boolean);
+			settings.scope =
+				parseScopedModelSelection(value) ??
+				value
+					.split(",")
+					.map((v) => v.trim())
+					.filter(Boolean);
 			return;
 		case "budget.sessionCeilingUsd": {
 			const parsed = Number(value);
@@ -1783,6 +2019,10 @@ function formatScopeConfirmTitle(plan: SettingsChangePlan, width: number): strin
 }
 
 function humanizeChangePlanValue(plan: SettingsChangePlan): string {
+	if (plan.rowId === "scope") {
+		const refs = parseScopedModelSelection(plan.selectedValue);
+		if (refs) return refs.length > 0 ? refs.join(", ") : "(empty)";
+	}
 	const separatorIndex = plan.selectedValue.indexOf(PROFILE_FIELD_SEPARATOR);
 	if (separatorIndex < 0) return plan.selectedValue;
 	const head = plan.selectedValue.slice(0, separatorIndex).trim();
@@ -2708,7 +2948,9 @@ export interface OpenSettingsOverlayDeps {
 }
 
 function formatSettingChangeNotice(id: string, value: string, scope: "session" | "global"): string {
-	return `${id} set to ${value} (${scope === "global" ? "saved globally" : "this session"})`;
+	const scopedRefs = id === "scope" ? parseScopedModelSelection(value) : null;
+	const displayValue = scopedRefs ? (scopedRefs.length > 0 ? scopedRefs.join(", ") : "(empty)") : value;
+	return `${id} set to ${displayValue} (${scope === "global" ? "saved globally" : "this session"})`;
 }
 
 export interface SettingsOverlayHandle extends OverlayHandle {
