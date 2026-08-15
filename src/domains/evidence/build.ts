@@ -43,6 +43,7 @@ import {
 	type EvidenceProtectedArtifactsFile,
 	type EvidenceRawTraceRow,
 	type EvidenceReceiptFile,
+	type EvidenceRunLink,
 	type EvidenceRunSource,
 	type EvidenceTag,
 	type EvidenceToolEvent,
@@ -61,9 +62,29 @@ export interface BuildEvidenceOptions {
 	sessionId?: string;
 }
 
+/**
+ * One session ledger entry's run attribution: the run it resolved to, plus the
+ * EvidenceRunLink provenance the bundle exports for it. An entry that resolved
+ * to no run still carries its candidates, so an ambiguous entry is reported
+ * rather than silently unattributed or claimed by whichever bundle asks.
+ */
+interface SessionRunLink {
+	runId: string | null;
+	kind: EvidenceRunLink["kind"];
+	confidence: EvidenceLinkConfidence;
+	candidateRunIds: string[];
+}
+
+/** Attribution context: one run's span, without the rest of its envelope. */
+interface RunWindow {
+	runId: string;
+	startedAt: string;
+	endedAt: string | null;
+}
+
 interface LinkedSessionEntry {
 	sessionId: string;
-	runId: string | null;
+	link: SessionRunLink;
 	entry: SessionEntry;
 }
 
@@ -79,6 +100,12 @@ interface AuditLinkResult {
 	readErrors: string[];
 }
 
+/** Raw runs.json rows, kept unparsed so sibling-run attribution and strict source parsing share one read. */
+interface RunLedgerRows {
+	rows: ReadonlyArray<unknown>;
+	path: string;
+}
+
 type EvidenceSource = { kind: "run"; runId: string } | { kind: "session"; sessionId: string };
 
 export async function buildEvidence(options: BuildEvidenceOptions): Promise<EvidenceBuildResult> {
@@ -92,7 +119,8 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		options.runId !== undefined
 			? { kind: "run", runId: options.runId }
 			: { kind: "session", sessionId: options.sessionId ?? "" };
-	const envelopes = await readRunLedger(options.stateDir, source);
+	const ledger = await readRunLedger(options.stateDir);
+	const envelopes = selectRunEnvelopes(ledger, source);
 	if (envelopes.length === 0) {
 		throw new Error(source.kind === "run" ? `run not found: ${source.runId}` : `session not found: ${source.sessionId}`);
 	}
@@ -119,7 +147,7 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		).map((entry) => entry.artifact),
 	};
 	const directory = evidenceDirectory(options.dataDir, evidenceId);
-	const sessionLinks = await linkSessionEntries(options.stateDir, source, runSources);
+	const sessionLinks = await linkSessionEntries(options.stateDir, source, runSources, ledger);
 	const auditLinks = await linkAuditRows(options.stateDir, source, runSources, sessionLinks);
 	const toolEventRows = toolEvents(runSources, sessionLinks, auditLinks);
 	const protectedArtifactsRaw = protectedArtifactsFile(sessionLinks);
@@ -345,6 +373,20 @@ function buildFindings(
 			),
 		);
 	}
+	const ambiguousEntries = sessionLinks.entries.filter(
+		(linked) => linked.link.kind === "ambiguous-timestamp-window",
+	).length;
+	if (ambiguousEntries > 0) {
+		findings.push(
+			finding(
+				findings.length,
+				"info",
+				"best-effort-link",
+				null,
+				`${ambiguousEntries} session entry(s) fell inside more than one concurrent run window`,
+			),
+		);
+	}
 	const bestEffortAuditRows = auditLinks.rows.filter((row) => row.confidence === "best-effort").length;
 	if (bestEffortAuditRows > 0) {
 		findings.push(
@@ -410,7 +452,10 @@ function validationEvidenceRunIds(
 }
 
 function validationRunIdFor(linked: LinkedSessionEntry, runSources: ReadonlyArray<EvidenceRunSource>): string | null {
-	if (linked.runId !== null) return linked.runId;
+	if (linked.link.runId !== null) return linked.link.runId;
+	// A link that names no run leaves the bundle's scope to decide: a single-run
+	// bundle credits its run, a multi-run bundle credits nobody, because an
+	// entry two concurrent runs could have produced proves neither validated.
 	if (runSources.length !== 1) return null;
 	return runSources[0]?.envelope.id ?? null;
 }
@@ -568,7 +613,12 @@ function cleanedTraceRows(
 			rows.push({ kind: "tool-summary", ...event });
 		}
 	}
-	for (const event of toolEventRows.filter((item) => item.runId === null)) rows.push({ kind: "tool-summary", ...event });
+	// Everything the per-run grouping above did not claim, so an event whose run
+	// attribution is ambiguous or points outside this bundle still appears once.
+	const groupedRunIds = new Set(runSources.map((item) => item.envelope.id));
+	for (const event of toolEventRows.filter((item) => item.runId === null || !groupedRunIds.has(item.runId))) {
+		rows.push({ kind: "tool-summary", ...event });
+	}
 	for (const item of findings) rows.push({ kind: "finding", ...item });
 	return rows;
 }
@@ -610,8 +660,10 @@ async function linkSessionEntries(
 	stateDir: string,
 	source: EvidenceOverview["source"],
 	runSources: ReadonlyArray<EvidenceRunSource>,
+	ledger: RunLedgerRows,
 ): Promise<SessionLinkResult> {
 	const attemptedSessionIds = sourceSessionIds(source, runSources);
+	const windows = attributionWindows(ledger, runSources, attemptedSessionIds);
 	const result: SessionLinkResult = {
 		entries: [],
 		attemptedSessionIds,
@@ -626,13 +678,22 @@ async function linkSessionEntries(
 		}
 		result.readErrors.push(...read.errors);
 		for (const entry of read.entries) {
-			const runId = linkedRunIdForTimestamp(entry.timestamp, runSources);
-			if (source.kind === "run" && runId !== source.runId) continue;
-			result.entries.push({ sessionId, runId, entry });
+			const link = linkSessionEntry(entry, windows);
+			if (source.kind === "run" && !linkCoversRun(link, source.runId)) continue;
+			result.entries.push({ sessionId, link, entry });
 		}
 	}
 	result.entries.sort(compareLinkedSessionEntries);
 	return result;
+}
+
+/**
+ * An ambiguous entry belongs in the bundle of every run it may have come from.
+ * Requiring an exact match is how coverage disappeared in proportion to how
+ * parallel the session was.
+ */
+function linkCoversRun(link: SessionRunLink, runId: string): boolean {
+	return link.runId === runId || link.candidateRunIds.includes(runId);
 }
 
 function sourceSessionIds(source: EvidenceOverview["source"], runSources: ReadonlyArray<EvidenceRunSource>): string[] {
@@ -645,15 +706,80 @@ function sourceSessionIds(source: EvidenceOverview["source"], runSources: Readon
 	return uniqueStrings(values);
 }
 
-function linkedRunIdForTimestamp(timestamp: string, runSources: ReadonlyArray<EvidenceRunSource>): string | null {
-	const candidates = runSources
-		.filter((source) => timestampInRunWindow(timestamp, source.envelope))
-		.map((source) => source.envelope.id)
+function linkSessionEntry(entry: SessionEntry, windows: ReadonlyArray<RunWindow>): SessionRunLink {
+	const stamped = writeTimeRunId(entry);
+	if (stamped !== null) {
+		return { runId: stamped, kind: "entry-run-id", confidence: "exact", candidateRunIds: [stamped] };
+	}
+	const candidates = windows
+		.filter((window) => timestampInRunWindow(entry.timestamp, window))
+		.map((window) => window.runId)
 		.sort(compareStrings);
-	return candidates.length === 1 ? (candidates[0] ?? null) : null;
+	const only = candidates.length === 1 ? candidates[0] : undefined;
+	if (only !== undefined) {
+		return { runId: only, kind: "timestamp-window", confidence: "best-effort", candidateRunIds: candidates };
+	}
+	if (candidates.length > 1) {
+		return { runId: null, kind: "ambiguous-timestamp-window", confidence: "best-effort", candidateRunIds: candidates };
+	}
+	return { runId: null, kind: "no-run-window", confidence: "best-effort", candidateRunIds: [] };
 }
 
-function timestampInRunWindow(timestamp: string, envelope: RunEnvelope): boolean {
+/**
+ * Attribution the producer wrote down. Protected-artifact entries carry the
+ * run id of the dispatch that registered them, so they never need the clock.
+ * Every other entry kind is written without run context and falls back to
+ * timestamp windowing.
+ */
+function writeTimeRunId(entry: SessionEntry): string | null {
+	return entry.kind === "protectedArtifact" ? (entry.runId ?? null) : null;
+}
+
+/**
+ * Windows for every run that may have produced an entry in the linked
+ * sessions, not just the runs the bundle reports on. A run-scoped bundle that
+ * only knows its own window cannot tell an entry it produced from one a
+ * concurrent sibling produced, and claims both. These windows are attribution
+ * context; they never become run sources.
+ */
+function attributionWindows(
+	ledger: RunLedgerRows,
+	runSources: ReadonlyArray<EvidenceRunSource>,
+	sessionIds: ReadonlyArray<string>,
+): RunWindow[] {
+	const windows = new Map<string, RunWindow>();
+	for (const source of runSources) {
+		windows.set(source.envelope.id, {
+			runId: source.envelope.id,
+			startedAt: source.envelope.startedAt,
+			endedAt: source.envelope.endedAt,
+		});
+	}
+	const linkedSessions = new Set(sessionIds);
+	// Sibling rows are read leniently: they are context, not the bundle's
+	// subject, so a retired envelope shape must not fail the build.
+	for (const row of ledger.rows) {
+		if (!isRecord(row)) continue;
+		const id = readOptionalString(row.id);
+		const startedAt = readOptionalString(row.startedAt);
+		const sessionId = readOptionalString(row.sessionId);
+		if (id === null || startedAt === null || sessionId === null) continue;
+		if (windows.has(id) || !linkedSessions.has(sessionId)) continue;
+		windows.set(id, { runId: id, startedAt, endedAt: readOptionalString(row.endedAt) });
+	}
+	return [...windows.values()].sort((left, right) => compareStrings(left.runId, right.runId));
+}
+
+/** Run-attribution provenance as an exported row carries it. */
+function evidenceRunLink(link: SessionRunLink): EvidenceRunLink {
+	return {
+		kind: link.kind,
+		confidence: link.confidence,
+		...(link.candidateRunIds.length > 1 ? { candidateRunIds: link.candidateRunIds } : {}),
+	};
+}
+
+function timestampInRunWindow(timestamp: string, envelope: { startedAt: string; endedAt: string | null }): boolean {
 	const value = Date.parse(timestamp);
 	const start = Date.parse(envelope.startedAt);
 	const end = envelope.endedAt === null ? Number.POSITIVE_INFINITY : Date.parse(envelope.endedAt);
@@ -674,7 +800,7 @@ interface SessionToolCall {
 	tool: string;
 	args: unknown;
 	timestamp: string;
-	runId: string | null;
+	link: SessionRunLink;
 	sessionId: string;
 }
 
@@ -684,7 +810,7 @@ interface SessionToolResult {
 	result: unknown;
 	isError: boolean;
 	timestamp: string;
-	runId: string | null;
+	link: SessionRunLink;
 	sessionId: string;
 }
 
@@ -698,7 +824,8 @@ function sessionToolEvents(entries: ReadonlyArray<LinkedSessionEntry>): Evidence
 		if (entry.kind === "bashExecution") {
 			events.push({
 				source: "session-entry",
-				runId: linked.runId,
+				runId: linked.link.runId,
+				runLink: evidenceRunLink(linked.link),
 				sessionId: linked.sessionId,
 				tool: "bash",
 				count: 1,
@@ -731,9 +858,11 @@ function sessionToolEvents(entries: ReadonlyArray<LinkedSessionEntry>): Evidence
 			pairedIds.add(fallbackId);
 		}
 		const tool = call?.tool ?? result.tool;
+		const link = call?.link ?? result.link;
 		events.push({
 			source: "session-entry",
-			runId: call?.runId ?? result.runId,
+			runId: link.runId,
+			runLink: evidenceRunLink(link),
 			sessionId: call?.sessionId ?? result.sessionId,
 			tool,
 			count: 1,
@@ -753,7 +882,8 @@ function sessionToolEvents(entries: ReadonlyArray<LinkedSessionEntry>): Evidence
 		if (pairedIds.has(call.id)) continue;
 		events.push({
 			source: "session-entry",
-			runId: call.runId,
+			runId: call.link.runId,
+			runLink: evidenceRunLink(call.link),
 			sessionId: call.sessionId,
 			tool: call.tool,
 			count: 1,
@@ -796,7 +926,7 @@ function extractSessionToolCall(entry: MessageEntry, linked: LinkedSessionEntry)
 		block?.arguments ??
 		block?.args ??
 		undefined;
-	return { id, tool, args, timestamp: entry.timestamp, runId: linked.runId, sessionId: linked.sessionId };
+	return { id, tool, args, timestamp: entry.timestamp, link: linked.link, sessionId: linked.sessionId };
 }
 
 function extractSessionToolResult(entry: MessageEntry, linked: LinkedSessionEntry): SessionToolResult {
@@ -824,7 +954,7 @@ function extractSessionToolResult(entry: MessageEntry, linked: LinkedSessionEntr
 		result,
 		isError: payload?.isError === true || payload?.error === true,
 		timestamp: entry.timestamp,
-		runId: linked.runId,
+		link: linked.link,
 		sessionId: linked.sessionId,
 	};
 }
@@ -1039,7 +1169,8 @@ function protectedArtifactsFile(sessionLinks: SessionLinkResult): EvidenceProtec
 			const event: EvidenceProtectedArtifactsFile["events"][number] = {
 				kind: "protected-artifact",
 				sessionId: linked.sessionId,
-				runId: linked.runId,
+				runId: linked.link.runId,
+				runLink: evidenceRunLink(linked.link),
 				timestamp: linked.entry.timestamp,
 				turnId: linked.entry.turnId,
 				parentTurnId: linked.entry.parentTurnId,
@@ -1116,9 +1247,23 @@ function formatEvidenceSource(source: EvidenceOverview["source"]): string {
 	return `eval ${source.evalId}`;
 }
 
+/**
+ * Run attribution as the transcript states it. A windowed link says so, and an
+ * ambiguous one names its candidates instead of printing a run id the bundle
+ * cannot stand behind.
+ */
+function transcriptRunLink(link: SessionRunLink): string {
+	if (link.kind === "entry-run-id") return ` run=${link.runId}`;
+	if (link.kind === "timestamp-window") return ` run=${link.runId} link=timestamp-window`;
+	if (link.kind === "ambiguous-timestamp-window") {
+		return ` run=? link=ambiguous-timestamp-window candidates=${link.candidateRunIds.join(",")}`;
+	}
+	return "";
+}
+
 function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 	const entry = linked.entry;
-	const prefix = `- ${entry.timestamp} session=${linked.sessionId}${linked.runId === null ? "" : ` run=${linked.runId}`}`;
+	const prefix = `- ${entry.timestamp} session=${linked.sessionId}${transcriptRunLink(linked.link)}`;
 	if (entry.kind === "message") {
 		if (entry.role === "tool_call") {
 			const call = extractSessionToolCall(entry, linked);
@@ -1195,7 +1340,7 @@ function renderFindings(findings: ReadonlyArray<EvidenceFinding>): string {
 	return `${lines.join("\n")}\n`;
 }
 
-async function readRunLedger(stateDir: string, source: EvidenceSource): Promise<RunEnvelope[]> {
+async function readRunLedger(stateDir: string): Promise<RunLedgerRows> {
 	const target = join(stateDir, "runs.json");
 	let raw: string;
 	try {
@@ -1207,13 +1352,17 @@ async function readRunLedger(stateDir: string, source: EvidenceSource): Promise<
 	}
 	const parsed = parseJson(raw, target);
 	if (!Array.isArray(parsed)) throw new Error(`${target}: expected array`);
+	return { rows: parsed, path: target };
+}
+
+function selectRunEnvelopes(ledger: RunLedgerRows, source: EvidenceSource): RunEnvelope[] {
 	// Strictly validate the selected evidence source, not every retained row:
 	// older rows may use a retired envelope shape. Keep the original index so
 	// corruption in a selected row still fails with an actionable location.
-	return parsed.flatMap((entry, index) => {
+	return ledger.rows.flatMap((entry, index) => {
 		if (!isRecord(entry)) return [];
 		const selected = source.kind === "run" ? entry.id === source.runId : entry.sessionId === source.sessionId;
-		return selected ? [parseRunEnvelope(entry, `${target}[${index}]`)] : [];
+		return selected ? [parseRunEnvelope(entry, `${ledger.path}[${index}]`)] : [];
 	});
 }
 

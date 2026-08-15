@@ -148,6 +148,20 @@ export interface EvidenceRunSource {
 
 export type EvidenceLinkConfidence = "exact" | "best-effort";
 
+/**
+ * How a row's `runId` was derived. `entry-run-id` is the run id the producer
+ * stamped on the record at write time and is exact. The others are timestamp
+ * windowing, which is a fallback: concurrent runs share one clock, so their
+ * windows overlap and containment cannot name an owner. A row inside more than
+ * one window is `ambiguous-timestamp-window`, reports a null `runId`, and lists
+ * every run it may belong to instead of picking one.
+ */
+export interface EvidenceRunLink {
+	kind: "entry-run-id" | "timestamp-window" | "ambiguous-timestamp-window" | "no-run-window";
+	confidence: EvidenceLinkConfidence;
+	candidateRunIds?: string[];
+}
+
 export type EvidenceToolEventSource = "session-entry" | "audit-row" | "receipt-aggregate" | "eval-command";
 
 export interface EvidenceToolEvent {
@@ -168,6 +182,8 @@ export interface EvidenceToolEvent {
 	actionClass?: string;
 	argsPreview?: string;
 	resultPreview?: string;
+	/** How `runId` was derived. Present on events built from session ledger entries. */
+	runLink?: EvidenceRunLink;
 }
 
 export interface EvidenceAuditLinkedRow {
@@ -269,8 +285,11 @@ export interface EvidenceProtectedArtifactEvent {
 	artifact: ProtectedArtifact;
 	toolName?: string;
 	toolCallId?: string;
+	/** Run id the session ledger recorded on the entry itself at write time. */
 	sourceRunId?: string;
 	correlationId?: string;
+	/** How `runId` was derived. */
+	runLink?: EvidenceRunLink;
 }
 
 export interface EvidenceProtectedArtifactsFile {
