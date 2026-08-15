@@ -10,6 +10,7 @@ import {
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { routingChangeNotices } from "../core/session-routing.js";
+import { visibleWidth } from "../engine/tui.js";
 import {
 	budgetAlertNotice,
 	middlewareHookFailedSessionNotice,
@@ -26,6 +27,7 @@ import {
 } from "./loop-guard-interrupt.js";
 import {
 	type AgentStatus,
+	INLINE_STATUS_INDENT_COLS,
 	resolveInlineVerb,
 	type StatusPhase,
 	spinnerFrame,
@@ -177,9 +179,10 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				deps.setStatusLine(null);
 				if (status.summary) deps.setLastTurnSummary(status.summary);
 			} else {
-				const verb = resolveInlineVerb(status, now(), deps.getTerminalColumns());
+				const cols = deps.getTerminalColumns();
+				const frame = cols < 30 ? "" : `${spinnerFrame(statusInlineFrame)} `;
+				const verb = resolveInlineVerb(status, now(), cols, INLINE_STATUS_INDENT_COLS + visibleWidth(frame));
 				if (verb) {
-					const frame = deps.getTerminalColumns() < 30 ? "" : `${spinnerFrame(statusInlineFrame)} `;
 					deps.setStatusLine({ phase: status.phase, verb: `${frame}${verb.text}`, toneHint: verb.toneHint });
 					statusInlineFrame = (statusInlineFrame + 1) % 10;
 				} else {

@@ -19,7 +19,7 @@ import {
 	renderToolSubline,
 	unwrapResultEnvelope,
 } from "./renderers/tool-execution.js";
-import type { StatusPhase, VerbRender } from "./status/index.js";
+import { INLINE_STATUS_INDENT_COLS, type StatusPhase, type VerbRender } from "./status/index.js";
 import { clioTheme, fgSequence, GLYPH, markdownTheme, SGR_DIM, SGR_RESET } from "./theme/index.js";
 
 // Fenced code reaches the screen through pi-tui's Markdown component, which
@@ -601,6 +601,9 @@ function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number): string[]
 	);
 }
 
+/** The indent resolveInlineVerb budgets against when it fits the verb to the terminal. */
+const STATUS_INDENT = " ".repeat(INLINE_STATUS_INDENT_COLS);
+
 function styleStatusVerb(text: string, toneHint: VerbRender["toneHint"]): string {
 	if (toneHint === "error") return `${RED_CRIT}${text}${RESET}`;
 	if (toneHint === "warn") return `${AMBER}${text}${RESET}`;
@@ -765,10 +768,12 @@ function renderEntryLines(
 	if (!labeled && !hasVisibleOutput(entry)) {
 		lines.push(clioPrefix.trimEnd());
 		if (shouldRenderStatus) {
-			lines.push(`  ${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
+			lines.push(
+				`${STATUS_INDENT}${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`,
+			);
 		}
 	} else if (shouldRenderStatus) {
-		lines.push(`  ${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
+		lines.push(`${STATUS_INDENT}${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
 	}
 	return lines;
 }

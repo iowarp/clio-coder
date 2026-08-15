@@ -13,5 +13,11 @@ export {
 	type TurnSummary,
 	type WatchdogTier,
 } from "./types.js";
-export { resolveFooterVerb, resolveInlineVerb, spinnerFrame, type VerbRender } from "./verbs.js";
+export {
+	INLINE_STATUS_INDENT_COLS,
+	resolveFooterVerb,
+	resolveInlineVerb,
+	spinnerFrame,
+	type VerbRender,
+} from "./verbs.js";
 export { computeWatchdogTier, TIER_THRESHOLDS_MS } from "./watchdog.js";
