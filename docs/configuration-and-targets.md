@@ -342,7 +342,7 @@ Supporting mechanics:
 
 ## Settings Center
 
-Open `/settings` in the TUI to edit session-visible defaults in a full-screen transactional Center. Wide terminals (≥72 columns) show sections in a left sidebar and the selected section's rows in the main pane; ultrawide terminals (≥112 columns) expand the layout to include a dedicated right-hand inspector. Below 72 columns, the Center switches to a modal drill-down stack (section list → section rows → detail drawer) with breadcrumbs, `/` search filtering, and `Esc` backtracking.
+Open `/settings` in the TUI to edit session-visible defaults in a full-screen transactional Center. Wide terminals (≥72 columns) show sections in a left sidebar and the selected section's rows in the main pane; ultrawide terminals (≥112 columns) expand the layout to include a dedicated right-hand inspector. Below 72 columns, the Center switches to a modal drill-down stack (section list → section rows → detail drawer) with breadcrumbs, `/` search filtering, and `Esc` backtracking. Below 60 columns, side margins drop to zero for full-width presentation.
 
 Every value change in Settings is transactional: selecting an editable row and pressing `Enter` opens a dedicated value picker, text input dialog, or provider-backed checklist (rather than immediately cycling values). Clio constructs an immutable change plan with preflight impact analysis and presents explicit destination choices:
 - `Apply this session` (for live-capable settings)
