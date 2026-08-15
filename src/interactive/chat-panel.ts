@@ -98,6 +98,13 @@ type TextSegment = {
 	 * answer that was 5-22 ms per frame to reproduce identical rows.
 	 */
 	wrapCache?: { width: number; completedLines: number; lines: string[] };
+	/**
+	 * A protocol suggestion line and the answer prose beneath it, when the model
+	 * opened its reply with both in one segment (which is what the skills prompt
+	 * asks for). The answer half is a segment of its own so it keeps its own
+	 * Markdown and wrap caches; it is cached here rather than rebuilt per frame.
+	 */
+	suggestionSplit?: { suggestion: string; answer: TextSegment };
 };
 type ToolSegment = {
 	kind: "tool";
@@ -420,6 +427,41 @@ function lastAssistantIndex(
 function hasStreamingText(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
 	const tail = entry.segments[entry.segments.length - 1];
 	return tail?.kind === "text" && !tail.finalized && tail.text.trim().length > 0;
+}
+
+/**
+ * Split a reply that opens with the skill-suggestion protocol line into that
+ * line and the answer beneath it.
+ *
+ * The prompt asks the model to *begin its reply* with the suggestion, so the
+ * usual shape is one segment holding both. Classifying that whole segment as
+ * advisory left the turn with no voice glyph at all: the suggestion did not
+ * claim it and the answer never got the chance. Returns null when the segment
+ * is only a suggestion, which stays advisory in full.
+ */
+function skillSuggestionSplit(seg: TextSegment): { suggestion: string; answer: TextSegment } | null {
+	if (!seg.text.startsWith(SKILL_SUGGESTION_PREFIX)) return null;
+	const breakIndex = seg.text.indexOf("\n");
+	if (breakIndex < 0) return null;
+	const answerText = seg.text.slice(breakIndex + 1);
+	if (answerText.trim().length === 0) return null;
+	const split = seg.suggestionSplit ?? {
+		suggestion: "",
+		answer: { kind: "text", text: answerText, finalized: seg.finalized } as TextSegment,
+	};
+	seg.suggestionSplit = split;
+	split.suggestion = seg.text.slice(0, breakIndex);
+	const answer = split.answer;
+	if (answer.text === answerText && answer.finalized === seg.finalized) return split;
+	// The answer half follows the same cache rules as any other segment: the
+	// streaming wrap cache assumes append-only text, so a rewrite or a
+	// finalization drops it and a delta keeps it.
+	const appendOnly = !seg.finalized && answer.finalized === seg.finalized && answerText.startsWith(answer.text);
+	answer.text = answerText;
+	answer.finalized = seg.finalized;
+	if (!appendOnly) delete answer.wrapCache;
+	if (answer.md) answer.md.setText(answerText);
+	return split;
 }
 
 function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
@@ -759,6 +801,17 @@ function renderEntryLines(
 		// A leading skill-suggestion protocol line is advisory rather than the
 		// answer, so it renders in place without claiming the turn's voice glyph.
 		if (seg.kind === "text" && seg.text.length === 0) continue;
+		const split = seg.kind === "text" ? skillSuggestionSplit(seg) : null;
+		if (split) {
+			// The suggestion line hangs plain and the answer beneath it is ordinary
+			// prose, so it claims the glyph when nothing else has.
+			lines.push(...hangProseLines(wrapTextWithAnsi(split.suggestion, proseWidth)));
+			const answerLines = renderTextSegmentLines(split.answer, proseWidth);
+			if (answerLines.length === 0) continue;
+			lines.push(...(labeled ? hangProseLines(answerLines) : hangProseLines(answerLines, clioPrefix)));
+			labeled = true;
+			continue;
+		}
 		const rendered =
 			seg.kind === "text" ? renderTextSegmentLines(seg, proseWidth) : renderErrorSegmentLines(seg, proseWidth);
 		if (rendered.length === 0) continue;
