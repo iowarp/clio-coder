@@ -132,34 +132,34 @@ Slash commands are available inside the TUI. Type `/` at the start of the prompt
 
 The registry table below lists the available interactive slash commands. On a bare `/`, commands are presented in groups (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Aliases are stem-gated: they are hidden by default and only surfaced when the typed stem matches the alias spelling. The "Usage" column details expected arguments, with brackets `[]` indicating optional arguments and angle brackets `<>` indicating required arguments.
 
-| Group | Command | Aliases | Usage | Purpose |
-| --- | --- | --- | --- | --- |
-| **Run** | `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] <agent> <task>` | Run a fleet agent |
-| **Run** | `/delegate` | - | `/delegate <agent-id> <task>` | Run an ACP delegation agent |
-| **Run** | `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
-| **Run** | `/targets` | - | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
-| **Inspect** | `/cost` | - | `/cost` | Show session token and cost totals |
-| **Inspect** | `/context` | `/ctx`, `/compact` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
-| **Inspect** | `/fleet` | - | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
-| **Inspect** | `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
-| **Inspect** | `/memory` | - | `/memory seed` | Inspect task memory or seed it from the newest handoff |
-| **Inspect** | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
-| **Configure** | `/thinking` | - | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
-| **Configure** | `/output` | - | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
-| **Configure** | `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
-| **Configure** | `/scoped-models` | - | `/scoped-models` | Open Settings → Models: the Alt+J / Alt+K cycle set and favorites |
-| **Configure** | `/settings` | `/config` | `/settings [section]` | Open interactive Settings Center |
-| **Configure** | `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
-| **Configure** | `/prompts` | - | `/prompts` | List prompt templates |
-| **Configure** | `/extensions` | - | `/extensions` | List installed extensions |
-| **Configure** | `/share` | - | `/share export <path> \| /share import [--dry-run] [--force] <path>` | Export or import Clio archives |
-| **Sessions** | `/quit` | `/exit` | `/quit` | Exit Clio Coder |
-| **Sessions** | `/help` | - | `/help [query]` | Open the interactive help center showing commands and keys |
-| **Sessions** | `/resume` | - | `/resume` | Resume a past session |
-| **Sessions** | `/new` | - | `/new` | Start a fresh session |
-| **Sessions** | `/tree` | - | `/tree` | Open session tree navigator |
-| **Sessions** | `/fork` | - | `/fork` | Fork from an assistant turn |
-| **Sessions** | `/export` | - | `/export [path]` | Export the session transcript to Markdown |
+| Command | Aliases | Usage | Purpose |
+| --- | --- | --- | --- |
+| `/quit` | `/exit` | `/quit` | Exit Clio Coder |
+| `/help` | - | `/help [query]` | Open the interactive help center showing commands and keys |
+| `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
+| `/prompts` | - | `/prompts` | List prompt templates |
+| `/extensions` | - | `/extensions` | List installed extensions |
+| `/share` | - | `/share export <path> \| /share import [--dry-run] [--force] <path>` | Export or import Clio archives |
+| `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] <agent> <task>` | Run a fleet agent |
+| `/delegate` | - | `/delegate <agent-id> <task>` | Run an ACP delegation agent |
+| `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
+| `/targets` | - | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
+| `/cost` | - | `/cost` | Show session token and cost totals |
+| `/context` | `/ctx`, `/compact` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
+| `/fleet` | - | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
+| `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
+| `/memory` | - | `/memory seed` | Inspect task memory or seed it from the newest handoff |
+| `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
+| `/thinking` | - | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
+| `/output` | - | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
+| `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
+| `/scoped-models` | - | `/scoped-models` | Open Settings → Models: the Alt+J / Alt+K cycle set and favorites |
+| `/settings` | `/config` | `/settings [section]` | Open interactive settings |
+| `/resume` | - | `/resume` | Resume a past session |
+| `/new` | - | `/new` | Start a fresh session |
+| `/tree` | - | `/tree` | Open session tree navigator |
+| `/fork` | - | `/fork` | Fork from an assistant turn |
+| `/export` | - | `/export [path]` | Export the session transcript to Markdown |
 
 `/context` with no arguments opens the context-window ledger overlay. The
 subcommands own the durable project-context noun: `compact` summarizes older
