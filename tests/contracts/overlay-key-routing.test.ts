@@ -107,7 +107,7 @@ const neverMatches = () => false;
 describe("modal precedence", () => {
 	it("keeps every open overlay ahead of the editor and active run", () => {
 		strictEqual(overlayOwnsInput("closed"), false);
-		for (const state of ["fleet", "agents", "settings", "ask-user"] satisfies ReadonlyArray<OverlayState>) {
+		for (const state of ["tasks", "agents", "settings", "ask-user"] satisfies ReadonlyArray<OverlayState>) {
 			strictEqual(overlayOwnsInput(state), true, state);
 		}
 	});
@@ -229,13 +229,10 @@ describe("list-overlay key routing", () => {
 	it("routes CSI-u Escape through app-owned overlay close handlers", () => {
 		for (const state of [
 			"dispatch-board",
-			"providers",
 			"auth",
 			"cost",
 			"context-view",
-			"thinking",
 			"model",
-			"scoped-models",
 			"settings",
 			"message-picker",
 		] satisfies ReadonlyArray<OverlayState>) {

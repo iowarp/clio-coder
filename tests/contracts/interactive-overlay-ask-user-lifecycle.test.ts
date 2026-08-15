@@ -81,7 +81,6 @@ function makeLifecycle(results: Deferred<AskUserResult>[]): {
 		notify: () => {},
 		terminal: { columns: 100 },
 		dispatchBoard: {},
-		getObservabilitySnapshot: () => ({}),
 		chatPanel: {},
 		io: { stdout: () => {}, stderr: () => {} },
 		readStructuredEntries: () => [],

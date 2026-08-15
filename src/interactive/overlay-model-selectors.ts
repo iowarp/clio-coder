@@ -1,20 +1,13 @@
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
+import type { ProvidersContract } from "../domains/providers/index.js";
+import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { TUI } from "../engine/tui.js";
 import type { FooterDashboardPanel } from "./footer/dashboard.js";
+import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
-import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
 import { openSettingsOverlay, type SettingsSectionId } from "./overlays/settings.js";
-import {
-	openThinkingOverlay,
-	readThinkingLevel,
-	resolveAvailableThinkingLevels,
-	resolveThinkingCapability,
-	resolveThinkingLabeler,
-} from "./overlays/thinking-selector.js";
-import type { TargetsHubNoticeLevel } from "./providers-overlay.js";
 
 export interface OverlayModelSelectorsDeps {
 	tui: TUI;
@@ -22,56 +15,30 @@ export interface OverlayModelSelectorsDeps {
 	providers: ProvidersContract;
 	bus: SafeEventBus;
 	refreshFooter: Pick<FooterDashboardPanel, "refresh">["refresh"];
-	notify: (level: TargetsHubNoticeLevel, text: string, key?: string) => void;
+	notify: (level: InteractiveNoticeLevel, text: string, key?: string) => void;
 	closeOverlay: () => void;
 	getSettings?: () => Readonly<ClioSettings>;
 	writeSettings?: (next: ClioSettings) => void;
 	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "global") => void;
 	onSelectModel?: (ref: { target: string; model: string }) => void;
-	onSetScope?: (scope: string[]) => void;
-	onSetThinkingLevel?: (level: ThinkingLevel) => void;
-	openThinkingOverlay?: typeof openThinkingOverlay;
+	/** Settings → Fleet shows live node placement health when the scheduler exposes it. */
+	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
+	/** Settings → Targets "connect" runs the auth flow over the open settings overlay. */
+	connectTarget?: (targetId: string) => Promise<void> | void;
 	openModelOverlay?: typeof openModelOverlay;
-	openScopedOverlay?: typeof openScopedOverlay;
 	openSettingsOverlay?: typeof openSettingsOverlay;
 }
 
 export interface OverlayModelSelectors {
-	openThinkingOverlayState(): void;
 	openModelOverlayState(): void;
-	openScopedModelsOverlayState(): void;
 	openSettingsOverlayState(section?: SettingsSectionId): void;
 	refreshSettingsOverlay(): void;
 }
 
 export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): OverlayModelSelectors {
-	const openThinking = deps.openThinkingOverlay ?? openThinkingOverlay;
 	const openModel = deps.openModelOverlay ?? openModelOverlay;
-	const openScoped = deps.openScopedOverlay ?? openScopedOverlay;
 	const openSettings = deps.openSettingsOverlay ?? openSettingsOverlay;
 	let settingsOverlayRefresh: (() => void) | null = null;
-
-	const openThinkingOverlayState = (): void => {
-		if (deps.transitions.state !== "closed") return;
-		deps.transitions.state = "thinking";
-		const settings = deps.getSettings?.();
-		const current = settings
-			? (resolveThinkingCapability(deps.providers, settings)?.effectiveLevel ?? readThinkingLevel(settings))
-			: "off";
-		const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
-		const thinkingOverlayDeps: Parameters<typeof openThinkingOverlay>[1] = {
-			current,
-			available,
-			onSelect: (next) => {
-				deps.onSetThinkingLevel?.(next);
-				deps.refreshFooter();
-			},
-			onClose: deps.closeOverlay,
-			...(settings ? { labelFor: resolveThinkingLabeler(deps.providers, settings) } : {}),
-		};
-		deps.transitions.handle = openThinking(deps.tui, thinkingOverlayDeps);
-		deps.tui.requestRender();
-	};
 
 	const openModelOverlayState = (): void => {
 		if (deps.transitions.state !== "closed") return;
@@ -106,23 +73,6 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 		deps.tui.requestRender();
 	};
 
-	const openScopedModelsOverlayState = (): void => {
-		if (deps.transitions.state !== "closed") return;
-		const settings = deps.getSettings?.();
-		if (!settings) return;
-		deps.transitions.state = "scoped-models";
-		deps.transitions.handle = openScoped(deps.tui, {
-			providers: deps.providers,
-			currentScope: extractScopeFromSettings(settings),
-			onCommit: (next) => {
-				deps.onSetScope?.(next);
-				deps.refreshFooter();
-			},
-			onClose: deps.closeOverlay,
-		});
-		deps.tui.requestRender();
-	};
-
 	const openSettingsOverlayState = (section?: SettingsSectionId): void => {
 		if (deps.transitions.state !== "closed" || !deps.getSettings || !deps.writeSettings) return;
 		deps.transitions.state = "settings";
@@ -130,6 +80,8 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 			getSettings: deps.getSettings,
 			providers: deps.providers,
 			...(section ? { section } : {}),
+			...(deps.getFleetNodes ? { getFleetNodes: deps.getFleetNodes } : {}),
+			...(deps.connectTarget ? { connectTarget: deps.connectTarget } : {}),
 			writeSettings: (next) => {
 				deps.writeSettings?.(next);
 				deps.refreshFooter();
@@ -163,9 +115,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 	};
 
 	return {
-		openThinkingOverlayState,
 		openModelOverlayState,
-		openScopedModelsOverlayState,
 		openSettingsOverlayState,
 		refreshSettingsOverlay: () => settingsOverlayRefresh?.(),
 	};

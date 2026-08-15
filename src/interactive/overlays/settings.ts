@@ -17,6 +17,7 @@ import {
 	thinkingLevelChoiceLabel,
 	thinkingLevelFromChoiceLabel,
 } from "../../domains/providers/index.js";
+import type { FleetNodeSnapshot } from "../../domains/scheduling/cluster.js";
 import {
 	type Component,
 	getKeybindings,
@@ -30,6 +31,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
+import { clockLocal } from "../format-time.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
 import { barSep, clioTheme, GLYPH, padAnsi, rule, screenTitle } from "../theme/index.js";
 import { modelsForTarget } from "./model-selector.js";
@@ -102,7 +104,7 @@ export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 const SETTINGS_SECTION_DESCRIPTIONS = {
 	safety: "How freely Clio acts, and how delegated agents' tools are governed.",
 	orchestrator: "Interactive chat routing and the optional proactive-memory model plane.",
-	fleet: "Defaults, profiles, and agent bindings applied to dispatched workers.",
+	fleet: "Defaults, profiles, and agent bindings applied to dispatched workers, and where they run.",
 	targets: "Configured inference targets: which one chat and the fleet use, and whether each answers.",
 	models: "The /models picker, favorites, and Alt+J / Alt+K cycling.",
 	budget: "Cost ceiling, per-turn output budget, and worker concurrency.",
@@ -167,12 +169,20 @@ export const SETTINGS_LABELS_BY_ID = {
 	"delegation.agents": "Delegation agents",
 } as const;
 
-/** Entry rows (one per fleet profile field, agent binding, target) are keyed by the config path they edit. */
-type EntrySettingId = `workers.profiles.${string}` | `workers.agentBindings.${string}` | `targets.${string}`;
+/**
+ * Entry rows (one per fleet profile field, agent binding, target, fleet node)
+ * are keyed by the config path they edit; fleet node rows are read-only status.
+ */
+type EntrySettingId =
+	| `workers.profiles.${string}`
+	| `workers.agentBindings.${string}`
+	| `targets.${string}`
+	| `fleet.nodes.${string}`;
 export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID | EntrySettingId;
-const ENTRY_ROW_ID = /^(workers\.profiles|workers\.agentBindings|targets)(\.|$)/;
+const ENTRY_ROW_ID = /^(workers\.profiles|workers\.agentBindings|targets|fleet\.nodes)(\.|$)/;
 const REMOVE_PROFILE_CHOICE = "(remove profile)";
 const UNBIND_CHOICE = "(unbind)";
+const AUTO_PLACEMENT_CHOICE = "(auto placement)";
 
 export const SETTINGS_SECTION_ROWS = {
 	safety: [
@@ -383,6 +393,10 @@ interface BuildSettingItemsOptions {
 	getSettings?: () => Readonly<ClioSettings>;
 	/** Re-derive rows after an action that changes what they show without a commit (a health probe). */
 	requestRefresh?: () => void;
+	/** Live fleet node snapshots (scheduling.fleet.list()); absent hides the node rows. */
+	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
+	/** Run the API-key / OAuth connect flow for a target; absent hides the action. */
+	connectTarget?: (targetId: string) => Promise<void> | void;
 }
 
 export class SubmenuWrapper implements Component {
@@ -418,7 +432,7 @@ export class SubmenuWrapper implements Component {
 	}
 }
 
-export function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
+function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
 		const input = new Input();
 		input.setValue(currentValue);
@@ -429,7 +443,7 @@ export function textInputSubmenu(title: string, note?: string): SettingSubmenuBu
 	};
 }
 
-export function selectTargetSubmenu(providers: ProvidersContract): SettingSubmenuBuilder {
+function selectTargetSubmenu(providers: ProvidersContract): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
 		const statuses = providers.list();
 		if (statuses.length === 0) {
@@ -458,7 +472,7 @@ function selectOptionalBackgroundTargetSubmenu(providers: ProvidersContract): Se
 	};
 }
 
-export function selectModelSubmenu(
+function selectModelSubmenu(
 	providers: ProvidersContract,
 	getActiveTarget: () => string | undefined,
 ): SettingSubmenuBuilder {
@@ -551,17 +565,20 @@ function profileNameChoices(live: () => Readonly<ClioSettings>): Array<{ value: 
 	return names.map((name) => ({ value: name, label: name }));
 }
 
-/** Per-target actions. A probe is not a settings change: it runs, then the rows refresh; only use/remove commit. */
-function targetActionsSubmenu(
-	targetId: string,
-	providers: ProvidersContract | undefined,
-	requestRefresh: (() => void) | undefined,
-): SettingSubmenuBuilder {
+/**
+ * Per-target actions. Probe and connect are not settings changes: they run,
+ * then the rows refresh; only use/remove commit.
+ */
+function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOptions | undefined): SettingSubmenuBuilder {
+	const providers = options?.providers;
+	const requestRefresh = options?.requestRefresh;
+	const connectTarget = options?.connectTarget;
 	return (currentValue: string, done: (val?: string) => void) => {
 		const runtime = providers?.list().find((entry) => entry.target.id === targetId)?.runtime ?? null;
 		const chatEligible = !providers || (runtime !== null && isOrchestratorEligibleRuntime(runtime));
 		const items = [
 			...(chatEligible ? [{ value: "use", label: "Use for chat and fleet dispatch" }] : []),
+			...(connectTarget ? [{ value: "connect", label: "Connect (API key or OAuth), then probe" }] : []),
 			...(providers ? [{ value: "probe", label: "Probe health now" }] : []),
 			{ value: "remove", label: "Remove target" },
 		];
@@ -571,18 +588,23 @@ function targetActionsSubmenu(
 			items,
 			note,
 		)(currentValue, (value) => {
+			const refresh = (): void => requestRefresh?.();
+			if (value === "connect" && connectTarget) {
+				done();
+				void Promise.resolve(connectTarget(targetId)).then(refresh, refresh);
+				return;
+			}
 			if (value !== "probe" || !providers) return done(value);
 			done();
-			void providers.probeTarget(targetId).then(
-				() => requestRefresh?.(),
-				() => requestRefresh?.(),
-			);
+			void providers.probeTarget(targetId).then(refresh, refresh);
 		});
 	};
 }
 
 function sectionForSetting(id: EditableSettingId): SettingsSectionId {
-	if (id.startsWith("workers.profiles.") || id.startsWith("workers.agentBindings.")) return "fleet";
+	if (id.startsWith("workers.profiles.") || id.startsWith("workers.agentBindings.") || id.startsWith("fleet.nodes.")) {
+		return "fleet";
+	}
 	if (id.startsWith("targets.")) return "targets";
 	for (const section of SETTINGS_SECTIONS) {
 		if ((SETTINGS_SECTION_ROWS[section.id] as readonly EditableSettingId[]).includes(id)) return section.id;
@@ -795,6 +817,7 @@ export function buildSettingItems(
 		settingItem("workers.maxRetries", String(settings.workers.maxRetries), {
 			values: ["0", "1", "2", "3", "5", "8"],
 		}),
+		...fleetNodeRows(options?.getFleetNodes?.() ?? []),
 		settingItem("targets", settings.targets.length > 0 ? `${settings.targets.length} configured` : "(none)", {
 			affordance: "add with `clio-coder targets add`",
 			readOnly: true,
@@ -926,8 +949,29 @@ function fleetProfileRows(
 					description: `Reasoning budget for profile ${name}.`,
 					values: thinking.values,
 				}),
+				settingItem(`workers.profiles.${name}.node`, profile.node ?? AUTO_PLACEMENT_CHOICE, {
+					label: `${name} · node`,
+					description: `Fleet node workers on profile ${name} are pinned to; auto placement picks per dispatch.`,
+					submenu: selectListSubmenu(`Node for profile ${name}`, profileNodeChoices(settings, options)),
+				}),
 			];
 		});
+}
+
+/** Pin choices: auto placement, never-remote local, then every declared node (with live state when known). */
+function profileNodeChoices(
+	settings: Readonly<ClioSettings>,
+	options: BuildSettingItemsOptions | undefined,
+): Array<{ value: string; label: string }> {
+	const live = new Map(options?.getFleetNodes?.().map((node) => [node.id, node] as const) ?? []);
+	return [
+		{ value: AUTO_PLACEMENT_CHOICE, label: AUTO_PLACEMENT_CHOICE },
+		{ value: "local", label: "local (never remote)" },
+		...settings.fleet.nodes.map((node) => {
+			const state = live.get(node.id);
+			return { value: node.id, label: `${node.id} (${node.host}${state ? `, ${state.state}` : ""})` };
+		}),
+	];
 }
 
 function agentBindingRows(settings: Readonly<ClioSettings>, live: () => Readonly<ClioSettings>): SettingsCenterItem[] {
@@ -967,8 +1011,21 @@ function targetRows(
 		return settingItem(`targets.${target.id}`, value, {
 			label: target.id,
 			description: `${target.runtime} · ${target.url ?? "no url"} · default model ${target.defaultModel ?? "(none)"}${status?.health.lastError ? ` · ${status.health.lastError}` : ""}`,
-			submenu: targetActionsSubmenu(target.id, providers, options?.requestRefresh),
-			affordance: "Enter: use, probe, remove",
+			submenu: targetActionsSubmenu(target.id, options),
+			affordance: options?.connectTarget ? "Enter: use, connect, probe, remove" : "Enter: use, probe, remove",
+		});
+	});
+}
+
+/** Read-only placement rows: where dispatched workers run, from the live scheduler snapshot. */
+function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>): SettingsCenterItem[] {
+	return nodes.map((node) => {
+		const busy = node.maxWorkers > 0 ? `${node.activeWorkers}/${node.maxWorkers} busy` : `${node.activeWorkers} busy`;
+		return settingItem(`fleet.nodes.${node.id}`, `${node.state} · ${busy}`, {
+			label: `node ${node.id}`,
+			description: `${node.kind} · ${node.host}${node.stateReason ? ` · ${node.stateReason}` : ""}${node.lastSeenAt ? ` · seen ${clockLocal(node.lastSeenAt)}` : ""}`,
+			affordance: "declared as fleet.nodes in settings.yaml; `clio-coder doctor` preflights them",
+			readOnly: true,
 		});
 	});
 }
@@ -1245,6 +1302,9 @@ function applyEntrySettingChange(settings: ClioSettings, id: string, value: stri
 			profile.model = value === "(unset)" || value === "" ? null : value;
 		} else if (field === "thinkingLevel") {
 			profile.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? profile.thinkingLevel;
+		} else if (field === "node") {
+			if (value === AUTO_PLACEMENT_CHOICE || value === "") delete profile.node;
+			else profile.node = value;
 		}
 		return true;
 	}
@@ -1909,6 +1969,8 @@ export interface OpenSettingsOverlayDeps {
 	onClose: () => void;
 	/** Open focused on this section (deep link from `/settings <section>`). */
 	section?: SettingsSectionId;
+	getFleetNodes?: BuildSettingItemsOptions["getFleetNodes"];
+	connectTarget?: BuildSettingItemsOptions["connectTarget"];
 }
 
 function formatSettingChangeNotice(id: string, value: string, scope: "session" | "global"): string {
@@ -1931,6 +1993,8 @@ function settingsBodyHeight(tui: TUI): number {
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): SettingsOverlayHandle {
 	const buildOptions: BuildSettingItemsOptions = { getSettings: deps.getSettings, requestRefresh: () => refreshRows() };
 	if (deps.providers) buildOptions.providers = deps.providers;
+	if (deps.getFleetNodes) buildOptions.getFleetNodes = deps.getFleetNodes;
+	if (deps.connectTarget) buildOptions.connectTarget = deps.connectTarget;
 	const items = buildSettingItems(deps.getSettings(), buildOptions);
 	const center = new SettingsCenter(items, {
 		getBodyHeight: () => settingsBodyHeight(tui),

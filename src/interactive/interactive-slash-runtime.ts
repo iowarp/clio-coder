@@ -8,7 +8,13 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
-import { type ProvidersContract, type ThinkingLevel, thinkingLevelChoiceLabel } from "../domains/providers/index.js";
+import {
+	type ProvidersContract,
+	type ResolvedThinkingCapability,
+	resolveModelRuntimeCapabilitiesForProviders,
+	type ThinkingLevel,
+	thinkingLevelChoiceLabel,
+} from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import type { SessionEntry } from "../domains/session/index.js";
@@ -22,7 +28,6 @@ import { runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
 import { dateLocal } from "./format-time.js";
 import type { SettingsSectionId } from "./overlays/settings.js";
-import { resolveThinkingCapability } from "./overlays/thinking-selector.js";
 import {
 	type ContextClearCommandOptions,
 	dispatchSlashCommand,
@@ -85,17 +90,13 @@ export interface InteractiveSlashRuntimeDeps {
 	expandSubmit: (text: string) => Promise<InteractiveSlashSubmitExpansion>;
 	openAskUser: AskUserHandler;
 	openSkillsHub: () => void;
-	openProviders: () => void;
 	openCost: () => void;
 	openContextView: () => void;
-	openFleet: () => void;
 	openTasks: () => void;
 	openMemory: () => void;
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	openView: (filter?: string) => void;
-	openThinking: () => void;
 	openModel: () => void;
-	openScopedModels: () => void;
 	openSettings: (section?: SettingsSectionId) => void;
 	openResume: () => void;
 	startNewSession: () => void;
@@ -120,6 +121,38 @@ export interface InteractiveSlashRuntime {
 }
 
 /** Owns slash-command context construction and its asynchronous command state. */
+const OUTPUT_VERBOSITIES: ReadonlyArray<ClioSettings["terminal"]["outputVerbosity"]> = [
+	"minimal",
+	"default",
+	"verbose",
+];
+
+/** Thinking capability of the active orchestrator target and model, or null when unresolved. */
+export function resolveThinkingCapability(
+	providers: ProvidersContract,
+	settings: Readonly<ClioSettings>,
+): ResolvedThinkingCapability | null {
+	const resolved = resolveModelRuntimeCapabilitiesForProviders(
+		providers,
+		settings.orchestrator.target,
+		settings.orchestrator.model,
+		settings.orchestrator.thinkingLevel ?? "off",
+	);
+	return resolved?.thinking ?? null;
+}
+
+/**
+ * Thinking levels permitted for the active orchestrator target. This is the
+ * same resolved surface used by the runtime payload builders and dashboard.
+ * Unknown or unconfigured targets return `["off"]`.
+ */
+export function resolveAvailableThinkingLevels(
+	providers: ProvidersContract,
+	settings: Readonly<ClioSettings>,
+): ReadonlyArray<ThinkingLevel> {
+	return resolveThinkingCapability(providers, settings)?.supportedLevels ?? ["off"];
+}
+
 export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps): InteractiveSlashRuntime {
 	let activeContextInit = false;
 	const cwd = (): string => deps.getCwd?.() ?? process.cwd();
@@ -169,10 +202,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				? deps.share.planImport(resolve(archivePath), importOptions)
 				: deps.share.importArchive(resolve(archivePath), importOptions);
 		},
-		openProviders: deps.openProviders,
 		openCost: deps.openCost,
 		openContextView: deps.openContextView,
-		openFleet: deps.openFleet,
 		openTasks: deps.openTasks,
 		openMemory: deps.openMemory,
 		seedTaskMemory: () => {
@@ -182,14 +213,13 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			return result;
 		},
 		openView: deps.openView,
-		openThinking: deps.openThinking,
 		setThinkingLevel: (level) => {
 			const settings = deps.getSettings?.();
 			if (!settings || !deps.onSetThinkingLevel) return { status: "unavailable" };
 			const thinking = resolveThinkingCapability(deps.providers, settings);
 			// The target's own supported set is the authority, and its labels are
-			// what the selector and footer already show, so `/thinking on` works on
-			// an on-off model exactly as picking `on` from the list does.
+			// what the settings row and footer already show, so `/thinking on` works
+			// on an on-off model exactly as picking `on` in settings does.
 			const supported = thinking?.supportedLevels ?? (["off"] as ReadonlyArray<ThinkingLevel>);
 			const labelFor = (candidate: ThinkingLevel): string =>
 				thinkingLevelChoiceLabel(thinking?.mechanism ?? null, candidate);
@@ -203,19 +233,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			return { status: "applied", level: match, display: labelFor(match) };
 		},
 		setOutputVerbosity: (verbosity) => {
-			if (!verbosity || !deps.getSettings || !deps.writeSettings) {
-				appendCommandNotice("info", "usage: /output minimal|default|verbose");
-				return;
-			}
+			if (!deps.getSettings || !deps.writeSettings) return { status: "unavailable" };
+			const requested = verbosity.trim().toLowerCase();
+			const match = OUTPUT_VERBOSITIES.find((candidate) => candidate === requested);
+			if (!match) return { status: "unsupported", verbosity, supported: OUTPUT_VERBOSITIES };
 			const next = structuredClone(deps.getSettings()) as ClioSettings;
-			if (verbosity !== "minimal" && verbosity !== "default" && verbosity !== "verbose") {
-				appendCommandNotice("error", "usage: /output minimal|default|verbose");
-				return;
-			}
-			next.terminal.outputVerbosity = verbosity;
+			next.terminal.outputVerbosity = match;
 			deps.writeSettings(next);
-			appendCommandNotice("success", `output detail: ${verbosity}`);
-			deps.requestRender();
+			return { status: "applied", verbosity: match };
 		},
 		openModel: deps.openModel,
 		providers: deps.providers,
@@ -224,7 +249,6 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel);
 			deps.requestRender();
 		},
-		openScopedModels: deps.openScopedModels,
 		openSettings: deps.openSettings,
 		openResume: deps.openResume,
 		startNewSession: deps.startNewSession,

@@ -584,6 +584,7 @@ describe("contracts/settings center", () => {
 				"workers.profiles.fast.target",
 				"workers.profiles.fast.model",
 				"workers.profiles.fast.thinkingLevel",
+				"workers.profiles.fast.node",
 				"workers.agentBindings",
 				"workers.agentBindings.researcher",
 				"workers.agentBindings.scout",
@@ -601,6 +602,7 @@ describe("contracts/settings center", () => {
 		strictEqual(byId.get("workers.profiles.fast.target")?.currentValue, "target-b");
 		strictEqual(byId.get("workers.profiles.fast.model")?.currentValue, "model-b");
 		strictEqual(byId.get("workers.profiles.fast.thinkingLevel")?.currentValue, "off");
+		strictEqual(byId.get("workers.profiles.fast.node")?.currentValue, "(auto placement)");
 		strictEqual(byId.get("workers.agentBindings.scout")?.currentValue, "fast");
 		ok(byId.get("workers.agentBindings.researcher")?.description.includes("does not exist"));
 		strictEqual(byId.get("targets.target-a")?.currentValue, "chat+fleet · unknown");
@@ -645,6 +647,16 @@ describe("contracts/settings center", () => {
 				id: "workers.profiles.fast.thinkingLevel",
 				value: "high",
 				assert: (s) => strictEqual(s.workers.profiles.fast?.thinkingLevel, "high"),
+			},
+			{
+				id: "workers.profiles.fast.node",
+				value: "local",
+				assert: (s) => strictEqual(s.workers.profiles.fast?.node, "local"),
+			},
+			{
+				id: "workers.profiles.fast.node",
+				value: "(auto placement)",
+				assert: (s) => strictEqual("node" in (s.workers.profiles.fast ?? {}), false),
 			},
 			{
 				id: "workers.profiles.fast.target",
@@ -737,6 +749,51 @@ describe("contracts/settings center", () => {
 		ok(rendered.includes("next dispatch"), "propagation shows inline");
 	});
 
+	it("runs the connect flow from a target row without committing, then refreshes the rows", async () => {
+		const live = { current: settingsWithTargets() };
+		const fake = fakeTui(30, 120);
+		const calls: string[] = [];
+		const connected: string[] = [];
+		let resolveConnect: (() => void) | undefined;
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			commitSetting: (id, next) => {
+				calls.push(id);
+				live.current = next;
+			},
+			connectTarget: (targetId) => {
+				connected.push(targetId);
+				return new Promise<void>((resolve) => {
+					resolveConnect = resolve;
+				});
+			},
+			section: "targets",
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay, "expected settings overlay component");
+		strictEqual(
+			buildSettingItems(live.current, { connectTarget: () => undefined }).find((item) => item.id === "targets.target-b")
+				?.affordance,
+			"Enter: use, connect, probe, remove",
+		);
+		overlay.handleInput?.("j"); // targets.target-a
+		overlay.handleInput?.("j"); // targets.target-b
+		overlay.handleInput?.(ENTER); // actions: use, connect, remove (no providers, so no probe)
+		overlay.handleInput?.(DOWN);
+		overlay.handleInput?.(ENTER); // connect
+		deepStrictEqual(connected, ["target-b"]);
+		deepStrictEqual(calls, [], "connect is an action, not a settings change");
+		const renders = fake.renders();
+		resolveConnect?.();
+		await Promise.resolve();
+		await Promise.resolve();
+		ok(fake.renders() > renders, "the rows re-derive once the connect flow settles");
+	});
+
 	it("removing a profile through its row also drops its bindings on refresh", () => {
 		const live = { current: settingsWithTargets() };
 		const fake = fakeTui(30, 120);
@@ -795,7 +852,7 @@ describe("contracts/settings center", () => {
 		let rendered = stripAnsi(overlay.render(120).join("\n"));
 		ok(rendered.includes("slow · target"), rendered);
 
-		for (let i = 0; i < 7; i += 1) overlay.handleInput?.("j"); // past the fast and slow rows to workers.agentBindings
+		for (let i = 0; i < 9; i += 1) overlay.handleInput?.("j"); // past the fast and slow rows to workers.agentBindings
 		overlay.handleInput?.(ENTER); // agent id input
 		for (const ch of "researcher") overlay.handleInput?.(ch);
 		overlay.handleInput?.(ENTER); // profile picker: fast, slow

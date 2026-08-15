@@ -15,7 +15,6 @@ type GeneralOpenerSeams = {
 	openContextResetOverlay?: typeof import("../../src/interactive/overlays/context-reset.js").openContextResetOverlay;
 	openTasksOverlay?: typeof import("../../src/interactive/tasks-overlay.js").openTasksOverlay;
 	openMemoryOverlay?: typeof import("../../src/interactive/memory-overlay.js").openMemoryOverlay;
-	openFleetOverlay?: typeof import("../../src/interactive/fleet-overlay.js").openFleetOverlay;
 	openViewOverlay?: typeof import("../../src/interactive/view/view-overlay.js").openViewOverlay;
 };
 
@@ -57,7 +56,6 @@ function makeRuntime(args: {
 			resetSelection: () => events.push("reset-selection"),
 			selectedRow: () => null,
 		},
-		getObservabilitySnapshot: () => ({}),
 		chatPanel: {},
 		io: { stdout: () => {}, stderr: (text: string) => events.push(`stderr:${text}`) },
 		readStructuredEntries: () => [],
@@ -91,7 +89,6 @@ describe("contracts/interactive general overlay openers", () => {
 				openContextOverlay: () => observe("context"),
 				openTasksOverlay: () => observe("tasks"),
 				openMemoryOverlay: () => observe("memory"),
-				openFleetOverlay: () => observe("fleet"),
 				openViewOverlay: (_tui, options) => {
 					strictEqual(options.initialFilter, "errors");
 					return observe("view");
@@ -105,21 +102,13 @@ describe("contracts/interactive general overlay openers", () => {
 			() => lifecycle.openContextViewOverlayState(),
 			() => lifecycle.openTasksOverlayState(),
 			() => lifecycle.openMemoryOverlayState(),
-			() => lifecycle.openFleetOverlayState(),
 			() => lifecycle.openViewOverlayState("errors"),
 		]) {
 			open();
 			lifecycle.closeOverlay();
 		}
 
-		deepStrictEqual(observed, [
-			"cost:cost",
-			"context:context-view",
-			"tasks:tasks",
-			"memory:memory",
-			"fleet:fleet",
-			"view:view",
-		]);
+		deepStrictEqual(observed, ["cost:cost", "context:context-view", "tasks:tasks", "memory:memory", "view:view"]);
 		lifecycle.dispose();
 	});
 

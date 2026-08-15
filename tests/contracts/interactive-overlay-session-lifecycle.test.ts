@@ -89,7 +89,6 @@ function createSessionHarness(options: {
 		notify: () => {},
 		terminal: { columns: 100 },
 		dispatchBoard: {},
-		getObservabilitySnapshot: () => ({}),
 		chatPanel: {
 			reset: () => events.push("panel:reset"),
 			appendUser: (text: string) => events.push(`panel:user:${text}`),

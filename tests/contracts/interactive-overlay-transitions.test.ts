@@ -1,6 +1,5 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
 import {
 	createOverlayLifecycle,
@@ -17,6 +16,7 @@ describe("contracts/interactive overlay transitions", () => {
 		const app = {
 			providers: {},
 			bus: { on: () => () => {}, emit: () => {} },
+			observability: {},
 		} as unknown as OverlayLifecycleApplicationDeps;
 		const runtime = {
 			app,
@@ -32,7 +32,6 @@ describe("contracts/interactive overlay transitions", () => {
 			notify: () => {},
 			terminal: { columns: 100 },
 			dispatchBoard: {},
-			getObservabilitySnapshot: () => ({}),
 			chatPanel: {},
 			io: { stdout: () => {}, stderr: () => {} },
 			readStructuredEntries: () => [],
@@ -40,16 +39,16 @@ describe("contracts/interactive overlay transitions", () => {
 			keybindings: {},
 			editor: { getText: () => "", setText: () => {} },
 			getSlashContext: () => ({}),
-			openProvidersOverlay: (_tui: TUI, _providers: ProvidersContract) => {
+			openCostOverlay: () => {
 				events.push(`factory:${lifecycle.getState()}`);
 				return handle;
 			},
 		} as unknown as OverlayLifecycleRuntimeDeps;
 		lifecycle = createOverlayLifecycle(runtime);
 
-		lifecycle.openProvidersOverlayState();
-		strictEqual(lifecycle.getState(), "providers");
-		deepStrictEqual(events, ["factory:providers", "render"]);
+		lifecycle.openCostOverlayState();
+		strictEqual(lifecycle.getState(), "cost");
+		deepStrictEqual(events, ["factory:cost", "render"]);
 
 		events.length = 0;
 		lifecycle.closeOverlay();

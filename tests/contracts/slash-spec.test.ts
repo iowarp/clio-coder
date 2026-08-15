@@ -84,20 +84,16 @@ describe("contracts/slash-spec", () => {
 			listExtensions: () => [],
 			listAgents: () => [],
 			listDelegationAgents: () => [],
-			openProviders: () => opened.push("targets"),
 			openCost: () => opened.push("cost"),
 			openContextView: () => opened.push("context"),
-			openFleet: () => opened.push("fleet"),
 			openTasks: () => opened.push("tasks"),
 			openMemory: () => opened.push("memory"),
 			seedTaskMemory: () => ({ status: "seeded", seeded: 2, skipped: 1, source: "handoff-latest.md" }),
 			openView: (filter) => opened.push(filter ? `view:${filter}` : "view"),
-			openThinking: () => opened.push("thinking"),
 			openModel: () => opened.push("model"),
 			providers: {} as ProvidersContract,
 			applyModelRef: () => undefined,
-			openScopedModels: () => opened.push("scoped-models"),
-			openSettings: () => opened.push("settings"),
+			openSettings: (section) => opened.push(section ? `settings:${section}` : "settings"),
 			openResume: () => opened.push("resume"),
 			startNewSession: () => opened.push("new"),
 			openTree: () => opened.push("tree"),
@@ -114,13 +110,39 @@ describe("contracts/slash-spec", () => {
 			render: () => undefined,
 		};
 
-		for (const input of ["/help routing", "/settings", "/targets", "/model", "/models", "/memory", "/view run-123"]) {
+		for (const input of [
+			"/help routing",
+			"/settings",
+			"/targets",
+			"/fleet",
+			"/scoped-models",
+			"/thinking",
+			"/output",
+			"/model",
+			"/models",
+			"/memory",
+			"/view run-123",
+		]) {
 			dispatchSlashCommand(parseSlashCommand(input), ctx);
 		}
 		dispatchSlashCommand(parseSlashCommand("/memory seed"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/not/a/command"), ctx);
 
-		deepStrictEqual(opened, ["help:routing", "settings", "targets", "model", "model", "memory", "view:run-123"]);
+		// Configuration-shaped commands are deep links: each opens its settings
+		// section rather than an overlay of its own.
+		deepStrictEqual(opened, [
+			"help:routing",
+			"settings",
+			"settings:targets",
+			"settings:fleet",
+			"settings:models",
+			"settings:orchestrator",
+			"settings:terminal",
+			"model",
+			"model",
+			"memory",
+			"view:run-123",
+		]);
 		deepStrictEqual(submitted, ["/not/a/command"]);
 		ok(notices.some((notice) => notice.includes("seeded 2 entries from handoff-latest.md; skipped 1 duplicate")));
 	});
@@ -138,16 +160,21 @@ describe("contracts/slash-spec", () => {
 			notice: (_level: string, text: string) => notices.push(text),
 			submitChat: (text: string) => submitted.push(text),
 			render: () => undefined,
-			openThinking: () => undefined,
 			shutdown: () => undefined,
 			setThinkingLevel: (level: string) =>
 				level === "off"
 					? ({ status: "applied", level, display: "off" } as const)
 					: ({ status: "unsupported", level, supported: ["off", "low"] } as const),
+			setOutputVerbosity: (verbosity: string) =>
+				verbosity === "verbose"
+					? ({ status: "applied", verbosity } as const)
+					: ({ status: "unsupported", verbosity, supported: ["minimal", "default", "verbose"] } as const),
 		} as unknown as SlashCommandContext;
 
 		dispatchSlashCommand(parseSlashCommand("/thinking off"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/thinking sideways"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/output verbose"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/output loud"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/quit now"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/home/akougkas/notes.md needs an update"), ctx);
 
@@ -162,6 +189,14 @@ describe("contracts/slash-spec", () => {
 		);
 		ok(
 			notices.some((notice) => notice.includes('"sideways" is not available here') && notice.includes("off, low")),
+			notices.join(" | "),
+		);
+		ok(
+			notices.some((notice) => notice === "output detail: verbose"),
+			notices.join(" | "),
+		);
+		ok(
+			notices.some((notice) => notice.includes('"loud" is not one of') && notice.includes("minimal, default, verbose")),
 			notices.join(" | "),
 		);
 		ok(
@@ -505,7 +540,13 @@ describe("contracts/slash-spec", () => {
 			["/memory", { kind: "memory" }],
 			["/memory seed", { kind: "memory-seed" }],
 			["/memory query", { kind: "usage-error", command: "memory", reason: "Unexpected argument: query" }],
-			["/thinking", { kind: "thinking" }],
+			["/thinking", { kind: "settings", section: "orchestrator" }],
+			["/output", { kind: "settings", section: "terminal" }],
+			["/output verbose", { kind: "output-set", verbosity: "verbose" }],
+			["/output verbose extra", { kind: "usage-error", command: "output", reason: "Unexpected argument: extra" }],
+			["/targets", { kind: "settings", section: "targets" }],
+			["/fleet", { kind: "settings", section: "fleet" }],
+			["/scoped-models", { kind: "settings", section: "models" }],
 			["/thinking off", { kind: "thinking-set", level: "off" }],
 			["/thinking query", { kind: "thinking-set", level: "query" }],
 			["/thinking off extra", { kind: "usage-error", command: "thinking", reason: "Unexpected argument: extra" }],

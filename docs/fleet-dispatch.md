@@ -104,9 +104,9 @@ fleet:
 Node ids must be unique and `local` is reserved.
 
 Worker profiles can pin work to a node: `workers.profiles.<name>.node` routes
-every dispatch bound to that profile. The `/fleet` overlay's profiles tab
-edits the pin (`o` key), and the dispatch tool accepts an explicit `node`
-argument per task.
+every dispatch bound to that profile. Settings → Fleet (`/fleet`) edits the
+pin on the profile's `node` row, and the dispatch tool accepts an explicit
+`node` argument per task.
 
 ## Doctor preflight
 
@@ -552,9 +552,9 @@ hard block.
 - The context meter renders the worker's last-message context occupancy
   against the model's context window: healthy below 80 percent, warn from 80,
   critical from 95.
-- `/fleet` cycles status (running and retrying runs with a node column),
-  nodes (the registry view with state, capacity, and last-seen), profiles
-  (with the node pin), and bindings.
+- `/fleet` opens Settings → Fleet: profiles (with the node pin), bindings,
+  and read-only node rows (state, capacity, and last-seen). Running and
+  retrying runs, with their node, live in the `Alt+W` Fleet Runs board.
 - The monitor tool reports the node and reroute lineage on `status`, `list`,
   and `collect`.
 - `clio-coder fleet status [--json]` shows the durable ledger view cross-process.

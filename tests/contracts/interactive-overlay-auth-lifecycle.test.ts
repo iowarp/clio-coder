@@ -9,15 +9,11 @@ import {
 	type OverlayLifecycleRuntimeDeps,
 } from "../../src/interactive/overlay-lifecycle.js";
 import type { AuthDialogHandle } from "../../src/interactive/overlays/auth-dialog.js";
-import type { OpenProvidersOverlayOptions } from "../../src/interactive/providers-overlay.js";
+import type { OpenSettingsOverlayDeps, SettingsOverlayHandle } from "../../src/interactive/overlays/settings.js";
 
 type AuthCharacterizationDeps = OverlayLifecycleRuntimeDeps & {
 	openAuthDialog?: (tui: TUI, title: string, onCancel: () => void) => AuthDialogHandle;
-	openProvidersOverlay?: (
-		tui: TUI,
-		providers: ProvidersContract,
-		options?: OpenProvidersOverlayOptions,
-	) => OverlayHandle;
+	openSettingsOverlay?: (tui: TUI, deps: OpenSettingsOverlayDeps) => SettingsOverlayHandle;
 };
 
 function runtimeDescriptor(auth: RuntimeDescriptor["auth"]): RuntimeDescriptor {
@@ -64,10 +60,11 @@ function makeLifecycle(
 	const events: string[] = [];
 	const runtime = runtimeDescriptor(auth);
 	const status = targetStatus(runtime);
-	let connectTarget: OpenProvidersOverlayOptions["connectTarget"];
+	let connectTarget: OpenSettingsOverlayDeps["connectTarget"];
 
 	const providers = {
 		getRuntime: (id: string) => (id === runtime.id ? runtime : null),
+		probeAllLive: async () => {},
 		probeTarget: async (id: string) => {
 			events.push(`probe:${id}`);
 			return status;
@@ -96,8 +93,12 @@ function makeLifecycle(
 			on: () => () => {},
 			emit: () => {},
 		},
+		writeSettings: () => {},
 	} as unknown as OverlayLifecycleApplicationDeps;
-	const providerHandle = { hide: () => events.push("hide:providers") } as unknown as OverlayHandle;
+	const settingsHandle = {
+		hide: () => events.push("hide:settings"),
+		refreshRows: () => {},
+	} as unknown as SettingsOverlayHandle;
 	const authHandle = { hide: () => events.push("hide:auth") } as unknown as OverlayHandle;
 	const runtimeDeps = {
 		app,
@@ -113,7 +114,6 @@ function makeLifecycle(
 		notify: (level: string, text: string, key?: string) => events.push(`notify:${level}:${text}:${key ?? ""}`),
 		terminal: { columns: 100 },
 		dispatchBoard: {},
-		getObservabilitySnapshot: () => ({}),
 		chatPanel: {},
 		io: { stdout: () => {}, stderr: () => {} },
 		readStructuredEntries: () => [],
@@ -121,10 +121,10 @@ function makeLifecycle(
 		keybindings: {},
 		editor: { getText: () => "", setText: () => {} },
 		getSlashContext: () => ({}),
-		openProvidersOverlay: (_tui: TUI, _providers: ProvidersContract, options?: OpenProvidersOverlayOptions) => {
-			events.push("open:providers");
-			connectTarget = options?.connectTarget;
-			return providerHandle;
+		openSettingsOverlay: (_tui: TUI, deps: OpenSettingsOverlayDeps) => {
+			events.push("open:settings");
+			connectTarget = deps.connectTarget;
+			return settingsHandle;
 		},
 		openAuthDialog: (_tui: TUI, title: string, _onCancel: () => void): AuthDialogHandle => {
 			events.push(`open:auth:${title}`);
@@ -144,7 +144,7 @@ function makeLifecycle(
 		},
 	} as unknown as AuthCharacterizationDeps;
 	const lifecycle = createOverlayLifecycle(runtimeDeps);
-	lifecycle.openProvidersOverlayState();
+	lifecycle.openSettingsOverlayState("targets");
 	strictEqual(typeof connectTarget, "function");
 	events.length = 0;
 	return {
@@ -157,12 +157,12 @@ function makeLifecycle(
 }
 
 describe("contracts/interactive auth overlay lifecycle", () => {
-	it("restores the providers overlay after a successful target probe in the established order", async () => {
+	it("restores the settings overlay after a successful target probe in the established order", async () => {
 		const { lifecycle, events, connect } = makeLifecycle("none");
 
 		await connect();
 
-		strictEqual(lifecycle.getState(), "providers");
+		strictEqual(lifecycle.getState(), "settings");
 		deepStrictEqual(events, [
 			"open:auth:Connect test-target",
 			"lines:Target: test-target|Runtime: test-runtime|Checking target...",
@@ -181,7 +181,7 @@ describe("contracts/interactive auth overlay lifecycle", () => {
 		lifecycle.dispose();
 	});
 
-	it("dismisses a pending API-key prompt before hiding auth and restoring providers", async () => {
+	it("dismisses a pending API-key prompt before hiding auth and restoring settings", async () => {
 		const { lifecycle, events, connect } = makeLifecycle("api-key");
 		const connection = connect();
 		strictEqual(lifecycle.getState(), "auth");
@@ -189,7 +189,7 @@ describe("contracts/interactive auth overlay lifecycle", () => {
 		lifecycle.closeOverlay();
 		await connection;
 
-		strictEqual(lifecycle.getState(), "providers");
+		strictEqual(lifecycle.getState(), "settings");
 		deepStrictEqual(events, [
 			"open:auth:Connect test-target",
 			"lines:Target: test-target|Runtime: test-runtime|API key required before Clio can connect to this target.",

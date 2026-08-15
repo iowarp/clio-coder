@@ -20,9 +20,9 @@ import { createFollowUpQueuePanel, type FollowUpQueuePanel } from "./follow-up-q
 import { buildFooterDashboard, type FooterDashboardDeps, type FooterDashboardPanel } from "./footer/dashboard.js";
 import { createNotificationCenter, type NotificationCenter } from "./footer/notifications.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
+import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import { type ClioKeybindingManager, createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
-import type { TargetsHubNoticeLevel } from "./providers-overlay.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import type { RunIo } from "./slash-commands.js";
@@ -100,7 +100,7 @@ export interface InteractivePresentation {
 	contextActivityStore: ContextActivityStore;
 	footer: FooterDashboardPanel;
 	notifications: NotificationCenter;
-	notify(level: TargetsHubNoticeLevel, text: string, key?: string): void;
+	notify(level: InteractiveNoticeLevel, text: string, key?: string): void;
 	dismissContextBootstrapNotices(): void;
 	announceTaskMemorySeedOffer(): void;
 	editor: ClioEditor;
@@ -211,7 +211,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			requestRender();
 		},
 	});
-	const notify = (level: TargetsHubNoticeLevel, text: string, key?: string): void => {
+	const notify = (level: InteractiveNoticeLevel, text: string, key?: string): void => {
 		notifications.add(key ? { level, text, key } : { level, text });
 	};
 	const dismissContextBootstrapNotices = (): void => {

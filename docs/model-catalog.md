@@ -11,7 +11,7 @@ Clio Coder treats a selectable model as the intersection of three sources:
 
 ## Runtime refresh controls
 
-- `/targets`: `r` probes the selected target; `R` probes all targets.
+- `/targets` (Settings → Targets): probes every target when it opens; a row's probe action re-probes that target.
 - `/model` or `/models`: `r` refreshes the selected row's target; `R` refreshes all targets.
 - `clio-coder models`: probes live targets by default before printing the CLI model list. Use `--offline` to skip live probing. Former `--probe` and `--no-probe` flags are gone.
 

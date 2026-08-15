@@ -69,9 +69,8 @@ clio-coder
 
 In the session:
 
-- `/fleet` opens the fleet overlay; Tab cycles status, nodes, profiles, and
-  bindings. The nodes tab shows blade, mini, and dragon online with their
-  capacity.
+- `/fleet` opens Settings → Fleet; its node rows show blade, mini, and dragon
+  online with their capacity.
 - Alt+W toggles the dispatch board, which will fill with per-run cards once
   work starts.
 
@@ -102,7 +101,7 @@ What to watch:
   runs read-only and ends with a `VERDICT:` line.
 - On a revise verdict, a second builder card appears with `gate builder c2`;
   the reviewer's findings were threaded to it as input data.
-- `/fleet` status rows carry the node column for both runs.
+- The `Alt+W` Fleet Runs board carries the node column for both runs.
 
 If a node dies mid-run (for the demo: stop sshd on blade), the run finalizes
 as stalled, the node is classified dead after consecutive channel failures,
