@@ -121,23 +121,24 @@ const requiredRecipeKeys = new Set([
 ]);
 const optionalRecipeKeys = new Set(["product"]);
 const allowedRecipeKeys = new Set([...requiredRecipeKeys, ...optionalRecipeKeys]);
-const sourceRecipeDir = join(root, "src", "domains", "agents", "builtins");
-const distRecipeDir = join(root, "dist", "domains", "agents", "builtins");
-for (const name of readdirSync(sourceRecipeDir)
+// Builtin recipes ship from their one canonical location, src/domains/agents/
+// builtins/, which is what src/domains/agents/extension.ts reads at runtime.
+// Every recipe must be in the pack and carry the strict v1 frontmatter schema.
+const recipeDir = join(root, "src", "domains", "agents", "builtins");
+for (const name of readdirSync(recipeDir)
 	.filter((entry) => entry.endsWith(".md"))
 	.sort()) {
-	const distPath = join(distRecipeDir, name);
-	const packagePath = `dist/domains/agents/builtins/${name}`;
+	const packagePath = `src/domains/agents/builtins/${name}`;
 	if (!fileSet.has(packagePath)) {
-		errors.push(`missing built recipe in dist/package: ${packagePath}`);
+		errors.push(`missing builtin recipe in package: ${packagePath}`);
 		continue;
 	}
 	try {
-		const raw = readFileSync(distPath, "utf8");
+		const raw = readFileSync(join(recipeDir, name), "utf8");
 		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
 		const frontmatter = match ? parseYaml(match[1]) : null;
 		if (!frontmatter || typeof frontmatter !== "object" || Array.isArray(frontmatter)) {
-			errors.push(`invalid built recipe frontmatter: ${packagePath}`);
+			errors.push(`invalid builtin recipe frontmatter: ${packagePath}`);
 			continue;
 		}
 		const keys = Object.keys(frontmatter);
@@ -146,11 +147,11 @@ for (const name of readdirSync(sourceRecipeDir)
 			keys.some((key) => !allowedRecipeKeys.has(key)) ||
 			[...requiredRecipeKeys].some((key) => !keys.includes(key))
 		) {
-			errors.push(`built recipe is not the strict v1 schema: ${packagePath}`);
+			errors.push(`builtin recipe is not the strict v1 schema: ${packagePath}`);
 		}
 	} catch (error) {
 		errors.push(
-			`unable to inspect built recipe ${packagePath}: ${error instanceof Error ? error.message : String(error)}`,
+			`unable to inspect builtin recipe ${packagePath}: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
 }
