@@ -63,7 +63,7 @@ Clio divides worker output into two isolated streams to protect control signals 
 2. **Control Lane (`stderr`)**:
    Emits out-of-band control frames prefixed by `@clio-control/1 `, capped at `WORKER_CONTROL_FRAME_MAX_BYTES` (16 KiB). Because control frames travel over `stderr`, they bypass backpressured bulk stdout streams and reach orchestrator watchdogs immediately. Control frame kinds include:
    * **Announce:** `{"kind": "announce", "attestation": ...}` sent immediately upon startup.
-   * **Heartbeat:** `{"kind": "heartbeat", "at": 1720186123000}` emitted every 1000 milliseconds.
+   * **Heartbeat:** `{"kind": "heartbeat"}` emitted every 1000 milliseconds. The frame carries no timestamp; the orchestrator stamps arrival on its own clock.
    * **Steer / Cancel Acknowledgments:** Confirming reception of stdin control directives.
 
 ### 2.2 Worker Input (`stdin`)
@@ -87,7 +87,7 @@ Any stdin chunk that is not a valid JSON structure matching these schemas is log
 
 Even when a model is processing a long thinking phase or generating a heavy output, the worker must prove it is alive to prevent the parent orchestrator's watchdog from reclaiming it.
 
-* **Emission:** The heartbeat loop (`startWorkerHeartbeat` in `src/worker/heartbeat.ts`) writes a heartbeat control frame (`{"kind": "heartbeat", "at": ...}`) to the `stderr` control lane every 1000 milliseconds.
+* **Emission:** The heartbeat loop (`startWorkerHeartbeat` in `src/worker/heartbeat.ts`) writes a heartbeat control frame (`{"kind": "heartbeat"}`) to the `stderr` control lane every 1000 milliseconds.
 * **Stream Isolation:** Because heartbeats ride the control lane rather than `stdout`, a large bulk output or queued tool result cannot starve or delay the watchdog check.
 * **Non-Blocking Timer:** The heartbeat timer interval is explicitly `.unref()`'d, ensuring the Node.js runtime is not kept alive past the natural lifetime of the worker run.
 * **Termination:** Once `startWorkerRun` resolves, the timer is cleared before returning the worker's exit code.
