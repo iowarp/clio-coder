@@ -16,6 +16,8 @@ import { ClioEditor } from "./clio-editor.js";
 import { createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore } from "./context-activity.js";
 import { createDispatchBoardStore, createDispatchBoardView, type DispatchBoardView } from "./dispatch-board.js";
+import { parseEditorBashCommand } from "./editor-bash.js";
+import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
 import { createFollowUpQueuePanel, type FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { buildFooterDashboard, type FooterDashboardDeps, type FooterDashboardPanel } from "./footer/dashboard.js";
 import { createNotificationCenter, type NotificationCenter } from "./footer/notifications.js";
@@ -25,7 +27,7 @@ import { type ClioKeybindingManager, createKeybindingManager } from "./keybindin
 import { buildLayout } from "./layout.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
-import type { RunIo } from "./slash-commands.js";
+import { parseSlashCommand, type RunIo } from "./slash-commands.js";
 import { createStatusController, type StatusController, type TurnSummary } from "./status/index.js";
 import { formatTargetLabel } from "./theme/index.js";
 import { createWelcomeDashboard, type WelcomeDashboardComponent } from "./welcome-dashboard.js";
@@ -139,13 +141,29 @@ const DEFAULT_FACTORIES: InteractivePresentationFactories = {
 	buildLayout,
 };
 
-/** Title-case a KeyId for the footer hint, preserving the historical fallback. */
-function formatKeyLabel(keyId: string | undefined): string {
-	if (!keyId || keyId.length === 0) return "Alt+X";
+/** Title-case a KeyId for compact chrome hints, preserving each caller's fallback. */
+function formatKeyLabel(keyId: string | undefined, fallback = "Alt+X"): string {
+	if (!keyId || keyId.length === 0) return fallback;
 	return keyId
 		.split("+")
 		.map((segment) => (segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1)))
 		.join("+");
+}
+
+function willEnterSteerActiveWork(deps: InteractivePresentationDeps, text: string): boolean {
+	const trimmed = text.trim();
+	if (trimmed.length === 0 || parseEditorBashCommand(text)) return false;
+	const mention = parseEditorSteerMention(trimmed);
+	if (mention) {
+		let running: Array<{ runId: string; agentId: string }> = [];
+		try {
+			running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
+		} catch {
+			running = [];
+		}
+		if (running.length > 0) return resolveSteerTarget(mention.target, running).kind === "match";
+	}
+	return parseSlashCommand(trimmed).kind === "unknown";
 }
 
 /**
@@ -296,6 +314,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				"off"
 			);
 		},
+		isStreaming: () => deps.chat.isStreaming(),
+		willEnterSteer: (text) => willEnterSteerActiveWork(deps, text),
+		getSubmitKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.submit")[0], "Enter"),
+		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Shift+Enter"),
 	});
 	editor.focused = true;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({

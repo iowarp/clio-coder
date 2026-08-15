@@ -69,7 +69,7 @@ export interface LeaderTarget {
 
 export interface ClioKeybindingManager {
 	matches(data: string, id: ClioKeybinding): boolean;
-	getKeys(id: ClioKeybinding): ReadonlyArray<KeyId>;
+	getKeys(id: Keybinding): ReadonlyArray<KeyId>;
 	getDescription(id: ClioKeybinding): string;
 	getConflicts(): ReadonlyArray<KeybindingConflict>;
 	overrideCount(): number;

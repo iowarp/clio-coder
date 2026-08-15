@@ -1,8 +1,11 @@
-import { Editor, type TUI } from "../engine/tui.js";
+import { Editor, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { ClioTheme } from "./theme/index.js";
 import { clioTheme, editorTheme, GLYPH, rule } from "./theme/index.js";
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
+const REVERSE_VIDEO_BLANK = `${String.fromCharCode(27)}[7m ${String.fromCharCode(27)}[0m`;
+const EMPTY_PROMPT = "Ask Clio…  / for commands";
+const MIN_HINT_WIDTH = 60;
 
 function stripAnsi(text: string): string {
 	return text.replace(ANSI, "");
@@ -18,7 +21,17 @@ export interface EditorChrome {
 	getModelLabel: () => string;
 	/** Effective thinking level, e.g. `high` / `off`. */
 	getThinkingLabel: () => string;
+	/** Whether Enter currently targets the active Clio response. */
+	isStreaming?: () => boolean;
+	/** Whether the current draft will actually steer Clio or live dispatch work on Enter. */
+	willEnterSteer?: (text: string) => boolean;
+	/** Resolved submit binding, formatted for display. */
+	getSubmitKeyLabel?: () => string;
+	/** Resolved multiline binding, formatted for display. */
+	getNewlineKeyLabel?: () => string;
 }
+
+type ComposerMode = "MESSAGE" | "FOLLOW-UP" | "STEER";
 
 function normalizeThinkingHint(value: string): string {
 	return value
@@ -52,6 +65,37 @@ function styledRailLabel(theme: ClioTheme, chrome: EditorChrome): string {
 	return `${theme.fg("dim", chrome.getModelLabel())} ${theme.fg("dim", "·")} ${styledThinkingHint(theme, chrome.getThinkingLabel())}`;
 }
 
+function composerMode(chrome: EditorChrome, text: string): ComposerMode {
+	if (!(chrome.isStreaming?.() ?? false)) return "MESSAGE";
+	const willSteer = chrome.willEnterSteer?.(text) ?? text.trim().length > 0;
+	return willSteer ? "STEER" : "FOLLOW-UP";
+}
+
+function lowerRailHint(theme: ClioTheme, chrome: EditorChrome): string {
+	return theme.fg(
+		"dim",
+		`${chrome.getSubmitKeyLabel?.() ?? "Enter"} send · ${chrome.getNewlineKeyLabel?.() ?? "Shift+Enter"} newline`,
+	);
+}
+
+function renderEmptyPrompt(line: string, width: number, theme: ClioTheme): string {
+	const cursorAt = line.indexOf(REVERSE_VIDEO_BLANK);
+	if (cursorAt < 0) return line;
+	const afterCursorAt = cursorAt + REVERSE_VIDEO_BLANK.length;
+	const available = Math.max(0, width - 1);
+	const prompt = truncateToWidth(theme.fg("dim", EMPTY_PROMPT), available, "…", false);
+	const consumed = visibleWidth(prompt);
+	return `${line.slice(0, afterCursorAt)}${prompt}${line.slice(afterCursorAt + consumed)}`;
+}
+
+function findBottomRail(lines: readonly string[], width: number): number {
+	const rail = "─".repeat(Math.max(0, width));
+	for (let index = 1; index < lines.length; index += 1) {
+		if (stripAnsi(lines[index] ?? "") === rail) return index;
+	}
+	return -1;
+}
+
 export class ClioEditor extends Editor {
 	constructor(
 		tui: TUI,
@@ -65,10 +109,26 @@ export class ClioEditor extends Editor {
 		if (lines.length === 0) return lines;
 		const theme = clioTheme();
 		const safeWidth = Math.max(0, width);
+		const text = this.getText();
+		const mode = composerMode(this.chrome, text);
 
 		if (!hasScrollIndicator(lines[0] ?? "")) {
 			lines[0] = rule(theme, safeWidth, {
+				left: mode,
+				leftToken: mode === "STEER" ? "action" : "accentDeep",
 				right: styledRailLabel(theme, this.chrome),
+				fillToken: "frameStrong",
+				rightRaw: true,
+				rightTail: theme.style("frameStrong", "─", { bold: true }),
+			});
+		}
+
+		if (text.length === 0 && lines[1]) lines[1] = renderEmptyPrompt(lines[1], safeWidth, theme);
+
+		const bottomRail = findBottomRail(lines, safeWidth);
+		if (bottomRail >= 0 && safeWidth >= MIN_HINT_WIDTH) {
+			lines[bottomRail] = rule(theme, safeWidth, {
+				right: lowerRailHint(theme, this.chrome),
 				fillToken: "frameStrong",
 				rightRaw: true,
 				rightTail: theme.style("frameStrong", "─", { bold: true }),

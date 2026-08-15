@@ -43,6 +43,7 @@ export function fitUnits(theme: ClioTheme, prefix: string, units: readonly strin
 
 export interface RuleOptions {
 	left?: string;
+	leftToken?: ClioToken;
 	right?: string;
 	fillToken?: ClioToken;
 	rightToken?: ClioToken;
@@ -55,7 +56,7 @@ export function rule(theme: ClioTheme, width: number, options: RuleOptions = {})
 	if (safeWidth === 0) return "";
 	// A left label starts flush at column 0, with a single trailing space before
 	// the fill. There is no leading space, so labeled rules align with the frame.
-	const left = options.left ? `${theme.style("accent", options.left, { bold: true })} ` : "";
+	const left = options.left ? `${theme.style(options.leftToken ?? "accent", options.left, { bold: true })} ` : "";
 	const rightBody = options.rightRaw ? options.right : theme.fg(options.rightToken ?? "muted", options.right ?? "");
 	const right = options.right ? ` ${rightBody} ${options.rightTail ?? ""}` : "";
 	const labelsWidth = visibleWidth(left) + visibleWidth(right);
