@@ -319,15 +319,30 @@ describe("contracts/overlay width — settings overlay", () => {
 		}
 	});
 
-	it("marks the explanation pane when it does not fit", () => {
-		const center = settingsCenter(20);
-		center.setSelection("safety", 0);
-		const flat = stripAnsi(center.render(40).join(" ")).replace(/\s+/gu, " ");
-		const help =
-			"read-only observes; suggest parks non-read calls; auto-edit edits, dispatches, and runs recognized commands; full-auto runs except command substitution and system-level changes. A confirmation marked exposure=outward parks for you at suggest and auto-edit.";
-		if (flat.includes(help)) return;
-		const shown = flat.slice(flat.indexOf("read-only observes"));
-		ok(shown.includes("…"), `the explanation stopped without a marker: ${JSON.stringify(shown.slice(0, 120))}`);
+	/**
+	 * The narrow page is a list first. Its inspector gets two rows at 20 and one
+	 * at 12, and the long per-value help paragraph is a wide-layout affordance:
+	 * at 40 columns it used to spend six rows explaining a row the operator could
+	 * no longer see. What the inspector does show still says when it was cut.
+	 */
+	it("budgets the narrow inspector and marks it when the explanation does not fit", () => {
+		const help = "read-only observes; suggest parks non-read calls";
+		for (const { bodyHeight, rows } of [
+			{ bodyHeight: 20, rows: 2 },
+			{ bodyHeight: 12, rows: 1 },
+		]) {
+			const center = settingsCenter(bodyHeight);
+			center.setSelection("safety", 0);
+			const lines = stripAnsi(center.render(40).join("\n")).split("\n");
+			const prose = lines.filter((line) => /How freely|always applies/u.test(line));
+			ok(prose.length <= rows, `${bodyHeight} rows spent ${prose.length} inspector rows:\n${lines.join("\n")}`);
+			const flat = prose.join(" ").replace(/\s+/gu, " ").trim();
+			ok(flat.includes("How freely Clio acts"), `the inspector lost the description:\n${lines.join("\n")}`);
+			if (!flat.includes("How freely Clio acts; the safety net always applies.")) {
+				ok(prose.at(-1)?.trim().endsWith("…"), `the description stopped without a marker: ${JSON.stringify(flat)}`);
+			}
+			ok(!lines.join(" ").includes(help), "the long help paragraph must not displace the narrow list");
+		}
 	});
 });
 
