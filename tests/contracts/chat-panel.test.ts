@@ -722,6 +722,26 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		ok(!text.includes("not a verification"), text);
 	});
 
+	it("omits the reasoning suffix entirely on a zero-reasoning turn", () => {
+		// The llama.cpp path reports `reasoningTokens: 0` where LM Studio reports
+		// nothing at all, and the panel printed `reasoning 0 provider` for it. At
+		// 71 columns that pushed the bare word `provider` onto its own line. Zero
+		// reasoning is the same story as no reasoning: say nothing.
+		const panel = createChatPanel();
+		const message = {
+			role: "assistant",
+			content: [{ type: "text", text: "answered without thinking" }],
+			usage: { input: 7434, output: 367, cacheRead: 16865, cacheWrite: 0, reasoningTokens: 0 },
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+		const text = strip(panel.render(71).join("\n"));
+		ok(text.includes("cache 16865/0"), text);
+		ok(!text.includes("reasoning"), text);
+		ok(!text.includes("provider"), text);
+	});
+
 	it("pauses and resumes cumulative live tool output without changing execution state", () => {
 		const panel = createChatPanel({ getOutputVerbosity: () => "verbose" });
 		panel.applyEvent({
