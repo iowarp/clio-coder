@@ -933,6 +933,19 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		strictEqual(countAction(expanded), 1, `expanded dispatch should use one orange signal: "${strip(expanded)}"`);
 	});
 
+	it("keeps the fleet summary as ACTIVITY's sole orange signal during background dispatch", () => {
+		const countAction = (value: string): number => value.split(theme.fgSequence("action")).length - 1;
+		const activity = activityQuadrant(agent, {
+			status,
+			toolCounts: { tools: {}, errors: 0, active: 0 },
+			width: 120,
+		}).join("\n");
+
+		strictEqual(countAction(activity), 1, `background ACTIVITY should use one orange signal: "${strip(activity)}"`);
+		ok(activity.includes(theme.fg("action", "1 active")), "the stronger fleet summary keeps action orange");
+		ok(activity.includes(theme.fg("accent", "fleet 1")), "the duplicate harness badge is demoted to accent");
+	});
+
 	it("never paints a dashboard value in the accentDeep structure color", () => {
 		// accentDeep only ever appears as the bold section tag, so its fg-only
 		// (value) sequence must not survive anywhere in the rendered dashboard.
