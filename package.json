@@ -46,13 +46,10 @@
 		"dist",
 		"!dist/**/*.map",
 		"assets/clio-coder-logo-128.webp",
-		"src/domains/agents/builtins/**",
-		"src/domains/agents/fleets/**",
+		"src/**",
 		"skills/workflow/cut-it/**",
 		"skills/git/**",
 		"skills/skill-marketplace.json",
-		"src/domains/providers/models/**",
-		"src/domains/prompts/fragments/**",
 		"docs/*.md",
 		"docs/html/**",
 		"README.md",
@@ -68,7 +65,7 @@
 		"access": "public"
 	},
 	"scripts": {
-		"build": "tsup",
+		"build": "tsup && node --import tsx scripts/build-codewiki-asset.ts",
 		"dev": "tsup --watch",
 		"clean": "rm -rf dist",
 		"typecheck": "tsc -p tsconfig.tests.json",
