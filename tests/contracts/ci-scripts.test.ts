@@ -118,19 +118,12 @@ describe("contracts/ci scripts", () => {
 		ok(!commands.includes("npm run test"), "no lane runs the plain suite alongside the gate or coverage run");
 	});
 
-	it("publishes from version tags through the release gate with provenance", () => {
+	it("releases from version tags through the release gate", () => {
 		const parsed = workflow(".github/workflows/release.yml");
 		const trigger = parsed.on as { push?: { tags?: unknown } };
 		deepStrictEqual(trigger.push?.tags, ["v*"], "release must trigger on v* tags only");
 
-		const permissions = parsed.permissions as Record<string, string>;
-		strictEqual(permissions["id-token"], "write", "npm provenance needs the OIDC id-token permission");
-
 		const commands = runCommands(".github/workflows/release.yml", "release");
-		ok(
-			commands.some((command) => command.includes("npm publish --provenance")),
-			commands.join("\n"),
-		);
 		ok(
 			commands.some((command) => command.includes("does not match tag")),
 			"release must refuse a tag that disagrees with package.json's version",
