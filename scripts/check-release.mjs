@@ -24,9 +24,12 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 
 // Size budgets serve as a tripwire against packaging defects such as leaked
 // node_modules or doubled dist, rather than policing documentation size or
-// enforcing an artificial package diet.
-const MAX_TARBALL_BYTES = 5_000_000;
-const MAX_UNPACKED_BYTES = 16_000_000;
+// enforcing an artificial package diet. Pack composition changed deliberately
+// in #66: about 19MB of vendored tree-sitter grammars (dist/assets/grammars/),
+// Clio's own source (src/**), and her code map (dist/assets/codewiki.json)
+// ride inside the tarball so the install needs neither grammar collection.
+const MAX_TARBALL_BYTES = 15_000_000;
+const MAX_UNPACKED_BYTES = 40_000_000;
 
 const FORBIDDEN = [
 	{ test: (f) => f.includes("__pycache__") || f.endsWith(".pyc"), reason: "python bytecode cache" },

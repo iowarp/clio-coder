@@ -21,7 +21,7 @@ import { makeScratchHome } from "../harness/scratch-env.js";
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 /** Packages tsup bundles into dist/; none may survive as a runtime import. */
-const BUNDLED = ["chalk", "diff", "uuid", "yaml", "typebox", "undici"];
+const BUNDLED = ["chalk", "diff", "uuid", "yaml", "typebox", "undici", "@vscode/tree-sitter-wasm", "tree-sitter-wasms"];
 
 function runNode(
 	args: ReadonlyArray<string>,
@@ -97,7 +97,7 @@ describe("smoke/pack-install", { concurrency: false }, () => {
 		ok(readFileSync(bin, "utf8").startsWith("#!/usr/bin/env node\n"), "installed bin must keep its shebang");
 	});
 
-	it("keeps the bundled packages out of the runtime import graph", () => {
+	it("keeps the bundled packages out of the runtime import graph and the install", () => {
 		const distDir = join(installedRoot, "dist");
 		const leaked: string[] = [];
 		for (const entry of readdirSync(distDir, { recursive: true, withFileTypes: true })) {
@@ -109,6 +109,11 @@ describe("smoke/pack-install", { concurrency: false }, () => {
 			}
 		}
 		strictEqual(leaked.join("; "), "", "bundled packages must not survive as runtime imports");
+		const topLevel = new Set(readdirSync(join(prefix, "node_modules")));
+		for (const name of ["@vscode", "tree-sitter-wasms"]) {
+			strictEqual(topLevel.has(name), false, `${name} must not be installed by the package`);
+		}
+		ok(existsSync(join(installedRoot, "dist", "assets", "grammars", "tree-sitter.wasm")), "vendored grammars must ship");
 	});
 
 	it("runs --version from the installed prefix", async () => {
