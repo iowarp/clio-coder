@@ -1376,8 +1376,56 @@ export function readSettings(): ClioSettings {
  * every mutation goes through updateSettings so there is exactly one writer
  * path and it always holds the lock.
  */
-function persistSettings(settings: ClioSettings): void {
-	safeResourceWrite(settingsPath(), stringifyYaml(settings), { encoding: "utf8", mode: 0o644 });
+function persistSettings(document: unknown): void {
+	safeResourceWrite(settingsPath(), stringifyYaml(document), { encoding: "utf8", mode: 0o644 });
+}
+
+/**
+ * The saved document exactly as YAML parsed it, before defaults are merged in.
+ * updateSettings patches this instead of the normalized blob, so the file only
+ * ever gains what a mutation actually touched.
+ */
+function readSavedDocument(): unknown {
+	const path = settingsPath();
+	if (!existsSync(path)) return {};
+	try {
+		return parseYaml(readFileSync(path, "utf8")) ?? {};
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * Write the `before` → `after` delta of two normalized settings blobs onto the
+ * raw saved document. Keys the mutation did not change keep their saved form
+ * (or stay absent), so materialized defaults such as `workers.profiles: {}`
+ * never leak into a file that never had them.
+ */
+function applySettingsDelta(saved: unknown, before: unknown, after: unknown): unknown {
+	if (!isPlainObject(before) || !isPlainObject(after)) return cloneValue(after);
+	const out: Record<string, unknown> = isPlainObject(saved) ? { ...saved } : {};
+	for (const [key, next] of Object.entries(after)) {
+		// Untouched keys keep whatever the file said, including saying nothing.
+		if (deepEquals(before[key], next)) continue;
+		out[key] = applySettingsDelta(out[key], before[key], next);
+	}
+	// A key the mutation removed from a map (a deleted worker profile) goes too.
+	for (const key of Object.keys(out)) {
+		if (!(key in after)) delete out[key];
+	}
+	return out;
+}
+
+function deepEquals(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (Array.isArray(a) || Array.isArray(b)) {
+		if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+		return a.every((entry, index) => deepEquals(entry, b[index]));
+	}
+	if (!isPlainObject(a) || !isPlainObject(b)) return false;
+	const keys = Object.keys(a);
+	if (keys.length !== Object.keys(b).length) return false;
+	return keys.every((key) => key in b && deepEquals(a[key], b[key]));
 }
 
 /**
@@ -1420,11 +1468,14 @@ export function withSettingsLock<T>(fn: () => T, options: SettingsUpdateOptions 
  */
 export function updateSettings(mutate: SettingsMutator, options: SettingsUpdateOptions = {}): ClioSettings {
 	return withSettingsLock(() => {
+		const saved = readSavedDocument();
 		const current = readSettings();
+		// Snapshot before the mutator runs: in-place mutators alias `current`.
+		const before = cloneValue(current);
 		const next = mutate(current) ?? current;
 		const revalidated = validateSettings(JSON.parse(JSON.stringify(next)));
 		if (revalidated.issues.length > 0) throw new SettingsValidationError(revalidated.issues);
-		persistSettings(revalidated.settings);
+		persistSettings(applySettingsDelta(saved, before, revalidated.settings));
 		return revalidated.settings;
 	}, options);
 }
