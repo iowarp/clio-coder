@@ -896,7 +896,9 @@ describe("chat-panel render caching", () => {
 	};
 
 	it("renders identically after a tool event that no longer clears the whole cache", () => {
-		const cached = createChatPanel();
+		// Fixed clock: real elapsed time would stamp a wall-clock duration onto
+		// the tool row in whichever panel happened to run slower.
+		const cached = createChatPanel({ now: () => 1000 });
 		settledTurns(cached, 12);
 		cached.render(80);
 
@@ -919,7 +921,7 @@ describe("chat-panel render caching", () => {
 		} as ChatLoopEvent);
 		cached.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 
-		const fresh = createChatPanel();
+		const fresh = createChatPanel({ now: () => 1000 });
 		settledTurns(fresh, 12);
 		fresh.applyEvent({
 			type: "tool_execution_start",
