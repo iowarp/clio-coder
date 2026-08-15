@@ -210,7 +210,7 @@ function runHeadline(run) {
 			: "",
 	];
 	const timing = `${formatTime(run.started_at)}${run.ended_at ? ` → ${formatTime(run.ended_at)}` : " → live"}${duration === null ? "" : ` · ${formatDuration(duration)}`}`;
-	return `<div class="eyebrow">${escapeHtml(run.status)} · ${escapeHtml(timing)}</div><h1>${escapeHtml(run.run_id)}</h1>${request === null ? "" : `<p class="task" title="${escapeHtml(request)}">${escapeHtml(request)}</p>`}<div class="chips">${chips.join("")}</div>`;
+	return `<div class="eyebrow"><span class="status-badge ${statusClass(run.status)}">${escapeHtml(run.status)}</span> · ${escapeHtml(timing)}</div><h1>${escapeHtml(run.run_id)}</h1>${request === null ? "" : `<p class="task" title="${escapeHtml(request)}">${escapeHtml(request)}</p>`}<div class="chips">${chips.join("")}</div>`;
 }
 
 /** Wall clock for the run; a live run measures against now, as the waterfall does. */

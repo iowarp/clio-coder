@@ -361,10 +361,14 @@ main,
 	transition: all 0.2s ease;
 }
 
-.run.running .status-mark,
-.run.queued .status-mark {
+.run.running .status-mark {
 	background: var(--action);
 	box-shadow: 0 0 12px rgba(255, 126, 41, 0.65);
+}
+
+.run.queued .status-mark {
+	background: var(--warning);
+	box-shadow: 0 0 10px rgba(255, 180, 84, 0.4);
 }
 
 .run.success .status-mark {
@@ -403,9 +407,12 @@ main,
 	letter-spacing: 0.05em;
 }
 
-.running .status,
-.queued .status {
+.running .status {
 	color: var(--action);
+}
+
+.queued .status {
+	color: var(--warning);
 }
 
 .success .status {
@@ -532,9 +539,46 @@ main,
 }
 
 .back:hover {
-	background: rgba(255, 255, 255, 0.08);
+	background: rgba(0, 212, 219, 0.08);
 	color: var(--text-main);
-	border-color: rgba(var(--color-orange-rgb), 0.35);
+	border-color: rgba(var(--color-cyan-rgb), 0.4);
+	box-shadow: 0 0 15px rgba(0, 212, 219, 0.15);
+}
+
+.status-badge {
+	display: inline-block;
+	padding: 0.15rem 0.55rem;
+	border-radius: 4px;
+	font-family: var(--font-mono);
+	font-size: 0.725rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	vertical-align: middle;
+}
+
+.status-badge.success {
+	background: rgba(16, 185, 129, 0.15);
+	color: var(--color-emerald);
+	border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.status-badge.fail {
+	background: rgba(239, 68, 68, 0.15);
+	color: var(--color-rose);
+	border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.status-badge.running {
+	background: rgba(255, 126, 41, 0.15);
+	color: var(--action);
+	border: 1px solid rgba(255, 126, 41, 0.35);
+}
+
+.status-badge.queued {
+	background: rgba(255, 180, 84, 0.15);
+	color: var(--warning);
+	border: 1px solid rgba(255, 180, 84, 0.3);
 }
 
 .run-head {
