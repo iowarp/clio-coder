@@ -25,6 +25,7 @@ import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
 export const DETACHED_DISPATCH_NUDGE_REGISTRATION_ID = "nudge.detached-dispatch";
 export const READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID = "nudge.read-only-exploration";
 export const READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD = 9;
+export const UNBACKED_WORKER_CLAIM_REGISTRATION_ID = "rail.unbacked-worker-claim";
 
 const SCOUT_AGENT_ID = "scout";
 
@@ -206,6 +207,89 @@ export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegi
 				{ kind: "request_continuation", message },
 				{ kind: "inject_reminder", message, severity: "info" },
 			];
+		},
+	};
+}
+
+/**
+ * Honesty rail for fabricated worker results.
+ *
+ * A model under context pressure can narrate a worker it never dispatched:
+ * "the scout investigation is complete" after twelve inline greps, headed
+ * "Scout Shadow Report". Nothing in the turn contradicts it, and the operator
+ * has no receipt id to check against.
+ *
+ * The check is per-turn and mechanical, never an LLM judge: the final
+ * assistant text matched against worker-result claim shapes, and whether any
+ * dispatch call ran in the same turn. When a claim is made and no dispatch
+ * ran, the turn ends with one advisory transcript line. Detection is
+ * deliberately conservative: an intention ("let me dispatch a scout") is not a
+ * claim, so only a claim of results trips it.
+ */
+const WORKER_NOUN = "(?:scouts?|shadow (?:agent|worker)s?|sub-?agents?|workers?)";
+const RESULT_VERB =
+	"(?:found|reported|returned|investigated|explored|concluded|confirmed|discovered|surfaced|completed|is complete|came back)";
+
+const WORKER_CLAIM_PATTERNS: ReadonlyArray<RegExp> = [
+	// "the scout found ...", "the scout investigation is complete", "workers came back ..."
+	new RegExp(`\\b${WORKER_NOUN}\\b[^.\\n]{0,40}?\\b${RESULT_VERB}\\b`, "i"),
+	// "... reported by the scout"
+	new RegExp(`\\b${RESULT_VERB}\\b[^.\\n]{0,24}\\bby\\s+(?:the\\s+|a\\s+|our\\s+)?${WORKER_NOUN}\\b`, "i"),
+	// A titled worker deliverable: "Scout Shadow Report", "Worker findings".
+	/\b(?:scout|shadow|worker)\b[^\n]{0,20}\b(?:report|findings|summary)\b/i,
+];
+
+export function claimsWorkerResults(text: string | undefined): boolean {
+	if (typeof text !== "string" || text.trim().length === 0) return false;
+	return WORKER_CLAIM_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+export function buildUnbackedWorkerClaimMessage(): string {
+	return "[Clio Coder] no dispatch ran this turn; worker results named above are not backed by a receipt. Dispatch the work or state plainly that you did it inline.";
+}
+
+/**
+ * Contradicts a worker claim that no dispatch call backs. One advisory line,
+ * no continuation: the turn is already over and the operator, not another
+ * model round, decides what to do about it.
+ */
+export function createUnbackedWorkerClaimRegistration(): MiddlewareHookRegistration {
+	const dispatchedTurns = new Set<string>();
+	const turnKey = (input: MiddlewareHookInput): string => {
+		const userTurnId = input.hook === "turn_end" ? input.metadata?.userTurnId : undefined;
+		return (
+			(typeof userTurnId === "string" && userTurnId.length > 0 ? userTurnId : input.turnId) ?? input.runId ?? NO_TURN
+		);
+	};
+	const remember = (key: string): void => {
+		if (dispatchedTurns.size >= EXPLORATION_NUDGE_TURN_LIMIT && !dispatchedTurns.has(key)) {
+			const oldest = dispatchedTurns.values().next().value;
+			if (oldest !== undefined) dispatchedTurns.delete(oldest);
+		}
+		dispatchedTurns.add(key);
+	};
+	return {
+		id: UNBACKED_WORKER_CLAIM_REGISTRATION_ID,
+		description: "contradict a worker/scout result claim that no dispatch call in the turn backs",
+		hooks: ["after_tool", "turn_end"],
+		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
+			const key = turnKey(input);
+			if (input.hook === "after_tool") {
+				// Any completed dispatch counts, succeeded or not: a run that failed is
+				// still visible in the transcript and honestly reportable. Only a turn
+				// with no dispatch call at all can fabricate one.
+				if (input.toolName === ToolNames.Dispatch) remember(key);
+				return [];
+			}
+			if (input.hook !== "turn_end") return [];
+			const dispatched = dispatchedTurns.delete(key);
+			const stopReason = input.metadata?.stopReason;
+			if (stopReason !== undefined && stopReason !== "stop") return [];
+			// A surface without the dispatch tool cannot have dispatched, so a worker
+			// mention there is discussion, not a fabricated result.
+			if (!hasActiveTool(input, ToolNames.Dispatch)) return [];
+			if (dispatched || !claimsWorkerResults(input.text)) return [];
+			return [{ kind: "inject_reminder", message: buildUnbackedWorkerClaimMessage(), severity: "warn" }];
 		},
 	};
 }

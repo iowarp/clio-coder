@@ -160,14 +160,26 @@ function finiteNonNegative(value: number | null | undefined): number {
 	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
-export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined): string {
-	if (!snapshot) return `none · 0${GLYPH.error}`;
+/**
+ * The tools row answers two different questions and used to answer only the
+ * second: what the model can reach, and what it has called. `registered` is the
+ * count of tool schemas sent to the provider this turn, so a session that has
+ * only dispatched still reports the tools it holds instead of reading "none",
+ * which said the model had no tools at all.
+ */
+export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined, registered?: number | null): string {
+	const available =
+		typeof registered === "number" && Number.isFinite(registered) && registered > 0
+			? `${Math.floor(registered)} avail`
+			: null;
+	if (!snapshot) return `${available ?? "none"} · 0${GLYPH.error}`;
 	const entries = Object.entries(snapshot.tools)
 		.filter(([name, count]) => count > 0 && name.toLowerCase() !== "dispatch")
 		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 		.slice(0, 4)
 		.map(([name, count]) => `${name} ${formatFooterTokens(count)}`);
-	const prefix = entries.length > 0 ? entries.join(" · ") : "none";
+	const called = entries.length > 0 ? entries.join(" · ") : available !== null ? null : "none";
+	const prefix = [available, called].filter((part): part is string => part !== null).join(" · ");
 	const active =
 		typeof snapshot.active === "number" && snapshot.active > 0 ? ` · active ${formatFooterTokens(snapshot.active)}` : "";
 	const truncated =

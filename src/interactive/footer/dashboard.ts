@@ -465,7 +465,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			agent: {
 				statusText: statusText(status, now(), width, frame),
 				dispatchSummary: dispatchSegment(dispatch),
-				toolTally: formatToolTally(tools),
+				toolTally: formatToolTally(tools, contextLedger?.toolCount ?? null),
 				dispatchRows: dispatch,
 				contextActivity: deps.getContextActivity?.() ?? null,
 				lastTurn: deps.getLastTurnSummary?.() ?? null,

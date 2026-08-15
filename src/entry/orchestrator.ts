@@ -66,6 +66,7 @@ import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import {
 	createDetachedDispatchNudgeRegistration,
 	createReadOnlyExplorationNudgeRegistration,
+	createUnbackedWorkerClaimRegistration,
 	openDetachedBatchViews,
 } from "../domains/middleware/dispatch-nudge.js";
 import {
@@ -1410,6 +1411,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	middleware.registerHook(createToolProseRegistration());
 	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
 	middleware.registerHook(createReadOnlyExplorationNudgeRegistration());
+	middleware.registerHook(createUnbackedWorkerClaimRegistration());
 	middleware.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
 	);
