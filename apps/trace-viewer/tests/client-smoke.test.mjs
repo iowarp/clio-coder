@@ -379,4 +379,65 @@ describe("trace viewer client", () => {
 		assert.match(html, /first pass \(evidence\)/);
 		assert.doesNotMatch(html, /undefined/);
 	});
+
+	it("formats zero cost truthfully as $0.00 and sub-cent amounts with 4 decimal places", () => {
+		const run = {
+			run_id: "run-cost",
+			status: "success",
+			agent: "coder",
+			target: "local",
+			model: "gpt",
+			started_at: "2026-01-01T00:00:00Z",
+		};
+		const phaseZero = {
+			phase_id: "p0",
+			run_id: "run-cost",
+			seq: 0,
+			name: "zero",
+			kind: "agent",
+			owner: "coder",
+			status: "success",
+			attempt: 0,
+			started_at: "2026-01-01T00:00:00Z",
+			ended_at: "2026-01-01T00:00:01Z",
+			total_tokens: 0,
+			total_cost_usd: 0,
+			input_tokens: 0,
+			input_cost_usd: 0,
+			output_tokens: 0,
+			output_cost_usd: 0,
+			cache_read_tokens: 0,
+			cache_read_cost_usd: 0,
+			cache_write_tokens: 0,
+			cache_write_cost_usd: 0,
+		};
+		const phaseSubcent = {
+			phase_id: "p1",
+			run_id: "run-cost",
+			seq: 1,
+			name: "subcent",
+			kind: "agent",
+			owner: "coder",
+			status: "success",
+			attempt: 0,
+			started_at: "2026-01-01T00:00:01Z",
+			ended_at: "2026-01-01T00:00:02Z",
+			total_tokens: 100,
+			total_cost_usd: 0.0036,
+			input_tokens: 80,
+			input_cost_usd: 0.0024,
+			output_tokens: 20,
+			output_cost_usd: 0.0012,
+		};
+
+		const htmlZero = runPage(run, [phaseZero], [], []);
+		assert.match(htmlZero, /\$0\.00/);
+		assert.doesNotMatch(htmlZero, /\$0\.0000/);
+		assert.match(htmlZero, /<span class="status-badge success">success<\/span>/);
+
+		const htmlSubcent = runPage(run, [phaseSubcent], [], []);
+		assert.match(htmlSubcent, /\$0\.0036/);
+		assert.match(htmlSubcent, /\$0\.0024/);
+		assert.match(htmlSubcent, /\$0\.0012/);
+	});
 });
