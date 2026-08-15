@@ -9,6 +9,16 @@ export type PendingSkillRequestSource = "slash-command" | "selector" | "marketpl
  */
 export const SKILL_SUGGESTION_ANCHOR = "Suggested skill: /skill:<name>";
 
+/**
+ * The part of the anchor a real reply keeps once `<name>` is substituted.
+ *
+ * Surfaces that recognize a suggestion in live output must match this, not the
+ * template: no model ever writes the literal `<name>`, so a full-anchor test is
+ * always false. The chat panel's glyph guard was exactly that, and the
+ * suggestion held the turn's ✦ while the answer beneath it hung plain.
+ */
+export const SKILL_SUGGESTION_PREFIX = SKILL_SUGGESTION_ANCHOR.slice(0, SKILL_SUGGESTION_ANCHOR.indexOf("<name>"));
+
 export interface PendingSkillRequest {
 	name: string;
 	args: string;
