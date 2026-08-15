@@ -261,7 +261,7 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
 const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 	autonomy:
-		"read-only observes; suggest parks non-read calls; auto-edit edits, dispatches, and runs recognized commands; full-auto runs except command substitution and system-level changes. A confirmation marked exposure=outward parks for you at auto-edit.",
+		"read-only observes; suggest parks non-read calls; auto-edit edits, dispatches, and runs recognized commands; full-auto runs except command substitution and system-level changes. A confirmation marked exposure=outward parks for you at suggest and auto-edit.",
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"compaction.threshold":
@@ -285,7 +285,8 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string, string>>> = {
 	autonomy: {
 		"read-only": "observe and answer only; never edits files or runs commands",
-		suggest: "propose every edit and command for your approval",
+		suggest:
+			"propose every edit and command for your approval; confirmations marked exposure=outward (filing an issue or PR, pushing, releasing) park here as well",
 		"auto-edit":
 			"edits and dispatches run; recognized commands (tests, lint, build, .clio-coder/safety.yaml entries) run; other commands ask, as do confirmations marked exposure=outward (filing an issue or PR, pushing, releasing)",
 		"full-auto":
