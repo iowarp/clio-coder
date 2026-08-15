@@ -201,6 +201,7 @@ const REMOVE_PROFILE_CHOICE = "(remove profile)";
 const UNBIND_CHOICE = "(unbind)";
 const AUTO_PLACEMENT_CHOICE = "(auto placement)";
 const PROFILE_FIELD_SEPARATOR = " -> ";
+const PROFILE_SUMMARY_VALUE_BUDGET = 26;
 
 export const SETTINGS_SECTION_ROWS = {
 	safety: [
@@ -1108,6 +1109,17 @@ function fleetProfileRows(
 			const model = profile.model ?? "(unset)";
 			const placement = profile.node ?? "auto";
 			const summary = `${target}/${model}  ${thinking.display}  ${placement}`;
+			const compactThinking = truncateProfileFact(thinking.display, 7);
+			const compactPlacement = truncateProfileFact(placement, 7);
+			const route = target === settings.workers.default.target ? model : `${target}/${model}`;
+			const routeBudget = Math.max(
+				8,
+				PROFILE_SUMMARY_VALUE_BUDGET -
+					visibleWidth(compactThinking) -
+					visibleWidth(compactPlacement) -
+					visibleWidth(ROW_GAP) * 2,
+			);
+			const compactRoute = truncateProfileFact(route, routeBudget);
 			return settingItem(`workers.profiles.${name}`, summary, {
 				label: name,
 				description: `Profile ${name}. Enter to edit its target, model, thinking level, placement, or remove it.`,
@@ -1115,9 +1127,9 @@ function fleetProfileRows(
 				submenu: profileWorkbenchSubmenu(name, settings, live, options),
 				affordance: "Enter: drill into profile fields",
 				valueSegments: [
-					{ text: `${target}/${model}`, tone: "neutral" },
-					{ text: `  ${thinking.display}`, tone: "neutral" },
-					{ text: `  ${placement}`, tone: "neutral" },
+					{ text: compactRoute, tone: "neutral" },
+					{ text: `${ROW_GAP}${compactThinking}`, tone: "neutral" },
+					{ text: `${ROW_GAP}${compactPlacement}`, tone: "neutral" },
 				],
 			});
 		});
@@ -1131,10 +1143,10 @@ function profileWorkbenchSubmenu(
 ): SettingSubmenuBuilder {
 	return (_currentValue: string, done: (value?: string) => void): Component => {
 		const fields = [
-			{ value: "target", label: "Edit target" },
-			{ value: "model", label: "Edit model" },
-			{ value: "thinkingLevel", label: "Edit thinking level" },
-			{ value: "node", label: "Edit placement" },
+			{ value: "target", label: "Edit target", presentationKind: "action" as const },
+			{ value: "model", label: "Edit model", presentationKind: "action" as const },
+			{ value: "thinkingLevel", label: "Edit thinking level", presentationKind: "action" as const },
+			{ value: "node", label: "Edit placement", presentationKind: "action" as const },
 			{
 				value: "remove",
 				label: "Remove profile",
@@ -1758,11 +1770,44 @@ export function createSettingsChangePlan(
 
 /** Keep the destination—the value the operator is about to commit—visible as confirmation titles narrow. */
 function formatScopeConfirmTitle(plan: SettingsChangePlan, width: number): string {
-	const full = `${plan.label}: ${plan.originalValue} → ${plan.selectedValue}`;
+	const selectedValue = humanizeChangePlanValue(plan);
+	const full = plan.originalValue.trim()
+		? `${plan.label}: ${plan.originalValue} → ${selectedValue}`
+		: `${plan.label}: ${selectedValue}`;
 	if (visibleWidth(full) <= width) return full;
-	const destinationFirst = `${plan.label}: → ${plan.selectedValue}`;
+	const destinationFirst = plan.originalValue.trim()
+		? `${plan.label}: → ${selectedValue}`
+		: `${plan.label}: ${selectedValue}`;
 	if (visibleWidth(destinationFirst) <= width) return destinationFirst;
 	return ellipsizeFromLeft(destinationFirst, width);
+}
+
+function humanizeChangePlanValue(plan: SettingsChangePlan): string {
+	const separatorIndex = plan.selectedValue.indexOf(PROFILE_FIELD_SEPARATOR);
+	if (separatorIndex < 0) return plan.selectedValue;
+	const head = plan.selectedValue.slice(0, separatorIndex).trim();
+	const tail = plan.selectedValue.slice(separatorIndex + PROFILE_FIELD_SEPARATOR.length).trim();
+	if (plan.rowId === "workers.profiles" || plan.rowId === "workers.agentBindings") return `${head} → ${tail}`;
+	if (!plan.rowId.startsWith("workers.profiles.")) return plan.selectedValue;
+	const label =
+		head === "thinkingLevel" ? "thinking" : head === "node" ? "placement" : head === "target" ? "target" : "model";
+	return `${label} → ${tail}`;
+}
+
+function truncateProfileFact(text: string, width: number): string {
+	const safeWidth = Math.max(1, width);
+	if (visibleWidth(text) <= safeWidth) return text;
+	if (safeWidth <= visibleWidth(ELLIPSIS)) return ELLIPSIS;
+	const characters: string[] = [];
+	let used = 0;
+	const contentWidth = safeWidth - visibleWidth(ELLIPSIS);
+	for (const character of Array.from(text)) {
+		const characterWidth = visibleWidth(character);
+		if (used + characterWidth > contentWidth) break;
+		characters.push(character);
+		used += characterWidth;
+	}
+	return `${characters.join("")}${ELLIPSIS}`;
 }
 
 function ellipsizeFromLeft(text: string, width: number): string {

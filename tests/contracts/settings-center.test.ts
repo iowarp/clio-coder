@@ -240,7 +240,7 @@ describe("contracts/settings center", () => {
 		strictEqual(byId.get("fleet.group.placement")?.presentationKind, "group-header");
 		strictEqual(byId.get("workers.profiles.fast")?.presentationKind, "setting");
 		deepStrictEqual(byId.get("workers.profiles.fast")?.valueSegments, [
-			{ text: "target-b/model-b", tone: "neutral" },
+			{ text: "target-b/model…", tone: "neutral" },
 			{ text: "  off", tone: "neutral" },
 			{ text: "  auto", tone: "neutral" },
 		]);
@@ -1064,7 +1064,10 @@ describe("contracts/settings center", () => {
 		center.refreshItems();
 		strictEqual(center.getSelection().section, "fleet");
 		strictEqual(center.getSelection().rowId, "workers.profiles.fast", "profile identity survives an earlier insertion");
-		ok(stripAnsi(center.render(112).join("\n")).includes("❯ Edit model"), "drilled field identity survives refresh");
+		ok(
+			stripAnsi(center.render(112).join("\n")).includes(`❯ ${GLYPH.active} Edit model`),
+			"drilled field identity survives refresh",
+		);
 
 		center.handleInput(ESC);
 		const scoutIndex = fleetItems().findIndex((item) => item.id === "workers.agentBindings.scout");
@@ -1081,6 +1084,93 @@ describe("contracts/settings center", () => {
 		items.splice(0, items.length, ...buildSettingItems(settings));
 		center.refreshItems();
 		strictEqual(center.getSelection().rowId, "workers.agentBindings.scout", "route identity survives a removal");
+	});
+
+	it("renders clean confirmation titles for profile adds, bindings, and every workbench field", () => {
+		const settings = settingsWithTargets();
+		const confirmation = (id: EditableSettingId, value: string): string => {
+			const items = buildSettingItems(settings);
+			const originalItem = items.find((item) => item.id === id);
+			ok(originalItem, `${id} exists`);
+			const titleItem = { ...originalItem, values: [value] };
+			delete titleItem.submenu;
+			const titleItems = items.map((item) => (item.id === id ? titleItem : item));
+			const center = new SettingsCenter(titleItems, {
+				getBodyHeight: () => 24,
+				prepareChange: (item, selectedValue) => createSettingsChangePlan(settings, item, selectedValue),
+				onApply: () => undefined,
+				onCancel: () => undefined,
+			});
+			const sectionItems = titleItems.filter((item) => item.section === originalItem.section);
+			center.setSelection(
+				originalItem.section,
+				sectionItems.findIndex((item) => item.id === id),
+			);
+			center.handleInput(ENTER);
+			center.handleInput(ENTER);
+			return stripAnsi(center.render(112).join("\n"));
+		};
+
+		const cases = [
+			{ id: "workers.profiles" as const, value: "tester-tmp -> target-a", title: "Add profile: tester-tmp → target-a" },
+			{
+				id: "workers.agentBindings" as const,
+				value: "researcher -> fast",
+				title: "Add agent route: researcher → fast",
+			},
+			{ id: "workers.profiles.fast" as const, value: "target -> target-a", title: "fast: → target → target-a" },
+			{ id: "workers.profiles.fast" as const, value: "model -> model-next", title: "fast: → model → model-next" },
+			{ id: "workers.profiles.fast" as const, value: "thinkingLevel -> on", title: "fast: → thinking → on" },
+			{ id: "workers.profiles.fast" as const, value: "node -> local", title: "fast: → placement → local" },
+		];
+		for (const testCase of cases) {
+			const rendered = confirmation(testCase.id, testCase.value);
+			ok(rendered.includes(testCase.title), `${testCase.title} missing from:\n${rendered}`);
+			ok(!rendered.includes(" -> "), `internal separator leaked into:\n${rendered}`);
+		}
+	});
+
+	it("budgets a realistic profile summary so target, model, thinking, and placement all remain visible", () => {
+		const settings = settingsWithTargets();
+		settings.targets.push({
+			id: "mini",
+			runtime: "openai-compat",
+			url: "http://localhost:3333",
+			defaultModel: "Qwen3.8-27B-IQ4_NL-262K",
+		});
+		settings.workers.profiles.realistic = {
+			target: "mini",
+			model: "Qwen3.8-27B-IQ4_NL-262K",
+			thinkingLevel: "low",
+			node: "local",
+		};
+		const row = buildSettingItems(settings).find((item) => item.id === "workers.profiles.realistic");
+		ok(row);
+		const compact = row.valueSegments.map((segment) => segment.text).join("");
+		ok(Array.from(compact).length <= 26, `profile summary exceeded 26 cells: ${compact}`);
+		for (const fact of ["mini/", "Qwen3.8", "low", "local", "…"])
+			ok(compact.includes(fact), `${fact} missing from ${compact}`);
+		strictEqual(row.currentValue, "mini/Qwen3.8-27B-IQ4_NL-262K  low  local");
+	});
+
+	it("marks every profile workbench edit as an action", () => {
+		const items = buildSettingItems(settingsWithTargets());
+		const center = new SettingsCenter(items, {
+			getBodyHeight: () => 24,
+			prepareChange: () => null,
+			onApply: () => undefined,
+			onCancel: () => undefined,
+		});
+		const fleetItems = items.filter((item) => item.section === "fleet");
+		center.setSelection(
+			"fleet",
+			fleetItems.findIndex((item) => item.id === "workers.profiles.fast"),
+		);
+		center.handleInput(ENTER);
+		const rendered = stripAnsi(center.render(112).join("\n"));
+		for (const label of ["Edit target", "Edit model", "Edit thinking level", "Edit placement"]) {
+			ok(rendered.includes(`${GLYPH.active} ${label}`), `${label} lacks the action glyph:\n${rendered}`);
+		}
 	});
 
 	it("opens focused on the deep-linked section", () => {
