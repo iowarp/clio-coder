@@ -195,7 +195,8 @@ type EntrySettingId =
 	| `fleet.nodes.${string}`;
 export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID | EntrySettingId;
 type FleetGroupHeaderId = `fleet.group.${"defaults" | "profiles" | "agent-routes" | "placement"}`;
-export type SettingsCenterRowId = EditableSettingId | FleetGroupHeaderId;
+type TargetsCtaId = "targets.add-cta";
+export type SettingsCenterRowId = EditableSettingId | FleetGroupHeaderId | TargetsCtaId;
 const REMOVE_PROFILE_CHOICE = "(remove profile)";
 const UNBIND_CHOICE = "(unbind)";
 const AUTO_PLACEMENT_CHOICE = "(auto placement)";
@@ -398,6 +399,17 @@ export interface SettingsCenterItem extends SettingItem {
 	readOnly: boolean;
 	presentationKind: SettingsPresentationKind;
 	valueSegments: readonly SettingsValueSegment[];
+	targetConsole?: {
+		health: SettingsValueSegment;
+		id: string;
+		roles: string;
+		runtime: string;
+		latency: string;
+		url: string;
+		defaultModel: string;
+		lastProbe: string;
+		failureReason: string;
+	};
 	help?: string;
 	valueHelp?: Record<string, string>;
 	defaultValue?: string;
@@ -639,7 +651,9 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 	const requestRefresh = options?.requestRefresh;
 	const connectTarget = options?.connectTarget;
 	return (currentValue: string, done: (val?: string) => void) => {
-		const runtime = providers?.list().find((entry) => entry.target.id === targetId)?.runtime ?? null;
+		const status = providers?.list().find((entry) => entry.target.id === targetId);
+		const target = status?.target ?? options?.getSettings?.().targets.find((entry) => entry.id === targetId);
+		const runtime = status?.runtime ?? null;
 		const chatEligible = !providers || (runtime !== null && isOrchestratorEligibleRuntime(runtime));
 		const items = [
 			...(chatEligible
@@ -675,7 +689,8 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 				presentationKind: "destructive-action" as const,
 			},
 		];
-		const note = chatEligible ? undefined : "Not chat-eligible: its runtime is not HTTP/native.";
+		const details = `URL: ${target?.url ?? "(none)"} · Default model: ${target?.defaultModel ?? "(none)"} · Last probe: ${status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never"} · Failure reason: ${status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : "none")}`;
+		const note = chatEligible ? details : `Not chat-eligible: its runtime is not HTTP/native. · ${details}`;
 		return selectListSubmenu(
 			`Target ${targetId}`,
 			items,
@@ -795,6 +810,22 @@ function fleetGroupHeader(id: FleetGroupHeaderId, label: string): SettingsCenter
 		readOnly: true,
 		presentationKind: "group-header",
 		valueSegments: [],
+	};
+}
+
+function targetAddCta(): SettingsCenterItem {
+	return {
+		id: "targets.add-cta",
+		label: "Add target",
+		currentValue: "`clio-coder targets add`",
+		description: "Launch the accepted target setup wizard from your shell.",
+		section: "targets",
+		configPath: "targets.add-cta",
+		affordance: "accepted CLI wizard",
+		scope: "live",
+		readOnly: true,
+		presentationKind: "action",
+		valueSegments: [{ text: "`clio-coder targets add`", tone: "neutral" }],
 	};
 }
 
@@ -963,12 +994,15 @@ export function buildSettingItems(
 		}),
 		fleetGroupHeader("fleet.group.placement", "Placement"),
 		...fleetNodeRows(options?.getFleetNodes?.() ?? []),
-		settingItem("targets", settings.targets.length > 0 ? `${settings.targets.length} configured` : "(none)", {
-			affordance: "add with `clio-coder targets add`",
+		settingItem("targets", "", {
+			description: "Live inference target inventory and routing roles.",
+			affordance: "column heading",
 			readOnly: true,
 			presentationKind: "group-header",
+			valueSegments: [],
 		}),
 		...targetRows(settings, options),
+		targetAddCta(),
 		settingItem("scope", scopeText, {
 			submenu: editTextSubmenu("Edit model cycle scope comma-separated list"),
 			affordance: "free text",
@@ -1214,8 +1248,7 @@ function targetRows(
 		].filter((role) => role !== null);
 		const health = status?.health.status ?? "unknown";
 		const operation = options?.getTargetOperation?.(target.id) ?? null;
-		// Roles lead: the value column shows about twelve cells at 120 columns.
-		const roleText = roles.length > 0 ? `${roles.join("+")} · ` : "";
+		const roleText = roles.length > 0 ? roles.join("+") : "—";
 		const healthSegment = targetHealthSegment(health);
 		const activitySegment: SettingsValueSegment | null = operation
 			? {
@@ -1223,19 +1256,41 @@ function targetRows(
 					tone: "activity",
 				}
 			: null;
+		const liveHealth = activitySegment ?? healthSegment;
+		const runtime = status?.runtime?.id ?? target.runtime;
+		const latency =
+			status?.health.latencyMs === null || status?.health.latencyMs === undefined ? "—" : `${status.health.latencyMs} ms`;
+		const lastProbe = status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never";
+		const failureReason = status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : "none");
 		const valueSegments = [
-			...(roleText ? [{ text: roleText, tone: "neutral" as const }] : []),
-			activitySegment ?? healthSegment,
+			liveHealth,
+			{ text: `  ${target.id}`, tone: "neutral" as const },
+			{ text: `  ${roleText}`, tone: "neutral" as const },
+			{ text: `  ${runtime}`, tone: "neutral" as const },
+			{ text: `  ${latency}`, tone: "neutral" as const },
 		];
-		const value = roles.length > 0 ? `${roles.join("+")} · ${health}` : health;
-		return settingItem(`targets.${target.id}`, value, {
+		const value = `${health} · ${target.id} · ${roleText} · ${runtime} · ${latency}`;
+		const item = settingItem(`targets.${target.id}`, value, {
 			label: target.id,
-			description: `${target.runtime} · ${target.url ?? "no url"} · default model ${target.defaultModel ?? "(none)"}${status?.health.lastError ? ` · ${status.health.lastError}` : ""}`,
+			description: `URL: ${target.url ?? "(none)"} · Default model: ${target.defaultModel ?? "(none)"}`,
+			help: `Last probe: ${lastProbe} · Failure reason: ${failureReason}`,
 			submenu: targetActionsSubmenu(target.id, options),
 			affordance: options?.connectTarget ? "Enter: use, connect, probe, remove" : "Enter: use, probe, remove",
 			presentationKind: "status",
 			valueSegments,
 		});
+		item.targetConsole = {
+			health: liveHealth,
+			id: target.id,
+			roles: roleText,
+			runtime,
+			latency,
+			url: target.url ?? "(none)",
+			defaultModel: target.defaultModel ?? "(none)",
+			lastProbe,
+			failureReason,
+		};
+		return item;
 	});
 }
 
@@ -1299,6 +1354,8 @@ function refreshSettingItemsInPlace(items: SettingsCenterItem[], next: readonly 
 		item.readOnly = updated.readOnly;
 		item.presentationKind = updated.presentationKind;
 		item.valueSegments = updated.valueSegments;
+		if (updated.targetConsole) item.targetConsole = updated.targetConsole;
+		else delete item.targetConsole;
 		if (updated.help) item.help = updated.help;
 		else delete item.help;
 		if (updated.valueHelp) item.valueHelp = updated.valueHelp;
@@ -1784,6 +1841,18 @@ function formatSettingRow(
 ): string {
 	const theme = clioTheme();
 	const indent = " ".repeat(Math.max(0, indentWidth));
+	if (item.id === "targets") return formatTargetConsoleHeader(width, indentWidth);
+	if (item.targetConsole) return formatTargetConsoleRow(item, width, selected, indentWidth);
+	if (item.id === "targets.add-cta") {
+		const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+		const label = theme.style("accentDeep", item.label, { bold: true });
+		return truncateToWidth(
+			`${indent}${prefix}${label}${ROW_GAP}${theme.fg(selected ? "accent" : "muted", item.currentValue)}`,
+			width,
+			ELLIPSIS,
+			true,
+		);
+	}
 	const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
 	const labelText = padAnsi(item.label, columns.label, ELLIPSIS);
 	const label = selected
@@ -1820,6 +1889,73 @@ function formatSettingRow(
 			: item.valueSegments;
 	const value = renderSettingValue(valueSegments, valueWidth, selected, item.readOnly);
 	return truncateToWidth(`${indent}${prefix}${label}${ROW_GAP}${pathSegment}${marker}${value}`, width, ELLIPSIS, true);
+}
+
+function targetConsoleColumns(
+	width: number,
+): Array<{ key: "health" | "id" | "roles" | "runtime" | "latency"; width: number }> {
+	const safeWidth = Math.max(1, width);
+	if (safeWidth < 34) {
+		const health = Math.min(11, Math.max(6, Math.floor(safeWidth * 0.42)));
+		return [
+			{ key: "health", width: health },
+			{ key: "id", width: Math.max(1, safeWidth - health - 2) },
+		];
+	}
+	if (safeWidth < 47) {
+		const latency = 7;
+		const health = 10;
+		return [
+			{ key: "health", width: health },
+			{ key: "id", width: Math.max(6, safeWidth - health - latency - 4) },
+			{ key: "latency", width: latency },
+		];
+	}
+	const gaps = 8;
+	const cells = Math.max(39, safeWidth - gaps);
+	const health = 12;
+	const latency = 7;
+	const roles = Math.min(13, 6 + Math.floor(Math.max(0, cells - 39) * 0.2));
+	const id = Math.min(18, 8 + Math.floor(Math.max(0, cells - 39) * 0.45));
+	return [
+		{ key: "health", width: health },
+		{ key: "id", width: id },
+		{ key: "roles", width: roles },
+		{ key: "runtime", width: Math.max(5, cells - health - latency - roles - id) },
+		{ key: "latency", width: latency },
+	];
+}
+
+function formatTargetConsoleHeader(width: number, indentWidth: number): string {
+	const theme = clioTheme();
+	const indent = " ".repeat(Math.max(0, indentWidth));
+	const available = Math.max(1, width - visibleWidth(indent) - 2);
+	const labels = { health: "HEALTH", id: "TARGET", roles: "ROLES", runtime: "RUNTIME", latency: "LATENCY" } as const;
+	const cells = targetConsoleColumns(available).map((column) => padAnsi(labels[column.key], column.width, ELLIPSIS));
+	return truncateToWidth(`${indent}  ${theme.style("dim", cells.join(ROW_GAP), { bold: true })}`, width, ELLIPSIS, true);
+}
+
+function formatTargetConsoleRow(
+	item: SettingsCenterItem,
+	width: number,
+	selected: boolean,
+	indentWidth: number,
+): string {
+	const console = item.targetConsole;
+	if (!console) return "";
+	const theme = clioTheme();
+	const indent = " ".repeat(Math.max(0, indentWidth));
+	const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+	const available = Math.max(1, width - visibleWidth(indent) - 2);
+	const cells = targetConsoleColumns(available).map((column) => {
+		const text = column.key === "health" ? console.health.text : console[column.key];
+		const padded = padAnsi(text, column.width, ELLIPSIS);
+		if (column.key === "health")
+			return renderSettingValue([{ ...console.health, text: padded }], column.width, selected, false);
+		if (column.key === "id" && selected) return theme.style("accent", padded, { bold: true });
+		return theme.fg(selected ? "accent" : "muted", padded);
+	});
+	return truncateToWidth(`${indent}${prefix}${cells.join(ROW_GAP)}`, width, ELLIPSIS, true);
 }
 
 function renderSettingValue(
@@ -2193,7 +2329,16 @@ export class SettingsCenter implements Component {
 			plan.selectedValue === REMOVE_PROFILE_CHOICE
 				? `Affected agent routes: ${affectedBindings.length > 0 ? affectedBindings.join(", ") : "none"} · `
 				: "";
-		const note = `${bindingPreflight}Affects ${plan.leaves.map((leaf) => leaf.path).join(", ")} · ${plan.impact}`;
+		const targetRemovalPreflight = (() => {
+			if (!plan.rowId.startsWith("targets.") || plan.selectedValue !== "remove") return "";
+			const paths = (prefix: string): string[] =>
+				plan.leaves.filter((leaf) => leaf.path.startsWith(prefix)).map((leaf) => leaf.path);
+			const profiles = paths("workers.profiles.").map((path) => path.slice("workers.profiles.".length));
+			const describe = (label: string, affected: readonly string[]): string =>
+				`Affected ${label}: ${affected.length > 0 ? affected.join(", ") : "none"}`;
+			return `${describe("chat route", paths("orchestrator."))} · ${describe("fleet route", paths("workers.default."))} · ${describe("memory route", paths("background."))} · ${describe("profiles", profiles)} · `;
+		})();
+		const note = `${bindingPreflight}${targetRemovalPreflight}Affects ${plan.leaves.map((leaf) => leaf.path).join(", ")} · ${plan.impact}`;
 		this.submenuComponent = new SubmenuWrapper(title, list, buildHint([{ key: "Enter", verb: "choose" }], "back"), note);
 	}
 
@@ -2454,6 +2599,9 @@ export class SettingsCenter implements Component {
 	}
 
 	private footerScopeNote(item: SettingsCenterItem): string {
+		if (item.id === "targets.add-cta") return "Run the command shown to open the accepted add wizard";
+		if (item.submenu && (item.presentationKind === "status" || item.presentationKind === "action"))
+			return "Enter opens actions · nothing changes until an action is confirmed";
 		if (item.readOnly) return "Read-only here · managed on the surface above";
 		if (item.scope === "restart") return "Saved to settings.yaml · restart Clio to apply";
 		return "Enter chooses a value · then choose session, global, or cancel before anything changes";
@@ -2508,6 +2656,8 @@ export interface OpenSettingsOverlayDeps {
 	onClose: () => void;
 	/** Open focused on this section (deep link from `/settings <section>`). */
 	section?: SettingsSectionId;
+	/** Optional semantic row anchor for command deep links. */
+	rowId?: SettingsCenterRowId;
 	getFleetNodes?: BuildSettingItemsOptions["getFleetNodes"];
 	connectTarget?: BuildSettingItemsOptions["connectTarget"];
 }
@@ -2563,7 +2713,11 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		onCancel: () => deps.onClose(),
 		requestRender: () => tui.requestRender(),
 	});
-	if (deps.section) center.setSelection(deps.section, 0);
+	if (deps.section) {
+		const sectionItems = buildSettingsSections(items).find((section) => section.id === deps.section)?.items ?? [];
+		const rowIndex = deps.rowId ? sectionItems.findIndex((item) => item.id === deps.rowId) : -1;
+		center.setSelection(deps.section, rowIndex >= 0 ? rowIndex : 0);
+	}
 	const refreshRows = (): void => {
 		refreshSettingItemsInPlace(items, buildSettingItems(deps.getSettings(), buildOptions));
 		center.refreshItems();
@@ -2578,7 +2732,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		footerHint: buildHint([
 			{ key: "Tab", verb: "switch lane" },
 			{ key: "Space", verb: "preview" },
-			{ key: "Enter", verb: "edit" },
+			{ key: "Enter", verb: "open" },
 		]),
 	});
 	return Object.assign(handle, { refreshRows });

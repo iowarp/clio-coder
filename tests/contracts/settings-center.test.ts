@@ -246,7 +246,13 @@ describe("contracts/settings center", () => {
 		]);
 		strictEqual(byId.get("targets")?.presentationKind, "group-header");
 		strictEqual(byId.get("targets.target-b")?.presentationKind, "status");
-		deepStrictEqual(byId.get("targets.target-b")?.valueSegments, [{ text: "○ down", tone: "unhealthy" }]);
+		deepStrictEqual(byId.get("targets.target-b")?.valueSegments, [
+			{ text: "○ down", tone: "unhealthy" },
+			{ text: "  target-b", tone: "neutral" },
+			{ text: "  —", tone: "neutral" },
+			{ text: "  openai-compat", tone: "neutral" },
+			{ text: "  —", tone: "neutral" },
+		]);
 		strictEqual(byId.get("fleet.nodes.remote-a")?.presentationKind, "status");
 		deepStrictEqual(byId.get("fleet.nodes.remote-a")?.valueSegments, [
 			{ text: "○ offline", tone: "unhealthy" },
@@ -256,7 +262,13 @@ describe("contracts/settings center", () => {
 			buildSettingItems(settings, {
 				getTargetOperation: (targetId) => (targetId === "target-b" ? "probe" : null),
 			}).find((item) => item.id === "targets.target-b")?.valueSegments,
-			[{ text: `${GLYPH.running} probing`, tone: "activity" }],
+			[
+				{ text: `${GLYPH.running} probing`, tone: "activity" },
+				{ text: "  target-b", tone: "neutral" },
+				{ text: "  —", tone: "neutral" },
+				{ text: "  openai-compat", tone: "neutral" },
+				{ text: "  —", tone: "neutral" },
+			],
 		);
 	});
 
@@ -288,6 +300,68 @@ describe("contracts/settings center", () => {
 					.includes("· ·"),
 				item.id,
 			);
+		}
+	});
+
+	it("renders target health, id, roles, runtime, and latency with a labeled operational drawer", () => {
+		const settings = settingsWithTargets();
+		settings.background = { target: "target-a", model: "memory-model", thinkingLevel: "off" };
+		const checkedAt = "2026-08-15T16:30:00.000Z";
+		const providers = {
+			...providersWithHealth({ "target-a": "healthy", "target-b": "down" }, settings),
+			list: () =>
+				providersWithHealth({ "target-a": "healthy", "target-b": "down" }, settings)
+					.list()
+					.map((status) =>
+						status.target.id === "target-a"
+							? {
+									...status,
+									health: { ...status.health, lastCheckAt: checkedAt, latencyMs: 42 },
+								}
+							: { ...status, reason: "connection refused", health: { ...status.health, lastError: "ECONNREFUSED" } },
+					),
+		} as unknown as ProvidersContract;
+		const items = buildSettingItems(settings, { providers });
+		const row = items.find((item) => item.id === "targets.target-a");
+		deepStrictEqual(row?.targetConsole, {
+			health: { text: `${GLYPH.running} healthy`, tone: "healthy" },
+			id: "target-a",
+			roles: "chat+fleet+memory",
+			runtime: "openai-compat",
+			latency: "42 ms",
+			url: "http://localhost:1111",
+			defaultModel: "model-a",
+			lastProbe: row?.targetConsole?.lastProbe,
+			failureReason: "none",
+		});
+		ok(row?.targetConsole?.lastProbe !== "never");
+		strictEqual(row?.description, "URL: http://localhost:1111 · Default model: model-a");
+		ok(row?.help?.includes("Last probe:"));
+		ok(row?.help?.includes("Failure reason: none"));
+
+		const center = new SettingsCenter(items, {
+			getBodyHeight: () => 24,
+			prepareChange: () => null,
+			onApply: () => undefined,
+			onCancel: () => undefined,
+		});
+		center.setSelection("targets", 1);
+		const rendered = stripAnsi(center.render(72).join("\n"));
+		for (const value of ["HEALTH", "TARGET", "ROLES", "RUNTI", "LATENCY", "chat+", "42 ms", "URL:"]) {
+			ok(rendered.includes(value), `${value} missing from:\n${rendered}`);
+		}
+		ok(rendered.includes("Enter opens actions"), rendered);
+		ok(!rendered.includes("Enter chooses a value"), rendered);
+		center.handleInput(ENTER);
+		const actions = stripAnsi(center.render(72).join("\n"));
+		for (const detail of [
+			"Target target-a",
+			"URL: http://localhost:1111",
+			"Default model: model-a",
+			"Last probe:",
+			"Failure reason: none",
+		]) {
+			ok(actions.includes(detail), `${detail} missing from action drawer:\n${actions}`);
 		}
 	});
 
@@ -416,7 +490,10 @@ describe("contracts/settings center", () => {
 		strictEqual(child.status, 0, child.stderr);
 		ok(!new RegExp(`${ESC}\\[[0-9;]*38(?:;|m)`).test(child.stdout), "NO_COLOR emits no foreground color sequences");
 		const plain = stripAnsi(child.stdout);
-		ok(plain.includes("❯ down-target"), "focus survives without color");
+		ok(
+			plain.split("\n").some((line) => line.includes("❯") && line.includes("○ down")),
+			"focus survives without color",
+		);
 		ok(plain.includes(`${GLYPH.running} healthy`), "healthy target remains explicit without color");
 		ok(plain.includes("◐ degraded"), "degraded target remains explicit without color");
 		ok(plain.includes("○ down"), "down target remains explicit without color");
@@ -1024,6 +1101,54 @@ describe("contracts/settings center", () => {
 		ok(rendered.includes("retry.enabled"), rendered);
 	});
 
+	it("lands command deep links on exact rows and Targets on the first actionable row or empty CTA", () => {
+		for (const deepLink of [
+			{ section: "orchestrator" as const, rowId: "orchestrator.thinkingLevel" as const, label: "Thinking level" },
+			{ section: "terminal" as const, rowId: "terminal.outputVerbosity" as const, label: "Output detail" },
+			{ section: "models" as const, rowId: "scope" as const, label: "Model cycle set" },
+		]) {
+			const fake = fakeTui(24, 100);
+			openSettingsOverlay(fake.tui, {
+				getSettings: settingsWithTargets,
+				writeSettings: () => undefined,
+				section: deepLink.section,
+				rowId: deepLink.rowId,
+				onClose: () => undefined,
+			});
+			const overlay = fake.captured();
+			ok(overlay);
+			const rendered = stripAnsi(overlay.render(120).join("\n"));
+			ok(
+				rendered.split("\n").some((line) => line.includes("❯") && line.includes(deepLink.label)),
+				rendered,
+			);
+		}
+
+		const configured = new SettingsCenter(buildSettingItems(settingsWithTargets()), {
+			getBodyHeight: () => 30,
+			prepareChange: () => null,
+			onApply: () => undefined,
+			onCancel: () => undefined,
+		});
+		configured.setSelection("targets", 0);
+		strictEqual(configured.getSelection().rowId, "targets.target-a");
+
+		const emptySettings = settingsWithTargets();
+		emptySettings.targets = [];
+		const empty = new SettingsCenter(buildSettingItems(emptySettings), {
+			getBodyHeight: () => 30,
+			prepareChange: () => null,
+			onApply: () => undefined,
+			onCancel: () => undefined,
+		});
+		empty.setSelection("targets", 0);
+		strictEqual(empty.getSelection().rowId, "targets.add-cta");
+		const emptyRender = stripAnsi(empty.render(112).join("\n"));
+		strictEqual(emptyRender.split("clio-coder targets add").length - 1, 1, "the accepted add command appears once");
+		ok(emptyRender.includes("Run the command shown"));
+		ok(emptyRender.includes("accepted add wizard"));
+	});
+
 	it("routes one explicit global commit through commitSetting and emits a scoped notice", () => {
 		const live = { current: settingsWithTargets() };
 		const fake = fakeTui(24, 100);
@@ -1104,7 +1229,7 @@ describe("contracts/settings center", () => {
 		);
 		deepStrictEqual(
 			sections.get("targets")?.map((item) => item.id),
-			["targets", "targets.target-a", "targets.target-b"],
+			["targets", "targets.target-a", "targets.target-b", "targets.add-cta"],
 		);
 		const byId = new Map(buildSettingItems(settings).map((item) => [item.id, item]));
 		strictEqual(byId.get("workers.profiles")?.label, "Add profile");
@@ -1119,9 +1244,10 @@ describe("contracts/settings center", () => {
 		);
 		strictEqual(byId.get("workers.agentBindings.scout")?.currentValue, "fast");
 		ok(byId.get("workers.agentBindings.researcher")?.description.includes("does not exist"));
-		strictEqual(byId.get("targets.target-a")?.currentValue, "chat+fleet · unknown");
-		strictEqual(byId.get("targets.target-b")?.currentValue, "unknown");
+		strictEqual(byId.get("targets.target-a")?.currentValue, "unknown · target-a · chat+fleet · openai-compat · —");
+		strictEqual(byId.get("targets.target-b")?.currentValue, "unknown · target-b · — · openai-compat · —");
 		ok(byId.get("targets")?.readOnly, "adding a target stays with `clio-coder targets add`");
+		strictEqual(byId.get("targets.add-cta")?.currentValue, "`clio-coder targets add`");
 		for (const id of ["workers.profiles.fast", "workers.agentBindings.scout", "targets.target-a"]) {
 			const item = byId.get(id as EditableSettingId);
 			ok(item?.submenu, `${id} is editable`);
@@ -1415,7 +1541,11 @@ describe("contracts/settings center", () => {
 		ok(calls.every((call) => call.scope === "session"));
 		const rendered = stripAnsi(overlay.render(120).join("\n"));
 		ok(rendered.includes("target-b"), rendered);
-		ok(rendered.includes("chat+fleet"), "the target row shows the roles it now serves");
+		strictEqual(
+			buildSettingItems(live.current).find((item) => item.id === "targets.target-b")?.targetConsole?.roles,
+			"chat+fleet",
+			"the target row derives the roles it now serves",
+		);
 		ok(rendered.includes("next dispatch"), "propagation shows inline");
 	});
 
@@ -1586,6 +1716,84 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(ENTER); // probe, remove
 		overlay.handleInput?.(ENTER); // probe throws synchronously but the UI settles
 		ok(!stripAnsi(overlay.render(120).join("\n")).includes(`${GLYPH.running} probing`));
+	});
+
+	it("shows target removal preflight from exact change-plan leaves", () => {
+		const live = { current: settingsWithTargets() };
+		live.current.background = { target: "target-a", model: "memory-model", thinkingLevel: "off" };
+		live.current.workers.profiles.local = {
+			target: "target-a",
+			model: "model-a",
+			thinkingLevel: "off",
+		};
+		const fake = fakeTui(30, 120);
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			commitSetting: () => undefined,
+			section: "targets",
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay);
+		overlay.handleInput?.(ENTER); // target-a actions: use, remove
+		overlay.handleInput?.(DOWN);
+		overlay.handleInput?.(ENTER); // removal preflight
+		const preflight = stripAnsi(overlay.render(120).join("\n")).replace(/\s+/g, " ");
+		for (const expected of [
+			"Affected chat route:",
+			"orchestrator.target",
+			"orchestrator.model",
+			"Affected fleet route:",
+			"workers.default.target",
+			"workers.default.model",
+			"Affected memory route:",
+			"background.target",
+			"background.model",
+			"Affected profiles: local",
+		]) {
+			ok(preflight.includes(expected), `${expected} missing from:\n${preflight}`);
+		}
+	});
+
+	it("shows exactly one live target indicator across overlapping targets", async () => {
+		const live = { current: settingsWithTargets() };
+		const fake = fakeTui(30, 120);
+		const settles = new Map<string, () => void>();
+		openSettingsOverlay(fake.tui, {
+			getSettings: () => live.current,
+			writeSettings: (next) => {
+				live.current = next;
+			},
+			connectTarget: (targetId) =>
+				new Promise<void>((resolve) => {
+					settles.set(targetId, resolve);
+				}),
+			section: "targets",
+			onClose: () => undefined,
+		});
+		const overlay = fake.captured();
+		ok(overlay);
+		overlay.handleInput?.(ENTER); // target-a actions
+		overlay.handleInput?.(DOWN);
+		overlay.handleInput?.(ENTER); // connect target-a
+		overlay.handleInput?.("j"); // target-b
+		overlay.handleInput?.(ENTER);
+		overlay.handleInput?.(DOWN);
+		overlay.handleInput?.(ENTER); // connect target-b
+		let rendered = stripAnsi(overlay.render(120).join("\n"));
+		strictEqual(rendered.split(`${GLYPH.running} connecting`).length - 1, 1, rendered);
+		settles.get("target-a")?.();
+		await Promise.resolve();
+		await Promise.resolve();
+		rendered = stripAnsi(overlay.render(120).join("\n"));
+		strictEqual(rendered.split(`${GLYPH.running} connecting`).length - 1, 1, rendered);
+		settles.get("target-b")?.();
+		await Promise.resolve();
+		await Promise.resolve();
+		ok(!stripAnsi(overlay.render(120).join("\n")).includes(`${GLYPH.running} connecting`));
 	});
 
 	it("removing a profile through its row also drops its bindings on refresh", () => {

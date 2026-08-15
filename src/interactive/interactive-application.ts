@@ -511,7 +511,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.seedTaskMemory ? { seedTaskMemory: deps.seedTaskMemory } : {}),
 		openView: (filter) => openViewOverlayState(filter),
 		openModel: () => openModelOverlayState(),
-		openSettings: (section) => openSettingsOverlayState(section),
+		openSettings: (section, rowId) => openSettingsOverlayState(section, rowId),
 		openResume: () => openResumeOverlayState(),
 		startNewSession: () => startNewSession(),
 		openTree: () => openTreeOverlayState(),

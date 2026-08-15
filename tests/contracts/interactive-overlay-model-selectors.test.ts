@@ -110,8 +110,9 @@ describe("contracts/interactive model selector overlays", () => {
 				},
 			},
 		});
-		lifecycle.openSettingsOverlayState("targets");
+		lifecycle.openSettingsOverlayState("targets", "targets.target-a");
 		strictEqual(settingsDeps?.section, "targets");
+		strictEqual(settingsDeps?.rowId, "targets.target-a");
 		deepStrictEqual(settingsDeps?.getFleetNodes?.(), []);
 		strictEqual(typeof settingsDeps?.connectTarget, "function");
 	});
