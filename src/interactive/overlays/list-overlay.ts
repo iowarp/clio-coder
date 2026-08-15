@@ -59,6 +59,16 @@ export class ListOverlayView implements Component {
 	private showDetail = false;
 	private listScrollOffset = 0;
 	private detailScrollOffset = 0;
+	/**
+	 * Whether the last frame actually drew a detail pane.
+	 *
+	 * The split pane is gated on the render width and the stacked one on
+	 * showDetail, and `getHint` is handed neither. The frame renders the child
+	 * before it fits the footer, so the last frame is the one the hint describes.
+	 * It starts on the router's own belief in `detailPaneVisible`, which is what
+	 * the scroll keys would do before any render has corrected it.
+	 */
+	private detailPaneDrawn: boolean;
 	private readonly input: Input;
 	/**
 	 * The live item set. Separate from `options.items` because a surface backed by
@@ -89,6 +99,7 @@ export class ListOverlayView implements Component {
 		this.isFilterFocused = !!options.filterable;
 		this.filterText = options.initialFilter ?? "";
 		this.items = options.items;
+		this.detailPaneDrawn = options.layout === "split";
 		this.input = new Input();
 		if (options.initialFilter) {
 			this.input.setValue(options.initialFilter);
@@ -157,14 +168,18 @@ export class ListOverlayView implements Component {
 			hintEntries.push(FILTER_HINT);
 		}
 
+		// Navigation before actions, which is the order a narrowing footer drops in:
+		// droppable entries go left to right, so the last one written is the last one
+		// standing. Scrolling a pane is reachable only once the pane is on screen, and
+		// the key that puts it there is the one worth keeping at 73 columns. Below the
+		// split threshold the footer used to advertise the scroll keys, which did
+		// nothing, and drop `Enter/Tab detail`, which was the way in.
 		const hasDetail = this.items.some((item) => !!item.detail);
 		if (hasDetail) {
-			if (!this.options.onSelect) {
-				hintEntries.push({ key: "Enter/Tab", verb: "detail" });
-			} else {
-				hintEntries.push({ key: "Tab", verb: "detail" });
+			if (this.detailPaneDrawn) {
+				hintEntries.push({ key: "PgUp/PgDn", verb: "scroll detail" });
 			}
-			hintEntries.push({ key: "PgUp/PgDn", verb: "scroll detail" });
+			hintEntries.push({ key: this.options.onSelect ? "Tab" : "Enter/Tab", verb: "detail" });
 		}
 
 		if (this.options.hints) {
@@ -349,6 +364,13 @@ export class ListOverlayView implements Component {
 			this.selectIndex(Math.max(0, filteredItems.length - 1));
 		}
 
+		const selectedItem = filteredItems[this.selectedIndex];
+		const hasDetail = !!selectedItem?.detail;
+		const isSplit = this.options.layout === "split" && width >= 90;
+		// Recorded before the memo returns, so a cached frame still leaves the footer
+		// describing the pane this width draws.
+		this.detailPaneDrawn = isSplit || (this.showDetail && hasDetail);
+
 		// Frame memo: identical inputs return the identical array, which lets the
 		// overlay frame's childLines identity cache short-circuit the whole frame.
 		const memoKey = [
@@ -371,11 +393,6 @@ export class ListOverlayView implements Component {
 			const inputLines = this.input.render(width);
 			lines.push(...inputLines);
 		}
-
-		const selectedItem = filteredItems[this.selectedIndex];
-		const hasDetail = selectedItem && !!selectedItem.detail;
-
-		const isSplit = this.options.layout === "split" && width >= 90;
 
 		if (isSplit) {
 			const listMaxLines = 14;

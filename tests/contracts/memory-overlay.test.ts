@@ -354,8 +354,10 @@ describe("contracts/memory overlay", () => {
 	});
 
 	it("names the real keys in the footer and closes on Escape", () => {
+		// The scroll keys sit ahead of the key that opens the pane, so a footer that
+		// has to narrow sheds them first and keeps the way in.
 		const hint = view(operatorStatus, () => [durableRecord(true)]).getHint();
-		strictEqual(hint, "[↑↓] select · [type] filter · [Enter/Tab] detail · [PgUp/PgDn] scroll detail · [Esc] close");
+		strictEqual(hint, "[↑↓] select · [type] filter · [PgUp/PgDn] scroll detail · [Enter/Tab] detail · [Esc] close");
 
 		let mounted: Component | null = null;
 		let hidden = 0;

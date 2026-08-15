@@ -1,6 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type ListOverlayItem, ListOverlayView } from "../../src/interactive/overlays/list-overlay.js";
+import type { Component, OverlayHandle, TUI } from "../../src/engine/tui.js";
+import { type ListOverlayItem, ListOverlayView, openListOverlay } from "../../src/interactive/overlays/list-overlay.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
@@ -219,8 +220,75 @@ describe("contracts/list-overlay", () => {
 			() => {},
 		);
 
-		const hint = view.getHint();
-		strictEqual(hint, "[↑↓] select · [type] filter · [Enter/Tab] detail · [PgUp/PgDn] scroll detail · [Esc] close");
+		// Nothing has drawn a detail pane yet, so the keys that scroll one are not
+		// offered; the key that opens it is.
+		view.render(80);
+		strictEqual(view.getHint(), "[↑↓] select · [type] filter · [Enter/Tab] detail · [Esc] close");
+
+		// Tab draws the pane. The scroll keys join ahead of the key that toggles it,
+		// because a narrowing footer sheds droppable entries left to right.
+		view.handleInput("\t");
+		view.render(80);
+		strictEqual(
+			view.getHint(),
+			"[↑↓] select · [type] filter · [PgUp/PgDn] scroll detail · [Enter/Tab] detail · [Esc] close",
+		);
+	});
+
+	/**
+	 * At 73 columns the memory overlay's footer read
+	 * `[type] filter · [PgUp/PgDn] scroll detail · [Esc] close`. The split pane is
+	 * gated on 90 columns, so PgDn moved nothing, and the narrowing pass had eaten
+	 * `[Enter/Tab] detail`, which is the only way to get a pane on screen at all.
+	 */
+	it("advertises the key that opens the detail pane, not the dead scroll keys, at 73 columns", () => {
+		const items: ListOverlayItem[] = [{ id: "1", label: "Apple", detail: () => ["a delicious apple"] }];
+
+		let mounted: Component | null = null;
+		const tui = {
+			showOverlay(component: Component): OverlayHandle {
+				mounted = component;
+				return {
+					hide: () => undefined,
+					setHidden: () => undefined,
+					isHidden: () => false,
+					focus: () => undefined,
+					unfocus: () => undefined,
+					isFocused: () => true,
+				};
+			},
+			requestRender: () => undefined,
+		} as unknown as TUI;
+
+		openListOverlay(tui, { title: "Memory", items, filterable: true, layout: "split", onClose: () => {} });
+		if (mounted === null) throw new Error("the list overlay was not mounted");
+		const frame = mounted as Component;
+		const footer = (): string => stripAnsi(frame.render(73).at(-1) ?? "");
+
+		// A 73-column box renders below the split threshold, so there is no pane and
+		// nothing to scroll.
+		const hidden = footer();
+		ok(hidden.includes("[Enter/Tab] detail"), hidden);
+		ok(!hidden.includes("scroll detail"), hidden);
+
+		// Tab stacks the pane under the list. Both keys work now and both are
+		// offered, but the footer has 71 columns for a 90-column hint, and what it
+		// keeps is the key that toggles the pane rather than the one that scrolls it.
+		frame.handleInput?.("\t");
+		const shown = footer();
+		ok(shown.includes("[Enter/Tab] detail"), shown);
+		ok(!shown.includes("scroll detail"), shown);
+
+		// The same state before fitting, which is where the ordering that produced
+		// that outcome lives.
+		const view = new ListOverlayView({ title: "Memory", items, filterable: true, onClose: () => {} }, () => {});
+		view.handleInput("\t");
+		view.render(69);
+		const full = view.getHint();
+		ok(
+			full.indexOf("[PgUp/PgDn] scroll detail") < full.indexOf("[Enter/Tab] detail"),
+			`the key that opens the pane must outlive the keys that scroll it: ${full}`,
+		);
 	});
 
 	it("styles an empty filtered list as muted neutral content", () => {
