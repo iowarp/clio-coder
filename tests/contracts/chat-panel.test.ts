@@ -1,6 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { SKILL_SUGGESTION_ANCHOR } from "../../src/core/skill-activation.js";
+import { SKILL_SUGGESTION_ANCHOR, SKILL_SUGGESTION_PREFIX } from "../../src/core/skill-activation.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { redactToolArgs, renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
@@ -601,39 +601,53 @@ describe("chat-panel agent voice", () => {
 		);
 	});
 
+	/**
+	 * The suggestion a model actually writes has `<name>` substituted, so this
+	 * feeds a real line rather than the template. Testing the template passed
+	 * against a guard that could never fire in production: every live reply held
+	 * the ✦ on the advisory line while the answer beneath it hung plain.
+	 */
 	it("leaves a leading skill suggestion unglyphed and gives ✦ to the answer after the tool ledger", () => {
-		const panel = createChatPanel({ now: frozen.now });
-		panel.applyEvent({
-			type: "message_end",
-			message: { role: "assistant", content: [{ type: "text", text: SKILL_SUGGESTION_ANCHOR }], stopReason: "stop" },
-		} as ChatLoopEvent);
-		panel.applyEvent({
-			type: "tool_execution_start",
-			toolCallId: "skill-read",
-			toolName: "read",
-			args: { path: "skills/example/SKILL.md" },
-		} as ChatLoopEvent);
-		panel.applyEvent({
-			type: "tool_execution_end",
-			toolCallId: "skill-read",
-			toolName: "read",
-			result: "skill body",
-			isError: false,
-		} as ChatLoopEvent);
-		panel.applyEvent({
-			type: "message_end",
-			message: { role: "assistant", content: [{ type: "text", text: "Substantive answer" }], stopReason: "stop" },
-		} as ChatLoopEvent);
-		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		const suggestion = SKILL_SUGGESTION_ANCHOR.replace("<name>", "tui-design");
+		strictEqual(suggestion, "Suggested skill: /skill:tui-design");
+		ok(suggestion.startsWith(SKILL_SUGGESTION_PREFIX), "a substituted suggestion still carries the shared prefix");
+		ok(!suggestion.includes("<name>"), "no live reply writes the placeholder");
 
-		const plain = strip(panel.render(100).join("\n"));
-		const suggestionAt = plain.indexOf(SKILL_SUGGESTION_ANCHOR);
-		const toolAt = plain.indexOf("skills/example/SKILL.md");
-		const answerAt = plain.indexOf("✦ Substantive answer");
-		ok(suggestionAt >= 0, `the suggestion renders: ${plain}`);
-		ok(!plain.includes(`✦ ${SKILL_SUGGESTION_ANCHOR}`), `the suggestion does not claim the glyph: ${plain}`);
-		ok(toolAt > suggestionAt, `the tool ledger follows the suggestion: ${plain}`);
-		ok(answerAt > toolAt, `the substantive answer owns the glyph below the tool ledger: ${plain}`);
+		for (const width of [40, 72, 80, 100]) {
+			const panel = createChatPanel({ now: frozen.now });
+			panel.applyEvent({
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: suggestion }], stopReason: "stop" },
+			} as ChatLoopEvent);
+			panel.applyEvent({
+				type: "tool_execution_start",
+				toolCallId: "skill-read",
+				toolName: "read",
+				args: { path: "skills/example/SKILL.md" },
+			} as ChatLoopEvent);
+			panel.applyEvent({
+				type: "tool_execution_end",
+				toolCallId: "skill-read",
+				toolName: "read",
+				result: "skill body",
+				isError: false,
+			} as ChatLoopEvent);
+			panel.applyEvent({
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: "Substantive answer" }], stopReason: "stop" },
+			} as ChatLoopEvent);
+			panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+
+			const plain = strip(panel.render(width).join("\n"));
+			const suggestionAt = plain.indexOf(SKILL_SUGGESTION_PREFIX);
+			const toolAt = plain.indexOf("skills/example/SKILL.md");
+			const answerAt = plain.indexOf("✦ Substantive answer");
+			ok(suggestionAt >= 0, `${width}: the suggestion renders: ${plain}`);
+			ok(!plain.includes(`✦ ${SKILL_SUGGESTION_PREFIX}`), `${width}: the suggestion claimed the glyph: ${plain}`);
+			ok(toolAt > suggestionAt, `${width}: the tool ledger follows the suggestion: ${plain}`);
+			ok(answerAt > toolAt, `${width}: the answer owns the glyph below the tool ledger: ${plain}`);
+			strictEqual(plain.split("✦").length - 1, 1, `${width}: exactly one reply glyph in the turn: ${plain}`);
+		}
 	});
 
 	it("turns the reply glyph and the terminal error text red on a failed turn", () => {

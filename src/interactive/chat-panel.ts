@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import type { OutputVerbosity } from "../core/defaults.js";
-import { SKILL_SUGGESTION_ANCHOR } from "../core/skill-activation.js";
+import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
 import { estimateReasoningTextTokens, extractReasoningTokens } from "../domains/session/context-accounting.js";
 import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
@@ -762,7 +762,7 @@ function renderEntryLines(
 		const rendered =
 			seg.kind === "text" ? renderTextSegmentLines(seg, proseWidth) : renderErrorSegmentLines(seg, proseWidth);
 		if (rendered.length === 0) continue;
-		const isSkillSuggestion = seg.kind === "text" && seg.text.startsWith(SKILL_SUGGESTION_ANCHOR);
+		const isSkillSuggestion = seg.kind === "text" && seg.text.startsWith(SKILL_SUGGESTION_PREFIX);
 		if (!labeled && !isSkillSuggestion) {
 			lines.push(...hangProseLines(rendered, clioPrefix));
 			labeled = true;
