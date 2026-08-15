@@ -72,8 +72,7 @@ body::before {
 	position: fixed;
 	inset: 0;
 	background-image:
-		linear-gradient(var(--bg-grid) 1px, transparent 1px),
-		linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+		linear-gradient(var(--bg-grid) 1px, transparent 1px), linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
 	background-size: 40px 40px;
 	background-position: center top;
 	pointer-events: none;
@@ -1251,8 +1250,8 @@ pre {
 	letter-spacing: 0.05em;
 }
 
-.tools th:nth-child(n+2),
-.tools td:nth-child(n+2) {
+.tools th:nth-child(n + 2),
+.tools td:nth-child(n + 2) {
 	text-align: right;
 }
 
