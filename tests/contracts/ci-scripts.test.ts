@@ -18,6 +18,7 @@ interface WorkflowStep {
 
 interface WorkflowJob {
 	steps: WorkflowStep[];
+	permissions?: Record<string, unknown>;
 	strategy?: {
 		matrix?: Record<string, unknown>;
 	};
@@ -128,6 +129,28 @@ describe("contracts/ci scripts", () => {
 			commands.some((command) => command.includes("does not match tag")),
 			"release must refuse a tag that disagrees with package.json's version",
 		);
+	});
+
+	/**
+	 * npm publish is a manual maintainer step, so the release workflow must carry
+	 * no publish path at all. These read parsed YAML rather than the file text
+	 * because the workflow's own header comment names `npm publish` while saying
+	 * there is none, and because a commented-out publish step is still no path.
+	 */
+	it("keeps every publish path out of the release workflow", () => {
+		const parsed = workflow(".github/workflows/release.yml");
+		const job = workflowJob(".github/workflows/release.yml", "release");
+		const permissions = [
+			...Object.keys((parsed.permissions ?? {}) as Record<string, unknown>),
+			...Object.keys(job.permissions ?? {}),
+		];
+
+		for (const step of job.steps) {
+			ok(!(step.run ?? "").includes("npm publish"), `no step may publish: ${step.run}`);
+			ok(!(step.uses ?? "").includes("npm publish"), `no action may publish: ${step.uses}`);
+			ok(!("registry-url" in (step.with ?? {})), `no step may point setup-node at a registry: ${step.uses}`);
+		}
+		ok(!permissions.includes("id-token"), `release must not request an OIDC token: ${permissions.join(", ")}`);
 	});
 
 	it("keeps live smoke local-only and outside hosted CI/release gates", () => {
