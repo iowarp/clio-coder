@@ -34,6 +34,28 @@ export interface StatusController {
 const TICK_INTERVAL_MS = 1000;
 const SETTLE_MS = 5000;
 const STATUS_EMIT_THROTTLE_MS = 100;
+/**
+ * A streaming worker publishes thousands of progress events per dispatch, and
+ * the watchdog only needs a signal coarser than its ten-second first tier, so
+ * one refresh per tick is enough. Coalescing keeps the reducer (and the
+ * provider lookup behind every apply) off the worker's stream rate.
+ */
+const DISPATCH_PROGRESS_COALESCE_MS = TICK_INTERVAL_MS;
+
+/**
+ * Worker/ACP stream evidence, as opposed to the heartbeats that ride the same
+ * channel: a worker keepalive, or the watchdog's own observation that one went
+ * stale, says nothing about whether the worker produced anything. The event
+ * crosses a process boundary untyped, so read it defensively.
+ */
+const HEARTBEAT_EVENT_TYPES = new Set(["heartbeat", "heartbeat_status"]);
+
+function isWorkerStreamEvidence(raw: unknown): boolean {
+	const event = (raw as { event?: unknown } | null | undefined)?.event;
+	if (typeof event !== "object" || event === null) return false;
+	const type = (event as { type?: unknown }).type;
+	return typeof type === "string" && type.length > 0 && !HEARTBEAT_EVENT_TYPES.has(type);
+}
 
 function statusMetadata(status: AgentStatus): AgentStatusChangedPayload["metadata"] {
 	if (status.tool) return { toolName: status.tool.toolName };
@@ -61,6 +83,7 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 	let status: AgentStatus = { ...INITIAL_STATUS };
 	let disposed = false;
 	let lastNotifyAt = 0;
+	let lastDispatchProgressAt = Number.NEGATIVE_INFINITY;
 	let settleTimer: unknown = null;
 	let abortCeilingTimer: unknown = null;
 	const listeners = new Set<(status: AgentStatus) => void>();
@@ -171,6 +194,13 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			deps.bus.on(BusChannels.DispatchStarted, (payload) =>
 				apply({ type: "overlay_push", overlay: "dispatching", data: payload }, true),
 			),
+			deps.bus.on(BusChannels.DispatchProgress, (payload) => {
+				if (!isWorkerStreamEvidence(payload)) return;
+				const at = now();
+				if (at - lastDispatchProgressAt < DISPATCH_PROGRESS_COALESCE_MS) return;
+				lastDispatchProgressAt = at;
+				apply({ type: "dispatch_progress" });
+			}),
 			deps.bus.on(BusChannels.DispatchCompleted, () => apply({ type: "overlay_pop", overlay: "dispatching" }, true)),
 			deps.bus.on(BusChannels.DispatchFailed, () => apply({ type: "overlay_pop", overlay: "dispatching" }, true)),
 			deps.bus.on(BusChannels.RunAborted, (payload) => {

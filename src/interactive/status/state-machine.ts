@@ -48,13 +48,19 @@ export interface ForceCancelledStatusEvent {
 	reason: string;
 }
 
+/** Worker stream evidence for a dispatch this turn is awaiting. */
+export interface DispatchProgressStatusEvent {
+	type: "dispatch_progress";
+}
+
 export type StatusInputEvent =
 	| ChatLoopEvent
 	| WatchdogTickEvent
 	| OverlayPushEvent
 	| OverlayPopEvent
 	| RunAbortedStatusEvent
-	| ForceCancelledStatusEvent;
+	| ForceCancelledStatusEvent
+	| DispatchProgressStatusEvent;
 
 const OVERLAY_PHASES = new Set<StatusPhase>(["tool_blocked", "retrying", "compacting", "dispatching", "stuck"]);
 const CORE_ACTIVE_PHASES = new Set<StatusPhase>(["preparing", "waiting_model", "thinking", "writing", "tool_running"]);
@@ -219,6 +225,12 @@ function popOverlay(prev: AgentStatus, overlay: OverlayPhase, ctx: ReduceContext
 function activePhaseAfterStuck(prev: AgentStatus): StatusPhase {
 	if (prev.phase !== "stuck") return prev.phase;
 	return prev.resumePhase ?? "thinking";
+}
+
+function isAwaitingDispatch(prev: AgentStatus): boolean {
+	if (prev.phase === "dispatching") return true;
+	if (prev.activePhases?.has("dispatching")) return true;
+	return (prev.overlayStack ?? []).some((frame) => frame.phase === "dispatching");
 }
 
 function isWaitingForOperator(prev: AgentStatus): boolean {
@@ -447,6 +459,13 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 				overlayStack: [],
 			};
 		}
+		case "dispatch_progress":
+			// The orchestrator's own stream is silent for as long as a worker runs,
+			// so the await-watchdog measured its own silence and reported "no
+			// progress" about a worker that was streaming the whole time
+			// (issue #54). Worker output is this turn's progress.
+			if (!isActive(prev.phase) || !isAwaitingDispatch(prev)) return prev;
+			return refreshMeaningful(prev, ctx);
 		case "overlay_push":
 			return pushOverlay(prev, event.overlay, ctx, event.data);
 		case "overlay_pop":
