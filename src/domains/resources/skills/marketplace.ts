@@ -125,7 +125,7 @@ function indexSkills(indexPath: string, diagnostics: string[]): MarketplaceSkill
 /**
  * True when the directory contains a <pkg>/SKILL.md either immediately (flat
  * catalog) or one category folder down (grouped catalog, e.g.
- * skills/git/create-pr/SKILL.md). The loader itself recurses arbitrarily;
+ * skills/git/ship/SKILL.md). The loader itself recurses arbitrarily;
  * this probe only decides whether a repo-level skills/ folder is a catalog.
  */
 function looksLikeSkillCatalog(dir: string): boolean {
