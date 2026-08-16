@@ -1616,6 +1616,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				pendingSkillRequests: [],
 			};
 			const promptExpansion = resources?.expandPromptTemplate(parsedSkillRequest.text, process.cwd());
+			// A prompt named as `/name` is a request for that template. When the
+			// template refuses, the run says why and stops; sending the literal
+			// `/name` on to the model spends a turn answering a command it cannot
+			// run, and the operator never sees the refusal.
+			if (promptExpansion?.expanded === false && promptExpansion.refusal) {
+				process.stderr.write(`clio-coder: ${promptExpansion.refusal.message}\n`);
+				await termination.shutdown(1);
+				return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
+			}
 			const fileExpansion = await expandInlineFileReferencesAsync(
 				promptExpansion?.expanded ? promptExpansion.text : parsedSkillRequest.text,
 				{
