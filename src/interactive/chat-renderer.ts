@@ -37,7 +37,8 @@ import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import { renderToolResultOnly } from "./renderers/tool-execution.js";
 import { readWorkerReceiptFacts } from "./worker-receipts.js";
-import { type WorkerReceiptReader, workerEntriesFromRunEntries } from "./worker-replay.js";
+import { workerEntriesFromRunEntries } from "./worker-replay.js";
+import type { WorkerReceiptReader } from "./worker-stream.js";
 
 const DEFAULT_COALESCE_MS = 16;
 const MAX_REPLAY_TEXT_CHARS = 20_000;

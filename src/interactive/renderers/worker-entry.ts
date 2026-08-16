@@ -87,11 +87,12 @@ function footerUnits(receipt: WorkerReceiptSummary): string[] {
 	if (receipt.exitCode !== undefined && receipt.exitCode !== 0) {
 		units.push(theme.fg("error", `exit=${receipt.exitCode}`));
 	}
-	if (receipt.tokens > 0) units.push(dim(`${formatFooterTokens(receipt.tokens)} tok`));
-	else if (receipt.toolCalls !== undefined && receipt.toolCalls > 0) {
+	if (receipt.tokenCount !== undefined && receipt.tokenCount > 0) {
+		units.push(dim(`${formatFooterTokens(receipt.tokenCount)} tok`));
+	} else if (receipt.toolCalls !== undefined && receipt.toolCalls > 0) {
 		units.push(dim(`${receipt.toolCalls} tool call${receipt.toolCalls === 1 ? "" : "s"}`));
 	}
-	units.push(dim(formatCompactMs(receipt.elapsedMs)));
+	if (receipt.durationMs !== undefined) units.push(dim(formatCompactMs(receipt.durationMs)));
 	if (receipt.contract !== undefined) units.push(dim(`contract ${receipt.contract}`));
 	if (receipt.receiptUnavailable === true) units.push(theme.fg("warning", "receipt unavailable"));
 	const failure = receipt.failureMessage === undefined ? "" : firstLine(receipt.failureMessage).trim();
@@ -178,7 +179,7 @@ function footerLines(entry: WorkerEntryState, width: number): string[] {
 function foldedLines(entry: WorkerEntryState, width: number, expandKey: string | undefined): string[] {
 	const header = headerLine(entry, width);
 	const status = entry.receipt === undefined ? pendingUnit(entry) : outcomeUnit(entry.receipt);
-	const elapsed = entry.receipt === undefined ? "" : dim(` ${formatCompactMs(entry.receipt.elapsedMs)}`);
+	const elapsed = entry.receipt?.durationMs === undefined ? "" : dim(` ${formatCompactMs(entry.receipt.durationMs)}`);
 	const hint = expandKey === undefined || expandKey.length === 0 ? "" : dim(`  [${expandKey} expand]`);
 	const tail = `  ${status}${elapsed}${hint}`;
 	const room = Math.max(1, width - visibleWidth(tail));

@@ -5,7 +5,7 @@ import { type WorkerRunEntryFields, workerRunEntryFields } from "./worker-replay
 import {
 	createWorkerStream,
 	type WorkerEntryState,
-	type WorkerReceiptFacts,
+	type WorkerReceiptReader,
 	type WorkerStream,
 	type WorkerStreamChange,
 } from "./worker-stream.js";
@@ -35,7 +35,7 @@ export interface InteractiveSubscriptionsDeps {
 	 */
 	recordWorkerRun?: (fields: WorkerRunEntryFields) => void;
 	/** Sealed-receipt reader, injected by tests. Defaults to `<state>/receipts/<runId>.json`. */
-	readWorkerReceipt?: (runId: string) => WorkerReceiptFacts | null;
+	readWorkerReceipt?: WorkerReceiptReader;
 }
 
 export interface InteractiveSubscriptions {
