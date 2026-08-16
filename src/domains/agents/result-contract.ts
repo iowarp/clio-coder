@@ -1159,6 +1159,14 @@ export const RESULT_CONTRACT_REPAIR_TOOL = "result_contract";
  * satisfying both. `stopReason: "toolUse"` and the toolCall block keep the
  * assistant half out of terminal validation, durable output, and the
  * synthesis sanitizer.
+ *
+ * The assistant half carries explicit zero usage. pi-ai's context estimator
+ * (`estimateContextTokens`, run while sizing every request) dereferences
+ * `usage` on any assistant message not marked `aborted`/`error`, so a
+ * usage-less `toolUse` message throws `Cannot read properties of undefined
+ * (reading 'totalTokens')` on the very next model round and the worker dies
+ * with the contract `not-reached` (#70). Zero usage keeps the estimator on
+ * the model's last real usage and its byte-for-byte prompt-cache behavior.
  */
 export function resultContractRepairMessages(
 	input: ResultContractRepairInput,
@@ -1171,6 +1179,14 @@ export function resultContractRepairMessages(
 			role: "assistant",
 			content: [{ type: "toolCall", id, name: RESULT_CONTRACT_REPAIR_TOOL, arguments: {} }],
 			stopReason: "toolUse",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
 			...origin,
 			timestamp,
 		},
