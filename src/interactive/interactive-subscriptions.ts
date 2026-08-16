@@ -53,53 +53,43 @@ export interface InteractiveSubscriptions {
  */
 export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDeps): InteractiveSubscriptions {
 	const workers = createWorkerStream({ readReceipt: deps.readWorkerReceipt ?? readWorkerReceiptFacts });
-	const applyWorker = (change: WorkerStreamChange | null): void => {
-		if (change !== null) deps.applyWorkerState?.(change.entry);
+	const repaint = (): void => {
+		deps.refreshFooter();
+		deps.renderTaskIsland();
+		deps.requestRender();
 	};
-	const unsubscribers = [
-		deps.bus.on(BusChannels.DispatchEnqueued, () => {
-			deps.refreshFooter();
-			deps.renderTaskIsland();
-			deps.requestRender();
-		}),
-		deps.bus.on(BusChannels.DispatchStarted, (payload) => {
-			const change = workers.started(payload);
-			applyWorker(change);
-			// Every attempt writes its own entry: a failover is history, and the
-			// attempt trail a resumed block shows is that history read back.
-			if (change !== null) deps.recordWorkerRun?.(workerRunEntryFields(change.entry));
-			deps.refreshFooter();
-			deps.renderTaskIsland();
-			deps.requestRender();
-		}),
-		deps.bus.on(BusChannels.DispatchProgress, (payload) => {
-			const workerEvent = payload.event as { type?: unknown } | null | undefined;
-			if (workerEvent?.type === "clio_steer_received") {
-				deps.notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
+	/** Fold one lifecycle payload into its worker block, place the block, then repaint. */
+	const folded =
+		<P>(reduce: (payload: P) => WorkerStreamChange | null, after?: (change: WorkerStreamChange) => void) =>
+		(payload: P): void => {
+			const change = reduce(payload);
+			if (change !== null) {
+				deps.applyWorkerState?.(change.entry);
+				after?.(change);
 			}
-			applyWorker(workers.progress(payload));
-			deps.refreshFooter();
-			deps.renderTaskIsland();
-			deps.requestRender();
-		}),
-		deps.bus.on(BusChannels.RunAborted, (payload) => {
-			applyWorker(workers.aborted(payload));
-			deps.refreshFooter();
-			deps.renderTaskIsland();
-			deps.requestRender();
-		}),
-		deps.bus.on(BusChannels.DispatchCompleted, (payload) => {
-			applyWorker(workers.completed(payload));
-			deps.refreshFooter();
-			deps.renderTaskIsland();
-			deps.requestRender();
-		}),
-		deps.bus.on(BusChannels.DispatchFailed, (payload) => {
-			applyWorker(workers.failed(payload));
-			deps.refreshFooter();
-			deps.renderTaskIsland();
-			deps.requestRender();
-		}),
+			repaint();
+		};
+	const unsubscribers = [
+		deps.bus.on(BusChannels.DispatchEnqueued, repaint),
+		// Every attempt writes its own session entry: a failover is history, and
+		// the attempt trail a resumed block shows is that history read back.
+		deps.bus.on(
+			BusChannels.DispatchStarted,
+			folded(workers.started, (change) => deps.recordWorkerRun?.(workerRunEntryFields(change.entry))),
+		),
+		deps.bus.on(
+			BusChannels.DispatchProgress,
+			folded((payload) => {
+				const workerEvent = payload.event as { type?: unknown } | null | undefined;
+				if (workerEvent?.type === "clio_steer_received") {
+					deps.notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
+				}
+				return workers.progress(payload);
+			}),
+		),
+		deps.bus.on(BusChannels.RunAborted, folded(workers.aborted)),
+		deps.bus.on(BusChannels.DispatchCompleted, folded(workers.completed)),
+		deps.bus.on(BusChannels.DispatchFailed, folded(workers.failed)),
 		deps.bus.on(BusChannels.ContextActivity, () => {
 			deps.refreshFooter();
 			deps.renderContextIsland();
