@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { jsonPayloadCandidates } from "../../core/json-payload.js";
 import { AGENT_AUTOMATION_AUTHORITIES, type AgentAutomationAuthority } from "./spec.js";
 
 export type ResultContract =
@@ -280,24 +281,6 @@ function success(
 }
 
 /**
- * The candidate spans a terminal result may hold its JSON object in, in the
- * order they are tried: the whole message, the first fenced block, then the
- * outermost brace span. `extractJsonObject` in the context-bootstrap reader
- * accepts the same three, and a validator that stands in front of a reader must
- * not be stricter than it.
- */
-function jsonCandidates(output: string): string[] {
-	const trimmed = output.trim();
-	const candidates = [trimmed];
-	const fenced = /```[A-Za-z0-9_-]*\s*\n?([\s\S]*?)```/.exec(trimmed)?.[1]?.trim();
-	if (fenced !== undefined && fenced.length > 0) candidates.push(fenced);
-	const start = trimmed.indexOf("{");
-	const end = trimmed.lastIndexOf("}");
-	if (start >= 0 && end > start) candidates.push(trimmed.slice(start, end + 1));
-	return candidates;
-}
-
-/**
  * Read the JSON object a terminal result carries. Every contract prompt asks
  * for bare JSON and a fence is the deviation local models reach for first, so
  * refusing one burns both repair rounds and fails a run whose payload was
@@ -310,7 +293,7 @@ function parseJson(
 ): { ok: true; value: Record<string, unknown> } | { ok: false; reason: string } {
 	if (output === null || output.trim().length === 0) return { ok: false, reason: "missing final result" };
 	let parsedSomething = false;
-	for (const candidate of jsonCandidates(output)) {
+	for (const candidate of jsonPayloadCandidates(output)) {
 		let value: unknown;
 		try {
 			value = JSON.parse(candidate) as unknown;
