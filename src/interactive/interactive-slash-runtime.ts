@@ -38,6 +38,7 @@ import {
 	type TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
 import { verifyReceiptFile } from "./view/artifacts.js";
+import type { WorkerEntryState } from "./worker-stream.js";
 
 const EXPORT_RENDER_WIDTH = 100;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the ESC control character is the ANSI escape introducer this pattern exists to strip
@@ -114,6 +115,8 @@ export interface InteractiveSlashRuntimeDeps {
 	openExtensions: () => void;
 	openContextReset: () => void;
 	setEditorText: (text: string) => void;
+	/** Worker blocks this session folded, oldest first; `/share` picks a finished one. */
+	listWorkerRuns?: () => ReadonlyArray<WorkerEntryState>;
 	getCwd?: () => string;
 	getConfigDir?: () => string;
 	installSkill?: typeof installSkill;
@@ -374,6 +377,29 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				.finally(deps.requestRender);
 		},
 		verifyReceipt: (runId) => verifyReceiptFile(deps.stateDir, runId),
+		...(deps.listWorkerRuns ? { listWorkerRuns: deps.listWorkerRuns } : {}),
+		submitOperatorNote: (text) => {
+			// The user-turn path, minus expansion. A worker's answer is literal
+			// text: running it through the prompt, skill, and @file expanders would
+			// let a worker's output name a file the operator never mentioned.
+			void (async () => {
+				try {
+					const willQueue = deps.chat.isStreaming();
+					deps.recordSubmittedTurn();
+					deps.refreshFooter();
+					// A queued turn renders when the engine injects it, the same rule
+					// submitChat follows, so appending here would show it twice.
+					if (!willQueue) deps.chatPanel.appendUser(text);
+					deps.requestRender();
+					await deps.chat.submit(text);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					deps.io.stderr(`[/share] ${msg}\n`);
+				} finally {
+					deps.requestRender();
+				}
+			})();
+		},
 		submitChat: (text) => {
 			const runSubmit = (sub: InteractiveSlashSubmitExpansion) => {
 				void (async () => {

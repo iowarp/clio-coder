@@ -136,6 +136,8 @@ export interface WorkerStream {
 	failed(payload: DispatchFailedPayload): WorkerStreamChange | null;
 	aborted(payload: RunAbortedPayload): WorkerStreamChange | null;
 	get(assignmentId: string): WorkerEntryState | undefined;
+	/** Every retained entry, oldest first. `/share` reads it to find a finished run. */
+	entries(): ReadonlyArray<WorkerEntryState>;
 }
 
 /**
@@ -440,6 +442,10 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 
 		get(assignmentId): WorkerEntryState | undefined {
 			return byAssignment.get(assignmentId);
+		},
+
+		entries(): ReadonlyArray<WorkerEntryState> {
+			return [...byAssignment.values()];
 		},
 	};
 }
