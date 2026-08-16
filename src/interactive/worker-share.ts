@@ -37,21 +37,38 @@ function outcomeWord(outcome: string): string {
 	return outcome === "succeeded" ? "ok" : outcome;
 }
 
+/** The prefix every shared note starts with; docs, tests, and the honesty rail pin it. */
+export const WORKER_SHARE_NOTE_PREFIX = "[worker result]";
+
+/** The origin the header names, so a model with a compacted context still sees who put the note there. */
+export const WORKER_SHARE_ORIGIN = "shared by the operator";
+
 /**
  * The operator note a shared run becomes:
  *
- *   [worker result] coder · run 2mkas6s · ok
+ *   [worker result] coder · run 2mkas6s · ok · shared by the operator
  *   <bounded output text>
  *
  * The header names the worker so the main agent can tell a shared answer from
- * the operator's own words, and returns null when there is nothing to share:
- * a run that produced no text is not worth a turn.
+ * the operator's own words, and names the operator as the origin so a model
+ * that never dispatched the run does not read the note as an unattributed tool
+ * result (#73). Returns null when there is nothing to share: a run that
+ * produced no text is not worth a turn.
  */
 export function formatWorkerShareNote(facts: WorkerShareFacts): string | null {
 	const text = facts.text.trim();
 	if (text.length === 0) return null;
-	const header = `[worker result] ${facts.agentId} · run ${facts.runId} · ${outcomeWord(facts.outcome)}`;
+	const header = `${WORKER_SHARE_NOTE_PREFIX} ${facts.agentId} · run ${facts.runId} · ${outcomeWord(facts.outcome)} · ${WORKER_SHARE_ORIGIN}`;
 	return `${header}\n${truncateUtf8(text, WORKER_SHARE_MAX_BYTES, SHARE_TRUNCATION_MARKER)}`;
+}
+
+/**
+ * Whether operator text is a shared worker note. The header is the first line,
+ * so the chat loop can tell the honesty rail a worker result entered the turn
+ * by the operator's hand rather than by a dispatch call.
+ */
+export function isWorkerShareNote(text: string): boolean {
+	return text.trimStart().startsWith(`${WORKER_SHARE_NOTE_PREFIX} `);
 }
 
 /** Terminal facts of a settled worker block, or null while it is still running. */

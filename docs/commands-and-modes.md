@@ -231,8 +231,14 @@ when the run finishes, and `/share [runId]` does it afterwards for a run already
 on screen. Bare `/share` takes the newest finished run the operator started
 themselves (never a model-asked `◆` run), while `/share <runId>` may name a
 model-asked run explicitly. What crosses is the receipt's own bounded text under a
-`[worker result] coder · run 2mkas6s · ok` header, entering the session through
-the ordinary user-turn path so replay and compaction treat it as operator text.
+`[worker result] coder · run 2mkas6s · ok · shared by the operator` header,
+entering the session through the ordinary user-turn path so replay and
+compaction treat it as operator text. The header names the operator as the
+origin, and the system prompt tells the main agent that such a note is
+operator steering whose run id names a receipt it can read, so a model that
+never dispatched the run does not discard it as unattributed output. A turn
+that only relays a shared note does not trip the unbacked-worker-claim
+advisory.
 `/new` resets the transcript and the pool bare `/share` draws from, so a run
 from the previous session cannot be shared into the new one. Worker tool
 arguments never cross at all: the transcript carries tool names only, the same

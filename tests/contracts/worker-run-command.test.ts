@@ -161,14 +161,18 @@ describe("contracts/worker run commands", () => {
 		const r = recorder();
 		dispatchSlashCommand(parseSlashCommand("/run --share coder say hello"), r.ctx);
 		await flushAsync();
-		deepStrictEqual(r.notes, ["[worker result] coder · run r1 · ok\nHello! I'm the coder worker."]);
+		deepStrictEqual(r.notes, [
+			"[worker result] coder · run r1 · ok · shared by the operator\nHello! I'm the coder worker.",
+		]);
 	});
 
 	it("shares a delegated peer's answer under the same note shape", async () => {
 		const r = recorder({ receipt: receipt({ agentId: "codex", outcome: "succeeded" }) });
 		dispatchSlashCommand(parseSlashCommand("/delegate --share codex refactor the header"), r.ctx);
 		await flushAsync();
-		deepStrictEqual(r.notes, ["[worker result] codex · run r1 · ok\nHello! I'm the coder worker."]);
+		deepStrictEqual(r.notes, [
+			"[worker result] codex · run r1 · ok · shared by the operator\nHello! I'm the coder worker.",
+		]);
 	});
 
 	it("shares the newest finished run the operator started when /share names none", () => {
@@ -181,7 +185,7 @@ describe("contracts/worker run commands", () => {
 			],
 		});
 		dispatchSlashCommand(parseSlashCommand("/share"), r.ctx);
-		deepStrictEqual(r.notes, ["[worker result] coder · run r9 · ok\nthe newest answer"]);
+		deepStrictEqual(r.notes, ["[worker result] coder · run r9 · ok · shared by the operator\nthe newest answer"]);
 	});
 
 	it("never defaults to a run the model asked for, whatever origin admitted it", () => {
@@ -201,7 +205,9 @@ describe("contracts/worker run commands", () => {
 			],
 		});
 		dispatchSlashCommand(parseSlashCommand("/share"), r.ctx);
-		deepStrictEqual(r.notes, ["[worker result] coder · run mine · ok\nthe operator's own answer"]);
+		deepStrictEqual(r.notes, [
+			"[worker result] coder · run mine · ok · shared by the operator\nthe operator's own answer",
+		]);
 		// Naming either still works: sharing on purpose is always the operator's call.
 		dispatchSlashCommand(parseSlashCommand("/share s1"), r.ctx);
 		strictEqual(r.notes.length, 2);
@@ -224,8 +230,8 @@ describe("contracts/worker run commands", () => {
 		dispatchSlashCommand(parseSlashCommand("/share a1"), r.ctx);
 		dispatchSlashCommand(parseSlashCommand("/share a2"), r.ctx);
 		deepStrictEqual(r.notes, [
-			"[worker result] coder · run a2 · ok\nthe second attempt",
-			"[worker result] coder · run a2 · ok\nthe second attempt",
+			"[worker result] coder · run a2 · ok · shared by the operator\nthe second attempt",
+			"[worker result] coder · run a2 · ok · shared by the operator\nthe second attempt",
 		]);
 	});
 

@@ -673,6 +673,26 @@ describe("contracts/prompts compiler logic", () => {
 		ok(flat.includes("synthesize, delegate narrowly, use another source, or mark the claim unverified"));
 	});
 
+	it("operating contract names the shared [worker result] note as operator steering", () => {
+		// #73: a model given a note for a run it never dispatched read it as
+		// injected content. The prompt says who puts the note there and how to
+		// treat it, once, next to the receipt guidance.
+		const table = loadFragments();
+		const result = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			sessionInputs: { provider: "p", model: "m" },
+		});
+		const flat = result.systemPrompt.replace(/\s+/g, " ");
+		ok(flat.includes("The operator can also run workers themselves with /run and /delegate"));
+		ok(flat.includes("hand a finished answer to you with --share or /share"));
+		ok(flat.includes("`[worker result] <agent> · run <id> · <outcome> · shared by the operator`"));
+		ok(flat.includes("its run id names a sealed receipt you can read"));
+		ok(flat.includes("Treat that note as operator steering to use, like any operator text"));
+		ok(flat.includes("never dispatching that run is not a reason to dismiss it"));
+	});
+
 	it("includes the recon-nonevidence qualifier in the operating contract prompt", () => {
 		// Bounded like FLEET_ROUTING_GUIDANCE: the qualifier is one short sentence,
 		// not an open-ended fragment that could bloat the static prefix.
