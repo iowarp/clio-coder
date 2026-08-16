@@ -545,6 +545,24 @@ hard block.
 
 ## Operator visibility
 
+- Every run carries the origin that asked for it, and every surface shows it
+  with the same pair of glyphs: `◇` for a run the operator started with `/run`
+  or `/delegate`, `◆` for one the model started by calling a dispatch tool, and
+  a dim `·` for the runs Clio starts for itself. A running `◇` on the board is
+  therefore the operator's own work. The footer chip splits into `◇1 ◆3` when
+  more than one kind is live and stays `fleet N` otherwise.
+- User-origin and agent-origin runs also render in the chat transcript as an
+  attributed block: header, worker prose down a rail, coalesced tool names, and
+  a receipt footer. Agent-origin blocks fold to one line under the tool call
+  that spawned them. Internal-origin runs stay on the board. The block replaces
+  nothing on the board; the two surfaces answer different questions, which is
+  what happened and how it is going.
+- A `/run` answer reaches the operator, not the model. `--share` on the command
+  or `/share [runId]` afterwards is the only way it enters the main agent's
+  context, and it enters as ordinary operator text.
+- Each attempt of a transcript-bound run writes a `workerRun` session entry, so
+  `/resume` redraws the blocks from those entries plus the sealed receipts. A
+  missing receipt renders `receipt unavailable`.
 - The dispatch board shows per-run cards with the node id (absent placement
   renders `local`), gate badges (`gate reviewer c2`), reroute badges, live
   tool activity (names only; arguments never cross the worker stdout seam),

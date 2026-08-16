@@ -90,7 +90,30 @@ The ACP boundary enforces strict isolation rules:
 
 ---
 
-## 6. Error Taxonomy
+## 6. Delegation Peers in the Transcript
+
+The sections above describe Clio as an ACP server. In the other direction, Clio
+is an ACP client: `/delegate <agent-id> <task>` and any dispatch to an agent id
+configured under `delegation.agents` run the task on an external peer such as
+`codex` or `opencode`.
+
+A delegated peer is a worker like any other on screen. The adapter maps the
+peer's `text_delta` and `message_end` notifications onto the same dispatch event
+stream a local Clio worker publishes, so the peer's answer renders in the chat
+transcript as the same attributed block, with the same fold behavior, the same
+`--share` and `/share` path into the main agent's context, and the same replay
+from a sealed receipt. There is no ACP-specific UI path.
+
+The header is where the difference shows. A local Clio worker names the target
+and model it ran on; a peer runs behind someone else's process and can honestly
+name only the protocol it was reached through, so its header reads `◇ you →
+codex (acp) · run 7hq2ab`. Its footer reports elapsed and the count of mediated
+tool calls rather than a token count, because a peer reports no token usage to
+claim.
+
+---
+
+## 7. Error Taxonomy
 
 The ACP subsystem defines four typed error classes (`src/engine/acp/errors.ts`):
 

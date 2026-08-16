@@ -203,6 +203,38 @@ Settings → Targets presents an operational console table (`HEALTH`, `ID`, `ROL
 
 Settings → Fleet is an entity workbench organized with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Dispatched worker defaults and profile rows render as compact summaries (`fast-local dynamo/qwen  high  auto`), drilling into fields (`target`, `model`, `thinkingLevel`, `node`) on `Enter`. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the `Alt+W` Fleet Runs board, which also steers and cancels them.
 
+`/run` and `/delegate` put the worker's answer on screen. Both echo the typed
+line, then stream the run into the transcript as an attributed block: a header
+(`◇ you → coder · mini/Nemo-3.5-Lightning · run 2mkas6s`), the worker's prose
+down a rail, one coalesced line of tool names, and a receipt footer carrying the
+outcome, tokens, elapsed, and result-contract conformance. A run the model
+started renders the same block marked `◆` and folded to a single line under the
+tool call that spawned it, so a fan-out of three scouts costs three rows until
+the operator opens one. `Alt+O` opens the newest folded block, `Ctrl+Alt+O` or
+`Alt+Shift+O` opens every one. Runs Clio starts for itself stay on the fleet
+board and never reach the transcript. A run that fails over keeps one block and
+gains an `↻ failed over → attempt 2 on dynamo/qwen3` line inside it.
+
+That block is the only place a `/run` answer goes. The main agent is not told
+about it, which is what makes a side run a side run; asked about the answer, it
+will say it has not seen one. `--share` on either command hands the result over
+when the run finishes, and `/share [runId]` does it afterwards for a run already
+on screen. Bare `/share` takes the newest finished run the operator started
+themselves, since a run the model started already reached it as a tool result.
+What crosses is the receipt's own bounded text under a `[worker result] coder ·
+run 2mkas6s · ok` header, entering the session through the ordinary user-turn
+path so replay and compaction treat it as operator text. Worker tool arguments
+never cross at all: the transcript carries tool names only, the same rule the
+dispatch board follows.
+
+Blocks survive a resume. Each attempt writes a `workerRun` session entry naming
+the run, its origin, and its runtime, and `/resume` rebuilds the block from that
+entry plus the sealed receipt under `<state>/receipts/<runId>.json`. A run whose
+receipt is gone replays with a `receipt unavailable` footer rather than a header
+with nothing under it. The entries are bookkeeping: they cost nothing in the
+context window and never become model context, so resuming a session full of
+side runs does not spend the window on them.
+
 The `/tasks` overlay shows the session task board the agent maintains through
 the `tasks` tool: every task with its status, the evidence note recorded when
 it was completed, and the reason recorded when it was blocked or dropped. The
@@ -475,7 +507,7 @@ Clio Coder features direct, interactive controls for model reasoning and thinkin
 - **Thinking Level (`Shift+Tab`):** Allows operators to cycle through available thinking configurations. This is useful for dialing model reasoning budgets up or down in real time.
 - **Thinking Blocks Toggle (`Alt+R`):** Toggles the latest assistant thinking block between a compact, single-line folded marker and an expanded, full-body view.
 - **All Thinking (`Ctrl+Alt+R` / `Alt+Shift+R`):** Toggles every thinking block in the transcript.
-- **Tool Body Toggle (`Alt+O`) / All Tools (`Ctrl+Alt+O` / `Alt+Shift+O`):** Expand the latest tool or every tool body.
+- **Tool Body Toggle (`Alt+O`) / All Tools (`Ctrl+Alt+O` / `Alt+Shift+O`):** Expand the latest tool or every tool body. The single-target key takes the newest foldable thing of either kind, so a worker card that just landed opens before the tool call above it; exactly one surface advertises the chord at a time.
 - **Live Tool Output (`Alt+P`):** Pause or resume cumulative partial tool output in expanded live tool bodies; the tool still executes.
 - **Live Streaming:** During active assistant turns, thinking increments stream live into the chat panel down a rail-prefixed segment. Reasoning totals marked `≈` are approximations from visible text; provider-reported totals are shown without that marker. Neither implies complete or cryptographically verified hidden reasoning.
 - **Thinking Replay:** When continuing a conversation, prior thinking is preserved and replayed in the history according to target-specific rules.
