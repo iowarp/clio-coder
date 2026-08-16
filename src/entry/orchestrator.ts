@@ -47,6 +47,7 @@ import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
+import { InteropDomainModule } from "../domains/interop/index.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import {
@@ -783,6 +784,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const result = await loadDomains([
 		ConfigDomainModule,
 		ExtensionsDomainModule,
+		InteropDomainModule,
 		createResourcesDomainModule({
 			skills: () => ({
 				disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,

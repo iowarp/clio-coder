@@ -49,7 +49,7 @@ const ACTION_CLASSES = new Set<ActionClass>([
 	"git_destructive",
 	"unknown",
 ]);
-const PATH_POLICY_KEYS = ["zeroAccessPaths", "readOnlyPaths", "noDeletePaths"] as const;
+const PATH_POLICY_KEYS = ["zeroAccessPaths", "readOnlyPaths", "noWritePaths", "noDeletePaths"] as const;
 const ROOT_KEYS = new Set(["version", "commands", "tasks", "disableDefaultPathPolicy", ...PATH_POLICY_KEYS]);
 const COMMAND_KEYS = new Set([
 	"id",
