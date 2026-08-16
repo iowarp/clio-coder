@@ -865,6 +865,25 @@ function pathIsPresent(filesystem: ResultContractFilesystem, target: string): bo
 	return filesystem.pathExists(target);
 }
 
+/** One `validations` entry, quoted by every reason that rejects the array. */
+const MUTATION_VALIDATION_EXAMPLE = '{"name":"npm test","passed":true,"evidence":"exit 0"}';
+
+/**
+ * Why a `validations` array was refused, in terms the model can act on. Naming
+ * the requirement was not enough for a small local model (#74): a run that
+ * emitted `"validations":[]` read the reason as satisfied, spent both repair
+ * rounds re-emitting the same empty array, and failed `result_contract_exhausted`.
+ * The two ways to get this wrong need different corrections, so each reason
+ * says which one happened and shows the entry that would have passed.
+ */
+function mutationValidationsReason(value: unknown): string {
+	const empty = Array.isArray(value) && value.length === 0;
+	if (empty) {
+		return `Mutation result must carry typed validation results: validations was empty. Emit one entry per check this run actually made, each shaped like ${MUTATION_VALIDATION_EXAMPLE}. A run that only read files still names the read and cites what it saw.`;
+	}
+	return `Mutation result must carry typed validation results: every validations entry is shaped like ${MUTATION_VALIDATION_EXAMPLE}, with a string name, a boolean passed, a string evidence, and no other keys.`;
+}
+
 /**
  * A mutation report states what the run changed and what it validated. Shape
  * alone cannot tell either claim from an invention, and the shape example this
@@ -902,8 +921,7 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 	const authorship = validateAuthorship(value);
 	if (authorship !== null) return failure(contract, "unmeasured", authorship);
 	const validations = parseChecks(value.validations);
-	if (validations === null)
-		return failure(contract, "unmeasured", "Mutation result must carry typed validation results");
+	if (validations === null) return failure(contract, "unmeasured", mutationValidationsReason(value.validations));
 	const reportedFailure = !validations.every((check) => check.passed);
 	const effects = input.observedRunEffects;
 	if (effects === undefined) return success(contract, reportedFailure ? "fail" : "pass", value);
