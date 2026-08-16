@@ -24,6 +24,9 @@ export function createInteropBundle(_context: DomainContext): DomainBundle<Inter
 			detected = await detectInteropAgents(input, detected?.agents);
 			return detected;
 		},
+		// A decision is written and read back, so the report an overlay rebuilds
+		// from carries it: a declined row leaves the proposal list on the
+		// keystroke rather than on the next detection.
 		lastReport() {
 			return detected ?? readInteropReport();
 		},
@@ -31,10 +34,14 @@ export function createInteropBundle(_context: DomainContext): DomainBundle<Inter
 			return interopProposals(report, readSettings());
 		},
 		accept(ids) {
-			return acceptInteropAgents(ids, detected ?? readInteropReport() ?? EMPTY_REPORT);
+			const result = acceptInteropAgents(ids, detected ?? readInteropReport() ?? EMPTY_REPORT);
+			detected = readInteropReport() ?? detected;
+			return result;
 		},
 		decline(ids) {
-			return declineInteropAgents(ids, detected ?? readInteropReport() ?? EMPTY_REPORT);
+			const result = declineInteropAgents(ids, detected ?? readInteropReport() ?? EMPTY_REPORT);
+			detected = readInteropReport() ?? detected;
+			return result;
 		},
 		bootHint(report) {
 			return interopBootHint(report, readSettings());
