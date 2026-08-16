@@ -41,7 +41,7 @@ describe("contracts/prompts-overlay", () => {
 			mounted.tui,
 			{
 				listPrompts: () => ({
-					items: [{ name: "review", argumentHint: "<scope>", description: "Review a focused change" }],
+					items: [{ name: "review", argumentHint: "<scope>", description: "Review a focused change", trusted: true }],
 					diagnostics: [{ type: "warning", message: "fragment is stale", path: "/repo/prompts/review.md" }],
 				}),
 				setEditorText: () => {},

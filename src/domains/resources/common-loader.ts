@@ -9,7 +9,24 @@ export interface ResourceRoot {
 	path: string;
 	scope: ResourceScope;
 	source?: string;
+	/** Collision rank, higher wins. See {@link ResourceSourceInfo.precedence}. */
+	precedence?: number;
+	/** Whether the resource is usable without an explicit trust opt-in. Defaults to true. */
+	trusted?: boolean;
 }
+
+/**
+ * Collision tiers shared by every compatibility-aware resource kind. They match
+ * the skill precedence table so a foreign prompt root ranks against Clio's own
+ * roots exactly the way a foreign skill root does.
+ */
+export const COMPAT_RESOURCE_PRECEDENCE = {
+	extension: 10,
+	userCompat: 20,
+	user: 30,
+	projectCompat: 40,
+	project: 50,
+} as const;
 
 export type FrontmatterSplitResult =
 	| {
@@ -29,9 +46,20 @@ export function defaultScopedResourceRoots(kind: ExtensionResourceKind, cwd: str
 			path: root.path,
 			scope: "package" as const,
 			source: root.source,
+			precedence: COMPAT_RESOURCE_PRECEDENCE.extension,
 		})),
-		{ path: path.join(clioConfigDir(), kind), scope: "user", source: "config" },
-		{ path: path.join(cwd, ".clio-coder", kind), scope: "project", source: "project" },
+		{
+			path: path.join(clioConfigDir(), kind),
+			scope: "user" as const,
+			source: "config",
+			precedence: COMPAT_RESOURCE_PRECEDENCE.user,
+		},
+		{
+			path: path.join(cwd, ".clio-coder", kind),
+			scope: "project" as const,
+			source: "project",
+			precedence: COMPAT_RESOURCE_PRECEDENCE.project,
+		},
 	];
 }
 
@@ -40,6 +68,7 @@ export function sourceInfoForRoot(root: ResourceRoot, filePath: string): Resourc
 		path: filePath,
 		scope: root.scope,
 		...(root.source ? { source: root.source } : {}),
+		...(root.precedence !== undefined ? { precedence: root.precedence } : {}),
 	};
 }
 

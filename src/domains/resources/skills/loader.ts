@@ -208,8 +208,13 @@ function defaultPrecedenceForScope(scope: ResourceScope): number {
 	}
 }
 
-function projectCompatTrusted(input: LoadSkillsInput): boolean {
-	if (input.trustProjectCompatRoots === true) return true;
+/**
+ * Whether project-scope compatibility roots are model-visible. Prompts share
+ * this gate with skills: both substitute another agent's project file into
+ * Clio's context, so one opt-in covers both.
+ */
+export function projectCompatTrusted(explicit?: boolean): boolean {
+	if (explicit === true) return true;
 	return process.env.CLIO_CODER_TRUST_PROJECT_SKILLS === "1";
 }
 
@@ -225,7 +230,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 	const cwd = input.cwd ?? process.cwd();
 	const home = input.home ?? homedir();
 	const configDir = input.configDir ?? clioConfigDirSafe();
-	const trustProject = projectCompatTrusted(input);
+	const trustProject = projectCompatTrusted(input.trustProjectCompatRoots);
 	const roots: SkillRoot[] = [];
 
 	for (const root of enabledExtensionResourceRoots("skills", cwd)) {
