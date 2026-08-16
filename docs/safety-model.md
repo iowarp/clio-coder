@@ -140,7 +140,7 @@ Every tool call entering the safety engine passes through a strict 10-step evalu
 2. **Write-Root Containment**: Verifies that mutations remain within configured write boundaries (`evaluateWriteRoots`).
 3. **Hard Blocks**: Enforces unconditional blocks against destructive actions (such as `git_destructive` operations and zero-access credentials).
 4. **Invalid Project Policy Fail-Closed**: If `.clio-coder/safety.yaml` contains parsing or schema errors, execution tools fail closed.
-5. **Path Policy Enforcement**: Evaluates `zeroAccessPaths`, `readOnlyPaths`, and `noDeletePaths`.
+5. **Path Policy Enforcement**: Evaluates `zeroAccessPaths`, `readOnlyPaths`, `noWritePaths`, and `noDeletePaths`.
 6. **Bash Zero-Access Protocol**: Rejects shell commands attempting to read, exfiltrate, or redirect from protected credential files. A safe presence-check exception (`grep -sq "^NAME=" <file>`) is permitted for environment probing without exposing secrets.
 7. **Ask Rails**: Evaluates rules requiring confirmation (such as project `requireConfirmation` or unanalyzable command substitutions `$(...)`).
 8. **System Modify Checks**: Assesses operating-system level modification commands targeting system roots (`/etc`, `/usr`, `/var`, `/bin`, `/sbin`, `/run`), exempting temporary write paths (`/var/tmp`, `/var/folders`).
@@ -162,6 +162,8 @@ zeroAccessPaths:
   - .env
 readOnlyPaths:
   - vendor/
+noWritePaths:
+  - third_party/generated/
 noDeletePaths:
   - out/validated/
 commands:
@@ -184,7 +186,7 @@ commands:
 Accepted root keys:
 
 ```text
-version | commands | tasks | disableDefaultPathPolicy | zeroAccessPaths | readOnlyPaths | noDeletePaths
+version | commands | tasks | disableDefaultPathPolicy | zeroAccessPaths | readOnlyPaths | noWritePaths | noDeletePaths
 ```
 
 `tasks` is an alias for command policy entries. Unknown keys, wrong types, duplicate command IDs, absolute `cwd`, `..`-escaping `cwd`, and invalid path-policy entries make the policy invalid.
@@ -195,8 +197,20 @@ Path-policy behavior:
 | --- | --- |
 | `zeroAccessPaths` | Blocks read, write, and delete. |
 | `readOnlyPaths` | Allows read, blocks write/delete. |
+| `noWritePaths` | Allows read, blocks write/delete. Separate from `readOnlyPaths` so the default policy can name directories Clio reads as a matter of course and must never author. |
 | `noDeletePaths` | Blocks delete. |
 | `disableDefaultPathPolicy` | Uses only project path policy rather than merging default damage-control paths. Note: This cannot disable built-in zero-access protection for critical system paths like `.git/config` and `credentials.yaml`. |
+
+The default damage-control policy populates `noWritePaths` from the interop
+agent registry: `~/.claude/`, `~/.codex/`, `~/.gemini/`, `~/.cursor/`,
+`~/.config/opencode/`, `~/.copilot/`, `~/.agents/`, `~/.antigravitycli/`, and
+their project equivalents. Clio never writes into another coding agent's
+directory. It reads those roots for skills, prompts, and rule prose and has no
+reason to author them, and `noDeletePaths` alone did not cover the case: a
+`write` or `edit` targeting `~/.codex/skills/x/SKILL.md` is refused at every
+posture including `auto-edit` and `full-auto`, with reason code
+`path-policy:noWritePaths`. `.clio-coder/` is Clio's own directory and is
+unaffected.
 
 Command entry notes:
 

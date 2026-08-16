@@ -143,6 +143,19 @@ export class ListOverlayView implements Component {
 	}
 
 	/**
+	 * Run the action bound to a key, if one is bound. Reports whether the key was
+	 * claimed, so a list with rows swallows its own action keys either way rather
+	 * than letting one fall through to the filter.
+	 */
+	private runAction(data: string, filteredItems: ReadonlyArray<ListOverlayItem>): boolean {
+		const action = this.options.actions?.[data];
+		if (!action) return false;
+		const selectedItem = filteredItems[this.selectedIndex];
+		if (selectedItem) action(selectedItem);
+		return true;
+	}
+
+	/**
 	 * Esc semantics shared by every list overlay regardless of which pane has
 	 * focus: first Esc clears a nonempty filter, second Esc closes.
 	 */
@@ -485,6 +498,14 @@ export class ListOverlayView implements Component {
 				return;
 			}
 
+			// The footer advertises the action keys from the moment the overlay opens
+			// and the filter input holds focus then, so the first `d` an operator
+			// pressed in /interop landed in the filter box instead of declining the
+			// selected row. An empty query has nothing to narrow, so a bound key acts
+			// on the selection. Once a query is typed the letters belong to it, and
+			// ↑/↓ hands focus back to the list where the same keys act again.
+			if (this.filterText.length === 0 && data.length === 1 && this.runAction(data, filteredItems)) return;
+
 			this.inputEpoch += 1;
 			this.input.handleInput(data);
 			const next = this.input.getValue();
@@ -530,16 +551,7 @@ export class ListOverlayView implements Component {
 				return;
 			}
 
-			if (this.options.actions) {
-				const action = this.options.actions[data];
-				if (action) {
-					const selectedItem = filteredItems[this.selectedIndex];
-					if (selectedItem) {
-						action(selectedItem);
-					}
-					return;
-				}
-			}
+			if (this.runAction(data, filteredItems)) return;
 
 			if (this.options.filterable && matchesKey(data, "backspace")) {
 				this.isFilterFocused = true;
@@ -568,12 +580,27 @@ export class ListOverlayView implements Component {
 	}
 }
 
-export function openListOverlay(tui: TUI, options: ListOverlayOptions): OverlayHandle {
+export interface ListOverlayHandle extends OverlayHandle {
+	/**
+	 * Replace the rows and repaint. The view memoizes its whole frame on a row-set
+	 * epoch only this bumps, so a caller that mutates the array it handed in draws
+	 * the frame from before its own change until some other key moves the memo key.
+	 */
+	setItems(items: ReadonlyArray<ListOverlayItem>): void;
+}
+
+export function openListOverlay(tui: TUI, options: ListOverlayOptions): ListOverlayHandle {
 	const view = new ListOverlayView(options, () => tui.requestRender());
-	return showClioOverlayFrame(tui, view, {
+	const handle = showClioOverlayFrame(tui, view, {
 		anchor: "center",
 		width: 100,
 		title: options.title,
 		footerHint: () => view.getHint(),
+	});
+	return Object.assign(handle, {
+		setItems(items: ReadonlyArray<ListOverlayItem>): void {
+			view.setItems(items);
+			tui.requestRender();
+		},
 	});
 }

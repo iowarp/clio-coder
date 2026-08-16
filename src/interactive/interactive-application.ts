@@ -8,6 +8,7 @@ import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
+import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
@@ -33,6 +34,7 @@ import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from ".
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
+import { interopOverlaySurface } from "./overlays/interop.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import type {
 	ContextClearCommandOptions,
@@ -107,6 +109,7 @@ export interface InteractiveDeps {
 	initialNotices?: ReadonlyArray<string>;
 	resources?: ResourcesContract;
 	extensions?: ExtensionsContract;
+	interop?: InteropContract;
 	share?: ShareContract;
 	/**
 	 * Shared tool registry. When wired, the permission overlay opens automatically
@@ -475,6 +478,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		appendTranscriptNotice: (level, text) => appendNotice(level, text, busNoticeSink),
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 	});
+	// The overlay reads the report this process already produced at boot; it
+	// never probes on a keystroke.
+	const interop = deps.interop;
+	const interopSurface = interop ? interopOverlaySurface(interop, (level, text) => notify(level, text)) : null;
 	const slashRuntime = createInteractiveSlashRuntime({
 		io,
 		bus: deps.bus,
@@ -484,6 +491,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		chatPanel,
 		...(deps.resources ? { resources: deps.resources } : {}),
 		...(deps.extensions ? { extensions: deps.extensions } : {}),
+		...(interopSurface ? { interop: interopSurface } : {}),
 		...(deps.agents ? { agents: deps.agents } : {}),
 		...(deps.share ? { share: deps.share } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
@@ -521,6 +529,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openAgents: () => openAgentsOverlayState(),
 		openPrompts: () => openPromptsOverlayState(),
 		openExtensions: () => openExtensionsOverlayState(),
+		openInterop: () => openInteropOverlayState(),
 		openContextReset: () => openContextResetOverlayState(),
 		setEditorText: (text) => editor.setText(text),
 		// What the operator can share is what the operator can see: the panel's
@@ -602,6 +611,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openSkillsHubState,
 		openPromptsOverlayState,
 		openExtensionsOverlayState,
+		openInteropOverlayState,
 	} = overlayLifecycle;
 
 	const dispatchSteering = createDispatchSteering({

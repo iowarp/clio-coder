@@ -900,4 +900,40 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			await closeServer(fixture.server);
 		}
 	});
+
+	it("runs a prompt template named as a command and stops on one it may not read", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const project = join(scratch.dir, "project");
+		mkdirSync(join(project, ".clio-coder", "prompts"), { recursive: true });
+		writeFileSync(join(project, ".clio-coder", "prompts", "smoketemplate.md"), "Say the words tortoise shell.\n", "utf8");
+		mkdirSync(join(project, ".claude", "commands"), { recursive: true });
+		writeFileSync(join(project, ".claude", "commands", "foreignsmoke.md"), "Say the words leopard print.\n", "utf8");
+		const fixture = await startOpenAICompatFixture("mock reply");
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const env = { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" };
+			const expanded = await runCli(["--no-context-files", "--no-skills", "run", "/smoketemplate"], {
+				env,
+				cwd: project,
+				timeoutMs: 20_000,
+			});
+			strictEqual(expanded.code, 0, `stderr=${expanded.stderr}`);
+			ok(JSON.stringify(fixture.requests).includes("tortoise shell"), "the template body is what the model received");
+
+			// The untrusted project root refuses, and the operator reads why instead
+			// of the model answering a command it cannot run.
+			const refused = await runCli(["--no-context-files", "--no-skills", "run", "/foreignsmoke"], {
+				env,
+				cwd: project,
+				timeoutMs: 20_000,
+			});
+			strictEqual(refused.code, 1, `stderr=${refused.stderr}`);
+			match(refused.stderr, /untrusted project root/);
+			const sent = JSON.stringify(fixture.requests);
+			ok(!sent.includes("leopard print"), "an untrusted body never reaches the model");
+			ok(!sent.includes("/foreignsmoke"), "and neither does the literal command");
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
 });

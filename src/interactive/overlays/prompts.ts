@@ -21,12 +21,16 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 				if (template.argumentHint) {
 					lines.push(`**Argument Hint:** \`${template.argumentHint}\``);
 				}
+				lines.push(`**Source:** ${template.sourceInfo.source ?? template.sourceInfo.scope}`);
+				if (!template.trusted) {
+					lines.push("**Untrusted:** set `skills.trustProjectCompatRoots` before this template will expand.");
+				}
 				return lines;
 			},
 		};
-		if (template.argumentHint) {
-			item.meta = template.argumentHint;
-		}
+		const marker = template.trusted ? undefined : clioTheme().fg("warning", "untrusted");
+		if (marker) item.meta = template.argumentHint ? `${template.argumentHint} · ${marker}` : marker;
+		else if (template.argumentHint) item.meta = template.argumentHint;
 		return item;
 	});
 

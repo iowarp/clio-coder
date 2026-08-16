@@ -254,12 +254,12 @@ describe("contracts/slash-spec", () => {
 		// indistinguishable from a mistyped command carrying arguments, which is the
 		// shape of the defect this exists to catch, so it resolves as a command and
 		// fails. A sentence that has to start this way needs the backslash escape.
-		deepStrictEqual(parseSlashCommand("/tmp is full"), { kind: "unknown-command", token: "tmp" });
+		deepStrictEqual(parseSlashCommand("/tmp is full"), { kind: "unknown-command", token: "tmp", text: "/tmp is full" });
 
 		// The escape has to survive the editor, which trims the submitted line
 		// before the parser ever sees it. A leading space does not survive, so it
 		// buys nothing; a backslash does.
-		deepStrictEqual(parseSlashCommand(" /tmp is full"), { kind: "unknown-command", token: "tmp" });
+		deepStrictEqual(parseSlashCommand(" /tmp is full"), { kind: "unknown-command", token: "tmp", text: "/tmp is full" });
 		deepStrictEqual(parseSlashCommand("\\/tmp is full"), { kind: "unknown", text: "/tmp is full" });
 		deepStrictEqual(parseSlashCommand("  \\/tmp is full  "), { kind: "unknown", text: "/tmp is full" });
 
@@ -303,8 +303,8 @@ describe("contracts/slash-spec", () => {
 			],
 			["/context init --no-generate", { kind: "usage-error", command: "context", reason: "Unknown flag: --no-generate" }],
 			["/context init extra", { kind: "usage-error", command: "context", reason: "Unexpected argument: extra" }],
-			["/context-init", { kind: "unknown-command", token: "context-init" }],
-			["/context-init --preview", { kind: "unknown-command", token: "context-init" }],
+			["/context-init", { kind: "unknown-command", token: "context-init", text: "/context-init" }],
+			["/context-init --preview", { kind: "unknown-command", token: "context-init", text: "/context-init --preview" }],
 
 			// context reset is zero-argument; confirmation happens in its chooser
 			["/context reset", { kind: "context-clear", options: {} }],
@@ -314,8 +314,8 @@ describe("contracts/slash-spec", () => {
 			["/context reset --confirm-all", { kind: "usage-error", command: "context", reason: "Unknown flag: --confirm-all" }],
 			["/context reset --invalid", { kind: "usage-error", command: "context", reason: "Unknown flag: --invalid" }],
 			["/context reset extra", { kind: "usage-error", command: "context", reason: "Unexpected argument: extra" }],
-			["/context-clear", { kind: "unknown-command", token: "context-clear" }],
-			["/context-clear --all", { kind: "unknown-command", token: "context-clear" }],
+			["/context-clear", { kind: "unknown-command", token: "context-clear", text: "/context-clear" }],
+			["/context-clear --all", { kind: "unknown-command", token: "context-clear", text: "/context-clear --all" }],
 
 			// context refresh (hub)
 			["/context refresh", { kind: "context-refresh" }],
@@ -333,8 +333,8 @@ describe("contracts/slash-spec", () => {
 			["/skill writer draft release notes", { kind: "skill-invocation", text: "/skill writer draft release notes" }],
 
 			// /skills was absorbed into the /skill hub in v0.2.3 and now fails as absent
-			["/skills", { kind: "unknown-command", token: "skills" }],
-			["/skills git tools", { kind: "unknown-command", token: "skills" }],
+			["/skills", { kind: "unknown-command", token: "skills", text: "/skills" }],
+			["/skills git tools", { kind: "unknown-command", token: "skills", text: "/skills git tools" }],
 
 			// run
 			["/run scout task text", { kind: "run", agentId: "scout", task: "task text", options: {} }],
@@ -494,8 +494,8 @@ describe("contracts/slash-spec", () => {
 			["/view verify myRunId extra", { kind: "view-usage" }],
 
 			// /receipts was absorbed into /view in v0.2.3 and now fails as absent
-			["/receipts", { kind: "unknown-command", token: "receipts" }],
-			["/receipts verify myRunId", { kind: "unknown-command", token: "receipts" }],
+			["/receipts", { kind: "unknown-command", token: "receipts", text: "/receipts" }],
+			["/receipts verify myRunId", { kind: "unknown-command", token: "receipts", text: "/receipts verify myRunId" }],
 
 			// model
 			["/model", { kind: "model" }],
@@ -516,23 +516,23 @@ describe("contracts/slash-spec", () => {
 			// context overlay (hub, no args); the retired spelling no longer parses
 			["/context", { kind: "context-view" }],
 			["/ctx", { kind: "context-view" }],
-			["/context-view", { kind: "unknown-command", token: "context-view" }],
+			["/context-view", { kind: "unknown-command", token: "context-view", text: "/context-view" }],
 
 			// spellings from other tools that name something Clio really has
 			["/exit", { kind: "quit" }],
 			["/config", { kind: "settings" }],
 
 			// status (deleted) -> falls through to unknown
-			["/status", { kind: "unknown-command", token: "status" }],
+			["/status", { kind: "unknown-command", token: "status", text: "/status" }],
 
 			// connect/disconnect (deleted) -> falls through to unknown
-			["/connect", { kind: "unknown-command", token: "connect" }],
-			["/connect target-a", { kind: "unknown-command", token: "connect" }],
-			["/disconnect", { kind: "unknown-command", token: "disconnect" }],
-			["/disconnect target-a", { kind: "unknown-command", token: "disconnect" }],
+			["/connect", { kind: "unknown-command", token: "connect", text: "/connect" }],
+			["/connect target-a", { kind: "unknown-command", token: "connect", text: "/connect target-a" }],
+			["/disconnect", { kind: "unknown-command", token: "disconnect", text: "/disconnect" }],
+			["/disconnect target-a", { kind: "unknown-command", token: "disconnect", text: "/disconnect target-a" }],
 
 			// unknown / invalid
-			["/invalid-command", { kind: "unknown-command", token: "invalid-command" }],
+			["/invalid-command", { kind: "unknown-command", token: "invalid-command", text: "/invalid-command" }],
 			// A registered command with unparseable arguments is a usage error, not
 			// a chat message. `unknown` stays for input that matched no command.
 			["/quit now", { kind: "usage-error", command: "quit", reason: "Unexpected argument: now" }],
@@ -574,7 +574,7 @@ describe("contracts/slash-spec", () => {
 			["/new query", { kind: "usage-error", command: "new", reason: "Unexpected argument: query" }],
 			["/tree query", { kind: "usage-error", command: "tree", reason: "Unexpected argument: query" }],
 			["/fork query", { kind: "usage-error", command: "fork", reason: "Unexpected argument: query" }],
-			["/hotkeys query", { kind: "unknown-command", token: "hotkeys" }],
+			["/hotkeys query", { kind: "unknown-command", token: "hotkeys", text: "/hotkeys query" }],
 		];
 
 		for (const [input, expected] of testCases) {
@@ -639,6 +639,7 @@ describe("contracts/slash-spec", () => {
 			"skill",
 			"prompts",
 			"extensions",
+			"interop",
 			"share",
 			"run",
 			"delegate",
@@ -683,7 +684,7 @@ describe("contracts/slash-spec", () => {
 			"context-clear",
 			"context-view",
 		]) {
-			deepStrictEqual(parseSlashCommand(`/${absent}`), { kind: "unknown-command", token: absent });
+			deepStrictEqual(parseSlashCommand(`/${absent}`), { kind: "unknown-command", token: absent, text: `/${absent}` });
 		}
 	});
 

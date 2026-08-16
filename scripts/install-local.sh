@@ -281,6 +281,7 @@ warn_about_shadowing_clio
 
 if [[ $dry_run -eq 1 ]]; then
 	log "would run: node $cli_target doctor --fix"
+	log "would run: node $cli_target configure --interop"
 	ok "dry run complete"
 	print_next_steps
 	exit 0
@@ -288,5 +289,10 @@ fi
 
 log "running: node $cli_target doctor --fix"
 node "$cli_target" doctor --fix || fail "doctor --fix could not bring the install to green; inspect the output above"
+
+# Detected coding agents are proposed here, never wired without an answer. On a
+# non-interactive install this prints the proposals and writes nothing.
+log "running: node $cli_target configure --interop"
+node "$cli_target" configure --interop || warn "interop review did not finish; run \`clio-coder configure --interop\` later"
 
 print_next_steps

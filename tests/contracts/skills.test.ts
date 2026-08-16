@@ -375,6 +375,20 @@ describe("contracts/skills loader normalization", () => {
 		ok(list.diagnostics.some((diag) => diag.message.includes("same canonical skill file")));
 	});
 
+	it("names the winning path in the symlink dedupe diagnostic", () => {
+		const realRoot = scratchDir();
+		const aliasRoot = scratchDir();
+		writeSkillDir(realRoot, "linked-skill", ['name: "linked-skill"', 'description: "Canonical skill."']);
+		symlinkSync(join(realRoot, "linked-skill"), join(aliasRoot, "linked-skill"), "dir");
+		const list = loadSkills({ roots: [userRoot(realRoot), projectRoot(aliasRoot)] });
+		const winner = list.items[0];
+		ok(winner);
+		const diagnostic = list.diagnostics.find((diag) => diag.message.includes("same canonical skill file"));
+		ok(diagnostic);
+		ok(diagnostic.message.includes(`${winner.filePath}, which is the entry in use`), diagnostic.message);
+		ok(diagnostic.path !== winner.filePath, "the diagnostic points at the discarded copy");
+	});
+
 	it("hashes are stable across loads and change with content", () => {
 		const root = scratchDir();
 		const file = writeSkillDir(root, "hashing", ['name: "hashing"', 'description: "Hash stability."'], "ONE");
@@ -435,6 +449,31 @@ describe("contracts/skills compatibility roots", () => {
 		const copilot = list.items.find((s) => s.name === "copilot-skill");
 		ok(copilot);
 		strictEqual(copilot.source, "copilot");
+	});
+
+	it("breaks an equal-precedence compat tie by registry order rather than path spelling", () => {
+		const home = scratchDir("clio-home-");
+		const project = scratchDir("clio-proj-");
+		const config = scratchDir("clio-cfg-");
+		// Alphabetically .github sorts after .claude, so the old path tiebreak
+		// handed the name to Copilot; the registry ranks Claude Code first.
+		writeSkillDir(
+			join(project, ".claude", "skills"),
+			"shared",
+			['name: "shared"', 'description: "Claude copy."'],
+			"CLAUDE BODY",
+		);
+		writeSkillDir(
+			join(project, ".github", "skills"),
+			"shared",
+			['name: "shared"', 'description: "Copilot copy."'],
+			"COPILOT BODY",
+		);
+		const list = loadSkills({ cwd: project, home, configDir: config, trustProjectCompatRoots: true });
+		const skill = list.items.find((entry) => entry.name === "shared");
+		ok(skill);
+		strictEqual(skill.source, "claude");
+		strictEqual(skill.content, "CLAUDE BODY");
 	});
 
 	it("treats project compat roots as untrusted by default", () => {
