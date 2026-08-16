@@ -40,6 +40,22 @@ if [ -z "${CLIO_CODER_MAIN_URL:-}" ] || [ -z "${CLIO_CODER_WORKER_URL:-}" ]; the
 fi
 CLIO_CODER_MAIN_TARGET=${CLIO_CODER_MAIN_TARGET:-local-main}
 CLIO_CODER_WORKER_TARGET=${CLIO_CODER_WORKER_TARGET:-local-worker}
+# Each node's runtime and thinking level travel from the operator's fleet.
+# Hardcoding them described an LM Studio orchestrator as llama.cpp and raised
+# the thinking level the operator had turned off, so the container ran a
+# different fleet than the one being benchmarked.
+CLIO_CODER_MAIN_RUNTIME=${CLIO_CODER_MAIN_RUNTIME:-llamacpp}
+CLIO_CODER_WORKER_RUNTIME=${CLIO_CODER_WORKER_RUNTIME:-lmstudio-native}
+CLIO_CODER_MAIN_THINKING=${CLIO_CODER_MAIN_THINKING:-off}
+CLIO_CODER_WORKER_THINKING=${CLIO_CODER_WORKER_THINKING:-off}
+key_env_for_runtime() {
+  case "$1" in
+    lmstudio-native|lmstudio) echo CLIO_CODER_LMSTUDIO_KEY ;;
+    *) echo CLIO_CODER_LLAMACPP_KEY ;;
+  esac
+}
+MAIN_KEY_ENV=$(key_env_for_runtime "$CLIO_CODER_MAIN_RUNTIME")
+WORKER_KEY_ENV=$(key_env_for_runtime "$CLIO_CODER_WORKER_RUNTIME")
 mkdir -p "$HOME/.config/clio-coder"
 cat > "$HOME/.config/clio-coder/settings.yaml" <<YAML
 version: 1
@@ -47,19 +63,19 @@ identity: clio
 autonomy: ${CLIO_CODER_AUTONOMY:-full-auto}
 targets:
   - id: ${CLIO_CODER_MAIN_TARGET}
-    runtime: llamacpp
+    runtime: ${CLIO_CODER_MAIN_RUNTIME}
     url: ${CLIO_CODER_MAIN_URL}
     auth:
-      apiKeyEnvVar: CLIO_CODER_LLAMACPP_KEY
+      apiKeyEnvVar: ${MAIN_KEY_ENV}
     wireModels:
       - ${CLIO_CODER_MAIN_MODEL}
     defaultModel: ${CLIO_CODER_MAIN_MODEL}
     gateway: true
   - id: ${CLIO_CODER_WORKER_TARGET}
-    runtime: lmstudio-native
+    runtime: ${CLIO_CODER_WORKER_RUNTIME}
     url: ${CLIO_CODER_WORKER_URL}
     auth:
-      apiKeyEnvVar: CLIO_CODER_LMSTUDIO_KEY
+      apiKeyEnvVar: ${WORKER_KEY_ENV}
     wireModels:
       - ${CLIO_CODER_WORKER_MODEL}
     defaultModel: ${CLIO_CODER_WORKER_MODEL}
@@ -67,18 +83,27 @@ targets:
 orchestrator:
   target: ${CLIO_CODER_MAIN_TARGET}
   model: ${CLIO_CODER_MAIN_MODEL}
-  thinkingLevel: low
+  thinkingLevel: ${CLIO_CODER_MAIN_THINKING}
 workers:
   default:
     target: ${CLIO_CODER_WORKER_TARGET}
     model: ${CLIO_CODER_WORKER_MODEL}
-    thinkingLevel: low
+    thinkingLevel: ${CLIO_CODER_WORKER_THINKING}
   onPermission: deny
 YAML
 
+# State the freshly written settings describe: doctor creates the data, state,
+# and cache trees so the first turn is not also a first-install.
+clio-coder doctor --fix >/dev/null 2>&1 || true
+
 # 4. Connectivity preflight so a network-isolated container fails loudly, not silently.
+#    Both nodes are checked: a reachable orchestrator with an unreachable worker
+#    fails only once dispatch starts, which reads as a mid-episode agent fault.
 if ! curl -fsS -m 8 "${CLIO_CODER_MAIN_URL}/v1/models" >/dev/null 2>&1; then
   log "WARNING: cannot reach fleet main at ${CLIO_CODER_MAIN_URL} from container; runs will fail"
+fi
+if ! curl -fsS -m 8 "${CLIO_CODER_WORKER_URL}/v1/models" >/dev/null 2>&1; then
+  log "WARNING: cannot reach fleet workers at ${CLIO_CODER_WORKER_URL} from container; dispatch will fail"
 fi
 
 # 5. Deterministic Stage 1 index so code_nav has data immediately.

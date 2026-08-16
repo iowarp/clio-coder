@@ -21,8 +21,20 @@ FLEET_JSON = Path(__file__).resolve().parent / "fleet.json"
 
 # Per-node fields and the CLIO_CODER_* env var that overrides each, matching the vars
 # the terminal-bench agent and install-clio.sh already use.
-_ORCH_ENV = {"url": "CLIO_CODER_MAIN_URL", "model": "CLIO_CODER_MAIN_MODEL", "target": "CLIO_CODER_MAIN_TARGET", "thinking": "CLIO_CODER_MAIN_THINKING"}
-_WORK_ENV = {"url": "CLIO_CODER_WORKER_URL", "model": "CLIO_CODER_WORKER_MODEL", "target": "CLIO_CODER_WORKER_TARGET", "thinking": "CLIO_CODER_WORKER_THINKING"}
+_ORCH_ENV = {
+    "url": "CLIO_CODER_MAIN_URL",
+    "model": "CLIO_CODER_MAIN_MODEL",
+    "target": "CLIO_CODER_MAIN_TARGET",
+    "thinking": "CLIO_CODER_MAIN_THINKING",
+    "runtime": "CLIO_CODER_MAIN_RUNTIME",
+}
+_WORK_ENV = {
+    "url": "CLIO_CODER_WORKER_URL",
+    "model": "CLIO_CODER_WORKER_MODEL",
+    "target": "CLIO_CODER_WORKER_TARGET",
+    "thinking": "CLIO_CODER_WORKER_THINKING",
+    "runtime": "CLIO_CODER_WORKER_RUNTIME",
+}
 
 
 def _apply_env(node: dict[str, Any], env_map: dict[str, str]) -> dict[str, Any]:
