@@ -121,6 +121,19 @@ describe("worker stream fold", () => {
 		strictEqual(worker.get("run-1")?.text, "Hello! I'm the coder worker.");
 	});
 
+	it("moves nothing for a run it never opened, whichever event arrives first", () => {
+		const worker = stream({ readReceipt: () => null });
+		strictEqual(worker.progress({ runId: "run-1", agentId: "coder", event: textDeltaEvent("early") }), null);
+		strictEqual(worker.completed(completed()), null);
+		strictEqual(worker.failed(failed({ runId: "run-1" })), null);
+		strictEqual(
+			worker.aborted({ source: "dispatch_abort", runId: "run-1", startedAt: null, elapsedMs: 5, reason: "x" }),
+			null,
+		);
+		// DispatchStarted is what opens the block; nothing before it left a trace.
+		strictEqual(worker.started(started())?.entry.text, "");
+	});
+
 	it("never reaches the transcript for an internal-origin run", () => {
 		const worker = stream();
 		strictEqual(worker.started(started({ requestOrigin: "internal" })), null);
