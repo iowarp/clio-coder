@@ -36,6 +36,7 @@
  * report against its own interest and needs no corroboration.
  */
 
+import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 
@@ -86,14 +87,11 @@ function claimIdentity(name: string): string {
 
 function claimedValidationNames(output: string | null): string[] {
 	if (output === null) return [];
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(output);
-	} catch {
-		return [];
-	}
-	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return [];
-	const record = parsed as Record<string, unknown>;
+	// Read through the shared payload reader so a fenced report that its
+	// contract accepted does not silently yield no claims here.
+	const parsed = parseJsonObjectPayload(output);
+	if (!parsed.ok) return [];
+	const record = parsed.value;
 	const entries = record.checks ?? record.validations;
 	if (!Array.isArray(entries)) return [];
 	const names: string[] = [];

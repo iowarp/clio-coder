@@ -12,6 +12,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { parseVerifierResult, type VerifierCheck, type VerifierResult } from "../agents/result-contract.js";
@@ -193,13 +194,14 @@ function parseGateChecks(value: unknown): GateCheck[] | null {
 
 /** Parse a judge answer. The winner must name an enumerated candidate ordinal. */
 export function parseCompeteGateResult(output: string, candidateCount: number): GateResultParse<CompeteGateResult> {
-	let value: unknown;
-	try {
-		value = JSON.parse(output) as unknown;
-	} catch {
-		return { ok: false, reason: "judge result must be valid JSON" };
+	const parsed = parseJsonObjectPayload(output);
+	if (!parsed.ok) {
+		return {
+			ok: false,
+			reason: parsed.reason === "not-object" ? "judge result must be a JSON object" : "judge result must be valid JSON",
+		};
 	}
-	if (!isRecord(value)) return { ok: false, reason: "judge result must be a JSON object" };
+	const value = parsed.value;
 	if (Object.keys(value).some((key) => key !== "winner" && key !== "checks")) {
 		return { ok: false, reason: "judge result has unknown fields" };
 	}

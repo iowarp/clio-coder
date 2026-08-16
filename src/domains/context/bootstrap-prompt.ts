@@ -1,4 +1,4 @@
-import { jsonPayloadCandidates } from "../../core/json-payload.js";
+import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionScanResult } from "./adoption.js";
 import type { BootstrapStructuredOutput } from "./bootstrap.js";
@@ -204,19 +204,15 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 	return `${BOOTSTRAP_PROMPT}\n\n<bootstrap-input>\n${serialized}\n</bootstrap-input>`;
 }
 
-function extractJsonObject(text: string): unknown {
+function extractJsonObject(text: string): Record<string, unknown> {
 	// Each span is tried and a parse failure moves to the next one. Returning on
 	// the first span that merely looks like the payload threw away a complete
 	// handbook whose "Commands" body held a fenced example: the fence span
 	// stopped at that inner close and the whole run was reported as a bootstrap
 	// failure even though the terminal result had already passed its contract.
-	for (const candidate of jsonPayloadCandidates(text)) {
-		try {
-			return JSON.parse(candidate) as unknown;
-		} catch {
-			// Try the next span.
-		}
-	}
+	const parsed = parseJsonObjectPayload(text);
+	if (parsed.ok) return parsed.value;
+	if (parsed.reason === "not-object") throw new Error("bootstrap model output must be a JSON object");
 	throw new Error("bootstrap model output did not contain a JSON object");
 }
 
@@ -266,11 +262,7 @@ function structuredSections(value: unknown): NonNullable<BootstrapStructuredOutp
 }
 
 export function parseBootstrapModelOutput(text: string): BootstrapStructuredOutput {
-	const parsed = extractJsonObject(text);
-	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-		throw new Error("bootstrap model output must be a JSON object");
-	}
-	const record = parsed as Record<string, unknown>;
+	const record = extractJsonObject(text);
 	return {
 		projectName: stringField(record, "projectName", 80),
 		identity: stringField(record, "identity", 600),

@@ -1523,6 +1523,12 @@ describe("Slice 3 gate role defaults and independence", () => {
 		const judged = parseCompeteGateResult(judgeReport(2), 3);
 		ok(judged.ok && judged.result.winner === 2);
 		strictEqual(parseCompeteGateResult(judgeReport(9), 3).ok, false, "the winner must name an enumerated candidate");
+		// A judge that fences its answer is read the same way the result
+		// contract reads a fenced terminal result; a fenced array is still refused.
+		const fencedJudge = parseCompeteGateResult(`Verdict:\n\`\`\`json\n${judgeReport(2)}\n\`\`\``, 3);
+		ok(fencedJudge.ok && fencedJudge.result.winner === 2, "a fenced judge answer must parse");
+		const fencedArray = parseCompeteGateResult("```json\n[2]\n```", 3);
+		ok(!fencedArray.ok && fencedArray.reason === "judge result must be a JSON object");
 	});
 
 	it("correlated quality routes are recorded rather than hidden", async () => {
