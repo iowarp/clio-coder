@@ -328,6 +328,30 @@ describe("worker transcript blocks", () => {
 		ok(/… \d+ more lines, \/view dispatch:r1/.test(rendered), rendered);
 	});
 
+	it("draws any run under a tool call as the model's folded card, whatever origin admitted it", () => {
+		const h = harness();
+		// A scout successor: the operator approved the plan, so admission labels it
+		// user origin, but the dispatch call is what spawned it.
+		h.push(h.worker.started(started({ runId: "s1", assignmentId: "s1", agentId: "scout", parentToolCallId: "call_1" })));
+		h.push(h.worker.progress({ runId: "s1", agentId: "scout", event: messageEnd("successor findings") }));
+		h.push(h.worker.completed(completed({ runId: "s1", agentId: "scout" })));
+		// A compete judge carries no origin of its own; the domain defaults it to agent.
+		h.push(
+			h.worker.started(
+				started({ runId: "j1", assignmentId: "j1", agentId: "judge", requestOrigin: "agent", parentToolCallId: "call_1" }),
+			),
+		);
+		h.push(h.worker.progress({ runId: "j1", agentId: "judge", event: messageEnd("candidate 2 wins") }));
+		h.push(h.worker.completed(completed({ runId: "j1", agentId: "judge", requestOrigin: "agent" })));
+		const rendered = h.render();
+		ok(rendered.includes(`${GLYPH.workerAgent} scout · mini/Nemo-3.5-Lightning · run s1 ${GLYPH.ok}`), rendered);
+		ok(rendered.includes(`${GLYPH.workerAgent} judge · mini/Nemo-3.5-Lightning · run j1 ${GLYPH.ok}`), rendered);
+		ok(!rendered.includes(GLYPH.workerHuman), `nothing here is the operator's own run:\n${rendered}`);
+		ok(!rendered.includes("successor findings") && !rendered.includes("candidate 2 wins"), `folded:\n${rendered}`);
+		h.panel.collapseAllTools();
+		ok(!h.render().includes("successor findings"), `the settled view stays folded too:\n${h.render()}`);
+	});
+
 	it("keeps every row of every shape inside the release width matrix", () => {
 		const h = harness({ expandKey: "Ctrl+O" });
 		h.push(h.worker.started(started()));

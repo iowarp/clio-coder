@@ -99,6 +99,18 @@ export interface WorkerEntryState {
 	parentToolCallId?: string;
 }
 
+/**
+ * Whether the model asked for this run. The parent tool call is the ground
+ * truth: a scout successor an operator approved is admitted as user origin but
+ * spawned by a dispatch call, and a compete judge carries no origin at all, so
+ * origin alone would draw both as the operator's own work and let bare /share
+ * hand the model a run it already has. Any run under a tool call is the
+ * model's; the origin label decides only for a run with none.
+ */
+export function workerAskedByModel(state: Pick<WorkerEntryState, "origin" | "parentToolCallId">): boolean {
+	return state.parentToolCallId !== undefined || state.origin === "agent";
+}
+
 export type WorkerStreamChange =
 	| { kind: "created"; entry: WorkerEntryState }
 	| { kind: "updated"; entry: WorkerEntryState };

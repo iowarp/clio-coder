@@ -13,7 +13,7 @@
 
 import { WORKER_OUTPUT_MAX_BYTES } from "../domains/dispatch/event-pump.js";
 import { truncateUtf8 } from "../tools/truncate-utf8.js";
-import type { WorkerEntryState } from "./worker-stream.js";
+import { type WorkerEntryState, workerAskedByModel } from "./worker-stream.js";
 
 /** Terminal facts of one finished run, from a receipt or from a settled block. */
 export interface WorkerShareFacts {
@@ -64,9 +64,9 @@ export function workerShareFactsFromEntry(entry: WorkerEntryState): WorkerShareF
  * Which run `/share` means. A named id matches either the logical assignment or
  * any attempt of it, so an operator can name the run id a failover left behind
  * and still get the block they watched. Without an id it is the most recent
- * settled run the operator started themselves: an agent-origin run already
- * reached the model through its tool result, so defaulting to one would share
- * something the model has, and hide the run the operator was looking at.
+ * settled run the operator started themselves: a run the model asked for
+ * already reached the model through its tool result, so defaulting to one would
+ * share something the model has, and hide the run the operator was looking at.
  */
 export function selectWorkerRunToShare(entries: ReadonlyArray<WorkerEntryState>, id?: string): WorkerEntryState | null {
 	const wanted = id?.trim();
@@ -74,7 +74,7 @@ export function selectWorkerRunToShare(entries: ReadonlyArray<WorkerEntryState>,
 		const entry = entries[index];
 		if (entry === undefined || entry.pending || entry.receipt === undefined) continue;
 		if (wanted === undefined || wanted.length === 0) {
-			if (entry.origin === "user") return entry;
+			if (!workerAskedByModel(entry)) return entry;
 			continue;
 		}
 		if (entry.assignmentId === wanted || entry.attempts.some((attempt) => attempt.runId === wanted)) return entry;

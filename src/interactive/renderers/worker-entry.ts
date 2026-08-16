@@ -13,7 +13,7 @@
  *   │ ⚙ read · artifact
  *   └ ✓ ok · 4.8k tok · 9.6s · contract pass
  *
- * Folded (the default for agent origin) is one row shaped like a tool subline,
+ * Folded (the default for a run the model asked for) is one row shaped like a tool subline,
  * so a fan-out of five scouts costs five rows until the operator opens one:
  *
  *   ◆ scout · zbook/gemma-4-26b · run 3nc18jo ✓ · 41s (Ctrl+O)
@@ -24,7 +24,7 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { type ClioToken, clioTheme, fitUnits, formatCompactMs, GLYPH } from "../theme/index.js";
-import type { WorkerEntryState, WorkerReceiptSummary } from "../worker-stream.js";
+import { type WorkerEntryState, type WorkerReceiptSummary, workerAskedByModel } from "../worker-stream.js";
 
 const theme = clioTheme();
 const dim = (text: string): string => theme.fg("dim", text);
@@ -39,7 +39,7 @@ const SEPARATOR = " · ";
 const BODY_LINE_LIMIT = 80;
 
 export interface WorkerEntryRenderOptions {
-	/** Collapsed to the header line plus outcome. Default for agent origin. */
+	/** Collapsed to the header line plus outcome. Default for a run the model asked for. */
 	folded: boolean;
 	/** Key hint appended to a folded header, e.g. "Ctrl+O". Omitted when unknown. */
 	expandKey?: string | undefined;
@@ -48,7 +48,7 @@ export interface WorkerEntryRenderOptions {
 }
 
 function originGlyph(entry: WorkerEntryState): string {
-	return entry.origin === "user" ? theme.fg("accent", GLYPH.workerHuman) : theme.fg("action", GLYPH.workerAgent);
+	return workerAskedByModel(entry) ? theme.fg("action", GLYPH.workerAgent) : theme.fg("accent", GLYPH.workerHuman);
 }
 
 /**
