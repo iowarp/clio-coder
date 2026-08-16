@@ -247,22 +247,37 @@ def render_prompt(
         next_step_str=render_next_step(step, with_background),
         dependencies=problem.get("required_dependencies", ""),
     )
-    return textwrap.dedent(
-        f"""\
-        You are solving SciCode problem {problem.get('problem_id')} ({problem.get('problem_name')}).
+    # Dedent the frame before filling it. An f-string inside textwrap.dedent
+    # interpolates first, and every value here is multi-line, so the shared
+    # indent dedent looks for was destroyed by the first substituted newline:
+    # the frame kept its eight spaces while the problem text sat at column
+    # zero, which hands the model an indented block that reads as code with
+    # prose spilling out of it. str.format does not re-scan substituted text,
+    # so the LaTeX braces in these descriptions pass through untouched.
+    frame = textwrap.dedent(
+        """\
+        You are solving SciCode problem {problem_id} ({problem_name}).
 
         Main problem:
-        {problem.get('problem_description_main', '')}
+        {problem_description}
 
         IO contract:
-        {problem.get('problem_io', '')}
+        {problem_io}
 
         Write or update solution.py in the current directory. Preserve earlier
         step implementations in that file. For this turn, implement only step
-        {step_number(step)} and any small helper it needs. Do not write tests.
+        {step_id} and any small helper it needs. Do not write tests.
 
         {body}
         """
+    )
+    return frame.format(
+        problem_id=problem.get("problem_id"),
+        problem_name=problem.get("problem_name"),
+        problem_description=problem.get("problem_description_main", ""),
+        problem_io=problem.get("problem_io", ""),
+        step_id=step_number(step),
+        body=body,
     )
 
 
