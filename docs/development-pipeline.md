@@ -26,8 +26,8 @@ human-gated checklist, not a skill. Worktrees
 [`resolve-merge-conflicts`](../skills/git/resolve-merge-conflicts/), and
 [`tdd`](../skills/coding/tdd/) are à-la-carte tools reached for when the
 situation calls for them, not stages every change passes through. An RCA
-document (`docs/issues/issue-<id>.md`, `rca` label) is an artifact of hard
-bugs, not a mandatory toll booth. Batch ticket creation from a PRD
+written as the closing comment on the issue (`rca` label) is an artifact of
+hard bugs, not a mandatory toll booth. Batch ticket creation from a PRD
 bypasses stage 1 and uses [`backlog`](../skills/planning/backlog/)
 instead; everything downstream is identical.
 
