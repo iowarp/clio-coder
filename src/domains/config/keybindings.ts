@@ -108,14 +108,14 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.tool.expand": {
 		defaultKeys: "alt+o",
 		description:
-			"Toggle the most recent tool segment between collapsed subline and full body (no effect while /output verbose pins them open)",
+			"Fold or unfold the newest tool call or worker block between its one-line summary and full details (no effect while /output verbose pins them open)",
 	},
 	"clio.tool.expandAll": {
 		// Alt+Shift+letter is commonly consumed by OS keyboard-layout switching.
 		// Keep it discoverable, but pair it with the legacy-safe Ctrl+Alt form.
 		defaultKeys: ["ctrl+alt+o", "alt+shift+o"],
 		description:
-			"Toggle all tool segments between collapsed sublines and full bodies (no effect while /output verbose pins them open)",
+			"Fold or unfold every tool call and worker block at once (no effect while /output verbose pins them open)",
 	},
 	"clio.tool.liveOutput": {
 		defaultKeys: "alt+p",

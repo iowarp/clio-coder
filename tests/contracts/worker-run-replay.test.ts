@@ -174,7 +174,7 @@ describe("worker block replay", () => {
 					}
 				: null,
 		);
-		ok(rendered.includes(`${GLYPH.workerHuman} you → coder · mini/Nemo-3.5-Lightning · run run-1`), rendered);
+		ok(rendered.includes(`${GLYPH.workerHuman} coder · mini/Nemo-3.5-Lightning · run run-1`), rendered);
 		ok(rendered.includes("│ Hello! I'm the coder worker."), rendered);
 		ok(rendered.includes(`└ ${GLYPH.ok} ok · 4.8k tok · 9.6s · contract pass`), rendered);
 	});
@@ -189,7 +189,7 @@ describe("worker block replay", () => {
 
 	it("says the receipt is gone rather than leaving the block running", () => {
 		const rendered = replay([workerRunEntry()], () => null);
-		ok(rendered.includes(`${GLYPH.workerHuman} you → coder`), rendered);
+		ok(rendered.includes(`${GLYPH.workerHuman} coder`), rendered);
 		ok(rendered.includes("receipt unavailable"), rendered);
 		ok(!rendered.includes("running"), `a finished run must not replay as live:\n${rendered}`);
 	});
@@ -206,7 +206,7 @@ describe("worker block replay", () => {
 			],
 			(runId) => (runId === "run-2" ? { outcome: "succeeded", text: "second attempt answer", durationMs: 3000 } : null),
 		);
-		strictEqual(rendered.split("you → coder").length - 1, 1, `one block, not two:\n${rendered}`);
+		strictEqual(rendered.split(`${GLYPH.workerHuman} coder`).length - 1, 1, `one block, not two:\n${rendered}`);
 		ok(rendered.includes("run run-2"), `the header names the attempt that finished:\n${rendered}`);
 		ok(rendered.includes(`${GLYPH.phaseRetry} failed over → attempt 2 on dynamo/qwen3`), rendered);
 		ok(rendered.includes("│ second attempt answer"), rendered);
@@ -247,7 +247,7 @@ describe("worker block replay", () => {
 		}));
 		const rows = rendered.split("\n");
 		const callRow = rows.findIndex((row) => row.includes("dispatch("));
-		const cardRow = rows.findIndex((row) => row.includes("agent → scout"));
+		const cardRow = rows.findIndex((row) => row.includes(`${GLYPH.workerAgent} scout`));
 		const replyRow = rows.findIndex((row) => row.includes("The scout is back."));
 		ok(callRow >= 0 && cardRow > callRow && replyRow > cardRow, `card sits between call and reply:\n${rendered}`);
 		// An agent-origin run replays folded, which is its settled view: the model

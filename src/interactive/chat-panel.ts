@@ -258,11 +258,12 @@ export interface ChatPanel extends Component {
 export interface ChatPanelOptions {
 	/**
 	 * Resolves the user-visible key string for the `clio.tool.expand`
-	 * action. Returning a non-empty string surfaces a dim ` (<key>)` hint on
-	 * the first wrapped line of the latest finished collapsed tool subline so
-	 * the Ctrl+O toggle is discoverable without repeating on every historical
-	 * row. Returning undefined or an empty string suppresses the hint. Called
-	 * per render so live keybinding changes flow through.
+	 * action, which folds and unfolds the newest tool call or worker block.
+	 * Returning a non-empty string surfaces a dim ` (<key>)` hint on the one
+	 * surface the key would act on: the latest finished collapsed tool subline,
+	 * or the newest folded worker card. Returning undefined or an empty string
+	 * suppresses the hint. Called per render so live keybinding changes flow
+	 * through.
 	 */
 	getToolExpandKey?: () => string | undefined;
 	/** Live transcript detail mode. Settings changes take effect on the next frame. */
@@ -1087,21 +1088,30 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		entry.segments.push({ kind: "error", text });
 	};
 
-	const latestCollapsedFinishedToolId = (): string | null => {
+	/**
+	 * Who advertises the fold key this frame: the newest folded worker card, or
+	 * the newest finished collapsed tool subline with no worker card behind it.
+	 * One surface at most, because the key reaches the newest foldable thing of
+	 * either kind, and a chord shown anywhere else would open something the
+	 * operator was not looking at. An already-open newest card advertises
+	 * nothing, since folding it again needs no invitation.
+	 */
+	const expandHintOwner = (): { toolId: string | null; workerId: string | null } => {
+		let workerMayOwn = true;
 		for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 			const entry = transcript[entryIndex];
-			// The expand key takes the newest foldable thing of either kind, so a
-			// worker block behind this point already owns it. A tool in front of it
-			// must not advertise a chord that would no longer reach it.
-			if (entry?.role === "worker") return null;
+			if (entry?.role === "worker") {
+				return { toolId: null, workerId: workerMayOwn && entry.folded ? entry.state.assignmentId : null };
+			}
 			if (entry?.role !== "assistant") continue;
 			for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
 				const seg = entry.segments[segIndex];
 				if (seg?.kind !== "tool") continue;
-				if (seg.finished && !seg.expanded) return seg.id;
+				if (seg.finished && !seg.expanded) return { toolId: seg.id, workerId: null };
+				workerMayOwn = false;
 			}
 		}
-		return null;
+		return { toolId: null, workerId: null };
 	};
 
 	/**
@@ -1122,25 +1132,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		let index = parentIndex + 1;
 		while (transcript[index]?.role === "worker") index += 1;
 		return index >= transcript.length ? null : index;
-	};
-
-	/**
-	 * Assignment of the newest folded worker block. Only that block advertises
-	 * the expand key: a fan-out of five scouts repeating the same chord five
-	 * times is noise, and the newest one is what the chord would open anyway.
-	 * The scan stops at a tool segment for the same reason the tool hint stops
-	 * at a worker block, so exactly one surface ever shows the chord.
-	 */
-	const latestFoldedWorkerAssignmentId = (): string | null => {
-		for (let index = transcript.length - 1; index >= 0; index -= 1) {
-			const entry = transcript[index];
-			if (entry?.role === "assistant" && entry.segments.some((segment) => segment.kind === "tool")) return null;
-			if (entry?.role !== "worker") continue;
-			// The newest block is the one the chord reaches. When it is already
-			// open the chord folds it again, which needs no advertising.
-			return entry.folded ? entry.state.assignmentId : null;
-		}
-		return null;
 	};
 
 	/** True when the entry owns the tool the expand hint currently points at. */
@@ -1181,7 +1172,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		// pinned to 0 whenever nothing is counting so a settled transcript
 		// re-renders no more often than it did before.
 		const tick = renderedRunningTool ? Math.floor(nowMs / 100) : 0;
-		// The hit guard runs before any transcript scan. latestCollapsedFinishedToolId
+		// The hit guard runs before any transcript scan. expandHintOwner
 		// walks the whole transcript when the newest tool is expanded or absent, and
 		// it is not part of the panel-level key, so computing it above the guard cost
 		// a full scan per frame for a value the early return discards.
@@ -1196,8 +1187,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: true, entriesRendered: 0 });
 			return cachedLines;
 		}
-		const latestHintToolId = latestCollapsedFinishedToolId();
-		const latestFoldedWorkerId = latestFoldedWorkerAssignmentId();
+		const { toolId: latestHintToolId, workerId: latestFoldedWorkerId } = expandHintOwner();
 		// The hint id is deliberately NOT part of the shared key: it changes on
 		// every finished collapsed tool, and keying every entry on it re-rendered
 		// the entire transcript per tool completion. Only the entry that contains

@@ -202,7 +202,7 @@ describe("interactive dispatch subscriptions", () => {
 			event: { type: "clio_tool_start", payload: { tool: "read" } },
 		});
 		const live = h.render();
-		ok(live.includes(`${GLYPH.workerHuman} you → coder · mini/Nemo-3.5-Lightning · run run-1`), live);
+		ok(live.includes(`${GLYPH.workerHuman} coder · mini/Nemo-3.5-Lightning · run run-1`), live);
 		ok(live.includes("│ Hello!"), live);
 		ok(live.includes(`│ ${GLYPH.phaseTool} read`), live);
 		ok(live.includes("└ ● running"), live);
@@ -299,7 +299,9 @@ describe("interactive dispatch subscriptions", () => {
 
 		const rendered = h.render();
 		const rows = rendered.split("\n");
-		const cardRows = [1, 2, 3].map((index) => rows.findIndex((row) => row.includes(`agent → scout-${index}`)));
+		const cardRows = [1, 2, 3].map((index) =>
+			rows.findIndex((row) => row.includes(`${GLYPH.workerAgent} scout-${index}`)),
+		);
 		deepStrictEqual(
 			cardRows,
 			[cardRows[0], (cardRows[0] ?? 0) + 1, (cardRows[0] ?? 0) + 2],
@@ -313,7 +315,7 @@ describe("interactive dispatch subscriptions", () => {
 		// One chord, one target. The tool segment stops advertising the key once a
 		// worker card behind it is what the key would reach.
 		strictEqual(rendered.split("Ctrl+O").length - 1, 1, `exactly one expand hint:\n${rendered}`);
-		ok(rows[cardRows[2] ?? 0]?.includes("[Ctrl+O expand]"), `the hint is on the newest card:\n${rendered}`);
+		ok(rows[cardRows[2] ?? 0]?.endsWith("(Ctrl+O)"), `the hint is on the newest card:\n${rendered}`);
 
 		strictEqual(h.panel.toggleLastToolExpanded(), true);
 		const expanded = h.render();

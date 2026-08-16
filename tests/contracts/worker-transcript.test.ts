@@ -131,7 +131,7 @@ describe("worker transcript blocks", () => {
 			h.worker.progress({ runId: "r1", agentId: "coder", event: { type: "clio_tool_start", payload: { tool: "read" } } }),
 		);
 		const live = h.render();
-		ok(live.includes(`${GLYPH.workerHuman} you → coder · mini/Nemo-3.5-Lightning · run r1`), live);
+		ok(live.includes(`${GLYPH.workerHuman} coder · mini/Nemo-3.5-Lightning · run r1`), live);
 		ok(live.includes("│ Hello! I'm the coder worker."), live);
 		ok(live.includes(`│ ${GLYPH.phaseTool} read`), live);
 		ok(live.includes("└ ● running"), live);
@@ -165,7 +165,7 @@ describe("worker transcript blocks", () => {
 			),
 		);
 		const rendered = h.render();
-		ok(rendered.includes(`${GLYPH.workerHuman} you → codex · (acp) · run r7`), rendered);
+		ok(rendered.includes(`${GLYPH.workerHuman} codex (acp) · run r7`), rendered);
 		ok(rendered.includes("│ patched the header"), rendered);
 		ok(rendered.includes(`└ ${GLYPH.ok} ok · 3 tool calls · 41s`), rendered);
 	});
@@ -181,32 +181,60 @@ describe("worker transcript blocks", () => {
 		h.push(h.worker.completed(completed({ requestOrigin: "agent", agentId: "scout", durationMs: 41_000 })));
 
 		const folded = h.render();
-		ok(folded.includes(`${GLYPH.workerAgent} agent → scout · zbook/gemma-4-26b · run r1`), folded);
-		ok(folded.includes(`${GLYPH.ok} ok 41s`), folded);
-		ok(folded.includes("[Ctrl+O expand]"), folded);
+		// One row shaped like a tool subline: identity, glyph, elapsed, the chord.
+		ok(folded.includes(`${GLYPH.workerAgent} scout · zbook/gemma-4-26b · run r1 ${GLYPH.ok} · 41s (Ctrl+O)`), folded);
 		ok(!folded.includes("three candidate files"), folded);
 
 		strictEqual(h.panel.toggleLastToolExpanded(), true);
 		const expanded = h.render();
 		ok(expanded.includes("│ three candidate files"), expanded);
 		ok(expanded.includes(`└ ${GLYPH.ok} ok · 4.8k tok · 41s`), expanded);
-		ok(!expanded.includes("[Ctrl+O expand]"), expanded);
+		ok(!expanded.includes("(Ctrl+O)"), expanded);
 	});
 
-	it("reports a failure with its outcome code, exit status, and first detail line", () => {
+	it("gives identity the row before elapsed, and cuts identity last, at 40 columns", () => {
+		const h = harness({ expandKey: "Ctrl+O" });
+		h.push(
+			h.worker.started(
+				started({ requestOrigin: "agent", agentId: "scout-3", targetId: "zbook", wireModelId: "gemma-4-26b" }),
+			),
+		);
+		h.push(h.worker.completed(completed({ requestOrigin: "agent", agentId: "scout-3", durationMs: 41_000 })));
+		const narrow = h.render(40);
+		ok(
+			narrow.split("\n").every((row) => row.length <= 40),
+			`inside 40 columns:\n${narrow}`,
+		);
+		ok(!narrow.includes("41s"), `elapsed is the first unit to go:\n${narrow}`);
+		ok(narrow.includes(`${GLYPH.workerAgent} scout-3 · zbook/gemma-4-2`), `the route survives:\n${narrow}`);
+		ok(narrow.endsWith(`${GLYPH.ok} (Ctrl+O)`), `status and chord stay whole:\n${narrow}`);
+		// A card that carries no chord has the room for the whole identity.
+		h.push(h.worker.started(started({ runId: "r2", assignmentId: "r2", requestOrigin: "agent", agentId: "scout-4" })));
+		h.push(h.worker.completed(completed({ runId: "r2", requestOrigin: "agent", agentId: "scout-4" })));
+		ok(h.render(40).includes(`${GLYPH.workerAgent} scout-3 · zbook/gemma-4-26b · run r1 ${GLYPH.ok}`), h.render(40));
+	});
+
+	it("reports a failure with its outcome code and exit status on one footer line, and the reason on the rail", () => {
 		const h = harness();
 		h.push(h.worker.started(started({ requestOrigin: "agent", agentId: "scout" })));
 		h.push(h.worker.failed(failed()));
+		// Folded, the card names the outcome code and nothing of the reason.
+		ok(h.render().includes(`run r1 ${GLYPH.error} result_contract_exhausted · 41s`), h.render());
 		strictEqual(h.panel.toggleLastToolExpanded(), true);
-		// Wide enough that the footer does not wrap; the failure text wraps rather
-		// than truncating, which is asserted separately below.
-		const rendered = h.render(160);
-		ok(rendered.includes(`└ ${GLYPH.error} result_contract_exhausted · exit=1`), rendered);
-		ok(rendered.includes("no conforming result after 3 rounds"), rendered);
-		ok(!rendered.includes("trailing detail"), rendered);
-		// A narrow terminal must still show the whole reason: a footer that cut it
-		// would report that something failed while hiding what.
-		ok(h.render(60).replace(/\s+/g, " ").includes("no conforming result after 3 rounds"), h.render(60));
+		const rows = h.render(160).split("\n");
+		const reason = rows.findIndex((row) => row.includes(`│ ${GLYPH.error} no conforming result after 3 rounds`));
+		const footer = rows.findIndex((row) => row.startsWith(`└ ${GLYPH.error} result_contract_exhausted · exit=1 · 41s`));
+		ok(reason >= 0 && footer === reason + 1, `reason on the rail, footer under it:\n${rows.join("\n")}`);
+		ok(!rows.join("\n").includes("trailing detail"), "only the first line of the reason");
+		// The footer never wraps: a narrow terminal closes it on whole units, and
+		// the reason still wraps as prose on the rail.
+		const narrow = h.render(40).split("\n");
+		ok(
+			narrow.every((row) => row.length <= 40),
+			`inside 40 columns:\n${narrow.join("\n")}`,
+		);
+		strictEqual(narrow.filter((row) => row.startsWith("└")).length, 1, `one footer row:\n${narrow.join("\n")}`);
+		ok(narrow.join(" ").includes("no conforming result after 3 rounds"), narrow.join("\n"));
 	});
 
 	it("keeps a failover in one block with a single attempt rail line", () => {
@@ -262,7 +290,7 @@ describe("worker transcript blocks", () => {
 		}
 		h.panel.applyEvent({ type: "text_delta", delta: "Three scouts are out." } as ChatLoopEvent);
 		const rendered = h.render();
-		const cardOrder = [1, 2, 3].map((index) => rendered.indexOf(`agent → scout-${index}`));
+		const cardOrder = [1, 2, 3].map((index) => rendered.indexOf(`${GLYPH.workerAgent} scout-${index}`));
 		deepStrictEqual(
 			cardOrder,
 			[...cardOrder].sort((a, b) => a - b),
@@ -300,15 +328,42 @@ describe("worker transcript blocks", () => {
 		ok(/… \d+ more lines, \/view dispatch:r1/.test(rendered), rendered);
 	});
 
+	it("keeps every row of every shape inside the release width matrix", () => {
+		const h = harness({ expandKey: "Ctrl+O" });
+		h.push(h.worker.started(started()));
+		h.push(h.worker.progress({ runId: "r1", agentId: "coder", event: delta("Hello! I'm the coder worker.") }));
+		h.push(
+			h.worker.progress({ runId: "r1", agentId: "coder", event: { type: "clio_tool_start", payload: { tool: "read" } } }),
+		);
+		h.push(
+			h.worker.started(
+				started({ runId: "r7", assignmentId: "r7", agentId: "codex", runtimeKind: "acp-delegation", runtimeId: "acp" }),
+			),
+		);
+		h.push(h.worker.completed(completed({ runId: "r7", agentId: "codex", tokenCount: 0 })));
+		h.push(
+			h.worker.started(
+				started({ runId: "s1", assignmentId: "s1", requestOrigin: "agent", agentId: "provenance-reviewer" }),
+			),
+		);
+		h.push(h.worker.failed(failed({ runId: "s1", agentId: "provenance-reviewer" })));
+		h.push(h.worker.started(started({ runId: "s2", assignmentId: "s2", requestOrigin: "agent", agentId: "scout" })));
+		for (const width of [40, 80, 120]) {
+			for (const row of h.render(width).split("\n")) {
+				ok(row.length <= width, `row ran past ${width} columns (${row.length}): ${JSON.stringify(row)}`);
+			}
+		}
+	});
+
 	it("restores the origin default fold on replay collapse, not a blanket fold", () => {
 		const h = harness();
 		h.push(h.worker.started(started()));
 		h.push(h.worker.started(started({ runId: "a1", assignmentId: "a1", requestOrigin: "agent", agentId: "scout" })));
 		h.panel.collapseAllTools();
 		const rendered = h.render();
-		ok(rendered.includes(`${GLYPH.workerHuman} you → coder`), rendered);
+		ok(rendered.includes(`${GLYPH.workerHuman} coder`), rendered);
 		ok(rendered.includes("└ ● running"), `the operator's own run stays open:\n${rendered}`);
-		ok(rendered.includes(`${GLYPH.workerAgent} agent → scout`), rendered);
+		ok(rendered.includes(`${GLYPH.workerAgent} scout`), rendered);
 		strictEqual(rendered.split("● running").length - 1, 2, `one open block, one folded row:\n${rendered}`);
 	});
 });

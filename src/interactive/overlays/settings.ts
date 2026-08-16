@@ -336,7 +336,7 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 	scope: "Choose target-level or exact target/model refs. Alt+J / Alt+K step the chat target through this list.",
 	runtimePlugins: "Comma-separated package names, loaded at startup. Restart Clio after changing.",
 	keybindings:
-		"Renderer controls: Alt+O latest tool, Ctrl+Alt+O or Alt+Shift+O all tools, Alt+P live tool output, Alt+R latest reasoning, Ctrl+Alt+R or Alt+Shift+R all reasoning. Override these in settings.yaml or use /help.",
+		"Renderer controls: Alt+O newest tool or worker details, Ctrl+Alt+O or Alt+Shift+O all of them, Alt+P live tool output, Alt+R latest reasoning, Ctrl+Alt+R or Alt+Shift+R all reasoning. Override these in settings.yaml or use /help.",
 };
 
 /** Per-value meaning, surfaced for the current value of an enum knob. */
@@ -379,7 +379,7 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 	},
 	"terminal.outputVerbosity": {
 		minimal: "quiet transcript; tools stay to one-line outcomes and reasoning stays folded",
-		default: "balanced transcript; expand the latest tool or reasoning block on demand",
+		default: "balanced transcript; unfold the latest tool, worker, or reasoning block on demand",
 		verbose: "transparent transcript; reasoning, arguments, and live tool output stay visible",
 	},
 };
