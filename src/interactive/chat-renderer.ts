@@ -23,6 +23,7 @@ import type {
 	SessionEntry,
 	SessionInfoEntry,
 	ThinkingLevelChangeEntry,
+	WorkerRunEntry,
 } from "../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
@@ -35,6 +36,8 @@ import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js"
 import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import { renderToolResultOnly } from "./renderers/tool-execution.js";
+import { readWorkerReceiptFacts } from "./worker-receipts.js";
+import { type WorkerReceiptReader, workerEntriesFromRunEntries } from "./worker-replay.js";
 
 const DEFAULT_COALESCE_MS = 16;
 const MAX_REPLAY_TEXT_CHARS = 20_000;
@@ -132,6 +135,13 @@ export interface RehydrateChatPanelOptions {
 	 * the same intent from the panel's `unboundedToolBodies` option.
 	 */
 	unboundedToolBodies?: boolean;
+	/**
+	 * Sealed-receipt reader for the worker blocks a `workerRun` entry names.
+	 * Defaults to `<state>/receipts/<runId>.json`; tests inject their own. This
+	 * is the one place replay reads outside the entry stream, and it swallows
+	 * every failure, so a session whose receipts are gone still replays.
+	 */
+	readWorkerReceipt?: WorkerReceiptReader;
 }
 
 function extractTurnText(payload: unknown): string {
@@ -805,6 +815,10 @@ export function buildReplayAgentMessagesFromTurns(
 			case "label":
 			case "protectedArtifact":
 			case "taskLedger":
+			// A worker's answer is not the operator's words and not the model's.
+			// It reaches the model only when an operator shares it, and a share
+			// is already a user message by the time it lands in the ledger.
+			case "workerRun":
 				break;
 		}
 	}
@@ -824,9 +838,15 @@ export function buildReplayAgentMessagesFromTurns(
  * result can be paired to a prior call id it updates that tool segment,
  * otherwise it falls back to a standalone transcript line.
  *
- * Pure except for the chat-panel calls: no I/O, no chat-loop events
- * wired. Callers read turns via `openSession(id).turns()` and pass them
- * in explicitly.
+ * Worker blocks are rebuilt from their `workerRun` entries plus the sealed
+ * receipts those entries name, so a resumed session shows the answer a `/run`
+ * produced rather than a header with nothing under it. The block is applied
+ * through the same panel call the live reducer uses, which is what makes an
+ * agent-origin card land under the tool segment that spawned it here too.
+ *
+ * Callers read turns via `openSession(id).turns()` and pass them in explicitly.
+ * The receipt reader is the one thing this touches beyond the panel; it is a
+ * parameter with a disk-backed default, and it never throws.
  */
 export function rehydrateChatPanelFromTurns(
 	chatPanel: ChatPanel,
@@ -834,7 +854,16 @@ export function rehydrateChatPanelFromTurns(
 	options: RehydrateChatPanelOptions = {},
 ): void {
 	const pendingToolIds: string[] = [];
-	for (const entry of selectReplayEntries(turns, options)) {
+	const selected = selectReplayEntries(turns, options);
+	// One block per assignment, drawn where its first attempt started. Later
+	// attempts of the same assignment fold into that block as `↻` rail lines, so
+	// a failover replays as the one run it was rather than as two.
+	const workerStates = workerEntriesFromRunEntries(
+		selected.filter((entry): entry is WorkerRunEntry => entry.kind === "workerRun"),
+		options.readWorkerReceipt ?? readWorkerReceiptFacts,
+	);
+	const placedAssignments = new Set<string>();
+	for (const entry of selected) {
 		switch (entry.kind) {
 			case "message": {
 				if (entry.role === "user") {
@@ -955,6 +984,14 @@ export function rehydrateChatPanelFromTurns(
 			case "sessionInfo":
 				if (entry.name || entry.label) chatPanel.appendReplayBlock((width) => renderSessionInfoEntry(entry, width));
 				break;
+			case "workerRun": {
+				if (placedAssignments.has(entry.assignmentId)) break;
+				const state = workerStates.get(entry.assignmentId);
+				if (state === undefined) break;
+				placedAssignments.add(entry.assignmentId);
+				chatPanel.applyWorkerState(state);
+				break;
+			}
 			case "label":
 			case "taskLedger":
 				break;

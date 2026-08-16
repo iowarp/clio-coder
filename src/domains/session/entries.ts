@@ -203,6 +203,50 @@ export interface TaskLedgerEntry extends BaseSessionEntry {
 	requiredValidationEvidence: TaskLedgerValidationEvidence[];
 }
 
+/** Who asked for a dispatched run. Internal runs never reach the transcript, so they never reach this entry. */
+export type WorkerRunOrigin = "user" | "agent";
+
+/** Runtime family a dispatched worker ran under; the transcript header names it. */
+export type WorkerRunRuntimeKind = "clio" | "acp" | "claude-sdk" | "claude-code";
+
+export interface WorkerRunRuntime {
+	kind: WorkerRunRuntimeKind;
+	/** Route facts for the runtimes that have one; an ACP peer has none. */
+	targetId?: string;
+	wireModelId?: string;
+	/** Delegation peer id; ACP only. */
+	peerId?: string;
+}
+
+/**
+ * A dispatched worker's block, as the session remembers it.
+ *
+ * Written where the block opens, on DispatchStarted, once per attempt: a
+ * failover writes a second entry under the same `assignmentId` so a resumed
+ * transcript can rebuild the attempt trail it showed live. The entry holds
+ * identity only. The answer lives in the sealed receipt under
+ * `receipts/<runId>.json`, which is the terminal truth for it either way, so
+ * streamed prose is never persisted here and a session file never grows with
+ * worker output.
+ *
+ * Context-free by construction. Like a notice, it estimates at zero tokens, is
+ * not a cut point, and never becomes a model message: a worker's answer reaches
+ * the model only when an operator shares it, which travels the user-turn path
+ * as ordinary text.
+ */
+export interface WorkerRunEntry extends BaseSessionEntry {
+	kind: "workerRun";
+	/** Logical work item. Retries and failovers of one run share it. */
+	assignmentId: string;
+	/** This attempt's run id, which is also its receipt id. */
+	runId: string;
+	origin: WorkerRunOrigin;
+	agentId: string;
+	runtime: WorkerRunRuntime;
+	/** Agent origin: the tool call whose execution spawned the run. */
+	parentToolCallId?: string;
+}
+
 export type SessionEntry =
 	| MessageEntry
 	| BashExecutionEntry
@@ -216,7 +260,8 @@ export type SessionEntry =
 	| LabelEntry
 	| ProtectedArtifactEntry
 	| SkillActivationEntry
-	| TaskLedgerEntry;
+	| TaskLedgerEntry
+	| WorkerRunEntry;
 
 export type SessionFileEntry = SessionHeader | SessionEntry;
 
@@ -240,6 +285,7 @@ export const SESSION_ENTRY_KINDS = [
 	"protectedArtifact",
 	"skillActivation",
 	"taskLedger",
+	"workerRun",
 ] as const;
 
 export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number];
@@ -308,6 +354,18 @@ const TASK_LEDGER_EVIDENCE_STATUSES: readonly TaskLedgerEvidenceStatus[] = [
 	"failed",
 	"missing",
 ];
+const WORKER_RUN_ORIGINS: readonly WorkerRunOrigin[] = ["user", "agent"];
+const WORKER_RUN_RUNTIME_KINDS: readonly WorkerRunRuntimeKind[] = ["clio", "acp", "claude-sdk", "claude-code"];
+
+function isWorkerRunRuntime(value: unknown): value is WorkerRunRuntime {
+	if (!isRecord(value)) return false;
+	return (
+		isOneOf(value.kind, WORKER_RUN_RUNTIME_KINDS) &&
+		isOptionalString(value.targetId) &&
+		isOptionalString(value.wireModelId) &&
+		isOptionalString(value.peerId)
+	);
+}
 
 function isTaskLedgerGoal(value: unknown): value is TaskLedgerGoal {
 	if (!isRecord(value)) return false;
@@ -436,6 +494,15 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isStringArray(v.activeRunIds) &&
 				Array.isArray(v.requiredValidationEvidence) &&
 				v.requiredValidationEvidence.every(isTaskLedgerEvidence)
+			);
+		case "workerRun":
+			return (
+				isString(v.assignmentId) &&
+				isString(v.runId) &&
+				isOneOf(v.origin, WORKER_RUN_ORIGINS) &&
+				isString(v.agentId) &&
+				isWorkerRunRuntime(v.runtime) &&
+				isOptionalString(v.parentToolCallId)
 			);
 	}
 	return false;

@@ -1,6 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { readWorkerReceiptFacts } from "./worker-receipts.js";
+import { type WorkerRunEntryFields, workerRunEntryFields } from "./worker-replay.js";
 import {
 	createWorkerStream,
 	type WorkerEntryState,
@@ -24,6 +25,15 @@ export interface InteractiveSubscriptionsDeps {
 	 * absent the fold still runs, so `/share` can find a finished run either way.
 	 */
 	applyWorkerState?: (state: WorkerEntryState) => void;
+	/**
+	 * Record one attempt of a transcript-bound run in the session ledger, so a
+	 * resumed session can redraw the block from the entry plus its receipt.
+	 * Called where the block opens and once per failover; absent hosts simply
+	 * do not persist, which costs replay and nothing else. The argument is a
+	 * snapshot, not the live block, so a host that defers the write records the
+	 * attempt it was handed.
+	 */
+	recordWorkerRun?: (fields: WorkerRunEntryFields) => void;
 	/** Sealed-receipt reader, injected by tests. Defaults to `<state>/receipts/<runId>.json`. */
 	readWorkerReceipt?: (runId: string) => WorkerReceiptFacts | null;
 }
@@ -53,7 +63,11 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			deps.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchStarted, (payload) => {
-			applyWorker(workers.started(payload));
+			const change = workers.started(payload);
+			applyWorker(change);
+			// Every attempt writes its own entry: a failover is history, and the
+			// attempt trail a resumed block shows is that history read back.
+			if (change !== null) deps.recordWorkerRun?.(workerRunEntryFields(change.entry));
 			deps.refreshFooter();
 			deps.renderTaskIsland();
 			deps.requestRender();
