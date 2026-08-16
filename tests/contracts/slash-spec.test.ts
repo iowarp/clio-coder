@@ -639,6 +639,7 @@ describe("contracts/slash-spec", () => {
 			"skill",
 			"prompts",
 			"extensions",
+			"interop",
 			"share",
 			"run",
 			"delegate",

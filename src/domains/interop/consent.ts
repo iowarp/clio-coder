@@ -21,7 +21,8 @@ import type {
  */
 export const INHERITED_PROJECT_CONTEXT = "none";
 
-function proposalEntry(
+/** The delegation entry a given agent kind would be wired as. */
+export function delegationEntryForKind(
 	kind: InteropAgentKind,
 	defaults: ClioSettings["delegation"]["defaults"],
 ): DelegationAgentConfig {
@@ -56,7 +57,7 @@ export function interopProposals(report: InteropReport, settings: ClioSettings):
 			kind: kind.id,
 			label: kind.label,
 			fingerprint: record.fingerprint,
-			entry: proposalEntry(kind, settings.delegation.defaults),
+			entry: delegationEntryForKind(kind, settings.delegation.defaults),
 			needsNetworkInstall: record.adapter !== "present",
 		});
 	}
@@ -68,14 +69,18 @@ export function renderProposalEntry(proposal: InteropProposal): string {
 	return stringifyYaml([proposal.entry]).trimEnd();
 }
 
-function recordDecisions(
+/**
+ * Merge the report with what is on disk and patch the named records. The lock
+ * covers the read as well as the write so a decision taken in one process is
+ * not overwritten by a detection snapshot from another.
+ */
+function updateRecords(
 	ids: ReadonlyArray<InteropAgentId>,
 	report: InteropReport,
-	decision: InteropDecision,
+	patch: (record: InteropAgentRecord) => InteropAgentRecord,
 ): InteropAgentId[] {
-	const decidedAt = new Date().toISOString();
 	const wanted = new Set(ids);
-	const decided: InteropAgentId[] = [];
+	const touched: InteropAgentId[] = [];
 	withStateFileLockSync(interopStatePath(), () => {
 		const stored = readInteropReport();
 		const byKind = new Map<InteropAgentId, InteropAgentRecord>(
@@ -84,12 +89,45 @@ function recordDecisions(
 		for (const id of wanted) {
 			const record = byKind.get(id);
 			if (record === undefined) continue;
-			byKind.set(id, { ...record, decision, decidedAt, decidedFingerprint: record.fingerprint });
-			decided.push(id);
+			byKind.set(id, patch(record));
+			touched.push(id);
 		}
 		writeInteropReport({ version: 1, detectedAt: report.detectedAt, agents: [...byKind.values()] });
 	});
-	return decided;
+	return touched;
+}
+
+function recordDecisions(
+	ids: ReadonlyArray<InteropAgentId>,
+	report: InteropReport,
+	decision: InteropDecision,
+): InteropAgentId[] {
+	const decidedAt = new Date().toISOString();
+	return updateRecords(ids, report, (record) => ({
+		...record,
+		decision,
+		decidedAt,
+		decidedFingerprint: record.fingerprint,
+	}));
+}
+
+/**
+ * One line at boot for agents that are installed, unconfigured, and undecided,
+ * and only the first time each set of facts is seen. The caller decides where
+ * this belongs; it is never emitted headless or under ACP.
+ */
+export function interopBootHint(report: InteropReport, settings: ClioSettings): string | null {
+	const fresh = interopProposals(report, settings).filter(
+		(proposal) => report.agents.find((agent) => agent.kind === proposal.kind)?.hintedFingerprint !== proposal.fingerprint,
+	);
+	if (fresh.length === 0) return null;
+	updateRecords(
+		fresh.map((proposal) => proposal.kind),
+		report,
+		(record) => ({ ...record, hintedFingerprint: record.fingerprint }),
+	);
+	const names = fresh.map((proposal) => proposal.entry.id).join(", ");
+	return `clio: ${names} detected on PATH and not configured. Run /interop to review.`;
 }
 
 /**

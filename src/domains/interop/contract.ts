@@ -17,4 +17,6 @@ export interface InteropContract extends DomainContract {
 	proposals(report: InteropReport): ReadonlyArray<InteropProposal>;
 	accept(ids: ReadonlyArray<InteropAgentId>): InteropDecisionResult;
 	decline(ids: ReadonlyArray<InteropAgentId>): InteropDecisionResult;
+	/** One boot line for undecided agents whose facts have not been announced yet. */
+	bootHint(report: InteropReport): string | null;
 }

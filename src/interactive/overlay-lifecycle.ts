@@ -34,6 +34,7 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "getSettings"
 	| "getTaskBoard"
 	| "getTaskMemoryStatus"
+	| "interop"
 	| "observability"
 	| "onContextClear"
 	| "onForkSession"
@@ -48,6 +49,16 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "toolRegistry"
 	| "writeSettings"
 >;
+
+/** Pending proposals from the report this process already holds; the picker never probes. */
+function interopProposalsFor(
+	interop: NonNullable<OverlayLifecycleApplicationDeps["interop"]>,
+): () => ReadonlyArray<import("../domains/interop/index.js").InteropProposal> {
+	return () => {
+		const report = interop.lastReport();
+		return report === null ? [] : interop.proposals(report);
+	};
+}
 
 export interface OverlayLifecycleRuntimeDeps {
 	app: OverlayLifecycleApplicationDeps;
@@ -90,6 +101,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	openSkillsHub?: typeof import("./overlays/skills-hub.js").openSkillsHub;
 	openPromptsOverlay?: typeof import("./overlays/prompts.js").openPromptsOverlay;
 	openExtensionsOverlay?: typeof import("./overlays/extensions.js").openExtensionsOverlay;
+	openInteropOverlay?: typeof import("./overlays/interop.js").openInteropOverlay;
 }
 
 export interface OverlayLifecycleController {
@@ -118,6 +130,7 @@ export interface OverlayLifecycleController {
 	openSkillsHubState(): void;
 	openPromptsOverlayState(): void;
 	openExtensionsOverlayState(): void;
+	openInteropOverlayState(): void;
 	toggleDispatchBoardOverlay(): void;
 	confirmPermission(): void;
 	stopTurnFromPermission(): void;
@@ -163,6 +176,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openSkillsHub: openSkillsHubFactory,
 		openPromptsOverlay: openPromptsOverlayFactory,
 		openExtensionsOverlay: openExtensionsOverlayFactory,
+		openInteropOverlay: openInteropOverlayFactory,
 	} = deps;
 	let overlayPermission: OverlayPermissionLifecycle | null = null;
 	let overlayAskUser: OverlayAskUserLifecycle | null = null;
@@ -260,6 +274,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.onSelectModel ? { onSelectModel: deps.app.onSelectModel } : {}),
 		...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
 		connectTarget: (targetId) => overlayAuth.openConnectFlow(targetId),
+		...(deps.app.interop ? { getInteropProposals: interopProposalsFor(deps.app.interop) } : {}),
 		...(openModelOverlayFactory ? { openModelOverlay: openModelOverlayFactory } : {}),
 		...(openSettingsOverlayFactory ? { openSettingsOverlay: openSettingsOverlayFactory } : {}),
 	});
@@ -277,6 +292,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openSkillsHubFactory ? { openSkillsHub: openSkillsHubFactory } : {}),
 		...(openPromptsOverlayFactory ? { openPromptsOverlay: openPromptsOverlayFactory } : {}),
 		...(openExtensionsOverlayFactory ? { openExtensionsOverlay: openExtensionsOverlayFactory } : {}),
+		...(openInteropOverlayFactory ? { openInteropOverlay: openInteropOverlayFactory } : {}),
 	});
 
 	const overlaySessions = createOverlaySessionLifecycle({
@@ -376,6 +392,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openSkillsHubState: overlayResourceOpeners.openSkillsHubState,
 		openPromptsOverlayState: overlayResourceOpeners.openPromptsOverlayState,
 		openExtensionsOverlayState: overlayResourceOpeners.openExtensionsOverlayState,
+		openInteropOverlayState: overlayResourceOpeners.openInteropOverlayState,
 		toggleDispatchBoardOverlay,
 		confirmPermission: () => {
 			overlayPermission?.confirm();

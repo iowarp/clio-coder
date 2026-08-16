@@ -71,6 +71,7 @@ export interface InteractiveSlashRuntimeDeps {
 	chatPanel: SlashChatPanel;
 	resources?: SlashResources;
 	extensions?: SlashExtensions;
+	interop?: SlashCommandContext["interop"];
 	agents?: SlashAgents;
 	share?: SlashShare;
 	getSettings?: () => Readonly<ClioSettings>;
@@ -113,6 +114,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openAgents: () => void;
 	openPrompts: () => void;
 	openExtensions: () => void;
+	openInterop?: () => void;
 	openContextReset: () => void;
 	setEditorText: (text: string) => void;
 	/** Worker blocks this session folded, oldest first; `/share` picks a finished one. */
@@ -312,6 +314,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openAgents: deps.openAgents,
 		openPrompts: deps.openPrompts,
 		openExtensions: deps.openExtensions,
+		...(deps.openInterop ? { openInterop: deps.openInterop } : {}),
+		...(deps.interop ? { interop: deps.interop } : {}),
 		setEditorText: (text) => {
 			deps.setEditorText(text);
 			deps.requestRender();

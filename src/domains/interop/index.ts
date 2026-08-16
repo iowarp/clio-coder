@@ -11,7 +11,9 @@ export const InteropDomainModule: DomainModule<InteropContract> = {
 export {
 	acceptInteropAgents,
 	declineInteropAgents,
+	delegationEntryForKind,
 	INHERITED_PROJECT_CONTEXT,
+	interopBootHint,
 	interopProposals,
 	renderProposalEntry,
 } from "./consent.js";
