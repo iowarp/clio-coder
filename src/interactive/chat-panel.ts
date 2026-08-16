@@ -742,6 +742,17 @@ function renderToolSegmentLines(
 	);
 }
 
+/**
+ * Whether a worker block draws its one-line card this frame. `/output verbose`
+ * opens every block and `/output minimal` folds every block, so the entry's own
+ * fold decides only in between.
+ */
+function workerEntryFolded(entry: Extract<TranscriptEntry, { role: "worker" }>, verbosity: OutputVerbosity): boolean {
+	if (verbosity === "verbose") return false;
+	if (verbosity === "minimal") return true;
+	return entry.folded;
+}
+
 function renderEntryLines(
 	entry: TranscriptEntry,
 	width: number,
@@ -767,7 +778,7 @@ function renderEntryLines(
 	}
 	if (entry.role === "worker") {
 		return renderWorkerEntryLines(entry.state, width, {
-			folded: verbosity === "verbose" ? false : verbosity === "minimal" ? true : entry.folded,
+			folded: workerEntryFolded(entry, verbosity),
 			...(expandKey !== undefined && entry.state.assignmentId === latestFoldedWorkerId ? { expandKey } : {}),
 			unbounded: unboundedToolBodies,
 		});
@@ -1071,6 +1082,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const latestCollapsedFinishedToolId = (): string | null => {
 		for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 			const entry = transcript[entryIndex];
+			// The expand key takes the newest foldable thing of either kind, so a
+			// worker block behind this point already owns it. A tool in front of it
+			// must not advertise a chord that would no longer reach it.
+			if (entry?.role === "worker") return null;
 			if (entry?.role !== "assistant") continue;
 			for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
 				const seg = entry.segments[segIndex];
@@ -1105,12 +1120,17 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * Assignment of the newest folded worker block. Only that block advertises
 	 * the expand key: a fan-out of five scouts repeating the same chord five
 	 * times is noise, and the newest one is what the chord would open anyway.
+	 * The scan stops at a tool segment for the same reason the tool hint stops
+	 * at a worker block, so exactly one surface ever shows the chord.
 	 */
 	const latestFoldedWorkerAssignmentId = (): string | null => {
 		for (let index = transcript.length - 1; index >= 0; index -= 1) {
 			const entry = transcript[index];
+			if (entry?.role === "assistant" && entry.segments.some((segment) => segment.kind === "tool")) return null;
 			if (entry?.role !== "worker") continue;
-			if (entry.folded) return entry.state.assignmentId;
+			// The newest block is the one the chord reaches. When it is already
+			// open the chord folds it again, which needs no advertising.
+			return entry.folded ? entry.state.assignmentId : null;
 		}
 		return null;
 	};
@@ -1197,7 +1217,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const entry = transcript[i];
 			if (!entry) continue;
 			if (!sawRunningTool && entryHasRunningTool(entry)) sawRunningTool = true;
-			if (i > 0) out.push("");
+			// Folded worker cards are a list, not a series of blocks: a fan-out of
+			// five scouts costs five rows, which is what makes the folded default
+			// worth having. Anything else keeps the blank line between entries.
+			const previous = i > 0 ? transcript[i - 1] : undefined;
+			const stacksOnPrevious =
+				entry.role === "worker" &&
+				previous?.role === "worker" &&
+				workerEntryFolded(entry, verbosity) &&
+				workerEntryFolded(previous, verbosity);
+			if (i > 0 && !stacksOnPrevious) out.push("");
 			const containsHint =
 				entryContainsHint(entry, latestHintToolId) ||
 				(entry.role === "worker" && entry.state.assignmentId === latestFoldedWorkerId);
