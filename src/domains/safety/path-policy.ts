@@ -2,12 +2,13 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 
-export type PathPolicyKind = "zeroAccessPaths" | "readOnlyPaths" | "noDeletePaths";
+export type PathPolicyKind = "zeroAccessPaths" | "readOnlyPaths" | "noWritePaths" | "noDeletePaths";
 export type PathPolicyOperation = "read" | "write" | "delete";
 
 export interface PathPolicyInput {
 	zeroAccessPaths?: ReadonlyArray<string>;
 	readOnlyPaths?: ReadonlyArray<string>;
+	noWritePaths?: ReadonlyArray<string>;
 	noDeletePaths?: ReadonlyArray<string>;
 }
 
@@ -34,7 +35,7 @@ export type PathPolicyDecision =
 			policyKind: PathPolicyKind;
 	  };
 
-const ORDERED_KINDS: readonly PathPolicyKind[] = ["zeroAccessPaths", "readOnlyPaths", "noDeletePaths"];
+const ORDERED_KINDS: readonly PathPolicyKind[] = ["zeroAccessPaths", "readOnlyPaths", "noWritePaths", "noDeletePaths"];
 
 export function isSameOrDescendant(candidatePath: string, policyPath: string): boolean {
 	const candidate = path.resolve(candidatePath);
@@ -57,7 +58,7 @@ function normalizePolicyEntry(rawPath: string, root: string): string {
 
 function blocksOperation(kind: PathPolicyKind, operation: PathPolicyOperation): boolean {
 	if (kind === "zeroAccessPaths") return true;
-	if (kind === "readOnlyPaths") return operation === "write" || operation === "delete";
+	if (kind === "readOnlyPaths" || kind === "noWritePaths") return operation === "write" || operation === "delete";
 	return operation === "delete";
 }
 
