@@ -737,6 +737,77 @@ def run_suite(args: argparse.Namespace) -> int:
     return 0
 
 
+def regrade_suite(args: argparse.Namespace) -> int:
+    """Rescore a finished run directory without calling a model again.
+
+    A 164-task suite costs half an hour of a local fleet's time, so a change to
+    the evaluator, the grading timeout, or the completion resolution had no way
+    to be applied except by generating every answer a second time. The
+    generated attempts are already on disk; this reads them, regrades them, and
+    rewrites the same suite artifacts the run wrote.
+    """
+    out_dir = Path(args.out)
+    metrics_path = out_dir / "metrics.jsonl"
+    if not metrics_path.exists():
+        raise DataBlocked(f"no generation record to regrade: {metrics_path}")
+    problems, _, _ = load_problems(args.data)
+    metrics_rows = read_jsonl(metrics_path)
+    ordered_ids: list[str] = []
+    for row in metrics_rows:
+        task_id = str(row.get("task_id", ""))
+        if task_id and task_id not in ordered_ids:
+            ordered_ids.append(task_id)
+    missing = [task_id for task_id in ordered_ids if task_id not in problems]
+    if missing:
+        raise KeyError(f"task ids in {metrics_path} are not in the dataset: {missing[:5]}")
+    chosen = [problems[task_id] for task_id in ordered_ids]
+
+    grade_rows: list[dict[str, Any]] = []
+    sample_rows: list[dict[str, Any]] = []
+    print(f"regrading {len(metrics_rows)} attempt(s) across {len(chosen)} task(s) in {out_dir}", file=sys.stderr)
+    for index, metric in enumerate(metrics_rows, 1):
+        task_id = str(metric["task_id"])
+        sample_id = int(metric.get("sample_id") or 0)
+        sample_dir = out_dir / "tasks" / task_slug(task_id) / f"sample-{sample_id:03d}"
+        if not sample_dir.exists():
+            raise DataBlocked(f"generated attempt directory missing: {sample_dir}")
+        problem = problems[task_id]
+        completion, completion_source = resolve_completion(problem, sample_dir)
+        # The metric row is the generation record, and these three fields are
+        # the part of it that describes the completion rather than the run, so
+        # they follow the resolution that just happened.
+        metric["completion_bytes"] = len(completion.encode("utf-8"))
+        metric["completion_source"] = completion_source
+        metric["empty_completion"] = not completion.strip()
+        grade = grade_attempt(problem, sample_dir, args.grade_timeout, args.evaluator)
+        grade["sample_id"] = sample_id
+        grade_rows.append(grade)
+        sample_rows.append({"task_id": task_id, "completion": completion, "sample_id": sample_id})
+        print(f"[{index}/{len(metrics_rows)}] {task_id} pass={grade.get('passed')} source={completion_source}", file=sys.stderr)
+
+    write_jsonl(metrics_path, metrics_rows)
+    write_jsonl(out_dir / "samples.jsonl", sample_rows)
+    write_jsonl(out_dir / "results.jsonl", grade_rows)
+    summary = suite_summary(chosen, metrics_rows, grade_rows, args.pass_at)
+    manifest_path, summary_path = write_suite_manifest(
+        out_dir,
+        chosen,
+        summary,
+        args.model,
+        args.target,
+        notes=[
+            "HumanEval tests execute generated Python. Run this adapter in a sandbox for untrusted code.",
+            "Resolved counts are task-level: a task is resolved when any generated sample passes.",
+            "Rescored from the attempts already in this directory; no model was called.",
+        ],
+        inherit_provenance=True,
+    )
+    print(f"manifest: {manifest_path}", file=sys.stderr)
+    print(f"summary: {summary_path}", file=sys.stderr)
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
 def run_task(args: argparse.Namespace) -> int:
     problems, _, _ = load_problems(args.data)
     task_id = normalize_task_id(args.task_id)
@@ -978,6 +1049,15 @@ def build_parser() -> argparse.ArgumentParser:
     add_clio_args(run)
     add_grade_args(run)
     run.set_defaults(func=run_suite)
+
+    again = sub.add_parser("regrade", help="rescore an existing run directory without calling a model")
+    add_data_arg(again)
+    again.add_argument("--out", required=True, help="run directory a previous `run` produced")
+    again.add_argument("--pass-at", type=int, action="append", default=[1], help="pass@k values to report; repeatable")
+    again.add_argument("--target", default=None, help="target recorded in the manifest when it records none")
+    again.add_argument("--model", default=None, help="model recorded in the manifest when it records none")
+    add_grade_args(again)
+    again.set_defaults(func=regrade_suite)
 
     one = sub.add_parser("run-task", help="run Clio for one HumanEval task")
     add_data_arg(one)
