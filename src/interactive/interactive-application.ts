@@ -658,6 +658,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		renderContextIsland: interactiveTickers.renderContextIsland,
 		requestRender: () => tui.requestRender(),
 		notify,
+		// The reducer mutates one state object per assignment, so the panel is
+		// handed that object rather than a copy: a streamed delta reaches the
+		// screen by invalidating a cached render, not by rebuilding the entry.
+		applyWorkerState: (state) => chatPanel.applyWorkerState(state),
 	});
 
 	applicationController = createInteractiveInputRuntime({

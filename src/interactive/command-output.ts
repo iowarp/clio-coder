@@ -35,6 +35,25 @@ export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutp
 	sink.requestRender();
 }
 
+/**
+ * Echo the command line an operator typed, dimmed, above the output it starts.
+ *
+ * A dispatched run draws its own attributed block, and without this the block
+ * appears with nothing above it saying who asked for it or what was asked. The
+ * echo is transcript-only: it is a replay block, so it is never persisted as a
+ * session entry and never reaches the model, which is the whole point of a
+ * `/run` the main agent is not told about.
+ */
+export function appendOperatorCommand(text: string, sink: CommandOutputSink): void {
+	const normalized = text.replace(/\r/g, "").replace(/\n+/gu, " ").trim();
+	if (normalized.length === 0) return;
+	sink.appendReplayBlock((width) => {
+		const theme = clioTheme();
+		return wrapTextWithAnsi(theme.fg("dim", `${GLYPH.user} ${normalized}`), width);
+	});
+	sink.requestRender();
+}
+
 export type CommandOutputReplayBlock = (width: number) => string[];
 
 export interface CommandOutputSink {
