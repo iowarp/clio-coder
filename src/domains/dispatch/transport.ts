@@ -25,13 +25,26 @@ import { spawn } from "node:child_process";
 import { shellQuote } from "../../core/shell-quote.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { RunNodeIdentity } from "./types.js";
-import { type SpawnedWorker, type SpawnOptions, spawnNativeWorker, spawnWorkerProcess } from "./worker-spawn.js";
+import {
+	type SpawnedWorker,
+	type SpawnOptions,
+	spawnNativeWorker,
+	spawnWorkerProcess,
+	type WorkerProcessOptions,
+} from "./worker-spawn.js";
 
 export type WorkerTransportKind = "local" | "ssh";
 
-export interface WorkerTransportSpawnOptions {
-	cwd?: string;
-}
+/**
+ * What a placement hands a transport: every process option except the env,
+ * which each transport owns. This is derived from WorkerProcessOptions rather
+ * than restated, because a restated subset is how a placed worker's
+ * `onLedgerPost` went missing: this type once listed only cwd, both transports
+ * forwarded exactly that, and every callback dispatch passed for a worker on a
+ * fleet node was dropped at the seam. Assigning the wider option literal to the
+ * narrower parameter is legal, so nothing complained.
+ */
+export type WorkerTransportSpawnOptions = Omit<WorkerProcessOptions, "env">;
 
 export interface WorkerTransport {
 	readonly kind: WorkerTransportKind;
@@ -85,7 +98,8 @@ export function createLocalWorkerTransport(opts?: Omit<SpawnOptions, "cwd">): Wo
 		kind: "local",
 		node: localNodeIdentity(),
 		spawn(spec, spawnOpts) {
-			return spawnNativeWorker(spec, { ...opts, ...(spawnOpts?.cwd !== undefined ? { cwd: spawnOpts.cwd } : {}) });
+			// The caller's per-spawn options ride over the transport's own defaults.
+			return spawnNativeWorker(spec, { ...opts, ...spawnOpts });
 		},
 	};
 }
@@ -169,15 +183,24 @@ export function createSshWorkerTransport(node: SshNodeEndpoint, opts?: SshTransp
 					// the channel-close path remains the primary termination signal
 				}
 			};
+			// The remote command cds itself, so cwd is consumed here and never
+			// applied to the local ssh client. The announce and forced-kill hooks
+			// are the transport's own and compose with the caller's rather than
+			// replacing them; every other option is forwarded as handed.
+			const { cwd: _consumedCwd, onAnnounce, onForcedKill, ...forwarded } = spawnOpts ?? {};
 			return spawnWorkerProcess(sshBinary, buildSshArgs(node, buildRemoteWorkerCommand(node, cwd)), spec, {
-				// No cwd for the local ssh client; the remote command cds itself.
-				env: process.env,
 				...(opts?.shutdownGraceMs !== undefined ? { shutdownGraceMs: opts.shutdownGraceMs } : {}),
+				...forwarded,
+				env: process.env,
 				onAnnounce: (attestation) => {
 					remote.pid = attestation.pid;
 					remote.processGroupId = attestation.processGroupId;
+					onAnnounce?.(attestation);
 				},
-				onForcedKill: killRemote,
+				onForcedKill: () => {
+					killRemote();
+					onForcedKill?.();
+				},
 			});
 		},
 	};
