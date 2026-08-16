@@ -8,7 +8,7 @@ import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
-import type { InteropAgentId, InteropContract } from "../domains/interop/index.js";
+import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
@@ -34,6 +34,7 @@ import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from ".
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
+import { interopOverlaySurface } from "./overlays/interop.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import type {
 	ContextClearCommandOptions,
@@ -480,24 +481,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	// The overlay reads the report this process already produced at boot; it
 	// never probes on a keystroke.
 	const interop = deps.interop;
-	const interopSurface = interop
-		? {
-				report: () => interop.lastReport(),
-				proposals: () => {
-					const report = interop.lastReport();
-					return report === null ? [] : interop.proposals(report);
-				},
-				configured: () => deps.getSettings?.().delegation.agents ?? [],
-				accept: (kind: InteropAgentId) => {
-					const result = interop.accept([kind]);
-					for (const id of result.wired) notify("success", `delegation agent ${id} added`);
-					for (const diagnostic of result.diagnostics) notify("warning", diagnostic);
-				},
-				decline: (kind: InteropAgentId) => {
-					interop.decline([kind]);
-				},
-			}
-		: null;
+	const interopSurface = interop ? interopOverlaySurface(interop, (level, text) => notify(level, text)) : null;
 	const slashRuntime = createInteractiveSlashRuntime({
 		io,
 		bus: deps.bus,

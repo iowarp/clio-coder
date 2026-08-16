@@ -1,9 +1,15 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readSettings } from "../../src/core/config.js";
+import type { DomainContext } from "../../src/core/domain-loader.js";
+import { initializeClioHome } from "../../src/core/init.js";
+import { createInteropBundle } from "../../src/domains/interop/extension.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../../src/domains/interop/index.js";
+import { writeInteropReport } from "../../src/domains/interop/index.js";
 import type { Component, OverlayHandle, TUI } from "../../src/engine/tui.js";
-import { openInteropOverlay } from "../../src/interactive/overlays/interop.js";
+import { interopOverlaySurface, openInteropOverlay } from "../../src/interactive/overlays/interop.js";
 import type { SlashCommandContext } from "../../src/interactive/slash-commands.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const ESC = String.fromCharCode(27);
 const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
@@ -158,6 +164,59 @@ describe("contracts/interop overlay", () => {
 		mounted.frame.handleInput?.("d");
 
 		ok(mounted.renders > before, "a decision requests a render");
+	});
+
+	/**
+	 * The same frame, over the real domain. Configured used to be read from the
+	 * TUI's hot settings snapshot, which the config watcher refreshes a tick after
+	 * the write, while the proposals were read from the file: an accepted agent
+	 * left Detected on the keystroke and appeared under Configured only when the
+	 * overlay was next opened.
+	 */
+	it("draws an accepted peer as Configured in the frame the keystroke asks for", () => {
+		const scratch = isolateClioEnv("clio-interop-overlay-");
+		try {
+			initializeClioHome();
+			writeInteropReport({
+				version: 1,
+				detectedAt: "2026-08-16T00:00:00.000Z",
+				agents: [
+					{
+						kind: "codex",
+						presence: "present",
+						binary: "/usr/local/bin/codex",
+						adapter: "absent",
+						skillCount: 0,
+						projectArtifacts: 0,
+						fingerprint: FINGERPRINT,
+					},
+				],
+			});
+			const bundle = createInteropBundle({} as unknown as DomainContext);
+			const ctx = {
+				interop: interopOverlaySurface(bundle.contract, () => undefined),
+			} as unknown as SlashCommandContext;
+			const mounted = open(ctx);
+			ok(
+				groups(mounted.frame).some((line) => line.includes("Detected")),
+				"the undecided peer starts as a proposal",
+			);
+
+			mounted.frame.handleInput?.("a");
+
+			ok(
+				readSettings().delegation.agents.some((agent) => agent.id === "codex"),
+				"the accept wired the peer",
+			);
+			const after = groups(mounted.frame);
+			ok(
+				after.some((line) => line.includes("Configured")),
+				`and the same frame draws it as connected: ${after.join(" | ")}`,
+			);
+			ok(!after.some((line) => line.includes("Detected")), after.join(" | "));
+		} finally {
+			scratch.restore();
+		}
 	});
 
 	it("leaves a row alone when the key lands on a group that has no decision to take", () => {
