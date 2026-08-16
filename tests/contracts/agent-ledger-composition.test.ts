@@ -28,7 +28,11 @@ import { openAgentLedger, readAgentLedger } from "../../src/domains/dispatch/age
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { SpawnedWorker, SpawnedWorkerResult, SpawnOptions } from "../../src/domains/dispatch/worker-spawn.js";
-import { createDispatchRunEventRegistry, createDispatchTool } from "../../src/tools/dispatch.js";
+import {
+	createDispatchBackgroundRegistry,
+	createDispatchRunEventRegistry,
+	createDispatchTool,
+} from "../../src/tools/dispatch.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import type { AgentLedgerBody, AgentLedgerEntry } from "../../src/worker/protocol.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
@@ -406,6 +410,59 @@ describe("contracts/agent-ledger composition: dispatch tool", () => {
 			strictEqual(solo.kind, "ok", solo.kind === "error" ? solo.message : "");
 			strictEqual(bundle.contract.detached?.get(solo.details?.batchId as string)?.ledgerId, undefined);
 			strictEqual(factory.workers[2]?.spec.ledger, undefined);
+		} finally {
+			for (const worker of factory.workers) worker.finish(0);
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("a parallel batch the operator backgrounds keeps its board open until collect", async () => {
+		// runBatch closed the ledger in a finally that also ran on the
+		// backgrounding throw, so an operator keypress killed peer coordination
+		// for runs that were still live, and the detached record it converted
+		// into carried no ledger id for collect to close later.
+		const factory = ledgerWorkerFactory(900);
+		const bundle = makeDispatchBundle(builtinAgentsContext(), { spawnWorker: factory.spawn });
+		await bundle.extension.start();
+		try {
+			const runEvents = createDispatchRunEventRegistry();
+			const background = createDispatchBackgroundRegistry();
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract, runEvents, background });
+			const monitor = createMonitorTool({ dispatch: bundle.contract, runEvents });
+			const call = tool.run(
+				{ tasks: ["alpha", "beta"], agent: "scout" },
+				{ sessionId: "session-ledger-background", toolCallId: "call-ledger-parallel", ...approvedDispatch },
+			) as Promise<ToolRunResult>;
+			await waitFor(() => factory.workers.length === 2 && background.size() === 1, "batch live and control registered");
+			const [a, b] = factory.workers;
+			ok(a !== undefined && b !== undefined);
+			const ledgerId = ledgerIdOf(a);
+
+			strictEqual(background.backgroundNewest().ok, true);
+			const result = await call;
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+			strictEqual(result.details?.conversion, "operator-backgrounded");
+			const batchId = result.details?.batchId as string;
+
+			strictEqual(readAgentLedger(ledgerId)?.closedAt, null, "backgrounding does not close a live batch's board");
+			strictEqual(bundle.contract.detached?.get(batchId)?.ledgerId, ledgerId, "the converted record carries the board");
+			b.post({ kind: "finding", claim: "posted after the operator backgrounded us", path: "src/beta/b.ts" });
+			await waitFor(
+				() => (readAgentLedger(ledgerId)?.entries.length ?? 0) === 1,
+				"a post after backgrounding is admitted",
+			);
+			await waitFor(() => deltasIn(a.sent).some((entry) => entry.id === "e1"), "and still reaches the peer");
+
+			a.finish(0);
+			b.finish(0);
+			const runIds = result.details?.assignmentIds as string[];
+			await waitFor(
+				() => runIds.every((runId) => (bundle.contract.assignments?.get(runId)?.status ?? "running") !== "running"),
+				"converted assignments settled",
+			);
+			const collected = (await monitor.run({ mode: "collect", batch_id: batchId }, {})) as ToolRunResult;
+			strictEqual(collected.kind, "ok");
+			ok(typeof readAgentLedger(ledgerId)?.closedAt === "string", "collect closes the converted batch's board");
 		} finally {
 			for (const worker of factory.workers) worker.finish(0);
 			await bundle.extension.stop?.();
