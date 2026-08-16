@@ -202,8 +202,8 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 
 Every topology that runs more than one worker at once opens an agent ledger, the
 bounded coordination board those workers share while they run: the parallel
-fan-out (`src/tools/dispatch.ts:3205`), a detached batch of two or more
-(`:537`), and compete (`:1519`). A worker reaches it through the `ledger` tool
+fan-out (`src/tools/dispatch.ts:3247`), a detached batch of two or more
+(`:538`), and compete (`:1549`). A worker reaches it through the `ledger` tool
 and posts one of three typed entries. A `claim` stakes path prefixes so peers
 stop colliding, a `finding` reports one observation with the path and line that
 ground it, and a `review` judges another entry by its id. Nothing untyped is
@@ -219,8 +219,9 @@ spawns late is handed the whole board twice over: the hub replays it on
 subscription, and it is rendered into that worker's dynamic prompt messages at
 spawn as untrusted peer data.
 
-The reducers never merge. A path cited by two or more runs is corroborated, a
-path cited by one is uncorroborated and still rendered standing on its own, a
+The reducers never merge. Citations are compared in workspace-relative form, so
+`./src/a.ts` and the absolute path of that file are one path. A path cited by
+two or more runs is corroborated, a path cited by one is uncorroborated and still rendered standing on its own, a
 finding with no citation is an ungrounded lead, and an entry a review failed is
 marked disputed where it stands. Overlapping claims from different runs carry
 the ids they overlap, which is advisory; the per-wave write boundary is what
@@ -232,11 +233,19 @@ candidate and the judge have settled. A detached batch, and a parallel batch the
 operator moved to the background, carry the ledger id on the durable batch
 record and close it on the first `monitor(mode="collect")`, because their peers
 stay concurrent past the call that started them. After the close, appends are
-refused and counted. The main model never sees the board: it is rendered only into a
-worker's prompt and a worker's tool result, and neither the dispatch tool
-result nor `monitor(mode="collect")` carries it. What survives into a receipt is
-that run's `ledgerContribution`, which is the ledger id, its posted and refused
-counts, and a sha256 over its own attributed entries, sealed orchestrator-side
+refused and counted.
+
+The main model reads the board too, once its workers have all settled. The
+parallel dispatch result, the compete result, and `monitor(mode="collect")` for
+a detached batch each carry one `agent ledger (<n> entries, sequence <w>)`
+section after the per-run lines, holding the same bounded render a worker sees,
+with the same attribution and the same corroboration and dispute marks and
+still no count, score, or consensus line. The same text is on the result's
+`details.agentLedgerBoard`. A board nobody posted to is omitted, so a
+single-run dispatch and an unused board read exactly as they did before.
+
+What survives into a receipt is that run's `ledgerContribution`, which is the
+ledger id, its posted and refused counts, and a sha256 over its own attributed entries, sealed orchestrator-side
 and covered by receipt integrity.
 
 ### Detached fan-out, backgrounding, and collect

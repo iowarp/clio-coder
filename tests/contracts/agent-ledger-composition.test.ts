@@ -390,10 +390,62 @@ describe("contracts/agent-ledger composition: dispatch tool", () => {
 			strictEqual(runIds.length, 2);
 			for (const runId of runIds) ok(bundle.contract.getRun(runId)?.status !== "running", "each run settled");
 			ok(typeof readAgentLedger(ledgerId)?.closedAt === "string", "settlement closes the board");
-			ok(
-				result.details !== undefined && !JSON.stringify(result.details).includes("alpha lead"),
-				"the board itself never reaches the main model's tool result",
+			// The board the peers built is what the main model reads back, rendered
+			// the same way its workers saw it and attributed the same way.
+			const output = result.kind === "ok" ? result.output : result.message;
+			match(output, /agent ledger \(1 entry, sequence 1\)/);
+			match(output, /e1 finding src\/alpha\/a\.ts: alpha lead \[uncorroborated\]/);
+			const posterRunId = readAgentLedger(ledgerId)?.entries[0]?.runId;
+			strictEqual(
+				result.details?.agentLedgerBoard,
+				`agent ledger (1 entry, sequence 1)\nscout (run ${posterRunId}, node local):\n  e1 finding src/alpha/a.ts: alpha lead [uncorroborated]`,
+				"details carry the same rendered board under a stable key",
 			);
+		} finally {
+			for (const worker of factory.workers) worker.finish(0);
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("adds nothing to a parallel result or a collect when the board stayed empty", async () => {
+		// A board nobody posted to has nothing to tell the main model, and a
+		// result that says so anyway spends the model's attention on a heading.
+		const factory = ledgerWorkerFactory(750);
+		const bundle = makeDispatchBundle(builtinAgentsContext(), { spawnWorker: factory.spawn });
+		await bundle.extension.start();
+		try {
+			const runEvents = createDispatchRunEventRegistry();
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract, runEvents });
+			const monitor = createMonitorTool({ dispatch: bundle.contract, runEvents });
+
+			const call = tool.run({ tasks: ["alpha", "beta"], agent: "scout" }, approvedDispatch) as Promise<ToolRunResult>;
+			await waitFor(() => factory.workers.length === 2, "both workers spawned");
+			for (const worker of factory.workers) worker.finish(0);
+			const result = await call;
+			const output = result.kind === "ok" ? result.output : result.message;
+			strictEqual(output.includes("agent ledger"), false, "an empty board adds no section");
+			strictEqual(result.details?.agentLedgerBoard, undefined, "and no details key");
+
+			const detached = (await tool.run(
+				{ tasks: ["gamma", "delta"], agent: "scout", detach: true },
+				{ sessionId: "session-ledger-empty", ...approvedDispatch },
+			)) as ToolRunResult;
+			strictEqual(detached.kind, "ok", detached.kind === "error" ? detached.message : "");
+			const batchId = detached.details?.batchId as string;
+			for (const worker of factory.workers) worker.finish(0);
+			const runIds = detached.details?.assignmentIds as string[];
+			await waitFor(
+				() => runIds.every((runId) => (bundle.contract.assignments?.get(runId)?.status ?? "running") !== "running"),
+				"detached assignments settled",
+			);
+			const collected = (await monitor.run({ mode: "collect", batch_id: batchId }, {})) as ToolRunResult;
+			strictEqual(collected.kind, "ok");
+			strictEqual(
+				(collected.kind === "ok" ? collected.output : "").includes("agent ledger"),
+				false,
+				"collect adds no section for an empty board",
+			);
+			strictEqual(collected.details?.agentLedgerBoard, undefined, "and no details key");
 		} finally {
 			for (const worker of factory.workers) worker.finish(0);
 			await bundle.extension.stop?.();
@@ -437,12 +489,22 @@ describe("contracts/agent-ledger composition: dispatch tool", () => {
 			const collected = (await monitor.run({ mode: "collect", batch_id: batchId }, {})) as ToolRunResult;
 			strictEqual(collected.kind, "ok");
 			match(collected.kind === "ok" ? collected.output : "", /collect complete/);
+			// Collect is where a detached batch reaches the main model, so it is
+			// where the board reaches it too.
+			match(collected.kind === "ok" ? collected.output : "", /agent ledger \(1 entry, sequence 1\)/);
+			match(collected.kind === "ok" ? collected.output : "", /e1 claim src\/alpha: alpha/);
+			ok(typeof collected.details?.agentLedgerBoard === "string", "collect details carry the board");
 			const closedAt = readAgentLedger(ledgerId)?.closedAt;
 			ok(typeof closedAt === "string", "the first collect closes the board");
 
 			const again = (await monitor.run({ mode: "collect", batch_id: batchId }, {})) as ToolRunResult;
 			strictEqual(again.kind, "ok");
 			strictEqual(readAgentLedger(ledgerId)?.closedAt, closedAt, "a repeated collect does not move the close");
+			strictEqual(
+				again.details?.agentLedgerBoard,
+				collected.details?.agentLedgerBoard,
+				"a closed board still renders, so a repeated collect reads the same board",
+			);
 
 			// A single detached run is not a fan-out and gets no board.
 			const solo = (await tool.run(

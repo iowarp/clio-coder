@@ -24,7 +24,7 @@ import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { type AgentLedgerEntry, canonicalJson, parseAgentLedgerBody } from "../../worker/protocol.js";
-import { claimConflicts } from "./agent-ledger.js";
+import { AGENT_LEDGER_PROMPT_MAX_CHARS, claimConflicts, renderAgentLedger } from "./agent-ledger.js";
 
 /** Bounded ring: newest first, oldest dropped past this count. */
 const MAX_AGENT_LEDGER_RECORDS = 50;
@@ -122,6 +122,23 @@ export async function openAgentLedger(id: string): Promise<AgentLedgerRecord> {
 /** Lock-free snapshot. Returns null when no ledger carries this id. */
 export function readAgentLedger(id: string): AgentLedgerRecord | null {
 	return readStore().find((ledger) => ledger.id === id) ?? null;
+}
+
+/**
+ * The board as one bounded section, headed by its size and watermark, for a
+ * result the main model reads. Attribution, corroboration, and dispute marks
+ * are exactly what the workers saw; nothing is counted, scored, or merged.
+ *
+ * Null when the board is absent or empty, so a result with nothing to add is
+ * byte-identical to one that never had a ledger. A closed ledger keeps its
+ * entries, so a late read still renders.
+ */
+export function renderAgentLedgerBoard(id: string): string | null {
+	const record = readAgentLedger(id);
+	if (record === null || record.entries.length === 0) return null;
+	const count = record.entries.length;
+	const head = `agent ledger (${count} ${count === 1 ? "entry" : "entries"}, sequence ${record.sequence})`;
+	return `${head}\n${renderAgentLedger(record.entries, { maxChars: AGENT_LEDGER_PROMPT_MAX_CHARS })}`;
 }
 
 /**

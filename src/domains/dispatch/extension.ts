@@ -101,7 +101,7 @@ import {
 } from "./active-route-planner.js";
 import { admit, createCapacityAdmissionController, createLeaseSlotGuard } from "./admission.js";
 import { agentRouteCandidates } from "./agent-candidates.js";
-import { renderAgentLedger } from "./agent-ledger.js";
+import { AGENT_LEDGER_PROMPT_MAX_CHARS, renderAgentLedger } from "./agent-ledger.js";
 import { publishAgentLedgerEntry, subscribeAgentLedger } from "./agent-ledger-hub.js";
 import {
 	type AgentLedgerAttribution,
@@ -1047,12 +1047,6 @@ export function renderWorkerProjectContext(
 function workerProjectContextIncludesVerification(body: string): boolean {
 	return body.includes("\nVerification expectations:\n");
 }
-
-/**
- * Ceiling on the spawn-time board. Oldest entries drop whole, so a worker that
- * never calls the tool still starts knowing what its peers staked.
- */
-const AGENT_LEDGER_PROMPT_MAX_CHARS = 4000;
 
 export function buildDynamicPromptMessages(
 	req: DispatchRequest,

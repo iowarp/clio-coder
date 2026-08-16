@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { Type } from "typebox";
 import { sleep } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
+import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
@@ -589,11 +590,13 @@ async function runCollect(
 ): Promise<ToolResult> {
 	let rows: CollectRow[];
 	let scope: string;
+	let ledgerId: string | null = null;
 	if (batchId.length > 0) {
 		const detached = deps.dispatch.detached;
 		if (!detached) return { kind: "error", message: "monitor: no detached batch records are available in this context" };
 		const record = detached.get(batchId);
 		if (!record) return { kind: "error", message: `monitor: unknown batch '${batchId}'` };
+		ledgerId = record.ledgerId ?? null;
 		rows = record.runs.map((entry) => resolveCollectRow(deps, entry.assignmentId, entry.agentId));
 		scope = `batch ${batchId}${record.collectedAt !== null ? " (already collected)" : ""}`;
 	} else {
@@ -639,6 +642,10 @@ async function runCollect(
 			(row.run.outcome !== undefined && row.run.outcome !== "succeeded" && row.run.outcome !== null),
 	);
 	const missing = rows.filter((row) => row.run === null);
+	// Every run is terminal here, so the board is what the peers finished with.
+	// It is read before the collect that closes it, and a closed board still
+	// renders, so a repeated collect answers the same way as the first.
+	const board = ledgerId === null ? null : renderAgentLedgerBoard(ledgerId);
 	// The batch is only reported collected when the durable mark actually
 	// persisted; on failure it stays open for a later collect and the result
 	// says so instead of pretending.
@@ -655,6 +662,7 @@ async function runCollect(
 	const lines = [
 		`collect complete for ${scope}: total=${rows.length} failed=${failed.length}${missing.length > 0 ? ` missing=${missing.length}` : ""}`,
 		...collectedRows.flatMap((row) => collectRunLine(row)),
+		...(board !== null ? ["", board] : []),
 		...(batchId.length > 0 && !collected
 			? ["", "note: the batch record could not be marked collected; it stays open for a later collect."]
 			: []),
@@ -666,6 +674,7 @@ async function runCollect(
 		details: {
 			mode: "collect",
 			...(batchId.length > 0 ? { batchId, collected } : {}),
+			...(board !== null ? { agentLedgerBoard: board } : {}),
 			complete: true,
 			runCount: rows.length,
 			failedCount: failed.length,

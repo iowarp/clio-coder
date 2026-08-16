@@ -12,7 +12,16 @@
  * left standing on its own rather than folded into a majority view.
  */
 
+import { isAbsolute, relative } from "node:path";
 import type { AgentLedgerBody, AgentLedgerEntry } from "../../worker/protocol.js";
+
+/**
+ * Ceiling on a rendered board wherever one is handed to a model: a worker's
+ * spawn-time prompt and the board the main model reads back off a settled
+ * dispatch. Oldest entries drop whole, so a worker that never calls the tool
+ * still starts knowing what its peers staked.
+ */
+export const AGENT_LEDGER_PROMPT_MAX_CHARS = 4000;
 
 /** Corroboration vocabulary, matching src/domains/agents/builtins/scout.md. */
 export type CorroborationState = "corroborated" | "uncorroborated" | "ungrounded lead";
@@ -64,6 +73,28 @@ export interface CorroborationReport {
 }
 
 /**
+ * Workspace-relative form of a cited path, so two runs naming one file agree.
+ * `./src/a.ts`, `src//a.ts`, and the absolute path under the orchestrator's
+ * workspace all key as `src/a.ts`. A path outside the workspace keeps the form
+ * its author cited, which is the only form anything else can resolve.
+ *
+ * The orchestrator cwd is the workspace root; it is read here and nowhere else
+ * in this module.
+ */
+function citedPathKey(path: string): string {
+	const trimmed = path.trim();
+	if (trimmed.length === 0) return trimmed;
+	const absolute = isAbsolute(trimmed);
+	const candidate = absolute ? relative(process.cwd(), trimmed) : trimmed;
+	if (absolute && (candidate.length === 0 || candidate.startsWith(".."))) return trimmed;
+	const normalized = candidate
+		.split("/")
+		.filter((segment) => segment.length > 0 && segment !== ".")
+		.join("/");
+	return normalized.length === 0 ? trimmed : normalized;
+}
+
+/**
  * Group findings by cited path. A path cited by two or more distinct runs is
  * corroborated; a path cited by one is uncorroborated; a finding that carries
  * no citation is an ungrounded lead.
@@ -72,7 +103,7 @@ export function corroboration(entries: ReadonlyArray<AgentLedgerEntry>): Corrobo
 	const runsByPath = new Map<string, string[]>();
 	for (const entry of entries) {
 		if (entry.body.kind !== "finding") continue;
-		const path = entry.body.path;
+		const path = entry.body.path === undefined ? undefined : citedPathKey(entry.body.path);
 		if (path === undefined) continue;
 		const runs = runsByPath.get(path) ?? [];
 		if (!runs.includes(entry.runId)) runs.push(entry.runId);
@@ -86,7 +117,7 @@ export function corroboration(entries: ReadonlyArray<AgentLedgerEntry>): Corrobo
 			byEntryId.set(entry.id, "ungrounded lead");
 			continue;
 		}
-		const runs = runsByPath.get(path) ?? [];
+		const runs = runsByPath.get(citedPathKey(path)) ?? [];
 		byEntryId.set(entry.id, runs.length >= 2 ? "corroborated" : "uncorroborated");
 	}
 	return { byEntryId, byPath: runsByPath };
