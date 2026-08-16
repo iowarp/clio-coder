@@ -36,6 +36,7 @@ import {
 	describeCallTarget,
 	sanitizeCallTargetText,
 } from "../../src/interactive/permission-overlay.js";
+import { invokeRegisteredTool } from "../../src/tools/agent-tools.js";
 import { askUserExposure, createAskUserTool, normalizeAskUserCall } from "../../src/tools/ask-user.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
@@ -412,6 +413,29 @@ describe("contracts/autonomy registry admission", () => {
 		registry.cancelParkedCalls("operator declined");
 		const verdict = await pending;
 		strictEqual(verdict.kind, "blocked");
+	});
+
+	it("does not charge an operator's thinking time to the tool it approved", async () => {
+		const registry = registryAt("auto-edit");
+		const finished: Array<{ tool: string; durationMs: number }> = [];
+		const pending = invokeRegisteredTool(registry, ToolNames.Bash, bashCall("echo hello").args, {
+			telemetry: {
+				onFinish: (event) => {
+					finished.push({ tool: event.tool, durationMs: event.durationMs });
+				},
+			},
+		});
+		await settle();
+		strictEqual(registry.hasParkedCalls(), true);
+		// Stand in for an operator reading the card before pressing allow.
+		await new Promise((resolve) => setTimeout(resolve, 120));
+		await registry.resumeParkedCalls({ actionClass: "execute", requestedBy: "test" });
+		await pending;
+
+		strictEqual(finished.length, 1);
+		const durationMs = finished[0]?.durationMs ?? -1;
+		ok(durationMs >= 0, `duration must stay non-negative, got ${durationMs}`);
+		ok(durationMs < 100, `the 120ms park must not be charged to the tool, got ${durationMs}ms`);
 	});
 
 	it("auto-edit runs writes and recognized commands, parks unrecognized bash, and a one-shot grant resumes it", async () => {

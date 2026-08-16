@@ -123,23 +123,36 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	const invokeOpts: ToolInvokeOptions = {};
 	if (input.invokeOptions) Object.assign(invokeOpts, input.invokeOptions);
 	if (signal) invokeOpts.signal = signal;
+	// The registry parks a call that needs an operator decision inside this
+	// invocation, so the span below covers the operator as well as the tool.
+	// Subtracting the park keeps `durationMs` a measurement of the tool: an
+	// approved `npm test` was rendered as a 56s test run and sealed into the
+	// receipt and toolStats that way, when the command itself took a fraction
+	// of a second.
+	let parkedMs = 0;
+	const callerOnParked = invokeOpts.onParked;
+	invokeOpts.onParked = (ms) => {
+		parkedMs += ms;
+		callerOnParked?.(ms);
+	};
+	const executedMs = (): number => Math.max(0, Math.round(performance.now() - startedAtClock) - parkedMs);
 	const hasInvokeOpts = Object.keys(invokeOpts).length > 0;
 	let verdictPromise: ReturnType<typeof registry.invoke>;
 	try {
 		verdictPromise = registry.invoke({ tool: spec.name, args }, hasInvokeOpts ? invokeOpts : undefined);
 	} catch (err) {
-		emitFinish(telemetry, spec.name, startedAtClock, "error", { ...withCallId, reason: errorMessage(err) });
+		emitFinish(telemetry, spec.name, executedMs, "error", { ...withCallId, reason: errorMessage(err) });
 		throw err;
 	}
 	let verdict: Awaited<typeof verdictPromise>;
 	try {
 		verdict = await verdictPromise;
 	} catch (err) {
-		emitFinish(telemetry, spec.name, startedAtClock, "error", { ...withCallId, reason: errorMessage(err) });
+		emitFinish(telemetry, spec.name, executedMs, "error", { ...withCallId, reason: errorMessage(err) });
 		throw err;
 	}
 	if (verdict.kind !== "ok") {
-		emitFinish(telemetry, spec.name, startedAtClock, "blocked", {
+		emitFinish(telemetry, spec.name, executedMs, "blocked", {
 			...withCallId,
 			reason: verdict.reason,
 			...(verdict.kind === "blocked" ? { decision: verdict.decision } : {}),
@@ -153,7 +166,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		throw new Error(formatModelRejection(verdict.reason, rejection));
 	}
 	if (verdict.result.kind === "error") {
-		emitFinish(telemetry, spec.name, startedAtClock, "error", {
+		emitFinish(telemetry, spec.name, executedMs, "error", {
 			...withCallId,
 			reason: verdict.result.message,
 			decision: verdict.decision,
@@ -169,14 +182,14 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	};
 	if (verdict.result.terminate === true) {
 		result.terminate = true;
-		emitFinish(telemetry, spec.name, startedAtClock, "ok", {
+		emitFinish(telemetry, spec.name, executedMs, "ok", {
 			...withCallId,
 			terminate: true,
 			decision: verdict.decision,
 			...(skillActivation ? { skillActivation } : {}),
 		});
 	} else {
-		emitFinish(telemetry, spec.name, startedAtClock, "ok", {
+		emitFinish(telemetry, spec.name, executedMs, "ok", {
 			...withCallId,
 			decision: verdict.decision,
 			...(skillActivation ? { skillActivation } : {}),
@@ -188,7 +201,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 function emitFinish(
 	telemetry: ToolTelemetry | undefined,
 	tool: string,
-	startedAtClock: number,
+	executedMs: () => number,
 	outcome: ToolOutcome,
 	extra?: {
 		reason?: string;
@@ -202,7 +215,7 @@ function emitFinish(
 	const event: ToolFinishEvent = {
 		tool,
 		posture: "operating",
-		durationMs: Math.round(performance.now() - startedAtClock),
+		durationMs: executedMs(),
 		outcome,
 	};
 	if (extra?.toolCallId !== undefined) event.toolCallId = extra.toolCallId;

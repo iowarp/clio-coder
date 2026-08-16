@@ -180,6 +180,14 @@ export interface ToolInvokeOptions {
 	askUserPolicy?: AskUserToolPolicy;
 	/** Registry-authenticated one-shot operator approval for this execution. */
 	approval?: { requestId: string; requestedBy: string; actionClass: ActionClass };
+	/**
+	 * How long this call sat parked awaiting an operator decision, reported when
+	 * the park resolves. A caller timing the invocation is measuring the tool,
+	 * and the park is the operator, so the two have to be separable: without
+	 * this a `npm test` approved after a minute of reading was recorded as a
+	 * one-minute test run in the transcript, the receipt, and toolStats.
+	 */
+	onParked?: (parkedMs: number) => void;
 }
 
 export type AskUserInterviewStatus = "idle" | "active" | "complete" | "cancelled";
@@ -682,7 +690,16 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
 				};
 				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", { requestId: meta.requestId });
-				const parkedCall: ParkedCall = { call: admissionCall, decision: outcome.decision, meta, resolve };
+				// Wrapping resolve here reports the park from every path that ends
+				// one: an approval, a denial, a retry that re-parks and later
+				// settles, an abort. A resolve site added later is covered too,
+				// because they all settle the entry through this function.
+				const parkedAtClock = performance.now();
+				const settle = (verdict: RegistryVerdict): void => {
+					options?.onParked?.(Math.round(performance.now() - parkedAtClock));
+					resolve(verdict);
+				};
+				const parkedCall: ParkedCall = { call: admissionCall, decision: outcome.decision, meta, resolve: settle };
 				if (options !== undefined) parkedCall.options = options;
 				if (options?.signal) {
 					const onAbort = (): void => {
