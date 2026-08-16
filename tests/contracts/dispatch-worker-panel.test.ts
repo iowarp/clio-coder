@@ -130,13 +130,16 @@ describe("dispatch origin on the board", () => {
 		ok(panel([row]).includes(`${GLYPH.workerHuman} ${GLYPH.subProcess} scout`));
 	});
 
-	it("keeps the fleet quadrant's single orange signal on rows the model started", () => {
-		const theme = clioTheme();
-		const rendered = activityQuadrant(workFacts([makeRow({ requestOrigin: "agent" })]), {
-			width: 96,
-			maxWorkers: 4,
-		}).join("\n");
-		strictEqual(rendered.split(theme.fgSequence("action")).length - 1, 1);
+	// The transcript paints an agent-origin block in action orange because it is
+	// the only signal on that surface. A board row sits under the fleet summary,
+	// which already owns the quadrant's single orange, so on the board the filled
+	// glyph carries origin by shape and never takes the action token. Asserted on
+	// the presentation token itself: counting escape sequences in rendered text
+	// reads as a character count under NO_COLOR, where the sequence is empty.
+	it("keeps the fleet quadrant's single orange signal off rows the model started", () => {
+		strictEqual(dispatchOriginPresentation({ requestOrigin: "agent" })?.token, "muted");
+		strictEqual(dispatchOriginPresentation({ requestOrigin: "user" })?.token, "accent");
+		strictEqual(dispatchOriginPresentation({ requestOrigin: "internal" })?.token, "dim");
 	});
 });
 
