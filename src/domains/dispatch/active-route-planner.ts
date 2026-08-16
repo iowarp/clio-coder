@@ -34,6 +34,9 @@ export function routeValidationProjection(
 		// Orchestrator-minted, never model-authored: the ledger reference is
 		// stripped before validation for the same reason the reservation is.
 		ledger,
+		// Presentation-only parentage stamped by the calling tool, on the same
+		// terms: a model must not be able to author it.
+		parentToolCallId,
 		...raw
 	} = request;
 	const awaitingEnvelope =
@@ -50,6 +53,7 @@ export function routeValidationProjection(
 			...(routeAttemptDecision !== undefined ? { routeAttemptDecision } : {}),
 			...(assignmentDeadlineAt !== undefined ? { assignmentDeadlineAt } : {}),
 			...(ledger !== undefined ? { ledger } : {}),
+			...(parentToolCallId !== undefined ? { parentToolCallId } : {}),
 			...(awaitingEnvelope ? { failover: "approved" as const } : {}),
 		}),
 	};

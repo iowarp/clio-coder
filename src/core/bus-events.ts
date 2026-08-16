@@ -466,11 +466,32 @@ export interface DispatchEnqueuedPayload extends DispatchRunIdentity {
 	requestOrigin: DispatchRequestOrigin;
 }
 
-/** Published on {@link BusChannels.DispatchStarted} once the child process is live. */
+/**
+ * Published on {@link BusChannels.DispatchStarted} once the child process is
+ * live.
+ *
+ * `assignmentId` and `attempt` are required, on the same terms as
+ * {@link DispatchTerminalStats}: a surface that draws one entry per logical
+ * work item has to key on the assignment, and a spawn path that forgot to send
+ * it would silently split a failover into two entries. Both come straight off
+ * the run's {@link RunLineage} (`rootRunId` / `attempt`), so no emitter has to
+ * derive them.
+ */
 export interface DispatchStartedPayload extends DispatchEnqueuedPayload {
 	pid: number | null;
 	/** Exact spawned argv encoded as JSON, for safe pid/command identity checks. */
 	processCommand?: string | undefined;
+	/** Logical work item this attempt belongs to; retries and failovers share it. */
+	assignmentId: string;
+	/** 0 on the first attempt, incremented once per retry. */
+	attempt: number;
+	/**
+	 * Tool call whose execution spawned this run. Present only on agent-origin
+	 * runs whose caller knew its own call id, which is what lets a transcript
+	 * nest the worker under the tool segment that started it instead of
+	 * appending it wherever the turn happens to be.
+	 */
+	parentToolCallId?: string | undefined;
 }
 
 /**

@@ -44,6 +44,15 @@ export interface DispatchRequest extends JobSpec {
 	ledger?: { id: string; sequence: number };
 	/** Absolute root-assignment deadline derived once from the approved duration. */
 	assignmentDeadlineAt?: number;
+	/**
+	 * Tool call the caller was executing when it built this request. Stamped by
+	 * the dispatch tool from its own invocation id and republished on
+	 * DispatchStarted so a transcript can nest the worker under the tool segment
+	 * that spawned it. It is deliberately NOT part of JobSpec: model JSON must
+	 * never be able to claim parentage of a tool call it did not make, so the
+	 * validation projection strips it like the reservation and ledger refs.
+	 */
+	parentToolCallId?: string;
 }
 
 /** Internal, non-serializable admission hook for transactional resource owners. */

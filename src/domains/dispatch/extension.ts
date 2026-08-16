@@ -3519,6 +3519,9 @@ export function createDispatchBundle(
 				runtimeKind: "acp-delegation",
 				pid: acp.pid,
 				processCommand: JSON.stringify([lifecycle.agentConfig.command, ...(lifecycle.agentConfig.args ?? [])]),
+				assignmentId: lineage.rootRunId,
+				attempt: lineage.attempt,
+				...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
 			});
 		} catch (error) {
 			try {
@@ -4510,6 +4513,9 @@ export function createDispatchBundle(
 				pid,
 				...(worker.processCommand !== undefined ? { processCommand: worker.processCommand } : {}),
 				...fleetIdentity,
+				assignmentId: lineage.rootRunId,
+				attempt: lineage.attempt,
+				...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
 			});
 		} catch (error) {
 			try {

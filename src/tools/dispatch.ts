@@ -1132,6 +1132,7 @@ async function runReviewGated(
 				...(review.model !== undefined ? { model: review.model } : {}),
 				...(review.target !== undefined ? { target: review.target } : {}),
 				...(base.plan !== undefined ? { plan: base.plan } : {}),
+				...(base.parentToolCallId !== undefined ? { parentToolCallId: base.parentToolCallId } : {}),
 				...(base.reservation !== undefined
 					? { reservation: { ownerId: base.reservation.ownerId, memberId: base.reservation.memberId } }
 					: {}),
@@ -1730,6 +1731,7 @@ async function runCompete(
 				...(compete.judge?.target !== undefined ? { target: compete.judge.target } : {}),
 				...(compete.judge?.node !== undefined ? { node: compete.judge.node } : {}),
 				...(base.plan !== undefined ? { plan: base.plan } : {}),
+				...(base.parentToolCallId !== undefined ? { parentToolCallId: base.parentToolCallId } : {}),
 				...(base.reservation !== undefined
 					? { reservation: { ownerId: base.reservation.ownerId, memberId: base.reservation.memberId } }
 					: {}),
@@ -2764,7 +2766,16 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			// tests/tools, but a hidden model-supplied field is never execution trust.
 			const resolvedPlan = trustedResolvedPlan;
 			const reservationOwnerId = trustedReservationOwners.get(args);
-			let requests = parsed.requests;
+			// Stamp this call's own id on every request before the mode branches
+			// split them. Derived sub-requests that spread a base request inherit
+			// it; the ones built fresh (reviewer, judge) copy it explicitly. A
+			// surface that cannot find the parent still renders the run, just not
+			// nested, so an absent id is never an error.
+			const parentToolCallId = options?.toolCallId;
+			let requests: ReadonlyArray<DispatchRequest> =
+				parentToolCallId === undefined || parentToolCallId.length === 0
+					? parsed.requests
+					: parsed.requests.map((request) => ({ ...request, parentToolCallId }));
 			if (planView.planScale && deps.dispatch.preview !== undefined && resolvedPlan === null) {
 				return { kind: "error", message: "dispatch: resolved plan is missing after admission" };
 			}

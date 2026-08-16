@@ -200,7 +200,10 @@ describe("durable trace store", () => {
 			["foreign", deadPid, "other-host"],
 			["legacy", deadPid, null],
 		] as const) {
-			store.startRun({ ...run(runId), pid, processCommand: "[]" }, "2026-01-01T00:00:00Z");
+			store.startRun(
+				{ ...run(runId), pid, processCommand: "[]", assignmentId: runId, attempt: 0 },
+				"2026-01-01T00:00:00Z",
+			);
 			store.insertEvent({
 				eventId: `${runId}:e`,
 				runId,
@@ -235,7 +238,10 @@ describe("durable trace store", () => {
 		store.db.exec("ALTER TABLE processes DROP COLUMN host; ALTER TABLE processes DROP COLUMN birth_token;");
 		store.close();
 		store = new TraceStore(file);
-		store.startRun({ ...run(), pid: process.pid, processCommand: "[]" }, "2026-01-01T00:00:00Z");
+		store.startRun(
+			{ ...run(), pid: process.pid, processCommand: "[]", assignmentId: "run-1", attempt: 0 },
+			"2026-01-01T00:00:00Z",
+		);
 		store.close();
 		const reader = new TraceReader(file);
 		try {
