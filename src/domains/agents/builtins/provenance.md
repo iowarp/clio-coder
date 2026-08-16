@@ -4,7 +4,7 @@ name: Provenance
 description: Shadow evidence, receipt, diff, and telemetry reader for source-backed handoffs.
 tools:
   required: [read]
-  optional: [grep, find, ls, git]
+  optional: [grep, find, ls, git, ledger]
 skills: []
 audience: shadow
 category: operations

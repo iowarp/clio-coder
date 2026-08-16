@@ -32,7 +32,9 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { routeValidationProjection } from "../../src/domains/dispatch/active-route-planner.js";
 import { claimConflicts, corroboration, disputes, renderAgentLedger } from "../../src/domains/dispatch/agent-ledger.js";
 import { publishAgentLedgerEntry, subscribeAgentLedger } from "../../src/domains/dispatch/agent-ledger-hub.js";
@@ -774,6 +776,27 @@ describe("contracts/agent-ledger tool attestation", () => {
 		const signature = attestedToolSignature({ toolsSupported: true, allowedTools: ["read", "grep"] });
 		strictEqual(signature, PRE_LEDGER_READ_GREP_SIGNATURE);
 		strictEqual(signature, toolSignatureOf(["read", "grep"]));
+	});
+
+	it("every dispatchable builtin declares the ledger, so a ledgered run is actually offered it", () => {
+		// A worker's tool surface is its recipe's declared inventory, narrowed and
+		// never widened: applyToolProfile only filters, effectiveToolNames only
+		// subtracts, withLedgerToolNarrowing only removes the ledger from a run
+		// with no board, and admission refuses any tool the recipe did not
+		// declare. No builtin declared the ledger, so no dispatched worker could
+		// reach it. A live three-scout fan-out sealed an empty board: sequence 0,
+		// no entries, and posted 0 in all three receipts.
+		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
+		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
+		const missing = recipes
+			.filter((entry) => entry.audience !== "internal")
+			.filter((entry) => !entry.tools.includes(ToolNames.Ledger))
+			.map((entry) => entry.id);
+		deepStrictEqual(missing, [], "a fanned-out builtin with no ledger in its recipe can never post");
+		// The one internal agent is the single-run bootstrap behind
+		// `clio-coder context init`, which never runs beside a peer.
+		const bootstrap = recipes.find((entry) => entry.id === "context-bootstrap");
+		strictEqual(bootstrap?.tools.includes(ToolNames.Ledger), false);
 	});
 
 	it("attests consistently for a spec that includes the ledger", () => {

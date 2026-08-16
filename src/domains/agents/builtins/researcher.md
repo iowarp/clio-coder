@@ -4,7 +4,7 @@ name: Researcher
 description: Shadow external-source researcher for coding decisions, official docs, standards, release notes, and academic papers.
 tools:
   required: [read]
-  optional: [web_fetch, context]
+  optional: [web_fetch, context, ledger]
 skills: []
 audience: shadow
 category: research

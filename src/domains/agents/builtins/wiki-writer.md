@@ -4,7 +4,7 @@ name: Wiki Writer
 description: Plans one repository wiki, or researches and writes one wiki page, against a supplied plan.
 tools:
   required: [read, {anyOf: [write, edit]}]
-  optional: [grep, find, ls, code_nav, context]
+  optional: [grep, find, ls, code_nav, context, ledger]
 skills: []
 audience: base
 category: implement

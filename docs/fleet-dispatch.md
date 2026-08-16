@@ -198,6 +198,42 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 | Compete | `mode: "compete", candidates: 2..4` | N candidates in scratch worktrees, read-only judge, winner applied or preserved. |
 | Agent automation | `agent: "auto"` | Baselines candidate agent from task shape via shared classifier (`coder`, `tester`, `documenter`, `verifier`, `researcher`, `scout`); advisory unless activated. |
 
+### Agent ledger
+
+Every topology that runs more than one worker at once opens an agent ledger, the
+bounded coordination board those workers share while they run: the parallel
+fan-out (`src/tools/dispatch.ts:3194`), a detached batch of two or more
+(`:537`), and compete (`:1508`). A worker reaches it through the `ledger` tool
+and posts one of three typed entries. A `claim` stakes path prefixes so peers
+stop colliding, a `finding` reports one observation with the path and line that
+ground it, and a `review` judges another entry by its id. Nothing untyped is
+postable, and a run gets 20 posts.
+
+The orchestrator is the sole writer. A post travels up the control lane as a
+body and nothing else, and every attribution field is stamped from the
+orchestrator's own admission record, so no worker-supplied value can reach a
+field a peer or a receipt reads as identity. Admitted entries are pushed back
+down as `ledger_delta` stdin frames into a per-worker mirror, so a read answers
+locally with a watermark instead of blocking on a round trip. A worker that
+spawns late is handed the whole board twice over: the hub replays it on
+subscription, and it is rendered into that worker's system prompt as untrusted
+peer data.
+
+The reducers never merge. A path cited by two or more runs is corroborated, a
+path cited by one is uncorroborated and still rendered standing on its own, a
+finding with no citation is an ungrounded lead, and an entry a review failed is
+marked disputed where it stands. Overlapping claims from different runs carry
+the ids they overlap, which is advisory; the per-wave write boundary is what
+actually stops two writers.
+
+The board closes once every worker settles, after which appends are refused and
+counted. The main model never sees the board: it is rendered only into a
+worker's prompt and a worker's tool result, and neither the dispatch tool
+result nor `monitor(mode="collect")` carries it. What survives into a receipt is
+that run's `ledgerContribution`, which is the ledger id, its posted and refused
+counts, and a sha256 over its own attributed entries, sealed orchestrator-side
+and covered by receipt integrity.
+
 ### Detached fan-out, backgrounding, and collect
 
 `detach: true` validates, admits, and spawns every task, then returns. The
