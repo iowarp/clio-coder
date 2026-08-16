@@ -271,6 +271,53 @@ describe("ssh worker transport channel contract", () => {
 		strictEqual(steer.payload?.text, "focus on the tests");
 	});
 
+	it("forwards a caller's control-lane callbacks and composes its own announce hook with the caller's", async () => {
+		// The transport once forwarded only cwd from what a placement handed it,
+		// so a worker on a fleet node could never post to the agent ledger: the
+		// callback dispatch passed died at this seam. Assigning the wider option
+		// literal to the narrower parameter is legal, so nothing complained.
+		const posted: unknown[] = [];
+		const announced: string[] = [];
+		const worker = transport("ledger").spawn(TEST_SPEC, {
+			cwd: "/w",
+			onLedgerPost: (body) => posted.push(body),
+			onAnnounce: (attestation) => announced.push(attestation.host),
+		});
+		const events: unknown[] = [];
+		const delta = {
+			type: "ledger_delta",
+			entries: [
+				{
+					id: "e1",
+					sequence: 1,
+					at: "2026-08-16T00:00:00.000Z",
+					runId: "run-a",
+					assignmentId: "asg-a",
+					agentId: "scout",
+					nodeId: "blade",
+					body: { kind: "finding", claim: "posted over ssh", path: "src/a.ts", line: 3 },
+				},
+			],
+		};
+		// The post arrives on the control lane, not the event stream, so the
+		// test answers it with a delta as soon as the callback fires.
+		const deadline = Date.now() + 5_000;
+		while (posted.length === 0) {
+			if (Date.now() > deadline) {
+				worker.abort();
+				throw new Error("the transport never delivered the worker's ledger post");
+			}
+			await new Promise((resolve) => setTimeout(resolve, 5));
+		}
+		strictEqual(worker.send?.(delta), true);
+		for await (const event of worker.events) events.push(event);
+		strictEqual((await worker.promise).exitCode, 0);
+		deepStrictEqual(posted, [{ kind: "finding", claim: "posted over ssh", path: "src/a.ts", line: 3 }]);
+		deepStrictEqual(eventTypes(events), ["clio_ledger_delta_seen", "message_end"]);
+		deepStrictEqual((events[0] as { payload?: { ids?: string[] } }).payload?.ids, ["e1"]);
+		deepStrictEqual(announced, ["fake-node"], "the caller's announce hook still fires beside the transport's own");
+	});
+
 	it("round-trips a permission escalation decision", async () => {
 		const worker = transport("permission").spawn(TEST_SPEC, { cwd: "/w" });
 		const events: unknown[] = [];

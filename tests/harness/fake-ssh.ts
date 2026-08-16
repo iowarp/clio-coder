@@ -213,6 +213,11 @@ rl.on("line", (line) => {
 		if (scenario === "permission") {
 			emit({ type: "clio_permission_escalated", payload: { requestId: "pr-1", tool: "write" } });
 		}
+		if (scenario === "ledger") {
+			// One agent-ledger post up the control lane, then wait for the
+			// orchestrator's delta to come back down stdin.
+			control({ kind: "ledger_post", body: { kind: "finding", claim: "posted over ssh", path: "src/a.ts", line: 3 } });
+		}
 		if (scenario === "hang-hard") {
 			eofExit = false;
 			process.on("SIGTERM", () => {});
@@ -231,7 +236,7 @@ rl.on("line", (line) => {
 			process.on("SIGTERM", () => {});
 			setInterval(() => {}, 1000);
 		}
-		// "steer", "permission", "hang", and "deaf-stdin" wait for further lines.
+		// "steer", "permission", "ledger", "hang", and "deaf-stdin" wait for further lines.
 		return;
 	}
 	let value;
@@ -243,6 +248,11 @@ rl.on("line", (line) => {
 	if (value.type === "steer") {
 		emit({ type: "clio_steer_received", payload: { text: value.text } });
 		assistant("steered: " + value.text);
+		process.exit(0);
+	}
+	if (value.type === "ledger_delta") {
+		emit({ type: "clio_ledger_delta_seen", payload: { ids: value.entries.map((entry) => entry.id) } });
+		assistant("mirror fed");
 		process.exit(0);
 	}
 	if (value.type === "permission_decision") {
