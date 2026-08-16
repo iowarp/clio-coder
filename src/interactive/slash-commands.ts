@@ -42,9 +42,10 @@ type SlashCommandVariant =
 	| { kind: "prompts" }
 	| { kind: "extensions" }
 	| ShareCommandVariant
-	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions }
+	/** `source` is the line the operator typed, echoed above the run's transcript block. */
+	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions; source: string }
 	| { kind: "run-usage" }
-	| { kind: "delegate"; agentId: string; task: string }
+	| { kind: "delegate"; agentId: string; task: string; source: string }
 	| { kind: "delegate-usage" }
 	| { kind: "agents" }
 	| { kind: "cost" }
@@ -230,6 +231,12 @@ export interface SlashCommandContext {
 	bus: SafeEventBus;
 	/** Strict recipe facts used to keep interactive /run role-equivalent with the CLI. */
 	getAgentRoleFacts?: AgentRoleFactsResolver;
+	/**
+	 * Echo the typed command line into the transcript, dimmed, before the block
+	 * it starts. `/run` and `/delegate` use it so a worker's attributed block has
+	 * the request above it. Transcript-only; the line never enters model context.
+	 */
+	echoOperatorCommand?: (text: string) => void;
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
 	runInit: (options: InitCommandOptions) => void;
@@ -572,7 +579,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				{ name: "task", required: true, rest: true },
 			],
 		},
-		fromArgs(parsed) {
+		fromArgs(parsed, trimmed) {
 			if (parsed.error) return { kind: "run-usage" };
 			const options: RunCommandOptions = {};
 
@@ -608,7 +615,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const agentId = parsed.positionals[0] ?? "";
 			const task = parsed.positionals[1] ?? "";
 
-			return { kind: "run", agentId, task, options };
+			return { kind: "run", agentId, task, options, source: trimmed };
 		},
 		handle(command, ctx) {
 			if (command.kind === "run-usage") {
@@ -620,6 +627,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (command.kind !== "run") return;
 			const { agentId, task, options } = command;
+			ctx.echoOperatorCommand?.(command.source);
 			void (async () => {
 				await handleRun(
 					agentId,
@@ -648,11 +656,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				{ name: "task", required: true, rest: true },
 			],
 		},
-		fromArgs(parsed) {
+		fromArgs(parsed, trimmed) {
 			if (parsed.error) return { kind: "delegate-usage" };
 			const agentId = parsed.positionals[0] ?? "";
 			const task = parsed.positionals[1] ?? "";
-			return { kind: "delegate", agentId, task };
+			return { kind: "delegate", agentId, task, source: trimmed };
 		},
 		handle(command, ctx) {
 			if (command.kind === "delegate-usage") {
@@ -663,6 +671,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind !== "delegate") return;
+			ctx.echoOperatorCommand?.(command.source);
 			void (async () => {
 				await handleDelegate(command.agentId, command.task, {
 					dispatch: ctx.dispatch,

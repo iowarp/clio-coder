@@ -25,7 +25,7 @@ import type { ChatLoop } from "./chat-loop.js";
 import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
-import { appendNotice } from "./command-output.js";
+import { appendNotice, appendOperatorCommand } from "./command-output.js";
 import { dateLocal } from "./format-time.js";
 import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
 import {
@@ -173,6 +173,12 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	const context: SlashCommandContext = {
 		io: deps.io,
 		notice: appendCommandNotice,
+		echoOperatorCommand: (text) => {
+			appendOperatorCommand(text, {
+				appendReplayBlock: (renderBlock) => deps.chatPanel.appendReplayBlock(renderBlock),
+				requestRender: deps.requestRender,
+			});
+		},
 		dispatch: deps.dispatch,
 		bus: deps.bus,
 		...(deps.agents

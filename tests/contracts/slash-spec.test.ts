@@ -16,6 +16,7 @@ import {
 	commandReference,
 	dispatchSlashCommand,
 	parseSlashCommand,
+	type SlashCommand,
 	type SlashCommandContext,
 } from "../../src/interactive/slash-commands.js";
 import { usageLine } from "../../src/interactive/slash-spec.js";
@@ -572,7 +573,14 @@ describe("contracts/slash-spec", () => {
 		];
 
 		for (const [input, expected] of testCases) {
-			deepStrictEqual(parseSlashCommand(input), expected, `Failed for input: "${input}"`);
+			const parsed = parseSlashCommand(input);
+			// `/run` and `/delegate` carry the typed line so the transcript can echo
+			// it above the block the run draws. It is the input verbatim in every
+			// case, so it is asserted as an invariant here rather than repeated in
+			// twenty rows of the table above.
+			const { source, ...rest } = parsed as SlashCommand & { source?: string };
+			if (source !== undefined) strictEqual(source, input, `source is the typed line for "${input}"`);
+			deepStrictEqual(rest, expected, `Failed for input: "${input}"`);
 		}
 	});
 
