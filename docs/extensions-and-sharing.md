@@ -13,16 +13,17 @@ Source of truth: `src/domains/extensions/**`, `src/domains/resources/**`, `src/d
 
 Prompts and skills are loaded from package, user, and project roots. Higher-ranked roots override lower-ranked resources with the same name.
 
-Prompts use the three-tier precedence:
+Prompts and skills both add compatibility roots so that the command and skill files other agents already have on the machine are usable without copying. Both root lists come from the interop agent registry (`src/domains/interop/registry.ts`), so the two kinds cannot drift apart. The prompt precedence, lowest to highest, is:
 
-| Rank | Scope | Root |
-| --- | --- | --- |
-| 0 | package | enabled extension resource roots |
-| 1 | user | `<configDir>/prompts` |
-| 2 | project | `.clio-coder/prompts` |
-| 3 | cli | reserved for call-site injected resources |
+| Precedence | Scope | Source | Root |
+| --- | --- | --- | --- |
+| 10 | package | extension | enabled extension resource roots |
+| 20 | user | claude / codex / opencode | `~/.claude/commands`, `~/.codex/prompts`, `~/.config/opencode/command` |
+| 30 | user | clio | `<configDir>/prompts` |
+| 40 | project | claude / codex / opencode | `.claude/commands`, `.codex/prompts`, `.opencode/command` (untrusted by default) |
+| 50 | project | clio | `.clio-coder/prompts` |
 
-Skills add Agent Skills compatibility roots so that skills installed by other agents are usable without copying. The skill precedence, lowest to highest, is:
+The skill precedence, lowest to highest, is:
 
 | Precedence | Scope | Source | Root |
 | --- | --- | --- | --- |
@@ -33,7 +34,7 @@ Skills add Agent Skills compatibility roots so that skills installed by other ag
 | 50 | project | clio | `.clio-coder/skills` |
 | 60 | cli | path | reserved for call-site injected resources |
 
-Clio-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio-coder/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. If multiple compatibility roots contain the same skill name at the same precedence, Clio resolves the collision deterministically by file path and records a diagnostic. If two roots resolve to the same canonical `SKILL.md` through a symlink, Clio keeps the higher-precedence entry and records a diagnostic.
+Clio-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio-coder/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. If multiple compatibility roots contain the same name at the same precedence, the tie breaks by the registry's agent order rather than by path spelling, so a skill symlinked into two foreign roots resolves to the same winner on every machine. If two roots resolve to the same canonical `SKILL.md` through a symlink, Clio keeps the higher-precedence entry and records a diagnostic naming the path that is in use.
 
 ---
 
@@ -65,6 +66,12 @@ Use in the TUI:
 ```
 
 Templates without frontmatter are accepted; Clio derives a fallback description from the first non-empty line. Invalid frontmatter degrades to a warning for prompt templates rather than failing the whole load.
+
+### Foreign prompt roots
+
+A Claude Code slash command in `.claude/commands`, a Codex prompt in `.codex/prompts`, and an OpenCode command in `.opencode/command` are prompt templates Clio reads directly, at both user and project scope. A foreign prompt is text substituted into a message the operator typed, so it keeps the untrusted-by-project default that skills have and never gains an execution grant of its own.
+
+User-scope foreign prompts are trusted the way user-scope foreign skills are: they came from the operator's own machine. A project-scope one lists in `/prompts` with an `untrusted` marker and refuses to substitute into a message until the trust flag is set, because an unreviewed checkout would otherwise get to write part of the operator's next message. `skills.trustProjectCompatRoots` is the one opt-in for both kinds: it is the same trust decision whichever resource is read out of the project root.
 
 ---
 

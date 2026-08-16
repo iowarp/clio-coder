@@ -29,7 +29,7 @@ Default config file:
 <configDir>/settings.yaml
 ```
 
-Role contents: config holds user-authored files (settings, credentials, agents, skills, prompts, extensions, runtimes); data holds durable artifacts (memory, evidence, evals); state holds machine-produced session state (sessions, audit, receipts, runs.json, recent-models.json, install.json, interviews, scratch); cache holds disposable derived files.
+Role contents: config holds user-authored files (settings, credentials, agents, skills, prompts, extensions, runtimes); data holds durable artifacts (memory, evidence, evals); state holds machine-produced session state (sessions, audit, receipts, runs.json, recent-models.json, install.json, interop.json, interviews, scratch); cache holds disposable derived files.
 
 `clio-coder paths --json` prints the resolved directories and is the single source of truth for scripts.
 
@@ -486,6 +486,8 @@ Every one of these has an environment override for a single process; see [enviro
 | `delegation.defaults.permissionTimeoutMs` | `120000` | integer ≥ 1 | next dispatch |
 | `delegation.defaults.toolGovernance` | `clio-policy` | `clio-policy`, `runtime-native` | next dispatch |
 
+`delegation.agents` is the one settings key Clio itself appends to, and only after an explicit answer in `clio-coder configure --interop` or `/interop`. Everything else here is operator-authored.
+
 ### Interface
 
 | Key | Default | Validation | When it applies |
@@ -547,6 +549,29 @@ clio-coder configure \
 
 Add capability overrides such as `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` only when live probes cannot infer the right values for your runtime/model.
 
+---
+
+## Interop with other coding agents
+
+Clio knows which other coding agents are installed on the machine and in the project, and it can propose connecting an ACP-capable one as a delegation peer. `src/domains/interop/registry.ts` holds one entry per known agent (`claude-code`, `codex`, `opencode`, `gemini`, `copilot`, `cursor`, `antigravity`, plus the `.agents` convention) carrying its binaries, the directories it owns, its skill and prompt roots, its instruction filenames, and its ACP launch recipe when it has one.
+
+Detection is bounded and fails open. It resolves binaries with `access(X_OK)` and no shell, checks install directories, and runs a `--version` with a two-second timeout only when the caller asks for it and only for a binary that already resolved. A probe that cannot answer reports `unknown` rather than `absent`, and detection never throws. It never spawns a foreign agent's work command, and it never reads under a foreign agent's `sessions`, `history`, `cache`, `projects`, or `state` directory: it records that a foreign session store exists, never its contents.
+
+Review and connect detected agents with:
+
+```bash
+clio-coder configure --interop
+```
+
+On a terminal this walks the pending proposals one at a time, showing the exact YAML entry before it asks, and writes only what you answer yes to. Without a TTY it prints the proposals and exits 0 with `settings.yaml` byte-identical, which is what `scripts/install-local.sh` runs after `doctor --fix`. The interactive `clio-coder configure` wizard ends with the same review, and `/interop` in the TUI is the same flow as an overlay.
+
+No code path writes `delegation.agents` without an operator decision, and `doctor --fix` is not such a path. An accepted proposal appends exactly one entry through the serialized settings writer, which re-reads the file under its lock, so two processes accepting different agents cannot drop each other's entry. The appended entry carries `toolGovernance: clio-policy` and no `projectContext` key, so the peer inherits `projectContext: "none"` and receives your task text rather than the project projection. Both facts are shown before you are asked.
+
+Decisions are recorded in `<stateDir>/interop.json`, schema v1, written atomically. Each decision is keyed by agent kind plus a fingerprint of the facts it was made against, so a declined agent stays silent forever while its binary path and version hold, and comes back as a fresh proposal when either moves. A file this version cannot parse degrades to "no report" rather than acting on a half-read decision record, and no read-only command writes it. Project-scoped facts stay where they already live, in `.clio-coder/state.json` under `contextSources`.
+
+Clio never writes into a foreign agent's directory. The safety path policy carries a `noWritePaths` class populated from the same registry; see [safety-model.md](safety-model.md) for the enumerated classes.
+
+---
 
 ## Subscription-based Targets and Runtimes
 
