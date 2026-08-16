@@ -70,6 +70,24 @@ export function renderProposalEntry(proposal: InteropProposal): string {
 }
 
 /**
+ * Facts come from the caller's report, standing decisions from disk. A caller
+ * holds one report across several calls, so its copy of a record is stale the
+ * moment an earlier call decided that record: taking the report's bookkeeping
+ * would erase the decision just written. Recording one accept and one decline
+ * in the same review lost the accept exactly this way.
+ */
+function withStoredDecision(stored: InteropAgentRecord | undefined, fresh: InteropAgentRecord): InteropAgentRecord {
+	if (stored === undefined) return fresh;
+	return {
+		...fresh,
+		...(stored.decision !== undefined ? { decision: stored.decision } : {}),
+		...(stored.decidedAt !== undefined ? { decidedAt: stored.decidedAt } : {}),
+		...(stored.decidedFingerprint !== undefined ? { decidedFingerprint: stored.decidedFingerprint } : {}),
+		...(stored.hintedFingerprint !== undefined ? { hintedFingerprint: stored.hintedFingerprint } : {}),
+	};
+}
+
+/**
  * Merge the report with what is on disk and patch the named records. The lock
  * covers the read as well as the write so a decision taken in one process is
  * not overwritten by a detection snapshot from another.
@@ -83,9 +101,13 @@ function updateRecords(
 	const touched: InteropAgentId[] = [];
 	withStateFileLockSync(interopStatePath(), () => {
 		const stored = readInteropReport();
-		const byKind = new Map<InteropAgentId, InteropAgentRecord>(
-			[...(stored?.agents ?? []), ...report.agents].map((record) => [record.kind, record]),
+		const storedByKind = new Map<InteropAgentId, InteropAgentRecord>(
+			(stored?.agents ?? []).map((record) => [record.kind, record]),
 		);
+		const byKind = new Map<InteropAgentId, InteropAgentRecord>(storedByKind);
+		for (const record of report.agents) {
+			byKind.set(record.kind, withStoredDecision(storedByKind.get(record.kind), record));
+		}
 		for (const id of wanted) {
 			const record = byKind.get(id);
 			if (record === undefined) continue;
