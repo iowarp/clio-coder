@@ -1,3 +1,4 @@
+import { jsonPayloadCandidates } from "../../core/json-payload.js";
 import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionScanResult } from "./adoption.js";
 import type { BootstrapStructuredOutput } from "./bootstrap.js";
@@ -204,13 +205,18 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 }
 
 function extractJsonObject(text: string): unknown {
-	const trimmed = text.trim();
-	if (trimmed.startsWith("{") && trimmed.endsWith("}")) return JSON.parse(trimmed);
-	const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed)?.[1]?.trim();
-	if (fenced?.startsWith("{")) return JSON.parse(fenced);
-	const start = trimmed.indexOf("{");
-	const end = trimmed.lastIndexOf("}");
-	if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1));
+	// Each span is tried and a parse failure moves to the next one. Returning on
+	// the first span that merely looks like the payload threw away a complete
+	// handbook whose "Commands" body held a fenced example: the fence span
+	// stopped at that inner close and the whole run was reported as a bootstrap
+	// failure even though the terminal result had already passed its contract.
+	for (const candidate of jsonPayloadCandidates(text)) {
+		try {
+			return JSON.parse(candidate) as unknown;
+		} catch {
+			// Try the next span.
+		}
+	}
 	throw new Error("bootstrap model output did not contain a JSON object");
 }
 

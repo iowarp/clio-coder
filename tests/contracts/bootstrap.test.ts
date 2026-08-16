@@ -10,6 +10,7 @@ import {
 	BOOTSTRAP_INPUT_MAX_CHARS,
 	BOOTSTRAP_SIBLING_CONTENT_MAX_CHARS,
 	buildBootstrapPrompt,
+	parseBootstrapModelOutput,
 } from "../../src/domains/context/bootstrap-prompt.js";
 import { parseClioMd, renderProjectContextFragment, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
@@ -176,6 +177,27 @@ describe("contracts/bootstrap", () => {
 		});
 
 		ok(prompt.includes("code_nav"), prompt);
+	});
+
+	it("reads a handbook payload behind prose and past a fence nested in its own body", () => {
+		const payload = {
+			projectName: "Nested",
+			identity: "Nested is a fixture.",
+			conventions: [],
+			invariants: [],
+			sections: [
+				{ title: "Commands", body: "```bash\nnpm test\n```" },
+				{ title: "Gotchas", body: "`index.ts:1` owns the flag." },
+			],
+		};
+		const output = parseBootstrapModelOutput(
+			`Now I have a thorough understanding.\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\``,
+		);
+
+		strictEqual(output.projectName, "Nested");
+		strictEqual(output.sections?.length, 2);
+		strictEqual(output.sections?.[1]?.title, "Gotchas");
+		throws(() => parseBootstrapModelOutput("I could not read the repository."));
 	});
 
 	it("bounds aggregate sibling context and uses display paths in the Scout payload", () => {
