@@ -212,10 +212,54 @@ export function agentAudiencePresentation(
 	return null;
 }
 
-/** The audience glyph as a styled, space-terminated prefix; empty for operator-facing agents. */
-export function agentAudiencePrefix(theme: ClioTheme, row: Pick<DispatchBoardRow, "agentAudience">): string {
+export interface DispatchOriginPresentation {
+	glyph: string;
+	token: ClioToken;
+}
+
+/**
+ * Who asked for this run, as the transcript spells it: hollow for the
+ * operator's own `/run` or `/delegate`, filled for one the model started by
+ * calling a dispatch tool, a quiet dot for the runs Clio starts for itself and
+ * never puts on the transcript. A running `◇` on the board is therefore the
+ * operator's own work, on the board and in the footer both.
+ *
+ * This is a different axis from {@link agentAudiencePresentation}, which says
+ * who picked the agent. An operator who approves a plan gets user-origin runs
+ * on shadow agents, so a row can carry both marks and mean two true things.
+ *
+ * Returns null for a row whose origin never reached the projection, so an
+ * unknown origin renders as nothing rather than claiming to be internal.
+ *
+ * Only the operator's own run takes a color. The transcript block paints an
+ * agent-origin run in action orange because it is the one signal on that
+ * surface; a board row sits under the fleet summary, which already owns the
+ * quadrant's single orange, so here the filled glyph carries origin by shape.
+ */
+export function dispatchOriginPresentation(
+	row: Pick<DispatchBoardRow, "requestOrigin">,
+): DispatchOriginPresentation | null {
+	if (row.requestOrigin === "user") return { glyph: GLYPH.workerHuman, token: "accent" };
+	if (row.requestOrigin === "agent") return { glyph: GLYPH.workerAgent, token: "muted" };
+	if (row.requestOrigin === "internal") return { glyph: GLYPH.workerInternal, token: "dim" };
+	return null;
+}
+
+/**
+ * The full glyph lead for a row: origin first, then audience. Reported with its
+ * own display width so each caller can reserve columns for it without
+ * measuring ANSI.
+ */
+export function dispatchRowPrefix(
+	theme: ClioTheme,
+	row: Pick<DispatchBoardRow, "agentAudience" | "requestOrigin">,
+): { text: string; width: number } {
+	const origin = dispatchOriginPresentation(row);
 	const audience = agentAudiencePresentation(row);
-	return audience === null ? "" : `${theme.fg(audience.token, audience.glyph)} `;
+	const text = `${origin === null ? "" : `${theme.fg(origin.token, origin.glyph)} `}${audience === null ? "" : `${theme.fg(audience.token, audience.glyph)} `}`;
+	const width =
+		(origin === null ? 0 : visibleWidth(origin.glyph) + 1) + (audience === null ? 0 : visibleWidth(audience.glyph) + 1);
+	return { text, width };
 }
 
 export interface DispatchStatusPresentation {
@@ -417,14 +461,13 @@ export function renderDispatchCard(
 	// are user data); clamp it so the title plus the elapsed meta never pushes
 	// the right corner past the card width.
 	const selectionWidth = options.selected === true ? visibleWidth(GLYPH.cursor) + 1 : 0;
-	const audiencePrefix = agentAudiencePrefix(theme, row);
-	const audienceWidth = audiencePrefix.length > 0 ? visibleWidth(GLYPH.subProcess) + 1 : 0;
-	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10 - selectionWidth - audienceWidth);
+	const rowPrefix = dispatchRowPrefix(theme, row);
+	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10 - selectionWidth - rowPrefix.width);
 	const clampedLabel = truncateToWidth(agentLabel, labelBudget, GLYPH.ellipsis, false);
 	const cardTitle =
 		options.selected === true
-			? `${theme.fg("accent", GLYPH.cursor)} ${audiencePrefix}${screenTitle(theme, clampedLabel)}`
-			: `${audiencePrefix}${clampedLabel}`;
+			? `${theme.fg("accent", GLYPH.cursor)} ${rowPrefix.text}${screenTitle(theme, clampedLabel)}`
+			: `${rowPrefix.text}${clampedLabel}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
@@ -528,12 +571,11 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 
 	// Reserve the glyph, separators, status word, and elapsed so a long agent
 	// label is clipped with a `…` marker rather than shoved off the row unmarked.
-	const audiencePrefix = agentAudiencePrefix(theme, row);
-	const audienceWidth = audiencePrefix.length > 0 ? visibleWidth(GLYPH.subProcess) + 1 : 0;
+	const rowPrefix = dispatchRowPrefix(theme, row);
 	const labelChrome =
 		visibleWidth(presentation.glyph) +
 		1 +
-		audienceWidth +
+		rowPrefix.width +
 		3 +
 		visibleWidth(presentation.label) +
 		3 +
@@ -542,7 +584,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 
 	// The agent label drops its accent color for plain bold; the status word is
 	// the only status-colored element on the row, with dim middot separators.
-	const line1 = `${glyph} ${audiencePrefix}${theme.paint(clampedLabel, { bold: true })}${dot}${statusStr}${dot}${theme.fg("muted", elapsed)}`;
+	const line1 = `${glyph} ${rowPrefix.text}${theme.paint(clampedLabel, { bold: true })}${dot}${statusStr}${dot}${theme.fg("muted", elapsed)}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;

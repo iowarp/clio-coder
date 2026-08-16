@@ -53,6 +53,11 @@ export const GLYPH = {
 	// so a running ◇ anywhere is work the operator started themselves.
 	workerHuman: "◇",
 	workerAgent: "◆",
+	// A run neither the operator nor the model asked for: wiki documenting, a
+	// bootstrap scout, a judge. It stays off the transcript entirely, so the
+	// board is the only surface that shows it and it gets the quietest mark
+	// that still holds the origin column.
+	workerInternal: "·",
 	ellipsis: "…",
 	favorite: "★",
 } as const;

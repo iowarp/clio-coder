@@ -8,10 +8,13 @@ import {
 	createDispatchBoardStore,
 	type DispatchBoardRow,
 	type DispatchBoardStatus,
+	dispatchOriginPresentation,
+	formatTaskIslandLines,
 	renderDispatchCard,
 } from "../../src/interactive/dispatch-board.js";
-import { type AgentWorkFacts, activityQuadrant } from "../../src/interactive/footer/widgets.js";
-import { GLYPH } from "../../src/interactive/theme/index.js";
+import { type AgentWorkFacts, activityQuadrant, buildHarnessStatePill } from "../../src/interactive/footer/widgets.js";
+import type { AgentStatus } from "../../src/interactive/status/index.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
 const strip = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
@@ -95,6 +98,94 @@ describe("internal-process identity", () => {
 
 	it("leaves operator-requested agents unmarked", () => {
 		ok(!panel([makeRow({ agentAudience: "base" })]).includes(GLYPH.subProcess));
+	});
+});
+
+describe("dispatch origin on the board", () => {
+	it("gives each origin its own glyph and leaves an unknown one unmarked", () => {
+		strictEqual(dispatchOriginPresentation({ requestOrigin: "user" })?.glyph, GLYPH.workerHuman);
+		strictEqual(dispatchOriginPresentation({ requestOrigin: "agent" })?.glyph, GLYPH.workerAgent);
+		strictEqual(dispatchOriginPresentation({ requestOrigin: "internal" })?.glyph, GLYPH.workerInternal);
+		strictEqual(dispatchOriginPresentation({}), null);
+	});
+
+	it("marks who asked on the card, the island, and the footer row", () => {
+		for (const [requestOrigin, glyph] of [
+			["user", GLYPH.workerHuman],
+			["agent", GLYPH.workerAgent],
+			["internal", GLYPH.workerInternal],
+		] as const) {
+			const row = makeRow({ requestOrigin });
+			ok(strip(renderDispatchCard(row, 76).join("\n")).includes(`${glyph} scout`), `card lost ${requestOrigin} origin`);
+			ok(strip(formatTaskIslandLines([row]).join("\n")).includes(`${glyph} scout`), `island lost ${requestOrigin} origin`);
+			ok(panel([row]).includes(`${glyph} scout`), `footer row lost ${requestOrigin} origin`);
+		}
+	});
+
+	// Two axes, two marks: the operator approved the plan that spawned this run,
+	// and Clio picked the agent that serves it. Origin leads because it answers
+	// "is this mine" first.
+	it("carries origin and audience together, origin first", () => {
+		const row = makeRow({ requestOrigin: "user", agentAudience: "shadow" });
+		ok(panel([row]).includes(`${GLYPH.workerHuman} ${GLYPH.subProcess} scout`));
+	});
+
+	it("keeps the fleet quadrant's single orange signal on rows the model started", () => {
+		const theme = clioTheme();
+		const rendered = activityQuadrant(workFacts([makeRow({ requestOrigin: "agent" })]), {
+			width: 96,
+			maxWorkers: 4,
+		}).join("\n");
+		strictEqual(rendered.split(theme.fgSequence("action")).length - 1, 1);
+	});
+});
+
+describe("footer worker chip", () => {
+	const idle: AgentStatus = {
+		phase: "idle",
+		since: 0,
+		lastMeaningfulAt: 0,
+		watchdogTier: 0,
+		watchdogPeak: 0,
+		localRuntime: false,
+	};
+	const chip = (rows: ReadonlyArray<DispatchBoardRow>): string =>
+		strip(buildHarnessStatePill(clioTheme(), idle, { tools: {}, errors: 0, active: 0 }, rows, 0, 1000, 80, true));
+
+	it("names both counts when the operator and the model are both running work", () => {
+		strictEqual(
+			chip([
+				makeRow({ runId: "a", requestOrigin: "user" }),
+				makeRow({ runId: "b", requestOrigin: "agent" }),
+				makeRow({ runId: "c", requestOrigin: "agent" }),
+			]),
+			`${GLYPH.workerHuman}1 ${GLYPH.workerAgent}2`,
+		);
+	});
+
+	it("keeps the plain count when one kind is running", () => {
+		strictEqual(
+			chip([makeRow({ runId: "a", requestOrigin: "user" }), makeRow({ runId: "b", requestOrigin: "user" })]),
+			"fleet 2",
+		);
+		strictEqual(chip([makeRow({ requestOrigin: "internal" })]), "fleet 1");
+	});
+
+	// A split that cannot name one of the running rows would report a total that
+	// is short, so the plain count is the honest fallback.
+	it("falls back to the plain count when a running row has no origin", () => {
+		strictEqual(chip([makeRow({ runId: "a", requestOrigin: "user" }), makeRow({ runId: "b" })]), "fleet 2");
+	});
+
+	it("counts only live rows, whichever origin they carry", () => {
+		strictEqual(
+			chip([
+				makeRow({ runId: "a", requestOrigin: "user" }),
+				makeRow({ runId: "b", requestOrigin: "agent" }),
+				makeRow({ runId: "c", requestOrigin: "agent", status: "completed" }),
+			]),
+			`${GLYPH.workerHuman}1 ${GLYPH.workerAgent}1`,
+		);
 	});
 });
 
