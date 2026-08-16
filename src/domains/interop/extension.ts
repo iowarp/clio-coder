@@ -33,6 +33,14 @@ export function createInteropBundle(_context: DomainContext): DomainBundle<Inter
 		proposals(report) {
 			return interopProposals(report, readSettings());
 		},
+		// Read here, not from the hot settings snapshot the TUI holds: that one is
+		// refreshed by the config watcher a tick after the write, and the overlay
+		// rebuilds its rows the moment accept returns. An accepted peer was gone
+		// from the proposals, which read the file, and not yet in the configured
+		// list, which read the snapshot, so it was in neither until a reopen.
+		configured() {
+			return readSettings().delegation.agents;
+		},
 		accept(ids) {
 			const result = acceptInteropAgents(ids, detected ?? readInteropReport() ?? EMPTY_REPORT);
 			detected = readInteropReport() ?? detected;

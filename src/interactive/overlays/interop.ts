@@ -1,4 +1,4 @@
-import type { InteropAgentId, InteropProposal, InteropReport } from "../../domains/interop/index.js";
+import type { InteropAgentId, InteropContract, InteropProposal, InteropReport } from "../../domains/interop/index.js";
 import { INHERITED_PROJECT_CONTEXT, renderProposalEntry } from "../../domains/interop/index.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { SlashCommandContext } from "../slash-commands.js";
@@ -20,6 +20,38 @@ export interface InteropOverlayDeps {
 	accept: (kind: InteropAgentId) => void;
 	decline: (kind: InteropAgentId) => void;
 	onClose: () => void;
+}
+
+/**
+ * The overlay's view of the interop domain, built from the contract alone.
+ *
+ * Detected and Configured partition the same agents, and the frame that follows
+ * a keystroke draws both. Reading the wired peers from the TUI's hot settings
+ * snapshot put them a config-watcher tick behind the proposals, which read the
+ * file: an accepted agent left Detected immediately and reached Configured only
+ * on the next time the overlay was opened. Taking one source is what keeps the
+ * two lists describing one moment.
+ */
+export function interopOverlaySurface(
+	interop: InteropContract,
+	notify: (level: "success" | "warning", text: string) => void,
+): Omit<InteropOverlayDeps, "onClose"> {
+	return {
+		report: () => interop.lastReport(),
+		proposals: () => {
+			const report = interop.lastReport();
+			return report === null ? [] : interop.proposals(report);
+		},
+		configured: () => interop.configured(),
+		accept: (kind) => {
+			const result = interop.accept([kind]);
+			for (const id of result.wired) notify("success", `delegation agent ${id} added`);
+			for (const diagnostic of result.diagnostics) notify("warning", diagnostic);
+		},
+		decline: (kind) => {
+			interop.decline([kind]);
+		},
+	};
 }
 
 function planLines(proposal: InteropProposal): string[] {
