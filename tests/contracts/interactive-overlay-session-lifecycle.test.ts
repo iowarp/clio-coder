@@ -90,10 +90,10 @@ function createSessionHarness(options: {
 		terminal: { columns: 100 },
 		dispatchBoard: {},
 		chatPanel: {
-			reset: () => events.push("panel:reset"),
 			appendUser: (text: string) => events.push(`panel:user:${text}`),
 			collapseAllTools: () => events.push("panel:collapse-tools"),
 		},
+		resetTranscript: () => events.push("panel:reset"),
 		io: { stdout: () => {}, stderr: (text: string) => events.push(`stderr:${text.trim()}`) },
 		readStructuredEntries: (sessionId: string) => {
 			events.push(`entries:read:${sessionId}`);

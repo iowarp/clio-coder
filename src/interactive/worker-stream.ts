@@ -131,8 +131,6 @@ export interface WorkerStreamOptions {
 	 * truth; the bus payload is only the fallback for when it cannot be read.
 	 */
 	readReceipt?: (runId: string) => WorkerReceiptFacts | null;
-	/** Assignments retained before the oldest settled one is evicted. */
-	maxEntries?: number;
 }
 
 export interface WorkerStream {
@@ -142,8 +140,13 @@ export interface WorkerStream {
 	failed(payload: DispatchFailedPayload): WorkerStreamChange | null;
 	aborted(payload: RunAbortedPayload): WorkerStreamChange | null;
 	get(assignmentId: string): WorkerEntryState | undefined;
-	/** Every retained entry, oldest first. `/share` reads it to find a finished run. */
-	entries(): ReadonlyArray<WorkerEntryState>;
+	/**
+	 * Forget every assignment. Called with the transcript's own reset, so a
+	 * session change clears the routing table and the visible blocks together:
+	 * a late event for a run of the old session then finds no entry, rather than
+	 * repainting an old block into the new transcript.
+	 */
+	reset(): void;
 }
 
 /**
@@ -158,7 +161,6 @@ export const WORKER_LIVE_TAIL_LINES = 40;
 export const WORKER_TOOL_NAME_LIMIT = 8;
 
 const WORKER_TEXT_TRUNCATION_MARKER = "";
-const DEFAULT_MAX_ENTRIES = 64;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -291,24 +293,11 @@ function receiptSummary(facts: WorkerReceiptFacts, fallbackElapsedMs: number): W
 
 export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStream {
 	const now = (): number => options.now?.() ?? Date.now();
-	const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
-	/** Insertion-ordered; eviction takes the oldest settled entry. */
 	const byAssignment = new Map<string, WorkerEntryState>();
-	/** Current attempt run id to its assignment, so progress and terminal events find their entry. */
+	/** Every attempt run id to its assignment, so progress and terminal events find their entry. */
 	const assignmentByRun = new Map<string, string>();
 	/** Durable answer text observed live, per attempt; the receipt wins when it is readable. */
 	const durableTextByRun = new Map<string, string>();
-
-	const prune = (): void => {
-		if (byAssignment.size <= maxEntries) return;
-		for (const [assignmentId, entry] of byAssignment) {
-			if (byAssignment.size <= maxEntries) break;
-			if (entry.pending) continue;
-			byAssignment.delete(assignmentId);
-			for (const attempt of entry.attempts) assignmentByRun.delete(attempt.runId);
-			for (const attempt of entry.attempts) durableTextByRun.delete(attempt.runId);
-		}
-	};
 
 	/** The entry a run id addresses, and only while that run is the entry's current attempt. */
 	const currentEntryForRun = (runId: unknown): WorkerEntryState | undefined => {
@@ -338,7 +327,6 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			entry.text = bounded.text;
 			entry.droppedLines = bounded.dropped;
 		}
-		prune();
 		return { kind: "updated", entry };
 	};
 
@@ -379,7 +367,6 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			};
 			byAssignment.set(assignmentId, entry);
 			assignmentByRun.set(runId, assignmentId);
-			prune();
 			return { kind: "created", entry };
 		},
 
@@ -453,8 +440,10 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			return byAssignment.get(assignmentId);
 		},
 
-		entries(): ReadonlyArray<WorkerEntryState> {
-			return [...byAssignment.values()];
+		reset(): void {
+			byAssignment.clear();
+			assignmentByRun.clear();
+			durableTextByRun.clear();
 		},
 	};
 }
