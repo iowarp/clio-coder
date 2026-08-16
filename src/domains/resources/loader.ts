@@ -3,6 +3,7 @@ import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { ResourceDiagnostic } from "./collision.js";
 import {
 	expandPromptTemplateInput,
+	type LoadPromptTemplatesInput,
 	loadPromptTemplates,
 	type PromptTemplate,
 	type PromptTemplateExpansion,
@@ -48,6 +49,14 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
 	> => options.skills?.() ?? {};
+	// Prompts share the skills opt-in: a project compatibility root is the same
+	// trust decision whichever kind is read out of it.
+	const promptOptions = (cwd: string): LoadPromptTemplatesInput => ({
+		cwd,
+		...(skillOptions().trustProjectCompatRoots !== undefined
+			? { trustProjectCompatRoots: skillOptions().trustProjectCompatRoots === true }
+			: {}),
+	});
 	return {
 		skills(cwd = defaultCwd) {
 			return loadSkills({ cwd, ...skillOptions() });
@@ -59,10 +68,10 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 			return parsePendingSkillRequests(text, loadSkills({ cwd, ...skillOptions() }), { cwd, ...expansionOptions });
 		},
 		prompts(cwd = defaultCwd) {
-			return loadPromptTemplates({ cwd });
+			return loadPromptTemplates(promptOptions(cwd));
 		},
 		expandPromptTemplate(text, cwd = defaultCwd) {
-			return expandPromptTemplateInput(text, loadPromptTemplates({ cwd }));
+			return expandPromptTemplateInput(text, loadPromptTemplates(promptOptions(cwd)));
 		},
 		themes() {
 			return { items: [], diagnostics: [] };

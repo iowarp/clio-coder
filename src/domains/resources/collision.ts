@@ -4,6 +4,12 @@ export interface ResourceSourceInfo {
 	path: string;
 	scope: ResourceScope;
 	source?: string;
+	/**
+	 * Collision rank, higher wins, for kinds that split a scope into tiers the
+	 * way skills split user roots into compatibility and Clio's own. Set it for
+	 * every candidate of a kind or none of them; a mixed set compares two scales.
+	 */
+	precedence?: number;
 }
 
 export interface ResourceCollision {
@@ -39,8 +45,12 @@ const SCOPE_RANK: Record<ResourceScope, number> = {
 	cli: 3,
 };
 
+function rankOf(info: ResourceSourceInfo): number {
+	return info.precedence ?? SCOPE_RANK[info.scope];
+}
+
 function compareCandidates<T>(a: ResourceCandidate<T>, b: ResourceCandidate<T>): number {
-	const rankDelta = SCOPE_RANK[a.source.scope] - SCOPE_RANK[b.source.scope];
+	const rankDelta = rankOf(a.source) - rankOf(b.source);
 	if (rankDelta !== 0) return rankDelta;
 	return a.source.path.localeCompare(b.source.path);
 }

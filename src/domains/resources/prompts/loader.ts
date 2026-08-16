@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
+import { INTEROP_AGENT_KINDS } from "../../interop/registry.js";
 import {
 	type ResourceCandidate,
 	type ResourceDiagnostic,
@@ -8,12 +10,14 @@ import {
 	resolveResourceCollisions,
 } from "../collision.js";
 import {
+	COMPAT_RESOURCE_PRECEDENCE,
 	defaultScopedResourceRoots,
 	readRootEntries,
 	sourceInfoForRoot,
 	splitYamlFrontmatter,
 	stringField,
 } from "../common-loader.js";
+import { projectCompatTrusted } from "../skills/loader.js";
 import { parseCommandArgs, substituteArgs } from "./substitute.js";
 
 export interface PromptTemplate {
@@ -22,6 +26,8 @@ export interface PromptTemplate {
 	content: string;
 	filePath: string;
 	sourceInfo: ResourceSourceInfo;
+	/** False for a project compatibility root until the operator opts in; such a template refuses to expand. */
+	trusted: boolean;
 	argumentHint?: string;
 }
 
@@ -29,6 +35,8 @@ export interface PromptTemplateRoot {
 	path: string;
 	scope: ResourceScope;
 	source?: string;
+	precedence?: number;
+	trusted?: boolean;
 }
 
 export interface PromptTemplateList {
@@ -39,6 +47,10 @@ export interface PromptTemplateList {
 export interface LoadPromptTemplatesInput {
 	cwd?: string;
 	roots?: ReadonlyArray<PromptTemplateRoot>;
+	/** Override the user home dir used for shared compatibility roots (testing). */
+	home?: string;
+	/** Opt in to model-visible project compatibility roots (.claude/commands, .codex/prompts). */
+	trustProjectCompatRoots?: boolean;
 }
 
 export type PromptTemplateExpansion =
@@ -56,8 +68,38 @@ export type PromptTemplateExpansion =
 			diagnostics: ResourceDiagnostic[];
 	  };
 
-function defaultPromptTemplateRoots(cwd: string): PromptTemplateRoot[] {
-	return defaultScopedResourceRoots("prompts", cwd);
+/**
+ * Clio's own prompt roots plus the command and prompt directories the other
+ * agents on the machine own. A foreign prompt is text substituted into a
+ * message the operator typed, so a project-scope one stays untrusted behind the
+ * same opt-in a project-scope foreign skill needs.
+ */
+function defaultPromptTemplateRoots(input: LoadPromptTemplatesInput = {}): PromptTemplateRoot[] {
+	const cwd = input.cwd ?? process.cwd();
+	const home = input.home ?? homedir();
+	const trustProject = projectCompatTrusted(input.trustProjectCompatRoots);
+	const compat: PromptTemplateRoot[] = [];
+	for (const kind of INTEROP_AGENT_KINDS) {
+		if (kind.userPromptRoot !== undefined) {
+			compat.push({
+				path: path.join(home, kind.userPromptRoot),
+				scope: "user",
+				source: `${kind.id}-user`,
+				precedence: COMPAT_RESOURCE_PRECEDENCE.userCompat,
+				trusted: true,
+			});
+		}
+		if (kind.projectPromptRoot !== undefined) {
+			compat.push({
+				path: path.join(cwd, kind.projectPromptRoot),
+				scope: "project",
+				source: `${kind.id}-project`,
+				precedence: COMPAT_RESOURCE_PRECEDENCE.projectCompat,
+				trusted: trustProject,
+			});
+		}
+	}
+	return [...defaultScopedResourceRoots("prompts", cwd), ...compat];
 }
 
 function splitOptionalFrontmatter(
@@ -116,6 +158,7 @@ function loadPromptFile(
 		content: body.trim(),
 		filePath,
 		sourceInfo,
+		trusted: root.trusted !== false,
 	};
 	if (argumentHint) template.argumentHint = argumentHint;
 	return { name, value: template, source: sourceInfo };
@@ -135,8 +178,7 @@ function loadPromptRoot(
 }
 
 export function loadPromptTemplates(input: LoadPromptTemplatesInput = {}): PromptTemplateList {
-	const cwd = input.cwd ?? process.cwd();
-	const roots = input.roots ?? defaultPromptTemplateRoots(cwd);
+	const roots = input.roots ?? defaultPromptTemplateRoots(input);
 	const diagnostics: ResourceDiagnostic[] = [];
 	const candidates = roots.flatMap((root) => loadPromptRoot(root, diagnostics));
 	const resolved = resolveResourceCollisions(candidates);
@@ -162,6 +204,21 @@ export function expandPromptTemplateInput(input: string, templates: PromptTempla
 	if (!command) return { expanded: false, text: input, args: [], diagnostics: templates.diagnostics };
 	const template = templates.items.find((entry) => entry.name === command.name);
 	if (!template) return { expanded: false, text: input, args: [], diagnostics: templates.diagnostics };
+	if (!template.trusted) {
+		return {
+			expanded: false,
+			text: input,
+			args: [],
+			diagnostics: [
+				...templates.diagnostics,
+				{
+					type: "warning",
+					message: `prompt template ${template.name} comes from an untrusted project root; set skills.trustProjectCompatRoots to use it`,
+					path: template.filePath,
+				},
+			],
+		};
+	}
 	const args = parseCommandArgs(command.rest);
 	return {
 		expanded: true,
