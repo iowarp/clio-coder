@@ -21,8 +21,10 @@ import {
 	renderToolSubline,
 	unwrapResultEnvelope,
 } from "./renderers/tool-execution.js";
+import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
 import { INLINE_STATUS_INDENT_COLS, type StatusPhase, type VerbRender } from "./status/index.js";
 import { clioTheme, fgSequence, GLYPH, markdownTheme, SGR_DIM, SGR_RESET } from "./theme/index.js";
+import type { WorkerEntryState } from "./worker-stream.js";
 
 // Fenced code reaches the screen through pi-tui's Markdown component, which
 // exposes the MarkdownTheme.highlightCode hook: it hands over the raw fence
@@ -201,12 +203,26 @@ type TranscriptEntry =
 			isError: boolean;
 			turnUsage?: ChatPanelTurnUsage;
 	  }
+	/**
+	 * A dispatched worker's attributed block. The panel owns only the fold
+	 * state; `state` is the live object the worker-stream reducer mutates, so a
+	 * streaming delta reaches the screen without copying the entry per frame.
+	 * The panel is told when that happened through `applyWorkerState`.
+	 */
+	| { role: "worker"; state: WorkerEntryState; folded: boolean }
 	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer };
 
 export interface ChatPanel extends Component {
 	appendUser(text: string): void;
 	appendReplayBlock(renderBlock: ReplayBlockRenderer): void;
 	applyEvent(event: ChatLoopEvent): void;
+	/**
+	 * Place or refresh a worker's block. The first call for an assignment
+	 * inserts the entry (agent origin nests under the tool segment named by
+	 * `state.parentToolCallId`, everything else appends); later calls only
+	 * invalidate the render, because the reducer mutates the same state object.
+	 */
+	applyWorkerState(state: WorkerEntryState): void;
 	setStatusLine(line: AssistantStatusLine | null): void;
 	toggleLastToolExpanded(): boolean;
 	toggleAllToolsExpanded(): boolean;
@@ -731,6 +747,7 @@ function renderEntryLines(
 	width: number,
 	expandKey: string | undefined,
 	latestHintToolId: string | null,
+	latestFoldedWorkerId: string | null,
 	nowMs: number,
 	unboundedToolBodies: boolean,
 	verbosity: OutputVerbosity,
@@ -747,6 +764,13 @@ function renderEntryLines(
 	}
 	if (entry.role === "retryStatus") {
 		return wrapTextWithAnsi(formatRetryStatus(entry.status), width);
+	}
+	if (entry.role === "worker") {
+		return renderWorkerEntryLines(entry.state, width, {
+			folded: verbosity === "verbose" ? false : verbosity === "minimal" ? true : entry.folded,
+			...(expandKey !== undefined && entry.state.assignmentId === latestFoldedWorkerId ? { expandKey } : {}),
+			unbounded: unboundedToolBodies,
+		});
 	}
 	// A settled assistant entry that rendered nothing at all contributes nothing.
 	// A mid-turn notice splits the transcript, so the events after it open a
@@ -848,6 +872,8 @@ function renderEntryLines(
 
 export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const transcript: TranscriptEntry[] = [];
+	/** Assignment to its placed block, so a streaming delta is O(1) to route. */
+	const workerEntries = new Map<string, TranscriptEntry>();
 	let dirty = true;
 	let cachedWidth: number | undefined;
 	let cachedLines: string[] = [];
@@ -1055,6 +1081,40 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		return null;
 	};
 
+	/**
+	 * Where a newly seen worker block belongs. An agent-origin run nests under
+	 * the assistant entry holding the tool call that spawned it, behind any
+	 * sibling blocks the same call already placed, so a fan-out reads top to
+	 * bottom in spawn order. Everything else, including a run whose parent call
+	 * is no longer in the transcript (a detached collect landing turns later),
+	 * appends at the tail. null means "append".
+	 */
+	const workerInsertionIndex = (state: WorkerEntryState): number | null => {
+		const parentToolCallId = state.parentToolCallId;
+		if (parentToolCallId === undefined) return null;
+		const owner = findToolSegmentOwner(parentToolCallId);
+		if (owner === undefined) return null;
+		const parentIndex = transcript.indexOf(owner.entry);
+		if (parentIndex < 0) return null;
+		let index = parentIndex + 1;
+		while (transcript[index]?.role === "worker") index += 1;
+		return index >= transcript.length ? null : index;
+	};
+
+	/**
+	 * Assignment of the newest folded worker block. Only that block advertises
+	 * the expand key: a fan-out of five scouts repeating the same chord five
+	 * times is noise, and the newest one is what the chord would open anyway.
+	 */
+	const latestFoldedWorkerAssignmentId = (): string | null => {
+		for (let index = transcript.length - 1; index >= 0; index -= 1) {
+			const entry = transcript[index];
+			if (entry?.role !== "worker") continue;
+			if (entry.folded) return entry.state.assignmentId;
+		}
+		return null;
+	};
+
 	/** True when the entry owns the tool the expand hint currently points at. */
 	const entryContainsHint = (entry: TranscriptEntry, latestHintToolId: string | null): boolean =>
 		latestHintToolId !== null &&
@@ -1066,10 +1126,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		entry.role === "assistant" &&
 		entry.segments.some((segment) => segment.kind === "tool" && !segment.finished && segment.startedAtMs !== undefined);
 
-	/** Settled entries whose render is a pure function of the base key. */
+	/**
+	 * Settled entries whose render is a pure function of the base key. A live
+	 * worker block is excluded for the same reason a running tool is: the
+	 * reducer mutates its state object in place, so a cached render would keep
+	 * serving the answer as it looked several deltas ago.
+	 */
 	const entryIsStable = (entry: TranscriptEntry): boolean =>
 		entry.role === "user" ||
 		entry.role === "replayBlock" ||
+		(entry.role === "worker" && !entry.state.pending) ||
 		(entry.role === "assistant" &&
 			!entry.pending &&
 			!entry.segments.some((segment) => segment.kind === "tool" && !segment.finished));
@@ -1103,6 +1169,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			return cachedLines;
 		}
 		const latestHintToolId = latestCollapsedFinishedToolId();
+		const latestFoldedWorkerId = latestFoldedWorkerAssignmentId();
 		// The hint id is deliberately NOT part of the shared key: it changes on
 		// every finished collapsed tool, and keying every entry on it re-rendered
 		// the entire transcript per tool completion. Only the entry that contains
@@ -1131,8 +1198,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (!entry) continue;
 			if (!sawRunningTool && entryHasRunningTool(entry)) sawRunningTool = true;
 			if (i > 0) out.push("");
-			const containsHint = entryContainsHint(entry, latestHintToolId);
-			const entryKey = containsHint ? `${baseKey}|hint:${latestHintToolId}` : baseKey;
+			const containsHint =
+				entryContainsHint(entry, latestHintToolId) ||
+				(entry.role === "worker" && entry.state.assignmentId === latestFoldedWorkerId);
+			const entryKey = containsHint ? `${baseKey}|hint:${latestHintToolId}|${latestFoldedWorkerId}` : baseKey;
 			const cached = entryRenderCache.get(entry);
 			const cacheable = i >= transcript.length - capacity && entry.role !== "replayBlock" && entryIsStable(entry);
 			if (cacheable && cached?.key === entryKey) {
@@ -1146,6 +1215,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					width,
 					expandKey,
 					latestHintToolId,
+					latestFoldedWorkerId,
 					nowMs,
 					unboundedToolBodies,
 					verbosity,
@@ -1190,9 +1260,40 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			transcript.push({ role: "replayBlock", renderBlock });
 			markDirty();
 		},
+		applyWorkerState(state: WorkerEntryState): void {
+			const existing = workerEntries.get(state.assignmentId);
+			if (existing !== undefined) {
+				// The reducer mutated the same state object this entry already holds,
+				// so nothing is re-linked; only the cached render is now stale.
+				invalidateEntryCache(existing);
+				markDirty();
+				return;
+			}
+			const entry: TranscriptEntry = { role: "worker", state, folded: state.origin === "agent" };
+			workerEntries.set(state.assignmentId, entry);
+			const at = workerInsertionIndex(state);
+			if (at === null) {
+				transcript.push(entry);
+			} else {
+				transcript.splice(at, 0, entry);
+				// A frozen prefix is a run of indices. Inserting inside it renumbers
+				// every entry behind the cut, so the freeze has to go.
+				if (frozen !== null && at < frozen.through) frozen = null;
+			}
+			markDirty();
+		},
 		toggleLastToolExpanded(): boolean {
+			// Ctrl+O owns the newest foldable thing, whichever kind it is. A worker
+			// block the operator just watched land is what they mean by "expand
+			// that", not the tool call two screens up that spawned it.
 			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 				const entry = transcript[entryIndex];
+				if (entry?.role === "worker") {
+					entry.folded = !entry.folded;
+					clearRenderCaches();
+					markDirty();
+					return true;
+				}
 				if (entry?.role !== "assistant") continue;
 				for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
 					const seg = entry.segments[segIndex];
@@ -1207,21 +1308,34 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		toggleAllToolsExpanded(): boolean {
 			const tools: ToolSegment[] = [];
+			const workers: Array<Extract<TranscriptEntry, { role: "worker" }>> = [];
 			for (const entry of transcript) {
+				if (entry.role === "worker") {
+					workers.push(entry);
+					continue;
+				}
 				if (entry.role !== "assistant") continue;
 				for (const seg of entry.segments) {
 					if (seg.kind === "tool") tools.push(seg);
 				}
 			}
-			if (tools.length === 0) return false;
-			const expand = tools.some((seg) => !seg.expanded);
+			if (tools.length === 0 && workers.length === 0) return false;
+			const expand = tools.some((seg) => !seg.expanded) || workers.some((entry) => entry.folded);
 			for (const seg of tools) seg.expanded = expand;
+			for (const entry of workers) entry.folded = !expand;
 			clearRenderCaches();
 			markDirty();
 			return true;
 		},
 		collapseAllTools(): void {
 			for (const entry of transcript) {
+				if (entry.role === "worker") {
+					// The settled view for a worker is its origin default, not
+					// universally folded: the operator's own run is the one block
+					// /run exists to show them.
+					entry.folded = entry.state.origin === "agent";
+					continue;
+				}
 				if (entry.role !== "assistant") continue;
 				for (const seg of entry.segments) {
 					if (seg.kind === "tool") seg.expanded = false;
@@ -1267,6 +1381,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		reset(): void {
 			transcript.length = 0;
+			workerEntries.clear();
 			clearRenderCaches();
 			markDirty();
 		},
