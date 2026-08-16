@@ -1,6 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Message, Model } from "@earendil-works/pi-ai";
+import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import {
 	parseScoutResult,
@@ -502,5 +503,45 @@ describe("contracts/agent result contract", () => {
 		strictEqual(wire[1]?.role, "assistant");
 		strictEqual(wire[2]?.role, "toolResult");
 		strictEqual((wire[2] as { toolCallId: string }).toolCallId, "clio-result-contract-repair-1");
+	});
+
+	it("a repair round survives request sizing: pi-ai's context estimator reads usage on the synthetic call (#70)", () => {
+		// buildBaseOptions -> clampMaxTokensToContext -> estimateContextTokens
+		// runs on every request. The estimator dereferences `usage` on any
+		// assistant message not marked aborted/error, so a usage-less
+		// synthetic call killed the worker on the round right after the
+		// violation: `Cannot read properties of undefined (reading 'totalTokens')`.
+		const origin = { provider: "llamacpp", api: "openai-completions", model: "Nemo-3.5-Lightning" };
+		const [call, result] = resultContractRepairMessages(
+			{ contract: { kind: "architect-plan", path: "PLAN.md" }, reason: "PLAN.md missing", attempt: 1, anchors: [] },
+			origin,
+		);
+		const usage = {
+			input: 500,
+			output: 40,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 540,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const terminal = {
+			role: "assistant",
+			content: [{ type: "text", text: "Here is the plan." }],
+			stopReason: "stop",
+			usage,
+			...origin,
+			timestamp: 0,
+		};
+		const model = {
+			...origin,
+			id: origin.model,
+			contextWindow: 8192,
+			maxTokens: 4096,
+			input: ["text"],
+		} as unknown as Model<"openai-completions">;
+		const context = { messages: [terminal, call, result] as unknown as Message[] };
+		const maxTokens = clampMaxTokensToContext(model, context, 4096);
+		ok(maxTokens > 0 && maxTokens <= 4096);
+		strictEqual(call.usage.totalTokens, 0, "the synthetic call contributes no usage of its own");
 	});
 });
