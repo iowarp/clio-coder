@@ -504,8 +504,31 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 
 const CODE_TOKEN_RE = /`([^`\n]+)`/g;
 
-function groundedToken(token: string, evidence: ModelGroundingCorpus): boolean {
+/**
+ * A citation anchored to a location: `src/cart.ts:26`, `src/cart.ts:40-42`, or
+ * `src/cart.ts:26:8`. The codewiki digest handed to the model prints its key
+ * symbols in exactly this form, so this is the shape a model that read the
+ * evidence writes back.
+ */
+const CITED_LOCATION_RE = /^(.*[^:]):(\d+)(?:[-:]\d+)?$/;
+
+function groundedPath(token: string, evidence: ModelGroundingCorpus): boolean {
 	return evidence.lower.includes(token.toLowerCase()) || evidence.indexedPaths.has(token.replace(/^\.\//, ""));
+}
+
+/**
+ * A token names something real when the token itself is in the evidence, or
+ * when it is a location-anchored citation whose path is. The corpus holds
+ * paths and symbol names, never file offsets, so requiring the whole token to
+ * match deleted precisely the lines that did the most reading: a Gotchas
+ * section whose five bullets each named a real file and line lost all five and
+ * vanished. Stripping the anchor cannot loosen the rule, because the bare path
+ * still has to ground on its own.
+ */
+function groundedToken(token: string, evidence: ModelGroundingCorpus): boolean {
+	if (groundedPath(token, evidence)) return true;
+	const anchored = CITED_LOCATION_RE.exec(token)?.[1];
+	return anchored !== undefined && anchored.length > 0 && groundedPath(anchored, evidence);
 }
 
 /**
