@@ -1,5 +1,6 @@
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { InteropProposal } from "../domains/interop/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { TUI } from "../engine/tui.js";
@@ -25,6 +26,8 @@ export interface OverlayModelSelectorsDeps {
 	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
 	/** Settings → Targets "connect" runs the auth flow over the open settings overlay. */
 	connectTarget?: (targetId: string) => Promise<void> | void;
+	/** Settings → Advanced offers detected agents on the delegation.agents row. */
+	getInteropProposals?: () => ReadonlyArray<InteropProposal>;
 	openModelOverlay?: typeof openModelOverlay;
 	openSettingsOverlay?: typeof openSettingsOverlay;
 }
@@ -83,6 +86,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 			...(rowId ? { rowId } : {}),
 			...(deps.getFleetNodes ? { getFleetNodes: deps.getFleetNodes } : {}),
 			...(deps.connectTarget ? { connectTarget: deps.connectTarget } : {}),
+			...(deps.getInteropProposals ? { getInteropProposals: deps.getInteropProposals } : {}),
 			writeSettings: (next) => {
 				deps.writeSettings?.(next);
 				deps.refreshFooter();

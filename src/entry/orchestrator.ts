@@ -47,7 +47,7 @@ import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
-import { InteropDomainModule } from "../domains/interop/index.js";
+import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import {
@@ -875,7 +875,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const extensions = result.getContract<ExtensionsContract>("extensions");
 	const share = result.getContract<ShareContract>("share");
 	const contextDomain = result.getContract<ContextContract>("context");
+	const interop = result.getContract<InteropContract>("interop");
+	// Boot detection resolves paths only: no `--version` subprocess and no skill
+	// walk on the boot path. The hint is gated on `interactive`, which is already
+	// false under headless and ACP.
+	const interopReport = interactive && interop ? await interop.detect({ cwd: process.cwd() }) : null;
 	const initialNotices = interactive ? [...(contextDomain?.startupHints() ?? [])] : [];
+	if (interop && interopReport) {
+		const interopHint = interop.bootHint(interopReport);
+		if (interopHint !== null) initialNotices.push(interopHint);
+	}
 	if (!providers || !dispatch || !observability || !safety || !middleware) {
 		process.stderr.write(
 			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + observability contracts; aborting.\n",
@@ -1645,6 +1654,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
+		...(interop ? { interop } : {}),
 		...(share ? { share } : {}),
 		toolRegistry,
 		...(session ? { session } : {}),

@@ -9,6 +9,7 @@ import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integri
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
+import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
 import type { PromptTemplate, ResourceList } from "../domains/resources/index.js";
@@ -46,6 +47,7 @@ type SlashCommandVariant =
 	| { kind: "skill-invocation"; text: string }
 	| { kind: "prompts" }
 	| { kind: "extensions" }
+	| { kind: "interop" }
 	| ShareCommandVariant
 	/** `source` is the line the operator typed, echoed above the run's transcript block. */
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions; source: string }
@@ -332,6 +334,14 @@ export interface SlashCommandContext {
 	openSkillsHub?: () => void;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
+	/** Detection report, pending proposals, and the two consent actions `/interop` drives. */
+	interop?: {
+		report: () => InteropReport | null;
+		proposals: () => ReadonlyArray<InteropProposal>;
+		configured: () => ReadonlyArray<{ id: string; command: string; args: ReadonlyArray<string> }>;
+		accept: (kind: InteropAgentId) => void;
+		decline: (kind: InteropAgentId) => void;
+	};
 	listAgents: () => ReadonlyArray<AgentSpec>;
 	listDelegationAgents: () => ReadonlyArray<{
 		id: string;
@@ -375,6 +385,7 @@ export interface SlashCommandContext {
 	openAgents: () => void;
 	openPrompts: () => void;
 	openExtensions: () => void;
+	openInterop?: () => void;
 	setEditorText?: (text: string) => void;
 	/**
 	 * Run compaction for the current session. Handler resolves the target
@@ -560,6 +571,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs: fromArgsOrUsage("extensions", { kind: "extensions" }),
 		handle(_command, ctx) {
 			ctx.openExtensions?.();
+		},
+	},
+	{
+		name: "interop",
+		description: "Review other coding agents detected on this machine",
+		group: "Inspect",
+		kinds: ["interop"],
+		args: {},
+		fromArgs: fromArgsOrUsage("interop", { kind: "interop" }),
+		handle(_command, ctx) {
+			ctx.openInterop?.();
 		},
 	},
 	{

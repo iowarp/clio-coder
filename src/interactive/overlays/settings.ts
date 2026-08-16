@@ -10,6 +10,12 @@ import { DEFAULT_SETTINGS, THINKING_LEVELS } from "../../core/defaults.js";
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import {
+	delegationEntryForKind,
+	type InteropAgentId,
+	type InteropProposal,
+	interopAgentKind,
+} from "../../domains/interop/index.js";
+import {
 	type CapabilityFlags,
 	isDispatchEligibleRuntime,
 	isOrchestratorEligibleRuntime,
@@ -469,6 +475,44 @@ interface BuildSettingItemsOptions {
 	getTargetOperation?: (targetId: string) => "connect" | "probe" | null;
 	/** Keeps the row grammar synchronized with the lifetime of connect/probe work. */
 	onTargetOperationChange?: (targetId: string, operation: "connect" | "probe" | null, operationToken: object) => void;
+	/** Detected agents not yet wired; absent or empty hides the add action on the delegation.agents row. */
+	getInteropProposals?: () => ReadonlyArray<InteropProposal>;
+}
+
+const DELEGATION_ADD_PREFIX = "add ";
+const DELEGATION_REMOVE_PREFIX = "remove ";
+
+/**
+ * The delegation.agents row is read-only until interop has something to offer.
+ * Adding writes the same entry `configure --interop` would, and removing names
+ * the `/delegate` id that stops resolving, which is the only user-visible
+ * consequence a change plan cannot show from a settings diff.
+ */
+function delegationAgentsAffordance(
+	agents: ReadonlyArray<{ id: string }>,
+	proposals: ReadonlyArray<InteropProposal>,
+): { affordance: string; readOnly?: boolean; submenu?: SettingSubmenuBuilder } {
+	const choices = [
+		...proposals.map((proposal) => ({
+			value: `${DELEGATION_ADD_PREFIX}${proposal.kind}`,
+			label: `Add detected agent ${proposal.entry.id} (${[proposal.entry.command, ...proposal.entry.args].join(" ")})`,
+			presentationKind: "action" as const,
+		})),
+		...agents.map((agent) => ({
+			value: `${DELEGATION_REMOVE_PREFIX}${agent.id}`,
+			label: `Remove ${agent.id}; /delegate ${agent.id} stops resolving`,
+			presentationKind: "destructive-action" as const,
+		})),
+	];
+	if (choices.length === 0) return { affordance: "edit settings.yaml", readOnly: true };
+	return {
+		affordance: "opens picker",
+		submenu: selectListSubmenu(
+			"Delegation agents",
+			choices,
+			"An added peer runs under clio-policy governance and inherits projectContext: none.",
+		),
+	};
 }
 
 type SubmenuTitle = string | ((width: number) => string);
@@ -1355,8 +1399,7 @@ export function buildSettingItems(
 			readOnly: true,
 		}),
 		settingItem("delegation.agents", agents.length > 0 ? `${agents.length} agent(s)` : "(none)", {
-			affordance: "edit settings.yaml",
-			readOnly: true,
+			...delegationAgentsAffordance(agents, options?.getInteropProposals?.() ?? []),
 		}),
 	];
 }
@@ -1664,6 +1707,20 @@ function applyPositiveInteger(value: string, set: (next: number) => void): void 
 /**
  * Pure mutation applied in place for Settings Center editable rows.
  */
+function applyDelegationAgentChange(settings: ClioSettings, value: string): void {
+	if (value.startsWith(DELEGATION_REMOVE_PREFIX)) {
+		const id = value.slice(DELEGATION_REMOVE_PREFIX.length);
+		settings.delegation.agents = settings.delegation.agents.filter((agent) => agent.id !== id);
+		return;
+	}
+	if (!value.startsWith(DELEGATION_ADD_PREFIX)) return;
+	const kind = interopAgentKind(value.slice(DELEGATION_ADD_PREFIX.length) as InteropAgentId);
+	if (kind?.acp === undefined) return;
+	const entry = delegationEntryForKind(kind, settings.delegation.defaults);
+	if (settings.delegation.agents.some((agent) => agent.id === entry.id)) return;
+	settings.delegation.agents.push(entry);
+}
+
 export function applySettingChange(settings: ClioSettings, id: string, value: string): void {
 	if (applyEntrySettingChange(settings, id, value)) return;
 	switch (id) {
@@ -1677,6 +1734,9 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		case "delegation.defaults.toolGovernance":
 			if (value === "clio-policy" || value === "agent-managed" || value === "deny-all")
 				settings.delegation.defaults.toolGovernance = value;
+			return;
+		case "delegation.agents":
+			applyDelegationAgentChange(settings, value);
 			return;
 		case "skills.trustProjectCompatRoots":
 			if (value === "true" || value === "false") settings.skills.trustProjectCompatRoots = value === "true";
@@ -3207,6 +3267,7 @@ export interface OpenSettingsOverlayDeps {
 	rowId?: SettingsCenterRowId;
 	getFleetNodes?: BuildSettingItemsOptions["getFleetNodes"];
 	connectTarget?: BuildSettingItemsOptions["connectTarget"];
+	getInteropProposals?: BuildSettingItemsOptions["getInteropProposals"];
 }
 
 function formatSettingChangeNotice(id: string, value: string, scope: "session" | "global"): string {
@@ -3247,6 +3308,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 	if (deps.providers) buildOptions.providers = deps.providers;
 	if (deps.getFleetNodes) buildOptions.getFleetNodes = deps.getFleetNodes;
 	if (deps.connectTarget) buildOptions.connectTarget = deps.connectTarget;
+	if (deps.getInteropProposals) buildOptions.getInteropProposals = deps.getInteropProposals;
 	const items = buildSettingItems(deps.getSettings(), buildOptions);
 	const center = new SettingsCenter(items, {
 		getBodyHeight: () => settingsBodyHeight(tui),
