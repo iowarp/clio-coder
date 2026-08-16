@@ -616,7 +616,21 @@ function runtimeMetadata(model: Model<Api>): ResolvedRuntimeMetadata {
 	};
 }
 
-function describeLoadFailure(
+/**
+ * Errnos raised before the server answered anything. A load that never reached
+ * the model cannot have been refused for its size, so the sizing advice below
+ * is wrong in both halves for these: the cause is the route, and no
+ * contextWindow override fixes a host that did not respond.
+ */
+const CONNECT_FAILURE_RE = /\b(ENETUNREACH|EHOSTUNREACH|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET|EAI_AGAIN)\b/;
+
+function isConnectFailure(err: unknown, cause: string): boolean {
+	const code = typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
+	if (typeof code === "string" && CONNECT_FAILURE_RE.test(code)) return true;
+	return CONNECT_FAILURE_RE.test(cause);
+}
+
+export function describeLoadFailure(
 	baseUrl: string,
 	model: Model<"lmstudio-native">,
 	loadConfig: LLMLoadModelConfig | undefined,
@@ -625,6 +639,14 @@ function describeLoadFailure(
 ): string {
 	const metadata = runtimeMetadata(model);
 	const cause = err instanceof Error ? err.message : String(err);
+	if (isConnectFailure(err, cause)) {
+		return [
+			`LM Studio at ${baseUrl} did not answer for target '${metadata.targetId}' model '${model.id}'.`,
+			"The connection failed before a load was attempted, so this is reachability rather than model sizing.",
+			"Check that the server is running and that this host can reach it, then retry.",
+			`SDK error: ${cause}`,
+		].join(" ");
+	}
 	const context = loadConfig?.contextLength ?? model.contextWindow;
 	const output = requestedMaxTokens === false || requestedMaxTokens === undefined ? model.maxTokens : requestedMaxTokens;
 	return [
