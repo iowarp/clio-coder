@@ -141,14 +141,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 * a call whose end event never arrives leaves at most one stale entry, which
 	 * the next run with the same id would overwrite.
 	 */
-	const toolOutcomes = new Map<string, { outcome: ToolOutcome; reason?: string }>();
+	const toolOutcomes = new Map<string, { outcome: ToolOutcome; reason?: string; durationMs: number }>();
 	const toolTelemetry: ToolTelemetry = {
 		onFinish(event) {
 			if (event.toolCallId === undefined) return;
-			toolOutcomes.set(
-				event.toolCallId,
-				event.reason === undefined ? { outcome: event.outcome } : { outcome: event.outcome, reason: event.reason },
-			);
+			toolOutcomes.set(event.toolCallId, {
+				outcome: event.outcome,
+				...(event.reason === undefined ? {} : { reason: event.reason }),
+				durationMs: event.durationMs,
+			});
 		},
 	};
 
@@ -560,7 +561,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				toolsInFlight = Math.max(0, toolsInFlight - 1);
 				const startedAt = deps.toolStartTimes.get(event.toolCallId);
 				deps.toolStartTimes.delete(event.toolCallId);
-				const durationMs = startedAt === undefined ? undefined : Math.round(Math.max(0, eventClock - startedAt));
 				// Carry the registry's verdict alongside the engine's result. The
 				// panel classifies settlement from `outcome`; without it the only
 				// available signal is result text, and grepping that text for
@@ -568,6 +568,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// (which prints `cancelled 0`) a permission block.
 				const admission = toolOutcomes.get(event.toolCallId);
 				toolOutcomes.delete(event.toolCallId);
+				// The registry's own span is the one that means "how long the tool
+				// took": the engine's start-to-end frame also covers the operator,
+				// because a call awaiting a permission decision is parked between
+				// those two events. Approving `wc -l src/*.ts | sort -n` after 25
+				// seconds of reading rendered it as a 31-second command.
+				const engineSpan = startedAt === undefined ? undefined : Math.round(Math.max(0, eventClock - startedAt));
+				const durationMs = admission?.durationMs ?? engineSpan;
 				enrichedEvent = {
 					...event,
 					...(durationMs !== undefined ? { durationMs } : {}),
