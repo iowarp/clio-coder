@@ -60,7 +60,7 @@ import {
 } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunLedgerContribution, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
-import { spawnWorkerProcess } from "../../src/domains/dispatch/worker-spawn.js";
+import { spawnNativeWorker, spawnWorkerProcess } from "../../src/domains/dispatch/worker-spawn.js";
 import { attestedToolSignature } from "../../src/engine/worker-tools.js";
 import {
 	createWorkerAgentLedgerMirror,
@@ -569,6 +569,65 @@ rl.on("line", (line) => {
 			strictEqual(result.exitCode, 0);
 			deepStrictEqual(posted, [{ kind: "finding", claim: "after announce" }]);
 			match(result.stderrTail ?? "", /dropped a ledger post/);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("delivers a post through spawnNativeWorker, which is what dispatch actually calls", async () => {
+		// The lane above works when a test calls spawnWorkerProcess directly.
+		// Every real local dispatch goes through spawnNativeWorker, which used to
+		// forward only cwd, env, and shutdownGraceMs and drop onLedgerPost with
+		// it. The option literal at the call site is built with a spread, which
+		// suppresses excess-property checking, so no type error marked the loss
+		// and three live fan-outs sealed boards with no entries.
+		const scratch = mkdtempSync(join(tmpdir(), "clio-agent-ledger-native-"));
+		const stubEntry = join(scratch, "stub-entry.js");
+		writeFileSync(
+			stubEntry,
+			`
+${STUB_ANNOUNCE_SOURCE}
+const readline = require("readline");
+const rl = readline.createInterface({ input: process.stdin });
+let sawSpec = false;
+rl.on("line", (line) => {
+	if (sawSpec) return;
+	sawSpec = true;
+	announceSpec(JSON.parse(line));
+	process.stderr.write(
+		"@clio-control/1 " + JSON.stringify({ kind: "ledger_post", body: { kind: "finding", claim: "through the native spawner" } }) + "\\n",
+	);
+	setTimeout(() => process.exit(0), 50);
+});
+`,
+		);
+		chmodSync(stubEntry, 0o755);
+		const spec = {
+			specVersion: WORKER_SPEC_VERSION,
+			settingsFingerprint: fixtureSettingsFingerprint(),
+			systemPrompt: "",
+			agentId: "scout",
+			executionRole: "builder",
+			task: "ledger lane",
+			target: { id: "default", runtime: "openai", defaultModel: "gpt-4o" },
+			runtime: { version: 2, id: "openai", kind: "http", apiFamily: "openai-completions", auth: "api-key" },
+			runtimeId: "openai",
+			wireModelId: "gpt-4o",
+			allowedTools: ["read"],
+		};
+		const posted: AgentLedgerBody[] = [];
+		const announced: string[] = [];
+		try {
+			const worker = spawnNativeWorker(spec as never, {
+				cwd: scratch,
+				workerEntryPath: stubEntry,
+				onLedgerPost: (body) => posted.push(body),
+				onAnnounce: (attestation) => announced.push(attestation.host),
+			});
+			const result = await worker.promise;
+			strictEqual(result.exitCode, 0);
+			deepStrictEqual(posted, [{ kind: "finding", claim: "through the native spawner" }]);
+			strictEqual(announced.length, 1, "every callback the caller passed survives the hop, not just the ledger one");
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}

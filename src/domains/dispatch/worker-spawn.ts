@@ -84,11 +84,17 @@ export interface SpawnedWorker {
 	attestation?(): WorkerAttestation | null;
 }
 
-export interface SpawnOptions {
-	cwd?: string;
-	env?: NodeJS.ProcessEnv;
+/**
+ * What a caller may hand `spawnNativeWorker`. It extends the process options
+ * rather than restating a subset of them, because a subset is how the callbacks
+ * went missing: this interface once listed only cwd, env, workerEntryPath, and
+ * shutdownGraceMs, `spawnNativeWorker` forwarded exactly those three, and every
+ * local worker's `onLedgerPost` was dropped on the floor. The call site spreads
+ * its option literal, which suppresses excess-property checking, so nothing
+ * complained.
+ */
+export interface SpawnOptions extends WorkerProcessOptions {
 	workerEntryPath?: string;
-	shutdownGraceMs?: number;
 }
 
 export interface WorkerProcessOptions {
@@ -549,9 +555,12 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 	// ExperimentalWarning offers operators no action and otherwise leaks into
 	// every internal-agent command's stderr. Suppress only that warning class;
 	// ordinary process warnings remain visible.
+	// Forward the whole option set. Enumerating it here is what silently dropped
+	// every callback a caller passed, so the only field this function decides is
+	// the entry path it consumed and the env default.
+	const { workerEntryPath: _entryPath, ...processOptions } = opts ?? {};
 	return spawnWorkerProcess(process.execPath, ["--disable-warning=ExperimentalWarning", workerEntry], spec, {
-		...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
+		...processOptions,
 		env: opts?.env ?? process.env,
-		...(opts?.shutdownGraceMs !== undefined ? { shutdownGraceMs: opts.shutdownGraceMs } : {}),
 	});
 }
