@@ -4,6 +4,7 @@ import type { Message, Model } from "@earendil-works/pi-ai";
 import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import {
+	parseCodeReport,
 	parseScoutResult,
 	RESULT_CONTRACT_REPAIR_TOOL,
 	resultContractAuthorship,
@@ -386,6 +387,32 @@ describe("contracts/agent result contract", () => {
 		});
 		strictEqual(fencedArray.conformance, "fail");
 		strictEqual(fencedArray.reason, "result must be a JSON object");
+	});
+
+	it("a fenced code report the validator accepted round-trips through parseCodeReport", () => {
+		const payload = {
+			passed: true,
+			exitCode: 0,
+			checks: [{ name: "npm run typecheck", passed: true, evidence: "tsc clean" }],
+			artifactPaths: ["src/sum.ts"],
+			outputExcerpt: "ok",
+		};
+		const fenced = `Here is the report:\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\``;
+		const validation = contract({
+			contract: { kind: "code-report" },
+			output: fenced,
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem,
+		});
+		strictEqual(validation.conformance, "pass");
+		const report = parseCodeReport(fenced);
+		ok(report, "the reader must accept every payload its validator passed");
+		strictEqual(report.passed, true);
+		strictEqual(report.exitCode, 0);
+		strictEqual(report.checks[0]?.name, "npm run typecheck");
+		strictEqual(report.artifactPaths[0], "src/sum.ts");
+		strictEqual(parseCodeReport("```json\n[1, 2]\n```"), null);
 	});
 
 	it("artifact existence without a correctness validator is not a quality pass", () => {

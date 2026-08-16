@@ -165,6 +165,21 @@ describe("contracts/dispatch validation grounding", () => {
 		ok(describeUngroundedValidations(grounding).includes('"npm run typecheck"'));
 	});
 
+	it("sees the claims in a report the model wrapped in a code fence", () => {
+		const grounding = groundClaimedValidations({
+			contractKind: "verifier-report",
+			output: `\`\`\`json\n${verifierReport}\n\`\`\``,
+			executedCommands: new Set(),
+			executedCheckingCalls: 0,
+		});
+		deepStrictEqual(grounding, {
+			claimed: 1,
+			grounded: 0,
+			ungrounded: ["npm run typecheck"],
+			basis: "no-command-executed",
+		});
+	});
+
 	it("leaves a claim the run did execute alone", () => {
 		const grounding = groundClaimedValidations({
 			contractKind: "verifier-report",

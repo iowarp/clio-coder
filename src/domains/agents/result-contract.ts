@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { jsonPayloadCandidates } from "../../core/json-payload.js";
+import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import { AGENT_AUTOMATION_AUTHORITIES, type AgentAutomationAuthority } from "./spec.js";
 
 export type ResultContract =
@@ -292,19 +292,12 @@ function parseJson(
 	output: string | null,
 ): { ok: true; value: Record<string, unknown> } | { ok: false; reason: string } {
 	if (output === null || output.trim().length === 0) return { ok: false, reason: "missing final result" };
-	let parsedSomething = false;
-	for (const candidate of jsonPayloadCandidates(output)) {
-		let value: unknown;
-		try {
-			value = JSON.parse(candidate) as unknown;
-		} catch {
-			continue;
-		}
-		parsedSomething = true;
-		if (value === null || typeof value !== "object" || Array.isArray(value)) continue;
-		return { ok: true, value: value as Record<string, unknown> };
-	}
-	return { ok: false, reason: parsedSomething ? "result must be a JSON object" : "result must be valid JSON" };
+	const parsed = parseJsonObjectPayload(output);
+	if (parsed.ok) return parsed;
+	return {
+		ok: false,
+		reason: parsed.reason === "not-object" ? "result must be a JSON object" : "result must be valid JSON",
+	};
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): boolean {
@@ -709,7 +702,11 @@ function validateCodeReport(contract: ResultContract, output: string | null): Re
 export function parseCodeReport(output: string | null): CodeReportResult | null {
 	const validation = validateCodeReport({ kind: "code-report" }, output);
 	if (validation.conformance !== "pass" || output === null) return null;
-	const value = JSON.parse(output) as CodeReportResult;
+	// The same reader the validator used, so a fenced payload that passed
+	// validation cannot fail here on a re-parse of the raw text.
+	const parsed = parseJsonObjectPayload(output);
+	if (!parsed.ok) return null;
+	const value = parsed.value as unknown as CodeReportResult;
 	return {
 		passed: value.passed,
 		exitCode: value.exitCode,
