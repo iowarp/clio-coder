@@ -616,6 +616,11 @@ Remote workers default to residency observe: the SSH transport exports
 them. A node opts into management explicitly with `residency: manage` in its
 fleet entry.
 
+A model the router tags as pinned (`pinned:true` or `role:scout`) is never
+evicted once resident, so Clio refuses to load it by evicting a resident that
+settings still reference by role; on a one-slot router such an override
+declines with a `will-not-fit` notice instead of stranding the configured model.
+
 ## Opt-in live regression
 
 After `npm run build`, an operator with a configured model target can run the

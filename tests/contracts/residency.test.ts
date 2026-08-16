@@ -150,6 +150,53 @@ describe("contracts/model residency decision", () => {
 		strictEqual(plan.notices.at(-1)?.level, "error");
 	});
 
+	it("never evicts a config-protected resident for a keep model that will come back tag-pinned (#72)", () => {
+		const plan = decideResidency({
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			keepModelId: "MiniCPM",
+			managed: true,
+			strategy: "router",
+			capacity: 1,
+			keepTagProtected: true,
+			resident: [{ modelId: "Nemo-3.5-Lightning", loadedByClio: false, protection: "config", role: "worker" }],
+		});
+
+		strictEqual(plan.decision, "decline");
+		deepStrictEqual(plan.evict, []);
+		strictEqual(plan.notices.at(-1)?.kind, "will-not-fit");
+		strictEqual(plan.notices.at(-1)?.level, "error");
+		strictEqual(plan.notices.at(-1)?.detail?.configProtected, true);
+		strictEqual(plan.notices.at(-1)?.detail?.role, "worker");
+		strictEqual(
+			plan.notices.at(-1)?.message.includes("'Nemo-3.5-Lightning' (a worker model)"),
+			true,
+			plan.notices.at(-1)?.message,
+		);
+	});
+
+	it("a tag-pinned keep model may still take an unprotected slot", () => {
+		const plan = decideResidency({
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			keepModelId: "MiniCPM",
+			managed: true,
+			strategy: "router",
+			capacity: 2,
+			keepTagProtected: true,
+			resident: [
+				{ modelId: "configured-coder", loadedByClio: false, protection: "config" },
+				{ modelId: "scratch", loadedByClio: true },
+			],
+		});
+
+		strictEqual(plan.decision, "reconcile");
+		deepStrictEqual(
+			plan.evict.map((entry) => entry.modelId),
+			["scratch"],
+		);
+	});
+
 	it("router without readable capacity conservatively swaps only unprotected residents", () => {
 		const plan = decideResidency({
 			targetId: "mini",

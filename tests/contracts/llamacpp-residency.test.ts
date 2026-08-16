@@ -211,6 +211,59 @@ describe("contracts/llamacpp router residency", () => {
 		strictEqual(notices.at(-1)?.level, "error");
 	});
 
+	/**
+	 * The mini stranding of 2026-08-16 (#72): on a one-slot router a pinned
+	 * override displaced the configured worker model, and because a pinned
+	 * resident is never an eviction candidate, the worker model could not come
+	 * back until someone unloaded the override by hand on the server.
+	 */
+	it("capacity-1: declines a pinned override instead of stranding the configured worker model (#72)", async () => {
+		setProtectedModelsProvider(() => [{ modelId: "Nemo-3.5-Lightning", role: "worker" as const }]);
+		const router = fakeRouter(
+			[
+				{ id: "Nemo-3.5-Lightning", state: "loaded" },
+				{ id: SCOUT, state: "unloaded", tags: ["pinned:true"] },
+			],
+			1,
+		);
+
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, SCOUT));
+
+		deepStrictEqual(router.posts(), [], "no unload and no load may happen");
+		strictEqual(router.states.get("Nemo-3.5-Lightning"), "loaded");
+		strictEqual(notices.at(-1)?.kind, "will-not-fit");
+		strictEqual(notices.at(-1)?.level, "error");
+		strictEqual(notices.at(-1)?.detail?.configProtected, true);
+		ok(notices.at(-1)?.message.includes("Nemo-3.5-Lightning"), notices.at(-1)?.message);
+
+		// The configured worker model is still servable afterwards.
+		resetLlamaCppResidencyState();
+		notices = [];
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, "Nemo-3.5-Lightning"));
+		deepStrictEqual(router.posts(), []);
+		strictEqual(
+			notices.some((notice) => notice.kind === "will-not-fit"),
+			false,
+		);
+	});
+
+	it("capacity-1: a pinned override still displaces an unprotected resident", async () => {
+		const router = fakeRouter(
+			[
+				{ id: "scratch", state: "loaded" },
+				{ id: SCOUT, state: "unloaded", tags: ["pinned:true"] },
+			],
+			1,
+		);
+
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, SCOUT));
+
+		deepStrictEqual(router.posts(), [
+			["http://mini:8080/models/unload", { model: "scratch" }],
+			["http://mini:8080/models/load", { model: SCOUT }],
+		]);
+	});
+
 	it("CLIO_CODER_RESIDENCY/lifecycle opt-out (managed=false) observes without loading or unloading", async () => {
 		const router = fakeRouter(
 			[
