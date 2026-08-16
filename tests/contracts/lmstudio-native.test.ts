@@ -5,6 +5,7 @@ import { RUN_OVERRIDES_ENV } from "../../src/core/run-overrides.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import {
 	assistantMessage,
+	describeLoadFailure,
 	type LmStudioRunDeps,
 	loadModelConfig,
 	type ResidentModelEntry,
@@ -674,6 +675,23 @@ describe("contracts/lmstudio-native prediction transport", () => {
 		ok(seen.url?.startsWith("http://127.0.0.1:1234/v1/"), seen.url);
 		strictEqual(seen.body?.reasoning_effort, "none");
 		ok(events.some((event) => event.type === "done"));
+	});
+
+	it("names reachability rather than model sizing when the connection never landed", () => {
+		const unreachable = describeLoadFailure(
+			"ws://192.168.86.143:1234",
+			model(),
+			undefined,
+			undefined,
+			new Error("connect ENETUNREACH 192.168.86.143:1234 - Local (0.0.0.0:0)"),
+		);
+		ok(unreachable.includes("did not answer"), unreachable);
+		ok(unreachable.includes("reachability rather than model sizing"), unreachable);
+		strictEqual(unreachable.includes("VRAM"), false, unreachable);
+		strictEqual(unreachable.includes("contextWindow"), false, unreachable);
+
+		const oversized = describeLoadFailure("ws://127.0.0.1:1234", model(), undefined, undefined, new Error("no space"));
+		ok(oversized.includes("VRAM pressure"), oversized);
 	});
 
 	it("sends an on dial as reasoning_effort low", async () => {
