@@ -47,6 +47,12 @@ export const GLYPH = {
 	// turn. It replaces the old `sh:`/`in:` agent-name prefixes; the two
 	// audiences are told apart by tone, not by a second glyph.
 	subProcess: "↳",
+	// Who asked for a dispatched run. Hollow is the operator's own (/run,
+	// /delegate); filled is one the model started by calling a dispatch tool.
+	// The transcript block, the board row, and the footer count share the pair,
+	// so a running ◇ anywhere is work the operator started themselves.
+	workerHuman: "◇",
+	workerAgent: "◆",
 	ellipsis: "…",
 	favorite: "★",
 } as const;
