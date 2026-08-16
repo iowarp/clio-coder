@@ -173,30 +173,24 @@ export function buildDiagnosticItems(
 export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 	const discoverMarketplace = deps.discoverMarketplace ?? (() => discoverMarketplaceSkills());
 
-	// The view reads this array by reference on every render, so an install
-	// refresh mutates it in place and requests a render.
-	const items: ListOverlayItem[] = [];
-
-	const rebuildItems = (): void => {
+	// Rebuilt rather than mutated in place: the view memoizes its frame on the row
+	// set, so a spliced array leaves an installed skill drawn as installable.
+	const buildRows = (): ListOverlayItem[] => {
 		const list = deps.listSkills();
 		const discovery = discoverMarketplace();
 		const installedNames = new Set(list.items.map((skill) => skill.name));
-		items.splice(
-			0,
-			items.length,
+		return [
 			...buildInstalledItems(list),
 			...buildMarketplaceItems(discovery.skills, installedNames),
 			...buildDiagnosticItems(list, discovery.diagnostics),
-		);
+		];
 	};
-
-	rebuildItems();
 
 	let closed = false;
 	let installInFlight = false;
 	const handle = openListOverlay(tui, {
 		title: "Skills",
-		items,
+		items: buildRows(),
 		filterable: true,
 		layout: "split",
 		emptyMessage: SKILLS_HUB_EMPTY,
@@ -225,10 +219,7 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 					} finally {
 						installInFlight = false;
 						// An install that lands after the hub closed has nothing to redraw.
-						if (!closed) {
-							rebuildItems();
-							tui.requestRender();
-						}
+						if (!closed) handle.setItems(buildRows());
 					}
 				})();
 			},

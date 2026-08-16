@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Component, OverlayHandle, TUI } from "../../src/engine/tui.js";
 import { type ListOverlayItem, ListOverlayView, openListOverlay } from "../../src/interactive/overlays/list-overlay.js";
@@ -344,6 +344,115 @@ describe("contracts/list-overlay", () => {
 			filteredLines.every((line) => !line.includes("no skills installed")),
 			"a filter that matched nothing must not claim the list is empty",
 		);
+	});
+
+	/**
+	 * The footer advertises an overlay's action keys from the moment it opens, and
+	 * the filter input holds focus then, so every first press of one landed in the
+	 * filter box: `/interop` opened saying `[d] decline` and the d typed a d.
+	 */
+	it("runs a bound action key while the filter is focused and its query is empty", () => {
+		const acted: string[] = [];
+		const view = new ListOverlayView(
+			{
+				title: "Test",
+				items: [
+					{ id: "1", label: "Apple" },
+					{ id: "2", label: "Banana" },
+				],
+				filterable: true,
+				actions: { d: (item) => acted.push(item.id) },
+				onClose: () => {},
+			},
+			() => {},
+		);
+
+		view.handleInput("d");
+
+		deepStrictEqual(acted, ["1"], "the key acts on the selected row");
+		const lines = view.render(80).map(stripAnsi);
+		ok(
+			lines.some((line) => line.includes("Apple")) && lines.some((line) => line.includes("Banana")),
+			`and never reaches the query, which would have matched nothing: ${lines.join(" | ")}`,
+		);
+	});
+
+	/**
+	 * The other half of the same rule. A typed query owns the letters, because
+	 * otherwise a name beginning with an action key could not be typed at all;
+	 * ↑/↓ hands focus back to the list, where the key acts again.
+	 */
+	it("gives an action key to a nonempty query, and back to the list on an arrow", () => {
+		const acted: string[] = [];
+		const options = {
+			title: "Test",
+			items: [
+				{ id: "1", label: "Apple" },
+				{ id: "2", label: "Banana" },
+			],
+			filterable: true,
+			actions: { d: (item: ListOverlayItem) => acted.push(item.id) },
+			onClose: () => {},
+		};
+
+		const typing = new ListOverlayView(options, () => {});
+		typing.handleInput("b");
+		typing.handleInput("d");
+		strictEqual(acted.length, 0, "a query in progress keeps its own letters");
+		ok(
+			typing
+				.render(80)
+				.map(stripAnsi)
+				.some((line) => line.includes("No matches found")),
+			"the d joined the query",
+		);
+
+		const onList = new ListOverlayView(options, () => {});
+		onList.handleInput("b");
+		onList.handleInput("[B");
+		onList.handleInput("d");
+		deepStrictEqual(acted, ["2"], "the key acts again once the list has focus");
+	});
+
+	it("repaints replaced rows through the handle rather than the array the caller passed", () => {
+		let mounted: Component | null = null;
+		let renders = 0;
+		const tui = {
+			showOverlay(component: Component): OverlayHandle {
+				mounted = component;
+				return {
+					hide: () => undefined,
+					setHidden: () => undefined,
+					isHidden: () => false,
+					focus: () => undefined,
+					unfocus: () => undefined,
+					isFocused: () => true,
+				};
+			},
+			requestRender: () => {
+				renders += 1;
+			},
+		} as unknown as TUI;
+
+		const handle = openListOverlay(tui, {
+			title: "Test",
+			items: [{ id: "1", label: "Apple" }],
+			filterable: true,
+			onClose: () => {},
+		});
+		if (mounted === null) throw new Error("the list overlay was not mounted");
+		const frame = mounted as Component;
+		ok(frame.render(80).some((line) => line.includes("Apple")));
+
+		handle.setItems([{ id: "2", label: "Banana" }]);
+
+		strictEqual(renders, 1, "replacing the rows asks for the repaint");
+		const lines = frame.render(80).map(stripAnsi);
+		ok(
+			lines.some((line) => line.includes("Banana")),
+			`the frame is drawn from the new rows: ${lines.join(" | ")}`,
+		);
+		ok(!lines.some((line) => line.includes("Apple")), lines.join(" | "));
 	});
 
 	it("offers only Esc in the footer when the list has no rows", () => {

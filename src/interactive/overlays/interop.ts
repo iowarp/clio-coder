@@ -3,7 +3,7 @@ import { INHERITED_PROJECT_CONTEXT, renderProposalEntry } from "../../domains/in
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { SlashCommandContext } from "../slash-commands.js";
 import { clioTheme } from "../theme/index.js";
-import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
+import { type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 /** @internal exported for contract tests */
 export const INTEROP_EMPTY =
@@ -77,22 +77,19 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 	const deps: InteropOverlayDeps = surface
 		? { ...surface, onClose }
 		: { report: () => null, proposals: () => [], configured: () => [], accept: () => {}, decline: () => {}, onClose };
-	const items: ListOverlayItem[] = [];
-	const rebuild = (): void => {
-		items.splice(0, items.length, ...buildItems(deps));
-	};
-	rebuild();
-
 	const decide = (item: ListOverlayItem, action: (kind: InteropAgentId) => void): void => {
 		if (item.group !== GROUP_DETECTED) return;
 		action(item.id as InteropAgentId);
-		rebuild();
-		tui.requestRender();
+		// The decision is already on disk; the rows are its projection. They are
+		// replaced rather than mutated in place, because the view memoizes the
+		// frame on the row set and a mutated array left the accepted or declined
+		// agent sitting under Detected until the next keystroke repainted it.
+		handle.setItems(buildItems(deps));
 	};
 
-	return openListOverlay(tui, {
+	const handle: ListOverlayHandle = openListOverlay(tui, {
 		title: "Interop",
-		items,
+		items: buildItems(deps),
 		filterable: true,
 		layout: "split",
 		emptyMessage: INTEROP_EMPTY,
@@ -106,4 +103,5 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 		},
 		onClose,
 	});
+	return handle;
 }
