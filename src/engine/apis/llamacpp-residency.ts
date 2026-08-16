@@ -236,6 +236,7 @@ export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Pr
 			return models.filter(residentModel).map((entry) => ({ modelId: entry.id, tags: entry.tags }));
 		},
 		capacity: async () => (await fetchRouterProps(input, fetchImpl)).maxInstances,
+		keepModelTags: async () => snapshot.find((entry) => entry.id === input.keepModelId)?.tags,
 		unload: (modelId) => postRouterModel(fetchImpl, unloadUrl(input.baseUrl), modelId),
 		load: async (modelId) => {
 			const state = snapshot.find((entry) => entry.id === modelId)?.state;

@@ -193,6 +193,13 @@ export interface ResidencyFacts {
 	strategy: ResidencyStrategy;
 	/** Max co-resident models when the runtime advertises it (llama.cpp router max_instances). */
 	capacity?: number;
+	/**
+	 * True when the runtime tags the keep model itself as operator-pinned, so it
+	 * will be excluded from every eviction tier once it is resident. Such a model
+	 * may only take an unprotected slot: evicting a config-protected resident for
+	 * it would be a one-way swap the configured role could never undo (#72).
+	 */
+	keepTagProtected?: boolean;
 	contextLength?: number;
 	modelMaxContext?: number;
 }
@@ -364,9 +371,12 @@ export function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 	// The keep model is not resident. Rank potential evictions by protection
 	// tier: unprotected residents first (Clio-attributed before foreign), then
 	// config-protected ones as a loud last resort. Tag-pinned residents are
-	// never candidates.
+	// never candidates. A keep model that will itself come back tag-pinned may
+	// not displace the config tier: once resident it is never a candidate, so
+	// the configured role could not reclaim its slot.
 	const tierUnprotected = clioLoadedFirst(others.filter((entry) => entry.protection === undefined));
 	const tierConfig = clioLoadedFirst(others.filter((entry) => entry.protection === "config"));
+	const configEvictable = facts.keepTagProtected !== true;
 
 	let evict: ResidentClassified[] = [];
 	let fallbackEvict: ResidentClassified[] = [];
@@ -374,7 +384,7 @@ export function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 	if (facts.strategy === "jit") {
 		// Attempt the co-resident load first; the runtime turns an oversized
 		// load into a clean failure, and only that failure justifies a swap.
-		fallbackEvict = [...tierUnprotected, ...tierConfig];
+		fallbackEvict = configEvictable ? [...tierUnprotected, ...tierConfig] : tierUnprotected;
 	} else if (facts.strategy === "scheduler") {
 		// The server fits and places models itself. Release only Clio's own
 		// unprotected stragglers; foreign and protected residents stay.
@@ -386,7 +396,32 @@ export function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 	} else {
 		const slotsNeeded = facts.resident.length + 1 - facts.capacity;
 		if (slotsNeeded > 0) {
-			const candidates = [...tierUnprotected, ...tierConfig];
+			const candidates = configEvictable ? [...tierUnprotected, ...tierConfig] : tierUnprotected;
+			if (
+				candidates.length < slotsNeeded &&
+				!configEvictable &&
+				tierUnprotected.length + tierConfig.length >= slotsNeeded
+			) {
+				// The load would only fit by evicting a configured model in favour of
+				// a pinned one. Decline up front instead of stranding the config role.
+				const blocked = tierConfig.slice(0, slotsNeeded - tierUnprotected.length);
+				const names = blocked.map((entry) => `'${entry.modelId}' (${describeRole(entry.role)})`).join(", ");
+				notices.push(
+					makeNotice(
+						facts,
+						"will-not-fit",
+						"error",
+						`cannot load pinned '${facts.keepModelId}' on '${facts.targetId}': it would evict ${names} that settings still reference, and a pinned model is never evicted, so the configured model could not return. Unload one manually, unpin '${facts.keepModelId}' on the server, or raise the server's max instances.`,
+						{
+							residentCount: facts.resident.length,
+							maxInstances: facts.capacity,
+							configProtected: true,
+							...(blocked[0]?.role ? { role: blocked[0].role } : {}),
+						},
+					),
+				);
+				return { decision: "decline", evict: [], fallbackEvict: [], keepResident, notices };
+			}
 			if (candidates.length < slotsNeeded) {
 				notices.push(
 					makeNotice(
@@ -437,6 +472,12 @@ export interface ResidencyAdapter {
 	contextLength?: number;
 	modelMaxContext?: number;
 	listResident(): Promise<ResidentModelInfo[]>;
+	/**
+	 * Runtime tags of the keep model itself, when the runtime lists them before
+	 * the load (the llama.cpp router lists tags for unloaded models too). Called
+	 * after {@link listResident}, so an adapter may serve it from that snapshot.
+	 */
+	keepModelTags?(): Promise<ReadonlyArray<string> | undefined>;
 	unload(modelId: string): Promise<void>;
 	/** Router-style servers: read the max co-resident instance count. */
 	capacity?(): Promise<number | undefined>;
@@ -494,6 +535,15 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 		}
 	}
 
+	let keepTagProtected = false;
+	if (adapter.keepModelTags) {
+		try {
+			keepTagProtected = residentTagProtected(await adapter.keepModelTags());
+		} catch {
+			keepTagProtected = false;
+		}
+	}
+
 	const protectedRoles = configProtectedRoles();
 	const classified: ResidentClassified[] = resident.map((entry) => {
 		const configId = [entry.modelId, ...(entry.aliasIds ?? [])].find((id) => protectedRoles.has(id));
@@ -519,6 +569,7 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 		managed: adapter.managed,
 		strategy: adapter.strategy,
 		...(capacity !== undefined ? { capacity } : {}),
+		...(keepTagProtected ? { keepTagProtected } : {}),
 		...(adapter.contextLength !== undefined ? { contextLength: adapter.contextLength } : {}),
 		...(adapter.modelMaxContext !== undefined ? { modelMaxContext: adapter.modelMaxContext } : {}),
 	};
