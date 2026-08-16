@@ -274,6 +274,23 @@ describe("worker stream fold", () => {
 		strictEqual(worker.get("run-1")?.text, "");
 	});
 
+	it("lets no duplicate or late DispatchStarted move the block backwards or reopen it", () => {
+		const worker = stream({ readReceipt: () => null });
+		worker.started(started());
+		worker.started(started({ runId: "run-2", attempt: 1, assignmentId: "run-1" }));
+		// The first attempt's DispatchStarted, replayed late: the current attempt stays.
+		strictEqual(worker.started(started()), null);
+		strictEqual(worker.get("run-1")?.runId, "run-2");
+		strictEqual(worker.get("run-1")?.attempts.length, 2);
+		worker.completed(completed({ runId: "run-2" }));
+		// A duplicate of the current attempt's start cannot un-settle a finished block.
+		strictEqual(worker.started(started({ runId: "run-2", attempt: 1, assignmentId: "run-1" })), null);
+		strictEqual(worker.get("run-1")?.pending, false);
+		strictEqual(worker.get("run-1")?.receipt?.outcome, "succeeded");
+		// The next attempt still folds in.
+		strictEqual(worker.started(started({ runId: "run-3", attempt: 2, assignmentId: "run-1" }))?.entry.pending, true);
+	});
+
 	it("lets no late terminal or abort from a superseded attempt settle the current one", () => {
 		const worker = stream({ readReceipt: () => null });
 		worker.started(started());
