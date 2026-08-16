@@ -18,7 +18,13 @@
  *   - Attempts fold into one entry. A failover publishes a second
  *     DispatchStarted under the same `assignmentId`, so it appends an attempt
  *     and keeps streaming into the block the operator is already reading
- *     instead of opening a second one.
+ *     instead of opening a second one. The retry itself is admitted as an
+ *     internal-origin request, so origin gates only the first attempt: the
+ *     assignment's origin is what the block carries.
+ *   - Only the current attempt can move the block. A late progress, terminal,
+ *     or abort event addressed to a superseded attempt is dropped, and a
+ *     settled block takes no more progress, so a slow event from an old run
+ *     can neither rewrite nor re-settle the attempt that replaced it.
  */
 
 import type {
@@ -304,11 +310,13 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 		}
 	};
 
-	const entryForRun = (runId: unknown): WorkerEntryState | undefined => {
+	/** The entry a run id addresses, and only while that run is the entry's current attempt. */
+	const currentEntryForRun = (runId: unknown): WorkerEntryState | undefined => {
 		const id = nonEmptyString(runId);
 		if (id === undefined) return undefined;
 		const assignmentId = assignmentByRun.get(id);
-		return assignmentId === undefined ? undefined : byAssignment.get(assignmentId);
+		const entry = assignmentId === undefined ? undefined : byAssignment.get(assignmentId);
+		return entry?.runId === id ? entry : undefined;
 	};
 
 	const settle = (entry: WorkerEntryState, payloadFacts: WorkerReceiptFacts): WorkerStreamChange => {
@@ -336,7 +344,6 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 
 	return {
 		started(payload): WorkerStreamChange | null {
-			if (payload.requestOrigin !== "user" && payload.requestOrigin !== "agent") return null;
 			const runId = nonEmptyString(payload.runId);
 			const assignmentId = nonEmptyString(payload.assignmentId) ?? runId;
 			if (runId === undefined || assignmentId === undefined) return null;
@@ -344,7 +351,8 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			const existing = byAssignment.get(assignmentId);
 			if (existing !== undefined) {
 				// A later attempt of work the operator is already watching. The block
-				// keeps its identity, gains a rail line, and streams again.
+				// keeps its identity, gains a rail line, and streams again. Its origin
+				// is the assignment's, not the retry request's.
 				existing.runId = runId;
 				existing.runtime = runtime;
 				existing.pending = true;
@@ -354,6 +362,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				assignmentByRun.set(runId, assignmentId);
 				return { kind: "updated", entry: existing };
 			}
+			if (payload.requestOrigin !== "user" && payload.requestOrigin !== "agent") return null;
 			const entry: WorkerEntryState = {
 				assignmentId,
 				runId,
@@ -375,8 +384,8 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 		},
 
 		progress(payload): WorkerStreamChange | null {
-			const entry = entryForRun(payload.runId);
-			if (entry === undefined || entry.runId !== payload.runId) return null;
+			const entry = currentEntryForRun(payload.runId);
+			if (entry === undefined || !entry.pending) return null;
 			const event = payload.event;
 			let changed = false;
 
@@ -411,19 +420,19 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 		},
 
 		completed(payload): WorkerStreamChange | null {
-			const entry = entryForRun(payload.runId);
+			const entry = currentEntryForRun(payload.runId);
 			if (entry === undefined) return null;
 			return settle(entry, terminalFacts(payload));
 		},
 
 		failed(payload): WorkerStreamChange | null {
-			const entry = entryForRun(payload.runId);
+			const entry = currentEntryForRun(payload.runId);
 			if (entry === undefined) return null;
 			return settle(entry, terminalFacts(payload));
 		},
 
 		aborted(payload): WorkerStreamChange | null {
-			const entry = entryForRun(payload.runId);
+			const entry = currentEntryForRun(payload.runId);
 			// A cancelled stream or a loop-guard stop names no dispatched run; only
 			// an abort that hits a live worker of ours settles anything.
 			if (entry === undefined || !entry.pending) return null;
