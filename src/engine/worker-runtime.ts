@@ -73,6 +73,7 @@ import { startClaudeCodeWorkerRun } from "./claude/subprocess-runtime.js";
 import {
 	createLoopGuardRegistration,
 	isLoopGuardSynthesisBackstopReason,
+	lockedSynthesisFallbackText,
 	resolveDeliveryTools,
 	sanitizeLockedSynthesisMessage,
 	workerLoopBlockBudget,
@@ -229,6 +230,15 @@ function terminalContractViolation(
 	if (!isAssistantMessage(message)) return null;
 	const text = assistantMessageText(message);
 	if (text === null || text.length === 0) return "missing final result";
+	// The loop guard already replaced this reply with its own notice, so there is
+	// no model result here to judge against a shape. Reporting the contract's
+	// shape anyway sent the repair directive, the receipt, and the operator after
+	// a JSON formatting problem that never existed: a bootstrap run that spiraled
+	// through 45 tool calls and lost its answer to the lockout was reported as
+	// "result must be valid JSON".
+	if (text.trim() === lockedSynthesisFallbackText()) {
+		return "the reply after the tool-call lockout held only tool-call markup and was removed; tools are off, so state the final result as plain text";
+	}
 	const stopReason = message.stopReason;
 	if (
 		shouldRequestStalledTurnContinuation({
