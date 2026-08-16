@@ -59,6 +59,13 @@ export type PromptTemplateExpansion =
 			text: string;
 			args: string[];
 			diagnostics: ResourceDiagnostic[];
+			/**
+			 * Set when the input named a template that exists and refused to expand.
+			 * A caller that would otherwise pass the text through says this instead:
+			 * the operator asked for a template, not for a message beginning with a
+			 * slash, so sending the literal `/name` to the model answers nothing.
+			 */
+			refusal?: { template: PromptTemplate; message: string };
 	  }
 	| {
 			expanded: true;
@@ -205,18 +212,13 @@ export function expandPromptTemplateInput(input: string, templates: PromptTempla
 	const template = templates.items.find((entry) => entry.name === command.name);
 	if (!template) return { expanded: false, text: input, args: [], diagnostics: templates.diagnostics };
 	if (!template.trusted) {
+		const message = `prompt template ${template.name} comes from an untrusted project root; set skills.trustProjectCompatRoots to use it`;
 		return {
 			expanded: false,
 			text: input,
 			args: [],
-			diagnostics: [
-				...templates.diagnostics,
-				{
-					type: "warning",
-					message: `prompt template ${template.name} comes from an untrusted project root; set skills.trustProjectCompatRoots to use it`,
-					path: template.filePath,
-				},
-			],
+			diagnostics: [...templates.diagnostics, { type: "warning", message, path: template.filePath }],
+			refusal: { template, message },
 		};
 	}
 	const args = parseCommandArgs(command.rest);

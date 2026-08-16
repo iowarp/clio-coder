@@ -39,6 +39,22 @@ describe("contracts/foreign prompt roots", () => {
 			expansion.diagnostics.some((diagnostic) => diagnostic.message.includes("untrusted project root")),
 			"the refusal says why",
 		);
+		// Named separately from the diagnostics list because every caller that would
+		// otherwise pass the text through has to tell this apart from "not a
+		// template": the TUI turns it into an error notice, the headless run exits
+		// on it, and neither sends the literal /demo to the model.
+		if (expansion.expanded) throw new Error("expected a refusal");
+		strictEqual(expansion.refusal?.template.name, "demo");
+		ok(expansion.refusal?.message.includes("skills.trustProjectCompatRoots"), expansion.refusal?.message);
+	});
+
+	it("carries no refusal when the token names no template at all", () => {
+		const list = loadPromptTemplates({ cwd: scratchDir(), home: scratchDir() });
+		const expansion = expandPromptTemplateInput("/absent", list);
+
+		strictEqual(expansion.expanded, false);
+		if (expansion.expanded) throw new Error("expected no expansion");
+		strictEqual(expansion.refusal, undefined, "an unknown token is not a template that refused");
 	});
 
 	it("expands the same template once the trust opt-in is set", () => {
