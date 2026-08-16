@@ -4,7 +4,7 @@ name: Scout
 description: Use for any broad repository reconnaissance, codebase orientation, structure/entry-point mapping, or multi-file symbol hunting; returns cited findings fast without spending main-context tool calls.
 tools:
   required: [read]
-  optional: [grep, find, ls, context, code_nav, git]
+  optional: [grep, find, ls, context, code_nav, git, ledger]
 skills: []
 audience: shadow
 category: explore
