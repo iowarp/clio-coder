@@ -286,6 +286,8 @@ export function workerReceiptSummary(facts: WorkerReceiptFacts | null): WorkerRe
 
 export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStream {
 	const byAssignment = new Map<string, WorkerEntryState>();
+	/** Highest attempt number seen per assignment; a DispatchStarted at or below it is a duplicate or a straggler. */
+	const attemptByAssignment = new Map<string, number>();
 	/** Every attempt run id to its assignment, so progress and terminal events find their entry. */
 	const assignmentByRun = new Map<string, string>();
 	/** Durable answer text observed live, per attempt; the receipt wins when it is readable. */
@@ -326,9 +328,11 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			const runtime = runtimeIdentity(payload);
 			const existing = byAssignment.get(assignmentId);
 			if (existing !== undefined) {
+				if (payload.attempt <= (attemptByAssignment.get(assignmentId) ?? -1)) return null;
 				// A later attempt of work the operator is already watching. The block
 				// keeps its identity, gains a rail line, and streams again. Its origin
 				// is the assignment's, not the retry request's.
+				attemptByAssignment.set(assignmentId, payload.attempt);
 				existing.runId = runId;
 				existing.runtime = runtime;
 				existing.pending = true;
@@ -338,6 +342,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				return { kind: "updated", entry: existing };
 			}
 			if (payload.requestOrigin !== "user" && payload.requestOrigin !== "agent") return null;
+			attemptByAssignment.set(assignmentId, payload.attempt);
 			const entry: WorkerEntryState = {
 				assignmentId,
 				runId,
@@ -429,6 +434,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 
 		reset(): void {
 			byAssignment.clear();
+			attemptByAssignment.clear();
 			assignmentByRun.clear();
 			durableTextByRun.clear();
 		},
