@@ -665,6 +665,19 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		// handed that object rather than a copy: a streamed delta reaches the
 		// screen by invalidating a cached render, not by rebuilding the entry.
 		applyWorkerState: (state) => chatPanel.applyWorkerState(state),
+		recordWorkerRun: (fields) => {
+			// A `/run` is an operator action that produced durable state, so it
+			// opens a session the same way a local `!bash` line does. Persistence
+			// is best effort: a failure here costs the block on the next resume,
+			// and must not cost the block on screen now.
+			try {
+				sessionTranscript.ensureSessionForLocalEntry();
+				if (!deps.session?.current()) return;
+				deps.session.appendEntry({ ...fields, parentTurnId: deps.session.tree().leafId ?? null });
+			} catch {
+				// Best effort; the live block already rendered.
+			}
+		},
 	});
 
 	applicationController = createInteractiveInputRuntime({

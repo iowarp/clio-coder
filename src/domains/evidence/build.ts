@@ -1325,6 +1325,12 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 			`${prefix} taskLedger goals=${entry.goals.length} subgoals=${entry.subgoals.length} activeRuns=${entry.activeRunIds.length} evidence=${entry.requiredValidationEvidence.length}`,
 		];
 	}
+	if (entry.kind === "workerRun") {
+		const parent = entry.parentToolCallId === undefined ? "" : ` parentCall=${entry.parentToolCallId}`;
+		return [
+			`${prefix} workerRun ${entry.agentId} origin=${entry.origin} runtime=${entry.runtime.kind} run=${entry.runId} assignment=${entry.assignmentId}${parent}`,
+		];
+	}
 	if (entry.kind === "custom") return [`${prefix} custom:${entry.customType} ${previewUnknown(entry.data)}`];
 	const _exhaustive: never = entry;
 	return [`${prefix} ${String(_exhaustive)}`];

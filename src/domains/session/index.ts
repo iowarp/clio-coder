@@ -53,6 +53,10 @@ export type {
 	TaskLedgerStatus,
 	TaskLedgerValidationEvidence,
 	ThinkingLevelChangeEntry,
+	WorkerRunEntry,
+	WorkerRunOrigin,
+	WorkerRunRuntime,
+	WorkerRunRuntimeKind,
 } from "./entries.js";
 export { isSessionEntry, isSessionHeader, SESSION_ENTRY_KINDS } from "./entries.js";
 export { SessionManifest } from "./manifest.js";
