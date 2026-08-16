@@ -8,7 +8,7 @@
  * to a bus, or renders; the chat panel owns presentation and the wiring owns
  * I/O, so every sequence below is testable as a pure fold.
  *
- * Two rules the fold enforces rather than documents:
+ * Three rules the fold enforces rather than documents:
  *
  *   - Tool *names* only. Names come exclusively from the `clio_*` telemetry
  *     events, never from `tool_execution_start`, whose `args` carry the call's
