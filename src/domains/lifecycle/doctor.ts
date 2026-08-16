@@ -4,8 +4,10 @@ import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../
 import { initializeClioHome } from "../../core/init.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
+import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
 import { openAuthStorage } from "../providers/auth/index.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
+import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
 import { readStateInfoResult } from "./state.js";
 import { getVersionInfo } from "./version.js";
 
@@ -21,6 +23,8 @@ export interface DoctorFinding {
 export interface DoctorOptions {
 	fix?: boolean;
 }
+
+const FOREIGN_SKILL_SOURCES = new Set<SkillSource>(["agents", "claude", "codex", "copilot", "opencode"]);
 
 function describeNodeType(stats: Stats): string {
 	if (stats.isFile()) return "a regular file";
@@ -413,6 +417,64 @@ export async function runDoctorFleetChecks(projectRoot: string = process.cwd()):
 				}/${record.targets.length} targets reachable from the node`
 			: `ineligible: ${record.detail ?? "preflight failed"}`,
 	}));
+}
+
+/**
+ * Interop sweep: one row per agent detection found, plus one aggregate row for
+ * the foreign skill roots that resolved. This reports and never proposes, and
+ * it never starts a session with a peer: reachability for a stdio peer means
+ * its command resolves on PATH. Nothing here writes.
+ */
+export async function runDoctorInteropChecks(projectRoot: string = process.cwd()): Promise<DoctorFinding[]> {
+	let settings: ReturnType<typeof readSettings>;
+	try {
+		settings = readSettings();
+	} catch {
+		return [];
+	}
+	const skills = loadSkills({ cwd: projectRoot });
+	const foreign = skills.items.filter((skill) => FOREIGN_SKILL_SOURCES.has(skill.source));
+	const report = await detectInteropAgents({
+		cwd: projectRoot,
+		probeVersion: true,
+		skillSources: skills.items.map((skill) => skill.source),
+	});
+	const configured = new Set(settings.delegation.agents.map((agent) => agent.id));
+	const findings: DoctorFinding[] = report.agents.map((agent) => {
+		const kind = interopAgentKind(agent.kind);
+		const status = configured.has(agent.kind)
+			? "configured"
+			: kind?.acp === undefined
+				? "no ACP recipe"
+				: "detected, not configured";
+		const head = agent.binary === undefined ? "not on PATH" : (agent.version ?? "version unknown");
+		const where =
+			agent.binary !== undefined
+				? ` at ${agent.binary}`
+				: agent.installDir !== undefined
+					? `, files under ${agent.installDir}`
+					: "";
+		return { ok: true, level: "ok", name: `interop ${agent.kind}`, detail: `${head} (${status})${where}` };
+	});
+	for (const agent of settings.delegation.agents) {
+		if (resolveOnPath([agent.command]).presence === "present") continue;
+		findings.push({
+			ok: true,
+			level: "warn",
+			name: `interop ${agent.id}`,
+			detail: `configured peer command \`${agent.command}\` does not resolve on PATH; /delegate ${agent.id} will fail to spawn`,
+		});
+	}
+	if (foreign.length > 0) {
+		const roots = new Set(foreign.map((skill) => skill.sourceInfo.source ?? skill.baseDir));
+		findings.push({
+			ok: true,
+			level: "ok",
+			name: "interop skills",
+			detail: `${foreign.length} skills from ${roots.size} foreign roots`,
+		});
+	}
+	return findings;
 }
 
 export async function runDoctorRuntimeChecks(): Promise<DoctorFinding[]> {

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { INTEROP_AGENT_KINDS } from "./registry.js";
+import { readInteropReport } from "./state.js";
 import type {
 	InteropAgentFacts,
 	InteropAgentKind,
@@ -17,7 +18,7 @@ const VERSION_PROBE_TIMEOUT_MS = 2000;
 const VERSION_PROBE_MAX_OUTPUT_BYTES = 4096;
 
 /** Resolve an executable on PATH without a shell. Never throws; unresolvable state reports "unknown". */
-function resolveOnPath(binaryNames: ReadonlyArray<string>): { presence: InteropPresence; binary?: string } {
+export function resolveOnPath(binaryNames: ReadonlyArray<string>): { presence: InteropPresence; binary?: string } {
 	if (binaryNames.length === 0) return { presence: "absent" };
 	const rawPath = process.env.PATH;
 	if (rawPath === undefined || rawPath.length === 0) return { presence: "unknown" };
@@ -123,11 +124,14 @@ function detected(facts: InteropAgentFacts): boolean {
  */
 export async function detectInteropAgents(
 	input: InteropDetectInput = {},
-	previous: ReadonlyArray<InteropAgentRecord> = [],
+	previous?: ReadonlyArray<InteropAgentRecord>,
 ): Promise<InteropReport> {
 	const cwd = path.resolve(input.cwd ?? process.cwd());
 	const home = input.home ?? homedir();
-	const priorByKind = new Map(previous.map((record) => [record.kind, record]));
+	// Standing decisions live in the recorded report. A caller that already holds
+	// a fresher one passes it; everyone else must still see the decisions, or a
+	// declined agent is proposed again on the next run.
+	const priorByKind = new Map((previous ?? readInteropReport()?.agents ?? []).map((record) => [record.kind, record]));
 	const agents: InteropAgentRecord[] = [];
 
 	for (const kind of INTEROP_AGENT_KINDS) {

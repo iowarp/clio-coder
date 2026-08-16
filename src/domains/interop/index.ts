@@ -8,8 +8,15 @@ export const InteropDomainModule: DomainModule<InteropContract> = {
 	createExtension: createInteropBundle,
 };
 
+export {
+	acceptInteropAgents,
+	declineInteropAgents,
+	INHERITED_PROJECT_CONTEXT,
+	interopProposals,
+	renderProposalEntry,
+} from "./consent.js";
 export type { InteropContract } from "./contract.js";
-export { detectInteropAgents } from "./detect.js";
+export { detectInteropAgents, resolveOnPath } from "./detect.js";
 export { InteropManifest } from "./manifest.js";
 export { foreignAgentDirs, INTEROP_AGENT_KINDS, interopAgentKind, interopSourceRank } from "./registry.js";
 export { readInteropReport, writeInteropReport } from "./state.js";
@@ -17,7 +24,9 @@ export type {
 	InteropAgentId,
 	InteropAgentKind,
 	InteropAgentRecord,
+	InteropDecisionResult,
 	InteropDetectInput,
 	InteropPresence,
+	InteropProposal,
 	InteropReport,
 } from "./types.js";

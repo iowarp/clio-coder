@@ -2,6 +2,7 @@ import {
 	formatDoctorReport,
 	runDoctor,
 	runDoctorFleetChecks,
+	runDoctorInteropChecks,
 	runDoctorRuntimeChecks,
 } from "../domains/lifecycle/doctor.js";
 import { printError } from "./shared.js";
@@ -29,10 +30,11 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	}
 	const findings = runDoctor({ fix });
 	const runtimeChecks = await runDoctorRuntimeChecks();
+	const interopChecks = await runDoctorInteropChecks();
 	// Fleet preflight probes each configured node over SSH and persists the
 	// per-node eligibility verdicts dispatch placement enforces.
 	const fleetChecks = await runDoctorFleetChecks();
-	const all = [...findings, ...runtimeChecks, ...fleetChecks];
+	const all = [...findings, ...runtimeChecks, ...interopChecks, ...fleetChecks];
 	const ok = all.every((f) => f.ok);
 	if (json) {
 		process.stdout.write(`${JSON.stringify({ ok, fix, findings: all }, null, 2)}\n`);
