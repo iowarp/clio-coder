@@ -119,6 +119,8 @@ describe("dispatch board fleet visibility", () => {
 				node: "mini",
 				gate: { role: "candidate", cycle: 1 },
 				contextWindow: 10_000,
+				assignmentId: "run-bus1",
+				attempt: 0,
 			});
 			bus.emit(BusChannels.DispatchProgress, {
 				runId: "run-bus1",
