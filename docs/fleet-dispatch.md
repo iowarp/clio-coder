@@ -173,6 +173,12 @@ accepted by the current reader.
   failures change the process-local registry health to `offline`. Doctor
   preflight is a separate durable eligibility gate: a failed or stale record
   blocks placement without pretending it changed channel health.
+- A result-contract repair round is a synthetic tool exchange, and its assistant
+  half carries explicit zero usage. Request sizing reads usage from every
+  assistant message that is not aborted or errored, and a repair message with no
+  usage crashed the worker one round after its terminal message. Zero usage is
+  skipped by the estimator, so the model's last real usage still anchors the
+  estimate and the worker survives the repair round (#70).
 
 ## Topologies
 
@@ -549,20 +555,37 @@ hard block.
   with the same pair of glyphs: `◇` for a run the operator started with `/run`
   or `/delegate`, `◆` for one the model started by calling a dispatch tool, and
   a dim `·` for the runs Clio starts for itself. A running `◇` on the board is
-  therefore the operator's own work. The footer chip splits into `◇1 ◆3` when
-  more than one kind is live and stays `fleet N` otherwise.
-- User-origin and agent-origin runs also render in the chat transcript as an
-  attributed block: header, worker prose down a rail, coalesced tool names, and
-  a receipt footer. Agent-origin blocks fold to one line under the tool call
-  that spawned them. Internal-origin runs stay on the board. The block replaces
-  nothing on the board; the two surfaces answer different questions, which is
-  what happened and how it is going.
-- A `/run` answer reaches the operator, not the model. `--share` on the command
-  or `/share [runId]` afterwards is the only way it enters the main agent's
-  context, and it enters as ordinary operator text.
-- Each attempt of a transcript-bound run writes a `workerRun` session entry, so
-  `/resume` redraws the blocks from those entries plus the sealed receipts. A
+  therefore the operator's own work. The footer chip in the status line splits
+  into `◇1 ◆3` when more than one kind is live and stays `fleet N` otherwise.
+  Board rows carry an origin glyph too.
+- User-origin and agent-origin runs stream into the chat transcript as an
+  attributed worker block. The typed command is echoed dim above the block.
+  Header units display `<agentId>` then `<targetId>/<wireModelId>` then `run <runId>`
+  for fleet workers (such as `◇ coder · mini/Nemo-3.5-Lightning · run 2mkas6s`),
+  or `<id> (acp) · run <runId>` with no route for ACP delegation peers. The block
+  body renders the worker prose down a rail, one coalesced line of tool names,
+  and a one-line receipt footer showing the outcome glyph, token count, duration,
+  and contract status (such as `└ ✓ ok · 8.4k tok · 18s · contract unmeasured`),
+  with the failure reason printed on the rail above the footer when a run fails.
+- Runs the model itself asked for through the dispatch tool (identified by
+  parentToolCallId) render as folded `◆` cards under the spawning tool segment;
+  operator-typed runs are `◇` and open. The fold chord uses the `clio.tool.expand`
+  keybinding (`Alt+O`), which toggles the newest foldable item of either kind
+  (tool call or worker block). `Ctrl+Alt+O` or `Alt+Shift+O` toggles every tool
+  call and worker block at once.
+- Sharing: nothing a worker produced enters the main model's context unless
+  `--share` was passed or the operator runs `/share [runId]`. What enters is a
+  bounded note of the shape `[worker result] <agent> · run <id> · <outcome>`
+  followed by the bounded answer text, traveling the ordinary user-turn path.
+  Bare `/share` picks the newest finished run the operator started themselves
+  (never a model-asked `◆` run); `/share <runId>` may name a model-asked run
+  explicitly. `/new` resets the transcript and the pool bare `/share` draws
+  from, so a run from the previous session cannot be shared into the new one.
+- Replay: `/resume` replays worker blocks from receipts; the session file's
+  `workerRun` entries carry ids, origin, and runtime only, without prose; the
+  replayed answer is bounded from the receipt exactly like the live one. A
   missing receipt renders `receipt unavailable`.
+- Memory workers on the background target never appear as transcript blocks.
 - The dispatch board shows per-run cards with the node id (absent placement
   renders `local`), gate badges (`gate reviewer c2`), reroute badges, live
   tool activity (names only; arguments never cross the worker stdout seam),

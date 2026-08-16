@@ -181,11 +181,15 @@ command exists and the spelling is the one other tools in this class use.
 `/clear` has no counterpart here, so it stays an error that names `/help`.
 
 Only active commands run. Typing anything command-shaped that the registry does
-not own reports `is not a command` and points at `/help`; it is never sent to the
-model. That covers spellings removed outright, such as `/status` and `/receipts`,
-as well as ordinary typos. It replaces the earlier behavior where an unrecognized
-spelling reached the model as prose and was answered conversationally, which left
-the operator believing a command had run when nothing had.
+not own checks the loaded prompt templates across native and foreign prompt roots.
+If a matching template is found in an untrusted project root, Clio prints that the
+prompt template comes from an untrusted project root and directs the operator to set
+`skills.trustProjectCompatRoots`, sending nothing to the model. If the token names
+neither a command nor a template, it reports `is not a command` and points at `/help`;
+it is never sent to the model. That covers spellings removed outright, such as
+`/status` and `/receipts`, as well as ordinary typos. It replaces the earlier
+behavior where an unrecognized spelling reached the model as prose and was answered
+conversationally, which left the operator believing a command had run when nothing had.
 
 Command-shaped means one word of letters, digits, and hyphens after the slash, so
 paths such as `/home/user/notes.md` still reach the model unchanged. One word
@@ -206,36 +210,43 @@ Settings → Targets presents an operational console table (`HEALTH`, `ID`, `ROL
 Settings → Fleet is an entity workbench organized with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Dispatched worker defaults and profile rows render as compact summaries (`fast-local dynamo/qwen  high  auto`), drilling into fields (`target`, `model`, `thinkingLevel`, `node`) on `Enter`. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the `Alt+W` Fleet Runs board, which also steers and cancels them.
 
 `/run` and `/delegate` put the worker's answer on screen. Both echo the typed
-line, then stream the run into the transcript as an attributed block: a header
-(`◇ you → coder · mini/Nemo-3.5-Lightning · run 2mkas6s`), the worker's prose
-down a rail, one coalesced line of tool names, and a receipt footer carrying the
-outcome, tokens, elapsed, and result-contract conformance. A run the model
-started renders the same block marked `◆` and folded to a single line under the
-tool call that spawned it, so a fan-out of three scouts costs three rows until
-the operator opens one. `Alt+O` opens the newest folded block, `Ctrl+Alt+O` or
-`Alt+Shift+O` opens every one. Runs Clio starts for itself stay on the fleet
-board and never reach the transcript. A run that fails over keeps one block and
-gains an `↻ failed over → attempt 2 on dynamo/qwen3` line inside it.
+line dim above the block, then stream the run into the transcript as an attributed
+block: a header (`◇ coder · mini/Nemo-3.5-Lightning · run 2mkas6s` for fleet workers,
+or `◇ codex (acp) · run 7hq2ab` for ACP peers), the worker's prose down a rail,
+one coalesced line of tool names, and a one-line footer carrying the outcome glyph,
+token count, duration, and contract status (such as `└ ✓ ok · 8.4k tok · 18s · contract unmeasured`),
+with the failure reason printed on the rail above the footer when a run fails.
+Runs the model itself asked for through the dispatch tool render as folded `◆`
+cards under the spawning tool segment; operator-typed runs are `◇` and open.
+The footer chip in the status line splits them (such as `◇1 ◆3`). `Alt+O` toggles
+the newest foldable item (tool call or worker block), while `Ctrl+Alt+O` or
+`Alt+Shift+O` toggles every one. Memory workers on the background target never
+appear as transcript blocks. A run that fails over keeps one block and gains an
+`↻ failed over → attempt 2 on dynamo/qwen3` line inside it.
 
 That block is the only place a `/run` answer goes. The main agent is not told
 about it, which is what makes a side run a side run; asked about the answer, it
 will say it has not seen one. `--share` on either command hands the result over
 when the run finishes, and `/share [runId]` does it afterwards for a run already
 on screen. Bare `/share` takes the newest finished run the operator started
-themselves, since a run the model started already reached it as a tool result.
-What crosses is the receipt's own bounded text under a `[worker result] coder ·
-run 2mkas6s · ok` header, entering the session through the ordinary user-turn
-path so replay and compaction treat it as operator text. Worker tool arguments
-never cross at all: the transcript carries tool names only, the same rule the
-dispatch board follows.
+themselves (never a model-asked `◆` run), while `/share <runId>` may name a
+model-asked run explicitly. What crosses is the receipt's own bounded text under a
+`[worker result] coder · run 2mkas6s · ok` header, entering the session through
+the ordinary user-turn path so replay and compaction treat it as operator text.
+`/new` resets the transcript and the pool bare `/share` draws from, so a run
+from the previous session cannot be shared into the new one. Worker tool
+arguments never cross at all: the transcript carries tool names only, the same
+rule the dispatch board follows.
 
 Blocks survive a resume. Each attempt writes a `workerRun` session entry naming
 the run, its origin, and its runtime, and `/resume` rebuilds the block from that
-entry plus the sealed receipt under `<state>/receipts/<runId>.json`. A run whose
-receipt is gone replays with a `receipt unavailable` footer rather than a header
-with nothing under it. The entries are bookkeeping: they cost nothing in the
-context window and never become model context, so resuming a session full of
-side runs does not spend the window on them.
+entry plus the sealed receipt under `<state>/receipts/<runId>.json`. The session
+file's `workerRun` entries carry ids, origins, and runtime references only, without
+prose; the replayed answer is bounded from the receipt exactly like the live one.
+A run whose receipt is gone replays with a `receipt unavailable` footer rather
+than a header with nothing under it. The entries are bookkeeping: they cost nothing
+in the context window and never become model context, so resuming a session full
+of side runs does not spend the window on them.
 
 The `/tasks` overlay shows the session task board the agent maintains through
 the `tasks` tool: every task with its status, the evidence note recorded when
@@ -299,8 +310,8 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Alt+J` / `Alt+K` | Cycle forward / backward through the scoped model set (when empty, displays a notice directing the operator to `/scoped-models`). |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). |
 | `Alt+S` / `Ctrl+Alt+B` | Convert an active attached dispatch to a detached background batch. |
-| `Alt+O` | Toggle the latest tool segment between collapsed subline and full body. |
-| `Ctrl+Alt+O` / `Alt+Shift+O` | Toggle all tool segments between collapsed sublines and full bodies. |
+| `Alt+O` | Toggle the newest tool call or worker block between collapsed subline and full body. |
+| `Ctrl+Alt+O` / `Alt+Shift+O` | Toggle all tool calls and worker blocks between collapsed sublines and full bodies. |
 | `Alt+P` | Toggle streaming partial tool output in expanded tool bodies. |
 | `Alt+R` | Toggle the latest thinking block between hidden marker and full body. |
 | `Ctrl+Alt+R` / `Alt+Shift+R` | Toggle all thinking blocks between hidden markers and full bodies. |

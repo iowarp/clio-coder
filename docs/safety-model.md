@@ -202,15 +202,14 @@ Path-policy behavior:
 | `disableDefaultPathPolicy` | Uses only project path policy rather than merging default damage-control paths. Note: This cannot disable built-in zero-access protection for critical system paths like `.git/config` and `credentials.yaml`. |
 
 The default damage-control policy populates `noWritePaths` from the interop
-agent registry: `~/.claude/`, `~/.codex/`, `~/.gemini/`, `~/.cursor/`,
-`~/.config/opencode/`, `~/.copilot/`, `~/.agents/`, `~/.antigravitycli/`, and
-their project equivalents. Clio never writes into another coding agent's
-directory. It reads those roots for skills, prompts, and rule prose and has no
-reason to author them, and `noDeletePaths` alone did not cover the case: a
-`write` or `edit` targeting `~/.codex/skills/x/SKILL.md` is refused at every
-posture including `auto-edit` and `full-auto`, with reason code
-`path-policy:noWritePaths`. `.clio-coder/` is Clio's own directory and is
-unaffected.
+agent registry: `~/.claude/`, `.claude/`, `~/.codex/`, `.codex/`, `~/.config/opencode/`,
+`.opencode/`, `~/.gemini/`, `.gemini/`, `~/.copilot/`, `~/.cursor/`, `.cursor/`,
+`~/.antigravitycli/`, `.antigravitycli/`, `~/.agents/`, and `.agents/`. Clio never writes
+into another coding agent's directory. It reads those roots for skills, prompts, and
+rule prose and has no reason to author them. A `write` or `edit` targeting any of
+these paths is refused at every posture including `auto-edit` and `full-auto`, with reason
+code `path-policy:noWritePaths`. Reads remain allowed. `.clio-coder/` is Clio's own directory
+and is untouched. `.github/` is deliberately not blocked.
 
 Command entry notes:
 
