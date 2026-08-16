@@ -333,17 +333,45 @@ function harvestSiblingBullets(files: ReadonlyArray<SiblingContextFile>): string
 	return out;
 }
 
-function inferConventions(cwd: string, projectType: ProjectType, files: ReadonlyArray<SiblingContextFile>): string[] {
+/**
+ * The extension local imports actually carry, measured from the specifiers the
+ * indexer already extracted. Reported only on a clear majority so a repository
+ * mid-migration is described as having no rule rather than the wrong one.
+ */
+function localImportExtension(codewiki: Codewiki): string | null {
+	const counts = new Map<string, number>();
+	let total = 0;
+	for (const file of codewiki.files) {
+		for (const specifier of file.imports) {
+			if (!specifier.startsWith(".")) continue;
+			total += 1;
+			const extension = /\.([A-Za-z0-9]+)$/.exec(specifier)?.[1];
+			const key = extension === undefined ? "" : `.${extension}`;
+			counts.set(key, (counts.get(key) ?? 0) + 1);
+		}
+	}
+	if (total < 4) return null;
+	for (const [extension, count] of counts) {
+		if (extension.length > 0 && count / total >= 0.8) return extension;
+	}
+	return null;
+}
+
+function inferConventions(cwd: string, files: ReadonlyArray<SiblingContextFile>, codewiki: Codewiki): string[] {
 	const conventions: string[] = [];
 	const context = allContextText(files);
 	const pkg = readJsonFile(join(cwd, "package.json"));
 	const packageText = typeof pkg === "object" && pkg !== null ? JSON.stringify(pkg) : "";
-	if (
-		/Local imports end in `?\.js`?/i.test(context) ||
-		(projectType === "typescript" && existsSync(join(cwd, "tsconfig.json")))
-	) {
-		pushUnique(conventions, "Local imports end in `.js`. Tests use `node:test`. Avoid `any` without a tracking issue.");
-	} else if (/node:test/i.test(context) || /node --import tsx --test|node --test/.test(packageText)) {
+	// A convention here is read as fact on every turn, so it is measured or it
+	// is not stated. The stack alone decides nothing: a repository that imports
+	// `./money.ts` under allowImportingTsExtensions is told to break its own
+	// build by a rule inferred from the presence of a tsconfig.
+	const declaredJs = /Local imports end in `?\.js`?/i.test(context);
+	const importExtension = declaredJs ? ".js" : localImportExtension(codewiki);
+	if (importExtension !== null) {
+		pushUnique(conventions, `Local imports end in \`${importExtension}\`.`);
+	}
+	if (/node:test/i.test(context) || /node --import tsx --test|node --test/.test(packageText)) {
 		pushUnique(conventions, "Tests use `node:test`.");
 	}
 	if (/No em-dash|em-dash/i.test(context)) {
@@ -598,7 +626,7 @@ function stabilizeGeneratedOutput(
 	const existing = input.existingClioMd;
 	const conventions: string[] = [];
 	for (const convention of existing?.conventions ?? []) pushUnique(conventions, convention);
-	for (const convention of inferConventions(input.cwd, input.projectType, input.siblingFiles)) {
+	for (const convention of inferConventions(input.cwd, input.siblingFiles, input.codewiki)) {
 		pushUnique(conventions, convention);
 	}
 	const invariants: string[] = [];
@@ -699,7 +727,7 @@ function heuristicBootstrapOutputSync(input: BootstrapGenerateInput): BootstrapS
 	return stabilizeGeneratedOutput(input, {
 		projectName: projectName(input.cwd),
 		identity: resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles).text,
-		conventions: inferConventions(input.cwd, input.projectType, input.siblingFiles),
+		conventions: inferConventions(input.cwd, input.siblingFiles, input.codewiki),
 		invariants: inferInvariants(input.siblingFiles),
 		sections: inferHeuristicSections(input),
 	});

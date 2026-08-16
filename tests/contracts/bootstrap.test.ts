@@ -83,6 +83,41 @@ describe("contracts/bootstrap", () => {
 		strictEqual(verification.body.includes("`pnpm run format`"), false, verification.body);
 	});
 
+	it("measures the local import extension instead of reading it off the stack", async () => {
+		writeFileSync(
+			join(scratch, "package.json"),
+			JSON.stringify({ name: "ts-extension-imports", type: "module" }),
+			"utf8",
+		);
+		writeFileSync(join(scratch, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true } }), "utf8");
+		writeFileSync(join(scratch, "money.ts"), "export const cents = 1;\n", "utf8");
+		writeFileSync(join(scratch, "cart.ts"), 'import { cents } from "./money.ts";\nexport const total = cents;\n', "utf8");
+		writeFileSync(
+			join(scratch, "report.ts"),
+			'import { total } from "./cart.ts";\nimport { cents } from "./money.ts";\nexport const line = total + cents;\n',
+			"utf8",
+		);
+		writeFileSync(
+			join(scratch, "index.ts"),
+			'export { line } from "./report.ts";\nexport { total } from "./cart.ts";\n',
+			"utf8",
+		);
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		ok(result.output.conventions.includes("Local imports end in `.ts`."), result.output.conventions.join(" | "));
+		strictEqual(
+			result.output.conventions.some((convention) => convention.includes("`.js`")),
+			false,
+			result.output.conventions.join(" | "),
+		);
+		// The stack no longer smuggles in claims nothing measured.
+		strictEqual(
+			result.output.conventions.some((convention) => convention.includes("Avoid `any`")),
+			false,
+			result.output.conventions.join(" | "),
+		);
+	});
+
 	it("parses and serializes CLIO-CODER.md content and metadata footer", () => {
 		const text = serializeClioMd({
 			projectName: "Sample",
