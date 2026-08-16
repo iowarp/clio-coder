@@ -293,6 +293,40 @@ def extract_python_from_events(events_path: Path) -> str | None:
     return matches[-1].strip() + "\n" if matches else None
 
 
+def resolve_completion(problem: dict[str, Any], run_dir: Path) -> tuple[str, str]:
+    """The completion to grade, and where it came from.
+
+    The task tells the agent to leave its answer in solution.py, and that file
+    is the first source. An agent that answered with a code block and never
+    edited the file leaves solution.py exactly as it was seeded, which yields
+    an empty completion; the event stream still carries the answer, so it is
+    read rather than scoring the seeded prompt against itself. Generation and
+    grading resolve through this one function so a graded completion is the
+    same text the generation step recorded.
+
+    The source travels with the completion because the two are not equivalent
+    evidence: a completion recovered from the stream means the agent solved the
+    task but ignored the file contract, and a reader must be able to subtract
+    those from a headline score.
+    """
+    solution_path = run_dir / "solution.py"
+    if solution_path.exists():
+        completion = completion_from_solution(problem, solution_path.read_text(encoding="utf-8", errors="replace"))
+        if completion.strip():
+            return completion, "solution.py"
+    extracted = extract_python_from_events(run_dir / "events" / "clio.jsonl")
+    if extracted:
+        completion = completion_from_solution(problem, extracted)
+        if completion.strip():
+            return completion, "events"
+    completion_path = run_dir / "completion.py"
+    if completion_path.exists():
+        completion = completion_path.read_text(encoding="utf-8", errors="replace")
+        if completion.strip():
+            return completion, "completion.py"
+    return "", "empty"
+
+
 def completion_from_solution(problem: dict[str, Any], solution_text: str) -> str:
     prompt = problem.get("prompt", "")
     if solution_text.startswith(prompt):
@@ -366,15 +400,8 @@ def generate_attempt(
             model=model,
         )
 
-    if solution_path.exists():
-        solution_text = solution_path.read_text(encoding="utf-8", errors="replace")
-    else:
-        extracted = extract_python_from_events(run_dir / "events" / "clio.jsonl")
-        solution_text = extracted or ""
-        if solution_text:
-            solution_path.write_text(solution_text, encoding="utf-8")
-
-    completion = completion_from_solution(problem, solution_text)
+    solution_text = solution_path.read_text(encoding="utf-8", errors="replace") if solution_path.exists() else ""
+    completion, completion_source = resolve_completion(problem, run_dir)
     (run_dir / "completion.py").write_text(completion, encoding="utf-8")
     events_path = run_dir / "events" / "clio.jsonl"
     run_id = run_id_from_events(events_path)
@@ -392,6 +419,7 @@ def generate_attempt(
             "run_id": run_id,
             "solution_bytes": len(solution_text.encode("utf-8")),
             "completion_bytes": len(completion.encode("utf-8")),
+            "completion_source": completion_source,
             "empty_completion": not completion.strip(),
         }
     )
@@ -486,17 +514,16 @@ def grade_completion(problem: dict[str, Any], completion: str, timeout: float, e
 
 
 def grade_attempt(problem: dict[str, Any], run_dir: Path, timeout: float, evaluator: str) -> dict[str, Any]:
-    completion_path = run_dir / "completion.py"
-    solution_path = run_dir / "solution.py"
-    if solution_path.exists():
-        completion = completion_from_solution(problem, solution_path.read_text(encoding="utf-8", errors="replace"))
-        completion_path.write_text(completion, encoding="utf-8")
-    elif completion_path.exists():
-        completion = completion_path.read_text(encoding="utf-8", errors="replace")
-    else:
-        completion = ""
+    completion, completion_source = resolve_completion(problem, run_dir)
+    (run_dir / "completion.py").write_text(completion, encoding="utf-8")
     result = grade_completion(problem, completion, timeout, evaluator)
-    result.update({"task_id": problem["task_id"], "completion_bytes": len(completion.encode("utf-8"))})
+    result.update(
+        {
+            "task_id": problem["task_id"],
+            "completion_bytes": len(completion.encode("utf-8")),
+            "completion_source": completion_source,
+        }
+    )
     (run_dir / "result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result
 
@@ -545,12 +572,16 @@ def suite_summary(
         "tasks": len(chosen),
         "samples": len(metrics_rows),
         "resolved": passed_tasks,
-        "errors": failed_tasks,
+        # An error is the harness failing to obtain an answer, not a model
+        # answering wrong. Reporting failed tasks here made a model that simply
+        # got things wrong read as a broken run, and disagreed with the sibling
+        # SWE-bench adapter's use of the same field.
+        "errors": generation_errors,
         "failedTasks": failed_tasks,
+        "completionsFromEventStream": sum(1 for metric in metrics_rows if metric.get("completion_source") == "events"),
         "passedSamples": sum(1 for row in grade_rows if row.get("passed")),
         "failedSamples": sum(1 for row in grade_rows if not row.get("passed")),
         "passAt": pass_at,
-        "generationErrors": generation_errors,
         "timedOut": sum(1 for metric in metrics_rows if metric.get("timed_out")),
         "emptyCompletions": sum(1 for metric in metrics_rows if metric.get("empty_completion")),
         "wallSeconds": round(
@@ -568,6 +599,29 @@ def suite_summary(
     }
 
 
+def recorded_provenance(out_dir: Path) -> tuple[str | None, dict[str, str] | None]:
+    """The model and target profile an earlier manifest in this directory recorded.
+
+    grade-task rewrites the directory run-task wrote, and the generation flags
+    are not repeated on the verifier command line. Re-deriving them from the
+    grader's own environment renamed the model that produced the answer, so the
+    generation record wins whenever it exists.
+    """
+    manifest_path = out_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None, None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    model = manifest.get("model")
+    profile = manifest.get("targetProfile")
+    return (
+        model if isinstance(model, str) and model and model != "unspecified" else None,
+        profile if isinstance(profile, dict) and profile else None,
+    )
+
+
 def write_suite_manifest(
     out_dir: Path,
     chosen: list[dict[str, Any]],
@@ -575,14 +629,17 @@ def write_suite_manifest(
     model: str | None,
     target: str | None,
     notes: list[str],
+    *,
+    inherit_provenance: bool = False,
 ) -> tuple[Path, Path]:
+    recorded_model, recorded_profile = recorded_provenance(out_dir) if inherit_provenance else (None, None)
     return write_result_manifest(
         out_dir,
         suite="human-eval",
         dataset=DATASET,
         dataset_split=DATASET_SPLIT,
-        model=humaneval_model(model),
-        profile=humaneval_target_profile(target, model),
+        model=recorded_model or humaneval_model(model),
+        profile=recorded_profile or humaneval_target_profile(target, model),
         instances=len(chosen),
         resolved=int(summary.get("resolved") or 0),
         errors=int(summary.get("errors") or 0),
@@ -709,6 +766,7 @@ def run_task(args: argparse.Namespace) -> int:
         "resolved": 0,
         "errors": 1 if metric.get("timed_out") or metric.get("exit") not in (0, None) or metric.get("empty_completion") else 0,
         "emptyCompletion": bool(metric.get("empty_completion")),
+        "completionSource": metric.get("completion_source"),
         # Absent rather than zero when the attempt's run reported no usage.
         "tokens": metric.get("tokens"),
         "tokensMeasured": bool(metric.get("tokens_measured")),
@@ -741,7 +799,11 @@ def grade_task(args: argparse.Namespace) -> int:
         "taskId": task_id,
         "samples": 1,
         "resolved": 1 if result.get("passed") else 0,
-        "errors": 0 if result.get("passed") else 1,
+        # A failed check is a wrong answer, not a harness error; run-task
+        # already recorded the generation errors this directory saw.
+        "errors": 0,
+        "failedTasks": 0 if result.get("passed") else 1,
+        "completionSource": result.get("completion_source"),
         "passedSamples": 1 if result.get("passed") else 0,
         "failedSamples": 0 if result.get("passed") else 1,
         "passAt": {"pass@1": 1.0 if result.get("passed") else 0.0},
@@ -754,6 +816,7 @@ def grade_task(args: argparse.Namespace) -> int:
         None,
         None,
         notes=["Scored by the HumanEval adapter verifier."],
+        inherit_provenance=True,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("passed") else 1
