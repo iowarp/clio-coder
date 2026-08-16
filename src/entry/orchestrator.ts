@@ -1732,12 +1732,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										generate: modelBootstrapGenerate({
 											dispatch,
 											resolveRoute: () => {
-												if (!config) throw new Error("bootstrap Scout configuration unavailable");
+												if (!config) throw new Error("context-bootstrap configuration unavailable");
 												return resolveBootstrapRoute(config.get());
 											},
+											// Names the agent that actually ran and reports the throw as
+											// what it is. "Scout unavailable" was wrong twice over: the
+											// agent is context-bootstrap, and the same line was printed
+											// for a worker that failed, a worker whose answer the loop
+											// guard removed, and a worker that succeeded and whose
+											// payload the reader then refused.
 											onFallback: (err, mode) =>
 												runIo?.stderr(
-													`context init: Scout unavailable, using ${mode === "existing" ? "existing CLIO-CODER.md" : "heuristic"} (${err.message})\n`,
+													`context init: context-bootstrap did not produce a handbook, using ${mode === "existing" ? "the existing CLIO-CODER.md" : "the heuristic writer"} (${err.message})\n`,
 												),
 										}),
 										modelId: "configured-clio-target",
