@@ -213,13 +213,28 @@ describe("worker transcript blocks", () => {
 		const h = harness();
 		h.push(h.worker.started(started()));
 		h.push(h.worker.progress({ runId: "r1", agentId: "coder", event: delta("first attempt") }));
+		// The sequence the domain publishes: the first attempt seals as failed,
+		// then the retry starts under the same assignment as an internal-origin
+		// request, and its terminal event carries that origin too.
+		h.push(h.worker.failed(failed({ runId: "r1", agentId: "coder", requestOrigin: "user" })));
 		h.push(
-			h.worker.started(started({ runId: "r2", attempt: 1, assignmentId: "r1", targetId: "dynamo", wireModelId: "qwen3" })),
+			h.worker.started(
+				started({
+					runId: "r2",
+					attempt: 1,
+					assignmentId: "r1",
+					requestOrigin: "internal",
+					targetId: "dynamo",
+					wireModelId: "qwen3",
+				}),
+			),
 		);
-		h.push(h.worker.completed(completed({ runId: "r2" })));
+		ok(h.render().includes("● attempt 2"), `the block reopens for the retry:\n${h.render()}`);
+		h.push(h.worker.completed(completed({ runId: "r2", requestOrigin: "internal" })));
 		const rendered = h.render();
 		strictEqual(rendered.split(GLYPH.workerHuman).length - 1, 1, `exactly one worker block:\n${rendered}`);
 		ok(rendered.includes("↻ failed over → attempt 2 on dynamo/qwen3"), rendered);
+		ok(rendered.includes(`└ ${GLYPH.ok} ok`), `sealed by the attempt that finished:\n${rendered}`);
 	});
 
 	it("nests agent-origin cards under the tool call that spawned them, in spawn order", () => {

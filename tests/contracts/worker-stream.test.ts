@@ -260,6 +260,71 @@ describe("worker stream fold", () => {
 		strictEqual(worker.get("run-1")?.text, "");
 	});
 
+	it("lets no late terminal or abort from a superseded attempt settle the current one", () => {
+		const worker = stream({ readReceipt: () => null });
+		worker.started(started());
+		worker.started(started({ runId: "run-2", attempt: 1, assignmentId: "run-1" }));
+		strictEqual(worker.completed(completed()), null);
+		strictEqual(worker.failed(failed({ runId: "run-1" })), null);
+		strictEqual(
+			worker.aborted({ source: "dispatch_abort", runId: "run-1", startedAt: null, elapsedMs: 100, reason: "late" }),
+			null,
+		);
+		const entry = worker.get("run-1");
+		strictEqual(entry?.pending, true, "the second attempt is still running");
+		strictEqual(entry?.receipt, undefined);
+		strictEqual(entry?.attempts[1]?.outcome, undefined);
+		// The attempt that is current settles it, and reads its own receipt.
+		const reads: string[] = [];
+		const sealed = createWorkerStream({
+			readReceipt: (runId) => {
+				reads.push(runId);
+				return null;
+			},
+		});
+		sealed.started(started());
+		sealed.started(started({ runId: "run-2", attempt: 1, assignmentId: "run-1" }));
+		strictEqual(sealed.completed(completed({ runId: "run-2" }))?.entry.pending, false);
+		deepStrictEqual(reads, ["run-2"]);
+	});
+
+	it("folds the real failover sequence, whose retry is admitted as internal origin", () => {
+		// What the dispatch domain actually publishes: the first attempt fails and
+		// seals, then the retry starts under the same assignment with the origin
+		// the admission path gives a retry, which is internal.
+		const worker = stream({ readReceipt: () => null });
+		worker.started(started());
+		strictEqual(worker.failed(failed({ runId: "run-1", agentId: "coder", requestOrigin: "user" }))?.entry.pending, false);
+		const retry = worker.started(
+			started({ runId: "run-2", attempt: 1, assignmentId: "run-1", requestOrigin: "internal", targetId: "dynamo" }),
+		);
+		strictEqual(retry?.kind, "updated");
+		strictEqual(retry?.entry.pending, true);
+		strictEqual(retry?.entry.origin, "user", "the block keeps the assignment's origin");
+		strictEqual(retry?.entry.receipt, undefined);
+		worker.progress({ runId: "run-2", agentId: "coder", event: messageEndEvent("recovered") });
+		const done = worker.completed(completed({ runId: "run-2", requestOrigin: "internal" }));
+		strictEqual(done?.entry.receipt?.outcome, "succeeded");
+		strictEqual(done?.entry.text, "recovered");
+		deepStrictEqual(
+			done?.entry.attempts.map((attempt) => `${attempt.runId}:${attempt.outcome ?? "?"}`),
+			["run-1:failed", "run-2:succeeded"],
+		);
+		// A retry of work the fold never opened is still nobody's block.
+		strictEqual(
+			worker.started(started({ runId: "x-2", attempt: 1, assignmentId: "x-1", requestOrigin: "internal" })),
+			null,
+		);
+	});
+
+	it("takes no progress once the block has settled", () => {
+		const worker = stream({ readReceipt: () => ({ outcome: "succeeded", text: "sealed" }) });
+		worker.started(started());
+		worker.completed(completed());
+		strictEqual(worker.progress({ runId: "run-1", agentId: "coder", event: textDeltaEvent("straggler") }), null);
+		strictEqual(worker.get("run-1")?.text, "sealed");
+	});
+
 	it("seals a failure with its outcome code and first detail line", () => {
 		const worker = stream({ readReceipt: () => null });
 		worker.started(started({ requestOrigin: "agent", agentId: "scout", parentToolCallId: "call_7" }));
