@@ -641,6 +641,32 @@ def run_problem(args: argparse.Namespace) -> int:
     return 0 if failures == 0 else 1
 
 
+def snapshot_step(args: argparse.Namespace) -> int:
+    """Capture a solution file a person wrote as one step's generated code.
+
+    run-problem snapshots each step as it finishes, so a problem solved in the
+    interactive TUI, or by hand, had no supported way to reach the grader: the
+    grader reads generated_code/<step>.py and only run-problem ever wrote one.
+    This is that step, and nothing else; the grading rules do not change.
+    """
+    data = Path(args.data)
+    problem = problem_by_id(read_jsonl(data), args.problem_id)
+    run_dir = Path(args.run)
+    step_id = str(args.step_number).strip()
+    step_index(problem, step_id)
+    source = Path(args.source) if args.source else run_dir / "solution.py"
+    if not source.exists():
+        raise DataBlocked(f"no solution file to snapshot: {source}")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if source.resolve() != (run_dir / "solution.py").resolve():
+        (run_dir / "solution.py").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    snapshot_step_code(problem, run_dir, step_id)
+    (run_dir / "problem.json").write_text(json.dumps(problem, indent=2) + "\n", encoding="utf-8")
+    captured = run_dir / "generated_code" / f"{step_id}.py"
+    print(json.dumps({"step_id": step_id, "source": str(source), "generated": str(captured)}, indent=2))
+    return 0
+
+
 def load_json_references(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
@@ -932,6 +958,14 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--force", action="store_true", help="replace an existing run directory")
     run.add_argument("--dry-run", action="store_true", help="render prompts without calling Clio")
     run.set_defaults(func=run_problem)
+
+    snap = sub.add_parser("snapshot-step", help="capture a hand-written or TUI-written solution as one step's code")
+    add_common_data_args(snap)
+    snap.add_argument("--problem-id", required=True)
+    snap.add_argument("--step-number", required=True)
+    snap.add_argument("--run", required=True, help="run directory the grader will read")
+    snap.add_argument("--source", default=None, help="solution file to capture; default: <run>/solution.py")
+    snap.set_defaults(func=snapshot_step)
 
     grade = sub.add_parser("grade-problem", help="grade every sub-step for one generated problem")
     add_common_data_args(grade)
