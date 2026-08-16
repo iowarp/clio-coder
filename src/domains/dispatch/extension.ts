@@ -259,7 +259,13 @@ import {
 	endpointIdentityHash,
 	receiptAttestationFields,
 } from "./worker-protocol.js";
-import { type SpawnedWorker, type SpawnedWorkerResult, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
+import {
+	type SpawnedWorker,
+	type SpawnedWorkerResult,
+	spawnNativeWorker,
+	type SpawnOptions as WorkerSpawnOptions,
+	type WorkerSpec,
+} from "./worker-spawn.js";
 
 interface RunTokenMeter {
 	inputTokens: number;
@@ -330,13 +336,13 @@ type EffectiveSettings = Readonly<ReturnType<ConfigContract["get"]>> | undefined
 export interface DispatchNodePlacement {
 	node: RunNodeIdentity;
 	/** Transport launch; absent for local placements, which use the bundle's spawnWorker. */
-	spawn?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
+	spawn?: (spec: WorkerSpec, opts?: WorkerSpawnOptions) => SpawnedWorker;
 	/** Failover hops that preceded this placement, oldest first. */
 	reroutes?: ReadonlyArray<RunNodeReroute>;
 }
 
 export interface DispatchBundleOptions {
-	spawnWorker?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
+	spawnWorker?: (spec: WorkerSpec, opts?: WorkerSpawnOptions) => SpawnedWorker;
 	/** Resolve the attested node and transport before capacity admission; absent means local. */
 	resolveNode?: (req: DispatchRequest) => DispatchNodePlacement | null;
 	/** Side-effect-free companion to resolveNode, primarily for alternate fleet backends and deterministic tests. */
