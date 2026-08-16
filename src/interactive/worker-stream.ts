@@ -244,7 +244,7 @@ function boundLiveText(text: string): { text: string; dropped: number } {
 }
 
 /** Head-anchored byte bound for a settled answer, matching the receipt's own bound. */
-function boundSettledText(text: string): { text: string; dropped: number } {
+export function boundSettledText(text: string): { text: string; dropped: number } {
 	const bounded = truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES, WORKER_TEXT_TRUNCATION_MARKER);
 	if (bounded === text) return { text, dropped: 0 };
 	return { text: bounded, dropped: Math.max(0, lineCount(text) - lineCount(bounded)) };

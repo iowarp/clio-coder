@@ -10,6 +10,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels, type DispatchStartedPayload } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { WORKER_OUTPUT_MAX_BYTES } from "../../src/domains/dispatch/event-pump.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import { isSessionEntry, type SessionEntry, type WorkerRunEntry } from "../../src/domains/session/index.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
@@ -185,6 +186,15 @@ describe("worker block replay", () => {
 		strictEqual(state?.runId, "run-1");
 		strictEqual(state?.pending, false);
 		strictEqual(state?.text, "Hello! I'm the coder worker.");
+	});
+
+	it("bounds a replayed answer the way live settlement does", () => {
+		const oversized = Array.from({ length: 1200 }, (_, index) => `line ${index}`).join("\n");
+		const panel = replayPanel([workerRunEntry()], () => ({ outcome: "succeeded", text: oversized }));
+		const [state] = panel.workerStates();
+		ok(state !== undefined);
+		ok(Buffer.byteLength(state.text, "utf8") <= WORKER_OUTPUT_MAX_BYTES, `${state.text.length} chars`);
+		ok(state.droppedLines > 0, "the bound must report the lines it cost");
 	});
 
 	it("says the receipt is gone rather than leaving the block running", () => {
