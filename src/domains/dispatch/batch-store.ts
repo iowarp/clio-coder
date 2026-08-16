@@ -113,15 +113,19 @@ export function getDetachedBatch(batchId: string): DetachedBatchRecord | null {
 export async function markDetachedBatchCollected(batchId: string): Promise<DetachedBatchRecord | null> {
 	let updated: DetachedBatchRecord | null = null;
 	// The agent ledger closes on the first collection, which is where a detached
-	// batch's peers stop being concurrent.
-	const ledgerToClose: string | null = null;
+	// batch's peers stop being concurrent. Only the collection that actually
+	// moves collectedAt closes it, so a repeated collect neither restamps the
+	// close time nor closes a board some other batch owns.
+	let ledgerToClose: string | null = null;
 	await withStateFileLock(storePath(), () => {
 		const batches = readStore();
 		const index = batches.findIndex((batch) => batch.id === batchId);
 		if (index === -1) return;
 		const current = batches[index];
 		if (!current) return;
-		updated = current.collectedAt === null ? { ...current, collectedAt: new Date().toISOString() } : current;
+		const firstCollection = current.collectedAt === null;
+		updated = firstCollection ? { ...current, collectedAt: new Date().toISOString() } : current;
+		if (firstCollection && current.ledgerId !== undefined) ledgerToClose = current.ledgerId;
 		batches[index] = updated;
 		writeStore(batches);
 	});
