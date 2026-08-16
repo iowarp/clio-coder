@@ -228,7 +228,16 @@ def render_previous_steps(problem: dict[str, Any], current_index: int, generated
 
 
 def render_next_step(step: dict[str, Any], with_background: bool) -> str:
-    pieces = [str(step.get("step_description_prompt", "")), str(step.get("function_header", ""))]
+    # SciCode's own prompt builder joins the description, the function header,
+    # and the step's return line (eval/scripts/gencode.py process_problem_code).
+    # Dropping the return line hides the output contract: problem 9 asks for the
+    # final residual and error and the model answered with the whole iteration
+    # history, which the return line states outright.
+    pieces = [
+        str(step.get("step_description_prompt", "")),
+        str(step.get("function_header", "")),
+        str(step.get("return_line", "")),
+    ]
     if with_background and step.get("step_background"):
         pieces.insert(1, str(step["step_background"]))
     return "\n\n".join(piece for piece in pieces if piece)
@@ -513,8 +522,15 @@ def snapshot_step_code(problem: dict[str, Any], run_dir: Path, step_id: str) -> 
     if not solution.exists():
         return
     content = solution.read_text(encoding="utf-8")
+    # SciCode writes the dependency header unconditionally at the top of every
+    # generated file, and its visible tests run at module scope against those
+    # names. Skipping the header when the text already appeared anywhere in the
+    # file broke on a function that imported numpy in its own body: `np` existed
+    # inside the function and nowhere else, so problem 1 failed with NameError
+    # raised by the test snippet rather than by the science. A duplicate import
+    # costs nothing; a missing one fails the step.
     deps = str(problem.get("required_dependencies", "")).strip()
-    prefix = f"{deps}\n\n" if deps and deps not in content else ""
+    prefix = f"{deps}\n\n" if deps else ""
     (generated_dir / f"{step_id}.py").write_text(prefix + content, encoding="utf-8")
 
 
