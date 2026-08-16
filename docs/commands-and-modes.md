@@ -26,6 +26,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder --no-skills` | Disable skill discovery for one invocation while still honoring explicit `--skill` paths. |
 | `clio-coder --skill <path>` | Load one explicit skill file or directory for one invocation (repeatable). |
 | `clio-coder configure` | Run the configuration wizard. |
+| `clio-coder configure --interop` | Review other coding agents detected on this machine and connect one as a delegation peer. Without a TTY it prints the proposals and writes nothing. |
 | `clio-coder configure --list` | List user-facing runtime ids. |
 | `clio-coder configure --list --all` | List every registered runtime, including aliases. |
 | `clio-coder targets [--json] [--probe] [--target <id>]` | List configured targets, health, auth, runtime, model, and capabilities. |
@@ -139,6 +140,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
 | `/prompts` | - | `/prompts` | List prompt templates |
 | `/extensions` | - | `/extensions` | List installed extensions |
+| `/interop` | - | `/interop` | Review other coding agents detected on this machine |
 | `/share` | - | `/share [runId] \| /share export <path> \| /share import [--dry-run] [--force] <path>` | Share a worker result with the main agent, or export and import Clio archives |
 | `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
 | `/delegate` | - | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
@@ -250,6 +252,31 @@ tier, and current bank size.
 After `/resume`, Clio offers `/memory seed` when the newest handoff contains a
 structured snapshot. Seeding is explicit, deduplicated, and unavailable while
 `memory.intervention.enabled` is off.
+
+The `/interop` overlay lists the other coding agents Clio found on this machine,
+grouped `Detected`, `Configured`, and `Declined`. A detected row's detail pane
+shows the exact `delegation.agents` entry that connecting it would append, plus
+the two facts a new peer inherits: `projectContext: none`, so the peer receives
+the task text and never the project projection, and `toolGovernance:
+clio-policy`, so its tool calls are gated by Clio safety. Press `a` to connect
+one or `d` to decline; the overlay reads the report this process already produced
+at boot and never probes on a keystroke. Accepting applies to the live session,
+because `delegation` hot-reloads.
+
+Boot adds at most one line about interop, in the shape `clio: codex detected on
+PATH and not configured. Run /interop to review.` It names only agents that are
+installed, unconfigured, and undecided, it appears at most once per set of facts,
+and it is never emitted in headless or ACP mode. Declining an agent silences it
+until its binary version or path changes, at which point it becomes a fresh
+proposal.
+
+`clio-coder doctor` reports interop and never proposes anything. It emits one
+`ok` row per detected agent naming its version, its path, and whether it is
+configured, one `warn` row for a configured peer whose command no longer resolves
+on PATH, and one aggregate row counting the skills loaded from foreign roots. A
+machine with no other agents installed emits no interop rows at all. Reachability
+for a stdio peer means the command resolves; doctor never starts a session with
+one, and plain `doctor` writes nothing.
 
 ## Keybindings
 

@@ -7,6 +7,7 @@ import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
 import { openExtensionsOverlay } from "./overlays/extensions.js";
 import { openHelpOverlay } from "./overlays/help-reference.js";
+import { openInteropOverlay } from "./overlays/interop.js";
 import { openPromptsOverlay } from "./overlays/prompts.js";
 import { openSkillsHub } from "./overlays/skills-hub.js";
 import type { SlashCommandContext } from "./slash-commands.js";
@@ -24,6 +25,7 @@ export interface OverlayResourceOpenersDeps {
 	openSkillsHub?: typeof openSkillsHub;
 	openPromptsOverlay?: typeof openPromptsOverlay;
 	openExtensionsOverlay?: typeof openExtensionsOverlay;
+	openInteropOverlay?: typeof openInteropOverlay;
 	installSkill?: typeof installMarketplaceSkill;
 }
 
@@ -33,6 +35,7 @@ export interface OverlayResourceOpeners {
 	openSkillsHubState(): void;
 	openPromptsOverlayState(): void;
 	openExtensionsOverlayState(): void;
+	openInteropOverlayState(): void;
 }
 
 export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): OverlayResourceOpeners {
@@ -41,6 +44,7 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 	const openSkills = deps.openSkillsHub ?? openSkillsHub;
 	const openPrompts = deps.openPromptsOverlay ?? openPromptsOverlay;
 	const openExtensions = deps.openExtensionsOverlay ?? openExtensionsOverlay;
+	const openInterop = deps.openInteropOverlay ?? openInteropOverlay;
 	const installSkill = deps.installSkill ?? installMarketplaceSkill;
 
 	const openHelpOverlayState = (query?: string): void => {
@@ -90,11 +94,19 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 		deps.tui.requestRender();
 	};
 
+	const openInteropOverlayState = (): void => {
+		if (deps.transitions.state !== "closed") return;
+		deps.transitions.state = "interop";
+		deps.transitions.handle = openInterop(deps.tui, deps.getSlashContext(), deps.closeOverlay);
+		deps.tui.requestRender();
+	};
+
 	return {
 		openHelpOverlayState,
 		openAgentsOverlayState,
 		openSkillsHubState,
 		openPromptsOverlayState,
 		openExtensionsOverlayState,
+		openInteropOverlayState,
 	};
 }

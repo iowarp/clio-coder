@@ -57,7 +57,7 @@ export interface InteractiveSlashSubmitExpansion {
 
 type SlashChat = Pick<ChatLoop, "getSessionId" | "isStreaming" | "submit">;
 type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser">;
-type SlashResources = Pick<ResourcesContract, "prompts" | "reload">;
+type SlashResources = Pick<ResourcesContract, "prompts" | "expandPromptTemplate" | "reload">;
 type SlashExtensions = Pick<ExtensionsContract, "list">;
 type SlashAgents = Pick<AgentsContract, "getSpec" | "listSpecs">;
 type SlashShare = Pick<ShareContract, "writeArchive" | "planImport" | "importArchive">;
@@ -71,6 +71,7 @@ export interface InteractiveSlashRuntimeDeps {
 	chatPanel: SlashChatPanel;
 	resources?: SlashResources;
 	extensions?: SlashExtensions;
+	interop?: SlashCommandContext["interop"];
 	agents?: SlashAgents;
 	share?: SlashShare;
 	getSettings?: () => Readonly<ClioSettings>;
@@ -113,6 +114,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openAgents: () => void;
 	openPrompts: () => void;
 	openExtensions: () => void;
+	openInterop?: () => void;
 	openContextReset: () => void;
 	setEditorText: (text: string) => void;
 	/** Worker blocks this session folded, oldest first; `/share` picks a finished one. */
@@ -165,6 +167,7 @@ export function resolveAvailableThinkingLevels(
 export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps): InteractiveSlashRuntime {
 	let activeContextInit = false;
 	const cwd = (): string => deps.getCwd?.() ?? process.cwd();
+	const resources = deps.resources;
 
 	const appendCommandNotice: SlashCommandContext["notice"] = (level, text) => {
 		appendNotice(level, text, {
@@ -218,6 +221,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			void deps.shutdown();
 		},
 		listPrompts: () => deps.resources?.prompts(cwd()) ?? { items: [], diagnostics: [] },
+		...(resources ? { expandPromptTemplate: (text: string) => resources.expandPromptTemplate(text, cwd()) } : {}),
 		openSkillsHub: deps.openSkillsHub,
 		listExtensions: () => deps.extensions?.list(cwd(), { all: true }) ?? [],
 		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
@@ -312,6 +316,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openAgents: deps.openAgents,
 		openPrompts: deps.openPrompts,
 		openExtensions: deps.openExtensions,
+		...(deps.openInterop ? { openInterop: deps.openInterop } : {}),
+		...(deps.interop ? { interop: deps.interop } : {}),
 		setEditorText: (text) => {
 			deps.setEditorText(text);
 			deps.requestRender();

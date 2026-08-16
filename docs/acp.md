@@ -30,8 +30,8 @@ The server is invoked via:
 clio-coder acp [--cwd PATH] [--permission-timeout MS]
 ```
 
-- `--cwd PATH`: Sets the initial workspace root directory for ACP sessions.
-- `--permission-timeout MS`: Configures the maximum timeout for delegated permission resolution (defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` ms from `src/core/defaults.ts:40`).
+- `--cwd PATH`: Workspace root the server boots in. Clio changes into the directory before it reads settings, builds project context, or opens a session ledger, so a session opens at that root. A path the process cannot enter exits 2 without starting the server.
+- `--permission-timeout MS`: How long a mediated permission request may wait for the client before it is denied, as a positive whole number of milliseconds. It overrides `delegation.defaults.permissionTimeoutMs` for this server only, which itself defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` (`src/core/defaults.ts:143`).
 
 Transport frames are JSON-RPC 2.0 messages serialized over `stdin`/`stdout`. All logging and diagnostic output is strictly routed to `stderr` to preserve standard I/O framing integrity.
 

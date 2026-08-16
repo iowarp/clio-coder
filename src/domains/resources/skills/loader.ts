@@ -6,6 +6,7 @@ import type { PendingSkillRequest } from "../../../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { enabledExtensionResourceRoots } from "../../extensions/index.js";
+import { INTEROP_AGENT_KINDS, interopSourceRank } from "../../interop/registry.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
 import { readRootEntries, splitYamlFrontmatter, stringField } from "../common-loader.js";
 import { normalizedSkillHash } from "./content-hash.js";
@@ -208,24 +209,33 @@ function defaultPrecedenceForScope(scope: ResourceScope): number {
 	}
 }
 
-function projectCompatTrusted(input: LoadSkillsInput): boolean {
-	if (input.trustProjectCompatRoots === true) return true;
+/**
+ * Whether project-scope compatibility roots are model-visible. Prompts share
+ * this gate with skills: both substitute another agent's project file into
+ * Clio's context, so one opt-in covers both.
+ */
+export function projectCompatTrusted(explicit?: boolean): boolean {
+	if (explicit === true) return true;
 	return process.env.CLIO_CODER_TRUST_PROJECT_SKILLS === "1";
 }
 
 /**
  * Discovery roots, lowest to highest precedence:
  *  1. package/extension skills
- *  2. shared user compat roots (~/.agents, ~/.claude, ~/.codex, ~/.copilot, ~/.config/opencode)
+ *  2. shared user compat roots, one per interop agent kind that owns a skills directory
  *  3. Clio user root (<config>/skills)
- *  4. project compat roots (.agents, .claude, .codex, .github, .opencode), trusted only on opt-in
+ *  4. the same agents' project roots, trusted only on opt-in
  *  5. Clio project root (.clio-coder/skills)
+ *
+ * The compatibility roots come from the interop registry rather than a list
+ * kept here, so adding an agent to the table is what teaches every reader about
+ * it at once.
  */
 export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 	const cwd = input.cwd ?? process.cwd();
 	const home = input.home ?? homedir();
 	const configDir = input.configDir ?? clioConfigDirSafe();
-	const trustProject = projectCompatTrusted(input);
+	const trustProject = projectCompatTrusted(input.trustProjectCompatRoots);
 	const roots: SkillRoot[] = [];
 
 	for (const root of enabledExtensionResourceRoots("skills", cwd)) {
@@ -239,51 +249,18 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		});
 	}
 
-	roots.push({
-		path: path.join(home, ".agents", "skills"),
-		scope: "user",
-		source: "agents",
-		origin: "agents-user",
-		precedence: SKILL_PRECEDENCE.userCompat,
-		trusted: true,
-		containment: home,
-	});
-	roots.push({
-		path: path.join(home, ".claude", "skills"),
-		scope: "user",
-		source: "claude",
-		origin: "claude-user",
-		precedence: SKILL_PRECEDENCE.userCompat,
-		trusted: true,
-		containment: home,
-	});
-	roots.push({
-		path: path.join(home, ".codex", "skills"),
-		scope: "user",
-		source: "codex",
-		origin: "codex-user",
-		precedence: SKILL_PRECEDENCE.userCompat,
-		trusted: true,
-		containment: home,
-	});
-	roots.push({
-		path: path.join(home, ".config", "opencode", "skills"),
-		scope: "user",
-		source: "opencode",
-		origin: "opencode-user",
-		precedence: SKILL_PRECEDENCE.userCompat,
-		trusted: true,
-		containment: home,
-	});
-	roots.push({
-		path: path.join(home, ".copilot", "skills"),
-		scope: "user",
-		source: "copilot",
-		origin: "copilot-user",
-		precedence: SKILL_PRECEDENCE.userCompat,
-		trusted: true,
-		containment: home,
-	});
+	for (const kind of INTEROP_AGENT_KINDS) {
+		if (kind.userSkillRoot === undefined || kind.skillSource === undefined) continue;
+		roots.push({
+			path: path.join(home, kind.userSkillRoot),
+			scope: "user",
+			source: kind.skillSource,
+			origin: `${kind.skillSource}-user`,
+			precedence: SKILL_PRECEDENCE.userCompat,
+			trusted: true,
+			containment: home,
+		});
+	}
 
 	if (configDir) {
 		roots.push({
@@ -297,51 +274,18 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		});
 	}
 
-	roots.push({
-		path: path.join(cwd, ".agents", "skills"),
-		scope: "project",
-		source: "agents",
-		origin: "agents-project",
-		precedence: SKILL_PRECEDENCE.projectCompat,
-		trusted: trustProject,
-		containment: cwd,
-	});
-	roots.push({
-		path: path.join(cwd, ".claude", "skills"),
-		scope: "project",
-		source: "claude",
-		origin: "claude-project",
-		precedence: SKILL_PRECEDENCE.projectCompat,
-		trusted: trustProject,
-		containment: cwd,
-	});
-	roots.push({
-		path: path.join(cwd, ".codex", "skills"),
-		scope: "project",
-		source: "codex",
-		origin: "codex-project",
-		precedence: SKILL_PRECEDENCE.projectCompat,
-		trusted: trustProject,
-		containment: cwd,
-	});
-	roots.push({
-		path: path.join(cwd, ".opencode", "skills"),
-		scope: "project",
-		source: "opencode",
-		origin: "opencode-project",
-		precedence: SKILL_PRECEDENCE.projectCompat,
-		trusted: trustProject,
-		containment: cwd,
-	});
-	roots.push({
-		path: path.join(cwd, ".github", "skills"),
-		scope: "project",
-		source: "copilot",
-		origin: "copilot-project",
-		precedence: SKILL_PRECEDENCE.projectCompat,
-		trusted: trustProject,
-		containment: cwd,
-	});
+	for (const kind of INTEROP_AGENT_KINDS) {
+		if (kind.projectSkillRoot === undefined || kind.skillSource === undefined) continue;
+		roots.push({
+			path: path.join(cwd, kind.projectSkillRoot),
+			scope: "project",
+			source: kind.skillSource,
+			origin: `${kind.skillSource}-project`,
+			precedence: SKILL_PRECEDENCE.projectCompat,
+			trusted: trustProject,
+			containment: cwd,
+		});
+	}
 
 	roots.push({
 		path: path.join(cwd, ".clio-coder", "skills"),
@@ -807,6 +751,21 @@ function loadExplicitSkillPath(inputPath: string, diagnostics: ResourceDiagnosti
 	return loaded.candidate ? [loaded.candidate] : [];
 }
 
+/**
+ * Ascending order for a set of candidates competing for one name or one
+ * canonical file, so the last entry is the winner. Precedence decides first.
+ * Two compatibility roots share a precedence tier, and ranking those by path
+ * spelling made the winner depend on what the agents happen to be called, so
+ * the second key is the registry's own agent order.
+ */
+function compareSkillCandidates(a: Skill, b: Skill): number {
+	const precedence = a.precedence - b.precedence;
+	if (precedence !== 0) return precedence;
+	const rank = interopSourceRank(b.source) - interopSourceRank(a.source);
+	if (rank !== 0) return rank;
+	return a.filePath.localeCompare(b.filePath);
+}
+
 function dedupeCanonicalSkillPaths(
 	candidates: ReadonlyArray<SkillCandidate>,
 	diagnostics: ResourceDiagnostic[],
@@ -824,18 +783,14 @@ function dedupeCanonicalSkillPaths(
 			if (only) winners.push(only);
 			continue;
 		}
-		const sorted = [...entries].sort((a, b) => {
-			const delta = a.skill.precedence - b.skill.precedence;
-			if (delta !== 0) return delta;
-			return a.skill.filePath.localeCompare(b.skill.filePath);
-		});
+		const sorted = [...entries].sort((a, b) => compareSkillCandidates(a.skill, b.skill));
 		const winner = sorted[sorted.length - 1];
 		if (!winner) continue;
 		winners.push(winner);
 		for (const loser of sorted.slice(0, -1)) {
 			diagnostics.push({
 				type: "warning",
-				message: `${loser.skill.name} at ${loser.skill.filePath} resolves to the same canonical skill file as ${winner.skill.filePath}; using the higher-precedence entry`,
+				message: `${loser.skill.name} at ${loser.skill.filePath} resolves to the same canonical skill file as ${winner.skill.filePath}, which is the entry in use`,
 				path: loser.skill.filePath,
 			});
 		}
@@ -843,7 +798,7 @@ function dedupeCanonicalSkillPaths(
 	return winners;
 }
 
-/** Resolve name collisions by precedence (higher wins), tiebroken by file path. */
+/** Resolve name collisions by precedence (higher wins), tiebroken by registry order. */
 function resolveSkillCollisions(candidates: ReadonlyArray<SkillCandidate>): {
 	winners: Skill[];
 	diagnostics: ResourceDiagnostic[];
@@ -860,11 +815,7 @@ function resolveSkillCollisions(candidates: ReadonlyArray<SkillCandidate>): {
 	const winners: Skill[] = [];
 	const diagnostics: ResourceDiagnostic[] = [];
 	for (const [name, entries] of byName.entries()) {
-		const sorted = [...entries].sort((a, b) => {
-			const delta = a.skill.precedence - b.skill.precedence;
-			if (delta !== 0) return delta;
-			return a.skill.filePath.localeCompare(b.skill.filePath);
-		});
+		const sorted = [...entries].sort((a, b) => compareSkillCandidates(a.skill, b.skill));
 		const winner = sorted[sorted.length - 1];
 		if (!winner) continue;
 		winners.push(winner.skill);

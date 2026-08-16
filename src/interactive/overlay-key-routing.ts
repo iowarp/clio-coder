@@ -23,6 +23,7 @@ export type OverlayState =
 	| "agents"
 	| "prompts"
 	| "extensions"
+	| "interop"
 	| "skills-hub";
 
 export interface PermissionOverlayKeyDeps {
@@ -196,6 +197,7 @@ export function routeOverlayKey(
 		overlayState === "agents" ||
 		overlayState === "prompts" ||
 		overlayState === "extensions" ||
+		overlayState === "interop" ||
 		overlayState === "skills-hub"
 	) {
 		return false;

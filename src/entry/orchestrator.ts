@@ -47,6 +47,7 @@ import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
+import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import {
@@ -218,6 +219,8 @@ export interface BootOptions {
 	acp?: {
 		transport?: AcpJsonRpcPeerTransport;
 		transportOptions?: StdioServerTransportOptions;
+		/** Overrides delegation.defaults.permissionTimeoutMs for this server only. */
+		permissionTimeoutMs?: number;
 	};
 }
 
@@ -783,6 +786,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const result = await loadDomains([
 		ConfigDomainModule,
 		ExtensionsDomainModule,
+		InteropDomainModule,
 		createResourcesDomainModule({
 			skills: () => ({
 				disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
@@ -873,7 +877,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const extensions = result.getContract<ExtensionsContract>("extensions");
 	const share = result.getContract<ShareContract>("share");
 	const contextDomain = result.getContract<ContextContract>("context");
+	const interop = result.getContract<InteropContract>("interop");
+	// Boot detection resolves paths only: no `--version` subprocess and no skill
+	// walk on the boot path. The hint is gated on `interactive`, which is already
+	// false under headless and ACP.
+	const interopReport = interactive && interop ? await interop.detect({ cwd: process.cwd() }) : null;
 	const initialNotices = interactive ? [...(contextDomain?.startupHints() ?? [])] : [];
+	if (interop && interopReport) {
+		const interopHint = interop.bootHint(interopReport);
+		if (interopHint !== null) initialNotices.push(interopHint);
+	}
 	if (!providers || !dispatch || !observability || !safety || !middleware) {
 		process.stderr.write(
 			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + observability contracts; aborting.\n",
@@ -1562,7 +1575,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				cwd: process.cwd(),
 				version: getVersionInfo().clio,
 				permissionTimeoutMs:
-					config?.get().delegation.defaults.permissionTimeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
+					options.acp.permissionTimeoutMs ??
+					config?.get().delegation.defaults.permissionTimeoutMs ??
+					DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 			});
 			chat.dispose();
 			await dispatch.drain();
@@ -1601,6 +1616,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				pendingSkillRequests: [],
 			};
 			const promptExpansion = resources?.expandPromptTemplate(parsedSkillRequest.text, process.cwd());
+			// A prompt named as `/name` is a request for that template. When the
+			// template refuses, the run says why and stops; sending the literal
+			// `/name` on to the model spends a turn answering a command it cannot
+			// run, and the operator never sees the refusal.
+			if (promptExpansion?.expanded === false && promptExpansion.refusal) {
+				process.stderr.write(`clio-coder: ${promptExpansion.refusal.message}\n`);
+				await termination.shutdown(1);
+				return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
+			}
 			const fileExpansion = await expandInlineFileReferencesAsync(
 				promptExpansion?.expanded ? promptExpansion.text : parsedSkillRequest.text,
 				{
@@ -1643,6 +1667,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
+		...(interop ? { interop } : {}),
 		...(share ? { share } : {}),
 		toolRegistry,
 		...(session ? { session } : {}),

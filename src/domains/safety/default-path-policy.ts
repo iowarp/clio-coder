@@ -1,3 +1,4 @@
+import { foreignAgentDirs } from "../interop/registry.js";
 import type { PathPolicyInput } from "./path-policy.js";
 
 /**
@@ -88,6 +89,10 @@ export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 		"venv/",
 		"target/",
 	],
+	// Another agent's own configuration. Clio reads these roots for skills,
+	// prompts, and rule prose and has no reason to author them, so the guard is
+	// on writes and not only on deletes.
+	noWritePaths: [...foreignAgentDirs()],
 	noDeletePaths: [
 		"~/.claude/",
 		"CLAUDE.md",
@@ -106,6 +111,7 @@ export function mergePathPolicyInputs(base: PathPolicyInput, override: PathPolic
 	return {
 		zeroAccessPaths: [...(base.zeroAccessPaths ?? []), ...(override.zeroAccessPaths ?? [])],
 		readOnlyPaths: [...(base.readOnlyPaths ?? []), ...(override.readOnlyPaths ?? [])],
+		noWritePaths: [...(base.noWritePaths ?? []), ...(override.noWritePaths ?? [])],
 		noDeletePaths: [...(base.noDeletePaths ?? []), ...(override.noDeletePaths ?? [])],
 	};
 }

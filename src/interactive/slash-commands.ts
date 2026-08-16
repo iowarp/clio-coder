@@ -9,9 +9,10 @@ import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integri
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
+import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
-import type { PromptTemplate, ResourceList } from "../domains/resources/index.js";
+import type { PromptTemplate, PromptTemplateExpansion, ResourceList } from "../domains/resources/index.js";
 import { parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
@@ -46,6 +47,7 @@ type SlashCommandVariant =
 	| { kind: "skill-invocation"; text: string }
 	| { kind: "prompts" }
 	| { kind: "extensions" }
+	| { kind: "interop" }
 	| ShareCommandVariant
 	/** `source` is the line the operator typed, echoed above the run's transcript block. */
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions; source: string }
@@ -73,7 +75,8 @@ type SlashCommandVariant =
 	| { kind: "compact"; instructions: string | undefined }
 	| { kind: "export"; path: string | undefined }
 	| { kind: "unknown"; text: string }
-	| { kind: "unknown-command"; token: string }
+	/** `text` is the whole line, so a token that turns out to name a prompt template keeps its arguments. */
+	| { kind: "unknown-command"; token: string; text: string }
 	| { kind: "usage-error"; command: string; reason: string }
 	| { kind: "empty" };
 
@@ -331,7 +334,21 @@ export interface SlashCommandContext {
 	runContextRefresh?: () => void;
 	openSkillsHub?: () => void;
 	listPrompts: () => ResourceList<PromptTemplate>;
+	/**
+	 * Resolve a `/name` against the loaded prompt templates. Absent when the host
+	 * wired no resources, in which case a command-shaped token that names no
+	 * builtin is simply not a command.
+	 */
+	expandPromptTemplate?: (text: string) => PromptTemplateExpansion;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
+	/** Detection report, pending proposals, and the two consent actions `/interop` drives. */
+	interop?: {
+		report: () => InteropReport | null;
+		proposals: () => ReadonlyArray<InteropProposal>;
+		configured: () => ReadonlyArray<{ id: string; command: string; args: ReadonlyArray<string> }>;
+		accept: (kind: InteropAgentId) => void;
+		decline: (kind: InteropAgentId) => void;
+	};
 	listAgents: () => ReadonlyArray<AgentSpec>;
 	listDelegationAgents: () => ReadonlyArray<{
 		id: string;
@@ -375,6 +392,7 @@ export interface SlashCommandContext {
 	openAgents: () => void;
 	openPrompts: () => void;
 	openExtensions: () => void;
+	openInterop?: () => void;
 	setEditorText?: (text: string) => void;
 	/**
 	 * Run compaction for the current session. Handler resolves the target
@@ -560,6 +578,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs: fromArgsOrUsage("extensions", { kind: "extensions" }),
 		handle(_command, ctx) {
 			ctx.openExtensions?.();
+		},
+	},
+	{
+		name: "interop",
+		description: "Review other coding agents detected on this machine",
+		group: "Inspect",
+		kinds: ["interop"],
+		args: {},
+		fromArgs: fromArgsOrUsage("interop", { kind: "interop" }),
+		handle(_command, ctx) {
+			ctx.openInterop?.();
 		},
 	},
 	{
@@ -1211,7 +1240,7 @@ export function parseSlashCommand(input: string): SlashCommand {
 	}
 	if (trimmed.startsWith("/")) {
 		const token = trimmed.slice(1).split(/\s+/u)[0] ?? "";
-		if (COMMAND_SHAPED_TOKEN.test(token)) return { kind: "unknown-command", token };
+		if (COMMAND_SHAPED_TOKEN.test(token)) return { kind: "unknown-command", token, text: trimmed };
 	}
 	return { kind: "unknown", text: trimmed };
 }
@@ -1228,7 +1257,20 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		return;
 	}
 	if (command.kind === "unknown-command") {
-		ctx.notice("error", `/${command.token} is not a command. Type /help for the list.`);
+		// The registry does not own the token, but a prompt template might. The
+		// parser stays pure, so the lookup happens here, and only for a spelling
+		// that matched no command: `/name` is how every other agent invokes the
+		// commands sitting in the roots Clio reads, and answering "not a command"
+		// for one that is loaded made the whole foreign prompt surface unreachable.
+		const expansion = ctx.expandPromptTemplate?.(command.text);
+		if (expansion?.expanded === true) {
+			ctx.submitChat(command.text);
+			return;
+		}
+		// A template that exists and refused is not a typo. Its reason reaches the
+		// operator and nothing reaches the model.
+		const refusal = expansion?.expanded === false ? expansion.refusal : undefined;
+		ctx.notice("error", refusal ? refusal.message : `/${command.token} is not a command. Type /help for the list.`);
 		ctx.render();
 		return;
 	}

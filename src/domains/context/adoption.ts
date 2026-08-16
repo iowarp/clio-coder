@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
+import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 
 export type AdoptionProvider = "claude-code" | "agents" | "codex" | "gemini" | "cursor" | "copilot" | "opencode";
 export type AdoptionScope = "project" | "global";
@@ -147,6 +148,20 @@ const GENERATED_OR_SECRET_DIRS = new Set([
 	"state",
 	"projects",
 ]);
+
+/**
+ * The constitution filenames a nested directory may carry, mapped to the agent
+ * that owns them. Only the registry's repo-root instruction files qualify: a
+ * file an agent reads only from its own directory is not a convention a
+ * subdirectory anywhere in the tree inherits.
+ */
+const NESTED_INSTRUCTION_PROVIDERS = new Map<string, AdoptionProvider>(
+	INTEROP_AGENT_KINDS.flatMap((kind) => {
+		const provider = kind.adoptionProvider;
+		if (provider === undefined) return [];
+		return kind.instructionFiles.filter((file) => !file.includes("/")).map((file) => [file, provider] as const);
+	}),
+);
 
 const UNSAFE_FILE_NAME_RE =
 	/(^\.env(?:\.|$)|secret|credential|token|password|history|cache|session|\.log$|state\.json$)/i;
@@ -293,14 +308,10 @@ function discoverCandidateSpecs(cwd: string, home: string, includeGlobal: boolea
 	// skills so the bounded imported-rule budget cannot be consumed by generic
 	// helper material before project rules. Nested constitutions retain their
 	// directory scope instead of silently becoming repository-global prose.
-	addProject("CLAUDE.md", "claude-code", "instructions");
-	addProject(join(".claude", "CLAUDE.md"), "claude-code", "instructions");
-	addProject("AGENTS.md", "codex", "instructions");
-	addProject("CODEX.md", "codex", "instructions");
-	addProject(join(".codex", "AGENTS.md"), "codex", "instructions");
-	addProject("GEMINI.md", "gemini", "instructions");
-	addProject(join(".gemini", "GEMINI.md"), "gemini", "instructions");
-	addProject(join(".github", "copilot-instructions.md"), "copilot", "instructions");
+	for (const kind of INTEROP_AGENT_KINDS) {
+		if (kind.adoptionProvider === undefined) continue;
+		for (const file of kind.instructionFiles) addProject(file, kind.adoptionProvider, "instructions");
+	}
 	// Nested constitutions are part of the claimed provenance set. Let the
 	// walker's typed limit/incomplete failures propagate instead of silently
 	// publishing an authoritative-looking partial adoption snapshot.
@@ -309,22 +320,19 @@ function discoverCandidateSpecs(cwd: string, home: string, includeGlobal: boolea
 		const parts = relPath.split("/");
 		if (parts.length - 1 > 6) continue;
 		const name = parts.at(-1);
-		if (name !== "CLAUDE.md" && name !== "AGENTS.md" && name !== "CODEX.md" && name !== "GEMINI.md") continue;
-		const filePath = join(cwd, relPath);
-		const provider: AdoptionProvider = name === "CLAUDE.md" ? "claude-code" : name === "GEMINI.md" ? "gemini" : "codex";
-		add(filePath, "project", provider, "instructions");
+		const provider = name === undefined ? undefined : NESTED_INSTRUCTION_PROVIDERS.get(name);
+		if (provider === undefined) continue;
+		add(join(cwd, relPath), "project", provider, "instructions");
 	}
 
 	addProject(join(".claude", "settings.json"), "claude-code", "settings");
 	addProjectDir(join(".claude", "commands"), "claude-code", "command", 3, markdownLike);
 	addProjectDir(join(".claude", "agents"), "claude-code", "agent", 2, markdownLike);
-	addProjectDir(join(".claude", "skills"), "claude-code", "skill", 4, markdownLike);
 
-	addProjectDir(join(".agents", "skills"), "agents", "skill", 4, markdownLike);
-
-	addProjectDir(join(".codex", "skills"), "codex", "skill", 4, markdownLike);
-
-	addProjectDir(join(".opencode", "skills"), "opencode", "skill", 4, markdownLike);
+	for (const kind of INTEROP_AGENT_KINDS) {
+		if (kind.adoptionProvider === undefined || kind.projectSkillRoot === undefined) continue;
+		addProjectDir(kind.projectSkillRoot, kind.adoptionProvider, "skill", 4, markdownLike);
+	}
 
 	addProject(join(".gemini", "settings.json"), "gemini", "settings");
 	addProject(join(".gemini", "config.json"), "gemini", "settings");
@@ -344,7 +352,6 @@ function discoverCandidateSpecs(cwd: string, home: string, includeGlobal: boolea
 	);
 
 	addProjectDir(join(".cursor", "rules"), "cursor", "rule", 0, markdownLike);
-	addProjectDir(join(".github", "skills"), "copilot", "skill", 4, markdownLike);
 
 	if (includeGlobal) add(join(home, ".codex", "AGENTS.md"), "global", "codex", "instructions");
 
