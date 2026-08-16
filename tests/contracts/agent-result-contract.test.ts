@@ -366,6 +366,28 @@ describe("contracts/agent result contract", () => {
 		strictEqual(reduceRouteQuality({ subject: { receipt, envelope }, receipts: [] }).label, "fail");
 	});
 
+	it("a result fenced as a json code block conforms, and a non-object still does not", () => {
+		const payload = { verdict: "pass", checks: [{ name: "typecheck", passed: true, evidence: "tsc clean" }] };
+		const fenced = contract({
+			contract: { kind: "verifier-report" },
+			output: `\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\``,
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem,
+		});
+		strictEqual(fenced.conformance, "pass");
+		strictEqual(fenced.quality, "pass");
+		const fencedArray = contract({
+			contract: { kind: "verifier-report" },
+			output: "```json\n[1, 2]\n```",
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem,
+		});
+		strictEqual(fencedArray.conformance, "fail");
+		strictEqual(fencedArray.reason, "result must be a JSON object");
+	});
+
 	it("artifact existence without a correctness validator is not a quality pass", () => {
 		const validation = contract({
 			contract: { kind: "architect-plan", path: "PLAN.md" },

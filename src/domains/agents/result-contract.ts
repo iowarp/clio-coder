@@ -279,19 +279,49 @@ function success(
 	};
 }
 
+/**
+ * The candidate spans a terminal result may hold its JSON object in, in the
+ * order they are tried: the whole message, the first fenced block, then the
+ * outermost brace span. `extractJsonObject` in the context-bootstrap reader
+ * accepts the same three, and a validator that stands in front of a reader must
+ * not be stricter than it.
+ */
+function jsonCandidates(output: string): string[] {
+	const trimmed = output.trim();
+	const candidates = [trimmed];
+	const fenced = /```[A-Za-z0-9_-]*\s*\n?([\s\S]*?)```/.exec(trimmed)?.[1]?.trim();
+	if (fenced !== undefined && fenced.length > 0) candidates.push(fenced);
+	const start = trimmed.indexOf("{");
+	const end = trimmed.lastIndexOf("}");
+	if (start >= 0 && end > start) candidates.push(trimmed.slice(start, end + 1));
+	return candidates;
+}
+
+/**
+ * Read the JSON object a terminal result carries. Every contract prompt asks
+ * for bare JSON and a fence is the deviation local models reach for first, so
+ * refusing one burns both repair rounds and fails a run whose payload was
+ * correct. Widening the span that is searched does not widen what conforms: a
+ * candidate still has to parse and still has to be an object, and the per-kind
+ * validators still own every field.
+ */
 function parseJson(
 	output: string | null,
 ): { ok: true; value: Record<string, unknown> } | { ok: false; reason: string } {
 	if (output === null || output.trim().length === 0) return { ok: false, reason: "missing final result" };
-	try {
-		const value = JSON.parse(output) as unknown;
-		if (value === null || typeof value !== "object" || Array.isArray(value)) {
-			return { ok: false, reason: "result must be a JSON object" };
+	let parsedSomething = false;
+	for (const candidate of jsonCandidates(output)) {
+		let value: unknown;
+		try {
+			value = JSON.parse(candidate) as unknown;
+		} catch {
+			continue;
 		}
+		parsedSomething = true;
+		if (value === null || typeof value !== "object" || Array.isArray(value)) continue;
 		return { ok: true, value: value as Record<string, unknown> };
-	} catch {
-		return { ok: false, reason: "result must be valid JSON" };
 	}
+	return { ok: false, reason: parsedSomething ? "result must be a JSON object" : "result must be valid JSON" };
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): boolean {
