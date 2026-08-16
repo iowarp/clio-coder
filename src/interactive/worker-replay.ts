@@ -19,6 +19,7 @@
 
 import type { SessionEntryInput, WorkerRunEntry } from "../domains/session/index.js";
 import {
+	boundSettledText,
 	type WorkerAttempt,
 	type WorkerEntryState,
 	type WorkerReceiptReader,
@@ -85,6 +86,7 @@ export function workerEntriesFromRunEntries(
 		const last = attempts[attempts.length - 1];
 		if (last === undefined) continue;
 		const facts = readReceipt(last.runId);
+		const bounded = boundSettledText(facts?.text ?? "");
 		const trail: WorkerAttempt[] = attempts.map((attempt) => ({
 			runId: attempt.runId,
 			targetLabel: workerTargetLabel(attempt.runtime),
@@ -96,8 +98,8 @@ export function workerEntriesFromRunEntries(
 			origin: last.origin,
 			agentId: last.agentId,
 			runtime: last.runtime,
-			text: facts?.text ?? "",
-			droppedLines: 0,
+			text: bounded.text,
+			droppedLines: bounded.dropped,
 			tools: [],
 			attempts: trail,
 			pending: false,
