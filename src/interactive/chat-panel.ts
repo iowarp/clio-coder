@@ -24,7 +24,7 @@ import {
 import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
 import { INLINE_STATUS_INDENT_COLS, type StatusPhase, type VerbRender } from "./status/index.js";
 import { clioTheme, fgSequence, GLYPH, markdownTheme, SGR_DIM, SGR_RESET } from "./theme/index.js";
-import type { WorkerEntryState } from "./worker-stream.js";
+import { type WorkerEntryState, workerAskedByModel } from "./worker-stream.js";
 
 // Fenced code reaches the screen through pi-tui's Markdown component, which
 // exposes the MarkdownTheme.highlightCode hook: it hands over the raw fence
@@ -1296,7 +1296,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				markDirty();
 				return;
 			}
-			const entry: WorkerTranscriptEntry = { role: "worker", state, folded: state.origin === "agent" };
+			const entry: WorkerTranscriptEntry = { role: "worker", state, folded: workerAskedByModel(state) };
 			workerEntries.set(state.assignmentId, entry);
 			const at = workerInsertionIndex(state);
 			if (at === null) {
@@ -1363,7 +1363,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// The settled view for a worker is its origin default, not
 					// universally folded: the operator's own run is the one block
 					// /run exists to show them.
-					entry.folded = entry.state.origin === "agent";
+					entry.folded = workerAskedByModel(entry.state);
 					continue;
 				}
 				if (entry.role !== "assistant") continue;

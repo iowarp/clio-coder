@@ -184,6 +184,29 @@ describe("contracts/worker run commands", () => {
 		deepStrictEqual(r.notes, ["[worker result] coder · run r9 · ok\nthe newest answer"]);
 	});
 
+	it("never defaults to a run the model asked for, whatever origin admitted it", () => {
+		const r = recorder({
+			workerRuns: [
+				workerEntry({ assignmentId: "mine", runId: "mine", text: "the operator's own answer" }),
+				// A scout successor: user origin by admission, spawned by a dispatch call.
+				workerEntry({ assignmentId: "s1", runId: "s1", text: "successor findings", parentToolCallId: "call_1" }),
+				// A compete judge: agent origin, spawned by the same call.
+				workerEntry({
+					assignmentId: "j1",
+					runId: "j1",
+					origin: "agent",
+					text: "judge verdict",
+					parentToolCallId: "call_1",
+				}),
+			],
+		});
+		dispatchSlashCommand(parseSlashCommand("/share"), r.ctx);
+		deepStrictEqual(r.notes, ["[worker result] coder · run mine · ok\nthe operator's own answer"]);
+		// Naming either still works: sharing on purpose is always the operator's call.
+		dispatchSlashCommand(parseSlashCommand("/share s1"), r.ctx);
+		strictEqual(r.notes.length, 2);
+	});
+
 	it("shares a run named by its assignment or by the attempt a failover left behind", () => {
 		const r = recorder({
 			workerRuns: [
