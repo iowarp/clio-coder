@@ -26,7 +26,7 @@ Markdown.
 | --- | --- | --- |
 | `artifact` tool plan / review / report | `.clio-coder/artifacts/PLAN.md`, `REVIEW.md`, `REPORT.md` | Human transient |
 | Any artifact the user named a path for | that path, inside the workspace | Human deliverable |
-| RCA write-ups for shipped fixes | `docs/issues/` (committed) | Human deliverable |
+| RCA write-ups for shipped fixes | the GitHub issue's closing comment, never a committed file | Human deliverable |
 | Codewiki index | `.clio-coder/codewiki.json` | Agent-to-agent |
 | Markdown wiki | `.clio-coder/wiki/` | Human transient |
 | Session context state | `.clio-coder/state.json` | Agent-to-agent |
