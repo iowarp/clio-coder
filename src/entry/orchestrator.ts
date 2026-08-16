@@ -219,6 +219,8 @@ export interface BootOptions {
 	acp?: {
 		transport?: AcpJsonRpcPeerTransport;
 		transportOptions?: StdioServerTransportOptions;
+		/** Overrides delegation.defaults.permissionTimeoutMs for this server only. */
+		permissionTimeoutMs?: number;
 	};
 }
 
@@ -1573,7 +1575,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				cwd: process.cwd(),
 				version: getVersionInfo().clio,
 				permissionTimeoutMs:
-					config?.get().delegation.defaults.permissionTimeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
+					options.acp.permissionTimeoutMs ??
+					config?.get().delegation.defaults.permissionTimeoutMs ??
+					DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 			});
 			chat.dispose();
 			await dispatch.drain();
