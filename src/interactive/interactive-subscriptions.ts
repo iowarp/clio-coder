@@ -20,9 +20,10 @@ export interface InteractiveSubscriptionsDeps {
 	requestRender: () => void;
 	notify: (level: InteractiveNoticeLevel, text: string, key?: string) => void;
 	/**
-	 * Place or refresh a worker's transcript block. Optional because a host
-	 * without a chat panel still wants the footer and island repaints; when it is
-	 * absent the fold still runs, so `/share` can find a finished run either way.
+	 * Place or refresh a worker's transcript block. Optional only so a host
+	 * without a chat panel still gets the footer and island repaints. Without it
+	 * no block is placed and nothing is shareable, because `/share` reads
+	 * `chatPanel.workerStates()`. Tests rely on the contract staying optional.
 	 */
 	applyWorkerState?: (state: WorkerEntryState) => void;
 	/**
