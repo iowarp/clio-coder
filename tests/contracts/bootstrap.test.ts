@@ -411,9 +411,13 @@ describe("contracts/bootstrap", () => {
 		strictEqual(result.telemetry.generation.mode, "model");
 	});
 
-	it("keeps a line whose citation carries a line anchor and drops one whose path is invented", async () => {
+	it("grounds a citation past its line anchor or call parens and still drops an invented one", async () => {
 		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "anchored", type: "module" }), "utf8");
-		writeFileSync(join(scratch, "index.ts"), "export const anchored = true;\n", "utf8");
+		writeFileSync(
+			join(scratch, "index.ts"),
+			"export const anchored = true;\nexport function readFlag(): boolean {\n\treturn anchored;\n}\n",
+			"utf8",
+		);
 
 		const result = await runBootstrap({
 			cwd: scratch,
@@ -435,7 +439,9 @@ describe("contracts/bootstrap", () => {
 							body: [
 								"The run flag is declared at `index.ts:1` and nothing else assigns it.",
 								"Rounding lives in `index.ts:1-3` and callers depend on the direction.",
+								"`readFlag()` in `index.ts` is the only reader and never caches.",
 								"Dispatch is wired in `src/dispatch.ts:3` and owns the routing table.",
+								"`missingHelper()` normalizes the flag before anything else sees it.",
 							].join("\n"),
 						},
 					],
@@ -447,7 +453,9 @@ describe("contracts/bootstrap", () => {
 		ok(gotchas, "line-anchored citations to a real file must survive grounding");
 		ok(gotchas.body.includes("`index.ts:1`"), gotchas.body);
 		ok(gotchas.body.includes("`index.ts:1-3`"), gotchas.body);
+		ok(gotchas.body.includes("`readFlag()`"), gotchas.body);
 		strictEqual(gotchas.body.includes("src/dispatch.ts"), false, gotchas.body);
+		strictEqual(gotchas.body.includes("missingHelper"), false, gotchas.body);
 	});
 
 	it("records a parsed Scout draft as heuristic when no enrichment survives grounding", async () => {

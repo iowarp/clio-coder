@@ -540,23 +540,37 @@ const CODE_TOKEN_RE = /`([^`\n]+)`/g;
  */
 const CITED_LOCATION_RE = /^(.*[^:]):(\d+)(?:[-:]\d+)?$/;
 
-function groundedPath(token: string, evidence: ModelGroundingCorpus): boolean {
+/** A symbol written as a call: `priceCart()`. */
+const CITED_CALL_RE = /^(.+?)\(\s*\)$/;
+
+function groundedName(token: string, evidence: ModelGroundingCorpus): boolean {
 	return evidence.lower.includes(token.toLowerCase()) || evidence.indexedPaths.has(token.replace(/^\.\//, ""));
 }
 
 /**
- * A token names something real when the token itself is in the evidence, or
- * when it is a location-anchored citation whose path is. The corpus holds
- * paths and symbol names, never file offsets, so requiring the whole token to
- * match deleted precisely the lines that did the most reading: a Gotchas
- * section whose five bullets each named a real file and line lost all five and
- * vanished. Stripping the anchor cannot loosen the rule, because the bare path
- * still has to ground on its own.
+ * The names a citation carries under its decoration. The corpus holds paths,
+ * symbol names, and scripts, so a token that adds a file offset or call parens
+ * to one of them cannot match it whole, and requiring the whole token to match
+ * deleted precisely the lines that had done the most reading. A Gotchas section
+ * whose five bullets each named a real file and line lost all five and
+ * vanished; the run after that lost every line that wrote `priceCart()` for the
+ * symbol `priceCart`. Peeling the decoration cannot loosen the rule, because
+ * the bare name still has to ground on its own.
  */
+function citedNames(token: string): string[] {
+	const names: string[] = [];
+	let current = token;
+	for (let round = 0; round < 2; round += 1) {
+		const next = (CITED_CALL_RE.exec(current)?.[1] ?? CITED_LOCATION_RE.exec(current)?.[1])?.trim();
+		if (next === undefined || next.length === 0 || next === current) break;
+		names.push(next);
+		current = next;
+	}
+	return names;
+}
+
 function groundedToken(token: string, evidence: ModelGroundingCorpus): boolean {
-	if (groundedPath(token, evidence)) return true;
-	const anchored = CITED_LOCATION_RE.exec(token)?.[1];
-	return anchored !== undefined && anchored.length > 0 && groundedPath(anchored, evidence);
+	return groundedName(token, evidence) || citedNames(token).some((name) => groundedName(name, evidence));
 }
 
 /**
