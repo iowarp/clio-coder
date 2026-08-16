@@ -238,6 +238,24 @@ describe("contracts/agent-ledger render", () => {
 		findingEntry(4, "run-c", "something is off in admission, no line yet"),
 	];
 
+	it("corroborates two runs that cite one file in different path forms", () => {
+		// Two scouts reading the same file wrote its path the way each happened to
+		// hold it. Keying on the raw string left both findings uncorroborated,
+		// which is the state that makes a real agreement look like two guesses.
+		const cited = join(process.cwd(), "src/core/state-file-lock.ts");
+		const mixed = [
+			findingEntry(1, "run-a", "lock is taken twice", "./src/core/state-file-lock.ts"),
+			findingEntry(2, "run-b", "second reader confirms the double take", cited),
+			findingEntry(3, "run-c", "unrelated file", "/etc/hosts"),
+		];
+		const report = corroboration(mixed);
+		strictEqual(report.byEntryId.get("e1"), "corroborated");
+		strictEqual(report.byEntryId.get("e2"), "corroborated");
+		strictEqual(report.byEntryId.get("e3"), "uncorroborated");
+		// The render still shows each author's own words for the path.
+		match(lineFor(renderAgentLedger(mixed), "e2"), /state-file-lock\.ts/);
+	});
+
 	it("labels an uncorroborated finding and never merges it into the corroborated one", () => {
 		const report = corroboration(board);
 		strictEqual(report.byEntryId.get("e1"), "corroborated");

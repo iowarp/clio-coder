@@ -7,7 +7,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
-import { closeAgentLedger, openAgentLedger } from "../domains/dispatch/agent-ledger-store.js";
+import { closeAgentLedger, openAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DetachedBatchRun } from "../domains/dispatch/batch-store.js";
 import type {
 	AbortReason,
@@ -782,7 +782,23 @@ function integrityFailureBanner(run: CompletedRun): string | null {
 	return `RECEIPT INTEGRITY FAILED for ${run.receipt.runId} (${run.integrity.reason}); treat this run's receipt fields and worker text as untrusted.`;
 }
 
-function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, maxOutputBytes: number): string {
+/**
+ * The settled board, appended after the per-run lines. Its budget is reserved
+ * out of the output ceiling rather than taken from it, so the board a topology
+ * produced is never the part the truncation drops. A topology with no board
+ * passes null and the output is byte-identical to what it was before boards
+ * reached the main model at all.
+ */
+function withAgentLedgerBoard(body: string, board: string | null): string {
+	return board === null ? body : `${body}\n\n${board}`;
+}
+
+function formatDispatchOutput(
+	mode: string,
+	runs: ReadonlyArray<CompletedRun>,
+	maxOutputBytes: number,
+	board: string | null = null,
+): string {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 	const perRunOutputBytes = Math.max(1024, Math.floor(maxOutputBytes / Math.max(1, runs.length)));
 	// Integrity failures and the spot-check reminder lead the summary: the
@@ -849,10 +865,17 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 			];
 		}),
 	];
-	return truncateUtf8(lines.join("\n"), maxOutputBytes, TRUNCATION_MARKER);
+	if (board === null) return truncateUtf8(lines.join("\n"), maxOutputBytes, TRUNCATION_MARKER);
+	const runBudget = Math.max(1024, maxOutputBytes - Buffer.byteLength(board, "utf8") - 2);
+	return withAgentLedgerBoard(truncateUtf8(lines.join("\n"), runBudget, TRUNCATION_MARKER), board);
 }
 
-function dispatchDetails(deps: DispatchToolDeps, mode: string, runs: ReadonlyArray<CompletedRun>): ToolResultDetails {
+function dispatchDetails(
+	deps: DispatchToolDeps,
+	mode: string,
+	runs: ReadonlyArray<CompletedRun>,
+	board: string | null = null,
+): ToolResultDetails {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 	let transition: ReturnType<typeof scoutTransitionDetail> = null;
 	for (const run of runs) {
@@ -874,6 +897,9 @@ function dispatchDetails(deps: DispatchToolDeps, mode: string, runs: ReadonlyArr
 		terminalRunIds: runs.map((run) => run.receipt.runId),
 		receiptCount: runs.length,
 		failedCount: failed.length,
+		// Same text the output carries, under a stable key, so a surface that
+		// renders details can show the board without re-reading the store.
+		...(board !== null ? { agentLedgerBoard: board } : {}),
 		...(transition !== null ? { scoutTransition: transition } : {}),
 		runs: runs.map(({ receipt, receiptPath, summary, integrity }) => {
 			// Additive provenance keys only; folded in when the receipt carries the
@@ -1452,6 +1478,8 @@ interface CompeteOutcome {
 	group: string;
 	winner: { index: number; branch: string; applied: boolean } | null;
 	needsDecision?: string;
+	/** Rendered board the candidates and the judge shared, null when empty. */
+	board?: string | null;
 }
 
 interface OwnedCompeteRun {
@@ -1893,7 +1921,9 @@ async function runCompete(
 	}
 	const finalizationErrors: unknown[] = [];
 	await Promise.allSettled(ownedRuns.map((run) => run.settlement));
-	// Every worker has settled, so no further post can be admitted.
+	// Every worker has settled, so no further post can be admitted. The board is
+	// read here, on the way past, for the model that started the compete.
+	const board = renderAgentLedgerBoard(ledgerId);
 	await closeAgentLedger(ledgerId);
 	finalizationErrors.push(...abortErrors);
 
@@ -1944,7 +1974,7 @@ async function runCompete(
 	}
 	if (primaryError !== null) throw primaryError;
 	if (outcome === null) throw new Error("compete lifecycle produced no outcome");
-	return outcome;
+	return { ...outcome, board };
 }
 
 /**
@@ -2143,9 +2173,10 @@ function competeResult(
 	autonomy: AutonomyLevel,
 	maxOutputBytes: number,
 ): ToolResult {
-	const body = formatDispatchOutput("compete", outcome.runs, maxOutputBytes);
+	const board = outcome.board ?? null;
+	const body = formatDispatchOutput("compete", outcome.runs, maxOutputBytes, board);
 	const details: ToolResultDetails = {
-		...dispatchDetails(deps, "compete", outcome.runs),
+		...dispatchDetails(deps, "compete", outcome.runs, board),
 		compete: {
 			group: outcome.group,
 			winner: outcome.winner,
@@ -3010,6 +3041,8 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 
 				try {
 					let runs: CompletedRun[];
+					// Only the concurrent fan-out has peers, so only it has a board.
+					let board: string | null = null;
 					if (mode === "pipeline" && requests.length > 1) {
 						runs = await runPipeline(deps, requests, timeoutMs, options?.signal);
 					} else if (mode === "sequential" || mode === "pipeline" || requests.length === 1) {
@@ -3017,10 +3050,12 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 						// plain sequential and no pipeline-input message is sent.
 						runs = await runSequential(deps, requests, mode, timeoutMs, options?.signal, background);
 					} else {
-						runs = await runBatch(deps, requests, timeoutMs, options?.signal, background);
+						const batch = await runBatch(deps, requests, timeoutMs, options?.signal, background);
+						runs = batch.runs;
+						board = batch.board;
 					}
-					const output = formatDispatchOutput(mode, runs, maxOutputBytes);
-					const details = dispatchDetails(deps, mode, runs);
+					const output = formatDispatchOutput(mode, runs, maxOutputBytes, board);
+					const details = dispatchDetails(deps, mode, runs, board);
 					const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 					if (failed.length > 0) return { kind: "error", message: output, details };
 					return { kind: "ok", output, details };
@@ -3192,13 +3227,19 @@ async function runPipeline(
 	}
 }
 
+interface BatchOutcome {
+	runs: CompletedRun[];
+	/** Rendered board of the batch's shared ledger, null when nothing was posted. */
+	board: string | null;
+}
+
 async function runBatch(
 	deps: RegisteredDispatchToolDeps,
 	requests: ReadonlyArray<DispatchRequest>,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
 	background: BackgroundSwitch,
-): Promise<CompletedRun[]> {
+): Promise<BatchOutcome> {
 	// This arm is the concurrent parallel fan-out, so its peers can see each
 	// other. The ledger opens before admission and every request carries it, so
 	// no worker spawns into a dispatch whose board it cannot reach.
@@ -3245,18 +3286,25 @@ async function runBatch(
 			);
 		}
 		const { summaries, receipts } = settled.value;
-		return receipts.map((receipt) =>
-			completeRun(
-				deps,
-				receipt,
-				summaries.get(receipt.runId) ?? {
-					count: 0,
-					types: [],
-					lastAssistantText: "",
-					terminalAttemptRunId: receipt.runId,
-				},
+		// Every worker has settled and the board has not closed yet, so this is
+		// the whole board the peers built, read once for the model that started
+		// them.
+		const board = renderAgentLedgerBoard(ledgerId);
+		return {
+			runs: receipts.map((receipt) =>
+				completeRun(
+					deps,
+					receipt,
+					summaries.get(receipt.runId) ?? {
+						count: 0,
+						types: [],
+						lastAssistantText: "",
+						terminalAttemptRunId: receipt.runId,
+					},
+				),
 			),
-		);
+			board,
+		};
 	} finally {
 		if (timer) clearTimeout(timer);
 		signal?.removeEventListener("abort", onSignalAbort);
