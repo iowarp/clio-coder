@@ -462,6 +462,41 @@ describe("contracts/agent result contract", () => {
 		ok(wrongShape.reason?.includes("commitMessage must be a string when present"));
 	});
 
+	it("a refused validations array is told which mistake it made and shown the entry that passes (#74)", () => {
+		// Receipt 2462pefhepp8: Nemo-3.5-Lightning answered a read-only coder task
+		// with `"validations":[]`, read "must carry typed validation results" as
+		// already satisfied, and re-emitted the same empty array through both
+		// repair rounds into `result_contract_exhausted`. The reason has to say
+		// which way the array was wrong and carry the entry that would pass.
+		const mutation = (validations: string) =>
+			contract({
+				contract: { kind: "mutation-report" },
+				output: `{"mutatedPaths":[],"validations":${validations},"summary":"SOLOTOKEN-90427"}`,
+				cwd: "/repo",
+				networkAllowed: false,
+				filesystem,
+			});
+		const example = '{"name":"npm test","passed":true,"evidence":"exit 0"}';
+		const empty = mutation("[]");
+		strictEqual(empty.conformance, "fail");
+		ok(empty.reason?.includes("validations was empty"));
+		ok(empty.reason?.includes(example), "the empty array is shown one entry, not just told to have some");
+		ok(empty.reason?.includes("only read files"), "a read-only run is told what counts as its validation");
+		// Malformed entries are a different correction: the keys, not the count.
+		const untyped = mutation('["ran npm test"]');
+		strictEqual(untyped.conformance, "fail");
+		ok(untyped.reason?.includes(example));
+		ok(!untyped.reason?.includes("was empty"));
+		ok(untyped.reason?.includes("no other keys"));
+		// The repair round the worker replays carries the same example verbatim.
+		const [, repair] = resultContractRepairMessages(
+			{ contract: { kind: "mutation-report" }, reason: empty.reason ?? "", attempt: 1, anchors: [] },
+			{ provider: "llamacpp", api: "openai-completions", model: "Nemo-3.5-Lightning" },
+		);
+		ok(repair.content[0].text.includes("validations was empty"));
+		ok(repair.content[0].text.includes(example));
+	});
+
 	it("an empty authored field reads as no authored message", () => {
 		const output = '{"mutatedPaths":[],"validations":[],"commitMessage":"","summary":""}';
 		strictEqual(resultContractAuthorship({ kind: "mutation-report" }, output).commitMessage, null);

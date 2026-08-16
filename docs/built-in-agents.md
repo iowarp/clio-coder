@@ -72,6 +72,8 @@ Grounding is checked against the run's own reads, not just against the file. The
 
 Every contract-bearing agent gets bounded in-worker repair. When the terminal result misses its contract, the worker replays the validator's own reason, the exact accepted shape, and the `path:line` locations this run actually read, then asks for the result again. Two repair rounds is the whole allowance; after that the run fails with `result_contract_exhausted`. This is what keeps a small local model that gathered the right evidence from being failed for a shape mistake nobody told it about.
 
+Two rounds only help when the reason is actionable, so a validator reason names the mistake and shows the value that would have passed. A `mutation-report` with `"validations":[]` is told the array was empty and is given one entry shaped like `{"name":"npm test","passed":true,"evidence":"exit 0"}`, and a report whose entries are malformed is told which keys each entry carries. Naming the requirement alone left a small model re-emitting the same empty array through both rounds.
+
 ---
 
 ## Frontmatter schema
