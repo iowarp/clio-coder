@@ -18,7 +18,7 @@ function afterDispatch(turnId: string): MiddlewareHookInput {
 function turnEnd(
 	turnId: string,
 	text: string,
-	overrides: { activeToolNames?: string; stopReason?: string } = {},
+	overrides: { activeToolNames?: string; stopReason?: string; sharedWorkerNote?: boolean } = {},
 ): MiddlewareHookInput {
 	return {
 		hook: "turn_end",
@@ -28,6 +28,7 @@ function turnEnd(
 			stopReason: overrides.stopReason ?? "stop",
 			activeToolNames: overrides.activeToolNames ?? ACTIVE_TOOLS,
 			userTurnId: turnId,
+			...(overrides.sharedWorkerNote === undefined ? {} : { sharedWorkerNote: overrides.sharedWorkerNote }),
 		},
 	};
 }
@@ -70,6 +71,15 @@ describe("unbacked worker claim rail", () => {
 		const registration = createUnbackedWorkerClaimRegistration();
 		deepStrictEqual(registration.evaluate(afterDispatch("turn-2")), []);
 		deepStrictEqual(registration.evaluate(turnEnd("turn-2", CONTAMINATED_REPORT)), []);
+	});
+
+	it("stays silent when the turn relays a [worker result] note the operator shared", () => {
+		// The operator ran the worker with /run and handed the answer over with
+		// /share; the model never dispatched it, and relaying it is honest (#73).
+		const registration = createUnbackedWorkerClaimRegistration();
+		const relay = "The worker found the call site at a.ts:1, per the shared run r1.";
+		deepStrictEqual(registration.evaluate(turnEnd("turn-share", relay, { sharedWorkerNote: true })), []);
+		strictEqual(registration.evaluate(turnEnd("turn-plain", relay, { sharedWorkerNote: false })).length, 1);
 	});
 
 	it("does not carry one turn's dispatch over to the next", () => {

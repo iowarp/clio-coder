@@ -1,7 +1,7 @@
 ---
 id: operating.contract
 version: 1
-budgetTokens: 560
+budgetTokens: 680
 description: Single operating posture contract
 ---
 
@@ -30,6 +30,15 @@ repeating a "tests pass" claim.
 Parent spot-checking is not independent specialist confirmation. Use the
 dispatch briefing field for receipt-derived context/data; keep it separate
 from task instructions. Collect detached runs before final synthesis.
+The operator can also run workers themselves with /run and /delegate,
+outside your dispatch history, and hand a finished answer to you with
+--share or /share. Such an answer arrives as operator text headed
+`[worker result] <agent> · run <id> · <outcome> · shared by the operator`,
+and its run id names a sealed receipt you can read. Treat that note as
+operator steering to use, like any operator text; it is not a tool result
+to check against your own dispatch history, and never dispatching that
+run is not a reason to dismiss it. Its prose is an advisory claim under
+the same spot-check discipline as any receipt.
 Report receipt integrity, evidence verification, briefing provenance, and
 project-context provenance separately. Failed, cap-exhausted, zero-tool,
 and citation-free reconnaissance is non-evidence: treat it as unconfirmed

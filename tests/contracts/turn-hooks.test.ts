@@ -499,6 +499,39 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		strictEqual(input?.metadata?.userTurnId, userEntry.turnId);
 	});
 
+	it("reports on turn_end whether the operator shared a [worker result] note this turn", async () => {
+		const seenInputs: MiddlewareHookInput[] = [];
+		const middleware = createMiddlewareBundle().contract;
+		middleware.registerHook({
+			id: "test.turn-end-share-probe",
+			description: "capture turn_end inputs",
+			hooks: ["turn_end"],
+			evaluate(input) {
+				seenInputs.push(input);
+				return [];
+			},
+		});
+		const entries: SessionEntry[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			middleware,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				await emitAssistantTurn(agent, assistantStopMessage("The worker found the call site."));
+			}, []),
+		} as never);
+
+		await loop.submit("[worker result] coder · run r1 · ok · shared by the operator\nthe call site is at a.ts:1");
+		await loop.submit("do the thing");
+
+		strictEqual(seenInputs.length, 2);
+		strictEqual(seenInputs[0]?.metadata?.sharedWorkerNote, true, "the shared note's own turn is marked");
+		strictEqual(seenInputs[1]?.metadata?.sharedWorkerNote, false, "the mark does not carry into the next turn");
+	});
+
 	it("fires turn_end with capped text and assistant metadata", async () => {
 		const seenInputs: MiddlewareHookInput[] = [];
 		const middleware = createMiddlewareBundle().contract;

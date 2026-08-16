@@ -205,6 +205,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				runtimeTier: agentRuntime.runtimeResolution.runtimeTier ?? "",
 				activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
 				turnToolCalls: state.turnToolCalls,
+				sharedWorkerNote: state.turnSharedWorkerNote,
 			};
 			if (terminalToolResult !== undefined) {
 				metadata.terminalToolResult = true;

@@ -243,7 +243,9 @@ export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegi
  * dispatch call ran in the same turn. When a claim is made and no dispatch
  * ran, the turn ends with one advisory transcript line. Detection is
  * deliberately conservative: an intention ("let me dispatch a scout") is not a
- * claim, so only a claim of results trips it.
+ * claim, so only a claim of results trips it. A turn the operator handed a
+ * shared `[worker result]` note (turn_end metadata `sharedWorkerNote`) is
+ * exempt: the result it relays is the operator's, backed by a receipt.
  */
 const WORKER_NOUN = "(?:scouts?|shadow (?:agent|worker)s?|sub-?agents?|workers?)";
 const RESULT_VERB =
@@ -307,6 +309,10 @@ export function createUnbackedWorkerClaimRegistration(): MiddlewareHookRegistrat
 			// A surface without the dispatch tool cannot have dispatched, so a worker
 			// mention there is discussion, not a fabricated result.
 			if (!hasActiveTool(input, ToolNames.Dispatch)) return [];
+			// A `[worker result]` note the operator shared this turn is a receipt-backed
+			// worker result that entered by the operator's hand, not by a dispatch
+			// call. A turn that only relays it has nothing to fabricate (#73).
+			if (input.metadata?.sharedWorkerNote === true) return [];
 			if (dispatched || !claimsWorkerResults(input.text)) return [];
 			return [{ kind: "inject_reminder", message: buildUnbackedWorkerClaimMessage(), severity: "warn" }];
 		},

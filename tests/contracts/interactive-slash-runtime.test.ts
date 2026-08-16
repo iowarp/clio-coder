@@ -260,7 +260,9 @@ describe("contracts/interactive slash runtime", () => {
 		const harness = createHarness();
 		const runtime = createInteractiveSlashRuntime(harness.deps);
 
-		runtime.context.submitOperatorNote?.("[worker result] coder · run r1 · ok\nsee @plan.md and /skill:writer");
+		runtime.context.submitOperatorNote?.(
+			"[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill:writer",
+		);
 		await flushAsync();
 
 		// The same path typed text takes, minus expansion: a worker's answer is
@@ -269,9 +271,9 @@ describe("contracts/interactive slash runtime", () => {
 		deepStrictEqual(harness.events, [
 			"record-turn",
 			"footer",
-			"user:[worker result] coder · run r1 · ok\nsee @plan.md and /skill:writer",
+			"user:[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill:writer",
 			"render",
-			"submit:[worker result] coder · run r1 · ok\nsee @plan.md and /skill:writer",
+			"submit:[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill:writer",
 		]);
 		harness.finishSubmit();
 	});

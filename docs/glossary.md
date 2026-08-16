@@ -83,7 +83,7 @@ This document defines core architectural concepts and terminology used throughou
 - **Owning Type**: `WorkerRunOrigin` in `src/domains/session/entries.ts`.
 
 ### 20. Share Note
-- **Definition**: A bounded operator note formatted as `[worker result] <agent> · run <id> · <outcome>` that delivers a finished worker answer into the main agent context over the user-turn path.
+- **Definition**: A bounded operator note formatted as `[worker result] <agent> · run <id> · <outcome> · shared by the operator` that delivers a finished worker answer into the main agent context over the user-turn path.
 - **Owning Type**: `WorkerShareFacts` in `src/interactive/worker-share.ts`.
 
 ### 21. Fold

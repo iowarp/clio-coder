@@ -575,8 +575,11 @@ hard block.
   call and worker block at once.
 - Sharing: nothing a worker produced enters the main model's context unless
   `--share` was passed or the operator runs `/share [runId]`. What enters is a
-  bounded note of the shape `[worker result] <agent> · run <id> · <outcome>`
+  bounded note of the shape `[worker result] <agent> · run <id> · <outcome> · shared by the operator`
   followed by the bounded answer text, traveling the ordinary user-turn path.
+  The operating contract tells the main agent that this note is operator
+  steering backed by a readable receipt, not a tool result to verify against
+  its own dispatch history.
   Bare `/share` picks the newest finished run the operator started themselves
   (never a model-asked `◆` run); `/share <runId>` may name a model-asked run
   explicitly. `/new` resets the transcript and the pool bare `/share` draws

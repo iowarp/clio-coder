@@ -61,6 +61,7 @@ import { createTurnQueues, type QueuedChatMessage, type QueuedMessagesSnapshot }
 import { createTurnRecovery, type RetryStatusEvent, reclassifyStallAbort } from "./turn-recovery.js";
 import { type AssistantDeltaEvent, createTurnRuntime } from "./turn-runtime.js";
 import { type AgentRuntime, type ChatLoopRunSnapshot, createTurnState } from "./turn-state.js";
+import { isWorkerShareNote } from "./worker-share.js";
 
 export type { QueuedChatMessage, QueuedMessageKind, QueuedMessagesSnapshot } from "./turn-queues.js";
 export type { RetryStatusEvent, RetryStatusPayload, RetryStatusPhase } from "./turn-recovery.js";
@@ -479,6 +480,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// steering queue drains after every tool batch, so the text
 					// lands as a user message before the next model turn.
 					// alt+enter (queueFollowUp) keeps the after-this-run intent.
+					if (isWorkerShareNote(trimmed)) state.turnSharedWorkerNote = true;
 					queues.steer(trimmed);
 					return;
 				}
@@ -503,6 +505,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// 1. Accept the prompt: reset per-turn accounting, freeze the tool
 			// surface, fire turn_start, and assemble the submitted text.
 			state.turnToolCalls = 0;
+			state.turnSharedWorkerNote = isWorkerShareNote(text);
 			middlewareToolChoice.reset();
 			if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;

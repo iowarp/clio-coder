@@ -88,6 +88,8 @@ export interface ChatTurnState {
 	toolProseAssessedChars: number;
 	/** Tool calls observed in the current turn; feeds turn_end metadata. */
 	turnToolCalls: number;
+	/** A `[worker result]` note the operator shared entered this turn, as the prompt or as a steer; feeds turn_end metadata. */
+	turnSharedWorkerNote: boolean;
 	/** One stalled-turn nudge per user prompt; reset when a real prompt arrives. */
 	stalledTurnNudgeSpent: boolean;
 	/** A middleware request_continuation is waiting to resubmit after settle. */
@@ -111,6 +113,7 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		streamStallReason: null,
 		toolProseAssessedChars: 0,
 		turnToolCalls: 0,
+		turnSharedWorkerNote: false,
 		stalledTurnNudgeSpent: false,
 		pendingRequestContinuation: false,
 		currentPendingSkillPolicy: undefined,
