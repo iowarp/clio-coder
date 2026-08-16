@@ -7,7 +7,8 @@ import {
 	type DispatchStartedPayload,
 } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
+import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
 import { createInteractiveSubscriptions } from "../../src/interactive/interactive-subscriptions.js";
 import { GLYPH } from "../../src/interactive/theme/index.js";
 import type { WorkerReceiptFacts } from "../../src/interactive/worker-stream.js";
@@ -69,10 +70,11 @@ function completed(overrides: Partial<DispatchCompletedPayload> = {}): DispatchC
 /** A panel wired to the subscriptions exactly as the interactive application wires it. */
 function transcriptHarness(receipt: (runId: string) => WorkerReceiptFacts | null = () => null): {
 	bus: ReturnType<typeof createSafeEventBus>;
+	panel: ChatPanel;
 	render: () => string;
 } {
 	const bus = createSafeEventBus();
-	const panel = createChatPanel();
+	const panel = createChatPanel({ getToolExpandKey: () => "Ctrl+O" });
 	createInteractiveSubscriptions({
 		bus,
 		refreshFooter: () => {},
@@ -83,7 +85,7 @@ function transcriptHarness(receipt: (runId: string) => WorkerReceiptFacts | null
 		applyWorkerState: (state) => panel.applyWorkerState(state),
 		readWorkerReceipt: receipt,
 	});
-	return { bus, render: () => panel.render(96).join("\n").replace(ANSI, "") };
+	return { bus, panel, render: () => panel.render(96).join("\n").replace(ANSI, "") };
 }
 
 describe("interactive dispatch subscriptions", () => {
@@ -182,5 +184,69 @@ describe("interactive dispatch subscriptions", () => {
 		});
 		h.bus.emit(BusChannels.DispatchCompleted, completed({ runId: "wiki-1", requestOrigin: "internal" }));
 		strictEqual(h.render().trim(), "");
+	});
+
+	it("nests an agent-driven fan-out under the dispatch tool segment as folded cards", () => {
+		const h = transcriptHarness((runId) => ({ outcome: "succeeded", text: `answer from ${runId}`, durationMs: 41_000 }));
+		h.panel.appendUser("find the slow path");
+		h.panel.applyEvent({ type: "text_delta", delta: "Scouting the repository." } as ChatLoopEvent);
+		h.panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "call_1",
+			toolName: "dispatch",
+			args: { mode: "parallel" },
+		} as ChatLoopEvent);
+		for (const index of [1, 2, 3]) {
+			h.bus.emit(
+				BusChannels.DispatchStarted,
+				started({
+					runId: `s${index}`,
+					assignmentId: `s${index}`,
+					agentId: `scout-${index}`,
+					requestOrigin: "agent",
+					targetId: "zbook",
+					wireModelId: "gemma-4-26b",
+					parentToolCallId: "call_1",
+				}),
+			);
+		}
+		for (const index of [1, 2, 3]) {
+			h.bus.emit(
+				BusChannels.DispatchCompleted,
+				completed({ runId: `s${index}`, agentId: `scout-${index}`, requestOrigin: "agent", durationMs: 41_000 }),
+			);
+		}
+		h.panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "call_1",
+			toolName: "dispatch",
+			args: { mode: "parallel" },
+			result: "3 scouts finished",
+			isError: false,
+		} as ChatLoopEvent);
+		h.panel.applyEvent({ type: "text_delta", delta: "Three scouts are back." } as ChatLoopEvent);
+
+		const rendered = h.render();
+		const rows = rendered.split("\n");
+		const cardRows = [1, 2, 3].map((index) => rows.findIndex((row) => row.includes(`agent → scout-${index}`)));
+		deepStrictEqual(
+			cardRows,
+			[cardRows[0], (cardRows[0] ?? 0) + 1, (cardRows[0] ?? 0) + 2],
+			`three cards, three consecutive rows, in spawn order:\n${rendered}`,
+		);
+		ok(
+			rows.findIndex((row) => row.includes("dispatch(")) < (cardRows[0] ?? -1),
+			`cards sit under the call:\n${rendered}`,
+		);
+		ok(!rendered.includes("answer from s1"), `folded by default:\n${rendered}`);
+		// One chord, one target. The tool segment stops advertising the key once a
+		// worker card behind it is what the key would reach.
+		strictEqual(rendered.split("Ctrl+O").length - 1, 1, `exactly one expand hint:\n${rendered}`);
+		ok(rows[cardRows[2] ?? 0]?.includes("[Ctrl+O expand]"), `the hint is on the newest card:\n${rendered}`);
+
+		strictEqual(h.panel.toggleLastToolExpanded(), true);
+		const expanded = h.render();
+		ok(expanded.includes("│ answer from s3"), expanded);
+		ok(!expanded.includes("answer from s2"), `only the targeted card opened:\n${expanded}`);
 	});
 });
