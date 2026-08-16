@@ -256,6 +256,26 @@ describe("contracts/interactive slash runtime", () => {
 		ok(!harness.events.includes("write-thinking"), "/thinking wrote saved settings");
 	});
 
+	it("submits a shared worker result as a user turn, and never expands it", async () => {
+		const harness = createHarness();
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+
+		runtime.context.submitOperatorNote?.("[worker result] coder · run r1 · ok\nsee @plan.md and /skill:writer");
+		await flushAsync();
+
+		// The same path typed text takes, minus expansion: a worker's answer is
+		// literal, so an @path or a /skill: inside it must reach the model as the
+		// characters the worker wrote.
+		deepStrictEqual(harness.events, [
+			"record-turn",
+			"footer",
+			"user:[worker result] coder · run r1 · ok\nsee @plan.md and /skill:writer",
+			"render",
+			"submit:[worker result] coder · run r1 · ok\nsee @plan.md and /skill:writer",
+		]);
+		harness.finishSubmit();
+	});
+
 	it("records and paints an expanded chat submission before awaiting the chat loop", async () => {
 		const harness = createHarness();
 		const runtime = createInteractiveSlashRuntime(harness.deps);

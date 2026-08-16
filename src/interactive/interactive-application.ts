@@ -523,6 +523,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openExtensions: () => openExtensionsOverlayState(),
 		openContextReset: () => openContextResetOverlayState(),
 		setEditorText: (text) => editor.setText(text),
+		// Read lazily: the subscriptions that own the fold are built below, and
+		// `/share` can only be typed once the whole application is running.
+		listWorkerRuns: () => interactiveSubscriptions.workers.entries(),
 	});
 
 	const editorSubmit = createEditorSubmitController({

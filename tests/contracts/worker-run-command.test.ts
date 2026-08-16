@@ -1,6 +1,7 @@
 /**
  * The operator-facing half of a dispatched run: what `/run` and `/delegate` put
- * in the transcript, and what they deliberately keep out of the model's context.
+ * in the transcript, what `--share` and `/share` hand to the main agent, and
+ * what stays out of the model's context when neither was asked for.
  */
 
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
@@ -14,14 +15,19 @@ import {
 	parseSlashCommand,
 	type SlashCommandContext,
 } from "../../src/interactive/slash-commands.js";
+import { WORKER_SHARE_MAX_BYTES } from "../../src/interactive/worker-share.js";
+import type { WorkerEntryState } from "../../src/interactive/worker-stream.js";
+
+const flushAsync = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 interface Recorder {
 	ctx: SlashCommandContext;
 	echoed: string[];
 	submitted: string[];
+	notes: string[];
 	notices: string[];
 	requests: unknown[];
-	settled: Promise<void>;
+	workerRuns: WorkerEntryState[];
 }
 
 function receipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
@@ -30,29 +36,45 @@ function receipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
 		agentId: "coder",
 		outcome: "succeeded",
 		exitCode: 0,
-		output: { text: "Hello! I'm the coder worker." },
+		output: { state: "final", text: "Hello! I'm the coder worker.", bytes: 28, truncated: false },
 		...overrides,
 	} as unknown as RunReceipt;
 }
 
-function recorder(options: { receipt?: RunReceipt } = {}): Recorder {
+/** A settled worker block as the reducer would leave it after a finished run. */
+function workerEntry(overrides: Partial<WorkerEntryState> = {}): WorkerEntryState {
+	return {
+		assignmentId: "r1",
+		runId: "r1",
+		origin: "user",
+		agentId: "coder",
+		runtime: { kind: "clio", targetId: "mini", wireModelId: "Nemo-3.5" },
+		text: "Hello! I'm the coder worker.",
+		droppedLines: 0,
+		tools: [],
+		attempts: [{ runId: "r1", targetLabel: "mini/Nemo-3.5" }],
+		pending: false,
+		receipt: { outcome: "succeeded", tokens: 4800, elapsedMs: 9600 },
+		startedAtMs: 0,
+		...overrides,
+	};
+}
+
+function recorder(options: { receipt?: RunReceipt; workerRuns?: WorkerEntryState[] } = {}): Recorder {
 	const echoed: string[] = [];
 	const submitted: string[] = [];
+	const notes: string[] = [];
 	const notices: string[] = [];
 	const requests: unknown[] = [];
-	let settle: () => void = () => {};
-	const settled = new Promise<void>((resolve) => {
-		settle = resolve;
-	});
+	const workerRuns = options.workerRuns ?? [];
 	const dispatch = {
 		ownsProgressBus: () => true,
 		dispatch: async (request: unknown) => {
 			requests.push(request);
 			return {
 				runId: "r1",
-				// eslint-disable-next-line require-yield
 				events: (async function* () {})(),
-				finalPromise: Promise.resolve(options.receipt ?? receipt()).finally(() => queueMicrotask(settle)),
+				finalPromise: Promise.resolve(options.receipt ?? receipt()),
 			};
 		},
 	} as unknown as DispatchContract;
@@ -63,6 +85,8 @@ function recorder(options: { receipt?: RunReceipt } = {}): Recorder {
 		dispatch,
 		bus: createSafeEventBus(),
 		echoOperatorCommand: (text) => echoed.push(text),
+		submitOperatorNote: (text) => notes.push(text),
+		listWorkerRuns: () => workerRuns,
 		shutdown: () => undefined,
 		runInit: () => undefined,
 		runContextClear: () => undefined,
@@ -93,14 +117,14 @@ function recorder(options: { receipt?: RunReceipt } = {}): Recorder {
 		submitChat: (text) => submitted.push(text),
 		render: () => undefined,
 	};
-	return { ctx, echoed, submitted, notices, requests, settled };
+	return { ctx, echoed, submitted, notes, notices, requests, workerRuns };
 }
 
 describe("contracts/worker run commands", () => {
 	it("echoes the typed line above the block the run draws", async () => {
 		const r = recorder();
 		dispatchSlashCommand(parseSlashCommand("/run coder say hello"), r.ctx);
-		await r.settled;
+		await flushAsync();
 		deepStrictEqual(r.echoed, ["/run coder say hello"]);
 	});
 
@@ -108,7 +132,7 @@ describe("contracts/worker run commands", () => {
 		const r = recorder();
 		dispatchSlashCommand(parseSlashCommand("/run --target mini coder say hello"), r.ctx);
 		dispatchSlashCommand(parseSlashCommand("/delegate codex refactor the header"), r.ctx);
-		await r.settled;
+		await flushAsync();
 		deepStrictEqual(r.echoed, ["/run --target mini coder say hello", "/delegate codex refactor the header"]);
 	});
 
@@ -124,11 +148,90 @@ describe("contracts/worker run commands", () => {
 	});
 
 	it("keeps a successful run out of the notice bar and out of the model's context", async () => {
-		const r = recorder();
+		const r = recorder({ workerRuns: [workerEntry()] });
 		dispatchSlashCommand(parseSlashCommand("/run coder say hello"), r.ctx);
-		await r.settled;
+		dispatchSlashCommand(parseSlashCommand("/delegate codex refactor the header"), r.ctx);
+		await flushAsync();
 		deepStrictEqual(r.notices, [], "the transcript block is the success signal");
 		deepStrictEqual(r.submitted, [], "a worker answer never reaches the model on its own");
+		deepStrictEqual(r.notes, [], "and no operator note is written on its behalf");
 		strictEqual((r.requests[0] as { requestOrigin?: string }).requestOrigin, "user");
+	});
+
+	it("hands the receipt's answer to the main agent when --share asked for it", async () => {
+		const r = recorder();
+		dispatchSlashCommand(parseSlashCommand("/run --share coder say hello"), r.ctx);
+		await flushAsync();
+		deepStrictEqual(r.notes, ["[worker result] coder · run r1 · ok\nHello! I'm the coder worker."]);
+	});
+
+	it("shares a delegated peer's answer under the same note shape", async () => {
+		const r = recorder({ receipt: receipt({ agentId: "codex", outcome: "succeeded" }) });
+		dispatchSlashCommand(parseSlashCommand("/delegate --share codex refactor the header"), r.ctx);
+		await flushAsync();
+		deepStrictEqual(r.notes, ["[worker result] codex · run r1 · ok\nHello! I'm the coder worker."]);
+	});
+
+	it("shares the newest finished run the operator started when /share names none", () => {
+		const r = recorder({
+			workerRuns: [
+				workerEntry({ assignmentId: "old", runId: "old", text: "stale" }),
+				workerEntry({ assignmentId: "agent-1", runId: "agent-1", origin: "agent", text: "scout says" }),
+				workerEntry({ assignmentId: "r9", runId: "r9", text: "the newest answer" }),
+				workerEntry({ assignmentId: "live", runId: "live", pending: true, text: "still going" }),
+			],
+		});
+		dispatchSlashCommand(parseSlashCommand("/share"), r.ctx);
+		deepStrictEqual(r.notes, ["[worker result] coder · run r9 · ok\nthe newest answer"]);
+	});
+
+	it("shares a run named by its assignment or by the attempt a failover left behind", () => {
+		const r = recorder({
+			workerRuns: [
+				workerEntry({
+					assignmentId: "a1",
+					runId: "a2",
+					text: "the second attempt",
+					attempts: [
+						{ runId: "a1", targetLabel: "mini/Nemo-3.5", outcome: "failed" },
+						{ runId: "a2", targetLabel: "dynamo/qwen3" },
+					],
+				}),
+			],
+		});
+		dispatchSlashCommand(parseSlashCommand("/share a1"), r.ctx);
+		dispatchSlashCommand(parseSlashCommand("/share a2"), r.ctx);
+		deepStrictEqual(r.notes, [
+			"[worker result] coder · run a2 · ok\nthe second attempt",
+			"[worker result] coder · run a2 · ok\nthe second attempt",
+		]);
+	});
+
+	it("says so rather than sharing nothing", () => {
+		const r = recorder({ workerRuns: [workerEntry({ assignmentId: "r1", runId: "r1", text: "" })] });
+		dispatchSlashCommand(parseSlashCommand("/share"), r.ctx);
+		dispatchSlashCommand(parseSlashCommand("/share nope"), r.ctx);
+		deepStrictEqual(r.notes, []);
+		deepStrictEqual(r.notices, ["error:run r1 produced no text to share", "error:no finished run nope in this session"]);
+	});
+
+	it("bounds a shared answer to what a receipt can hold", () => {
+		const r = recorder({ workerRuns: [workerEntry({ text: "x".repeat(20_000) })] });
+		dispatchSlashCommand(parseSlashCommand("/share"), r.ctx);
+		const note = r.notes[0] ?? "";
+		ok(Buffer.byteLength(note, "utf8") <= WORKER_SHARE_MAX_BYTES + 128, `bounded, got ${note.length} chars`);
+		ok(note.endsWith("[worker output truncated]"), "and says that it was cut");
+	});
+
+	it("keeps the archive senses of /share working", () => {
+		const exported: string[] = [];
+		const r = recorder();
+		r.ctx.exportShareArchive = (path) => {
+			exported.push(path);
+			return { fileCount: 3, path };
+		};
+		dispatchSlashCommand(parseSlashCommand("/share export /tmp/archive.json"), r.ctx);
+		deepStrictEqual(exported, ["/tmp/archive.json"]);
+		deepStrictEqual(r.notes, [], "an archive export is not a worker share");
 	});
 });

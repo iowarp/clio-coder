@@ -6,6 +6,7 @@ import type { ContextInitOptions } from "../domains/context/init-options.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
+import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
@@ -18,6 +19,8 @@ import type { NoticeLevel } from "./command-output.js";
 import { SETTINGS_SECTIONS, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
+import { formatWorkerShareNote, selectWorkerRunToShare, workerShareFactsFromEntry } from "./worker-share.js";
+import type { WorkerEntryState } from "./worker-stream.js";
 
 /**
  * Ported from pi-coding-agent's BUILTIN_SLASH_COMMANDS registry. Each entry owns
@@ -29,6 +32,8 @@ import { matchFromSpec, usageLine } from "./slash-spec.js";
 type ShareCommandVariant =
 	| { kind: "share"; action: "export"; path: string }
 	| { kind: "share"; action: "import"; path: string; dryRun: boolean; force: boolean }
+	/** Put a finished worker run's answer into the main agent's context. Bare `/share` takes the newest one. */
+	| { kind: "share"; action: "worker-run"; runId?: string }
 	| { kind: "share"; action: "usage"; subcommand?: "export" | "import"; error?: string };
 
 type SlashCommandVariant =
@@ -45,7 +50,7 @@ type SlashCommandVariant =
 	/** `source` is the line the operator typed, echoed above the run's transcript block. */
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions; source: string }
 	| { kind: "run-usage" }
-	| { kind: "delegate"; agentId: string; task: string; source: string }
+	| { kind: "delegate"; agentId: string; task: string; source: string; share?: boolean }
 	| { kind: "delegate-usage" }
 	| { kind: "agents" }
 	| { kind: "cost" }
@@ -112,6 +117,8 @@ export interface RunCommandOptions {
 	thinkingLevel?: JobThinkingLevel;
 	toolProfile?: ToolProfileName;
 	requiredCapabilities?: string[];
+	/** Hand the receipt's answer to the main agent when the run finishes. Off by default. */
+	share?: boolean;
 }
 
 export interface HandleRunDeps {
@@ -127,6 +134,35 @@ export interface HandleRunDeps {
 	 * stream arrives instead of waiting for the terminal receipt.
 	 */
 	bus?: SafeEventBus;
+	/**
+	 * Operator-turn sink for `--share`. Absent means the flag has nowhere to put
+	 * the answer, which is reported rather than silently dropped: an operator who
+	 * asked for the model to see a result must not be told it did.
+	 */
+	submitOperatorNote?: (text: string) => void;
+}
+
+/**
+ * Hand a finished run's sealed answer to the main agent. The receipt is the
+ * terminal truth here rather than the transcript block: the block is a view of
+ * this same text, and the caller already holds the receipt.
+ */
+function shareReceipt(agentId: string, receipt: RunReceipt, deps: HandleRunDeps): void {
+	if (!deps.submitOperatorNote) {
+		deps.notice("error", "--share is not wired in this session; the result stayed local");
+		return;
+	}
+	const note = formatWorkerShareNote({
+		agentId,
+		runId: receipt.runId,
+		outcome: receipt.outcome,
+		text: receipt.output?.text ?? "",
+	});
+	if (note === null) {
+		deps.notice("warn", `--share: run ${receipt.runId} produced no text to share`);
+		return;
+	}
+	deps.submitOperatorNote(note);
 }
 
 /**
@@ -182,13 +218,21 @@ export async function handleRun(
 			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
 			notice("error", `run failed: exit=${receipt.exitCode}${failure}`);
 		}
+		// A failed run is still worth sharing when the operator asked for it: the
+		// failure text is what they would want the main agent to work from.
+		if (options.share === true) shareReceipt(agentId, receipt, deps);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		notice("error", `run failed: ${msg}`);
 	}
 }
 
-async function handleDelegate(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
+async function handleDelegate(
+	agentId: string,
+	task: string,
+	deps: HandleRunDeps,
+	options: { share?: boolean } = {},
+): Promise<void> {
 	const { dispatch, notice, bus } = deps;
 	const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
 	try {
@@ -213,10 +257,42 @@ async function handleDelegate(agentId: string, task: string, deps: HandleRunDeps
 			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
 			notice("error", `delegate failed: exit=${receipt.exitCode}${failure}`);
 		}
+		if (options.share === true) shareReceipt(agentId, receipt, deps);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		notice("error", `delegate failed: ${msg}`);
 	}
+}
+
+/**
+ * `/share [runId]`: hand a finished worker run's answer to the main agent.
+ *
+ * Nothing here is implicit. The operator either typed the command or passed
+ * `--share`, and the note travels the ordinary user-turn path, so the model
+ * receives it exactly as it receives anything else the operator writes.
+ */
+function shareWorkerRun(runId: string | undefined, ctx: SlashCommandContext): void {
+	if (!ctx.submitOperatorNote) {
+		ctx.notice("error", "share is not wired; the worker transcript is unavailable in this session");
+		return;
+	}
+	const entry = selectWorkerRunToShare(ctx.listWorkerRuns?.() ?? [], runId);
+	if (!entry) {
+		ctx.notice(
+			"error",
+			runId === undefined
+				? "no finished /run or /delegate result to share yet"
+				: `no finished run ${runId} in this session`,
+		);
+		return;
+	}
+	const facts = workerShareFactsFromEntry(entry);
+	const note = facts === null ? null : formatWorkerShareNote(facts);
+	if (note === null) {
+		ctx.notice("error", `run ${entry.runId} produced no text to share`);
+		return;
+	}
+	ctx.submitOperatorNote(note);
 }
 
 /**
@@ -237,6 +313,15 @@ export interface SlashCommandContext {
 	 * the request above it. Transcript-only; the line never enters model context.
 	 */
 	echoOperatorCommand?: (text: string) => void;
+	/**
+	 * Put operator-authored text into the session the way typed text enters it:
+	 * a user turn, persisted in the ledger, visible in the transcript. Used only
+	 * by `--share` and `/share`, and never with expansion, because a worker's
+	 * answer is literal text and must not be re-read as file or skill syntax.
+	 */
+	submitOperatorNote?: (text: string) => void;
+	/** Worker blocks this session folded, oldest first. `/share` picks from these. */
+	listWorkerRuns?: () => ReadonlyArray<WorkerEntryState>;
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
 	runInit: (options: InitCommandOptions) => void;
@@ -483,10 +568,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "share",
-		description: "Export or import Clio archives",
+		description: "Share a worker result with the main agent, or export and import Clio archives",
 		group: "Sessions",
 		kinds: ["share"],
 		args: {
+			positionals: [{ name: "runId", required: false }],
 			subcommands: {
 				export: {
 					positionals: [{ name: "path", required: true }],
@@ -518,10 +604,20 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					force: parsed.flags.has("--force"),
 				};
 			}
+			// No subcommand means the worker-result sense of the word, with or
+			// without a run id. `export` and `import` are the archive senses and are
+			// matched above, so neither reading can swallow the other.
+			if (subcommand === undefined) {
+				return { kind: "share", action: "worker-run", ...(path !== undefined ? { runId: path } : {}) };
+			}
 			return { kind: "share", action: "usage", ...(subcommand !== undefined ? { subcommand } : {}) };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "share") return;
+			if (command.action === "worker-run") {
+				shareWorkerRun(command.runId, ctx);
+				return;
+			}
 			if (command.action === "usage") {
 				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "share");
 				if (!entry) return;
@@ -573,6 +669,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				{ name: "--thinking", takesValue: true, values: RUN_THINKING_LEVELS, valueName: "level" },
 				{ name: "--tool-profile", takesValue: true, values: TOOL_PROFILE_NAMES },
 				{ name: "--require", takesValue: true, repeatable: true, valueName: "cap" },
+				{ name: "--share" },
 			],
 			positionals: [
 				{ name: "agent", required: true },
@@ -612,6 +709,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				options.requiredCapabilities = [...requiredCapabilities];
 			}
 
+			if (parsed.flags.has("--share")) options.share = true;
+
 			const agentId = parsed.positionals[0] ?? "";
 			const task = parsed.positionals[1] ?? "";
 
@@ -638,6 +737,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						io: ctx.io,
 						notice: ctx.notice,
 						bus: ctx.bus,
+						...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
 					},
 					options,
 				);
@@ -651,6 +751,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		group: "Run",
 		kinds: ["delegate", "delegate-usage"],
 		args: {
+			parseFlagsBeforeRest: true,
+			flags: [{ name: "--share" }],
 			positionals: [
 				{ name: "agent-id", required: true },
 				{ name: "task", required: true, rest: true },
@@ -660,7 +762,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (parsed.error) return { kind: "delegate-usage" };
 			const agentId = parsed.positionals[0] ?? "";
 			const task = parsed.positionals[1] ?? "";
-			return { kind: "delegate", agentId, task, source: trimmed };
+			return { kind: "delegate", agentId, task, source: trimmed, ...(parsed.flags.has("--share") ? { share: true } : {}) };
 		},
 		handle(command, ctx) {
 			if (command.kind === "delegate-usage") {
@@ -672,13 +774,20 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (command.kind !== "delegate") return;
 			ctx.echoOperatorCommand?.(command.source);
+			const share = command.share === true;
 			void (async () => {
-				await handleDelegate(command.agentId, command.task, {
-					dispatch: ctx.dispatch,
-					io: ctx.io,
-					notice: ctx.notice,
-					bus: ctx.bus,
-				});
+				await handleDelegate(
+					command.agentId,
+					command.task,
+					{
+						dispatch: ctx.dispatch,
+						io: ctx.io,
+						notice: ctx.notice,
+						bus: ctx.bus,
+						...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
+					},
+					{ share },
+				);
 				ctx.render();
 			})();
 		},

@@ -139,9 +139,9 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
 | `/prompts` | - | `/prompts` | List prompt templates |
 | `/extensions` | - | `/extensions` | List installed extensions |
-| `/share` | - | `/share export <path> \| /share import [--dry-run] [--force] <path>` | Export or import Clio archives |
-| `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] <agent> <task>` | Run a fleet agent |
-| `/delegate` | - | `/delegate <agent-id> <task>` | Run an ACP delegation agent |
+| `/share` | - | `/share [runId] \| /share export <path> \| /share import [--dry-run] [--force] <path>` | Share a worker result with the main agent, or export and import Clio archives |
+| `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
+| `/delegate` | - | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
 | `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
 | `/targets` | - | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
 | `/cost` | - | `/cost` | Show session token and cost totals |

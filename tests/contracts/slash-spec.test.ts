@@ -338,6 +338,7 @@ describe("contracts/slash-spec", () => {
 
 			// run
 			["/run scout task text", { kind: "run", agentId: "scout", task: "task text", options: {} }],
+			["/run --share scout task text", { kind: "run", agentId: "scout", task: "task text", options: { share: true } }],
 			[
 				"/run --worker-profile custom scout task text",
 				{ kind: "run", agentId: "scout", task: "task text", options: { workerProfile: "custom" } },
@@ -415,12 +416,16 @@ describe("contracts/slash-spec", () => {
 
 			// delegate
 			["/delegate agent task text", { kind: "delegate", agentId: "agent", task: "task text" }],
+			["/delegate --share codex task text", { kind: "delegate", agentId: "codex", task: "task text", share: true }],
 			["/delegate agent --target dynamo task", { kind: "delegate", agentId: "agent", task: "--target dynamo task" }],
 			["/delegate", { kind: "delegate-usage" }],
 			["/delegate agent", { kind: "delegate-usage" }],
 
 			// share
-			["/share", { kind: "share", action: "usage" }],
+			// A bare /share is the worker-result sense: the newest finished run the
+			// operator started. The archive senses are the two named subcommands.
+			["/share", { kind: "share", action: "worker-run" }],
+			["/share 2mkas6s", { kind: "share", action: "worker-run", runId: "2mkas6s" }],
 			["/share export /my/path", { kind: "share", action: "export", path: "/my/path" }],
 			[
 				"/share export /my/path extra",
@@ -469,7 +474,7 @@ describe("contracts/slash-spec", () => {
 					error: "Unexpected argument: extra",
 				},
 			],
-			["/share invalid", { kind: "share", action: "usage", error: "Unexpected argument: invalid" }],
+			["/share one two", { kind: "share", action: "usage", error: "Unexpected argument: two" }],
 
 			// view
 			["/view", { kind: "view" }],
@@ -594,12 +599,15 @@ describe("contracts/slash-spec", () => {
 
 		strictEqual(
 			usageLine(runEntry),
-			"\nusage: /run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <cap>] <agent> <task>\n",
+			"\nusage: /run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <cap>] [--share] <agent> <task>\n",
 		);
 
-		strictEqual(usageLine(delegateEntry), "\nusage: /delegate <agent-id> <task>\n");
+		strictEqual(usageLine(delegateEntry), "\nusage: /delegate [--share] <agent-id> <task>\n");
 
-		strictEqual(usageLine(shareEntry), "\nusage: /share export <path> | /share import [--dry-run] [--force] <path>\n");
+		strictEqual(
+			usageLine(shareEntry),
+			"\nusage: /share [runId] | /share export <path> | /share import [--dry-run] [--force] <path>\n",
+		);
 
 		strictEqual(usageLine(shareEntry, "export"), "\nusage: /share export <path>\n");
 
@@ -752,7 +760,7 @@ describe("contracts/slash-spec", () => {
 		strictEqual(byName.get("context")?.argumentHint, "compact | init | refresh | reset");
 		strictEqual(byName.get("quit")?.argumentHint, undefined);
 		strictEqual(byName.get("help")?.argumentHint, "[query]");
-		strictEqual(byName.get("share")?.argumentHint, "export | import");
+		strictEqual(byName.get("share")?.argumentHint, "[runId] | export | import");
 		strictEqual(byName.get("run")?.argumentHint, "[--agent-profile <profile>] … <agent> <task>");
 		for (const command of commands) {
 			if (!command.argumentHint) continue;
