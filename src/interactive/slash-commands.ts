@@ -3,7 +3,7 @@ import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
-import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
@@ -166,6 +166,42 @@ function shareReceipt(agentId: string, receipt: RunReceipt, deps: HandleRunDeps)
 }
 
 /**
+ * The attributed half every operator-started run shares, whether `/run` or
+ * `/delegate` built the request. Dispatch it, forward its events for surfaces
+ * that do not share the domain's bus, wait for the receipt, keep the notice bar
+ * quiet on success because the transcript block is the success signal, and
+ * share the sealed answer only when the operator asked. A failed run is still
+ * worth sharing when they did: the failure text is what they would want the
+ * main agent to work from.
+ */
+async function runAttributed(
+	command: "run" | "delegate",
+	request: DispatchRequest,
+	deps: HandleRunDeps,
+	share: boolean,
+): Promise<void> {
+	const { dispatch, notice, bus } = deps;
+	const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
+	try {
+		const handle = await dispatch.dispatch(request);
+		for await (const event of handle.events) {
+			const e = event as { type?: string };
+			if (!e.type || e.type === "heartbeat") continue;
+			progressBus?.emit(BusChannels.DispatchProgress, { runId: handle.runId, agentId: request.agentId, event });
+		}
+		const receipt = await handle.finalPromise;
+		if (receipt.exitCode !== 0 || receipt.failureMessage) {
+			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
+			notice("error", `${command} failed: exit=${receipt.exitCode}${failure}`);
+		}
+		if (share) shareReceipt(request.agentId, receipt, deps);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		notice("error", `${command} failed: ${msg}`);
+	}
+}
+
+/**
  * Dispatches /run through the dispatch contract and streams events to stdout.
  * Target + model are resolved by the dispatch domain from request overrides,
  * worker profiles, recipe hints, and `settings.workers.default`.
@@ -176,23 +212,25 @@ export async function handleRun(
 	deps: HandleRunDeps,
 	options: RunCommandOptions = {},
 ): Promise<void> {
-	const { dispatch, notice, bus } = deps;
-	const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
 	if (options.target && options.workerProfile) {
-		notice("warn", `--target ${options.target} takes precedence; --worker ${options.workerProfile} will be ignored`);
+		deps.notice("warn", `--target ${options.target} takes precedence; --worker ${options.workerProfile} will be ignored`);
 	}
 	if (options.target && options.workerRuntime) {
-		notice("warn", `--target ${options.target} takes precedence; --runtime ${options.workerRuntime} will be ignored`);
+		deps.notice(
+			"warn",
+			`--target ${options.target} takes precedence; --runtime ${options.workerRuntime} will be ignored`,
+		);
 	}
-	try {
-		const request = {
+	await runAttributed(
+		"run",
+		{
 			agentId,
 			task,
 			executionRole: requestExecutionRole({
 				agentId,
 				...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
 			}),
-			requestOrigin: "user" as const,
+			requestOrigin: "user",
 			...(options.workerProfile ? { workerProfile: options.workerProfile } : {}),
 			...(options.workerRuntime ? { workerRuntime: options.workerRuntime } : {}),
 			...(options.target ? { target: options.target } : {}),
@@ -202,29 +240,10 @@ export async function handleRun(
 			...(options.requiredCapabilities && options.requiredCapabilities.length > 0
 				? { requiredCapabilities: options.requiredCapabilities }
 				: {}),
-		};
-		const handle = await dispatch.dispatch(request);
-		for await (const event of handle.events) {
-			const e = event as { type?: string };
-			if (!e.type || e.type === "heartbeat") continue;
-			progressBus?.emit(BusChannels.DispatchProgress, {
-				runId: handle.runId,
-				agentId,
-				event,
-			});
-		}
-		const receipt = await handle.finalPromise;
-		if (receipt.exitCode !== 0 || receipt.failureMessage) {
-			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
-			notice("error", `run failed: exit=${receipt.exitCode}${failure}`);
-		}
-		// A failed run is still worth sharing when the operator asked for it: the
-		// failure text is what they would want the main agent to work from.
-		if (options.share === true) shareReceipt(agentId, receipt, deps);
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		notice("error", `run failed: ${msg}`);
-	}
+		},
+		deps,
+		options.share === true,
+	);
 }
 
 async function handleDelegate(
@@ -233,35 +252,12 @@ async function handleDelegate(
 	deps: HandleRunDeps,
 	options: { share?: boolean } = {},
 ): Promise<void> {
-	const { dispatch, notice, bus } = deps;
-	const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
-	try {
-		const handle = await dispatch.dispatch({
-			agentId,
-			delegationAgentId: agentId,
-			executionRole: "builder",
-			requestOrigin: "user",
-			task,
-		});
-		for await (const event of handle.events) {
-			const e = event as { type?: string };
-			if (!e.type || e.type === "heartbeat") continue;
-			progressBus?.emit(BusChannels.DispatchProgress, {
-				runId: handle.runId,
-				agentId,
-				event,
-			});
-		}
-		const receipt = await handle.finalPromise;
-		if (receipt.exitCode !== 0 || receipt.failureMessage) {
-			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
-			notice("error", `delegate failed: exit=${receipt.exitCode}${failure}`);
-		}
-		if (options.share === true) shareReceipt(agentId, receipt, deps);
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		notice("error", `delegate failed: ${msg}`);
-	}
+	await runAttributed(
+		"delegate",
+		{ agentId, delegationAgentId: agentId, executionRole: "builder", requestOrigin: "user", task },
+		deps,
+		options.share === true,
+	);
 }
 
 /**

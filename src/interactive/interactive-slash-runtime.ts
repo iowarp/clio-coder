@@ -173,6 +173,33 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		});
 	};
 
+	/** One expanded operator turn into the chat loop: record it, paint it, submit it. */
+	const submitExpanded = (sub: InteractiveSlashSubmitExpansion): void => {
+		void (async () => {
+			try {
+				// Enter while streaming becomes a steer inside chat.submit. The
+				// queue panel shows it until the engine injects it, and the
+				// injection emits queued_user_turn, which is when the transcript
+				// renders it. Appending here too showed the text twice and at
+				// the wrong point in the turn's order.
+				const willQueue = deps.chat.isStreaming();
+				deps.recordSubmittedTurn();
+				deps.refreshFooter();
+				if (!willQueue) deps.chatPanel.appendUser(sub.text);
+				deps.requestRender();
+				await deps.chat.submit(sub.text, {
+					...(sub.images.length > 0 ? { images: sub.images } : {}),
+					...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
+					...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
+				});
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
+			} finally {
+				deps.requestRender();
+			}
+		})();
+	};
 	const context: SlashCommandContext = {
 		io: deps.io,
 		notice: appendCommandNotice,
@@ -378,56 +405,11 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		},
 		verifyReceipt: (runId) => verifyReceiptFile(deps.stateDir, runId),
 		...(deps.listWorkerRuns ? { listWorkerRuns: deps.listWorkerRuns } : {}),
-		submitOperatorNote: (text) => {
-			// The user-turn path, minus expansion. A worker's answer is literal
-			// text: running it through the prompt, skill, and @file expanders would
-			// let a worker's output name a file the operator never mentioned.
-			void (async () => {
-				try {
-					const willQueue = deps.chat.isStreaming();
-					deps.recordSubmittedTurn();
-					deps.refreshFooter();
-					// A queued turn renders when the engine injects it, the same rule
-					// submitChat follows, so appending here would show it twice.
-					if (!willQueue) deps.chatPanel.appendUser(text);
-					deps.requestRender();
-					await deps.chat.submit(text);
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
-					deps.io.stderr(`[/share] ${msg}\n`);
-				} finally {
-					deps.requestRender();
-				}
-			})();
-		},
+		// The user-turn path, minus expansion. A worker's answer is literal text:
+		// running it through the prompt, skill, and @file expanders would let a
+		// worker's output name a file the operator never mentioned.
+		submitOperatorNote: (text) => submitExpanded({ text, images: [], workingContextPaths: [], pendingSkillRequests: [] }),
 		submitChat: (text) => {
-			const runSubmit = (sub: InteractiveSlashSubmitExpansion) => {
-				void (async () => {
-					try {
-						// Enter while streaming becomes a steer inside chat.submit. The
-						// queue panel shows it until the engine injects it, and the
-						// injection emits queued_user_turn, which is when the transcript
-						// renders it. Appending here too showed the text twice and at
-						// the wrong point in the turn's order.
-						const willQueue = deps.chat.isStreaming();
-						deps.recordSubmittedTurn();
-						deps.refreshFooter();
-						if (!willQueue) deps.chatPanel.appendUser(sub.text);
-						deps.requestRender();
-						await deps.chat.submit(sub.text, {
-							...(sub.images.length > 0 ? { images: sub.images } : {}),
-							...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
-							...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
-						});
-					} catch (err) {
-						const msg = err instanceof Error ? err.message : String(err);
-						deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
-					} finally {
-						deps.requestRender();
-					}
-				})();
-			};
-
 			void (async () => {
 				try {
 					const submitted = await deps.expandSubmit(text);
@@ -474,7 +456,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 										deps.io.stdout(`Successfully installed "${uninstalled.name}"!\n`);
 										await deps.resources?.reload();
 										const postInstallSubmitted = await deps.expandSubmit(text);
-										runSubmit(postInstallSubmitted);
+										submitExpanded(postInstallSubmitted);
 									} catch (err) {
 										deps.io.stderr(
 											`Failed to install skill "${uninstalled.name}": ${err instanceof Error ? err.message : String(err)}\n`,
@@ -485,7 +467,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 						return;
 					}
 
-					runSubmit(submitted);
+					submitExpanded(submitted);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
