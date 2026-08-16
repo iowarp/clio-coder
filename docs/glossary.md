@@ -73,3 +73,47 @@ This document defines core architectural concepts and terminology used throughou
 ### 17. Topology
 - **Definition**: The multi-agent structural orchestration pattern governing workflow execution (`singular`, `parallel`, `sequential`, `pipeline`, `detached`, `review`, `compete`, `auto`).
 - **Owning Type**: `DispatchTopology` in `src/domains/dispatch/types.ts`.
+
+### 18. Worker Block
+- **Definition**: The attributed transcript segment rendering a worker's streaming execution. It includes a header with origin glyph and route, a rail for worker prose, coalesced tool names, and a one-line receipt footer.
+- **Owning Type**: `WorkerEntryState` in `src/interactive/worker-stream.ts`.
+
+### 19. Origin Glyphs (`◇`/`◆`)
+- **Definition**: Transcript and fleet board indicators that identify who requested a run. The glyph `◇` marks operator-typed runs, `◆` marks model-requested dispatches, and a dim dot marks internal Clio runs.
+- **Owning Type**: `WorkerRunOrigin` in `src/domains/session/entries.ts`.
+
+### 20. Share Note
+- **Definition**: A bounded operator note formatted as `[worker result] <agent> · run <id> · <outcome>` that delivers a finished worker answer into the main agent context over the user-turn path.
+- **Owning Type**: `WorkerShareFacts` in `src/interactive/worker-share.ts`.
+
+### 21. Fold
+- **Definition**: Collapsing an expanded tool call or worker block down to a single-line summary row. Toggled for the newest foldable item with `Alt+O` or for all items with `Ctrl+Alt+O` / `Alt+Shift+O`.
+- **Owning Type**: `WorkerEntryRenderOptions` in `src/interactive/renderers/worker-entry.ts`.
+
+### 22. Interop
+- **Definition**: The domain governing discovery, compatibility roots, and delegation wiring for other coding agents installed on the local machine and in the repository.
+- **Owning Type**: `InteropContract` in `src/domains/interop/contract.ts`.
+
+### 23. Consent Record
+- **Definition**: A persistent state entry recording the operator's decision to accept or decline an interop agent proposal, written atomically under `interop.json`.
+- **Owning Type**: `InteropAgentRecord` in `src/domains/interop/types.ts`.
+
+### 24. Fingerprint
+- **Definition**: A SHA-256 digest of stable agent facts (including binary path, version, and launch recipe) that keys consent records so standing decisions stay valid until facts change.
+- **Owning Type**: `InteropAgentFacts` in `src/domains/interop/types.ts`.
+
+### 25. noWritePaths
+- **Definition**: A damage-control path policy class that permits reads while blocking writes and deletes under every registered foreign agent directory across all autonomy levels.
+- **Owning Type**: `PathPolicyKind` in `src/domains/safety/path-policy.ts`.
+
+### 26. Foreign Prompt Root
+- **Definition**: An external prompt directory owned by another coding agent (such as `.claude/commands` or `.codex/prompts`) from which Clio loads prompt templates.
+- **Owning Type**: `PromptTemplateRoot` in `src/domains/resources/prompts/loader.ts`.
+
+### 27. Compat Root
+- **Definition**: A compatibility directory for prompts or skills discovered from foreign agent installations, ranked below native Clio resource roots.
+- **Owning Type**: `ResourceSourceInfo` in `src/domains/resources/collision.ts`.
+
+### 28. Trust Gate
+- **Definition**: A security boundary requiring explicit operator opt-in via `skills.trustProjectCompatRoots` before prompt templates or skills from project-scope foreign roots can execute or expand.
+- **Owning Type**: `PromptTemplate` in `src/domains/resources/prompts/loader.ts`.

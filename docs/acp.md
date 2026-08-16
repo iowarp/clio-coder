@@ -106,10 +106,10 @@ from a sealed receipt. There is no ACP-specific UI path.
 
 The header is where the difference shows. A local Clio worker names the target
 and model it ran on; a peer runs behind someone else's process and can honestly
-name only the protocol it was reached through, so its header reads `◇ you →
-codex (acp) · run 7hq2ab`. Its footer reports elapsed and the count of mediated
-tool calls rather than a token count, because a peer reports no token usage to
-claim.
+name only the protocol it was reached through, so its header reads `◇ codex
+(acp) · run 7hq2ab`. Its footer reports elapsed and, when the peer reports no
+token usage, the count of mediated tool calls in place of a token count; a peer
+that does report usage gets the same `tok` unit a local worker does.
 
 ---
 
