@@ -12,9 +12,10 @@ import { type TaskBoardSnapshot, taskBoardCounts } from "../../domains/session/t
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { CONTEXT_CATEGORY_TOKEN, contextCategorySwatch, renderContextMeterBar } from "../context-meter.js";
 import {
-	agentAudiencePrefix,
 	agentDisplayLabel,
 	type DispatchBoardRow,
+	dispatchOriginPresentation,
+	dispatchRowPrefix,
 	dispatchStatusPresentation,
 } from "../dispatch-board.js";
 import { buildSegmentedContextBar, CONTEXT_BAR_LABEL_WIDTH, formatFooterTokens } from "../footer-panel.js";
@@ -715,11 +716,12 @@ export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
 }
 
 /**
- * One row per live worker: the sub-process glyph when Clio started the run for
- * itself, the agent's own name, the fleet node it landed on, its status glyph,
- * elapsed, and the receipt id once the run has sealed one. Units are fitted
- * whole, so a narrow quadrant closes on a dim ellipsis rather than clipping a
- * receipt id into a string that still reads like a valid trace argument.
+ * One row per live worker: the origin glyph, the sub-process glyph when Clio
+ * started the run for itself, the agent's own name, the fleet node it landed
+ * on, its status glyph, elapsed, and the receipt id once the run has sealed
+ * one. Units are fitted whole, so a narrow quadrant closes on a dim ellipsis
+ * rather than clipping a receipt id into a string that still reads like a valid
+ * trace argument.
  */
 function workerLine(theme: ClioTheme, row: DispatchBoardRow, width: number): string {
 	const presentation = dispatchStatusPresentation(row.status, { compact: true });
@@ -733,7 +735,7 @@ function workerLine(theme: ClioTheme, row: DispatchBoardRow, width: number): str
 		theme.fg("dim", formatCompactMs(row.elapsedMs)),
 		...(row.receiptId !== undefined ? [theme.fg("dim", row.receiptId)] : []),
 	];
-	return fitUnits(theme, agentAudiencePrefix(theme, row), units, Math.max(1, Math.floor(width)));
+	return fitUnits(theme, dispatchRowPrefix(theme, row).text, units, Math.max(1, Math.floor(width)));
 }
 
 interface ActivityQuadrantOptions extends ExpandedQuadrantOptions {
@@ -1013,8 +1015,35 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 	}
 }
 
-function activeWorkerCount(rows: ReadonlyArray<DispatchBoardRow>): number {
-	return rows.filter((row) => row.status === "running" || row.status === "stale" || row.status === "enqueued").length;
+function activeWorkerRows(rows: ReadonlyArray<DispatchBoardRow>): ReadonlyArray<DispatchBoardRow> {
+	return rows.filter((row) => row.status === "running" || row.status === "stale" || row.status === "enqueued");
+}
+
+/**
+ * The live worker count, split by who asked once more than one kind is running:
+ * `◇1 ◆3` says the operator has one run of their own alongside three the model
+ * started, which `fleet 4` cannot. A single kind keeps the plain count, and so
+ * does a set holding a run whose origin never reached the projection, because a
+ * split that cannot name every active run would report a total that is short.
+ *
+ * The chip keeps one color. Its token says the fleet is busy; origin is carried
+ * by glyph shape, which is the same pair the board rows and the transcript
+ * blocks use.
+ */
+function activeWorkerChip(rows: ReadonlyArray<DispatchBoardRow>): string {
+	const active = activeWorkerRows(rows);
+	const counts = new Map<string, number>();
+	for (const row of active) {
+		const glyph = dispatchOriginPresentation(row)?.glyph;
+		if (glyph === undefined) return `fleet ${active.length}`;
+		counts.set(glyph, (counts.get(glyph) ?? 0) + 1);
+	}
+	if (counts.size < 2) return `fleet ${active.length}`;
+	const order = [GLYPH.workerHuman, GLYPH.workerAgent, GLYPH.workerInternal];
+	return order
+		.filter((glyph) => counts.has(glyph))
+		.map((glyph) => `${glyph}${counts.get(glyph)}`)
+		.join(" ");
 }
 
 function harnessBadge(
@@ -1024,12 +1053,12 @@ function harnessBadge(
 	dispatchRows: ReadonlyArray<DispatchBoardRow>,
 	fleetSummaryIsAction = false,
 ): string {
-	const workers = activeWorkerCount(dispatchRows);
+	const workers = activeWorkerRows(dispatchRows).length;
 	const activeTools = finiteNonNegative(toolCounts.active);
 	// Active fleet work is a Clio-signature state; it gets the action color.
 	if (workers > 0) {
 		const token = status.phase === "dispatching" ? "muted" : fleetSummaryIsAction ? "accent" : "action";
-		return theme.fg(token, `fleet ${workers}`);
+		return theme.fg(token, activeWorkerChip(dispatchRows));
 	}
 	const badgeText = activeTools > 0 ? `tools ${activeTools}` : null;
 	return badgeText ? theme.fg("muted", badgeText) : "";
