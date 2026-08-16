@@ -267,6 +267,48 @@ describe("contracts/agent-ledger composition: bundle", () => {
 		}
 	});
 
+	it("holds a post that lands before the run has attribution and appends it once it does", async () => {
+		// The worker is live from the moment spawn returns, and its attribution
+		// exists only once the orchestrator has created the envelope a few awaits
+		// later. A post in that gap used to be dropped with no diagnostic while
+		// the worker's mirror had already counted it and told the model "posted".
+		const factory = ledgerWorkerFactory(650);
+		const bundle = makeDispatchBundle(builtinAgentsContext(), {
+			spawnWorker: (spec, opts) => {
+				const worker = factory.spawn(spec, opts);
+				// Synchronously inside spawn: nothing about this run exists yet.
+				opts?.onLedgerPost?.({ kind: "finding", claim: "posted before attribution", path: "src/alpha/a.ts" });
+				return worker;
+			},
+		});
+		await bundle.extension.start();
+		const ledgerId = "ledger-composition-early";
+		try {
+			await openAgentLedger(ledgerId);
+			const handle = await bundle.contract.dispatch({
+				agentId: "scout",
+				executionRole: "builder",
+				task: "early scout",
+				ledger: { id: ledgerId, sequence: 0 },
+			});
+			await waitFor(() => (readAgentLedger(ledgerId)?.entries.length ?? 0) === 1, "the held post was appended");
+			const entry = readAgentLedger(ledgerId)?.entries[0];
+			strictEqual(entry?.runId, handle.runId, "it carries the attribution that did not exist when it was posted");
+			const worker = factory.workers[0];
+			ok(worker !== undefined);
+			await waitFor(
+				() => deltasIn(worker.sent).some((candidate) => candidate.id === "e1"),
+				"and reaches the author's mirror",
+			);
+			worker.finish(0);
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.ledgerContribution?.posted, 1);
+		} finally {
+			for (const worker of factory.workers) worker.finish(0);
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("hands the same spawn options to a placement's transport as to the local spawner", async () => {
 		// The second live break was spawnNativeWorker forwarding a subset of its
 		// options. A fleet placement is another spawner behind another seam, so

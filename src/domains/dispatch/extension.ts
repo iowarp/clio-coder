@@ -107,6 +107,7 @@ import {
 	type AgentLedgerAttribution,
 	agentLedgerContribution,
 	appendAgentLedgerEntry,
+	MAX_AGENT_LEDGER_POSTS_PER_RUN,
 	readAgentLedger,
 } from "./agent-ledger-store.js";
 import { materializeAgentPlanSelection } from "./agent-plan-adapter.js";
@@ -4121,19 +4122,31 @@ export function createDispatchBundle(
 		// The agent ledger is orchestrator-owned. The worker sends a body and
 		// nothing else; every attribution field below is stamped from this
 		// process's own admission record, so no worker-supplied value can reach
-		// one. Attribution exists only once the run has an envelope, which is why
-		// a post that lands before then is dropped rather than queued.
+		// one. Attribution exists only once the run has an envelope, and the
+		// worker is already live before that, so a post that lands in the gap is
+		// held in order and appended the moment attribution exists. The hold is
+		// bounded by the per-run cap, which is what the append would refuse past
+		// anyway.
 		const agentLedgerId = spec.ledger?.id ?? null;
 		let agentLedgerAttribution: AgentLedgerAttribution | null = null;
 		let unsubscribeAgentLedger: (() => void) | null = null;
-		const onLedgerPost = (body: AgentLedgerBody): void => {
-			const attribution = agentLedgerAttribution;
-			if (agentLedgerId === null || attribution === null) return;
+		const heldLedgerPosts: AgentLedgerBody[] = [];
+		const appendLedgerPost = (attribution: AgentLedgerAttribution, body: AgentLedgerBody): void => {
+			if (agentLedgerId === null) return;
 			void appendAgentLedgerEntry(agentLedgerId, attribution, body)
 				.then((result) => {
 					if (result.ok) publishAgentLedgerEntry(agentLedgerId, result.entry);
 				})
 				.catch((error) => reportDispatchDiagnostic(`append agent ledger entry for ${attribution.runId}`, error));
+		};
+		const onLedgerPost = (body: AgentLedgerBody): void => {
+			if (agentLedgerId === null) return;
+			const attribution = agentLedgerAttribution;
+			if (attribution === null) {
+				if (heldLedgerPosts.length < MAX_AGENT_LEDGER_POSTS_PER_RUN) heldLedgerPosts.push(body);
+				return;
+			}
+			appendLedgerPost(attribution, body);
 		};
 		let worker: SpawnedWorker;
 		try {
@@ -4443,17 +4456,19 @@ export function createDispatchBundle(
 				leaseSlot.transferToAssignment();
 			}
 			if (agentLedgerId !== null) {
-				agentLedgerAttribution = {
+				const attribution: AgentLedgerAttribution = {
 					runId: envelope.id,
 					assignmentId: lineage.rootRunId,
 					agentId: req.agentId,
 					nodeId: placed.id,
 				};
+				agentLedgerAttribution = attribution;
 				// The hub replays the whole board on subscription, so this mirror is
 				// complete whatever this run's spawn timing was.
 				unsubscribeAgentLedger = subscribeAgentLedger(agentLedgerId, envelope.id, (entries) =>
 					sendToWorker === undefined ? false : sendToWorker({ type: "ledger_delta", entries }),
 				);
+				for (const body of heldLedgerPosts.splice(0)) appendLedgerPost(attribution, body);
 			}
 			identity = detectRunIdentity();
 			ledgerRef.update(envelope.id, {
