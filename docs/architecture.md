@@ -37,6 +37,7 @@ Registered domain modules include:
 | evidence | `src/domains/evidence/**` | Forensic evidence bundles, failure attribution. |
 | evolution | `src/domains/evolution/**` | Authority-tiered self-edit manifests and gates. |
 | extensions | `src/domains/extensions/**` | Extension discovery, packaging, and lifecycle. |
+| interop | `src/domains/interop/**` | The agent-kind registry, bounded detection of other coding agents, and consent to wire one as a delegation peer. |
 | lifecycle | `src/domains/lifecycle/**` | Doctor diagnostics, upgrade mechanics, uninstallation. |
 | memory | `src/domains/memory/**` | Approved long-term memory, proactive task intervention. |
 | middleware | `src/domains/middleware/**` | Declarative and programmatic lifecycle hooks and budgets. |
@@ -48,6 +49,26 @@ Registered domain modules include:
 | scheduling | `src/domains/scheduling/**` | Budget ceilings, node cluster states, batch capacity checks. |
 | session | `src/domains/session/**` | Append-only JSONL transcripts, tree navigation, compaction. |
 | share | `src/domains/share/**` | Portable workspace and resource archive export/import. |
+
+The `interop` domain owns one question: which other coding agents are on this
+machine and in this project. `src/domains/interop/registry.ts` is pure data, one
+entry per known agent carrying its binaries, the directories it owns, its skill
+and prompt roots, its instruction filenames, and the ACP launch recipe when it
+has one. Every other module that used to keep its own copy of that list now
+derives it: the skills loader and the prompts loader take their compatibility
+roots from the table, the adoption scanner takes its candidate files from it,
+and the safety path policy takes the foreign directories it refuses to write
+into from it.
+
+The domain owns detection and consent, and nothing else. It never executes a
+foreign agent's work command, never loads a skill, prompt, or rule itself, and
+never reads under a foreign agent's `sessions`, `history`, `cache`, `projects`,
+or `state` directory. Detection resolves binaries with `access(X_OK)` and no
+shell, checks install directories, and runs a bounded `--version` only when the
+caller asks and only for a binary that already resolved; a probe that cannot
+answer reports `unknown` and never `absent`. The one durable configuration write
+is an append to `delegation.agents`, and it happens only after an operator
+decision.
 
 ---
 
