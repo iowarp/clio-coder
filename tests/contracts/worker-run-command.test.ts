@@ -54,8 +54,7 @@ function workerEntry(overrides: Partial<WorkerEntryState> = {}): WorkerEntryStat
 		tools: [],
 		attempts: [{ runId: "r1", targetLabel: "mini/Nemo-3.5" }],
 		pending: false,
-		receipt: { outcome: "succeeded", tokens: 4800, elapsedMs: 9600 },
-		startedAtMs: 0,
+		receipt: { outcome: "succeeded", tokenCount: 4800, durationMs: 9600 },
 		...overrides,
 	};
 }

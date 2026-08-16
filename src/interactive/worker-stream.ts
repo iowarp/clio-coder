@@ -36,26 +36,8 @@ import type {
 } from "../core/bus-events.js";
 import { durableAssistantTextFromEvent, WORKER_OUTPUT_MAX_BYTES } from "../domains/dispatch/event-pump.js";
 import type { RunKind } from "../domains/dispatch/types.js";
+import type { WorkerRunOrigin, WorkerRunRuntime, WorkerRunRuntimeKind } from "../domains/session/index.js";
 import { truncateUtf8 } from "../tools/truncate-utf8.js";
-
-/** Origins that reach the transcript. Internal runs stay on the board. */
-export type WorkerOrigin = "user" | "agent";
-
-/**
- * Runtime family named in the entry header. Every family shares one entry
- * shape; the header exists so an operator can tell a local Clio worker from a
- * Claude subprocess from a delegated ACP peer without opening the board.
- */
-export type WorkerRuntimeKind = "clio" | "acp" | "claude-sdk" | "claude-code";
-
-export interface WorkerRuntimeIdentity {
-	kind: WorkerRuntimeKind;
-	/** Route facts for the runtimes that have one; ACP peers have none. */
-	targetId?: string;
-	wireModelId?: string;
-	/** Delegation peer id; ACP only. */
-	peerId?: string;
-}
 
 export interface WorkerAttempt {
 	runId: string;
@@ -65,45 +47,44 @@ export interface WorkerAttempt {
 
 export type WorkerResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
 
-/** Terminal facts drawn from the sealed receipt, or from the terminal event when no receipt was readable. */
-export interface WorkerReceiptFacts {
-	outcome: string;
-	outcomeCode?: string | undefined;
-	exitCode?: number | undefined;
-	failureMessage?: string | undefined;
-	tokenCount?: number | undefined;
-	durationMs?: number | undefined;
-	toolCalls?: number | undefined;
-	contract?: WorkerResultContract | undefined;
-	/** Receipt-sealed assistant answer; absent when the receipt was unreadable. */
-	text?: string | undefined;
-}
-
+/**
+ * Terminal facts a worker block reports. Sealed by the receipt when it can be
+ * read, carried by the terminal event otherwise. Every unit is optional and
+ * rendered only when known: an ACP peer reports no tokens of its own, and a
+ * block that says it spent zero would be claiming something no receipt sealed.
+ */
 export interface WorkerReceiptSummary {
 	outcome: string;
 	outcomeCode?: string;
-	tokens: number;
-	elapsedMs: number;
-	contract?: WorkerResultContract;
-	toolCalls?: number;
 	exitCode?: number;
 	failureMessage?: string;
-	/**
-	 * True when the summary came from an abort marker rather than a sealed
-	 * terminal event. A later DispatchCompleted/DispatchFailed replaces it.
-	 */
+	tokenCount?: number;
+	durationMs?: number;
+	toolCalls?: number;
+	contract?: WorkerResultContract;
+	/** From an abort marker rather than a sealed terminal event; a later DispatchCompleted/DispatchFailed replaces it. */
 	provisional?: boolean;
-	/** True when the terminal event landed but no receipt could be read for it. */
+	/** The run is over, but no receipt could be read for it. */
 	receiptUnavailable?: boolean;
 }
+
+/** A receipt's projection: the summary plus the answer it sealed. */
+export interface WorkerReceiptFacts extends WorkerReceiptSummary {
+	text?: string;
+}
+
+/** Reads `receipts/<runId>.json` and projects it; null when it is absent or unreadable. */
+export type WorkerReceiptReader = (runId: string) => WorkerReceiptFacts | null;
 
 export interface WorkerEntryState {
 	assignmentId: string;
 	/** Current attempt's run id. */
 	runId: string;
-	origin: WorkerOrigin;
+	/** The assignment's origin. Internal runs never open an entry, so it is never "internal". */
+	origin: WorkerRunOrigin;
 	agentId: string;
-	runtime: WorkerRuntimeIdentity;
+	/** Runtime family plus route, as the session entry records it; the header names it. */
+	runtime: WorkerRunRuntime;
 	/** Bounded worker prose: the live tail while running, the sealed answer once settled. */
 	text: string;
 	/** Lines the bound dropped from `text`; renders the `/view dispatch:` tail. */
@@ -116,8 +97,6 @@ export interface WorkerEntryState {
 	receipt?: WorkerReceiptSummary;
 	/** Agent origin: the tool call whose execution spawned this run. */
 	parentToolCallId?: string;
-	/** Wall clock at the current attempt's start; the abort fallback measures against it. */
-	startedAtMs: number;
 }
 
 export type WorkerStreamChange =
@@ -125,12 +104,11 @@ export type WorkerStreamChange =
 	| { kind: "updated"; entry: WorkerEntryState };
 
 export interface WorkerStreamOptions {
-	now?: () => number;
 	/**
 	 * Sealed terminal facts for a finished run. The receipt is the terminal
 	 * truth; the bus payload is only the fallback for when it cannot be read.
 	 */
-	readReceipt?: (runId: string) => WorkerReceiptFacts | null;
+	readReceipt?: WorkerReceiptReader;
 }
 
 export interface WorkerStream {
@@ -174,14 +152,17 @@ function finiteNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-export function workerRuntimeKind(runtimeKind: RunKind | undefined, runtimeId: string | undefined): WorkerRuntimeKind {
+export function workerRuntimeKind(
+	runtimeKind: RunKind | undefined,
+	runtimeId: string | undefined,
+): WorkerRunRuntimeKind {
 	if (runtimeKind === "acp-delegation") return "acp";
 	if (runtimeId === "claude-code") return "claude-code";
 	if (runtimeId === "claude-sdk") return "claude-sdk";
 	return "clio";
 }
 
-function runtimeIdentity(payload: DispatchStartedPayload): WorkerRuntimeIdentity {
+function runtimeIdentity(payload: DispatchStartedPayload): WorkerRunRuntime {
 	const kind = workerRuntimeKind(payload.runtimeKind, payload.runtimeId);
 	if (kind === "acp") {
 		const peerId = nonEmptyString(payload.agentId);
@@ -197,7 +178,7 @@ function runtimeIdentity(payload: DispatchStartedPayload): WorkerRuntimeIdentity
 }
 
 /** Short route label for an attempt line: the model that ran it, or the peer that did. */
-export function workerTargetLabel(runtime: WorkerRuntimeIdentity): string {
+export function workerTargetLabel(runtime: WorkerRunRuntime): string {
 	if (runtime.kind === "acp") return runtime.peerId ?? "acp";
 	if (runtime.targetId !== undefined && runtime.wireModelId !== undefined) {
 		return `${runtime.targetId}/${runtime.wireModelId}`;
@@ -278,21 +259,20 @@ function terminalFacts(payload: DispatchCompletedPayload | DispatchFailedPayload
 	};
 }
 
-function receiptSummary(facts: WorkerReceiptFacts, fallbackElapsedMs: number): WorkerReceiptSummary {
-	return {
-		outcome: facts.outcome,
-		...(facts.outcomeCode !== undefined && facts.outcomeCode !== null ? { outcomeCode: facts.outcomeCode } : {}),
-		tokens: facts.tokenCount ?? 0,
-		elapsedMs: facts.durationMs ?? fallbackElapsedMs,
-		...(facts.contract !== undefined ? { contract: facts.contract } : {}),
-		...(facts.toolCalls !== undefined ? { toolCalls: facts.toolCalls } : {}),
-		...(facts.exitCode !== undefined ? { exitCode: facts.exitCode } : {}),
-		...(facts.failureMessage !== undefined ? { failureMessage: facts.failureMessage } : {}),
-	};
+/**
+ * The one projection from receipt facts to the summary a block's footer
+ * reports, shared by live settlement and by replay so both draw the same
+ * numbers from the same bytes. Null is a run whose receipt is gone (an expired
+ * state dir, a session copied without its receipts): the run is over and the
+ * transcript says so, even when it cannot say how.
+ */
+export function workerReceiptSummary(facts: WorkerReceiptFacts | null): WorkerReceiptSummary {
+	if (facts === null) return { outcome: "unknown", receiptUnavailable: true };
+	const { text: _text, ...summary } = facts;
+	return summary;
 }
 
 export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStream {
-	const now = (): number => options.now?.() ?? Date.now();
 	const byAssignment = new Map<string, WorkerEntryState>();
 	/** Every attempt run id to its assignment, so progress and terminal events find their entry. */
 	const assignmentByRun = new Map<string, string>();
@@ -309,12 +289,8 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 	};
 
 	const settle = (entry: WorkerEntryState, payloadFacts: WorkerReceiptFacts): WorkerStreamChange => {
-		const sealed = options.readReceipt?.(entry.runId) ?? null;
-		const facts: WorkerReceiptFacts = sealed ?? payloadFacts;
-		entry.receipt = {
-			...receiptSummary(facts, Math.max(0, now() - entry.startedAtMs)),
-			...(sealed === null ? { receiptUnavailable: true } : {}),
-		};
+		const facts = options.readReceipt?.(entry.runId) ?? { ...payloadFacts, receiptUnavailable: true };
+		entry.receipt = workerReceiptSummary(facts);
 		entry.pending = false;
 		const attempt = entry.attempts[entry.attempts.length - 1];
 		if (attempt !== undefined) attempt.outcome = facts.outcome;
@@ -344,7 +320,6 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				existing.runId = runId;
 				existing.runtime = runtime;
 				existing.pending = true;
-				existing.startedAtMs = now();
 				delete existing.receipt;
 				existing.attempts.push({ runId, targetLabel: workerTargetLabel(runtime) });
 				assignmentByRun.set(runId, assignmentId);
@@ -362,7 +337,6 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				tools: [],
 				attempts: [{ runId, targetLabel: workerTargetLabel(runtime) }],
 				pending: true,
-				startedAtMs: now(),
 				...(payload.parentToolCallId !== undefined ? { parentToolCallId: payload.parentToolCallId } : {}),
 			};
 			byAssignment.set(assignmentId, entry);
@@ -423,12 +397,13 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			// A cancelled stream or a loop-guard stop names no dispatched run; only
 			// an abort that hits a live worker of ours settles anything.
 			if (entry === undefined || !entry.pending) return null;
+			const durationMs = finiteNumber(payload.elapsedMs);
+			const failureMessage = nonEmptyString(payload.reason);
 			entry.pending = false;
 			entry.receipt = {
 				outcome: "canceled",
-				tokens: 0,
-				elapsedMs: finiteNumber(payload.elapsedMs) ?? Math.max(0, now() - entry.startedAtMs),
-				...(nonEmptyString(payload.reason) !== undefined ? { failureMessage: payload.reason } : {}),
+				...(durationMs !== undefined ? { durationMs } : {}),
+				...(failureMessage !== undefined ? { failureMessage } : {}),
 				provisional: true,
 			};
 			const attempt = entry.attempts[entry.attempts.length - 1];

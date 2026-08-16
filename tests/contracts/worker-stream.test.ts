@@ -22,6 +22,7 @@ import {
 	WORKER_TOOL_NAME_LIMIT,
 	type WorkerReceiptFacts,
 	type WorkerStreamOptions,
+	workerReceiptSummary,
 	workerRuntimeKind,
 	workerTargetLabel,
 } from "../../src/interactive/worker-stream.js";
@@ -100,8 +101,7 @@ function messageEndEvent(text: string): unknown {
 }
 
 function stream(options: WorkerStreamOptions = {}) {
-	let clock = 1_000;
-	return createWorkerStream({ now: () => (clock += 100), ...options });
+	return createWorkerStream(options);
 }
 
 describe("worker stream fold", () => {
@@ -200,10 +200,11 @@ describe("worker stream fold", () => {
 		const change = worker.completed(completed());
 		strictEqual(change?.entry.text, "the sealed answer");
 		strictEqual(change?.entry.pending, false);
+		// The same projection replay uses: the receipt's facts minus its text.
 		deepStrictEqual(change?.entry.receipt, {
 			outcome: "succeeded",
-			tokens: 4800,
-			elapsedMs: 9600,
+			tokenCount: 4800,
+			durationMs: 9600,
 			contract: "pass",
 		});
 	});
@@ -214,7 +215,7 @@ describe("worker stream fold", () => {
 		worker.progress({ runId: "run-1", agentId: "coder", event: messageEndEvent("streamed answer") });
 		const change = worker.completed(completed());
 		strictEqual(change?.entry.receipt?.receiptUnavailable, true);
-		strictEqual(change?.entry.receipt?.tokens, 4800);
+		strictEqual(change?.entry.receipt?.tokenCount, 4800);
 		strictEqual(change?.entry.receipt?.toolCalls, 3);
 		// No receipt to seal, so the durable message the run did produce stands.
 		strictEqual(change?.entry.text, "streamed answer");
@@ -349,7 +350,7 @@ describe("worker stream fold", () => {
 		});
 		strictEqual(abort?.entry.pending, false);
 		strictEqual(abort?.entry.receipt?.provisional, true);
-		strictEqual(abort?.entry.receipt?.elapsedMs, 2500);
+		strictEqual(abort?.entry.receipt?.durationMs, 2500);
 		const sealed = worker.failed(failed({ outcome: "canceled", outcomeDetail: "operator abort", exitCode: 130 }));
 		strictEqual(sealed?.entry.receipt?.provisional, undefined);
 		strictEqual(sealed?.entry.receipt?.exitCode, 130);
@@ -393,6 +394,11 @@ describe("worker stream fold", () => {
 });
 
 describe("worker receipt projection", () => {
+	it("keeps unknown units unknown and strips the sealed text from the footer facts", () => {
+		deepStrictEqual(workerReceiptSummary({ outcome: "succeeded", text: "the answer" }), { outcome: "succeeded" });
+		deepStrictEqual(workerReceiptSummary(null), { outcome: "unknown", receiptUnavailable: true });
+	});
+
 	it("reads the sealed answer, the elapsed span, and the contract verdict", () => {
 		const facts = workerReceiptFacts({
 			outcome: "succeeded",

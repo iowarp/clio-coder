@@ -110,7 +110,7 @@ function harness(options: { expandKey?: string } = {}): Harness {
 	});
 	// No receipt files exist under a contracts run, so the fold falls back to the
 	// terminal payload. The footer facts asserted below are the payload's.
-	const worker = createWorkerStream({ now: frozen.now, readReceipt: () => null });
+	const worker = createWorkerStream({ readReceipt: () => null });
 	return {
 		panel,
 		worker,
