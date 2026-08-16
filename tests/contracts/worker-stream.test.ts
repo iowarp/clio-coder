@@ -373,15 +373,22 @@ describe("worker stream fold", () => {
 		strictEqual(workerRuntimeKind("acp-delegation", "acp"), "acp");
 	});
 
-	it("evicts settled entries past the retention bound and keeps live ones", () => {
-		const worker = stream({ readReceipt: () => null, maxEntries: 2 });
+	it("forgets every assignment on reset, so a late event of the old session moves nothing", () => {
+		const worker = stream({ readReceipt: () => null });
 		worker.started(started({ runId: "a", assignmentId: "a" }));
 		worker.completed(completed({ runId: "a" }));
 		worker.started(started({ runId: "b", assignmentId: "b" }));
-		worker.started(started({ runId: "c", assignmentId: "c" }));
+		worker.reset();
 		strictEqual(worker.get("a"), undefined);
-		ok(worker.get("b"));
-		ok(worker.get("c"));
+		strictEqual(worker.get("b"), undefined);
+		strictEqual(worker.progress({ runId: "b", agentId: "coder", event: textDeltaEvent("late") }), null);
+		strictEqual(worker.completed(completed({ runId: "b" })), null);
+		strictEqual(
+			worker.started(started({ runId: "b-2", attempt: 1, assignmentId: "b", requestOrigin: "internal" })),
+			null,
+		);
+		// The fold is usable again afterwards.
+		strictEqual(worker.started(started({ runId: "c", assignmentId: "c" }))?.kind, "created");
 	});
 });
 

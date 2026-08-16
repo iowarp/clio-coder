@@ -72,10 +72,12 @@ function transcriptHarness(receipt: (runId: string) => WorkerReceiptFacts | null
 	bus: ReturnType<typeof createSafeEventBus>;
 	panel: ChatPanel;
 	render: () => string;
+	/** The application's one transcript reset: the panel and the fold together. */
+	resetTranscript: () => void;
 } {
 	const bus = createSafeEventBus();
 	const panel = createChatPanel({ getToolExpandKey: () => "Ctrl+O" });
-	createInteractiveSubscriptions({
+	const subscriptions = createInteractiveSubscriptions({
 		bus,
 		refreshFooter: () => {},
 		renderTaskIsland: () => {},
@@ -85,7 +87,15 @@ function transcriptHarness(receipt: (runId: string) => WorkerReceiptFacts | null
 		applyWorkerState: (state) => panel.applyWorkerState(state),
 		readWorkerReceipt: receipt,
 	});
-	return { bus, panel, render: () => panel.render(96).join("\n").replace(ANSI, "") };
+	return {
+		bus,
+		panel,
+		render: () => panel.render(96).join("\n").replace(ANSI, ""),
+		resetTranscript: () => {
+			panel.reset();
+			subscriptions.workers.reset();
+		},
+	};
 }
 
 describe("interactive dispatch subscriptions", () => {
@@ -169,6 +179,33 @@ describe("interactive dispatch subscriptions", () => {
 		// tail and its facts are what the footer reports.
 		ok(settled.includes("│ Hello! I'm the coder worker."), settled);
 		ok(settled.includes(`└ ${GLYPH.ok} ok · 4.8k tok · 9.6s · contract pass`), settled);
+	});
+
+	it("clears the fold with the transcript, so an old session's run neither reappears nor is shareable", () => {
+		const h = transcriptHarness((runId) => ({ outcome: "succeeded", text: `answer from ${runId}` }));
+		h.bus.emit(BusChannels.DispatchStarted, started({ runId: "old", assignmentId: "old" }));
+		h.bus.emit(BusChannels.DispatchCompleted, completed({ runId: "old" }));
+		h.bus.emit(BusChannels.DispatchStarted, started({ runId: "live", assignmentId: "live" }));
+		strictEqual(h.panel.workerStates().length, 2);
+
+		h.resetTranscript();
+		deepStrictEqual(h.panel.workerStates(), [], "nothing of the old session is left to share");
+		// The old session's run keeps going in the process; its events find no block.
+		h.bus.emit(BusChannels.DispatchProgress, {
+			runId: "live",
+			agentId: "coder",
+			event: { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "late" } },
+		});
+		h.bus.emit(BusChannels.DispatchCompleted, completed({ runId: "live" }));
+		strictEqual(h.render().trim(), "", `an old-session event repainted into the new transcript:\n${h.render()}`);
+
+		// A run started after the reset is this session's, and shareable.
+		h.bus.emit(BusChannels.DispatchStarted, started({ runId: "new", assignmentId: "new" }));
+		h.bus.emit(BusChannels.DispatchCompleted, completed({ runId: "new" }));
+		deepStrictEqual(
+			h.panel.workerStates().map((state) => `${state.runId}:${state.text}`),
+			["new:answer from new"],
+		);
 	});
 
 	it("keeps internal-origin runs off the transcript", () => {

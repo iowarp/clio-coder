@@ -60,6 +60,8 @@ export interface OverlayLifecycleRuntimeDeps {
 	terminal: Pick<import("../engine/tui.js").ProcessTerminal, "columns">;
 	dispatchBoard: ReturnType<typeof import("./dispatch-board.js").createDispatchBoardView>;
 	chatPanel: import("./chat-panel.js").ChatPanel;
+	/** Clears the transcript and every view folded alongside it; the session overlays call it before a replay. */
+	resetTranscript: () => void;
 	io: import("./slash-commands.js").RunIo;
 	readStructuredEntries: (sessionId: string) => import("../domains/session/index.js").SessionEntry[];
 	announceTaskMemorySeedOffer: () => void;
@@ -134,6 +136,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		terminal,
 		dispatchBoard,
 		chatPanel,
+		resetTranscript,
 		io,
 		readStructuredEntries,
 		announceTaskMemorySeedOffer,
@@ -282,6 +285,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.session ? { session: deps.app.session } : {}),
 		chat: deps.app.chat,
 		chatPanel,
+		resetTranscript,
 		readStructuredEntries,
 		getSlashNotice: () => deps.getSlashContext().notice,
 		...(deps.app.onResumeSession ? { onResumeSession: deps.app.onResumeSession } : {}),

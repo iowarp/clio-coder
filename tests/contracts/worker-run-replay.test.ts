@@ -73,13 +73,20 @@ function workerRunEntry(overrides: Partial<WorkerRunEntry> = {}): WorkerRunEntry
 	};
 }
 
+function replayPanel(
+	turns: ReadonlyArray<SessionEntry>,
+	readWorkerReceipt: (runId: string) => WorkerReceiptFacts | null,
+): ReturnType<typeof createChatPanel> {
+	const panel = createChatPanel({ getToolExpandKey: () => "Ctrl+O" });
+	rehydrateChatPanelFromTurns(panel, turns, { readWorkerReceipt });
+	return panel;
+}
+
 function replay(
 	turns: ReadonlyArray<SessionEntry>,
 	readWorkerReceipt: (runId: string) => WorkerReceiptFacts | null,
 ): string {
-	const panel = createChatPanel({ getToolExpandKey: () => "Ctrl+O" });
-	rehydrateChatPanelFromTurns(panel, turns, { readWorkerReceipt });
-	return panel.render(96).join("\n").replace(ANSI, "");
+	return replayPanel(turns, readWorkerReceipt).render(96).join("\n").replace(ANSI, "");
 }
 
 describe("worker-run session entry", () => {
@@ -170,6 +177,14 @@ describe("worker block replay", () => {
 		ok(rendered.includes(`${GLYPH.workerHuman} you → coder · mini/Nemo-3.5-Lightning · run run-1`), rendered);
 		ok(rendered.includes("│ Hello! I'm the coder worker."), rendered);
 		ok(rendered.includes(`└ ${GLYPH.ok} ok · 4.8k tok · 9.6s · contract pass`), rendered);
+	});
+
+	it("lists a replayed block among the panel's worker states, so /share can name it after a resume", () => {
+		const panel = replayPanel([workerRunEntry()], () => ({ outcome: "succeeded", text: "Hello! I'm the coder worker." }));
+		const [state] = panel.workerStates();
+		strictEqual(state?.runId, "run-1");
+		strictEqual(state?.pending, false);
+		strictEqual(state?.text, "Hello! I'm the coder worker.");
 	});
 
 	it("says the receipt is gone rather than leaving the block running", () => {

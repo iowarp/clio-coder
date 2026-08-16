@@ -523,9 +523,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openExtensions: () => openExtensionsOverlayState(),
 		openContextReset: () => openContextResetOverlayState(),
 		setEditorText: (text) => editor.setText(text),
-		// Read lazily: the subscriptions that own the fold are built below, and
-		// `/share` can only be typed once the whole application is running.
-		listWorkerRuns: () => interactiveSubscriptions.workers.entries(),
+		// What the operator can share is what the operator can see: the panel's
+		// blocks, live or replayed, rather than the reducer's routing table.
+		listWorkerRuns: () => chatPanel.workerStates(),
 	});
 
 	const editorSubmit = createEditorSubmitController({
@@ -552,6 +552,17 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		getOverlayState: () => overlayLifecycle?.getState() ?? "closed",
 		isFooterExpanded: () => footer.isExpanded(),
 	});
+	/**
+	 * The one transcript reset. The chat panel and the worker fold are two views
+	 * of one session, so a session change (/new, /resume, /tree, /fork) clears
+	 * them together: a late event for a run of the old session then finds no
+	 * entry, and bare /share cannot select the old session's result. Read lazily
+	 * because the subscriptions that own the fold are built below.
+	 */
+	const resetTranscript = (): void => {
+		chatPanel.reset();
+		interactiveSubscriptions.workers.reset();
+	};
 	overlayLifecycle = createOverlayLifecycle({
 		app: deps,
 		tui,
@@ -563,6 +574,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		terminal,
 		dispatchBoard,
 		chatPanel,
+		resetTranscript,
 		io,
 		readStructuredEntries,
 		announceTaskMemorySeedOffer,
@@ -625,7 +637,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		deps.onNewSession();
 		deps.observability.resetSession();
 		presentation.resetForNewSession();
-		chatPanel.reset();
+		resetTranscript();
 		deps.chat.resetForSession(null);
 		footer.refresh();
 		tui.requestRender();

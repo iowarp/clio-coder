@@ -22,6 +22,8 @@ export interface OverlaySessionLifecycleDeps {
 	session?: SessionContract;
 	chat: Pick<ChatLoop, "resetForSession">;
 	chatPanel: ChatPanel;
+	/** The one transcript reset: the panel plus every view folded alongside it. */
+	resetTranscript(): void;
 	readStructuredEntries(sessionId: string): SessionEntry[];
 	getSlashNotice(): SlashCommandContext["notice"];
 	onResumeSession?(sessionId: string): void;
@@ -115,7 +117,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 				deps.onResumeSession?.(sessionId);
 				try {
 					const turns = deps.readStructuredEntries(sessionId);
-					deps.chatPanel.reset();
+					deps.resetTranscript();
 					rehydrateChatPanelFromTurns(deps.chatPanel, turns);
 					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
 					const leafTurnId = session.tree(sessionId).leafId;
@@ -164,7 +166,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					const sessionId = session.current()?.id ?? null;
 					if (!sessionId) throw new Error("no current session after turn switch");
 					const turns = deps.readStructuredEntries(sessionId);
-					deps.chatPanel.reset();
+					deps.resetTranscript();
 					rehydrateChatPanelFromTurns(deps.chatPanel, turns, { uptoTurnId: turnId });
 					const replayMessages = buildReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
 					deps.chat.resetForSession(turnId, replayMessages);
@@ -209,7 +211,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 				try {
 					if (deps.onForkSession) deps.onForkSession(parentTurnId);
 					else session.fork(parentTurnId);
-					deps.chatPanel.reset();
+					deps.resetTranscript();
 					const forkedSessionId = session.current()?.id ?? null;
 					if (forkedSessionId) replayFork(forkedSessionId, parentTurnId, session);
 					else deps.chat.resetForSession(null);

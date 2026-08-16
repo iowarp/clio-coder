@@ -212,6 +212,8 @@ type TranscriptEntry =
 	| { role: "worker"; state: WorkerEntryState; folded: boolean }
 	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer };
 
+type WorkerTranscriptEntry = Extract<TranscriptEntry, { role: "worker" }>;
+
 export interface ChatPanel extends Component {
 	appendUser(text: string): void;
 	appendReplayBlock(renderBlock: ReplayBlockRenderer): void;
@@ -223,6 +225,12 @@ export interface ChatPanel extends Component {
 	 * invalidate the render, because the reducer mutates the same state object.
 	 */
 	applyWorkerState(state: WorkerEntryState): void;
+	/**
+	 * Every worker block on the transcript, oldest first, live or replayed.
+	 * `/share` selects from this rather than from the reducer's routing table,
+	 * so what the operator can share is exactly what the operator can see.
+	 */
+	workerStates(): ReadonlyArray<WorkerEntryState>;
 	setStatusLine(line: AssistantStatusLine | null): void;
 	toggleLastToolExpanded(): boolean;
 	toggleAllToolsExpanded(): boolean;
@@ -747,7 +755,7 @@ function renderToolSegmentLines(
  * opens every block and `/output minimal` folds every block, so the entry's own
  * fold decides only in between.
  */
-function workerEntryFolded(entry: Extract<TranscriptEntry, { role: "worker" }>, verbosity: OutputVerbosity): boolean {
+function workerEntryFolded(entry: WorkerTranscriptEntry, verbosity: OutputVerbosity): boolean {
 	if (verbosity === "verbose") return false;
 	if (verbosity === "minimal") return true;
 	return entry.folded;
@@ -883,8 +891,8 @@ function renderEntryLines(
 
 export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const transcript: TranscriptEntry[] = [];
-	/** Assignment to its placed block, so a streaming delta is O(1) to route. */
-	const workerEntries = new Map<string, TranscriptEntry>();
+	/** Assignment to its placed block, in placement order, so a streaming delta is O(1) to route. */
+	const workerEntries = new Map<string, WorkerTranscriptEntry>();
 	let dirty = true;
 	let cachedWidth: number | undefined;
 	let cachedLines: string[] = [];
@@ -1298,7 +1306,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				markDirty();
 				return;
 			}
-			const entry: TranscriptEntry = { role: "worker", state, folded: state.origin === "agent" };
+			const entry: WorkerTranscriptEntry = { role: "worker", state, folded: state.origin === "agent" };
 			workerEntries.set(state.assignmentId, entry);
 			const at = workerInsertionIndex(state);
 			if (at === null) {
@@ -1310,6 +1318,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (frozen !== null && at < frozen.through) frozen = null;
 			}
 			markDirty();
+		},
+		workerStates(): ReadonlyArray<WorkerEntryState> {
+			return [...workerEntries.values()].map((entry) => entry.state);
 		},
 		toggleLastToolExpanded(): boolean {
 			// Ctrl+O owns the newest foldable thing, whichever kind it is. A worker
@@ -1337,7 +1348,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		toggleAllToolsExpanded(): boolean {
 			const tools: ToolSegment[] = [];
-			const workers: Array<Extract<TranscriptEntry, { role: "worker" }>> = [];
+			const workers: WorkerTranscriptEntry[] = [];
 			for (const entry of transcript) {
 				if (entry.role === "worker") {
 					workers.push(entry);
