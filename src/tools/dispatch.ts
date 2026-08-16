@@ -634,6 +634,12 @@ class DispatchBackgroundedError extends Error {
 		readonly live: ReadonlyArray<DetachedBatchRun>,
 		readonly settled: ReadonlyArray<CompletedRun>,
 		readonly undispatched: ReadonlyArray<string>,
+		/**
+		 * The agent ledger the live runs still share. It stays open across the
+		 * conversion and rides on the detached record so collect closes it, the
+		 * same as a batch that was detached from the start.
+		 */
+		readonly ledgerId: string | null = null,
 	) {
 		super("dispatch: backgrounded by operator");
 		this.name = "DispatchBackgroundedError";
@@ -666,7 +672,12 @@ async function backgroundedDispatchResult(
 	// would resolve through.
 	await deps.dispatch.assignments?.flushWrites?.();
 	try {
-		await detached.register({ batchId: converted.batchId, runs: converted.live, sessionId });
+		await detached.register({
+			batchId: converted.batchId,
+			runs: converted.live,
+			sessionId,
+			...(converted.ledgerId !== null ? { ledgerId: converted.ledgerId } : {}),
+		});
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		return {
@@ -3209,6 +3220,10 @@ async function runBatch(
 	const onSignalAbort = (): void => abort(true);
 	const timer = timeoutMs !== undefined ? setTimeout(() => abort(false), timeoutMs) : null;
 	signal?.addEventListener("abort", onSignalAbort, { once: true });
+	// The board closes when the batch settles in this call. A backgrounded
+	// batch settles elsewhere: its runs are still live and still posting, so
+	// the ledger rides on the converted record and closes at collect instead.
+	let backgrounded = false;
 	try {
 		const completion = registered.completion.then((value) => ({ kind: "completed" as const, value }));
 		const settled = await Promise.race([completion, background.requested.then(() => ({ kind: "background" as const }))]);
@@ -3216,6 +3231,7 @@ async function runBatch(
 			// The batch drain keeps metering; only this await unwinds. Every run in
 			// a parallel batch is already live, so the whole batch converts.
 			completion.catch(() => {});
+			backgrounded = true;
 			throw new DispatchBackgroundedError(
 				handle.batchId,
 				handle.assignmentIds.map((runId, index) => ({
@@ -3225,6 +3241,7 @@ async function runBatch(
 				})),
 				[],
 				[],
+				ledgerId,
 			);
 		}
 		const { summaries, receipts } = settled.value;
@@ -3243,6 +3260,6 @@ async function runBatch(
 	} finally {
 		if (timer) clearTimeout(timer);
 		signal?.removeEventListener("abort", onSignalAbort);
-		await closeAgentLedger(ledgerId);
+		if (!backgrounded) await closeAgentLedger(ledgerId);
 	}
 }

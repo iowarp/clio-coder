@@ -202,8 +202,8 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 
 Every topology that runs more than one worker at once opens an agent ledger, the
 bounded coordination board those workers share while they run: the parallel
-fan-out (`src/tools/dispatch.ts:3194`), a detached batch of two or more
-(`:537`), and compete (`:1508`). A worker reaches it through the `ledger` tool
+fan-out (`src/tools/dispatch.ts:3205`), a detached batch of two or more
+(`:537`), and compete (`:1519`). A worker reaches it through the `ledger` tool
 and posts one of three typed entries. A `claim` stakes path prefixes so peers
 stop colliding, a `finding` reports one observation with the path and line that
 ground it, and a `review` judges another entry by its id. Nothing untyped is
@@ -216,8 +216,8 @@ field a peer or a receipt reads as identity. Admitted entries are pushed back
 down as `ledger_delta` stdin frames into a per-worker mirror, so a read answers
 locally with a watermark instead of blocking on a round trip. A worker that
 spawns late is handed the whole board twice over: the hub replays it on
-subscription, and it is rendered into that worker's system prompt as untrusted
-peer data.
+subscription, and it is rendered into that worker's dynamic prompt messages at
+spawn as untrusted peer data.
 
 The reducers never merge. A path cited by two or more runs is corroborated, a
 path cited by one is uncorroborated and still rendered standing on its own, a
@@ -226,8 +226,13 @@ marked disputed where it stands. Overlapping claims from different runs carry
 the ids they overlap, which is advisory; the per-wave write boundary is what
 actually stops two writers.
 
-The board closes once every worker settles, after which appends are refused and
-counted. The main model never sees the board: it is rendered only into a
+When the board closes depends on where the batch settles. An attached parallel
+fan-out closes it when the tool call returns, and compete closes it once every
+candidate and the judge have settled. A detached batch, and a parallel batch the
+operator moved to the background, carry the ledger id on the durable batch
+record and close it on the first `monitor(mode="collect")`, because their peers
+stay concurrent past the call that started them. After the close, appends are
+refused and counted. The main model never sees the board: it is rendered only into a
 worker's prompt and a worker's tool result, and neither the dispatch tool
 result nor `monitor(mode="collect")` carries it. What survives into a receipt is
 that run's `ledgerContribution`, which is the ledger id, its posted and refused
