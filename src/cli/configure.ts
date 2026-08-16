@@ -29,6 +29,8 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
+import { ask, askYesNo } from "./ask.js";
+import { runInteropReview } from "./configure-interop.js";
 import {
 	type ConfigureCategory,
 	formatCategoryMenu,
@@ -49,6 +51,7 @@ Configure model targets for chat and fleet-agent dispatch.
 
 Usage:
   clio-coder configure                   interactive wizard
+  clio-coder configure --interop         review detected coding agents as delegation peers
   clio-coder configure --list            list target runtimes (user-facing only)
   clio-coder configure --list --all      list every registered runtime including aliases
   clio-coder configure --id <targetId> [flags] --runtime <runtimeId>
@@ -99,6 +102,7 @@ interface ParsedArgs {
 	help: boolean;
 	list: boolean;
 	all: boolean;
+	interop: boolean;
 	remove?: string;
 	renameOld?: string;
 	renameNew?: string;
@@ -130,6 +134,7 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 		help: false,
 		list: false,
 		all: false,
+		interop: false,
 		force: false,
 		gateway: false,
 		setOrchestrator: false,
@@ -154,6 +159,9 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--all":
 				out.all = true;
+				break;
+			case "--interop":
+				out.interop = true;
 				break;
 			case "--remove":
 				out.remove = need();
@@ -868,39 +876,6 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	return 0;
 }
 
-async function ask(
-	rl: ReturnType<typeof createInterface>,
-	label: string,
-	defaultValue?: string,
-): Promise<string | null> {
-	const suffix = defaultValue && defaultValue.length > 0 ? ` [${defaultValue}]` : "";
-	try {
-		const answer = (await rl.question(`${label}${suffix}: `)).trim();
-		if (answer.length === 0) return defaultValue ?? "";
-		if (answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") return null;
-		return answer;
-	} catch {
-		return null;
-	}
-}
-
-async function askYesNo(
-	rl: ReturnType<typeof createInterface>,
-	label: string,
-	defaultValue: boolean,
-): Promise<boolean> {
-	const marker = defaultValue ? "Y/n" : "y/N";
-	for (;;) {
-		const answer = await ask(rl, `${label} [${marker}]`);
-		if (answer === null) return defaultValue;
-		if (answer.length === 0) return defaultValue;
-		const lc = answer.toLowerCase();
-		if (lc === "y" || lc === "yes") return true;
-		if (lc === "n" || lc === "no") return false;
-		process.stderr.write(`invalid response: ${answer}\n`);
-	}
-}
-
 async function pickRuntime(rl: ReturnType<typeof createInterface>): Promise<RuntimeDescriptor | null> {
 	const registry = getRuntimeRegistry();
 	const entries = listProviderSupportEntries(registry.list());
@@ -1368,6 +1343,7 @@ async function runInteractive(
 
 	printSummary(settings, descriptor, probe);
 	printOk(`target ${targetId} saved`);
+	await runInteropReview(rl);
 	return 0;
 }
 
@@ -1436,6 +1412,15 @@ export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<
 	if (args.list) {
 		printRuntimeList(args.all);
 		return 0;
+	}
+	if (args.interop) {
+		if (!input.isTTY) return runInteropReview(null);
+		const rl = createInterface({ input, output });
+		try {
+			return await runInteropReview(rl);
+		} finally {
+			rl.close();
+		}
 	}
 	if (args.remove) return runTargetRemove(args.remove);
 	if (args.renameOld && args.renameNew) return runTargetRename(args.renameOld, args.renameNew);

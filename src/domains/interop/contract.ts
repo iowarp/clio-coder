@@ -1,5 +1,12 @@
 import type { DomainContract } from "../../core/domain-loader.js";
-import type { InteropAgentKind, InteropDetectInput, InteropReport } from "./types.js";
+import type {
+	InteropAgentId,
+	InteropAgentKind,
+	InteropDecisionResult,
+	InteropDetectInput,
+	InteropProposal,
+	InteropReport,
+} from "./types.js";
 
 export interface InteropContract extends DomainContract {
 	/** The static agent table. No I/O. */
@@ -7,4 +14,7 @@ export interface InteropContract extends DomainContract {
 	detect(input?: InteropDetectInput): Promise<InteropReport>;
 	/** The newest report this process produced, else the recorded one. Never probes. */
 	lastReport(): InteropReport | null;
+	proposals(report: InteropReport): ReadonlyArray<InteropProposal>;
+	accept(ids: ReadonlyArray<InteropAgentId>): InteropDecisionResult;
+	decline(ids: ReadonlyArray<InteropAgentId>): InteropDecisionResult;
 }
