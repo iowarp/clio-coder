@@ -116,6 +116,40 @@ describe("interactive dispatch subscriptions", () => {
 		deepStrictEqual(log, ["notify:success:steer received by coder (run-1):steer:run-1", "footer", "task", "render"]);
 	});
 
+	it("folds, places, records, and only then repaints, on every lifecycle channel", () => {
+		const bus = createSafeEventBus();
+		const log: string[] = [];
+		createInteractiveSubscriptions({
+			bus,
+			refreshFooter: () => log.push("footer"),
+			renderTaskIsland: () => log.push("task"),
+			renderContextIsland: () => log.push("context"),
+			requestRender: () => log.push("render"),
+			notify: () => {},
+			applyWorkerState: (state) => log.push(`apply:${state.runId}:${state.pending ? "live" : "settled"}`),
+			recordWorkerRun: (fields) => log.push(`record:${fields.runId}`),
+			readWorkerReceipt: () => null,
+		});
+		bus.emit(BusChannels.DispatchStarted, started());
+		bus.emit(BusChannels.DispatchCompleted, completed());
+		// A payload the fold has no block for still repaints the footer and island.
+		bus.emit(BusChannels.DispatchCompleted, completed({ runId: "unknown" }));
+		deepStrictEqual(log, [
+			"apply:run-1:live",
+			"record:run-1",
+			"footer",
+			"task",
+			"render",
+			"apply:run-1:settled",
+			"footer",
+			"task",
+			"render",
+			"footer",
+			"task",
+			"render",
+		]);
+	});
+
 	it("refreshes both islands for context activity and unsubscribes idempotently", () => {
 		const bus = createSafeEventBus();
 		const log: string[] = [];
