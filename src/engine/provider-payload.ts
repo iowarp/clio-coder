@@ -166,7 +166,7 @@ export function patchToolChoiceNonePayload(payload: unknown, model: EngineModel)
  * that carries tool_use blocks unless tools are defined, and it honors
  * tool_choice none properly.
  */
-export function patchToolSurfaceLockedPayload(payload: unknown, model: EngineModel): unknown | undefined {
+function patchToolSurfaceLockedPayload(payload: unknown, model: EngineModel): unknown | undefined {
 	if (!isRecord(payload)) return undefined;
 	if (!("tools" in payload) || payload.tools === undefined || payload.tools === null) return undefined;
 	if (isAnthropicMessagesApi(model.api)) return patchToolChoiceNonePayload(payload, model);

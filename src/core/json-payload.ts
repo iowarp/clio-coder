@@ -15,7 +15,7 @@
  * looks plausible: the context-bootstrap reader did exactly that and turned a
  * complete handbook into "Unterminated string in JSON".
  */
-export function jsonPayloadCandidates(text: string): string[] {
+function jsonPayloadCandidates(text: string): string[] {
 	const trimmed = text.trim();
 	const candidates = [trimmed];
 	const fenced = /```[A-Za-z0-9_-]*\s*\n?([\s\S]*?)```/.exec(trimmed)?.[1]?.trim();
