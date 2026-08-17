@@ -271,13 +271,13 @@ independent of the chat target and the fleet default. A running session owns
 its routing snapshot, while the saved
 selection becomes the default for new sessions.
 
-The reference live configuration is an LM Studio server on the `zbook` node with
-the wire model `qwopus3.5-9b-v3`:
+The reference live configuration is an LM Studio server on the `node-a` node with
+the wire model `example-background-model`:
 
 ```yaml
 background:
-  target: zbook
-  model: qwopus3.5-9b-v3
+  target: node-a
+  model: example-background-model
   thinkingLevel: off
 ```
 
@@ -300,7 +300,7 @@ real target surfaces to verify the route:
 
 ```bash
 clio-coder targets --probe
-clio-coder models --target zbook
+clio-coder models --target node-a
 clio-coder
 ```
 
@@ -417,8 +417,8 @@ npm run test:file -- tests/contracts/proactive-memory-eval.test.ts
 ```
 
 For a live local comparison, an adapter should route only the `llm` variant
-through the request's target/model (the reference is `zbook` /
-`qwopus3.5-9b-v3`), keep baseline memory telemetry empty, and run all
+through the request's target/model (the reference is `node-a` /
+`example-background-model`), keep baseline memory telemetry empty, and run all
 nine trials in equivalent isolated workspaces. Do not promote the LLM tier from
 one anecdotal task. The evidence bar is a pass-rate gain from a small number of
 specific, usually cited reminders at acceptable added token and latency cost.

@@ -327,8 +327,8 @@ flowchart LR
   O --> P["execution plan<br/>hashed DAG, capacity waves"]
   P --> A["admission<br/>leases, queue, cost ceiling"]
   A --> L["local worker"]
-  A --> S1["ssh node: blade"]
-  A --> S2["ssh node: dragon"]
+  A --> S1["ssh node: node-a"]
+  A --> S2["ssh node: node-b"]
   L --> R["receipts and evidence"]
   S1 --> R
   S2 --> R
@@ -341,12 +341,12 @@ present:
 ```yaml
 fleet:
   nodes:
-    - id: blade
-      host: blade.example.net
+    - id: node-a
+      host: node-a.example.net
       maxWorkers: 2
       residency: observe
-    - id: dragon
-      host: dragon.example.net
+    - id: node-b
+      host: node-b.example.net
       maxWorkers: 1
 ```
 

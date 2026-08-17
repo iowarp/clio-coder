@@ -10,38 +10,38 @@ Background and reference: [fleet-dispatch.md](fleet-dispatch.md).
 
 | Role | Machine | Notes |
 | --- | --- | --- |
-| Orchestrator | `zbook` | Runs the interactive Clio session. |
-| SSH node | `blade` | General worker capacity. |
-| SSH node | `mini` | Serves the operator's resident models on its GPU; residency stays observe. |
-| SSH node | `dragon` | General worker capacity. |
+| Orchestrator | `local` | Runs the interactive Clio session. |
+| SSH node | `node-a` | General worker capacity. |
+| SSH node | `node-b` | Serves the operator's resident models on its GPU; residency stays observe. |
+| SSH node | `node-c` | General worker capacity. |
 
 All four machines share the filesystem, so the project root resolves to the
 same absolute path everywhere. The demo project is any CMake/C++ repository
 with a known failing build or test; a one-line compile error in a `.cpp` file
 works well on camera.
 
-## 1. Declare the fleet (zbook)
+## 1. Declare the fleet (local)
 
 Add the nodes to `settings.yaml` (see `clio-coder paths` for its location):
 
 ```yaml
 fleet:
   nodes:
-    - id: blade
-      host: blade
+    - id: node-a
+      host: node-a.example.net
       maxWorkers: 2
-    - id: mini
-      host: mini
+    - id: node-b
+      host: node-b.example.net
       maxWorkers: 1
       residency: observe
-    - id: dragon
-      host: dragon
+    - id: node-c
+      host: node-c.example.net
       maxWorkers: 2
 ```
 
-The implicit `local` node (zbook itself) is never declared. `residency:
+The implicit `local` node (the orchestrator host itself) is never declared. `residency:
 observe` is the default and is written here only to make the demo point
-explicit: workers on mini must never evict its resident models.
+explicit: workers on node-b must never evict its resident models.
 
 ## 2. Preflight the nodes
 
@@ -69,7 +69,7 @@ clio-coder
 
 In the session:
 
-- `/fleet` opens Settings → Fleet; its node rows show blade, mini, and dragon
+- `/fleet` opens Settings → Fleet; its node rows show node-a, node-b, and node-c
   online with their capacity.
 - Alt+W toggles the dispatch board, which will fill with per-run cards once
   work starts.
@@ -81,13 +81,13 @@ placement. Example prompt for the chat input:
 
 ```
 Dispatch the fix for the failing CMake build as a reviewed task: builder on
-node blade, reviewer on node dragon, at most 2 review cycles. The task is:
+node node-a, reviewer on node node-c, at most 2 review cycles. The task is:
 "Fix the compile error in src/mesh/loader.cpp so `cmake --build build` and
 `ctest --test-dir build` both pass. Keep the change minimal."
 ```
 
 The model calls the dispatch tool with `review: {max_cycles: 2, node:
-"dragon"}` and `node: "blade"` on the task. Because a remote placement is
+"node-c"}` and `node: "node-a"` on the task. Because a remote placement is
 plan-scale, supervised autonomy parks the call and shows the plan artifact
 (topology, per-task agent, model, node); one approval launches the whole
 plan. Full-auto skips the stop and seals the plan hash into the receipts
@@ -95,15 +95,15 @@ instead.
 
 What to watch:
 
-- The board card for the builder shows `node blade`, live tool activity, and
+- The board card for the builder shows `node node-a`, live tool activity, and
   the per-worker context meter.
-- The reviewer card shows `node dragon` and `gate reviewer c1`; the reviewer
+- The reviewer card shows `node node-c` and `gate reviewer c1`; the reviewer
   runs read-only and ends with a `VERDICT:` line.
 - On a revise verdict, a second builder card appears with `gate builder c2`;
   the reviewer's findings were threaded to it as input data.
 - The `Alt+W` Fleet Runs board carries the node column for both runs.
 
-If a node dies mid-run (for the demo: stop sshd on blade), the run finalizes
+If a node dies mid-run (for the demo: stop sshd on node-a), the run finalizes
 as stalled, the node is classified dead after consecutive channel failures,
 and the bounded retry reroutes to a survivor with the hop recorded on the new
 receipt.
@@ -134,7 +134,7 @@ clio-coder evidence inspect <evidenceId>
 
 `clio-coder evidence build` recomputes the receipt's integrity digest against the
 run ledger; a tampered or mismatched receipt fails the build with the field
-that diverged. The receipts of the remote runs verify on zbook because the
+that diverged. The receipts of the remote runs verify on the orchestrator host because the
 ledger and receipts live on the shared filesystem. Current receipts use strict
 v15 and authenticate every current receipt and reconstructed-ledger field.
 Every other receipt version is rejected rather than reported as partial; the

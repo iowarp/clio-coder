@@ -611,7 +611,7 @@ hard block.
 - User-origin and agent-origin runs stream into the chat transcript as an
   attributed worker block. The typed command is echoed dim above the block.
   Header units display `<agentId>` then `<targetId>/<wireModelId>` then `run <runId>`
-  for fleet workers (such as `◇ coder · mini/Nemo-3.5-Lightning · run 2mkas6s`),
+  for fleet workers (such as `◇ coder · node-a/example-coder-model · run 2mkas6s`),
   or `<id> (acp) · run <runId>` with no route for ACP delegation peers. The block
   body renders the worker prose down a rail, one coalesced line of tool names,
   and a one-line receipt footer showing the outcome glyph, token count, duration,
