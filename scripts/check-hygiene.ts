@@ -1032,6 +1032,140 @@ function checkPackaging(): void {
 }
 
 // ---------------------------------------------------------------------------
+// gitignored-reference: nothing under scripts/ or src/ builds a path onto
+// this checkout's own root (the `fileURLToPath(new URL(..., import.meta.url))`
+// family every scripts/*.mjs tool uses to find the repo) and then joins a
+// literal that lands inside a gitignored directory. #84 shipped exactly this:
+// scripts/shard-tests.mjs read .superpowers/uniq.json off REPO_ROOT, worked
+// in every working copy that happened to have the file, and threw ENOENT on
+// a fresh clone because .gitignore excludes .superpowers/ and nothing ships
+// the file. resolvePackageRoot() call sites are a different idiom (the
+// installed package root, not this dev checkout) and are already checked
+// above; this check exists for the other one. `dist/` is exempted the same
+// way checkPackaging exempts it: generated at build time, shipped in the
+// tarball, correctly absent from git.
+//
+// A bare directory name with no `/` (workspace-files.ts listing `.superpowers`
+// among directories the file walker skips) is not a path reference and is
+// deliberately out of scope: that usage is the read this check exists to
+// prevent, working correctly, not an instance of it.
+// ---------------------------------------------------------------------------
+const GITIGNORED_REFERENCE_ROOTS = ["scripts", "src"];
+const GITIGNORED_REFERENCE_EXEMPT = (path: string): boolean => path === "dist" || path.startsWith("dist/");
+
+function filesWithExtensions(dir: string, extensions: string[]): string[] {
+	const found: string[] = [];
+	const walk = (current: string): void => {
+		let entries: import("node:fs").Dirent[];
+		try {
+			entries = readdirSync(current, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			const full = join(current, entry.name);
+			if (entry.isDirectory()) {
+				walk(full);
+				continue;
+			}
+			if (entry.isFile() && extensions.some((ext) => entry.name.endsWith(ext))) found.push(full);
+		}
+	};
+	walk(dir);
+	return found;
+}
+
+interface GitignoredReferenceHit {
+	file: string;
+	line: number;
+	joinedPath: string;
+}
+
+/**
+ * A variable is "this checkout's root" if its initializer mentions
+ * `import.meta.url`, whatever combination of `fileURLToPath`, `.pathname`,
+ * `dirname`, and `resolve` wraps it. The four scripts/*.mjs tools that
+ * declare one each spell it differently; matching the marker rather than one
+ * exact call shape is what makes this check reach all of them.
+ */
+function repoRootAnchors(source: ts.SourceFile): Set<string> {
+	const anchors = new Set<string>();
+	const visit = (node: ts.Node): void => {
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isIdentifier(node.name) &&
+			node.initializer?.getText(source).includes("import.meta.url")
+		) {
+			anchors.add(node.name.text);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(source);
+	return anchors;
+}
+
+function gitignoredReferenceHits(absolute: string, anchors: Set<string>): GitignoredReferenceHit[] {
+	const text = readFileSync(absolute, "utf8");
+	const source = ts.createSourceFile(absolute, text, ts.ScriptTarget.ESNext, true);
+	const hits: GitignoredReferenceHit[] = [];
+	const visit = (node: ts.Node): void => {
+		if (
+			ts.isCallExpression(node) &&
+			ts.isIdentifier(node.expression) &&
+			["join", "resolve"].includes(node.expression.text)
+		) {
+			const [first, ...rest] = node.arguments;
+			if (first && ts.isIdentifier(first) && anchors.has(first.text) && rest.length > 0) {
+				const segments: string[] = [];
+				for (const argument of rest) {
+					if (ts.isStringLiteral(argument)) segments.push(argument.text);
+					else break;
+				}
+				if (segments.length === rest.length && segments.length > 0) {
+					const joinedPath = segments.join("/").replaceAll(/\/+/g, "/");
+					hits.push({
+						file: relative(root, absolute).replaceAll("\\", "/"),
+						line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+						joinedPath,
+					});
+				}
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(source);
+	return hits;
+}
+
+function checkGitignoredReference(): void {
+	const candidates: GitignoredReferenceHit[] = [];
+	for (const area of GITIGNORED_REFERENCE_ROOTS) {
+		const extensions = area === "scripts" ? [".ts", ".mjs", ".js"] : [".ts"];
+		for (const absolute of filesWithExtensions(join(root, area), extensions)) {
+			const text = readFileSync(absolute, "utf8");
+			if (!text.includes("import.meta.url")) continue;
+			const source = ts.createSourceFile(absolute, text, ts.ScriptTarget.ESNext, true);
+			const anchors = repoRootAnchors(source);
+			if (anchors.size === 0) continue;
+			candidates.push(...gitignoredReferenceHits(absolute, anchors));
+		}
+	}
+	if (candidates.length === 0) return;
+	const ignored = gitIgnored(candidates.map((hit) => hit.joinedPath));
+	const offenders = candidates.filter(
+		(hit) => ignored.has(hit.joinedPath) && !GITIGNORED_REFERENCE_EXEMPT(hit.joinedPath),
+	);
+	if (offenders.length > 0) {
+		fail(
+			"gitignored-reference",
+			`a gitignored path is joined onto this checkout's own root, so it is absent on a fresh clone:\n  ${offenders
+				.map((hit) => `${hit.file}:${hit.line} resolves ${hit.joinedPath}`)
+				.join("\n  ")}`,
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // prompts: the prompt no longer carries a doc routing table; it names two
 // docs and directs the model to context(scope="docs") for the rest. Prove
 // the two named docs exist, the directive is phrased as a call rather than
@@ -1092,6 +1226,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["theme-discipline", checkThemeDiscipline],
 	["readme-install-block", checkReadmeInstallBlock],
 	["packaging", checkPackaging],
+	["gitignored-reference", checkGitignoredReference],
 	["prompts", checkPromptsDocLinks],
 ];
 
