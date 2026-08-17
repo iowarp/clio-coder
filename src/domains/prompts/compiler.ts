@@ -221,7 +221,9 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		// line above; pointing at it beats letting the model recall the schemas.
 		"When answering capability-inventory questions, copy the Direct tools line above verbatim rather than recalling the attached schemas, and make no calls",
 		...(canDispatch ? ["add dispatch(list:true) only if agents or the fleet are requested"] : []),
-		...(canListSkills ? ['add context(scope="skills") only if skills are requested'] : []),
+		...(canListSkills
+			? ['add context(scope="skills") only if skills are requested (it lists installed and marketplace skills)']
+			: []),
 	].join("; ");
 	const lines = [
 		"# Tool Contract",
@@ -233,7 +235,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available, explicit broad repository/codebase exploration uses agent:"auto" before repo-wide reads.',
 		'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded agent:"auto" handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
 		'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
-		'List installed skills with context(scope="skills") only when the task is skill-shaped or the operator asks about skills; if one matches, suggest the operator run /skill:<name>, and never load a skill the operator did not request.',
+		'List installed and installable skills with context(scope="skills") only when the task is skill-shaped or the operator asks about or names a skill; if one matches, suggest the operator run /skill:<name> (which offers to install a marketplace skill), and never load a skill the operator did not request.',
 	];
 	// One hint per tool, sorted by tool name: deterministic bytes regardless
 	// of surface or registration order, and removing a tool from the surface
@@ -407,7 +409,7 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 	return [
 		"# Retrieval Hints",
 		"Compact CLIO-CODER.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
-		"For narrow questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. For explicit broad repository exploration, hand the search to a reconnaissance worker with dispatch when it is available. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
+		'For narrow questions about where code, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. For a question about a skill, or a name that could be one, use context(scope="skills") first: skills live in skill roots and the marketplace, not in the working tree, so grepping the repository for a skill name finds nothing. For explicit broad repository exploration, hand the search to a reconnaissance worker with dispatch when it is available. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.',
 	].join("\n");
 }
 

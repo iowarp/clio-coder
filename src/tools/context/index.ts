@@ -5,8 +5,10 @@ import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import {
 	checkSkillDrift,
+	discoverMarketplaceSkills,
 	type LoadSkillsInput,
 	loadSkills,
+	type MarketplaceSkill,
 	modelVisibleSkills,
 	type Skill,
 } from "../../domains/resources/index.js";
@@ -187,14 +189,60 @@ function renderPendingSkillTask(name: string, options: ToolInvokeOptions | undef
 	return lines;
 }
 
-function renderSkillsList(skills: ReadonlyArray<Skill>): string {
-	if (skills.length === 0) return "No skills are installed.";
+/**
+ * Marketplace rows the listing may show. Absent when discovery is switched
+ * off for the run (a `--no-skills` worker) and for a recipe-bound worker,
+ * whose context(scope=skills) admits exactly its bound names: neither can
+ * install anything, so installable rows would only invite a load the policy
+ * rejects. Whatever discovery reports as broken stays out of the listing; the
+ * CLI and the hub carry those diagnostics.
+ */
+function marketplaceRowsFor(
+	deps: ContextToolDeps,
+	installed: ReadonlyArray<Skill>,
+	options: ToolInvokeOptions | undefined,
+): MarketplaceSkill[] {
+	if (deps.getSkillLoaderOptions?.().disableDiscovery === true) return [];
+	const policy = options?.pendingSkillPolicy;
+	if (policy && policyIsRecipeBound(policy)) return [];
+	const installedNames = new Set(installed.map((skill) => skill.name));
+	try {
+		return discoverMarketplaceSkills({ cwd: cwdFromDeps(deps) }).skills.filter(
+			(entry) => !installedNames.has(entry.name),
+		);
+	} catch {
+		return [];
+	}
+}
+
+function renderSkillsList(skills: ReadonlyArray<Skill>, marketplace: ReadonlyArray<MarketplaceSkill>): string {
+	if (skills.length === 0 && marketplace.length === 0)
+		return "No skills are installed and no marketplace is configured.";
 	const lines = [
 		"Available skills. Match the current task against the descriptions below: when one fits, suggest the operator run /skill:<name>; when several compose, suggest the sequence in order. Skill bodies load only after an explicit operator request; never load one without it.",
 		"",
 	];
-	for (const skill of skills) {
-		lines.push(`- ${skill.name} (${skill.scope}): ${skill.description}`);
+	if (skills.length > 0) {
+		lines.push("Installed:");
+		for (const skill of skills) {
+			lines.push(`- ${skill.name} (${skill.scope}): ${skill.description}`);
+		}
+	} else {
+		lines.push("Installed: none.");
+	}
+	if (marketplace.length > 0) {
+		// Installable rows are suggested exactly like installed ones: the
+		// operator's /skill:<name> prompts to install before it runs, so the
+		// model's move is the same suggest-and-wait. Only the body is out of
+		// reach until then, which is why the description is all that appears.
+		lines.push(
+			"",
+			"Marketplace (not installed; /skill:<name> offers to install, or `clio-coder skills install <name>`). Suggest these the same way when one matches; their bodies cannot be loaded until the operator installs them:",
+		);
+		for (const entry of marketplace) {
+			const category = entry.category ? ` [${entry.category}]` : "";
+			lines.push(`- ${entry.name}${category}: ${entry.description}`);
+		}
 	}
 	// Recency anchor with an exact reply shape: literal models act on an output
 	// template where they skip conditional prose in the header.
@@ -237,17 +285,20 @@ function runWorkspaceScope(
 }
 
 function withSkillsPointer(deps: ContextToolDeps, snap: WorkspaceSnapshot): Record<string, unknown> {
-	let count = 0;
+	let installed = 0;
+	let installable = 0;
 	try {
 		const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
-		count = modelVisibleSkills(list.items).length;
+		const visible = modelVisibleSkills(list.items);
+		installed = visible.length;
+		installable = marketplaceRowsFor(deps, visible, undefined).length;
 	} catch {
 		return { ...snap };
 	}
-	if (count === 0) return { ...snap };
+	if (installed === 0 && installable === 0) return { ...snap };
 	return {
 		...snap,
-		skills: `Installed skills: ${count}. If one matches this task, list them with context(scope="skills") and suggest /skill:<name> to the operator; load only on operator request.`,
+		skills: `Skills: ${installed} installed, ${installable} installable from the marketplace. If one matches this task, or the operator names a skill, list them with context(scope="skills") and suggest /skill:<name> to the operator; load only on operator request.`,
 	};
 }
 
@@ -303,14 +354,28 @@ function runSkillsScope(
 	if (name.length === 0) {
 		const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
 		const visible = modelVisibleSkills(list.items);
+		const marketplace = marketplaceRowsFor(deps, visible, options);
+		const rendered = renderSkillsList(visible, marketplace);
+		// The catalog is bounded but not small: the whole listing must fit the
+		// per-call cap like any observation, and a cut list says so instead of
+		// silently dropping the marketplace tail.
+		const truncation = truncateHead(rendered, { maxBytes: reservation.callCapBytes, maxLines: Number.MAX_SAFE_INTEGER });
+		const total = visible.length + marketplace.length;
 		return finalizeObservation({
 			tool: ToolNames.Context,
 			unit: "entries",
-			output: renderSkillsList(visible),
-			shownCount: visible.length,
-			totalCount: visible.length,
-			truncated: false,
-			details: { skills: visible.map((skill) => ({ name: skill.name, scope: skill.scope })) },
+			output: truncation.content,
+			...(truncation.truncated ? { fullOutput: rendered } : {}),
+			shownCount: total,
+			totalCount: total,
+			truncated: truncation.truncated,
+			details: {
+				skills: visible.map((skill) => ({ name: skill.name, scope: skill.scope })),
+				marketplace: marketplace.map((entry) => ({
+					name: entry.name,
+					...(entry.category ? { category: entry.category } : {}),
+				})),
+			},
 			reservation,
 			...(options ? { options } : {}),
 		});
@@ -321,6 +386,16 @@ function runSkillsScope(
 	const visible = modelVisibleSkills(list.items);
 	const skill = visible.find((item) => item.name === name);
 	if (!skill) {
+		// A marketplace entry is a skill that exists and is not installed. Saying
+		// "unknown skill" about it denies the operator a thing the listing just
+		// offered; name the state and the one move that changes it.
+		const installable = marketplaceRowsFor(deps, visible, options).some((entry) => entry.name === name);
+		if (installable) {
+			return {
+				kind: "error",
+				message: `context: skill "${name}" is not installed; it is available in the marketplace. Ask the operator to run /skill:${name}, which offers to install it, and wait. Do not retry this load.`,
+			};
+		}
 		const available = visible.map((item) => item.name).join(", ");
 		const suffix = available.length > 0 ? ` Available skills: ${available}.` : " No skills are currently available.";
 		return { kind: "error", message: `context: unknown skill "${name}".${suffix}` };
@@ -396,7 +471,7 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.Context,
 		description:
-			"Environment context: scope=workspace returns the git/project snapshot, scope=docs searches Clio's bundled documentation (omit query to list the corpus), scope=skills lists available skills or loads one by name. For repository code and the repo's generated wiki use code_nav (mode=wiki).",
+			"Environment context: scope=workspace returns the git/project snapshot, scope=docs searches Clio's bundled documentation (omit query to list the corpus), scope=skills lists installed and marketplace skills or loads an installed one by name. For repository code and the repo's generated wiki use code_nav (mode=wiki).",
 		parameters: Type.Object({
 			scope: stringEnum(["workspace", "docs", "skills"], "Context source."),
 			query: Type.Optional(Type.String({ description: "scope=docs: question or terms; omit to list the corpus." })),

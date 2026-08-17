@@ -27,8 +27,10 @@ Commands:
   clio-coder skills sync [--force]
   clio-coder skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
 
-search covers installed skills plus the local marketplace (a repo skills/
-catalog, CLIO_CODER_SKILL_CATALOG_DIR, or the skill-marketplace.json index).
+search covers installed skills plus the local marketplace: CLIO_CODER_SKILL_CATALOG_DIR,
+a repo skills/ catalog, or the catalog and skill-marketplace.json index the
+installed clio-coder package carries. Installing from the shipped catalog copies
+local files and needs no network.
 
 install resolves a bare name through that marketplace; a path or GitHub URL
 installs directly, and an existing local path always wins over a same-named

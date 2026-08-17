@@ -402,19 +402,27 @@ skill's `allowed-tools` declaration is enforced at tool admission, and a skill
 can ship executable RED-GREEN evals that `clio-coder skills eval <name>` runs
 instead of trusting the prose.
 
-This repository ships a curated catalog under [skills/](skills/README.md) with
+The package ships a curated catalog under [skills/](skills/README.md) with
 provenance frontmatter, evals, and content hashes pinned in
 `skills/registry.yaml`, so an installed copy verifies against its audited
-source at activation. Nothing auto-loads.
+source at activation. The catalog is a marketplace, not a discovery root:
+nothing auto-loads, and a skill reaches your session only when you install
+it. Bare names resolve through the shipped catalog with no setup, and the
+copy is local, so installing needs no network.
 
 ```bash
+clio-coder skills search debug              # installed matches, then marketplace ones
 clio-coder skills install context-handoff   # copy into .clio-coder/skills
 clio-coder skills list                      # confirm Clio sees it
 ```
 
-The catalog includes [`find-skills`](skills/meta/find-skills/), which routes
-discovery through `clio-coder skills search` and `clio-coder skills install`. Install it
-with `clio-coder skills install find-skills --user` so it outranks the community
+In a session, `/skill:<name>` on a catalog skill offers the install first, and
+`context(scope="skills")` shows the model both what is installed and what the
+marketplace can install, so asking Clio about a skill by name works before it
+is installed. The catalog includes [`find-skills`](skills/meta/find-skills/),
+which routes discovery through `clio-coder skills search` and
+`clio-coder skills install`. Install it with
+`clio-coder skills install find-skills --user` so it outranks the community
 skill of the same name that other installers drop into compat roots.
 
 ## Memory that survives long tasks

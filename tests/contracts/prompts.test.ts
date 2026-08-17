@@ -85,7 +85,7 @@ const TOOL_HINTS = {
 	context: {
 		tool: "context",
 		hint:
-			'Call context with scope="skills" to list available skills; when one matches the task, suggest the operator run /skill:<name> and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
+			'Call context with scope="skills" to list installed and marketplace skills; when one matches the task, or the operator names a skill or asks how one works, suggest the operator run /skill:<name> (a marketplace skill is offered for install) and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
 	},
 	dispatch: {
 		tool: "dispatch",
@@ -748,7 +748,7 @@ describe("contracts/prompts compiler logic", () => {
 			result.sections.some((section) => section.id === "skills-catalog"),
 			false,
 		);
-		ok(result.systemPrompt.includes('Call context with scope="skills" to list available skills'));
+		ok(result.systemPrompt.includes('Call context with scope="skills" to list installed and marketplace skills'));
 		ok(result.systemPrompt.includes("Call dispatch with list:true"));
 	});
 
@@ -781,12 +781,12 @@ describe("contracts/prompts compiler logic", () => {
 			"# Tool Contract",
 			"The attached schemas are the session's complete direct-tool surface; follow each schema exactly.",
 			"Harness model: direct tools are attached schemas; fleet agents are workers behind dispatch; skills are operator-activated workflows reached through context. Keep these capability sets distinct.",
-			'When answering capability-inventory questions, copy the Direct tools line above verbatim rather than recalling the attached schemas, and make no calls; add dispatch(list:true) only if agents or the fleet are requested; add context(scope="skills") only if skills are requested.',
+			'When answering capability-inventory questions, copy the Direct tools line above verbatim rather than recalling the attached schemas, and make no calls; add dispatch(list:true) only if agents or the fleet are requested; add context(scope="skills") only if skills are requested (it lists installed and marketplace skills).',
 			"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 			'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available, explicit broad repository/codebase exploration uses agent:"auto" before repo-wide reads.',
 			'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded agent:"auto" handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
 			'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
-			'List installed skills with context(scope="skills") only when the task is skill-shaped or the operator asks about skills; if one matches, suggest the operator run /skill:<name>, and never load a skill the operator did not request.',
+			'List installed and installable skills with context(scope="skills") only when the task is skill-shaped or the operator asks about or names a skill; if one matches, suggest the operator run /skill:<name> (which offers to install a marketplace skill), and never load a skill the operator did not request.',
 			FLEET_ROUTING_GUIDANCE,
 			TOOL_HINTS.ask_user.hint,
 			TOOL_HINTS.code_nav.hint,
@@ -873,7 +873,11 @@ describe("contracts/prompts compiler logic", () => {
 		// Ordinary multi-step coding never spends a skill-listing call; the old
 		// broad trigger must stay gone.
 		strictEqual(prompt.includes("For a multi-step task, list installed skills"), false);
-		ok(prompt.includes('List installed skills with context(scope="skills") only when the task is skill-shaped'));
+		ok(
+			prompt.includes(
+				'List installed and installable skills with context(scope="skills") only when the task is skill-shaped',
+			),
+		);
 		ok(prompt.includes("never load a skill the operator did not request"));
 
 		// The deterministic routing order and failure recovery are static base
@@ -904,7 +908,10 @@ describe("contracts/prompts compiler logic", () => {
 		// contract's static skill-awareness passage and the Tool Contract's static
 		// base lines still render; only the per-tool "Call context with ..." /
 		// "Call dispatch with ..." hints are surface-dependent.
-		strictEqual(result.systemPrompt.includes('Call context with scope="skills" to list available skills'), false);
+		strictEqual(
+			result.systemPrompt.includes('Call context with scope="skills" to list installed and marketplace skills'),
+			false,
+		);
 		strictEqual(result.systemPrompt.includes("list:true"), false);
 	});
 

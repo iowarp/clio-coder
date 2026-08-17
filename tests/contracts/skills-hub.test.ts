@@ -143,8 +143,11 @@ describe("contracts/skills-hub marketplace rows", () => {
 	});
 
 	it("has no rows and no diagnostic row when nothing is configured", () => {
+		// The installed package carries its own catalog, so "nothing configured"
+		// is only reachable with catalog discovery switched off entirely; a bare
+		// cwd alone now resolves to the package catalog.
 		const cwd = seedCatalog({ "README.md": "no skills here\n" });
-		const discovery = discoverMarketplaceSkills({ cwd, indexPath: null });
+		const discovery = discoverMarketplaceSkills({ cwd, indexPath: null, catalogDir: null });
 
 		strictEqual(discovery.status, "unavailable");
 		deepStrictEqual(discovery.diagnostics, [MARKETPLACE_UNCONFIGURED]);
