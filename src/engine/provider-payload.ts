@@ -234,7 +234,12 @@ export function patchToolChoiceNamedPayload(
 	if (model.api === "mistral-conversations") {
 		return { ...payload, tools, toolChoice: { type: "function", function: { name: toolName } } };
 	}
-	return { ...payload, tools, tool_choice: { type: "function", function: { name: toolName } } };
+	// Generic OpenAI-compatible servers reject the object form outright: both LM
+	// Studio and llama.cpp answer HTTP 400 with "Invalid tool_choice type:
+	// 'object'. Supported string values: none, auto, required". The tool surface
+	// is already narrowed to the single named definition above, so "required" is
+	// equivalent here and is the only spelling every server accepts.
+	return { ...payload, tools, tool_choice: "required" };
 }
 
 /** Attach llama-server's native JSON-schema response constraint without changing its tool surface. */
