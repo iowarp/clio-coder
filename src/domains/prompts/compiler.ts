@@ -270,10 +270,14 @@ function workerPermissionSentence(mode: WorkerPromptInputs["onPermission"]): str
 }
 
 function renderWorkerOperatingContract(operatingContract: LoadedFragment, inputs: WorkerPromptInputs): string {
+	// The session contract's `# Skills` passage teaches suggesting a skill to
+	// the operator and listing the marketplace. A worker has neither: it can
+	// load only recipe-bound names (the bound-skill block says so) and its
+	// reply goes to the orchestrator, so the passage could only send it to a
+	// listing it cannot act on. Every worker prompt drops it.
 	const skillsHeading = "\n# Skills\n";
 	const skillsAt = operatingContract.body.indexOf(skillsHeading);
-	const withoutSkills = skillsAt >= 0 ? operatingContract.body.slice(0, skillsAt) : operatingContract.body;
-	const skillAwareBody = inputs.hasCanonicalContext && !inputs.hasBoundSkills ? operatingContract.body : withoutSkills;
+	const skillAwareBody = skillsAt >= 0 ? operatingContract.body.slice(0, skillsAt) : operatingContract.body;
 	const operatingPermission =
 		inputs.autonomy === "read-only"
 			? "This read-only worker denies mutating calls without requesting approval."

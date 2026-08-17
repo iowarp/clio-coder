@@ -51,6 +51,13 @@ export interface ContextToolDeps {
 	>;
 	/** Absent in worker registries without a session; scope=workspace errors cleanly. */
 	workspace?: ContextWorkspaceDeps;
+	/**
+	 * Whether scope=skills may list marketplace entries beside installed
+	 * skills. Worker registries set false: a worker can neither install a
+	 * skill nor address the operator who could, so installable rows would only
+	 * invite a load the pending-skill policy rejects. Undefined means true.
+	 */
+	skillMarketplace?: boolean;
 }
 
 function cwdFromDeps(deps?: ContextToolDeps): string {
@@ -190,9 +197,10 @@ function renderPendingSkillTask(name: string, options: ToolInvokeOptions | undef
 }
 
 /**
- * Marketplace rows the listing may show. Absent when discovery is switched
- * off for the run (a `--no-skills` worker) and for a recipe-bound worker,
- * whose context(scope=skills) admits exactly its bound names: neither can
+ * Marketplace rows the listing may show. Absent for every worker registry
+ * (`skillMarketplace: false`), when discovery is switched off for the run
+ * (a `--no-skills` run), and for a recipe-bound policy, whose
+ * context(scope=skills) admits exactly its bound names: none of these can
  * install anything, so installable rows would only invite a load the policy
  * rejects. Whatever discovery reports as broken stays out of the listing; the
  * CLI and the hub carry those diagnostics.
@@ -202,6 +210,7 @@ function marketplaceRowsFor(
 	installed: ReadonlyArray<Skill>,
 	options: ToolInvokeOptions | undefined,
 ): MarketplaceSkill[] {
+	if (deps.skillMarketplace === false) return [];
 	if (deps.getSkillLoaderOptions?.().disableDiscovery === true) return [];
 	const policy = options?.pendingSkillPolicy;
 	if (policy && policyIsRecipeBound(policy)) return [];
@@ -215,9 +224,16 @@ function marketplaceRowsFor(
 	}
 }
 
-function renderSkillsList(skills: ReadonlyArray<Skill>, marketplace: ReadonlyArray<MarketplaceSkill>): string {
-	if (skills.length === 0 && marketplace.length === 0)
-		return "No skills are installed and no marketplace is configured.";
+function renderSkillsList(
+	skills: ReadonlyArray<Skill>,
+	marketplace: ReadonlyArray<MarketplaceSkill>,
+	marketplaceOffered: boolean,
+): string {
+	if (skills.length === 0 && marketplace.length === 0) {
+		// A registry that never offers the marketplace (a worker) must not
+		// claim none is configured; it simply has nothing to list.
+		return marketplaceOffered ? "No skills are installed and no marketplace is configured." : "No skills are installed.";
+	}
 	const lines = [
 		"Available skills. Match the current task against the descriptions below: when one fits, suggest the operator run /skill:<name>; when several compose, suggest the sequence in order. Skill bodies load only after an explicit operator request; never load one without it.",
 		"",
@@ -355,7 +371,7 @@ function runSkillsScope(
 		const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
 		const visible = modelVisibleSkills(list.items);
 		const marketplace = marketplaceRowsFor(deps, visible, options);
-		const rendered = renderSkillsList(visible, marketplace);
+		const rendered = renderSkillsList(visible, marketplace, deps.skillMarketplace !== false);
 		// The catalog is bounded but not small: the whole listing must fit the
 		// per-call cap like any observation, and a cut list says so instead of
 		// silently dropping the marketplace tail.

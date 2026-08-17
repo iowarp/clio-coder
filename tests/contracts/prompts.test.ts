@@ -514,8 +514,14 @@ describe("contracts/prompts compiler logic", () => {
 			hasBoundSkills: false,
 			persona: workerPersona("# Coder\n\nHandle the skill-shaped task."),
 		});
-		ok(unbound.systemPrompt.includes('first call context (scope="skills")'));
-		ok(/Only an explicit\s+operator request activates a skill/.test(unbound.systemPrompt));
+		// The session contract's `# Skills` passage (list the catalog, suggest
+		// to the operator, marketplace rows) never reaches a worker, bound or
+		// not: a worker cannot load an unbound skill and has no operator to
+		// suggest one to. The context hint stays because the tool is attached.
+		strictEqual(unbound.systemPrompt.includes('first call context (scope="skills")'), false);
+		strictEqual(/Only an explicit\s+operator request activates a skill/.test(unbound.systemPrompt), false);
+		strictEqual(unbound.systemPrompt.includes("marketplace the operator installs from"), false);
+		ok(unbound.systemPrompt.includes(TOOL_HINTS.context.hint));
 
 		const boundPersona = [
 			"# Architect",

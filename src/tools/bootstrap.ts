@@ -72,6 +72,8 @@ export interface ToolBootstrapDeps {
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
 	>;
+	/** False in worker registries: context(scope=skills) lists installed skills only. */
+	skillMarketplace?: boolean;
 }
 
 function withSourceInfo<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
@@ -383,6 +385,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	const skillToolDeps = {
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
+		...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),
 	};
 	if (deps.askUser) {
 		registry.register({

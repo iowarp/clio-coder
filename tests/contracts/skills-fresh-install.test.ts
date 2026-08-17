@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import type { SkillDeclaredToolPolicy } from "../../src/core/skill-activation.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { discoverMarketplaceSkills, installSkill } from "../../src/domains/resources/skills/marketplace.js";
+import { createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
@@ -138,8 +140,26 @@ describe("contracts/skills fresh install: the marketplace with nothing configure
 		}
 	});
 
-	it("keeps marketplace rows out of a recipe-bound worker listing and a --no-skills run", async () => {
+	it("keeps marketplace rows out of every worker registry, a recipe-bound listing, and a --no-skills run", async () => {
 		const cwd = freshProject();
+		// The worker registry itself, unbound: installed skills only. A worker
+		// cannot install a skill or address the operator who could.
+		const workerRegistry = createWorkerToolRegistry();
+		const workerListing = await workerRegistry.invoke({ tool: ToolNames.Context, args: { scope: "skills" } }, {});
+		strictEqual(workerListing.kind, "ok");
+		if (workerListing.kind === "ok") {
+			strictEqual(workerListing.result.kind, "ok");
+			if (workerListing.result.kind === "ok") {
+				strictEqual(workerListing.result.output.includes("Marketplace ("), false, workerListing.result.output);
+				const details = workerListing.result.details as { marketplace?: unknown[] };
+				strictEqual((details.marketplace ?? []).length, 0);
+			}
+		}
+		// The same flag on a bare context tool.
+		const flagged = createContextTool({ getCwd: () => cwd, skillMarketplace: false });
+		const flaggedListing = await flagged.run({ scope: "skills" }, undefined);
+		strictEqual(flaggedListing.kind, "ok");
+		if (flaggedListing.kind === "ok") strictEqual(flaggedListing.output.includes("Marketplace ("), false);
 		const bound = createContextTool({ getCwd: () => cwd });
 		const boundListing = await bound.run(
 			{ scope: "skills" },
@@ -161,6 +181,16 @@ describe("contracts/skills fresh install: the marketplace with nothing configure
 		if (bare.kind === "ok") {
 			strictEqual(bare.output, "No skills are installed and no marketplace is configured.");
 		}
+		// A worker registry with nothing installed says only that; it never
+		// claims no marketplace is configured, because it was never offered one.
+		const bareWorker = createContextTool({
+			getCwd: () => cwd,
+			skillMarketplace: false,
+			getSkillLoaderOptions: () => ({ disableDiscovery: true }),
+		});
+		const workerBare = await bareWorker.run({ scope: "skills" }, undefined);
+		strictEqual(workerBare.kind, "ok");
+		if (workerBare.kind === "ok") strictEqual(workerBare.output, "No skills are installed.");
 	});
 });
 

@@ -123,9 +123,39 @@ describe("contracts/skills first-turn reminder", () => {
 		strictEqual(registration.evaluate(turnStart({ sessionId: "b", conversationMessages: 0 })).length, 1);
 	});
 
+	it("fires on a fresh install with nothing installed when the marketplace has skills", () => {
+		// The npm-install case: zero installed, a shipped catalog full of
+		// installable skills. Gating on installed alone kept this reminder, the
+		// one channel local models act on, from ever firing for exactly the
+		// operator who had never installed anything.
+		const fresh = createSkillsReminderRegistration({
+			countModelVisibleSkills: () => 0,
+			countInstallableSkills: () => 31,
+		});
+		const effects = fresh.evaluate(turnStart({ conversationMessages: 0, text: "grill me on this plan" }));
+		strictEqual(effects.length, 1);
+		const effect = effects[0];
+		ok(effect && effect.kind === "inject_reminder");
+		if (effect?.kind === "inject_reminder") {
+			strictEqual(effect.message, skillsReminderMessage(0, 31));
+			ok(effect.message.includes("[Skills] 0 installed, 31 installable from the marketplace"));
+			ok(effect.message.includes("offered for install"));
+			ok(effect.message.includes(SKILL_SUGGESTION_ANCHOR));
+		}
+		// Both counts present: the line names both.
+		ok(skillsReminderMessage(2, 29).includes("[Skills] 2 installed, 29 installable from the marketplace"));
+		// No marketplace: the original shape, so a configured host reads as before.
+		ok(skillsReminderMessage(2, 0).includes("[Skills] 2 installed."));
+	});
+
 	it("stays silent with zero model-visible skills and on skill-request turns", () => {
 		const none = createSkillsReminderRegistration({ countModelVisibleSkills: () => 0 });
 		strictEqual(none.evaluate(turnStart({ conversationMessages: 0 })).length, 0);
+		const noneAnywhere = createSkillsReminderRegistration({
+			countModelVisibleSkills: () => 0,
+			countInstallableSkills: () => 0,
+		});
+		strictEqual(noneAnywhere.evaluate(turnStart({ conversationMessages: 0 })).length, 0);
 
 		const withSkills = createSkillsReminderRegistration({ countModelVisibleSkills: () => 3 });
 		// The operator already invoked /skill:<name>; the reminder would be noise.

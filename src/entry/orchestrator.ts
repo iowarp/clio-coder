@@ -109,7 +109,12 @@ import {
 } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
-import { createResourcesDomainModule, modelVisibleSkills, type ResourcesContract } from "../domains/resources/index.js";
+import {
+	createResourcesDomainModule,
+	discoverMarketplaceSkills,
+	modelVisibleSkills,
+	type ResourcesContract,
+} from "../domains/resources/index.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { AutonomyLevel, SafetyContract } from "../domains/safety/index.js";
@@ -1051,6 +1056,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middleware.registerHook(
 			createSkillsReminderRegistration({
 				countModelVisibleSkills: () => modelVisibleSkills(resources.skills(process.cwd()).items).length,
+				// Same lookup context(scope="skills") lists under its Marketplace
+				// heading, minus what is already installed, so the count the
+				// reminder quotes is the count the listing will show.
+				countInstallableSkills: () => {
+					const installed = new Set(resources.skills(process.cwd()).items.map((skill) => skill.name));
+					return discoverMarketplaceSkills({ cwd: process.cwd() }).skills.filter((skill) => !installed.has(skill.name))
+						.length;
+				},
 			}),
 		);
 	}
