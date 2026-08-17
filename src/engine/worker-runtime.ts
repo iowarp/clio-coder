@@ -54,7 +54,7 @@ import { createProtectedArtifactsRegistration } from "../domains/safety/protecte
 import { createRunEffectsRecorder } from "../domains/safety/run-effects.js";
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
 import type { ToolProfileName } from "../tools/profiles.js";
-import type { AgentLedgerPort } from "../worker/protocol.js";
+import { type AgentLedgerPort, canonicalJson } from "../worker/protocol.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
@@ -768,9 +768,20 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		requestId: string;
 		tool: string;
 		actionClass: ActionClass;
+		/** Identity of the parked call (tool plus canonical args) for the answered-escalation memory. */
+		callKey: string;
 		timer: ReturnType<typeof setTimeout>;
 	}
 	let activeEscalation: ActiveEscalation | null = null;
+	// Answered escalations, keyed by the exact call. A worker that re-issues
+	// the identical call after the operator already decided it gets the same
+	// answer without a new card: a live coder re-asked one bash approval eight
+	// times after its edits were done, and each approval only bought the next
+	// identical card (#79). The memory is per run and per exact (tool, args)
+	// tuple; a different command is a new decision.
+	const answeredEscalations = new Map<string, { decision: "approve" | "deny"; requestId: string }>();
+	const escalationCallKey = (tool: string, args: Record<string, unknown> | undefined): string =>
+		`${tool}\u0000${canonicalJson(args ?? {})}`;
 	const clearActiveEscalation = (): void => {
 		if (activeEscalation) {
 			clearTimeout(activeEscalation.timer);
@@ -791,6 +802,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		const active = activeEscalation;
 		if (!active || active.requestId !== requestId) return false;
 		clearActiveEscalation();
+		answeredEscalations.set(active.callKey, { decision, requestId });
 		if (decision === "approve") {
 			emit({
 				type: "clio_permission_resolved",
@@ -865,13 +877,43 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const unsubscribePermission = registry.onPermissionRequired((call, decision, meta) => {
 		const actionClass = decision.classification.actionClass;
 		if (escalationConfig) {
+			const callKey = escalationCallKey(call.tool, call.args);
+			const remembered = answeredEscalations.get(callKey);
+			if (remembered !== undefined) {
+				const approved = remembered.decision === "approve";
+				const reason = approved
+					? `operator approved an identical ${call.tool} call earlier in this run (request ${remembered.requestId}); the answer stands without a new prompt`
+					: `permission denied by operator: an identical ${call.tool} call was already denied earlier in this run (request ${remembered.requestId}); the answer stands, so do not repeat this call`;
+				emit({
+					type: "clio_permission_resolved",
+					payload: {
+						tool: call.tool,
+						actionClass,
+						mode: "escalate",
+						source: "remembered",
+						requestId: meta.requestId,
+						decision: approved ? "approved" : "denied",
+						reason,
+					},
+				} as ClioWorkerEvent);
+				if (approved) {
+					void registry.resumeParkedCalls({
+						actionClass,
+						requestId: meta.requestId,
+						requestedBy: "escalation:remembered",
+					});
+				} else {
+					registry.cancelParkedCall(meta.requestId, reason);
+				}
+				return;
+			}
 			if (activeEscalation !== null) return;
 			const requestId = meta.requestId;
 			// The timer must hold the event loop: its firing is what denies an
 			// escalation the orchestrator never resolves. clearActiveEscalation
 			// clears it on every resolution path.
 			const timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), escalationConfig.timeoutMs);
-			activeEscalation = { requestId, tool: call.tool, actionClass, timer };
+			activeEscalation = { requestId, tool: call.tool, actionClass, callKey, timer };
 			// The operator decides on this exact call, so the escalation carries a
 			// sanitized preview of its object; the args stay inside the worker. The
 			// cap bounds the NDJSON line, and the overlay truncates further.

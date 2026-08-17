@@ -3361,7 +3361,7 @@ export function createDispatchBundle(
 					reason?: string;
 					requestId?: string;
 					mode?: "deny" | "fail" | "escalate";
-					source?: "operator" | "timeout" | "policy";
+					source?: "operator" | "timeout" | "policy" | "remembered";
 				};
 			};
 			if (isRecord(event)) {
@@ -4263,7 +4263,7 @@ export function createDispatchBundle(
 					target?: string;
 					axis?: string;
 					timeoutMs?: number;
-					source?: "operator" | "timeout" | "policy";
+					source?: "operator" | "timeout" | "policy" | "remembered";
 				};
 			};
 			if (isRecord(event)) {
@@ -4357,19 +4357,28 @@ export function createDispatchBundle(
 				// Escalation resolutions already have a request event. Policy
 				// deny/fail is non-stalling, so dispatch mints the adjacent pair.
 				const source = event.payload.source;
-				const granted = source === "operator" && event.payload.decision === "approved";
-				const decidedBy = source === "operator" ? "operator" : source === "timeout" ? "timeout" : "policy:no-operator";
+				const granted = (source === "operator" || source === "remembered") && event.payload.decision === "approved";
+				const decidedBy =
+					source === "operator"
+						? "operator"
+						: source === "remembered"
+							? "operator:remembered"
+							: source === "timeout"
+								? "timeout"
+								: "policy:no-operator";
 				const requestId =
 					typeof event.payload.requestId === "string"
 						? event.payload.requestId
-						: source === "operator" || source === "timeout"
+						: source === "operator" || source === "timeout" || source === "remembered"
 							? undefined
 							: `worker-permission-${++workerPolicyPermissionCounter}`;
 				const origin = runIdForPermissionAudit !== null ? `worker:${runIdForPermissionAudit}` : undefined;
 				const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
 				const reason =
 					typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
-				if (decidedBy === "policy:no-operator" && requestId && origin) {
+				// A remembered answer never raised an escalation card, so it mints
+				// the adjacent request/resolve pair the way policy denials do.
+				if ((decidedBy === "policy:no-operator" || source === "remembered") && requestId && origin) {
 					context.bus.emit(BusChannels.PermissionRequested, {
 						tool: event.payload.tool,
 						actionClass,
