@@ -342,6 +342,12 @@ interface ParkedCall {
 	decision: SafetyDecision;
 	meta: PermissionRequiredMeta;
 	resolve: (verdict: RegistryVerdict) => void;
+	/**
+	 * Seals the park at the instant the operator's decision lands, before the
+	 * admitted body runs. Idempotent, so the resolve paths that never reach a
+	 * body still report exactly one park.
+	 */
+	closePark: () => void;
 	options?: ToolInvokeOptions;
 	abortCleanup?: () => void;
 }
@@ -690,16 +696,32 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
 				};
 				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", { requestId: meta.requestId });
-				// Wrapping resolve here reports the park from every path that ends
-				// one: an approval, a denial, a retry that re-parks and later
-				// settles, an abort. A resolve site added later is covered too,
-				// because they all settle the entry through this function.
+				// The park ends when the operator decides, not when the verdict
+				// resolves: an approved call runs its body inside the resume pass,
+				// so measuring to the resolve would fold the tool's own execution
+				// into the park and the caller would subtract it. A dispatch that
+				// fanned out for 224.8s settled as a 15ms line that way (issue #82).
+				// closePark seals it at the decision; settle covers every path that
+				// ends a park without reaching a body, including one added later,
+				// because they all resolve the entry through this function.
 				const parkedAtClock = performance.now();
-				const settle = (verdict: RegistryVerdict): void => {
+				let parkReported = false;
+				const closePark = (): void => {
+					if (parkReported) return;
+					parkReported = true;
 					options?.onParked?.(Math.round(performance.now() - parkedAtClock));
+				};
+				const settle = (verdict: RegistryVerdict): void => {
+					closePark();
 					resolve(verdict);
 				};
-				const parkedCall: ParkedCall = { call: admissionCall, decision: outcome.decision, meta, resolve: settle };
+				const parkedCall: ParkedCall = {
+					call: admissionCall,
+					decision: outcome.decision,
+					meta,
+					resolve: settle,
+					closePark,
+				};
 				if (options !== undefined) parkedCall.options = options;
 				if (options?.signal) {
 					const onAbort = (): void => {
@@ -769,6 +791,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 									actionClass: grant.actionClass,
 								},
 							};
+				// Seal the park before the body runs. Everything after this line is
+				// the tool working, and the caller charges that to the tool.
+				entry.closePark();
 				entry.resolve(await runSpec(outcome.spec, entry.call, outcome.decision, approvedOptions));
 			}
 			const next = parked[0];

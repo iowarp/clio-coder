@@ -438,6 +438,54 @@ describe("contracts/autonomy registry admission", () => {
 		ok(durationMs < 100, `the 120ms park must not be charged to the tool, got ${durationMs}ms`);
 	});
 
+	it("charges an approved dispatch the fan-out it ran, not the slice before admission", async () => {
+		// A dispatch that parks runs its whole fan-out inside the resume pass, so
+		// a park measured to the verdict swallows the fan-out and the settled
+		// transcript line reads as the admission slice. Issue #82 saw 224.8s of
+		// fan-out render as 15ms.
+		const fanOutMs = 400;
+		const parkMs = 200;
+		const registry = registryAt("auto-edit");
+		registry.register({
+			...mockSpec(ToolNames.Dispatch, "dispatch"),
+			describeDispatchPlan: () => ({
+				topology: "review",
+				taskCount: 2,
+				planScale: true,
+				tasks: [],
+				text: "review plan",
+				hash: "0".repeat(64),
+			}),
+			run: async () => {
+				await new Promise((resolve) => setTimeout(resolve, fanOutMs));
+				return { kind: "ok", output: "fan-out settled" };
+			},
+		});
+		const finished: number[] = [];
+		const pending = invokeRegisteredTool(
+			registry,
+			ToolNames.Dispatch,
+			{},
+			{
+				telemetry: {
+					onFinish: (event) => {
+						finished.push(event.durationMs);
+					},
+				},
+			},
+		);
+		await settle();
+		strictEqual(registry.hasParkedCalls(), true);
+		await new Promise((resolve) => setTimeout(resolve, parkMs));
+		await registry.resumeParkedCalls({ actionClass: "dispatch", requestedBy: "test" });
+		await pending;
+
+		strictEqual(finished.length, 1);
+		const durationMs = finished[0] ?? -1;
+		ok(durationMs >= fanOutMs * 0.8, `the fan-out must be charged to the tool, got ${durationMs}ms`);
+		ok(durationMs < fanOutMs + parkMs * 0.5, `the ${parkMs}ms park must not be charged, got ${durationMs}ms`);
+	});
+
 	it("auto-edit runs writes and recognized commands, parks unrecognized bash, and a one-shot grant resumes it", async () => {
 		const registry = registryAt("auto-edit");
 		strictEqual((await registry.invoke(writeCall("notes/autonomy-test.txt"))).kind, "ok");
