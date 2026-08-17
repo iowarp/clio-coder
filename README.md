@@ -126,11 +126,9 @@ experiment-protocol guides.
 
 ## Install
 
-From npm, the three commands under [Get started](#get-started) are the whole
-install. `clio-coder --version` and `clio-coder doctor` confirm which build
-answered and whether the home is set up. To follow a dist-tag instead of
-`latest`, `clio-coder upgrade --channel=beta`; the upgrade path is described in
-[docs/installation-and-lifecycle.md](docs/installation-and-lifecycle.md).
+From npm, [Get started](#get-started) is the whole install. `clio-coder upgrade`
+moves an existing install to the latest release; `--channel=beta` follows a
+dist-tag instead.
 
 From source, pinned to this release:
 
@@ -143,45 +141,21 @@ hash -r
 "$HOME/.local/bin/clio-coder" --version
 ```
 
-The clone is pinned to `v0.3.1`, the release these instructions describe.
-Without `--branch` you get the default branch, which is ahead of the release and
-is not what the rest of this page documents.
-
-`npm run install:local` verifies dependencies, builds the CLI, installs a
-symlink at `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`, and runs the installed
-CLI's structure repair so a fresh install passes plain `clio-coder doctor` with no
-manual steps. It warns if the bin directory is not on your `PATH` and prints the
-`export` line above; the line is a no-op for the shell that already has it, and
-it is what makes a bare `clio-coder` resolve in the shell that does not. Put it in
-your shell profile to keep it across sessions. The symlink executes
-`dist/cli/index.js`, so re-run `npm run build` after editing TypeScript sources.
-
-The last line runs the launcher by its full path on purpose. A bare `clio-coder` may
-resolve to an older install earlier on your `PATH`, so it verifies whichever one
-that is rather than the one you just installed; the installer warns when it
-finds that shadowing, and names the other path.
-
-Before you switch to the bare name, ask which file it reaches:
-
-```bash
-command -v clio-coder    # expect $HOME/.local/bin/clio-coder
-```
-
-Comparing `clio-coder --version` against `"$HOME/.local/bin/clio-coder" --version` does not
-answer that. Two installs of the same release print the same version, so the
-versions agree while the name still resolves to the other one. The path is the
-question.
+`npm run install:local` builds the CLI, links it at
+`${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`, and initializes the home.
+Put the `export PATH` line in your shell profile. If an older install is on your
+`PATH`, `command -v clio-coder` shows which file the bare name reaches; the
+installer warns when it finds one.
 
 To remove it, preview first:
 
 ```bash
 clio-coder uninstall --dry-run
 clio-coder uninstall --remove-binary --force
-hash -r
 ```
 
-For selective wipes that keep settings or credentials, use `clio-coder reset`. Full
-details live in [docs/installation-and-lifecycle.md](docs/installation-and-lifecycle.md).
+Full lifecycle details, including `reset` and the upgrade path, are in
+[docs/installation-and-lifecycle.md](docs/installation-and-lifecycle.md).
 
 ## Five-minute start
 
