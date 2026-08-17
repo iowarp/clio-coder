@@ -32,10 +32,9 @@ function installerExportLine(): string {
 }
 
 /**
- * The Install section carries two shell blocks. The npm block comes first
- * because that is the path most readers take, so a test that wants the
- * from-source steps has to anchor on its own prose line rather than on
- * whichever block happens to be nearest the heading.
+ * The from-source steps live in the Install section under their own prose
+ * line, so the test anchors on that line rather than on whichever block
+ * happens to be nearest the heading.
  */
 function readmeBashBlockAfter(marker: string): ReadonlyArray<string> {
 	const readme = readFileSync("README.md", "utf8").split(/\r?\n/);
@@ -55,9 +54,21 @@ function readmeInstallBlock(): ReadonlyArray<string> {
 	return readmeBashBlockAfter("From source");
 }
 
-/** The published-package steps. */
+/**
+ * The published-package steps: the first shell block on the page that runs a
+ * global npm install. It sits on the first screen, above the Install section,
+ * because it is the first thing a reader runs; the test finds it by what it
+ * does rather than by where it is.
+ */
 function readmeNpmBlock(): ReadonlyArray<string> {
-	return readmeBashBlockAfter("From npm");
+	const readme = readFileSync("README.md", "utf8").split(/\r?\n/);
+	for (let open = readme.indexOf("```bash"); open >= 0; open = readme.indexOf("```bash", open + 1)) {
+		const close = readme.indexOf("```", open + 1);
+		ok(close > open, "every shell block is closed");
+		const block = readme.slice(open + 1, close);
+		if (block.some((line) => line.startsWith("npm install -g"))) return block;
+	}
+	throw new Error("README has no shell block that runs npm install -g");
 }
 
 describe("contracts/readme install block", () => {
