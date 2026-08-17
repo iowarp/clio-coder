@@ -28,27 +28,27 @@ function write(path: string, contents: string): void {
 describe("contracts/3a scoped settings layering", () => {
 	it("applies built-in < user < project < project.local precedence with per-key sources", () => {
 		const { cwd, userPath } = scratch();
-		write(userPath, "identity: user-id\nmodelSelector:\n  recentLimit: 5\n");
-		write(join(cwd, ".clio-coder", "settings.yaml"), "identity: project-id\nbudget:\n  sessionCeilingUsd: 10\n");
+		write(userPath, "autonomy: suggest\nmodelSelector:\n  recentLimit: 5\n");
+		write(join(cwd, ".clio-coder", "settings.yaml"), "autonomy: read-only\nbudget:\n  sessionCeilingUsd: 10\n");
 		write(join(cwd, ".clio-coder", "settings.local.yaml"), "theme: midnight\n");
 
 		const result = readLayeredSettings(cwd, { userPath });
-		strictEqual(result.settings.identity, "project-id");
+		strictEqual(result.settings.autonomy, "read-only");
 		strictEqual(result.settings.modelSelector.recentLimit, 5);
 		strictEqual(result.settings.budget.sessionCeilingUsd, 10);
 		strictEqual(result.settings.theme, "midnight");
 
-		strictEqual(settingsSourceFor(result.sources, "identity"), "project");
+		strictEqual(settingsSourceFor(result.sources, "autonomy"), "project");
 		strictEqual(settingsSourceFor(result.sources, "modelSelector.recentLimit"), "user");
 		strictEqual(settingsSourceFor(result.sources, "budget.sessionCeilingUsd"), "project");
 		strictEqual(settingsSourceFor(result.sources, "theme"), "project.local");
 		// A key no layer set falls back to built-in.
-		strictEqual(settingsSourceFor(result.sources, "autonomy"), "built-in");
+		strictEqual(settingsSourceFor(result.sources, "version"), "built-in");
 	});
 
 	it("strips credentials from project layers and never lets them reach effective settings", () => {
 		const { cwd, userPath } = scratch();
-		write(userPath, "identity: user-id\n");
+		write(userPath, "autonomy: suggest\n");
 		write(
 			join(cwd, ".clio-coder", "settings.yaml"),
 			"targets:\n  - id: t\n    runtime: ollama\n    auth:\n      apiKey: SUPER_SECRET\n",
@@ -63,16 +63,16 @@ describe("contracts/3a scoped settings layering", () => {
 
 	it("degrades a malformed project layer to the lower layers with an issue", () => {
 		const { cwd, userPath } = scratch();
-		write(userPath, "identity: user-id\n");
+		write(userPath, "autonomy: suggest\n");
 		write(join(cwd, ".clio-coder", "settings.yaml"), ":\n  - [bad yaml");
 		const result = readLayeredSettings(cwd, { userPath });
-		strictEqual(result.settings.identity, "user-id");
+		strictEqual(result.settings.autonomy, "suggest");
 		ok(result.issues.length >= 1);
 	});
 
 	it("attributes project validation failures to the project layer", () => {
 		const { cwd, userPath } = scratch();
-		write(userPath, "identity: user-id\n");
+		write(userPath, "autonomy: suggest\n");
 		write(join(cwd, ".clio-coder", "settings.yaml"), "targets:\n  - id: 7\n    runtime: ollama\n");
 		const result = readLayeredSettings(cwd, { userPath });
 		ok(result.issues.some((issue) => issue.origin === "project" && issue.path === "targets[0].id"));
@@ -164,7 +164,7 @@ describe("contracts/3c operator profile", () => {
 describe("contracts/3d config inspect graph", () => {
 	it("reports project rules, profile, hooks, and settings sources in the JSON contract", () => {
 		const { cwd } = scratch();
-		write(join(cwd, ".clio-coder", "settings.yaml"), "identity: graph-project\n");
+		write(join(cwd, ".clio-coder", "settings.yaml"), "autonomy: read-only\n");
 		write(join(cwd, ".clio-coder", "rules", "r.md"), "# Rule\nbody\n");
 		write(join(cwd, ".clio-coder", "profile.yaml"), "responsePosture: concise\n");
 		write(join(cwd, ".clio-coder", "hooks.yaml"), "- on: turn_start\n  kind: prompt\n  message: hi\n");
@@ -175,8 +175,8 @@ describe("contracts/3d config inspect graph", () => {
 		deepStrictEqual(roundTrip.entries.length, graph.entries.length);
 
 		// The project settings key is attributed to the project layer.
-		const identity = graph.settings.find((entry) => entry.key === "identity");
-		strictEqual(identity?.source, "project");
+		const autonomy = graph.settings.find((entry) => entry.key === "autonomy");
+		strictEqual(autonomy?.source, "project");
 
 		const categories = new Set(graph.entries.map((entry) => entry.category));
 		ok(categories.has("rule"), "expected a rule entry");

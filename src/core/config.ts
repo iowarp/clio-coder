@@ -862,6 +862,9 @@ function validateKeybindings(issues: Issues, value: unknown): ClioSettings["keyb
 
 const TOP_LEVEL_KEYS = [
 	"version",
+	// Accepted and ignored. Settings files generated before 0.3.1 carry an
+	// `identity:` line for a control nothing ever read; listing it here keeps
+	// those files loading without an unknown-key issue.
 	"identity",
 	"autonomy",
 	"targets",
@@ -913,10 +916,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 
 	if ("version" in raw && raw.version !== 1) {
 		issues.add("version", `expected 1, got ${describe(raw.version)}`);
-	}
-	if ("identity" in raw) {
-		const v = expectString(issues, "identity", raw.identity);
-		if (v !== undefined) settings.identity = v;
 	}
 	if ("autonomy" in raw) {
 		const v = expectEnum(issues, "autonomy", raw.autonomy, AUTONOMY_LEVELS);

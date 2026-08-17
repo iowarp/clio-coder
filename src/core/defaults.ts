@@ -244,7 +244,6 @@ export interface RoutingActivationSettings {
 
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
-	identity: "clio",
 	autonomy: "auto-edit" as AutonomyLevel,
 	targets: [] as TargetDescriptor[],
 	runtimePlugins: [] as string[],
@@ -383,7 +382,6 @@ export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on fir
 #   5. Launch: clio-coder
 
 version: 1
-identity: clio
 autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto
 
 # Inference targets. Each entry becomes selectable for chat and workers.
