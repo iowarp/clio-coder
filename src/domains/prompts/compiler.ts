@@ -118,7 +118,7 @@ export const FLEET_ROUTING_GUIDANCE_MAX_BYTES = 320;
 // `agent:"auto"` baselines by task shape and can still land on a worker whose
 // capability class is wrong for the job, so a pinned id is the reliable path.
 export const FLEET_ROUTING_GUIDANCE =
-	'Fleet routing: pin the `agent` id from the Fleet section above; agent:"auto" baselines from the task text and is a fallback, not a router. Broad repo/codebase exploration goes to a worker before repo-wide reads. Give each dispatch a concrete handoff and synthesize its receipt.';
+	'Fleet routing: pin the `agent` id from the Fleet section; agent:"auto" baselines from the task text and is a fallback, not a router.';
 
 /**
  * Worker-side mirror of the parent's `SPOT_CHECK_GUIDANCE`. The parent sentence
@@ -259,10 +259,14 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		"Harness model: direct tools are attached schemas; fleet agents are workers behind dispatch; skills are operator-activated workflows reached through context. Keep these capability sets distinct.",
 		`${inventoryGuidance}.`,
 		"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
-		'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available, explicit broad repository/codebase exploration uses agent:"auto" before repo-wide reads.',
-		'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded agent:"auto" handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
+		// The tool-specific instantiation of the operating contract's "narrow
+		// work: inspect directly" rule; the contract cannot name tools.
+		// Delegation, the tasks board, and skills are not restated here: the
+		// Delegation and Skills passages and the registry hints carry them, and
+		// each renders exactly when its tool does.
+		'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded.',
+		"Validate with verify or git diff before final claims.",
 		'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
-		'List installed and installable skills with context(scope="skills") only when the task is skill-shaped or the operator asks about or names a skill; if one matches, suggest the operator run /skill:<name> (which offers to install a marketplace skill), and never load a skill the operator did not request.',
 	];
 	// One hint per tool, sorted by tool name: deterministic bytes regardless
 	// of surface or registration order, and removing a tool from the surface
@@ -418,10 +422,13 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 			"Use only facts present in the current turn and say what file-specific context would be needed for precise code work.",
 		].join("\n");
 	}
+	// Where to look for skills and when to delegate exploration live in the
+	// Skills and Delegation passages; this block only says what is and is not
+	// preloaded.
 	return [
 		"# Retrieval Hints",
 		"Compact CLIO-CODER.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
-		'For narrow questions about where code, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. For a question about a skill, or a name that could be one, use context(scope="skills") first: skills live in skill roots and the marketplace, not in the working tree, so grepping the repository for a skill name finds nothing. For explicit broad repository exploration, hand the search to a reconnaissance worker with dispatch when it is available. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.',
+		"Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
 	].join("\n");
 }
 
