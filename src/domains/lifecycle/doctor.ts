@@ -349,7 +349,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		? [
 				state.installedAt ? `installed ${state.installedAt}` : null,
 				state.repairedAt ? `repaired ${state.repairedAt}` : null,
-				state.upgradedAt ? `upgraded ${state.upgradedAt}` : null,
+				state.upgradedAt ? `upgraded ${state.upgradedAt}${state.upgradedFrom ? ` from ${state.upgradedFrom}` : ""}` : null,
 			].filter((stamp): stamp is string => stamp !== null)
 		: [];
 	const stateStamp = stateStamps.join(", ");

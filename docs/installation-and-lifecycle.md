@@ -79,7 +79,7 @@ The core files are created automatically during the first run. `credentials.yaml
 | **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --config`. |
 | **Config** | `credentials.yaml` | Private keys and tokens managed via `clio-coder auth`. | `0o600` (rw-------) | Removed by uninstall / `reset --auth`. |
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
-| **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install), and `upgradedAt` (stamped on upgrade). | Writer/umask default | Removed by uninstall / `reset --state`. |
+| **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | Writer/umask default | Removed by uninstall / `reset --state`. |
 | **State** | `migrations.json` | Log of successfully applied schema/state migrations. | Writer/umask default | Removed by uninstall / `reset --state`. |
 | **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | Writer/umask default | Removed by uninstall / `reset --data`. |
 | **State** | `audit/YYYY-MM-DD.jsonl` | Daily safety audit logs showing allowed/blocked tool actions. | Writer/umask default | Removed by uninstall / `reset --state`. |
@@ -93,7 +93,7 @@ When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see `
 1.  **Directory Tree**: Recursively creates the four roots (`config`, `data`, `state`, `cache`) and their skeletons: `agents` under config, `memory`/`evidence`/`evals` under data, and `sessions`/`audit`/`receipts`/`interviews`/`scratch` under state.
 2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config. An existing file is never read, validated, or rewritten by initialization.
 3.  **Credentials Security**: If `credentials.yaml` is absent, creates a YAML file containing a managed-file comment and an empty object (`{}`), then locks its permissions immediately to owner-only read-write (`0o600`).
-4.  **Install Metadata**: Writes `install.json` with `installedAt` exactly once at first install; a later version, platform, or node change preserves `installedAt` and stamps `upgradedAt`.
+4.  **Install Metadata**: Writes `install.json` with `installedAt` exactly once at first install; a later version, platform, or node change preserves `installedAt` and stamps `upgradedAt`, and a version change also records the previous version as `upgradedFrom`.
 
 ---
 
@@ -185,6 +185,55 @@ checkout it never runs `npm install -g`: it performs its safe local duties
 (migration check, `install.json` refresh) and prints the real update steps,
 `git pull`, `npm run install:local`, `hash -r`. The npm reinstall path applies
 only to a genuinely npm-installed binary.
+
+#### Upgrading from 0.3.0
+
+Nothing has to be done by hand. On an npm install, one command does it all:
+
+```bash
+clio-coder upgrade
+```
+
+The 0.3.0 binary prints its header (`install npm`, `channel latest`,
+`current 0.3.0`), runs `npm install -g @iowarp/clio-coder@latest`, and then
+hands over to the binary that install just put on `PATH` with
+`clio-coder upgrade --post-install`. That newer binary runs the migration
+check (the registry is empty for 0.3.1, so `state/migrations.json` is written
+as `{"applied": []}` and nothing else moves), runs `clio-coder doctor --fix`,
+which refreshes `install.json`, and reports the transition as
+`ok: 0.3.0 -> 0.3.1 (migrations: 0)`. The outer 0.3.0 process closes with
+`ok: 0.3.0 -> post-install checks complete`. Under nvm or a custom npm prefix
+this works because `npm install -g` and the bare `clio-coder` resolve through
+the same prefix; the doctor rows the child prints are the proof of which binary
+answered. `clio-coder upgrade --dry-run` first names the exact command it would
+run, says that no migrations are registered, and prints
+`would refresh state metadata 0.3.0 -> 0.3.1` without touching the record.
+
+If you instead ran `npm install -g @iowarp/clio-coder` yourself, or launched
+the new binary before running `upgrade`, plain `clio-coder doctor` shows one
+failing row, `state metadata  stale 0.3.0 (...); current 0.3.1`, pointing at
+`clio-coder doctor --fix`, and exits 1. Either `clio-coder doctor --fix` or the
+next `clio-coder` launch refreshes it. `install.json` then reads
+`version: 0.3.1`, keeps the original `installedAt`, and gains `upgradedAt` and
+`upgradedFrom: "0.3.0"`; doctor's row becomes
+`0.3.1 (installed ..., upgraded ... from 0.3.0)`.
+
+The first interactive launch after the version changed shows one notice,
+`clio: upgraded 0.3.0 → 0.3.1. What changed at the keyboard: ...`, naming the
+commands that moved into `/settings` (`/targets`, `/fleet`, `/scoped-models`),
+the retired git skills (`commit-crafting`, `create-pr`, `investigate-issue`,
+`review-changes`, replaced by `file-ticket`, `fix-issue`, `ship`), the artifact
+tool's new default location under `.clio-coder/artifacts/`, and the CHANGELOG
+section for the rest. It is shown once per version, recorded as
+`noticedVersion` in `install.json`, and never to a headless `run` or an ACP
+server.
+
+Settings written by 0.3.0 keep working unchanged. `identity:` is accepted and
+ignored, since nothing ever read it; the next settings write drops the line. A
+fleet node's `clioEntry` is read as `clioCoderEntry` and left spelled as it
+was. `CLIO_CODER_MAX_RUNS` still reads as the older spelling of
+`CLIO_CODER_MAX_DISPATCH_RUNS`. No credentials, sessions, receipts, or memory
+records are touched.
 
 ### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:

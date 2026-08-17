@@ -39,6 +39,17 @@ interface InstallMetadata {
 	 * the user installed Clio, and every later run repeated it as fact.
 	 */
 	repairedAt?: string;
+	/**
+	 * The version on record before the most recent version change, kept so the
+	 * first interactive launch after an upgrade can say where it came from and
+	 * `doctor` can show it. Absent on a home that has never changed version.
+	 */
+	upgradedFrom?: string;
+	/**
+	 * The version whose upgrade notice the operator has already seen. Written
+	 * by the interactive boot, once per version, so the notice never repeats.
+	 */
+	noticedVersion?: string;
 	platform: string;
 	nodeVersion: string;
 }
@@ -127,10 +138,16 @@ export function initializeClioHome(): InitReport {
 		installMetadata.platform !== process.platform ||
 		installMetadata.nodeVersion !== process.version
 	) {
+		// A version change is the upgrade the record is about; a node or platform
+		// change alone keeps whatever earlier transition was on record.
+		const upgradedFrom =
+			installMetadata.version !== currentVersion ? installMetadata.version : installMetadata.upgradedFrom;
 		const payload: InstallMetadata = {
 			version: currentVersion,
 			...(installMetadata.installedAt !== undefined ? { installedAt: installMetadata.installedAt } : {}),
 			...(installMetadata.repairedAt !== undefined ? { repairedAt: installMetadata.repairedAt } : {}),
+			...(upgradedFrom !== undefined ? { upgradedFrom } : {}),
+			...(installMetadata.noticedVersion !== undefined ? { noticedVersion: installMetadata.noticedVersion } : {}),
 			upgradedAt: new Date().toISOString(),
 			platform: process.platform,
 			nodeVersion: process.version,
@@ -159,6 +176,8 @@ function readInstallMetadata(path: string): InstallMetadata | null {
 				...(typeof parsed.installedAt === "string" ? { installedAt: parsed.installedAt } : {}),
 				...(typeof parsed.upgradedAt === "string" ? { upgradedAt: parsed.upgradedAt } : {}),
 				...(typeof parsed.repairedAt === "string" ? { repairedAt: parsed.repairedAt } : {}),
+				...(typeof parsed.upgradedFrom === "string" ? { upgradedFrom: parsed.upgradedFrom } : {}),
+				...(typeof parsed.noticedVersion === "string" ? { noticedVersion: parsed.noticedVersion } : {}),
 				platform: parsed.platform,
 				nodeVersion: parsed.nodeVersion,
 			};

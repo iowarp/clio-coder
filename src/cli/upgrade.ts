@@ -7,6 +7,7 @@ import type { LifecycleContract } from "../domains/lifecycle/contract.js";
 import { LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { detectInstallMethod } from "../domains/lifecycle/install-method.js";
 import { listMigrations } from "../domains/lifecycle/migrations/index.js";
+import { readStateInfo } from "../domains/lifecycle/state.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { printError, printHeader, printOk } from "./shared.js";
 
@@ -85,7 +86,9 @@ function streamPrefixed(source: NodeJS.ReadableStream, sink: NodeJS.WritableStre
 		while (idx !== -1) {
 			const line = buffered.slice(0, idx);
 			buffered = buffered.slice(idx + 1);
-			sink.write(`[upgrade] ${line}\n`);
+			// A spawned `clio-coder upgrade --post-install` prefixes its own lines;
+			// wrapping those again printed `[upgrade] [upgrade] ...` for every row.
+			sink.write(line.startsWith("[upgrade] ") ? `${line}\n` : `[upgrade] ${line}\n`);
 			idx = buffered.indexOf("\n");
 		}
 	});
@@ -165,6 +168,16 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	const noNetwork = Boolean(process.env.CLIO_CODER_TEST_UPGRADE_NO_NETWORK);
 	const migrations = listMigrations();
 	const migrationIds = migrations.map((m) => m.id);
+	// What the state root says it is on, as distinct from the binary answering.
+	// After `npm install -g` the two differ until the refresh below, and that
+	// difference is the upgrade this command reports.
+	const recorded = readStateInfo()?.version ?? null;
+	const describeRefresh = (): string =>
+		recorded === null
+			? "state metadata (none recorded; would write it)"
+			: recorded === before
+				? `state metadata (already ${before})`
+				: `state metadata ${recorded} -> ${before}`;
 
 	if (opts.dryRun) {
 		if (method === "source") {
@@ -174,11 +187,13 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 		}
 		if (opts.skipMigrations) {
 			process.stdout.write("[upgrade] would skip migrations (--skip-migrations)\n");
+		} else if (migrationIds.length === 0) {
+			process.stdout.write("[upgrade] no migrations registered; the manifest would be written as is\n");
 		} else {
 			process.stdout.write(`[upgrade] would consider ${migrationIds.length} migration(s):\n`);
 			for (const id of migrationIds) process.stdout.write(`  - ${id}\n`);
 		}
-		process.stdout.write("[upgrade] would refresh state metadata\n");
+		process.stdout.write(`[upgrade] would refresh ${describeRefresh()}\n`);
 		printOk("dry run complete, no changes made");
 		return 0;
 	}
@@ -232,8 +247,9 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	}
 
 	if (method === "source" || noNetwork) {
+		const refresh = describeRefresh();
 		initializeClioHome();
-		process.stdout.write("[upgrade] refreshed state metadata\n");
+		process.stdout.write(`[upgrade] refreshed ${refresh}\n`);
 	} else {
 		try {
 			await runDoctorFixAfterInstall();
@@ -245,7 +261,10 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 
 	if (method === "source") printSourceUpgradeSteps();
 
+	// `before` is the binary that ran; on the post-install and local paths that
+	// is already the new version, and `0.3.1 -> 0.3.1` was a claim about a
+	// transition that never happened. The version that moved is the recorded one.
 	const after = getVersionInfo().clio;
-	printOk(`${before} -> ${after} (migrations: ${appliedCount})`);
+	printOk(`${recorded ?? before} -> ${after} (migrations: ${appliedCount})`);
 	return 0;
 }
