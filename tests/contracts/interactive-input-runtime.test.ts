@@ -49,6 +49,7 @@ it("constructs the input runtime without a terminal and wires controller-owned a
 		editorSubmit: {
 			openExternalEditorForInput: () => {},
 			queueFollowUpFromEditor: () => {},
+			interruptFromEditor: () => {},
 			restoreQueuedFollowUpsToEditor: () => {},
 		},
 		requestRender: () => events.push("render"),

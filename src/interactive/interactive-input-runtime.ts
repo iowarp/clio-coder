@@ -33,6 +33,7 @@ export interface InteractiveInputKeyActionDeps {
 	toggleAllThinkingExpansion: () => void;
 	openExternalEditor: () => void;
 	queueFollowUp: () => void;
+	interruptWithMessage: () => void;
 	restoreQueuedFollowUps: () => void;
 }
 
@@ -78,6 +79,7 @@ export interface InteractiveInputRuntimeDeps {
 	editorSubmit: {
 		openExternalEditorForInput(): void;
 		queueFollowUpFromEditor(): void;
+		interruptFromEditor(): void;
 		restoreQueuedFollowUpsToEditor(): void;
 	};
 	requestRender: () => void;
@@ -161,6 +163,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		},
 		openExternalEditor: deps.editorSubmit.openExternalEditorForInput,
 		queueFollowUp: deps.editorSubmit.queueFollowUpFromEditor,
+		interruptWithMessage: deps.editorSubmit.interruptFromEditor,
 		restoreQueuedFollowUps: deps.editorSubmit.restoreQueuedFollowUpsToEditor,
 	});
 	const leaderKeys = createLeaderKeyController({

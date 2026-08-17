@@ -58,7 +58,10 @@ export interface EditorSubmitUi {
 	requestRender(force?: boolean): void;
 }
 
-type EditorSubmitChat = Pick<ChatLoop, "clearQueuedFollowUps" | "isStreaming" | "queueFollowUp">;
+type EditorSubmitChat = Pick<
+	ChatLoop,
+	"clearQueuedFollowUps" | "interruptRefusal" | "isStreaming" | "queueFollowUp" | "submit"
+>;
 type EditorSubmitDispatch = Pick<DispatchContract, "snapshot" | "steer">;
 type EditorSubmitSession = Pick<SessionContract, "appendEntry" | "current" | "tree">;
 
@@ -94,6 +97,13 @@ export interface EditorSubmitController {
 	handleEditorSteerMention(mention: { target: string; text: string }): boolean;
 	submitEditorText(text: string): void;
 	queueFollowUpFromEditor(): void;
+	/**
+	 * Interrupt mode: cancel the active run and deliver the draft now. Idle, it
+	 * is a plain send. The chat loop owns cancel → settle → submit and the two
+	 * refusals (attached dispatch, parked permission ask), which degrade the
+	 * message to next-slot delivery with a notice.
+	 */
+	interruptFromEditor(): void;
 	restoreQueuedFollowUpsToEditor(): void;
 	hasActiveEditorBash(): boolean;
 	cancelActiveEditorBash(): boolean;
@@ -274,6 +284,36 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		});
 	};
 
+	const interruptFromEditor = (): void => {
+		const text = deps.editor.getText().trim();
+		if (text.length === 0) return;
+		if (!deps.chat.isStreaming()) {
+			deps.editor.setText("");
+			submitEditorText(text);
+			deps.ui.requestRender();
+			return;
+		}
+		void (async () => {
+			const submitted = await deps.expandSubmit(text);
+			if (submitted.images.length > 0) {
+				deps.io.stderr("[interrupt] image references cannot be sent while a response is streaming\n");
+				return;
+			}
+			deps.editor.addToHistory(text);
+			// Same restore Esc performs: when the interrupt will really cancel the
+			// run, the queued steers and follow-ups come back to the editor rather
+			// than vanishing with the cancelled run. A refused interrupt cancels
+			// nothing, so the queue stays put.
+			const restored = deps.chat.interruptRefusal() === null ? deps.chat.clearQueuedFollowUps() : [];
+			deps.editor.setText(restored.join("\n\n"));
+			deps.ui.requestRender();
+			await deps.chat.submit(submitted.text, { steering: "interrupt" });
+		})().catch((err) => {
+			const msg = err instanceof Error ? err.message : String(err);
+			deps.io.stderr(`[interrupt] ${msg}\n`);
+		});
+	};
+
 	const restoreQueuedFollowUpsToEditor = (): void => {
 		const restored = deps.chat.clearQueuedFollowUps();
 		if (restored.length === 0) {
@@ -292,6 +332,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		handleEditorSteerMention,
 		submitEditorText,
 		queueFollowUpFromEditor,
+		interruptFromEditor,
 		restoreQueuedFollowUpsToEditor,
 		hasActiveEditorBash: () => activeEditorBash !== null,
 		cancelActiveEditorBash: () => {

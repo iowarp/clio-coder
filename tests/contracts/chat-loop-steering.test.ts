@@ -169,6 +169,9 @@ interface SteeringHarnessLog {
 	followedUp: AgentMessage[];
 	clearSteeringCalls: number;
 	clearAllCalls: number;
+	abortCalls: number;
+	/** Fired on every `agent.abort()`; a test scripts the aborted run's settlement here. */
+	onAbort?: () => void;
 }
 
 function createSteeringAgentFactory(
@@ -206,7 +209,10 @@ function createSteeringAgentFactory(
 			followUp(message: AgentMessage) {
 				log.followedUp.push(message);
 			},
-			abort() {},
+			abort() {
+				log.abortCalls += 1;
+				log.onAbort?.();
+			},
 			clearSteeringQueue() {
 				log.clearSteeringCalls += 1;
 				log.steered.length = 0;
@@ -225,7 +231,7 @@ function createSteeringAgentFactory(
 }
 
 function emptyLog(): SteeringHarnessLog {
-	return { prompts: [], steered: [], followedUp: [], clearSteeringCalls: 0, clearAllCalls: 0 };
+	return { prompts: [], steered: [], followedUp: [], clearSteeringCalls: 0, clearAllCalls: 0, abortCalls: 0 };
 }
 
 function assistantDone(text: string): AgentMessage {
@@ -254,8 +260,22 @@ function gate(): Gate {
 	return { wait, release };
 }
 
-function createLoop(log: SteeringHarnessLog, promptImpl: Parameters<typeof createSteeringAgentFactory>[1]) {
+interface LoopGuards {
+	hasParkedCalls?: () => boolean;
+	hasAttachedDispatch?: () => boolean;
+}
+
+function createLoop(
+	log: SteeringHarnessLog,
+	promptImpl: Parameters<typeof createSteeringAgentFactory>[1],
+	guards: LoopGuards = {},
+) {
 	const entries: SessionEntry[] = [];
+	// The interrupt guards read only `hasParkedCalls` off the registry; the
+	// tool-surface resolution the loop also performs sees an empty registry.
+	const toolRegistry = guards.hasParkedCalls
+		? { hasParkedCalls: guards.hasParkedCalls, listRegistered: () => [], get: () => undefined }
+		: undefined;
 	return createChatLoop({
 		getSettings: () => settings(),
 		providers: providers(),
@@ -263,7 +283,38 @@ function createLoop(log: SteeringHarnessLog, promptImpl: Parameters<typeof creat
 		session: createSession(entries),
 		readSessionEntries: () => entries,
 		createAgent: createSteeringAgentFactory(log, promptImpl),
+		...(toolRegistry ? { toolRegistry } : {}),
+		...(guards.hasAttachedDispatch ? { hasAttachedDispatch: guards.hasAttachedDispatch } : {}),
 	} as never);
+}
+
+function abortedMessage(): AgentMessage {
+	return {
+		role: "assistant",
+		content: [],
+		stopReason: "aborted",
+		timestamp: Date.now(),
+	} as unknown as AgentMessage;
+}
+
+/**
+ * A first run that blocks until it is aborted, then settles as an aborted
+ * message; every later run completes immediately. Interrupt tests script the
+ * engine this way so the cancel → settle → submit order is observable.
+ */
+function abortableFirstRun(log: SteeringHarnessLog): Parameters<typeof createSteeringAgentFactory>[1] {
+	const abortGate = gate();
+	log.onAbort = () => abortGate.release();
+	return async (agent, _input, call) => {
+		if (call > 1) {
+			const done = assistantDone("done");
+			await agent.emit({ type: "message_end", message: done });
+			await agent.emit({ type: "agent_end", messages: [done] });
+			return;
+		}
+		await abortGate.wait;
+		await agent.emit({ type: "agent_end", messages: [abortedMessage()] });
+	};
 }
 
 describe("contracts/chat-loop steering queue routing", () => {
@@ -513,5 +564,163 @@ describe("contracts/chat-loop steering queue routing", () => {
 		runGate.release();
 		await firstRun;
 		deepStrictEqual(loop.queuedMessages(), { steer: [], followUp: [] });
+	});
+});
+
+describe("contracts/chat-loop steering modes (issue #89)", () => {
+	it("defaults Enter-while-streaming to next slot and honors end-of-turn through submit", async () => {
+		const log = emptyLog();
+		const runGate = gate();
+		const loop = createLoop(log, async (agent, _input, call) => {
+			if (call > 1) return;
+			await runGate.wait;
+			const done = assistantDone("done");
+			await agent.emit({ type: "agent_end", messages: [done] });
+		});
+
+		const firstRun = loop.submit("start");
+		await settle();
+		await loop.submit("mid-run correction");
+		await loop.submit("after you finish", { steering: "end-of-turn" });
+		await loop.submit("explicit next slot", { steering: "next-slot" });
+		deepStrictEqual(loop.queuedMessages(), {
+			steer: ["mid-run correction", "explicit next slot"],
+			followUp: ["after you finish"],
+		});
+		strictEqual(log.steered.length, 2, "next-slot rides the engine steering queue");
+		strictEqual(log.followedUp.length, 1, "end-of-turn rides the engine follow-up queue");
+		strictEqual(log.abortCalls, 0, "neither queued mode touches the run");
+
+		runGate.release();
+		await firstRun;
+	});
+
+	it("interrupt cancels the run, waits for it to settle, then submits the message as a fresh prompt", async () => {
+		const log = emptyLog();
+		const loop = createLoop(log, abortableFirstRun(log));
+		const order: string[] = [];
+		loop.onEvent((event: ChatLoopEvent) => {
+			if (event.type === "notice" && event.text.includes("interrupt")) order.push(`notice:${event.text}`);
+			if (event.type === "queued_user_turn") order.push(`user:${event.kind}:${event.text}`);
+		});
+
+		const firstRun = loop.submit("start a long task");
+		await settle();
+		strictEqual(loop.isStreaming(), true);
+		strictEqual(loop.interruptRefusal(), null, "nothing parked, nothing attached: interrupt is allowed");
+
+		await loop.submit("stop, read this now", { steering: "interrupt" });
+		await firstRun;
+
+		strictEqual(log.abortCalls, 1, "interrupt aborts the in-flight run");
+		deepStrictEqual(log.prompts, ["start a long task", "stop, read this now"], "the message lands as a fresh prompt");
+		deepStrictEqual(log.steered, [], "an interrupt never enters the steering queue");
+		strictEqual(loop.isStreaming(), false);
+		deepStrictEqual(order, [
+			"notice:[Clio Coder] run interrupted by operator; delivering the new message now.",
+			"user:interrupt:stop, read this now",
+		]);
+	});
+
+	it("interrupt clears queued steers and follow-ups with the cancelled run", async () => {
+		const log = emptyLog();
+		const loop = createLoop(log, abortableFirstRun(log));
+
+		const firstRun = loop.submit("start");
+		await settle();
+		await loop.submit("earlier correction");
+		loop.queueFollowUp("earlier follow-up");
+		await loop.submit("now", { steering: "interrupt" });
+		await firstRun;
+
+		strictEqual(log.clearAllCalls, 1, "the cancel drains both engine queues before the abort settles");
+		deepStrictEqual(loop.queuedMessages(), { steer: [], followUp: [] });
+		deepStrictEqual(
+			log.prompts,
+			["start", "now"],
+			"queued texts do not resubmit; the caller restores them to the editor",
+		);
+	});
+
+	it("refuses interrupt while a permission ask is parked and falls back to next slot, saying so", async () => {
+		const log = emptyLog();
+		const runGate = gate();
+		let parked = true;
+		const loop = createLoop(
+			log,
+			async (agent, _input, call) => {
+				if (call > 1) return;
+				await runGate.wait;
+				await agent.emit({ type: "agent_end", messages: [assistantDone("done")] });
+			},
+			{ hasParkedCalls: () => parked },
+		);
+		const notices: string[] = [];
+		loop.onEvent((event: ChatLoopEvent) => {
+			// The harness target is deliberately tiny, so the first submit also emits
+			// a context-window advisory; only the interrupt notice is under test.
+			if (event.type === "notice" && event.text.includes("interrupt")) notices.push(`${event.level}:${event.text}`);
+		});
+
+		const firstRun = loop.submit("start");
+		await settle();
+		ok(loop.interruptRefusal()?.includes("permission ask is parked"));
+
+		await loop.submit("answer differently", { steering: "interrupt" });
+		strictEqual(log.abortCalls, 0, "a parked ask is already waiting on the operator; nothing is cancelled");
+		deepStrictEqual(loop.queuedMessages(), { steer: ["answer differently"], followUp: [] });
+		strictEqual(notices.length, 1);
+		ok(notices[0]?.startsWith("warning:[Clio Coder] interrupt refused: a permission ask is parked"), notices[0]);
+		ok(notices[0]?.endsWith("Queued for the next slot instead."), notices[0]);
+
+		parked = false;
+		strictEqual(loop.interruptRefusal(), null, "the refusal lifts as soon as the ask is answered");
+		runGate.release();
+		await firstRun;
+	});
+
+	it("refuses interrupt while an attached dispatch is running and falls back to next slot, saying so", async () => {
+		const log = emptyLog();
+		const runGate = gate();
+		const loop = createLoop(
+			log,
+			async (agent, _input, call) => {
+				if (call > 1) return;
+				await runGate.wait;
+				await agent.emit({ type: "agent_end", messages: [assistantDone("done")] });
+			},
+			{ hasAttachedDispatch: () => true },
+		);
+		const notices: string[] = [];
+		loop.onEvent((event: ChatLoopEvent) => {
+			// The harness target is deliberately tiny, so the first submit also emits
+			// a context-window advisory; only the interrupt notice is under test.
+			if (event.type === "notice" && event.text.includes("interrupt")) notices.push(`${event.level}:${event.text}`);
+		});
+
+		const firstRun = loop.submit("start");
+		await settle();
+		ok(loop.interruptRefusal()?.includes("attached dispatch is running"));
+
+		await loop.submit("also check X", { steering: "interrupt" });
+		strictEqual(log.abortCalls, 0, "the worker's run is not killed");
+		deepStrictEqual(loop.queuedMessages(), { steer: ["also check X"], followUp: [] });
+		strictEqual(notices.length, 1);
+		ok(notices[0]?.startsWith("warning:[Clio Coder] interrupt refused: an attached dispatch is running"), notices[0]);
+		ok(notices[0]?.includes("@<agent>"), "the notice names the explicit steer route");
+
+		runGate.release();
+		await firstRun;
+	});
+
+	it("interrupt while idle is a plain submit", async () => {
+		const log = emptyLog();
+		const loop = createLoop(log, async (agent) => {
+			await agent.emit({ type: "agent_end", messages: [assistantDone("done")] });
+		});
+		strictEqual(loop.interruptRefusal(), null);
+		await loop.submit("hello", { steering: "interrupt" });
+		deepStrictEqual(log.prompts, ["hello"]);
+		strictEqual(log.abortCalls, 0);
 	});
 });

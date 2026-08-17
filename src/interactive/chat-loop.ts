@@ -57,13 +57,19 @@ import type { AgentStatusEvent } from "./status/types.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
 import { createTurnPersistence } from "./turn-persistence.js";
-import { createTurnQueues, type QueuedChatMessage, type QueuedMessagesSnapshot } from "./turn-queues.js";
+import {
+	createTurnQueues,
+	DEFAULT_STEERING_MODE,
+	type QueuedChatMessage,
+	type QueuedMessagesSnapshot,
+	type SteeringMode,
+} from "./turn-queues.js";
 import { createTurnRecovery, type RetryStatusEvent, reclassifyStallAbort } from "./turn-recovery.js";
 import { type AssistantDeltaEvent, createTurnRuntime } from "./turn-runtime.js";
 import { type AgentRuntime, type ChatLoopRunSnapshot, createTurnState } from "./turn-state.js";
 import { isWorkerShareNote } from "./worker-share.js";
 
-export type { QueuedChatMessage, QueuedMessageKind, QueuedMessagesSnapshot } from "./turn-queues.js";
+export type { QueuedChatMessage, QueuedMessageKind, QueuedMessagesSnapshot, SteeringMode } from "./turn-queues.js";
 export type { RetryStatusEvent, RetryStatusPayload, RetryStatusPhase } from "./turn-recovery.js";
 export type { AssistantDeltaEvent } from "./turn-runtime.js";
 export type { ChatLoopRunSnapshot } from "./turn-state.js";
@@ -83,7 +89,8 @@ export interface QueueUpdateEvent {
 export interface QueuedUserTurnEvent {
 	type: "queued_user_turn";
 	text: string;
-	kind: QueuedChatMessage["kind"];
+	/** `interrupt` marks a message that cancelled the run and was submitted as a fresh prompt. */
+	kind: QueuedChatMessage["kind"] | "interrupt";
 }
 
 /**
@@ -136,14 +143,25 @@ export interface ChatSubmitOptions {
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	/** Internal middleware resubmit; does not reset the per-user-prompt stalled-turn nudge cap. */
 	requestContinuation?: boolean;
+	/**
+	 * Delivery mode when a run is active; ignored when idle. Defaults to
+	 * `next-slot`. `interrupt` cancels the run, waits for it to settle, and
+	 * submits the text as a fresh prompt; see {@link ChatLoop.interruptRefusal}
+	 * for the two states in which it degrades to `next-slot` instead.
+	 */
+	steering?: SteeringMode;
 }
+
+/** Closing notice an operator interrupt leaves in the transcript and the ledger. */
+const INTERRUPT_CANCEL_REASON = "[Clio Coder] run interrupted by operator; delivering the new message now.";
 
 /**
  * Options for {@link ChatLoop.cancel}. A bare cancel is an operator Esc/Ctrl+C
  * that ends the in-flight turn as an empty aborted message. Passing a `reason`
- * marks the cancel as a system-initiated interrupt (the loop guard): the chat
- * loop persists a durable, visible assistant turn carrying that reason in place
- * of the empty aborted turn, and tags the audit trail with `source`.
+ * marks the cancel as an explained interrupt (the loop guard, or an operator
+ * interrupt-with-message): the chat loop persists a durable, visible assistant
+ * turn carrying that reason in place of the empty aborted turn, and tags the
+ * audit trail with `source`.
  */
 export interface ChatCancelOptions {
 	/** Operator-facing explanation for a system-initiated stop. */
@@ -158,6 +176,15 @@ export interface ChatLoop {
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
 	steer(text: string): boolean;
 	queueFollowUp(text: string): boolean;
+	/**
+	 * Why an interrupt would be refused right now, or null when it would
+	 * cancel the run. An attached dispatch is refused because the parent's abort
+	 * kills the worker's run and discards its work with no receipt; a parked
+	 * permission ask is refused because it is already waiting on the operator.
+	 * In both cases `submit(text, { steering: "interrupt" })` says so and
+	 * queues the text for the next slot instead.
+	 */
+	interruptRefusal(): string | null;
 	clearQueuedFollowUps(): string[];
 	queuedMessages(): QueuedMessagesSnapshot;
 	cancel(options?: ChatCancelOptions): void;
@@ -302,6 +329,12 @@ export interface CreateChatLoopDeps {
 	 * composition; the loop owns the buffer the reminder lands in.
 	 */
 	registerDeferredReminderSink?: (sink: (message: string) => void) => void;
+	/**
+	 * True while an attached `dispatch` call is running. An interrupt is refused
+	 * in that state; the composition root wires this from the dispatch
+	 * background registry, which holds exactly the attached calls.
+	 */
+	hasAttachedDispatch?: () => boolean;
 }
 
 export function reloadProtectedArtifactsForSession(
@@ -462,30 +495,78 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// --- the state machine --------------------------------------------------
 
 	// Settlement tracking for whenSettled(): the latest submit's promise,
-	// coerced to never reject so shutdown ordering cannot throw.
+	// coerced to never reject so shutdown ordering cannot throw. `priorSubmit`
+	// is the promise `activeSubmit` held before the latest submit replaced it,
+	// which is the run an interrupt has to wait out.
 	let activeSubmit: Promise<void> = Promise.resolve();
+	let priorSubmit: Promise<void> = Promise.resolve();
+
+	const interruptRefusalReason = (): string | null => {
+		if (deps.hasAttachedDispatch?.() === true) {
+			return "an attached dispatch is running and the interrupt would kill the worker's run with no receipt; use @<agent> to steer it or Esc to cancel it";
+		}
+		if (deps.toolRegistry?.hasParkedCalls() === true) {
+			return "a permission ask is parked and already waiting on you; answer it or press Esc";
+		}
+		return null;
+	};
 
 	const api: ChatLoop = {
 		steer: (text) => queues.steer(text),
 		queueFollowUp: (text) => queues.queueFollowUp(text),
+		interruptRefusal: () => (state.streaming ? interruptRefusalReason() : null),
 		clearQueuedFollowUps: () => queues.clearQueuedMirror().map((entry) => entry.text),
 		queuedMessages: () => queues.queuedMessages(),
 
 		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {
+			let interrupted = false;
 			if (state.streaming) {
-				const hasImages = options.images !== undefined && options.images.length > 0;
+				let mode: SteeringMode = options.steering ?? DEFAULT_STEERING_MODE;
 				const trimmed = text.trim();
-				if (!hasImages && trimmed.length > 0 && state.runtime) {
-					// Enter while streaming means "correct it now": the engine
-					// steering queue drains after every tool batch, so the text
-					// lands as a user message before the next model turn.
-					// alt+enter (queueFollowUp) keeps the after-this-run intent.
-					if (isWorkerShareNote(trimmed)) state.turnSharedWorkerNote = true;
-					queues.steer(trimmed);
+				if (mode === "interrupt" && trimmed.length > 0) {
+					const refusal = interruptRefusalReason();
+					if (refusal !== null) {
+						emitNotice(`[Clio Coder] interrupt refused: ${refusal}. Queued for the next slot instead.`, "warning");
+						mode = "next-slot";
+					} else {
+						// Cancel, then wait for the cancelled run to settle (its in-flight
+						// tool results and closing ledger turn), then fall through to the
+						// fresh-prompt path below. `priorSubmit` is the run being cancelled;
+						// `activeSubmit` already points at this call.
+						const prior = priorSubmit;
+						api.cancel({
+							reason: INTERRUPT_CANCEL_REASON,
+							auditReason: "operator interrupted the run with a message",
+						});
+						await prior;
+						if (!state.streaming) {
+							interrupted = true;
+						} else {
+							// Something restarted a run while the cancel settled (a
+							// continuation resubmit); do not fight it, deliver at the next slot.
+							emitNotice(
+								"[Clio Coder] a run restarted before the interrupt landed. Queued for the next slot instead.",
+								"warning",
+							);
+							mode = "next-slot";
+						}
+					}
+				}
+				if (!interrupted) {
+					const hasImages = options.images !== undefined && options.images.length > 0;
+					if (!hasImages && trimmed.length > 0 && state.runtime) {
+						// Enter while streaming means "correct it now": the engine
+						// steering queue drains after every tool batch, so the text
+						// lands as a user message before the next model turn.
+						// alt+enter (queueFollowUp) keeps the after-this-run intent.
+						if (isWorkerShareNote(trimmed)) state.turnSharedWorkerNote = true;
+						if (mode === "end-of-turn") queues.queueFollowUp(trimmed);
+						else queues.steer(trimmed);
+						return;
+					}
+					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
 					return;
 				}
-				emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
-				return;
 			}
 
 			state.lastRunSnapshot = null;
@@ -613,6 +694,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				options.requestContinuation === true,
 				text,
 			);
+			// An interrupt was submitted while a run was active, so no caller drew
+			// it in the transcript; render it here, after the cancel notice and the
+			// cancelled run's leftovers, which is the order the ledger has.
+			if (interrupted) emit({ type: "queued_user_turn", text, kind: "interrupt" });
 			context.logPromptCompileIfPending();
 			turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
 			context.setCurrentSnapshot(turnSnapshot);
@@ -856,6 +941,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const submitInner = api.submit.bind(api);
 	api.submit = (text, options) => {
+		priorSubmit = activeSubmit;
 		const run = submitInner(text, options);
 		activeSubmit = run.catch(() => {});
 		return run;

@@ -34,6 +34,7 @@ export interface ClioAppKeybindings {
 	"clio.thinking.expandAll": true;
 	"clio.editor.external": true;
 	"clio.message.followUp": true;
+	"clio.message.interrupt": true;
 	"clio.message.dequeue": true;
 	"clio.notifications.dismiss": true;
 	"clio.leader": true;
@@ -139,7 +140,16 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio.message.followUp": {
 		defaultKeys: "alt+enter",
-		description: "Queue the current input as a follow-up delivered after the active run (Enter steers the run live)",
+		description:
+			"End of turn: queue the current input for delivery when the active run settles (Enter delivers it at the next slot, between tool batches)",
+	},
+	"clio.message.interrupt": {
+		// Alt+I keeps the app scheme and earns the Ctrl+G leader fallback. A
+		// Ctrl+Enter chord was rejected because legacy terminals send it as a
+		// plain Enter, which would turn every send into a cancel.
+		defaultKeys: "alt+i",
+		description:
+			"Interrupt: cancel the active run and deliver the current input now (refused while an attached dispatch runs or a permission ask is parked; the input then queues for the next slot)",
 	},
 	"clio.message.dequeue": {
 		defaultKeys: "alt+up",

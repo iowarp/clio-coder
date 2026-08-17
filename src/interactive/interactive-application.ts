@@ -269,6 +269,7 @@ export interface KeyBindingDeps {
 	toggleAllThinkingExpansion: () => void;
 	openExternalEditor: () => void;
 	queueFollowUp: () => void;
+	interruptWithMessage: () => void;
 	restoreQueuedFollowUps: () => void;
 }
 
@@ -313,6 +314,9 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 			return true;
 		case "clio.message.followUp":
 			deps.queueFollowUp();
+			return true;
+		case "clio.message.interrupt":
+			deps.interruptWithMessage();
 			return true;
 		case "clio.message.dequeue":
 			deps.restoreQueuedFollowUps();
