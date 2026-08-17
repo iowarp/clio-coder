@@ -9,12 +9,16 @@ The Skills Hub (`/skill`) shows project skills, user skills, and the marketplace
 
 There is one source, `discoverMarketplaceSkills()` in `src/domains/resources/skills/marketplace.ts`, and it reads two kinds of real local data:
 
-1. **A catalog directory** of actual `SKILL.md` packages: `CLIO_CODER_SKILL_CATALOG_DIR`, or a `skills/` directory in the working tree when it holds packages. Metadata comes from the packages themselves through the skill loader, so a row's version, category, and audit state are the package's own.
-2. **A JSON index** at `CLIO_CODER_SKILL_MARKETPLACE_INDEX` or `<configDir>/skill-marketplace.json`, whose entries name a `sourceUrl` that `clio-coder skills install` accepts. `npm run skills:pin` publishes that file's `version`, `audit`, and `category` fields.
+1. **A catalog directory** of actual `SKILL.md` packages. Resolution order: `CLIO_CODER_SKILL_CATALOG_DIR`, then a `skills/` directory in the working tree when it holds packages, then the `skills/` catalog the installed clio-coder package carries. Metadata comes from the packages themselves through the skill loader, so a row's version, category, and audit state are the package's own.
+2. **A JSON index** whose entries name a `sourceUrl` that `clio-coder skills install` accepts. Resolution order: `CLIO_CODER_SKILL_MARKETPLACE_INDEX`, then `<configDir>/skill-marketplace.json`, then the package's own `skills/skill-marketplace.json`. `npm run skills:pin` publishes that file's `version`, `audit`, and `category` fields.
 
-Catalog packages win over index entries on a name collision, because the local files are the thing that installs. Neither source reaches the network; the hub opens on local data and never blocks.
+The package fallbacks mean a fresh npm install has a marketplace with no configuration: `clio-coder skills search grill` lists `grill-me` from the shipped catalog, `clio-coder skills install grill-me` copies it out of the package into `.clio-coder/skills/`, and `/skill:grill-me` offers that install before running. The shipped catalog is a marketplace source only, never a discovery root: nothing from it is loadable until the operator installs it, which keeps the install-then-activate contract and the per-skill scope choice in the operator's hands.
 
-When both sources are absent the hub has nothing to list and says so, naming the remedy:
+Catalog packages win over index entries on a name collision, because the local files are the thing that installs. Neither source reaches the network; the hub opens on local data and never blocks. Only an index entry whose `sourceUrl` is a GitHub URL, and that no catalog also carries, needs the network at install time.
+
+The model sees the same lookup: `context(scope="skills")` lists installed skills and, under a `Marketplace (not installed)` heading, the entries this lookup would install. Loading a marketplace-only skill by name answers "not installed" and points at `/skill:<name>`, never `unknown skill`.
+
+When both sources are absent (a source checkout with no `skills/` folder, or an incomplete package) the hub has nothing to list and says so, naming the remedy:
 
 ```
 no skills installed and no local marketplace configured. install one with

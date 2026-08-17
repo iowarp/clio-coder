@@ -2463,7 +2463,7 @@ describe("contracts/tools prompt hints", () => {
 		);
 		strictEqual(
 			hinted.get("context"),
-			'Call context with scope="skills" to list available skills; when one matches the task, suggest the operator run /skill:<name> and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
+			'Call context with scope="skills" to list installed and marketplace skills; when one matches the task, or the operator names a skill or asks how one works, suggest the operator run /skill:<name> (a marketplace skill is offered for install) and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
 		);
 		strictEqual(
 			hinted.get("dispatch"),
