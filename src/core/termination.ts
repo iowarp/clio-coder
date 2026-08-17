@@ -118,6 +118,8 @@ class TerminationCoordinator {
 	private readonly persistHooks: Hook[] = [];
 	private exitCode = 0;
 	private started = false;
+	private drained = false;
+	private readonly pendingNotices: string[] = [];
 	private signalHandler: ((signal: NodeJS.Signals) => void) | null = null;
 
 	getPhase(): TerminationPhase {
@@ -162,6 +164,8 @@ class TerminationCoordinator {
 		log("drain:start");
 		await this.runHooks(this.drainHooks, "drain", budgetMs, log);
 		log("drain:end");
+		this.drained = true;
+		this.flushNotices();
 		bus.emit(BusChannels.ShutdownDrained, {});
 
 		this.phase = "terminating";
@@ -209,7 +213,7 @@ class TerminationCoordinator {
 	installSignalHandlers(): void {
 		if (this.signalHandler) return;
 		const handler = (signal: NodeJS.Signals): void => {
-			process.stderr.write(`\nClio Coder: received ${signal}, shutting down...\n`);
+			this.notice(`Clio Coder: received ${signal}, shutting down...`);
 			void this.shutdown(SIGNAL_EXIT_CODES[signal] ?? 143);
 		};
 		this.signalHandler = handler;
@@ -227,6 +231,29 @@ class TerminationCoordinator {
 	 * One owner holds the interrupt at a time and the transfer is explicit.
 	 * SIGTERM is not part of the handover; it is never an interactive gesture.
 	 */
+	/**
+	 * Report something the operator should read after the process is gone,
+	 * such as which signal ended it. Nothing here knows whether a TUI is on
+	 * screen, but it does know that the terminal teardown is a drain hook: so
+	 * until drain has finished the notice is held, and the moment it has, the
+	 * notice goes to the terminal the TUI just handed back. Written straight
+	 * away once drain is over, which is the case for a re-armed SIGINT arriving
+	 * mid-shutdown. A second SIGTERM or SIGHUP inside the drain window takes
+	 * Node's default action and the held notice dies with the process; that
+	 * window is bounded by the per-hook budget and the shell reports the kill.
+	 */
+	notice(text: string): void {
+		if (this.drained) {
+			writeShutdownNotice(text);
+			return;
+		}
+		this.pendingNotices.push(text);
+	}
+
+	private flushNotices(): void {
+		for (const text of this.pendingNotices.splice(0)) writeShutdownNotice(text);
+	}
+
 	releaseInterruptOwnership(): () => void {
 		const handler = this.signalHandler;
 		if (!handler) return () => {};

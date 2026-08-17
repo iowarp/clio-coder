@@ -1,6 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { runWithBudget, wrapToWidth, writeShutdownNotice } from "../../src/core/termination.js";
+import {
+	getTerminationCoordinator,
+	runWithBudget,
+	wrapToWidth,
+	writeShutdownNotice,
+} from "../../src/core/termination.js";
 
 /**
  * Shutdown diagnostics land after the TUI has stopped, on the terminal the TUI
@@ -70,5 +75,64 @@ describe("contracts/termination shutdown notice", () => {
 		);
 		strictEqual(completed, false, "the budget, not the hook, decided the outcome");
 		resolveHook?.();
+	});
+});
+
+/**
+ * The signal notice used to be written the instant the signal arrived, which
+ * on a TUI session is while the frame is still painting. The terminal teardown
+ * is a drain hook, so the coordinator holds the notice until drain has ended
+ * and writes it onto the terminal the TUI just handed back.
+ *
+ * These cases drive the process-wide coordinator through a real shutdown with
+ * process.exit stubbed, so they run last in this file and nowhere else.
+ */
+describe("contracts/termination signal notice ordering", () => {
+	it("holds a notice through drain and writes it after the terminal teardown hook", async () => {
+		const stderr = process.stderr as unknown as { write: (chunk: string) => boolean };
+		const priorWrite = stderr.write;
+		const priorExit = process.exit;
+		const events: string[] = [];
+		const coordinator = getTerminationCoordinator();
+		coordinator.onDrain(() => {
+			events.push("teardown");
+		});
+		coordinator.onPersist(() => {
+			events.push("persist");
+		});
+		try {
+			stderr.write = (chunk: string): boolean => {
+				if (chunk.includes("received SIGTERM")) events.push("notice");
+				return true;
+			};
+			process.exit = ((code?: number): never => {
+				events.push(`exit:${code}`);
+				return undefined as never;
+			}) as typeof process.exit;
+			coordinator.notice("Clio Coder: received SIGTERM, shutting down...");
+			strictEqual(events.length, 0, "the notice is held while the TUI may still be painting");
+			await coordinator.shutdown(143);
+		} finally {
+			stderr.write = priorWrite;
+			process.exit = priorExit;
+		}
+		deepStrictEqual(events, ["teardown", "notice", "persist", "exit:143"]);
+	});
+
+	it("writes a notice at once when drain is already over, as for a re-armed SIGINT mid-shutdown", () => {
+		const stderr = process.stderr as unknown as { write: (chunk: string) => boolean };
+		const priorWrite = stderr.write;
+		const captured: string[] = [];
+		try {
+			stderr.write = (chunk: string): boolean => {
+				captured.push(chunk);
+				return true;
+			};
+			getTerminationCoordinator().notice("Clio Coder: received SIGINT, shutting down...");
+		} finally {
+			stderr.write = priorWrite;
+		}
+		strictEqual(captured.length, 1);
+		ok(captured[0]?.includes("received SIGINT"));
 	});
 });
