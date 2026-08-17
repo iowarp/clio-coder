@@ -115,6 +115,25 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			session,
 			onResume: (sessionId) => {
 				deps.onResumeSession?.(sessionId);
+				// onResumeSession (wired to session.resume) catches and stderr-logs
+				// its own failure rather than throwing here, so this is the only
+				// signal available: a successful switch always leaves session.current()
+				// pointing at the requested id. Without this check, a failed switch
+				// still replayed the target's transcript and moved the chat leaf to
+				// it while session.current() stayed on the session the operator
+				// started on (issue #93), so the next message was appended with a
+				// parent turn from a session that was never actually opened.
+				if (session.current()?.id !== sessionId) {
+					emitCommandNotice(
+						deps.getSlashNotice(),
+						"error",
+						"resume",
+						`could not switch to that session; staying on ${preResumeSessionId ?? "no session"}`,
+					);
+					deps.refreshFooter();
+					deps.requestRender();
+					return;
+				}
 				try {
 					const turns = deps.readStructuredEntries(sessionId);
 					deps.resetTranscript();
@@ -126,7 +145,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 				} catch (error) {
 					deps.stderr(`[/resume] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 				}
-				if (session.current()?.id === sessionId && sessionId !== preResumeSessionId) {
+				if (sessionId !== preResumeSessionId) {
 					deps.announceTaskMemorySeedOffer();
 				}
 				deps.refreshFooter();
@@ -195,7 +214,8 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			return;
 		}
 		const session = deps.session;
-		if (session.current() === null) {
+		const preForkSessionId = session.current()?.id ?? null;
+		if (preForkSessionId === null) {
 			emitCommandNotice(
 				deps.getSlashNotice(),
 				"warn",
@@ -211,10 +231,23 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 				try {
 					if (deps.onForkSession) deps.onForkSession(parentTurnId);
 					else session.fork(parentTurnId);
-					deps.resetTranscript();
 					const forkedSessionId = session.current()?.id ?? null;
-					if (forkedSessionId) replayFork(forkedSessionId, parentTurnId, session);
-					else deps.chat.resetForSession(null);
+					// A successful fork always creates a fresh session id; landing back
+					// on the id fork started from means the fork threw and
+					// onForkSession swallowed it (orchestrator.ts stderr-logs there).
+					// Do not replay: session.current() did not move (issue #93's
+					// extension.ts/fork.ts ordering fix keeps it on the session the
+					// operator started on instead of orphaning it), so there is
+					// nothing new to replay and doing so anyway just re-renders the
+					// same transcript while hiding that the fork failed.
+					if (forkedSessionId === null || forkedSessionId === preForkSessionId) {
+						emitCommandNotice(deps.getSlashNotice(), "error", "fork", `fork failed; staying on ${preForkSessionId}`);
+						deps.refreshFooter();
+						deps.requestRender();
+						return;
+					}
+					deps.resetTranscript();
+					replayFork(forkedSessionId, parentTurnId, session);
 				} catch (error) {
 					deps.stderr(`[/fork] fork failed: ${error instanceof Error ? error.message : String(error)}\n`);
 				}

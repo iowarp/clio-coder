@@ -156,6 +156,18 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		},
 		append(turn: TurnInput) {
 			if (!state) throw new Error("session.append: no current session");
+			// Invariant: a turn can only extend this session's own current leaf.
+			// The interactive layer tracks its own copy of "the last turn id"
+			// (turn-persistence.ts) and normally keeps it in lockstep with
+			// currentTurnId via chat.resetForSession after every switch; when a
+			// failed resume/fork/switchBranch left that copy pointing at a turn
+			// from a session that was never actually opened here, this is the
+			// one place that catches it before a foreign parent id reaches disk.
+			if (turn.parentId !== currentTurnId) {
+				throw new Error(
+					`session.append: turn parentId ${turn.parentId ?? "null"} is not this session's current leaf (expected ${currentTurnId ?? "null"}); refusing to parent a turn onto another session's turn`,
+				);
+			}
 			const record = appendTurn(state, turn);
 			currentTurnId = record.id;
 			return record;
@@ -190,14 +202,18 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		},
 		resume(sessionId) {
 			if (state && state.meta.id === sessionId) return state.meta;
+			// Open the target before touching the current session: resumeSessionState
+			// reads and migrates the target's meta.json and can throw (unsupported
+			// format version, unreadable entries, missing files). Closing or nulling
+			// the prior session ahead of that risk is how a failed switch used to
+			// orphan the operator with no current session (issue #93); on success,
+			// the prior is parked and closed only now that the successor is known good.
+			const resumed = resumeSessionState(sessionId);
 			if (state) {
-				// best-effort close of prior session before switching
 				const prior = state;
 				emitPark(prior.meta.id, "resume_other");
-				state = null;
 				void prior.writer.close();
 			}
-			const resumed = resumeSessionState(sessionId);
 			state = resumed.state;
 			currentTurnId = computeLeafId(resumed.nodes);
 			emitResume(resumed.state.meta.id, "resume");
@@ -206,13 +222,17 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		fork(parentTurnId, input) {
 			if (!state) throw new Error("session.fork: no current session to fork from");
 			const prior = state;
-			emitPark(prior.meta.id, "fork");
-			state = null;
+			// forkFromState reads and validates the parent's own ancestry chain
+			// and can throw (unknown or broken parent turn) before it ever creates
+			// the child session; it closes `prior.writer` itself, and only once the
+			// child is known good (see tree/fork.ts). Do not null or park `state`
+			// until forkFromState returns, for the same reason as resume() above.
 			const { next, nodes } = forkFromState({
 				from: prior,
 				parentTurnId,
 				...(input?.cwd !== undefined ? { cwd: input.cwd } : {}),
 			});
+			emitPark(prior.meta.id, "fork");
 			state = next;
 			currentTurnId = computeLeafId(nodes);
 			return next.meta;
@@ -232,15 +252,15 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		switchBranch(sessionId) {
 			// /tree-driven branch switch currently delegates to resume. Kept as a
 			// distinct contract method so later slices can layer telemetry or
-			// chat-loop rewiring without changing resume's semantics.
+			// chat-loop rewiring without changing resume's semantics. Same
+			// open-before-close ordering as resume() above and for the same reason.
 			if (state?.meta.id === sessionId) return state.meta;
+			const resumed = resumeSessionState(sessionId);
 			if (state) {
 				const prior = state;
 				emitPark(prior.meta.id, "switch_branch");
-				state = null;
 				void prior.writer.close();
 			}
-			const resumed = resumeSessionState(sessionId);
 			state = resumed.state;
 			currentTurnId = computeLeafId(resumed.nodes);
 			emitResume(resumed.state.meta.id, "switch_branch");

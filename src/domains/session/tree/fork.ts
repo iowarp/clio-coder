@@ -134,15 +134,21 @@ function branchEntriesFromParent(
 }
 
 /**
- * Fork the given state into a new session. Closes the prior writer
- * best-effort so the on-disk endedAt marker is written; the caller is
- * responsible for replacing its own state pointer with `result.next`.
+ * Fork the given state into a new session. Closes the prior writer once the
+ * child session is known good, so the on-disk endedAt marker on the parent is
+ * never written for a fork that failed; the caller is responsible for
+ * replacing its own state pointer with `result.next`.
  */
 export function forkFromState(input: ForkInput): ForkResult {
 	const parentMeta = input.from.meta;
-	// close() only performs synchronous filesystem work before resolving, so
-	// the following read sees a fully flushed parent transcript.
-	void input.from.writer.close();
+	// Appends are already synchronous writes (writeSync in the engine writer),
+	// so the read below already sees everything appended in this process
+	// without closing first; flushAppends only fsyncs for durability. Reading
+	// (and traceAncestry inside branchEntriesFromParent, which throws on an
+	// unknown or broken parent chain) happens before the parent writer is
+	// touched, so a broken fork point leaves the parent open and un-ended
+	// instead of orphaning the caller (issue #93).
+	input.from.writer.flushAppends();
 	const branch = branchEntriesFromParent(parentMeta, input.parentTurnId);
 
 	const cwd = input.cwd ?? parentMeta.cwd;
@@ -156,5 +162,8 @@ export function forkFromState(input: ForkInput): ForkResult {
 		parentTurnId: input.parentTurnId,
 	});
 	enrichForkMeta(next.meta, parentMeta.id, input.parentTurnId);
+	// Only now is the child known good: created, seeded, and stamped with its
+	// parent pointers. Close (and stamp endedAt on) the parent last.
+	void input.from.writer.close();
 	return { next, parentMeta, nodes: branch.tree };
 }
