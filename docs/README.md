@@ -23,7 +23,7 @@ current source, tests, and `CHANGELOG.md`.
 | Source layout, compile-time boundaries, domain loading, and runtime data flow | [architecture.md](architecture.md) ([Interactive Blueprint](html/architecture_blueprint.html)) |
 | Why the dispatch domain is not split, which invariants cross the obvious seams, and why direct subpath imports are permitted | [dispatch-architecture-rationale.md](dispatch-architecture-rationale.md) |
 | Prompt envelope reuse, provider tool delivery, and bounded tool results | [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) ([Interactive Blueprint](html/tools_blueprint.html)) |
-| In-depth reference for all 19 worker tools: parameters, typical payloads, and error examples | [tool-usage.md](tool-usage.md) ([Interactive Blueprint](html/tool_usage_blueprint.html)) |
+| In-depth reference for all 20 worker tools: parameters, typical payloads, and error examples | [tool-usage.md](tool-usage.md) ([Interactive Blueprint](html/tool_usage_blueprint.html)) |
 | Developer guide to implementing custom model runtimes and inference server integrations | [provider-adapter-cookbook.md](provider-adapter-cookbook.md) ([Interactive Blueprint](html/provider_adapter_blueprint.html)) |
 | Built-in agent recipes, discovery roots, frontmatter schema, and dispatch admission | [built-in-agents.md](built-in-agents.md) ([Interactive Blueprint](html/agents_blueprint.html)) |
 | Artifact browsing, receipt verification, dispatch diagnostics, and observability routing | [observability.md](observability.md) ([Interactive Blueprint](html/observability_blueprint.html)) |
@@ -47,7 +47,7 @@ current source, tests, and `CHANGELOG.md`.
 | Version registry and migration policies for all 9 serialized artifact schemas | [artifact-versions.md](artifact-versions.md) |
 | Process exit code taxonomy, `--help` standard, machine-readable JSON streaming, and headless output contracts | [exit-codes-and-output.md](exit-codes-and-output.md) |
 | Actionable error remediation and diagnostics keyed by exact user-facing messages | [troubleshooting.md](troubleshooting.md) |
-| Canonical definitions of 17 core architectural concepts mapped to `src/` types | [glossary.md](glossary.md) |
+| Canonical definitions of 40 core architectural concepts mapped to `src/` types | [glossary.md](glossary.md) |
 | Complete source-to-documentation mapping matrix and subsystem coverage status | [documentation-coverage.md](documentation-coverage.md) |
 | Issue-driven development lifecycle: file-ticket through release, label taxonomy, and dogfooding setup | [development-pipeline.md](development-pipeline.md) |
 | Proactive task memory architecture, session task bank, intervention rules, and handoff carrying | [proactive-memory.md](proactive-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |

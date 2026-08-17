@@ -708,7 +708,7 @@ locally with interactive blueprints.
 | Argonne ALCF Sophia and Metis inference targets over Globus OAuth | [alcf-provider.md](docs/alcf-provider.md) |
 | Safety posture, default-deny Bash, project policy, damage-control rules, typed validation | [safety-model.md](docs/safety-model.md) |
 | Source layout, compile-time boundaries, domain loading, runtime data flow | [architecture.md](docs/architecture.md) |
-| Reference for all 19 worker tools: parameters, payloads, error examples | [tool-usage.md](docs/tool-usage.md) |
+| Reference for all 20 worker tools: parameters, payloads, error examples | [tool-usage.md](docs/tool-usage.md) |
 | Prompt envelope reuse, provider tool delivery, bounded tool results | [prompt-envelope-and-tools.md](docs/prompt-envelope-and-tools.md) |
 | Implementing custom model runtimes and inference server integrations | [provider-adapter-cookbook.md](docs/provider-adapter-cookbook.md) |
 | Artifact browsing, receipt verification, dispatch diagnostics, observability routing | [observability.md](docs/observability.md) |

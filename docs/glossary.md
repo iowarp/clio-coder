@@ -8,39 +8,39 @@ This document defines core architectural concepts and terminology used throughou
 
 ### 1. Assignment
 - **Definition**: The logical unit of work dispatched to the fleet. An assignment encapsulates the requested task, briefing, authority boundaries, and retry history across one or more concrete run attempts.
-- **Owning Type**: `AssignmentRecord` in `src/domains/dispatch/types.ts`.
+- **Owning Type**: `DurableAssignmentRecord` in `src/domains/dispatch/assignment-store.ts`.
 
 ### 2. Run
 - **Definition**: A concrete execution attempt of an assignment. Every run possesses a unique UUIDv7 identifier, an isolated event stream, a designated execution node, and a final cryptographically sealed receipt.
-- **Owning Type**: `RunRecord` in `src/domains/dispatch/types.ts`.
+- **Owning Type**: `RunEnvelope` in `src/domains/dispatch/types.ts`.
 
 ### 3. Attempt
-- **Definition**: A 1-based sequential retry index of a logical assignment. When a run fails due to retriable infrastructure errors, a new attempt is created while preserving historical attempt records.
-- **Owning Type**: `AssignmentAttemptRecord` in `src/domains/dispatch/types.ts`.
+- **Definition**: A 0-based sequential retry index of a logical assignment. The first run of an assignment is attempt 0; a retry after a retriable infrastructure error increments it while preserving the earlier attempt's own run and receipt.
+- **Owning Type**: `RunLineage.attempt` in `src/domains/dispatch/types.ts`.
 
 ### 4. Batch
 - **Definition**: A durable collection of detached assignments created and tracked together under a single batch ID (`batches.json`).
-- **Owning Type**: `BatchRecord` in `src/domains/dispatch/types.ts`.
+- **Owning Type**: `DetachedBatchRecord` in `src/domains/dispatch/batch-store.ts`.
 
 ### 5. Plan
 - **Definition**: A multi-step directed acyclic graph (DAG) defining steps, dependencies, code validations, and budget ceilings approved by the operator before dispatch.
-- **Owning Type**: `ExecutionPlan` in `src/domains/dispatch/types.ts`.
+- **Owning Type**: `ExecutionPlan` in `src/domains/dispatch/execution-plan.ts`.
 
 ### 6. Receipt
 - **Definition**: An immutable, cryptographically sealed record of a completed run containing full execution facts, tool telemetry, token accounting, validation grounding, and outcome codes.
-- **Owning Type**: `RunReceiptV15` in `src/domains/dispatch/types.ts` (`RUN_RECEIPT_INTEGRITY_VERSION = 15`).
+- **Owning Type**: `RunReceipt` in `src/domains/dispatch/types.ts` (`RUN_RECEIPT_INTEGRITY_VERSION = 15`).
 
 ### 7. Envelope
-- **Definition**: A bounded container enforcing byte-length limits, truncation indicators, and SHA-256 provenance on dynamic payloads (e.g. parent briefings and tool outputs).
-- **Owning Type**: `ObservationEnvelope` in `src/tools/observation.ts`.
+- **Definition**: A bounded container enforcing byte-length limits and truncation indicators on a dynamic payload. Tool output carries shown and total byte counts plus a continuation fragment; a parent briefing carries byte count and SHA-256 content hash instead.
+- **Owning Type**: `Observation` in `src/tools/observation.ts` for tool output; `RunBriefingProvenance` in `src/domains/dispatch/types.ts` for briefings.
 
 ### 8. Phase
-- **Definition**: A designated execution interval within a run (such as `warmup`, `prompt`, `tool_execution`, or `finalize`) recorded in the trace store.
-- **Owning Type**: `PhaseRecord` in `src/domains/observability/trace-store.ts`.
+- **Definition**: A designated execution interval within a run. Every trace event and spend row is keyed to one `phaseId`, and the `phases` table is opened alongside `runs` for each operator turn.
+- **Owning Type**: `TraceEventInput.phaseId` and the `phases` table in `src/domains/observability/trace-store.ts`.
 
 ### 9. Gate
 - **Definition**: A validation or review barrier (such as a read-only reviewer verdict or a compete judge decision) determining whether candidate diffs are merged or revised.
-- **Owning Type**: `GateDecision` in `src/domains/dispatch/types.ts`.
+- **Owning Type**: `GateDecisionArtifact` in `src/domains/dispatch/gate-decisions.ts`.
 
 ### 10. Recipe
 - **Definition**: A versioned Markdown document declaring an agent's static persona, tool profile, execution capability class, cost ceilings, and result contracts.
@@ -60,7 +60,7 @@ This document defines core architectural concepts and terminology used throughou
 
 ### 14. Route
 - **Definition**: An exact execution tuple composed of `{ agent, target, model, node }` evaluated by the active route planner for capability fit and cost readiness.
-- **Owning Type**: `RouteTuple` in `src/domains/dispatch/types.ts`.
+- **Owning Type**: `RouteCandidate` in `src/domains/dispatch/route-decision.ts`.
 
 ### 15. Posture (Autonomy Level)
 - **Definition**: The active safety permission level governing tool mutation authority (`read-only`, `suggest`, `auto-edit`, `full-auto`).
@@ -71,8 +71,8 @@ This document defines core architectural concepts and terminology used throughou
 - **Owning Type**: `AgentCapabilityClass` in `src/domains/agents/spec.ts`.
 
 ### 17. Topology
-- **Definition**: The multi-agent structural orchestration pattern governing workflow execution (`singular`, `parallel`, `sequential`, `pipeline`, `detached`, `review`, `compete`, `auto`).
-- **Owning Type**: `DispatchTopology` in `src/domains/dispatch/types.ts`.
+- **Definition**: The multi-agent structural orchestration pattern governing workflow execution. Three unions spell it for three different jobs and their value sets differ: `parallel`, `sequential`, `pipeline`, `review`, `compete`, and `fleet` in a compiled plan; the same set with `detached` and without `fleet` for a capacity reservation; both plus `detached` and `fleet` at the tool surface. The operator-facing argument is spelled `mode`, and `singular` (the one-task call shape) and `auto` are values of that argument, not topologies.
+- **Owning Types**: `ExecutionPlanTopology` in `src/domains/dispatch/execution-plan.ts`, `ReservationTopology` in `src/domains/dispatch/reservation-store.ts`, `DispatchPlanTopology` in `src/tools/dispatch-plan.ts`.
 
 ### 18. Worker Block
 - **Definition**: The attributed transcript segment rendering a worker's streaming execution. It includes a header with origin glyph and route, a rail for worker prose, coalesced tool names, and a one-line receipt footer.
@@ -117,3 +117,51 @@ This document defines core architectural concepts and terminology used throughou
 ### 28. Trust Gate
 - **Definition**: A security boundary requiring explicit operator opt-in via `skills.trustProjectCompatRoots` before prompt templates or skills from project-scope foreign roots can execute or expand.
 - **Owning Type**: `PromptTemplate` in `src/domains/resources/prompts/loader.ts`.
+
+### 29. Fleet
+- **Definition**: The set of addressable nodes Clio may place work on, `local` plus every configured SSH host, together with their capacity accounting. `fleet` is also the topology of a plan compiled from a fleet contract.
+- **Owning Types**: `FleetNodeSnapshot` in `src/domains/scheduling/cluster.ts` for capacity; `FleetContract` in `src/domains/agents/fleet-contract.ts` for the declared multi-step workflow.
+
+### 30. Dispatch
+- **Definition**: Sending one unit of work to a worker: the domain that resolves recipe, target, model, and node, admits the request against authority, spawns the worker, and seals the receipt. It is the `dispatch` tool, the `/run` slash command, and `src/domains/dispatch/`.
+- **Owning Type**: `DispatchRequest` in `src/domains/dispatch/contract.ts`.
+
+### 31. Run Ledger
+- **Definition**: The durable dispatch run list at `runs.json` in the state directory, retention-capped by `guardrails.maxDispatchRuns`. It is what the fleet board, `clio-coder runs`, and eval linking read.
+- **Owning Type**: `RunEnvelope` in `src/domains/dispatch/types.ts`, persisted by `src/domains/dispatch/state.ts`.
+
+### 32. Agent Ledger
+- **Definition**: The append-only progress log a worker writes for itself through the `ledger` tool, mirrored to the orchestrator over the control lane and persisted in `agent-ledgers.json`. Live subscribers are tracked in memory by the ledger hub.
+- **Owning Type**: `AgentLedgerEntry` in `src/worker/protocol.ts`, stored by `src/domains/dispatch/agent-ledger-store.ts`.
+
+### 33. Session Ledger
+- **Definition**: The JSONL record of one session's turns, written per session and referenced by eval artifacts as `sessionLedgers`. It is what `/resume`, `/fork`, and replay read.
+- **Owning Type**: `SessionEntry` in `src/domains/session/entries.ts`.
+
+### 34. Task Ledger
+- **Definition**: The persisted form of the session task board: goals, subgoals, and the run ids in flight when the snapshot was folded. One session entry kind, distinct from the board that renders it.
+- **Owning Type**: `TaskLedgerEntry` in `src/domains/session/entries.ts`.
+
+### 35. Context Ledger
+- **Definition**: The accounting of how the model's context window is spent, bucketed into system, tools, agents, skills, memory, and the rest, and the input to compaction decisions.
+- **Owning Type**: `ContextLedgerCategory` in `src/domains/session/context-ledger.ts`.
+
+### 36. Dispatch Board
+- **Definition**: The live fleet view: one row per in-flight or recently finished run, carrying origin glyph, route, status, and the steer and cancel affordances.
+- **Owning Type**: `DispatchBoardRow` in `src/interactive/dispatch-board.ts`.
+
+### 37. Task Board
+- **Definition**: The operator-facing goal and subgoal checklist for the session. It renders from a snapshot and persists as a task ledger entry, so the UI noun and the wire format are deliberately named differently.
+- **Owning Type**: `TaskBoardSnapshot` in `src/domains/session/task-board.ts`.
+
+### 38. Dashboard
+- **Definition**: The startup and footer panels summarizing targets, session, and spend. Not a board in the dispatch or task sense; it holds no rows a run or a goal maps to.
+- **Owning Type**: `WelcomeDashboardStats` in `src/interactive/welcome-dashboard.ts`.
+
+### 39. Handbook
+- **Definition**: `CLIO-CODER.md`, the human-owned, version-controlled project context file at the repository root: project name, one-line description, conventions, hard invariants, and optional sections, closed by a fingerprint comment.
+- **Owning Type**: `ParsedClioMd` in `src/domains/context/clio-md.ts`.
+
+### 40. Delegate
+- **Definition**: Another coding agent Clio drives over ACP stdio as if it were a worker, configured under `delegation.agents` and invoked with `/delegate`. A delegate is a foreign harness, not a model target.
+- **Owning Type**: `DelegationAgentConfig` in `src/core/defaults.ts`.
