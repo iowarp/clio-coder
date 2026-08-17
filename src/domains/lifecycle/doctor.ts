@@ -220,6 +220,21 @@ function credentialsDamage(): string | null {
 	}
 }
 
+/**
+ * True when none of the four roots exist and no install record does. Anything
+ * short of that (one root present, a stray settings.yaml, a stale install.json)
+ * is a home Clio once touched, and the per-row report is the honest one for it.
+ */
+export function isUninitializedHome(dirs: ReturnType<typeof resolveClioDirs> = resolveClioDirs()): boolean {
+	return (
+		!existsSync(dirs.config) &&
+		!existsSync(dirs.data) &&
+		!existsSync(dirs.state) &&
+		!existsSync(dirs.cache) &&
+		!existsSync(join(dirs.state, "install.json"))
+	);
+}
+
 export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	let repairFailure: string | null = null;
 	if (options.fix) {
@@ -253,6 +268,21 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 
 	const dirs = resolveClioDirs();
 	const config = dirs.config;
+	if (!options.fix && isUninitializedHome(dirs)) {
+		// A home Clio has never written to is not a broken one. Seven `!!` rows
+		// each pointing at `--fix` read as damage to someone who ran `doctor` as
+		// their very first command after `npm install`, and the exit code said
+		// the same. One row names the state and the two commands that leave it.
+		findings.push({
+			ok: true,
+			level: "warn",
+			name: "installation",
+			detail:
+				"not set up yet: run `clio-coder` to start the first-run wizard, or `clio-coder configure`; " +
+				"`clio-coder doctor --fix` creates the directories without choosing a model",
+		});
+		return findings;
+	}
 	findings.push(directoryFinding("config dir", config));
 	findings.push(directoryFinding("data dir", dirs.data));
 	findings.push(directoryFinding("state dir", dirs.state));

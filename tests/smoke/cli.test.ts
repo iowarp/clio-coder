@@ -238,7 +238,14 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		match(result.stdout, /cache dir/);
 	});
 
-	it("doctor without --fix reports findings and exit code 1", async () => {
+	it("doctor without --fix on an untouched home says it is not set up and exits 0", async () => {
+		const result = await runCli(["doctor"], { env: scratch.env });
+		strictEqual(result.code, 0);
+		match(result.stdout, /not set up yet/);
+	});
+
+	it("doctor without --fix reports findings and exit code 1 once a home is partly present", async () => {
+		mkdirSync(join(scratch.dir, "state"), { recursive: true });
 		const result = await runCli(["doctor"], { env: scratch.env });
 		strictEqual(result.code, 1);
 		match(result.stdout, /settings.yaml/);

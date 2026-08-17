@@ -1,5 +1,6 @@
 import {
 	formatDoctorReport,
+	isUninitializedHome,
 	runDoctor,
 	runDoctorFleetChecks,
 	runDoctorInteropChecks,
@@ -9,7 +10,8 @@ import { printError } from "./shared.js";
 
 const HELP = `clio-coder doctor [--fix] [--json]
 
-Diagnose Clio Coder state without creating files. Use --fix to repair structure:
+Diagnose Clio Coder state without creating files. On a home Clio has never
+written to, doctor says so in one row and exits 0. Use --fix to repair structure:
 missing directories, missing template files, and credential permissions.
 Settings are validated directly against the current schema.
 Pass --json to emit a machine-readable report on stdout.
@@ -28,12 +30,19 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 		process.stderr.write(HELP);
 		return 2;
 	}
+	// Decided before runDoctor so a --fix run, which initializes the home, still
+	// gets every check on the home it just built.
+	const untouched = !fix && isUninitializedHome();
 	const findings = runDoctor({ fix });
 	const runtimeChecks = await runDoctorRuntimeChecks();
-	const interopChecks = await runDoctorInteropChecks();
+	// The interop and fleet sweeps read the state and config roots through the
+	// ensuring accessors, which create them, and there is no fleet or interop
+	// state to inspect before Clio has ever written anything. On a home Clio has
+	// never touched, doctor keeps its promise to create nothing.
+	const interopChecks = untouched ? [] : await runDoctorInteropChecks();
 	// Fleet preflight probes each configured node over SSH and persists the
 	// per-node eligibility verdicts dispatch placement enforces.
-	const fleetChecks = await runDoctorFleetChecks();
+	const fleetChecks = untouched ? [] : await runDoctorFleetChecks();
 	const all = [...findings, ...runtimeChecks, ...interopChecks, ...fleetChecks];
 	const ok = all.every((f) => f.ok);
 	if (json) {

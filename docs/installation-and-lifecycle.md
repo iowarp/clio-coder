@@ -122,10 +122,12 @@ clio-coder --version
   --fix` with the caller's environment), so a fresh install passes plain
   `clio-coder doctor` with no manual steps.
 
-On a machine where Clio has never run, plain `clio-coder doctor` reports the
-missing config structure and exits nonzero by design (it is a read-only
-diagnosis); `clio-coder doctor --fix`, the installer above, or simply launching
-`clio-coder` creates everything.
+On a machine where Clio has never run, plain `clio-coder doctor` prints one
+`WARN installation  not set up yet` row, exits 0, and creates nothing (it is a
+read-only diagnosis, and an untouched home is not a broken one). Launching
+`clio-coder`, running `clio-coder configure`, or `clio-coder doctor --fix`
+creates everything; once any root exists, doctor reports each missing piece and
+exits 1 until it is repaired.
 
 First-run target setup after install:
 
