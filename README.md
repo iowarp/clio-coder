@@ -643,8 +643,8 @@ Targeted checks when the risk is narrower:
 | --- | --- |
 | Types | `npm run typecheck` |
 | Style | `npm run lint` |
-| Contracts | `npm run test:contracts` |
-| Smoke flows | `npm run test:smoke` |
+| Contracts | `npm run test:file -- 'tests/contracts/**/*.test.ts'` |
+| Smoke flows | `npm run test:file -- 'tests/smoke/**/*.test.ts'` |
 | Domain boundaries | `npm run check:boundaries` |
 | Everything | `npm run test` |
 
