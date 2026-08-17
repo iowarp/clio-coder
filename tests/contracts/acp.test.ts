@@ -112,7 +112,7 @@ const VALID_TOOL_KINDS = new Set([
 	"other",
 ]);
 const VALID_TOOL_CONTENT_TYPES = new Set(["content", "diff", "terminal"]);
-const USAGE_META_KEY = "clio.coder/usage";
+const USAGE_META_KEY = "clio-coder/usage";
 
 function sessionUpdates(notifications: ReadonlyArray<unknown>): Record<string, unknown>[] {
 	const updates: Record<string, unknown>[] = [];
@@ -1088,12 +1088,12 @@ rl.on("line", (line) => {
       send({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "clientInfo.version required" } });
       return;
     }
-    send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: false, _meta: { "clio.coder/session": { close: true } } }, agentInfo: { name: "mock-acp", version: "1" } } });
+    send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: false, _meta: { "clio-coder/session": { close: true } } }, agentInfo: { name: "mock-acp", version: "1" } } });
   } else if (msg.method === "session/new") {
     send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: "sess-1" } });
   } else if (msg.method === "session/prompt") {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello from acp" } } } });
-    send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn", _meta: { "clio.coder/usage": { input: 2, output: 3 } } } });
+    send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn", _meta: { "clio-coder/usage": { input: 2, output: 3 } } } });
   } else if (msg.method === "session/close") {
     send({ jsonrpc: "2.0", id: msg.id, result: {} });
     process.exit(0);

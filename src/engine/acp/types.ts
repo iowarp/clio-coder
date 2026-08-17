@@ -5,8 +5,8 @@ import type { AgentMessage } from "../types.js";
  * extensions so a strict client (Zed/serde) never sees an unknown top-level
  * field on a standard response.
  */
-export const ACP_USAGE_META_KEY = "clio.coder/usage";
-export const ACP_SESSION_META_KEY = "clio.coder/session";
+export const ACP_USAGE_META_KEY = "clio-coder/usage";
+export const ACP_SESSION_META_KEY = "clio-coder/session";
 
 /** ACP v1 `ToolKind` closed enum (schema 0.4.5). */
 export type AcpToolKind =

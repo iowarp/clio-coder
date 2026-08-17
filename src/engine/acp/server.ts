@@ -542,7 +542,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				// clients never observe a non-spec capability field.
 				_meta: {
 					[ACP_SESSION_META_KEY]: { close: true },
-					"clio.coder/tools": "mediated",
+					"clio-coder/tools": "mediated",
 				},
 			},
 			authMethods: [],
