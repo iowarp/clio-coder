@@ -582,6 +582,55 @@ describe("contracts/prompts", () => {
 			}
 		});
 
+		it("worker safety is the level fragment itself: one source, action-class vocabulary, no tool names", () => {
+			// Before this, the worker's safety section was a hand-written copy of
+			// the four levels living in a switch in compiler.ts, and the copy
+			// drifted: its full-auto branch said "Writes, dispatches, and ordinary
+			// commands run" for workers none of which admit dispatch. Now both
+			// renderers read the same fragment body, so nothing can drift, and the
+			// fragments name action classes rather than tools, so nothing can be
+			// false for a surface that lacks a tool.
+			const table = loadFragments();
+			for (const level of ["read-only", "suggest", "auto-edit", "full-auto"] as const) {
+				const fragment = table.byId.get(`safety.${level}`);
+				ok(fragment, `safety.${level} must be registered`);
+				strictEqual(fragment.body.includes("dispatch"), false, `safety.${level} names dispatch`);
+				ok(fragment.body.includes("git_destructive actions are blocked by the safety net at every autonomy level."));
+				const worker = compileWorker(table, {
+					autonomy: level,
+					providerSupportsTools: true,
+					toolNames: ["read", "edit", "bash"],
+					toolPromptHints: [],
+					hasCanonicalContext: false,
+					hasBoundSkills: false,
+					onPermission: "deny",
+					persona: workerPersona("# Coder\n\nDo the task."),
+				});
+				ok(worker.systemPrompt.includes(fragment.body.trim()), `worker at ${level} must read the fragment body`);
+				// A worker whose surface lacks dispatch is never told about it: not
+				// in identity, contract, tool contract, safety, or the assigned-task
+				// contract (#91's class, not just its instance).
+				strictEqual(worker.systemPrompt.includes("dispatch"), false, `worker at ${level} mentions dispatch`);
+				const session = compile(table, {
+					identity: "identity.clio",
+					operatingContract: "operating.contract",
+					safety: `safety.${level}`,
+					sessionInputs: { provider: "p", model: "m" },
+				});
+				ok(session.systemPrompt.includes(fragment.body.trim()), `session at ${level} must read the fragment body`);
+			}
+			// The auto-edit level states the engine's rule, not the older
+			// approximation: an all-recognized `&&` chain runs (policy-engine.ts
+			// recognizeCommandChain); pipes, `;`, redirects, and a chain with an
+			// unrecognized step are the unrecognized forms.
+			const autoEdit = table.byId.get("safety.auto-edit");
+			ok(autoEdit);
+			ok(autoEdit.body.includes("a `&&` chain whose every step is recognized runs too"));
+			ok(autoEdit.body.includes("a `&&` chain with an unrecognized step all count as unrecognized"));
+			strictEqual(autoEdit.body.includes("Commands with pipes, `&&`, or redirects count as unrecognized"), false);
+			ok(autoEdit.body.includes("`.clio-coder/safety.yaml`"));
+		});
+
 		it("compiles deterministically: same inputs, same prompt, same hash", () => {
 			const table = loadFragments();
 			const a = compile(table, {

@@ -7,7 +7,7 @@ description: Read-only autonomy level
 # Read-only autonomy
 
 At read-only autonomy, inspect and answer; never mutate.
-Read-class tools (read, grep, find, ls, typed git inspection) run freely.
-Every write, command, and dispatch is auto-denied by the harness, and no approval prompt will appear.
-When a change is needed, propose it concretely: the exact file edits or commands the operator should apply.
-The safety net applies at every autonomy level.
+Read-class actions run freely.
+Every mutating call is denied by the harness, and no approval prompt appears.
+When a change is needed, propose it concretely: the exact file edits or commands to apply.
+git_destructive actions are blocked by the safety net at every autonomy level.
