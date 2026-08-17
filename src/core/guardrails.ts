@@ -70,10 +70,19 @@ export const GUARDRAIL_DEFAULTS: GuardrailValues = {
 export const GUARDRAIL_ENV_VARS: Readonly<Record<keyof GuardrailValues, string>> = {
 	turnToolCallBudget: "CLIO_CODER_TURN_TOOL_CALL_BUDGET",
 	workerToolCallCap: "CLIO_CODER_WORKER_TOOL_CALL_CAP",
-	maxDispatchRuns: "CLIO_CODER_MAX_RUNS",
+	maxDispatchRuns: "CLIO_CODER_MAX_DISPATCH_RUNS",
 	readMaxBytes: "CLIO_CODER_READ_MAX_BYTES",
 	observationTurnBudgetBytes: "CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES",
 	internalDispatchTimeoutMs: "CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS",
+};
+
+/**
+ * Older env spellings that still read. `CLIO_CODER_MAX_RUNS` was the only
+ * guardrail whose variable was not the SCREAMING_SNAKE of its key, and CI
+ * environments already set it, so it keeps working behind the canonical name.
+ */
+const GUARDRAIL_ENV_ALIASES: Readonly<Partial<Record<keyof GuardrailValues, string>>> = {
+	maxDispatchRuns: "CLIO_CODER_MAX_RUNS",
 };
 
 /**
@@ -166,5 +175,11 @@ function parsePositiveSafeInt(raw: string | undefined): number | undefined {
 
 /** Resolve one guardrail: env override > configured settings > default. */
 export function resolveGuardrail(key: keyof GuardrailValues, env: NodeJS.ProcessEnv = process.env): number {
-	return parsePositiveSafeInt(env[GUARDRAIL_ENV_VARS[key]]) ?? configured[key] ?? GUARDRAIL_DEFAULTS[key];
+	const alias = GUARDRAIL_ENV_ALIASES[key];
+	return (
+		parsePositiveSafeInt(env[GUARDRAIL_ENV_VARS[key]]) ??
+		(alias ? parsePositiveSafeInt(env[alias]) : undefined) ??
+		configured[key] ??
+		GUARDRAIL_DEFAULTS[key]
+	);
 }
