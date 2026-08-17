@@ -48,7 +48,7 @@ except Exception:
     _FLEET = None
 
 DEFAULT_MODEL_NAME = os.environ.get("CLIO_CODER_PRED_MODEL") or (_FLEET or {}).get(
-    "predictionModelName", "clio-coder-qwopus3.6-27b"
+    "predictionModelName", os.environ.get("CLIO_CODER_MODEL", "clio-coder")
 )
 
 TASK_TEMPLATE = """You are resolving a GitHub issue in the {repo} repository (checked out at commit {base_commit}).

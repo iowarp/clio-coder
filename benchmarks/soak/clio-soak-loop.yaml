@@ -25,8 +25,9 @@ suite:
 
 matrix:
   targets:
-    - id: mini
-      model: KAT-Coder-V2.5-Dev-IQ4_NL
+    # Operators edit target and model for their environment.
+    - id: node-a
+      model: example-coder-model
   repeats: 1
 
 tasks:

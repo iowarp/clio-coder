@@ -14,7 +14,8 @@ suite:
 
 matrix:
   targets:
-    - id: mini
+    # Operators edit target and model for their environment.
+    - id: node-a
   repeats: 1
 
 tasks:

@@ -254,7 +254,7 @@ function workerDeliveryOnlyDirective(limit: number, deliveryTools: ReadonlyArray
 /**
  * Dead tool-call markup a model can emit as plain text once tool_choice is
  * forced to none: the chat template's call syntax arrives as prose because the
- * runtime no longer parses it into a structured call. Measured on the mini
+ * runtime no longer parses it into a structured call. Measured on a local model
  * target, roughly one locked turn in three answered the forced text-only round
  * this way. Complete blocks are stripped wherever they appear; unterminated
  * trailing blocks (a length stop mid-markup) are stripped only when followed

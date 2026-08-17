@@ -729,7 +729,7 @@
         presencePenalty: 1.5
         maxTokens: 32768
     runtimePreference:
-      llamaCpp: "Mini router serves it with --jinja and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
+      llamaCpp: "A local llama.cpp router serves it with --jinja and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
       lmstudioNative: "Dense 27B Coder-MTP; the creator's template ships thinking-off, and no per-request field re-enables it."
     thinking:
       mechanism: none
@@ -766,7 +766,7 @@
         repeatPenalty: 1.05
         maxTokens: 32768
     runtimePreference:
-      llamaCpp: "Mini router serves it with --jinja and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
+      llamaCpp: "A local llama.cpp router serves it with --jinja and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
     thinking:
       mechanism: none
       guidance: |

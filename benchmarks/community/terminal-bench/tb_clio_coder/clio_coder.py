@@ -79,12 +79,12 @@ try:
     }
 except Exception:
     _DEF = {
-        "main_target": "local-main",
-        "main_model": "Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K",
+        "main_target": os.environ.get("CLIO_CODER_MAIN_TARGET", "local-main"),
+        "main_model": os.environ.get("CLIO_CODER_MAIN_MODEL", "example-coder-model"),
         "main_runtime": "llamacpp",
         "main_thinking": "off",
-        "worker_target": "local-worker",
-        "worker_model": "qwopus3.6-27b-v1-preview",
+        "worker_target": os.environ.get("CLIO_CODER_WORKER_TARGET", "local-worker"),
+        "worker_model": os.environ.get("CLIO_CODER_WORKER_MODEL", "example-coder-model"),
         "worker_runtime": "lmstudio-native",
         "worker_thinking": "off",
         "autonomy": "full-auto",

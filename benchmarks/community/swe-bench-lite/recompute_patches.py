@@ -6,6 +6,7 @@ This rebuilds model_patch as a source-only diff vs swebench_base, excluding Clio
 index, without re-running the fleet. Reads checkouts under <out>/checkouts/<instance_id>.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,7 +36,7 @@ def clean_diff(co: Path) -> str:
 
 def main():
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "runs/calib")
-    model_name = sys.argv[2] if len(sys.argv) > 2 else "clio-coder-qwopus3.6-27b"
+    model_name = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("CLIO_CODER_MODEL", "clio-coder")
     checkouts = sorted((out / "checkouts").iterdir())
     preds = out / "predictions.jsonl"
     rows = []

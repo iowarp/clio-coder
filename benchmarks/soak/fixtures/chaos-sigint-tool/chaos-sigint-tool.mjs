@@ -89,7 +89,7 @@ async function waitFor(predicate, timeoutMs, stepMs = 100) {
 	return await predicate();
 }
 
-// 4. Spawn node "$CLIO_CODER_ENTRY" with --no-context-files --no-skills run --autonomy full-auto --target mini --json
+// 4. Spawn node "$CLIO_CODER_ENTRY" with --no-context-files --no-skills run --autonomy full-auto --target "${CLIO_CODER_SOAK_TARGET:-node-a}" --json
 let stderrBuffer = "";
 const child = spawn(
 	process.execPath,
@@ -101,7 +101,7 @@ const child = spawn(
 		"--autonomy",
 		"full-auto",
 		"--target",
-		"mini",
+		process.env.CLIO_CODER_SOAK_TARGET || "node-a",
 		"--json",
 		prompt,
 	],

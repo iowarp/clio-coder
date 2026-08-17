@@ -2086,7 +2086,7 @@ export function createSettingsChangePlan(
 
 /**
  * A selection of several model references is a set, not a destination.
- * Spelling it out produced `…_K_M-262K, mini/Gemma-…`, a left-chopped ref dump
+ * Spelling it out produced `…-coder-model, node-b/example-…`, a left-chopped ref dump
  * with the row label pushed off the front, so a multi-reference selection is
  * summarized by count and the note beneath the title carries the leaves.
  */

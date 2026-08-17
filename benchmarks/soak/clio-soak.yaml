@@ -23,8 +23,9 @@ suite:
 
 matrix:
   targets:
-    - id: mini
-      model: KAT-Coder-V2.5-Dev-IQ4_NL
+    # Operators edit target and model for their environment.
+    - id: node-a
+      model: example-coder-model
   repeats: 1
 
 tasks:
@@ -238,11 +239,11 @@ tasks:
       kind: external-command
       commands:
         - >-
-          node "$CLIO_CODER_ENTRY" run --target mini --json "Use the read tool to read planted-fact.txt. Do not modify any file."
+          node "$CLIO_CODER_ENTRY" run --target "${CLIO_CODER_SOAK_TARGET:-node-a}" --json "Use the read tool to read planted-fact.txt. Do not modify any file."
         - >-
-          node "$CLIO_CODER_ENTRY" run --target mini --continue --json "Append one short continuity checkpoint. Do not modify any file."
+          node "$CLIO_CODER_ENTRY" run --target "${CLIO_CODER_SOAK_TARGET:-node-a}" --continue --json "Append one short continuity checkpoint. Do not modify any file."
         - >-
-          CLIO_CODER_FORCE_COMPACT=1 node "$CLIO_CODER_ENTRY" run --target mini --continue --json "After compaction, use the read tool to read planted-fact.txt again. Do not modify any file."
+          CLIO_CODER_FORCE_COMPACT=1 node "$CLIO_CODER_ENTRY" run --target "${CLIO_CODER_SOAK_TARGET:-node-a}" --continue --json "After compaction, use the read tool to read planted-fact.txt again. Do not modify any file."
       timeoutMs: 600000
     verify:
       measure:

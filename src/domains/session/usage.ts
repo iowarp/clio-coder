@@ -69,7 +69,7 @@ function stringAt(source: Record<string, unknown>, ...keys: string[]): string | 
  * Attribution follows the live path, which records under the *target* id and
  * the wire model rather than the runtime name. Reading the runtime out of the
  * payload instead split one endpoint into two blocks in `/cost`, so a single
- * `dynamo` target on `llamacpp` rendered as two providers whose turn counts
+ * `node-a` target on `llamacpp` rendered as two providers whose turn counts
  * diverged with every resume. `modelChange` rows are replayed in order so a
  * session that switched targets mid-way attributes each call to the one that
  * served it.
