@@ -69,23 +69,27 @@ function savedDocument(): Record<string, unknown> {
 	return parseYaml(readFileSync(settingsPath(), "utf8")) as Record<string, unknown>;
 }
 
-beforeEach(() => {
-	const root = mkdtempSync(join(tmpdir(), "clio-interop-consent-"));
-	scratchRoots.push(root);
-	savedHome = process.env.CLIO_CODER_HOME;
-	process.env.CLIO_CODER_HOME = root;
-	resetXdgCache();
-	initializeClioHome();
-});
-
-afterEach(() => {
-	if (savedHome === undefined) delete process.env.CLIO_CODER_HOME;
-	else process.env.CLIO_CODER_HOME = savedHome;
-	resetXdgCache();
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 describe("interop consent", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	beforeEach(() => {
+		const root = mkdtempSync(join(tmpdir(), "clio-interop-consent-"));
+		scratchRoots.push(root);
+		savedHome = process.env.CLIO_CODER_HOME;
+		process.env.CLIO_CODER_HOME = root;
+		resetXdgCache();
+		initializeClioHome();
+	});
+
+	afterEach(() => {
+		if (savedHome === undefined) delete process.env.CLIO_CODER_HOME;
+		else process.env.CLIO_CODER_HOME = savedHome;
+		resetXdgCache();
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("appends exactly one entry with clio-policy governance and no projectContext key", () => {
 		const result = acceptInteropAgents(["codex"], report("sha256:a"));
 

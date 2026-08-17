@@ -29,23 +29,27 @@ const REPORT: InteropReport = {
 	],
 };
 
-beforeEach(() => {
-	const root = mkdtempSync(join(tmpdir(), "clio-interop-state-"));
-	scratchRoots.push(root);
-	savedHome = process.env.CLIO_CODER_HOME;
-	process.env.CLIO_CODER_HOME = root;
-	mkdirSync(root, { recursive: true });
-	resetXdgCache();
-});
-
-afterEach(() => {
-	if (savedHome === undefined) delete process.env.CLIO_CODER_HOME;
-	else process.env.CLIO_CODER_HOME = savedHome;
-	resetXdgCache();
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 describe("interop state file", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	beforeEach(() => {
+		const root = mkdtempSync(join(tmpdir(), "clio-interop-state-"));
+		scratchRoots.push(root);
+		savedHome = process.env.CLIO_CODER_HOME;
+		process.env.CLIO_CODER_HOME = root;
+		mkdirSync(root, { recursive: true });
+		resetXdgCache();
+	});
+
+	afterEach(() => {
+		if (savedHome === undefined) delete process.env.CLIO_CODER_HOME;
+		else process.env.CLIO_CODER_HOME = savedHome;
+		resetXdgCache();
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("round-trips a report through the state dir", () => {
 		writeInteropReport(REPORT);
 		ok(interopStatePath().endsWith("interop.json"));

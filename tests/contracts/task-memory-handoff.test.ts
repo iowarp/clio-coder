@@ -17,11 +17,15 @@ import {
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 describe("contracts/task-memory handoff", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("round-trips a redacted knowledge/procedural snapshot into a fresh bank", () => {
 		const source = new TaskMemoryBank({ now: () => new Date("2026-07-13T00:00:00.000Z") });
 		source.updateStatus("private status must not cross sessions");

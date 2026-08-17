@@ -17,10 +17,6 @@ import type { OAuthLoginCallbacks } from "../../src/engine/oauth.js";
 
 const realFetch = globalThis.fetch;
 
-afterEach(() => {
-	globalThis.fetch = realFetch;
-});
-
 interface CapturedRequest {
 	url: string;
 	body: URLSearchParams;
@@ -50,6 +46,14 @@ function noopCallbacks(overrides: Partial<OAuthLoginCallbacks>): OAuthLoginCallb
 }
 
 describe("contracts/alcf-oauth", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		globalThis.fetch = realFetch;
+	});
+
 	it("builds an authorize URL with PKCE, gateway scope, and domain restriction", () => {
 		const url = new URL(buildAuthorizeUrl({ challenge: "CHALLENGE", state: "STATE" }));
 		strictEqual(url.origin + url.pathname, "https://auth.globus.org/v2/oauth2/authorize");

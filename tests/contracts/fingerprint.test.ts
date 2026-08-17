@@ -15,12 +15,6 @@ import {
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
 function scratchProject(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-fingerprint-"));
 	scratchRoots.push(root);
@@ -38,6 +32,16 @@ function treeHashForPaths(cwd: string, relPaths: ReadonlyArray<string>): string 
 }
 
 describe("contracts/fingerprint", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("only marks indexable file changes stale", () => {
 		const cwd = scratchProject();
 		const sourcePath = join(cwd, "src", "index.ts");

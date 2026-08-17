@@ -15,12 +15,6 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
 function scratchProject(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-resources-s5-"));
 	scratchRoots.push(root);
@@ -84,6 +78,16 @@ async function compileProjectPrompt(cwd: string, noContextFiles: boolean): Promi
 }
 
 describe("contracts/resources context-file loader deletion (S5)", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("the dead resources context-file loader and instruction-merge modules are gone", () => {
 		strictEqual(existsSync(join(repoRoot, "src", "domains", "resources", "context-files", "loader.ts")), false);
 		strictEqual(existsSync(join(repoRoot, "src", "domains", "resources", "context-files")), false);

@@ -10,10 +10,6 @@ import { createMonitorTool } from "../../src/tools/monitor.js";
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 function scratchDir(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-monitor-evidence-"));
 	scratchRoots.push(root);
@@ -143,6 +139,14 @@ function runBlock(output: string, runId: string): string {
 }
 
 describe("contracts/monitor collect evidence labeling", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("labels sealed receipt text and fails closed for canceled, tampered, and missing receipts", async () => {
 		const root = scratchDir();
 		const envelopes = [
