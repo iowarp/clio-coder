@@ -17,7 +17,7 @@ function hasScrollIndicator(line: string): boolean {
 }
 
 export interface EditorChrome {
-	/** Target+model identity, e.g. `mini·Qwen3.6-35B`. */
+	/** Target+model identity, e.g. `node-a·example-coder-model`. */
 	getModelLabel: () => string;
 	/** Effective thinking level, e.g. `high` / `off`. */
 	getThinkingLabel: () => string;

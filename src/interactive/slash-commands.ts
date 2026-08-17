@@ -1203,7 +1203,7 @@ for (const entry of BUILTIN_SLASH_COMMANDS) {
  * rather than being answered by a model that will invent a result.
  *
  * The shape test is what keeps that from swallowing ordinary text, because a
- * leading slash is also how an absolute path starts. `/home/akougkas/notes` and
+ * leading slash is also how an absolute path starts. `/home/user/notes` and
  * `/not/a/command` carry a separator, so they are not one word and still reach
  * the model unchanged.
  *

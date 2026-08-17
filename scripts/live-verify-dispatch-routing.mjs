@@ -23,13 +23,13 @@
  *                 the successful attempt's output, not the failed attempt's.
  *   5. joint-shadow  A local worker keeps its executed route while the joint
  *                 observer evaluates a live target and an always-503 target.
- *   6. attestation  A run pinned to mini, Qwopus-MoE-35B, llamacpp, and
- *                 http://192.168.86.141:8080 attests that exact host, target,
+ *   6. attestation  A run pinned to the configured live node, model, runtime,
+ *                 and URL attests that exact host, target,
  *                 model, runtime, and settings fingerprint into its receipt.
  *                 Its control gives the same target `baseUrl` instead of `url`
  *                 and asserts settings validation rejects it before dispatch.
  *   7. active-readonly  Six integrity-valid fixture sources activate one real
- *                 Scout route on the pinned free mini target; five refuse
+ *                 Scout route on the pinned free target; five refuse
  *                 before a delegated worker spawns.
  *   8. agent-auto-shadow  An explicit Scout stays on Scout while the one joint
  *                 shadow decision seals its bounded agent recommendation.
@@ -101,14 +101,14 @@ const ALL_SCENARIOS = [
  * point of the check is that the worker attests this identity, and a value the
  * harness could vary would prove nothing about drift.
  */
-const ATTESTATION_NODE = "mini";
-const ATTESTATION_MODEL = "Qwopus-MoE-35B";
-const ATTESTATION_RUNTIME = "llamacpp";
-const ATTESTATION_URL = "http://192.168.86.141:8080";
-const ACTIVE_TARGET = "mini";
-const ACTIVE_MODEL = "KAT-Coder-V2.5-Dev-IQ4_NL";
-const ACTIVE_RUNTIME = "llamacpp";
-const ACTIVE_URL = "http://192.168.86.141:8080";
+const ATTESTATION_NODE = process.env.CLIO_CODER_LIVE_NODE || "local-worker";
+const ATTESTATION_MODEL = process.env.CLIO_CODER_LIVE_MODEL || "example-coder-model";
+const ATTESTATION_RUNTIME = process.env.CLIO_CODER_LIVE_RUNTIME || "llamacpp";
+const ATTESTATION_URL = process.env.CLIO_CODER_LIVE_URL || "http://127.0.0.1:8080";
+const ACTIVE_TARGET = process.env.CLIO_CODER_LIVE_NODE || "local-worker";
+const ACTIVE_MODEL = process.env.CLIO_CODER_LIVE_MODEL || "example-coder-model";
+const ACTIVE_RUNTIME = process.env.CLIO_CODER_LIVE_RUNTIME || "llamacpp";
+const ACTIVE_URL = process.env.CLIO_CODER_LIVE_URL || "http://127.0.0.1:8080";
 const scenarios = (process.env.CLIO_CODER_LIVE_VERIFY_SCENARIOS || ALL_SCENARIOS.join(","))
 	.split(",")
 	.map((name) => name.trim())
@@ -712,13 +712,13 @@ async function scenarioJointShadow() {
 	clearState();
 	if (!(await probePinnedJointTarget())) {
 		throw new Error(
-			`[joint-shadow] pinned local infrastructure is unavailable: ${ATTESTATION_URL} did not answer for mini on the local node. ` +
+			`[joint-shadow] pinned local infrastructure is unavailable: ${ATTESTATION_URL} did not answer for ${ATTESTATION_NODE} on the local node. ` +
 				`This scenario requires ${ATTESTATION_RUNTIME} serving ${ATTESTATION_MODEL}; no substitute target is permitted.`,
 		);
 	}
 	const settings = baseSettings();
 	const pinnedLiveTarget = {
-		id: "mini",
+		id: ATTESTATION_NODE,
 		runtime: ATTESTATION_RUNTIME,
 		url: ATTESTATION_URL,
 		defaultModel: ATTESTATION_MODEL,
@@ -734,9 +734,9 @@ async function scenarioJointShadow() {
 		},
 		pinnedLiveTarget,
 	];
-	settings.orchestrator = { target: "mini", model: ATTESTATION_MODEL, thinkingLevel: "off" };
+	settings.orchestrator = { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" };
 	settings.workers = {
-		default: { target: "mini", model: ATTESTATION_MODEL, thinkingLevel: "off" },
+		default: { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" },
 		profiles: {},
 	};
 	writeSettings(settings);
@@ -912,7 +912,7 @@ async function scenarioAttestation() {
 		attestation.runtimeId === ATTESTATION_RUNTIME,
 		`attested runtime ${attestation.runtimeId} is not the pinned ${ATTESTATION_RUNTIME}`,
 	);
-	const expectedEndpoint = createHash("sha256").update(`clio.endpoint:http://192.168.86.141:8080`, "utf8").digest("hex");
+	const expectedEndpoint = createHash("sha256").update(`clio.endpoint:${ATTESTATION_URL}`, "utf8").digest("hex");
 	check(
 		attestation.endpointIdentityHash === expectedEndpoint,
 		`attested endpoint identity ${attestation.endpointIdentityHash} does not hash ${ATTESTATION_URL}`,

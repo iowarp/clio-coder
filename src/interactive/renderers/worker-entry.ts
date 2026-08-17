@@ -8,7 +8,7 @@
  * an operator learns one grammar. The origin glyph is the only thing that says
  * who asked, which is the same rule the board and the footer chip follow.
  *
- *   ◇ coder · mini/Nemo-3.5-Lightning · run 2mkas6s
+ *   ◇ coder · node-a/example-coder-model · run 2mkas6s
  *   │ Hello! I'm the coder worker.
  *   │ ⚙ read · artifact
  *   └ ✓ ok · 4.8k tok · 9.6s · contract pass
@@ -16,7 +16,7 @@
  * Folded (the default for a run the model asked for) is one row shaped like a tool subline,
  * so a fan-out of five scouts costs five rows until the operator opens one:
  *
- *   ◆ scout · zbook/gemma-4-26b · run 3nc18jo ✓ · 41s (Ctrl+O)
+ *   ◆ scout · node-b/example-scout-model · run 3nc18jo ✓ · 41s (Ctrl+O)
  *
  * Pure: no I/O, no module-level mutable state beyond the shared theme handle.
  */
