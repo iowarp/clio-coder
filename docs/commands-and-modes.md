@@ -207,11 +207,11 @@ Configuration lives in one place: the `/settings` overlay. `/targets`, `/fleet`,
 
 Settings → Targets presents an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. `Enter` opens actions for `Use` (switches active chat target and rebases model), `Connect` (runs the API-key or OAuth flow then probes), `Probe`, and `Remove` (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via `clio-coder targets add`.
 
-Settings → Fleet is an entity workbench organized with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Dispatched worker defaults and profile rows render as compact summaries (`fast-local dynamo/qwen  high  auto`), drilling into fields (`target`, `model`, `thinkingLevel`, `node`) on `Enter`. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the `Alt+W` Fleet Runs board, which also steers and cancels them.
+Settings → Fleet is an entity workbench organized with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Dispatched worker defaults and profile rows render as compact summaries (`fast-local node-a/example-coder-model  high  auto`), drilling into fields (`target`, `model`, `thinkingLevel`, `node`) on `Enter`. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the `Alt+W` Fleet Runs board, which also steers and cancels them.
 
 `/run` and `/delegate` put the worker's answer on screen. Both echo the typed
 line dim above the block, then stream the run into the transcript as an attributed
-block: a header (`◇ coder · mini/Nemo-3.5-Lightning · run 2mkas6s` for fleet workers,
+block: a header (`◇ coder · node-a/example-coder-model · run 2mkas6s` for fleet workers,
 or `◇ codex (acp) · run 7hq2ab` for ACP peers), the worker's prose down a rail,
 one coalesced line of tool names, and a one-line footer carrying the outcome glyph,
 token count, duration, and contract status (such as `└ ✓ ok · 8.4k tok · 18s · contract unmeasured`),
@@ -222,7 +222,7 @@ The footer chip in the status line splits them (such as `◇1 ◆3`). `Alt+O` to
 the newest foldable item (tool call or worker block), while `Ctrl+Alt+O` or
 `Alt+Shift+O` toggles every one. Memory workers on the background target never
 appear as transcript blocks. A run that fails over keeps one block and gains an
-`↻ failed over → attempt 2 on dynamo/qwen3` line inside it.
+`↻ failed over → attempt 2 on node-b/example-coder-model` line inside it.
 
 That block is the only place a `/run` answer goes. The main agent is not told
 about it, which is what makes a side run a side run; asked about the answer, it
