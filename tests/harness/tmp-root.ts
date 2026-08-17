@@ -24,6 +24,15 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 
 const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
+
+// Node's test runner sets FORCE_COLOR=1 in every test child when its own
+// stdout is a terminal, so the reporter's colours survive the round trip.
+// Tests that spawn the CLI inherit it, and eight of them assert uncoloured
+// text, so `npm test` from an interactive shell (and `npm publish`, whose
+// prepublishOnly runs the suite) failed on output that ci and a piped run
+// never see. Every test child loads this file first; dropping the variable
+// here gives a spawned CLI the same environment in a terminal as in ci.
+delete process.env.FORCE_COLOR;
 /** Names every root this harness makes, and the only names it will remove. */
 export const TEST_TMP_ROOT_PREFIX = "clio-tests-";
 
