@@ -234,6 +234,38 @@ describe("contracts/prompts", () => {
 		}
 	}
 
+	async function compileWorkerPromptWithFixture(cwd: string, workingContextPaths: ReadonlyArray<string>) {
+		const bus = createSafeEventBus();
+		const contracts = new Map<string, DomainContract>();
+		const domainContext: DomainContext = {
+			bus,
+			getContract<T extends DomainContract>(name: string): T | undefined {
+				return contracts.get(name) as T | undefined;
+			},
+		};
+		const promptsBundle = createPromptsBundle(domainContext);
+		await promptsBundle.extension.start();
+		try {
+			return await promptsBundle.contract.compileWorkerPrompt({
+				cwd,
+				workingContextPaths,
+				autonomy: "auto-edit",
+				providerSupportsTools: true,
+				toolNames: ["read", "edit"],
+				toolPromptHints: [
+					{ tool: "read", hint: "Read admitted files precisely." },
+					{ tool: "edit", hint: "Edit files precisely." },
+				],
+				hasCanonicalContext: false,
+				hasBoundSkills: false,
+				onPermission: "deny",
+				persona: workerPersona(),
+			});
+		} finally {
+			await promptsBundle.extension.stop?.();
+		}
+	}
+
 	describe("contracts/prompts hash", () => {
 		it("sha256 returns stable, correct hashes", () => {
 			strictEqual(sha256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
@@ -416,6 +448,53 @@ describe("contracts/prompts", () => {
 			ok(result.systemPrompt.endsWith(workerPersona().body));
 			ok(result.systemPrompt.includes("The assigned task is authoritative."));
 			ok(result.systemPrompt.includes("Role guidance is a persona, not a replacement task."));
+		});
+
+		it("renders additionalFragments last, in order, and omits the section when empty (compileWorker's injection channel, mirroring compile())", () => {
+			const table = loadFragments();
+			const base = {
+				autonomy: "read-only" as const,
+				providerSupportsTools: true,
+				toolNames: ["read"] as const,
+				toolPromptHints: [{ tool: "read", hint: "Read admitted files precisely." }],
+				persona: workerPersona(),
+			};
+			const withoutFragments = compileWorker(table, base);
+			strictEqual(
+				withoutFragments.sections.map((section) => section.id).join(","),
+				"identity,operating-contract,tool-contract,safety,persona",
+			);
+
+			const rule: RenderedPromptFragment = {
+				id: "context.project-rules",
+				relPath: "inline/project-rules",
+				body: "# Project rules\n\nNever widen a contract without updating its consumers.",
+				contentHash: sha256("rule"),
+				dynamic: true,
+			};
+			const profile: RenderedPromptFragment = {
+				id: "context.operator-profile",
+				relPath: "inline/operator-profile",
+				body: "## Operator profile\n- Validation preference: tests-first.",
+				contentHash: sha256("profile"),
+				dynamic: true,
+			};
+			const withFragments = compileWorker(table, { ...base, additionalFragments: [rule, profile] });
+			strictEqual(
+				withFragments.sections.map((section) => section.id).join(","),
+				"identity,operating-contract,tool-contract,safety,persona,context.project-rules,context.operator-profile",
+			);
+			ok(withFragments.systemPrompt.includes(rule.body));
+			ok(withFragments.systemPrompt.includes(profile.body));
+			ok(withFragments.systemPrompt.indexOf(rule.body) > withFragments.systemPrompt.indexOf(workerPersona().body));
+			ok(withFragments.fragmentManifest.some((f) => f.id === "context.project-rules"));
+			ok(withFragments.fragmentManifest.some((f) => f.id === "context.operator-profile"));
+			// No additionalFragments and an empty array both drop the section
+			// entirely rather than leaving a blank one: absence stays silent, the
+			// same rule push() already applies to every other worker section.
+			const withEmptyArray = compileWorker(table, { ...base, additionalFragments: [] });
+			strictEqual(withEmptyArray.systemPrompt, withoutFragments.systemPrompt);
+			strictEqual(withEmptyArray.systemPromptHash, withoutFragments.systemPromptHash);
 		});
 
 		it("normalizes worker toolkit ordering and duplicates deterministically", () => {
@@ -1312,6 +1391,63 @@ describe("contracts/prompts", () => {
 			const withWorkingPath = await compileProjectPromptWithWorkingPaths(cwd, [join(cwd, "src", "index.ts")]);
 			ok(withWorkingPath.systemPrompt.includes("Keep generated files small."));
 			ok(withWorkingPath.systemPrompt.includes("Prefer explicit exports for fixture modules."));
+		});
+
+		it("a worker whose working context touches an active rule's path receives that rule (issue #96)", async () => {
+			// The concrete failure named in #96: an operator writes a rule scoped
+			// to src/domains/**, the orchestrator dispatches a worker to edit a file
+			// under that path, and the worker used to never hear about the rule at
+			// all because compileWorker had no additionalFragments channel.
+			const cwd = scratchProject();
+			mkdirSync(join(cwd, ".clio-coder", "rules"), { recursive: true });
+			writeFileSync(join(cwd, ".clio-coder", "rules", "always.md"), "# Always\nKeep generated files small.\n", "utf8");
+			writeFileSync(
+				join(cwd, ".clio-coder", "rules", "typescript.md"),
+				"---\npaths:\n  - 'src/**/*.ts'\n---\n# TypeScript\nPrefer explicit exports for fixture modules.\n",
+				"utf8",
+			);
+
+			const withoutWorkingPath = await compileWorkerPromptWithFixture(cwd, []);
+			ok(withoutWorkingPath.systemPrompt.includes("Keep generated files small."));
+			ok(!withoutWorkingPath.systemPrompt.includes("Prefer explicit exports for fixture modules."));
+
+			const withWorkingPath = await compileWorkerPromptWithFixture(cwd, [join(cwd, "src", "index.ts")]);
+			ok(withWorkingPath.systemPrompt.includes("Keep generated files small."));
+			ok(withWorkingPath.systemPrompt.includes("Prefer explicit exports for fixture modules."));
+			ok(withWorkingPath.fragmentManifest.some((f) => f.id === "context.project-rules"));
+			// The channel is additionalFragments, appended after the persona, the
+			// same section compileWorker already uses for every other addition.
+			ok(
+				withWorkingPath.systemPrompt.indexOf("Prefer explicit exports for fixture modules.") >
+					withWorkingPath.systemPrompt.indexOf(workerPersona().body),
+			);
+		});
+
+		it("the operator profile reaches a worker unconditionally: it is small, capped, and governs how the worker should do the task (validation preference, commit style, local-only paths), not just how the orchestrator talks to the operator", async () => {
+			const cwd = scratchProject();
+			mkdirSync(join(cwd, ".clio-coder"), { recursive: true });
+			writeFileSync(
+				join(cwd, ".clio-coder", "profile.yaml"),
+				"responsePosture: concise\nvalidationPreference: tests-first\ncommitMessageStyle: conventional\nlocalOnlyPaths:\n  - secrets/\n",
+				"utf8",
+			);
+
+			const compiled = await compileWorkerPromptWithFixture(cwd, []);
+			ok(compiled.systemPrompt.includes("## Operator profile"));
+			ok(compiled.systemPrompt.includes("Validation preference: tests-first."));
+			ok(compiled.systemPrompt.includes("Keep local-only (do not push or share): secrets/."));
+			ok(compiled.fragmentManifest.some((f) => f.id === "context.operator-profile"));
+		});
+
+		it("a worker with no active rule and no operator profile carries neither section (no byte cost when nothing fires)", async () => {
+			const cwd = scratchProject();
+			const compiled = await compileWorkerPromptWithFixture(cwd, []);
+			strictEqual(compiled.systemPrompt.includes("# Project rules"), false);
+			strictEqual(compiled.systemPrompt.includes("## Operator profile"), false);
+			strictEqual(
+				compiled.fragmentManifest.some((f) => f.id === "context.project-rules" || f.id === "context.operator-profile"),
+				false,
+			);
 		});
 
 		it("context is not described as automatic; the snapshot is an explicit call", () => {

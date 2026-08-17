@@ -1048,6 +1048,35 @@ function workerProjectContextIncludesVerification(body: string): boolean {
 	return body.includes("\nVerification expectations:\n");
 }
 
+/**
+ * Path-like tokens in free text: a slash-separated segment, or a bare
+ * `name.ext` token. The model-facing dispatch tool has no structured
+ * path/file field, so a worker's task text is the only working-context
+ * signal available at compile time; this is best-effort recall, not a
+ * parser. A false-positive token is harmless because `selectActiveRules`
+ * only activates a rule when the token matches that rule's own glob.
+ */
+const PATH_TOKEN_RE = /(?:[\w.-]+\/)+[\w.-]+|\b[\w-]+\.[A-Za-z0-9]{1,8}\b/g;
+
+/**
+ * Best-effort working-context paths for a dispatched worker: `writeRoots`
+ * when the caller set them (the precise signal, for internal/programmatic
+ * callers), plus path-like tokens recalled from the task and briefing text.
+ * Feeds the same `selectActiveRules` a session uses, so a worker whose task
+ * touches a ruled path reads that rule instead of never hearing about it.
+ */
+function workerWorkingContextPaths(req: DispatchRequest): string[] {
+	const out = new Set<string>();
+	for (const root of req.writeRoots ?? []) out.add(root);
+	const text = `${req.task}\n${req.briefing ?? ""}`;
+	for (const match of text.matchAll(PATH_TOKEN_RE)) {
+		const token = match[0];
+		if (token.startsWith("http://") || token.startsWith("https://")) continue;
+		out.add(token);
+	}
+	return [...out];
+}
+
 export function buildDynamicPromptMessages(
 	req: DispatchRequest,
 	dynamicContext: WorkerDynamicContext = {},
@@ -3103,6 +3132,8 @@ export function createDispatchBundle(
 				contentHash: sha256(personaBody),
 				dynamic: false,
 			},
+			cwd,
+			workingContextPaths: workerWorkingContextPaths(req),
 		});
 		const systemPrompt = compiledWorkerPrompt.systemPrompt;
 		const budget = resolveEffectiveWorkerBudget({ declared: spec.budget, allowedTools: effectiveTools, settings });

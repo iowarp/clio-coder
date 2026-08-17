@@ -122,7 +122,12 @@ export function createPromptsBundle(
 			if (table.byId.size === 0) {
 				throw new Error("prompts: no fragments loaded, check startup logs");
 			}
-			return compileWorker(table, input);
+			const { cwd: inputCwd, workingContextPaths, ...workerInputs } = input;
+			const cwd = inputCwd ?? process.cwd();
+			return compileWorker(table, {
+				...workerInputs,
+				additionalFragments: customizationFragments(cwd, workingContextPaths ?? []),
+			});
 		},
 		reload,
 	};
