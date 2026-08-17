@@ -168,7 +168,7 @@ export function safetyOneLiner(level: string): string {
  * parked call resolves through its `onPermission` routing instead.
  */
 export const SESSION_APPROVAL_SEMANTICS =
-	"Ask decisions pause that exact call for one operator confirmation, which grants only the parked action; cancellation cancels the parked call cleanly.";
+	"Approval-required calls pause for one operator confirmation, which grants only the parked action; cancellation cancels the parked call cleanly.";
 
 function renderSafetySection(safetyFragment: LoadedFragment, level: string): string {
 	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level)}`;
@@ -377,41 +377,18 @@ export function workerSafetyOneLiner(level: AutonomyLevel, mode: WorkerPromptInp
 	}
 }
 
+/**
+ * The worker reads the same `safety.<level>` fragment the session does; the
+ * one-liner (with the run's permission routing) is the only role text. The
+ * level fragments speak in action classes and never name a tool, so nothing
+ * here can be false for a surface that lacks one; the earlier inline copy of
+ * the levels claimed a full-auto worker's "dispatches" ran when no builtin
+ * admits dispatch.
+ */
 function renderWorkerSafetySection(safetyFragment: LoadedFragment, inputs: WorkerPromptInputs): string {
-	const heading = safetyFragment.body.trim().split("\n", 1)[0] ?? "# Safety";
-	const lines = [
-		`Autonomy: ${inputs.autonomy}. ${workerSafetyOneLiner(inputs.autonomy, inputs.onPermission)}`,
-		"",
-		heading,
-	];
-	switch (inputs.autonomy) {
-		case "read-only":
-			lines.push(
-				"Admitted read-class tools run freely. Every mutating call is denied by the harness, and no approval prompt appears.",
-				"When a change is needed, propose it concretely instead of attempting it.",
-			);
-			break;
-		case "suggest":
-			lines.push(
-				"Admitted read-class tools run freely. Every non-read call is approval-required.",
-				workerPermissionSentence(inputs.onPermission),
-			);
-			break;
-		case "auto-edit":
-			lines.push(
-				"Workspace edits and recognized commands run. Other commands and system modifications are approval-required.",
-				workerPermissionSentence(inputs.onPermission),
-			);
-			break;
-		case "full-auto":
-			lines.push(
-				"Writes, dispatches, and ordinary commands run. System modifications and opaque command substitutions remain approval-required.",
-				workerPermissionSentence(inputs.onPermission),
-			);
-			break;
-	}
-	lines.push("Destructive git and other hard safety blocks remain denied at every autonomy level.");
-	return lines.join("\n");
+	const oneLine = `Autonomy: ${inputs.autonomy}. ${workerSafetyOneLiner(inputs.autonomy, inputs.onPermission)}`;
+	const body = safetyFragment.body.trim();
+	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
 }
 
 function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
