@@ -73,6 +73,7 @@ import {
 	isDispatchEligibleRuntime,
 	type ProvidersContract,
 	type ResolvedRuntimeTarget,
+	type RuntimeApiFamily,
 	type RuntimeDescriptor,
 	resolveModelCapabilities,
 	resolveRuntimeTarget,
@@ -1157,6 +1158,15 @@ interface ResolvedTarget {
 	thinkingLevel: ThinkingLevel;
 	capabilities: CapabilityFlags | null;
 	modelCapabilities: CapabilityFlags | null;
+	/**
+	 * What actually answered the tool-support question for this wire model: the
+	 * operator's own target override, else the knowledge-base entry, else null
+	 * when nothing named it. The merged `modelCapabilities` cannot express this,
+	 * because a runtime default of `tools: false` is indistinguishable there
+	 * from a measurement, and a knowledge-base miss on a local model id is
+	 * routine rather than an answer. See {@link targetToolCapability}.
+	 */
+	toolsCapabilityExplicit: boolean | null;
 	runtimeResolution: ResolvedRuntimeTarget;
 	effectivePricing: EffectivePricing;
 	/** Why the route this run got is not the route it asked for. Belongs in the outcome. */
@@ -1399,8 +1409,66 @@ function assertWorkerBudgetEnforceable(runtime: RuntimeDescriptor, hasDeclaredBu
 	);
 }
 
+/**
+ * API families whose wire protocol carries tool calls. Membership is a property
+ * of the protocol, not of any one model: every server speaking one of these can
+ * express a tool call, so a model served over it is presumed able to take one
+ * until something says otherwise. The excluded families (`embeddings-http`,
+ * `rerank-http`) have no tool surface to offer at all.
+ */
+const TOOL_CARRYING_API_FAMILIES: ReadonlySet<RuntimeApiFamily> = new Set([
+	"openai-completions",
+	"openai-responses",
+	"openai-codex-responses",
+	"azure-openai-responses",
+	"anthropic-messages",
+	"bedrock-converse-stream",
+	"google-generative-ai",
+	"google-vertex",
+	"lmstudio-native",
+	"mistral-conversations",
+	"ollama-native",
+	"claude-agent-sdk",
+	"claude-code-subprocess",
+]);
+
+/**
+ * Whether this run may be offered tools at all.
+ *
+ * A runtime default of `tools: false` on a protocol runtime is a placeholder,
+ * not a measurement: the generic `openai-compat` descriptor cannot know what an
+ * arbitrary local server has loaded, so it declares the conservative value and
+ * leaves the answer to the knowledge base. A knowledge-base miss on a local
+ * model id is routine (a new quant, a renamed GGUF, a model newer than the
+ * catalog), so reading that miss as "no tools" denied every dispatch against
+ * every unlisted local model while the same target answered tool calls fine on
+ * the chat path. Only an explicit `false`, from the operator's target override
+ * or from a knowledge-base entry that names the model, denies now; an unanswered
+ * question lets a tool-carrying protocol try and surface a real provider error
+ * if the server genuinely cannot.
+ */
 function targetToolCapability(target: ResolvedTarget): boolean {
-	return target.modelCapabilities?.tools ?? target.runtime.defaultCapabilities.tools === true;
+	if (target.modelCapabilities?.tools === true) return true;
+	if (target.runtime.defaultCapabilities.tools === true) return true;
+	if (target.toolsCapabilityExplicit === false) return false;
+	return TOOL_CARRYING_API_FAMILIES.has(target.runtime.apiFamily);
+}
+
+/**
+ * The only two sources that can actually answer "does this model take tools":
+ * the operator's own target override, which wins, and the knowledge-base entry
+ * for the wire model. Null means nothing named it, which is the common case for
+ * a local model id the catalog has never seen.
+ */
+function explicitToolCapability(
+	providers: ProvidersContract,
+	target: TargetDescriptor,
+	wireModelId: string,
+): boolean | null {
+	if (typeof target.capabilities?.tools === "boolean") return target.capabilities.tools;
+	const hit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
+	const fromKnowledgeBase = hit?.entry.capabilities?.tools;
+	return typeof fromKnowledgeBase === "boolean" ? fromKnowledgeBase : null;
 }
 
 function writeConfinedRequest(req: DispatchRequest): boolean {
@@ -1740,7 +1808,18 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	}
 	const product = input.req.product ?? input.recipe?.product;
 	if (product) spec.product = product;
-	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
+	// The orchestrator's tool decision is the one the run was admitted under and
+	// the one the approved tool signature was computed from, so it travels on the
+	// snapshot rather than being re-derived worker-side. The worker's
+	// workerProviderSupportsTools reads this field first; letting it recompute
+	// from the merged capability decision made an unanswered tool question
+	// resolve differently in the two processes, and the announcement was then
+	// refused for tool surface drift.
+	const resolutionSnapshot = runtimeTargetSnapshot(input.target.runtimeResolution);
+	spec.runtimeResolution = {
+		...resolutionSnapshot,
+		capabilities: { ...resolutionSnapshot.capabilities, tools: targetToolCapability(input.target) },
+	};
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
 	// Configured model ids with the role each serves, so the worker's empty
 	// residency registry evicts nothing and names what it must touch.
@@ -2058,6 +2137,7 @@ function resolveSelectedDispatchTarget(
 		thinkingLevel: resolved.target.effectiveThinkingLevel,
 		capabilities: capabilityInfoForTarget(providers, target.id),
 		modelCapabilities,
+		toolsCapabilityExplicit: explicitToolCapability(providers, target, wireModelId),
 		runtimeResolution: resolved.target,
 		effectivePricing: resolveEffectivePricing(target, runtime.id, wireModelId),
 	};
