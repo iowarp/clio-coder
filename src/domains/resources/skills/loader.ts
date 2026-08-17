@@ -67,6 +67,8 @@ export interface SkillProvenance {
 	/** Content hash of the upstream SKILL.md at install time, provenance-stripped. */
 	installedHash?: string;
 	audit?: "pass" | "warn" | "fail" | "unknown";
+	/** Who ran the install: a dispatched worker, or (unmarked) the operator. */
+	installedBy?: "worker";
 }
 
 export interface Skill {
@@ -479,7 +481,18 @@ function extractProvenance(frontmatter: Record<string, unknown>): SkillProvenanc
 	const auditRaw = field("audit");
 	const audit =
 		auditRaw === "pass" || auditRaw === "warn" || auditRaw === "fail" || auditRaw === "unknown" ? auditRaw : undefined;
-	if (!installUrl && !registryId && !registryUrl && !installedAt && !updatedAt && !installedHash && !audit)
+	const installedByRaw = field("installed-by", "installedBy");
+	const installedBy = installedByRaw === "worker" ? installedByRaw : undefined;
+	if (
+		!installUrl &&
+		!registryId &&
+		!registryUrl &&
+		!installedAt &&
+		!updatedAt &&
+		!installedHash &&
+		!audit &&
+		!installedBy
+	)
 		return undefined;
 	return {
 		...(installUrl ? { installUrl } : {}),
@@ -489,6 +502,7 @@ function extractProvenance(frontmatter: Record<string, unknown>): SkillProvenanc
 		...(updatedAt ? { updatedAt } : {}),
 		...(installedHash ? { installedHash } : {}),
 		...(audit ? { audit } : {}),
+		...(installedBy ? { installedBy } : {}),
 	};
 }
 

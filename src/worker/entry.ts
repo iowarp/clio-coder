@@ -14,6 +14,15 @@
 // id is appended once the spec is parsed.
 process.title = "clio-coder-worker";
 
+// Marks this process, and every child a worker's own bash tool spawns, as
+// running inside a dispatched worker rather than the operator's interactive
+// session. `installSkillFromSource` reads this to stamp skill provenance with
+// who performed the install, so a skill a worker drops into a trusted root
+// does not read as operator-installed. Set unconditionally at both local and
+// remote launch, since neither transport otherwise leaves a uniform signal on
+// the worker's own environment.
+process.env.CLIO_CODER_WORKER_RUN = "1";
+
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { setProtectedModelsProvider, setResidencyNoticeSink } from "../engine/apis/residency.js";
 import { startWorkerRun, type WorkerRunInput, workerProviderSupportsTools } from "../engine/worker-runtime.js";

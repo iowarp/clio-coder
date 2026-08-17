@@ -94,6 +94,7 @@ Set by Clio for its own processes; not operator knobs.
 | `CLIO_CODER_BOOTSTRAP_GENERATE_CHILD` | Marks the CLIO-CODER.md-generation child so it skips recursion (`src/domains/context/extension.ts`). |
 | `CLIO_CODER_WORKER_LABELS` | Comma-separated labels a dispatched worker reports as its own (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
 | `CLIO_CODER_WORKER_PGID` | Process-group id the transport assigns a worker so its whole tree can be signalled (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
+| `CLIO_CODER_WORKER_RUN` | Marks a dispatched worker process; a skill install run inside it is stamped `installed-by: worker` (`src/worker/entry.ts`, `src/domains/resources/skills/install.ts`). |
 
 ## Test-only
 
