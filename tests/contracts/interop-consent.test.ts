@@ -73,7 +73,7 @@ describe("interop consent", () => {
 	// every file, not just this one's. Routed through isolateClioEnv() rather
 	// than a hand-rolled save/mutate/restore of CLIO_CODER_HOME: that duplicate
 	// of the same idiom was exactly what raced against interop-state.test.ts's
-	// own copy at full-suite scale (issue #84) — isolateClioEnv() now serializes
+	// own copy at full-suite scale (issue #84). isolateClioEnv() now serializes
 	// every in-process env window process-wide, so this only closes the gap by
 	// going through it instead of re-implementing it.
 	let isolated: IsolatedClioEnv;

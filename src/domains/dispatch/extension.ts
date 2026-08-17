@@ -980,8 +980,14 @@ function personaOverrideFor(req: DispatchRequest, staticCompositionHash: string 
 
 /**
  * Per-run context for the dynamic worker prompt messages. Everything here
- * flows through dynamic messages, never through the stable system prompt, so
- * `staticCompositionHash` stays byte-identical run over run.
+ * flows through dynamic messages, never through the system prompt. The system
+ * prompt itself is stable per recipe and tool surface with one exception: the
+ * operator-editable layer (`additionalFragments`) folds in path-scoped project
+ * rules selected by `workerWorkingContextPaths`, which are recalled from the
+ * task and briefing text, so `staticCompositionHash` can differ between two
+ * runs of one recipe when a rule's glob matches one task and not the other.
+ * A local model's worker prefix cache misses on that flip; the trade was made
+ * deliberately in #96 to keep rules scoped rather than shipped wholesale.
  */
 export interface WorkerDynamicContext {
 	/** Used only for the verification-section inclusion rule, never for tier policy. */
