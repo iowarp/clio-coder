@@ -472,9 +472,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				...(deliveryTools.length > 0 ? { deliveryTools } : {}),
 				turnSynthesisLockout: workerBudget.synthesis,
 				// Once locked, the next model round is forced text-only at the
-				// request level (tool_choice none in onPayload below): the lockout
-				// directive alone relies on model compliance, and measured local
-				// models kept calling tools until the backstop aborted the run.
+				// request level (the tool surface is removed in onPayload below):
+				// the lockout directive alone relies on model compliance, and
+				// measured local models kept calling tools until the backstop
+				// aborted the run, or answered the forced round with tool-call
+				// markup that the loop guard then removed.
 				onSynthesisLockout: () => {
 					if (workerBudget.synthesis) {
 						synthesisToolLock = true;
@@ -634,7 +636,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				runtimeId: input.runtime.id,
 				thinkingLevel: effectiveThinkingLevel,
 				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
-				toolChoiceNone: synthesisToolLock || middlewareChoice.kind === "none",
+				toolSurfaceLocked: synthesisToolLock,
+				toolChoiceNone: middlewareChoice.kind === "none",
 				...(middlewareChoice.kind === "required" ? { toolChoiceName: middlewareChoice.toolName } : {}),
 			});
 		},

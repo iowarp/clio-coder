@@ -149,6 +149,33 @@ export function patchToolChoiceNonePayload(payload: unknown, model: EngineModel)
 	return { ...payload, tool_choice: "none" };
 }
 
+/**
+ * Force a text-only round the hard way: remove the tool surface from the
+ * request. Used for a worker's synthesis-locked rounds (the loop-guard lockout
+ * and the terminal result-contract repair). {@link patchToolChoiceNonePayload}
+ * is not enough there: llama.cpp honors tool_choice "none" by disabling its
+ * tool-call parser while the chat template still renders every tool schema,
+ * so a local model that decides to call a tool anyway hands its markup back
+ * as content, the loop guard strips it, and the worker ends with no result
+ * at all (a coder run that had written and tested its file returned zero
+ * output this way, #78). With no tools in the prompt the template renders no
+ * tool block and the model has nothing to call. The prompt prefix changes for
+ * these one or two rounds; that is the price of a usable answer.
+ *
+ * Anthropic keeps the tool_choice knob instead: its API rejects a history
+ * that carries tool_use blocks unless tools are defined, and it honors
+ * tool_choice none properly.
+ */
+export function patchToolSurfaceLockedPayload(payload: unknown, model: EngineModel): unknown | undefined {
+	if (!isRecord(payload)) return undefined;
+	if (!("tools" in payload) || payload.tools === undefined || payload.tools === null) return undefined;
+	if (isAnthropicMessagesApi(model.api)) return patchToolChoiceNonePayload(payload, model);
+	const stripped = { ...payload };
+	delete stripped.tools;
+	delete stripped.tool_choice;
+	return stripped;
+}
+
 /** Require one exposed tool for the next provider round while preserving the full schema surface. */
 export function patchToolChoiceNamedPayload(
 	payload: unknown,
@@ -239,6 +266,8 @@ export interface WorkerPayloadPatchOptions {
 	responseSchema?: Record<string, unknown>;
 	toolChoiceNone?: boolean;
 	toolChoiceName?: string;
+	/** Synthesis-locked round: remove the tool surface, see {@link patchToolSurfaceLockedPayload}. */
+	toolSurfaceLocked?: boolean;
 }
 
 /** Compose all worker-owned request mutations over one payload in a stable order. */
@@ -262,7 +291,13 @@ export function patchWorkerRequestPayload(
 		changed = true;
 	}
 
-	if (options.toolChoiceNone === true) {
+	if (options.toolSurfaceLocked === true) {
+		const lockedPatched = patchToolSurfaceLockedPayload(patched, model);
+		if (lockedPatched !== undefined) {
+			patched = lockedPatched;
+			changed = true;
+		}
+	} else if (options.toolChoiceNone === true) {
 		const toolChoicePatched = patchToolChoiceNonePayload(patched, model);
 		if (toolChoicePatched !== undefined) {
 			patched = toolChoicePatched;
