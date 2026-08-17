@@ -547,7 +547,7 @@ function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<
 		results,
 		followUp:
 			results.length > 0
-				? "Cited files are Clio's bundled docs, not workspace paths; never read or search for them as files. For more depth, run another context scope=docs query with more specific terms."
+				? "Cited files are Clio's bundled docs: read them from the installed documentation path named in your prompt, never by searching the workspace for them. For more depth, run another context scope=docs query with more specific terms."
 				: "Try Clio vocabulary such as target, autonomy, dispatch, evidence, middleware, context, validation, install, or model catalog.",
 	};
 }

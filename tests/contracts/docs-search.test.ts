@@ -138,16 +138,22 @@ describe("contracts/context docs scope", () => {
 		}
 	});
 
-	it("tells the model cited files are bundled docs, never workspace paths", async () => {
+	it("tells the model cited files are bundled docs read from the installed path, never searched for in the workspace", async () => {
 		const result = await contextTool.run({ scope: "docs", query: "autonomy" });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		const payload = JSON.parse(result.output) as { followUp?: string };
 		// Docs hits cite corpus-relative files that do not exist in the user's
-		// workspace; the follow-up must route depth back through scope=docs so
-		// models never chase the citations with read/find.
+		// workspace. The system prompt's docs-routing directive tells the model
+		// to read the routed document from the installed documentation path, so
+		// the follow-up must agree with it: read from that path, never grep or
+		// find the workspace for the citation, and route depth back through
+		// scope=docs. An earlier wording said "never read ... as files", which
+		// contradicted the directive in the same turn.
 		ok(typeof payload.followUp === "string");
-		ok(payload.followUp.includes("not workspace paths"), payload.followUp);
+		ok(payload.followUp.includes("installed documentation path"), payload.followUp);
+		ok(payload.followUp.includes("never by searching the workspace"), payload.followUp);
+		ok(!payload.followUp.includes("never read"), payload.followUp);
 		ok(payload.followUp.includes("scope=docs"), payload.followUp);
 	});
 
