@@ -11,7 +11,7 @@ Run a private suite from this source checkout with:
 
 ```sh
 npm run build
-clio-coder eval run --suite <external-path> --clio-entry dist/cli/index.js
+clio-coder eval run --suite <external-path> --clio-coder-entry dist/cli/index.js
 ```
 
 Use `--out <dir>` when the artifact should be written outside the default Clio

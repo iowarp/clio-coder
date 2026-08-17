@@ -1,6 +1,6 @@
 # Installation and Lifecycle Operations
 
-Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). The supported alpha install path is a source checkout with a deterministic local symlink; npm distribution of `@iowarp/clio-coder` begins with the first stable v0.3.0 (the CLI already classifies and upgrades npm installs, so nothing here changes shape at that point).
+Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). Clio Coder installs from npm as `@iowarp/clio-coder` (`npm install -g @iowarp/clio-coder`, published since v0.3.0) or from a source checkout with a deterministic local symlink; the CLI classifies both install kinds and `clio-coder upgrade` handles each.
 
 > [!TIP]
 > **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html) (Version: 0.3.1). You can open it directly in any web browser to view details dynamically.
@@ -182,7 +182,7 @@ The command detects the install method from the running binary. On a source
 checkout it never runs `npm install -g`: it performs its safe local duties
 (migration check, `install.json` refresh) and prints the real update steps,
 `git pull`, `npm run install:local`, `hash -r`. The npm reinstall path applies
-only to a genuinely npm-installed binary, once the package is published.
+only to a genuinely npm-installed binary.
 
 ### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:

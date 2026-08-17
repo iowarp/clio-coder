@@ -78,11 +78,11 @@ under `src/`, run `npm run build` again or keep `npm run dev` running.
 
 The release entry point is [../README.md](../README.md); detailed release
 history lives in [../CHANGELOG.md](../CHANGELOG.md). For v0.3.1 the supported
-install path is a source checkout through `npm run install:local`, the
-deterministic release gate is `npm run ci:release`, live model smoke
-validation is local/manual and opt-in through `npm run test:live` (add
-`-- --delegation` for opencode/copilot checks), and the package
-is not published to npm.
+install paths are `npm install -g @iowarp/clio-coder` and a source checkout
+through `npm run install:local`, the deterministic release gate is
+`npm run ci:release`, and live model smoke validation is local/manual and
+opt-in through `npm run test:live` (add `-- --delegation` for
+opencode/copilot checks).
 
 ## Writing Documentation
 
