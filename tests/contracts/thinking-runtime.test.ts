@@ -139,7 +139,7 @@ describe("contracts/tool-choice lockout payload patch", () => {
 		const openai = { api: "openai-completions" } as Parameters<typeof patchToolChoiceNamedPayload>[1];
 		deepStrictEqual(patchToolChoiceNamedPayload({ tools: [readFunction, dispatchFunction] }, openai, "dispatch"), {
 			tools: [dispatchFunction],
-			tool_choice: { type: "function", function: { name: "dispatch" } },
+			tool_choice: "required",
 		});
 		const responses = { api: "openai-responses" } as Parameters<typeof patchToolChoiceNamedPayload>[1];
 		deepStrictEqual(patchToolChoiceNamedPayload({ tools: [readFunction, dispatchFunction] }, responses, "dispatch"), {
@@ -193,6 +193,25 @@ describe("contracts/tool-choice lockout payload patch", () => {
 			tools: [dispatchFunction],
 			toolChoice: { type: "function", function: { name: "dispatch" } },
 		});
+	});
+
+	it("never sends an object tool_choice on a generic openai-compatible payload", () => {
+		// LM Studio and llama.cpp both answer HTTP 400 to the object form, so the
+		// string spelling is the contract for every api family that lands on the
+		// generic branch, not just openai-completions.
+		const dispatchFunction = { type: "function", function: { name: "dispatch" } };
+		const readFunction = { type: "function", function: { name: "read" } };
+		for (const api of ["openai-completions", "lmstudio-native", "ollama-native"] as const) {
+			const model = { api } as Parameters<typeof patchToolChoiceNamedPayload>[1];
+			const patched = patchToolChoiceNamedPayload(
+				{ model: "qwen3.8-27b", tools: [readFunction, dispatchFunction] },
+				model,
+				"dispatch",
+			) as Record<string, unknown>;
+			strictEqual(patched.tool_choice, "required", `${api} must use the string tool_choice`);
+			strictEqual(typeof patched.tool_choice, "string", `${api} must not send an object tool_choice`);
+			deepStrictEqual(patched.tools, [dispatchFunction], `${api} narrows tools to the forced tool`);
+		}
 	});
 });
 
