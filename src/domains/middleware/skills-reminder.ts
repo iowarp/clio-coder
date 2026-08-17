@@ -7,35 +7,48 @@ import { type MiddlewareEffect, metadataNumber } from "./types.js";
  * models read and ignore every ambient prompt channel but comply with the
  * identical instruction when it is visible user-message text, and
  * middleware reminders are the sanctioned mechanism for that text. Once
- * per session, on the first substantive task turn, when model-visible
- * skills exist, this registration injects one compact line teaching the
- * same reply protocol as the context(scope="skills") listing footer.
- * Reminder text only: loading stays operator-gated (`pendingSkillPolicy`
- * untouched), and a turn that already carries a pending skill request gets
- * no reminder because the operator has already chosen.
+ * per session, on the first substantive task turn, when model-visible or
+ * installable skills exist, this registration injects one compact line
+ * teaching the same reply protocol as the context(scope="skills") listing
+ * footer. Installable skills count because a fresh install has none
+ * installed and a marketplace full of them: gating on installed alone meant
+ * the one channel these models act on never fired for the operator who
+ * needed it most. Reminder text only: loading stays operator-gated
+ * (`pendingSkillPolicy` untouched), and a turn that already carries a
+ * pending skill request gets no reminder because the operator has already
+ * chosen.
  */
 
 export const SKILLS_REMINDER_REGISTRATION_ID = "observer.skills-reminder";
 
 export { SKILL_SUGGESTION_ANCHOR };
 
-export function skillsReminderMessage(count: number): string {
+export function skillsReminderMessage(installed: number, installable = 0): string {
 	// Unconditional imperative, deliberately: the skill-mastery batteries
 	// showed literal local models comply with "list and check" but never act
 	// on wording that first asks them to classify the task as skill-shaped.
 	// One listing call on the session's first turn is the accepted price.
+	const counts =
+		installable > 0
+			? `${installed} installed, ${installable} installable from the marketplace`
+			: `${installed} installed`;
 	return (
-		`[Skills] ${count} installed. Start this task by listing them with context(scope="skills") ` +
+		`[Skills] ${counts}. Start this task by listing them with context(scope="skills") ` +
 		"and checking for a match; if one matches, open your reply with the line " +
 		`\`${SKILL_SUGGESTION_ANCHOR}\` (a comma-separated sequence, in order, when several compose) ` +
-		"and wait for the operator; load only on operator request. If none match, do not mention " +
-		"skills and continue with the task."
+		"and wait for the operator; load only on operator request, and a marketplace skill is offered for " +
+		"install when the operator runs it. If none match, do not mention skills and continue with the task."
 	);
 }
 
 export interface SkillsReminderDeps {
-	/** Count of skills the model may see and suggest; 0 disables the reminder. */
+	/** Count of installed skills the model may see and suggest. */
 	countModelVisibleSkills(): number;
+	/**
+	 * Count of marketplace skills not yet installed. Optional; absent reads as
+	 * zero. Either count above zero arms the reminder.
+	 */
+	countInstallableSkills?(): number;
 }
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
@@ -174,14 +187,16 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 			// suggesting one would only add noise.
 			const pendingSkillRequests = metadataNumber(input, "pendingSkillRequests");
 			if (pendingSkillRequests !== null && pendingSkillRequests > 0) return NO_EFFECTS;
-			let count = 0;
+			let installed = 0;
+			let installable = 0;
 			try {
-				count = deps.countModelVisibleSkills();
+				installed = deps.countModelVisibleSkills();
+				installable = deps.countInstallableSkills?.() ?? 0;
 			} catch {
 				return NO_EFFECTS;
 			}
-			if (count <= 0) return NO_EFFECTS;
-			return [{ kind: "inject_reminder", severity: "info", message: skillsReminderMessage(count) }];
+			if (installed <= 0 && installable <= 0) return NO_EFFECTS;
+			return [{ kind: "inject_reminder", severity: "info", message: skillsReminderMessage(installed, installable) }];
 		},
 	};
 }
