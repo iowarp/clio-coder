@@ -528,6 +528,36 @@ describe("reviewer-gated dispatch", () => {
 		}
 	});
 
+	it("rejects a multi-task review at admission with the shape error instead of parking a plan it cannot run", async () => {
+		const fabric = scriptedGateFabric({});
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "auto-edit",
+			});
+			const raw = { tasks: ["implement the code", "write the tests"], mode: "parallel", review: { max_cycles: 2 } };
+			const prepared = tool.prepareAdmissionArguments?.(raw) ?? raw;
+			// The card must not present a plan the executor will refuse.
+			strictEqual(describeDispatchPlan(prepared).planScale, false);
+			const registry = createRegistry({ safety: createWorkerSafety(), autonomy: () => "auto-edit" });
+			registry.register(tool);
+			const parkedBefore = registry.parkedCount();
+			const verdict = await registry.invoke({ tool: ToolNames.Dispatch, args: raw }, {});
+			strictEqual(registry.parkedCount(), parkedBefore, "a call that cannot run never parks for approval");
+			strictEqual(verdict.kind, "ok");
+			if (verdict.kind !== "ok") return;
+			strictEqual(verdict.result.kind, "error");
+			if (verdict.result.kind !== "error") return;
+			match(verdict.result.message, /review supports exactly one task/);
+			ok(!verdict.result.message.includes("missing after admission"), verdict.result.message);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("executes every review cycle on its own approved role placement", async () => {
 		const fabric = scriptedGateFabric({ reviewerAnswers: [reviewReport("fail"), reviewReport("pass")] });
 		const placements: string[] = [];

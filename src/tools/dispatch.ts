@@ -990,6 +990,11 @@ export interface ReviewGateSettings {
 const REVIEW_MAX_CYCLES_DEFAULT = 2;
 const REVIEW_MAX_CYCLES_LIMIT = 4;
 
+const REVIEW_SINGLE_TASK_MESSAGE =
+	"dispatch: review supports exactly one task; run the fan-out without review, then dispatch one integration task with review to gate the combined result";
+const COMPETE_SINGLE_TASK_MESSAGE = "dispatch: compete requires exactly one task";
+const COMPETE_NO_REVIEW_MESSAGE = "dispatch: compete has its own judge and cannot combine with review";
+
 function reviewSettingsFromArgs(
 	args: Record<string, unknown>,
 ): { ok: true; review: ReviewGateSettings | undefined } | { ok: false; message: string } {
@@ -2275,6 +2280,14 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			...args,
 			[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT]: err instanceof Error ? err.message : String(err),
 		});
+	// A call whose shape the executor will refuse must not reach the operator
+	// as an approvable plan. Marking it prepared without a plan would render a
+	// plan-scale card from the raw arguments, and the approved call would then
+	// die on "resolved plan is missing after admission" instead of the real
+	// shape error. Recording the executor's own message as the preparation
+	// failure keeps the card away and hands the model the actionable text.
+	const shapeRejection = (args: Record<string, unknown>, message: string): Record<string, unknown> =>
+		describeDispatchPlan(args).planScale ? preparationFailure(args, message) : markPrepared(args);
 	const resolveTask = (
 		request: DispatchRequest,
 		role: NonNullable<ResolvedDispatchPlanArtifact["tasks"][number]["role"]>,
@@ -2431,9 +2444,12 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 		}
 		if (deps.dispatch.preview === undefined) return markPrepared(args);
 		const parsed = parseRequests(args);
-		if (!parsed.ok) return markPrepared(args);
+		if (!parsed.ok) return shapeRejection(args, parsed.message);
 		if (args.mode !== undefined && !["parallel", "sequential", "pipeline", "compete"].includes(String(args.mode))) {
-			return markPrepared(args);
+			return shapeRejection(
+				args,
+				`dispatch: mode must be parallel, sequential, pipeline, or compete; got '${String(args.mode)}'`,
+			);
 		}
 		const mode =
 			args.mode === "sequential"
@@ -2446,10 +2462,12 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 		try {
 			const tasks: ResolvedDispatchPlanArtifact["tasks"] = [];
 			const reviewResult = reviewSettingsFromArgs(args);
-			if (!reviewResult.ok) return markPrepared(args);
+			if (!reviewResult.ok) return shapeRejection(args, reviewResult.message);
 			if (reviewResult.review !== undefined) {
-				if (mode !== "parallel" || parsed.requests.length !== 1 || parsed.requests[0] === undefined) {
-					return markPrepared(args);
+				if (mode === "compete") return shapeRejection(args, COMPETE_NO_REVIEW_MESSAGE);
+				if (mode !== "parallel") return shapeRejection(args, `dispatch: review does not combine with mode=${mode}`);
+				if (parsed.requests.length !== 1 || parsed.requests[0] === undefined) {
+					return shapeRejection(args, REVIEW_SINGLE_TASK_MESSAGE);
 				}
 				const base = parsed.requests[0];
 				for (let cycle = 1; cycle <= reviewResult.review.maxCycles; cycle += 1) {
@@ -2481,9 +2499,11 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					);
 				}
 			} else if (mode === "compete") {
-				if (parsed.requests.length !== 1 || parsed.requests[0] === undefined) return markPrepared(args);
+				if (parsed.requests.length !== 1 || parsed.requests[0] === undefined) {
+					return shapeRejection(args, COMPETE_SINGLE_TASK_MESSAGE);
+				}
 				const competeResult = competeSettingsFromArgs(args);
-				if (!competeResult.ok) return markPrepared(args);
+				if (!competeResult.ok) return shapeRejection(args, competeResult.message);
 				const base = parsed.requests[0];
 				const subjects: RunGateSubjectRef[] = [];
 				for (let candidate = 1; candidate <= competeResult.compete.candidates; candidate += 1) {
@@ -2720,7 +2740,12 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			const args = prepareExecutionArguments(rawArgs);
 			const preparationError = args[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT];
 			if (typeof preparationError === "string") {
-				return { kind: "error", message: `dispatch: plan admission failed: ${preparationError}` };
+				return {
+					kind: "error",
+					message: preparationError.startsWith("dispatch: ")
+						? preparationError
+						: `dispatch: plan admission failed: ${preparationError}`,
+				};
 			}
 			if (args.list === true) {
 				const catalog = deps.getAgentCatalog?.().trim() ?? "";
@@ -2997,10 +3022,10 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 
 				if (mode === "compete") {
 					if (requests.length !== 1 || requests[0] === undefined) {
-						return { kind: "error", message: "dispatch: compete requires exactly one task" };
+						return { kind: "error", message: COMPETE_SINGLE_TASK_MESSAGE };
 					}
 					if (review !== undefined) {
-						return { kind: "error", message: "dispatch: compete has its own judge and cannot combine with review" };
+						return { kind: "error", message: COMPETE_NO_REVIEW_MESSAGE };
 					}
 					const competeParsed = competeSettingsFromArgs(args);
 					if (!competeParsed.ok) return { kind: "error", message: competeParsed.message };
@@ -3026,7 +3051,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 
 				if (review !== undefined) {
 					if (requests.length !== 1 || requests[0] === undefined) {
-						return { kind: "error", message: "dispatch: review supports exactly one task" };
+						return { kind: "error", message: REVIEW_SINGLE_TASK_MESSAGE };
 					}
 					if (mode !== "parallel") {
 						return { kind: "error", message: `dispatch: review does not combine with mode=${mode}` };
