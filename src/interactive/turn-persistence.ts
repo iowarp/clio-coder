@@ -70,11 +70,18 @@ export interface TurnPersistence {
 	): void;
 	/** Synthesized terminal row for a turn ended by a terminating tool result. */
 	appendTerminalToolAssistantTurn(terminal: { toolCallId: string; toolName: string }): void;
+	/**
+	 * Persist the user turn. `text` is the composed prompt the model receives
+	 * (reminder block, skill preamble, handoff, then the operator's words);
+	 * `operatorText`, when it differs, is what the operator actually typed and
+	 * is what a transcript replay renders under the operator marker.
+	 */
 	appendSubmittedUserTurn(
 		agentRuntime: AgentRuntime,
 		text: string,
 		images: ReadonlyArray<unknown> | undefined,
 		synthetic: boolean,
+		operatorText?: string,
 	): string | null;
 	appendRetryStatus(status: RetryStatusPayload): void;
 	appendModelChangeEntry(target: ChatLoopTarget): void;
@@ -363,7 +370,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			finishTracedTurn("success", null);
 		},
 
-		appendSubmittedUserTurn(agentRuntime, text, images, synthetic): string | null {
+		appendSubmittedUserTurn(agentRuntime, text, images, synthetic, operatorText): string | null {
 			if (!deps.session) return null;
 			if (!deps.session.current()) {
 				deps.session.create({
@@ -373,6 +380,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				});
 			}
 			const payload: Record<string, unknown> = images ? { content: [{ type: "text", text }, ...images] } : { text };
+			if (operatorText !== undefined && operatorText !== text) payload.operatorText = operatorText;
 			if (synthetic) {
 				payload.synthetic = true;
 				payload.source = "middleware_request_continuation";
