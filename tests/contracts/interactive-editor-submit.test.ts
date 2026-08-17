@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { BashCommandResult } from "../../src/core/bash-exec.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
@@ -30,7 +30,12 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 	const stderr: string[] = [];
 	const events: string[] = [];
 	const queued: string[] = [];
-	const submits: Array<{ text: string; steering?: string }> = [];
+	const submits: Array<{
+		text: string;
+		steering?: string;
+		workingContextPaths?: ReadonlyArray<string>;
+		pendingSkillRequests?: ReadonlyArray<unknown>;
+	}> = [];
 	let interruptRefusal: string | null = null;
 	let clearQueuedCalls = 0;
 	const steers: Array<{ runId: string; text: string }> = [];
@@ -67,7 +72,12 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 			},
 			interruptRefusal: () => interruptRefusal,
 			submit: async (message, options) => {
-				submits.push({ text: message, ...(options?.steering ? { steering: options.steering } : {}) });
+				submits.push({
+					text: message,
+					...(options?.steering ? { steering: options.steering } : {}),
+					...(options?.workingContextPaths ? { workingContextPaths: options.workingContextPaths } : {}),
+					...(options?.pendingSkillRequests ? { pendingSkillRequests: options.pendingSkillRequests } : {}),
+				});
 				events.push(`submit:${options?.steering ?? "default"}:${message}`);
 			},
 		},
@@ -78,6 +88,7 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 		sessionTranscript: {
 			ensureSessionForLocalEntry: () => events.push("ensure-session"),
 			refreshChatContextFromSession: (leafTurnId) => events.push(`refresh:${leafTurnId ?? "null"}`),
+			recordSubmittedTurn: () => events.push("record-turn"),
 		},
 		chatPanel: { appendReplayBlock: () => events.push("append-bash") },
 		dispatchCommand: (command) => events.push(`dispatch:${command}`),
@@ -265,8 +276,58 @@ describe("contracts/interactive editor submit", () => {
 			"history:stop and read this",
 			"set:earlier steer\n\nearlier follow-up",
 			"render",
+			"record-turn",
 			"submit:interrupt:expanded stop",
 		]);
+	});
+
+	it("interrupt while streaming carries the expansion's paths and skill requests, like an idle send", async () => {
+		const harness = createHarness({ streaming: true });
+		harness.setText("use /skill:grill-me on @src/foo.ts");
+		const skillRequest = { name: "grill-me", source: "slash-command" };
+		harness.deps.expandSubmit = async () => ({
+			text: "use grill-me on <file>",
+			images: [],
+			workingContextPaths: ["src/foo.ts"],
+			pendingSkillRequests: [skillRequest as never],
+		});
+		let collapsed = 0;
+		harness.deps.collapseLaunchpadBeforeSubmit = () => {
+			collapsed += 1;
+			harness.events.push("collapse");
+		};
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.interruptFromEditor();
+		await flushAsync();
+
+		deepStrictEqual(harness.submits, [
+			{
+				text: "use grill-me on <file>",
+				steering: "interrupt",
+				workingContextPaths: ["src/foo.ts"],
+				pendingSkillRequests: [skillRequest],
+			},
+		]);
+		strictEqual(collapsed, 1, "the launchpad collapses once, as it does for an idle send");
+		ok(harness.events.includes("record-turn"), "the submitted-turn counter moves, as it does for an idle send");
+	});
+
+	it("interrupt while streaming omits empty paths and skill requests rather than passing empty arrays", async () => {
+		const harness = createHarness({ streaming: true });
+		harness.setText("plain");
+		harness.deps.expandSubmit = async () => ({
+			text: "plain",
+			images: [],
+			workingContextPaths: [],
+			pendingSkillRequests: [],
+		});
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.interruptFromEditor();
+		await flushAsync();
+
+		deepStrictEqual(harness.submits, [{ text: "plain", steering: "interrupt" }]);
 	});
 
 	it("a refused interrupt leaves the queue alone and still hands the text to the chat loop", async () => {
@@ -348,6 +409,36 @@ describe("contracts/interactive editor submit", () => {
 
 		strictEqual(controller.hasActiveEditorBash(), false);
 		deepStrictEqual(harness.events, ["ensure-session", "append-bash", "refresh:null", "render"]);
+	});
+
+	it("restores the leaf the session has when the bash finishes, not the one captured when it started", async () => {
+		const harness = createHarness();
+		let leafId: string | null = "u1";
+		const appended: Array<{ kind: string; parentTurnId: string | null }> = [];
+		harness.deps.session = {
+			current: () => ({ id: "s1" }),
+			tree: () => ({ leafId }),
+			appendEntry: (input: { kind: string; parentTurnId?: string | null }) => {
+				appended.push({ kind: input.kind, parentTurnId: input.parentTurnId ?? null });
+				return { ...input, turnId: "e1", timestamp: "2026-08-17T00:00:00.000Z" };
+			},
+		} as never;
+		let resolveBash: (result: BashCommandResult) => void = () => {};
+		harness.deps.runBash = () =>
+			new Promise((resolve) => {
+				resolveBash = resolve;
+			});
+		const controller = createEditorSubmitController(harness.deps);
+
+		strictEqual(controller.runEditorBash("! npm test"), true);
+		// A prompt lands while the command runs: the session leaf moves on.
+		leafId = "a2";
+		resolveBash(bashResult());
+		await flushAsync();
+
+		deepStrictEqual(appended, [{ kind: "bashExecution", parentTurnId: "u1" }], "the entry keeps its start-time anchor");
+		ok(harness.events.includes("refresh:a2"), `chat leaf restored to the current leaf: ${harness.events.join(",")}`);
+		ok(!harness.events.includes("refresh:u1"), "and never to the stale one, which wedged every later submit");
 	});
 
 	it("rejects local bash behind a streaming response with the existing notice", () => {
