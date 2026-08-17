@@ -856,6 +856,20 @@ export function fallbackExtraction(language: CodewikiLanguage, relPath: string, 
 	return extractWithExtractors(fallbackExtractors, language, relPath, text);
 }
 
+/**
+ * Largest source text handed to tree-sitter. The cooperative slicer yields
+ * between files, never inside one, so a single parse is the longest stretch the
+ * event loop can be held for; measured on this machine that is roughly 0.5 ms
+ * per KiB of ordinary source and 2 to 3 ms per KiB of a minified bundle, which
+ * made one 9 MiB vendored bundle a 25 s freeze that no shutdown budget could
+ * interrupt (issue #99). Nothing hand-written is this big; anything above the
+ * cap is generated or vendored, and the regex extractor covers it in tens of
+ * milliseconds. Under the cap one parse of ordinary source is a few hundred
+ * milliseconds at most; a minified file right at the cap can still take about a
+ * second, which is bounded, and the loop gets its turn at the next file.
+ */
+export const MAX_TREE_SITTER_SOURCE_CHARS = 512 * 1024;
+
 function extractSourceFile(
 	language: CodewikiLanguage,
 	relPath: string,
@@ -863,6 +877,7 @@ function extractSourceFile(
 	treeSitterExtractor: LanguageExtractor,
 ): LanguageExtraction {
 	if (!treeSitterExtractor.langs.includes(language)) return fallbackExtraction(language, relPath, text);
+	if (text.length > MAX_TREE_SITTER_SOURCE_CHARS) return fallbackExtraction(language, relPath, text);
 	try {
 		return mergeTreeSitterWithRegexImports(language, relPath, text, treeSitterExtractor.extract(relPath, text));
 	} catch {

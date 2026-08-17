@@ -58,8 +58,10 @@ function persistState(
 /**
  * Rebuild the codewiki when it is missing or the working tree has drifted since
  * the last full index. Runs once at session start (catches branch switches, git
- * pulls, and out-of-session edits) and again at stop. Skips projects that were
- * never indexed so we never index an arbitrary directory unprompted.
+ * pulls, and out-of-session edits). Skips projects that were never indexed so we
+ * never index an arbitrary directory unprompted. This is the only place a
+ * session reconciles the index with the tree: in-session edits arrive through
+ * `noteFileChanges`, and stop() deliberately does no indexing at all.
  *
  * Every phase runs through one shared slicer. This work overlaps a mounted TUI:
  * before slicing, a drifted tree on a 1100-file repository held the event loop
@@ -222,7 +224,7 @@ export function createContextBundle(
 
 	// Incremental updates are read-modify-write on the artifact; overlapping runs
 	// would compute from a stale base and drop each other's records, so batches
-	// serialize through this queue and stop() drains it before its final rebuild.
+	// serialize through this queue and stop() drains it before the process exits.
 	let incrementalQueue: Promise<void> = Promise.resolve();
 	const noteFileChanges = (paths: ReadonlyArray<string>, cwd: string = lastCwd): void => {
 		incrementalQueue = incrementalQueue
@@ -261,35 +263,20 @@ export function createContextBundle(
 		async stop() {
 			unsubscribeSessionStart?.();
 			unsubscribeSessionStart = null;
+			// Everything the session changed already went through noteFileChanges,
+			// so the only work still owed at stop is the tail of that queue. Nothing
+			// here re-indexes: a stop-time rebuild used to run the same full scan as
+			// start on every exit, on the shutdown path, where one synchronous
+			// tree-sitter parse of a large file holds the event loop past every
+			// shutdown budget (issue #99). Out-of-band drift is start's job on the
+			// next session, and a never-indexed cwd stays that way; indexing an
+			// arbitrary directory because a process exited in it is not a favor.
 			await incrementalQueue;
-			// Stop runs the same rebuild as start and the TUI is still mounted while
-			// it drains, so it shares the sliced path rather than blocking the quit.
-			const slicer = createSlicer();
-			const projectType = detectProjectType(lastCwd);
 			const state = readClioState(lastCwd);
-			let codewiki = readCachedCodewiki(lastCwd);
-			let fingerprint = await computeFingerprintAsync(lastCwd, codewiki, { slicer });
-			let lastIndexedAt = state?.lastIndexedAt;
-			if (!state || isStale(state.fingerprint, fingerprint) || !codewiki || codewikiNeedsBackfill(codewiki)) {
-				lastIndexedAt = new Date().toISOString();
-				codewiki = codewiki
-					? await syncCodewiki(lastCwd, codewiki, { slicer })
-					: await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt }, { slicer });
-				writeCachedCodewiki(lastCwd, codewiki);
-				fingerprint = await computeFingerprintAsync(lastCwd, codewiki, { slicer });
-			}
-			writeClioState(lastCwd, {
-				version: 1,
-				projectType,
-				fingerprint,
-				...(codewiki ? { codewikiVersion: codewiki.version } : {}),
-				...(state?.contextSources ? { contextSources: state.contextSources } : {}),
-				...(state?.contextSourceHash ? { contextSourceHash: state.contextSourceHash } : {}),
-				...(state?.lastBootstrap ? { lastBootstrap: state.lastBootstrap } : {}),
-				...(state?.lastInitAt ? { lastInitAt: state.lastInitAt } : {}),
-				lastSessionAt: new Date().toISOString(),
-				...(lastIndexedAt ? { lastIndexedAt } : {}),
-			});
+			if (!state) return;
+			// The fingerprint is left as the last index wrote it. Stamping a fresh
+			// one without re-indexing would hide drift from the next start.
+			writeClioState(lastCwd, { ...state, lastSessionAt: new Date().toISOString() });
 		},
 	};
 
