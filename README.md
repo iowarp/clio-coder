@@ -353,8 +353,9 @@ fleet:
 Then `clio-coder doctor` runs a per-node preflight, `clio-coder fleet list|run|status`
 drives and observes contracts, and `clio-coder fleet drain|resume` closes or reopens
 durable dispatch admission. A drain preserves running work, rejects every new
-execution start, and expires after one hour unless renewed. The `/fleet`
-overlay shows nodes, profiles, bindings, and live runs. Nodes must share the
+execution start, and expires after one hour unless renewed. `/fleet` opens
+Settings → Fleet with defaults, profiles, agent bindings, and node placement,
+and the `Alt+W` Fleet Runs board shows live runs. Nodes must share the
 project filesystem at the same absolute path; hosts that do not fail admission
 with a clear reason. Target URLs resolve on the node the worker runs on, so
 `localhost` means that node's own inference server and there is no central
@@ -675,6 +676,7 @@ Benchmarks against public suites live under `benchmarks/`:
 ```bash
 npm run bench:swe        # SWE-bench Lite
 npm run bench:scicode    # SciCode
+npm run bench:tb         # Terminal-Bench
 ```
 
 ## Where to start
