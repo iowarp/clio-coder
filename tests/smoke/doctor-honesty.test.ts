@@ -9,7 +9,7 @@
  * merely unreadable, pointing at a `--fix` that fails the same way.
  */
 import { match, ok, strictEqual } from "node:assert/strict";
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
@@ -37,6 +37,37 @@ describe("clio-coder doctor honesty about its own roots", { concurrency: false }
 		ok(row !== undefined, `expected a "${name}" row in:\n${stdout}`);
 		return row;
 	}
+
+	it("treats a home it has never written to as not set up, not as broken, and writes nothing", async () => {
+		// The first command a new user runs after `npm install -g` may well be
+		// `doctor`. Seven `!!` rows and exit 1 read as damage; one row naming the
+		// state and the commands that leave it is the honest report.
+		const fresh = await runCli(["doctor"], { env: scratch.env });
+		strictEqual(fresh.code, 0, `an untouched home is not a failing install:\n${fresh.stdout}${fresh.stderr}`);
+		const row = rowFor(fresh.stdout, "installation");
+		match(row, /^WARN/u);
+		match(row, /not set up yet/u);
+		match(row, /clio-coder configure/u);
+		for (const name of ["config dir", "data dir", "state dir", "cache dir", "settings.yaml", "credentials"]) {
+			ok(!fresh.stdout.includes(name), `no per-root row on an untouched home, saw "${name}" in:\n${fresh.stdout}`);
+		}
+		strictEqual(readdirSync(scratch.dir).length, 0, "doctor without --fix creates nothing in an untouched home");
+
+		// Because doctor created nothing, the --fix that follows is a first
+		// install and is stamped as one, not as a repair of something doctor left.
+		const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
+		strictEqual(fixed.code, 0);
+		match(rowFor(fixed.stdout, "state metadata"), /installed /u);
+		ok(!rowFor(fixed.stdout, "state metadata").includes("repaired"));
+	});
+
+	it("keeps the per-root report once any root exists", async () => {
+		mkdirSync(join(scratch.dir, "cache"), { recursive: true });
+		const result = await runCli(["doctor"], { env: scratch.env });
+		strictEqual(result.code, 1);
+		match(rowFor(result.stdout, "config dir"), /missing/u);
+		ok(!result.stdout.includes("not set up yet"));
+	});
 
 	it("calls a root that is a regular file a failure, not an OK directory", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
