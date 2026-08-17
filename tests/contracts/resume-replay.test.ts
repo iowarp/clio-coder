@@ -83,6 +83,64 @@ describe("contracts/resume replay ledger fidelity", () => {
 	});
 });
 
+describe("contracts/resume replay operator turns", () => {
+	const ts = "2026-07-02T12:00:00.000Z";
+	const reminder =
+		'<system-reminder>\n[Skills] 9 installed. Start this task by listing them with context(scope="skills").\n</system-reminder>';
+
+	it("renders the operator's typed text, not the composed prompt, when the entry carries it", () => {
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, [
+			{
+				kind: "message",
+				role: "user",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: ts,
+				payload: { text: `${reminder}\n\nPlan an input-validation layer`, operatorText: "Plan an input-validation layer" },
+			},
+		]);
+		const rendered = strip(panel.render(100).join("\n"));
+		ok(rendered.includes("Plan an input-validation layer"), rendered);
+		ok(!rendered.includes("system-reminder"), rendered);
+		ok(!rendered.includes("[Skills]"), rendered);
+	});
+
+	it("drops the leading reminder scaffolding from an entry written before operator text was persisted", () => {
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, [
+			{
+				kind: "message",
+				role: "user",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: ts,
+				payload: { text: `${reminder}\n\nPlan an input-validation layer` },
+			},
+		]);
+		const rendered = strip(panel.render(100).join("\n"));
+		ok(rendered.includes("Plan an input-validation layer"), rendered);
+		ok(!rendered.includes("system-reminder"), rendered);
+		ok(!rendered.includes("[Skills]"), rendered);
+	});
+
+	it("leaves a reminder the operator quoted mid-message alone", () => {
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, [
+			{
+				kind: "message",
+				role: "user",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: ts,
+				payload: { text: "why did you show me <system-reminder>this</system-reminder>?" },
+			},
+		]);
+		const rendered = strip(panel.render(100).join("\n"));
+		ok(rendered.includes("why did you show me <system-reminder>this</system-reminder>?"), rendered);
+	});
+});
+
 describe("contracts/resume replay transcript notices", () => {
 	const ts = "2026-07-02T12:00:00.000Z";
 

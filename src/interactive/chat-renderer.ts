@@ -344,6 +344,28 @@ function chatMessageText(entry: MessageEntry): string {
 	return extractTurnText(entry.payload);
 }
 
+const LEADING_SYSTEM_REMINDER = /^\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/u;
+
+/**
+ * What the operator typed for a replayed user turn. The persisted text is the
+ * composed prompt (a system-reminder block and any skill preamble ride ahead of
+ * the operator's words, as visible text the model receives), and the live
+ * transcript only ever showed the typed part. Entries written since the
+ * operator text was persisted carry it directly; older entries drop the
+ * leading reminder scaffolding so a /fork or /resume redraw does not attribute
+ * it to the operator (#81).
+ */
+export function replayedUserText(entry: MessageEntry): string {
+	const obj = payloadObject(entry.payload);
+	if (typeof obj?.operatorText === "string") return obj.operatorText;
+	let text = extractTurnText(entry.payload);
+	for (;;) {
+		const stripped = text.replace(LEADING_SYSTEM_REMINDER, "");
+		if (stripped === text) return text;
+		text = stripped;
+	}
+}
+
 function messageFailure(entry: MessageEntry): { stopReason: "error" | "aborted"; errorMessage: string } | null {
 	const obj = payloadObject(entry.payload);
 	if (!obj) return null;
@@ -868,7 +890,7 @@ export function rehydrateChatPanelFromTurns(
 		switch (entry.kind) {
 			case "message": {
 				if (entry.role === "user") {
-					const text = truncateReplayText(chatMessageText(entry));
+					const text = truncateReplayText(replayedUserText(entry));
 					if (text.length > 0) chatPanel.appendUser(text);
 					break;
 				}

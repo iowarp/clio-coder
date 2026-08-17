@@ -611,6 +611,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				submittedText,
 				images,
 				options.requestContinuation === true,
+				text,
 			);
 			context.logPromptCompileIfPending();
 			turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
