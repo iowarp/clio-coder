@@ -9,6 +9,11 @@
  * boundary. Emits NDJSON events on stdout.
  */
 
+// A fleet run puts N of these in the process table at once. Name the process
+// before the spec arrives so an early failure is still identifiable; the agent
+// id is appended once the spec is parsed.
+process.title = "clio-coder-worker";
+
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { setProtectedModelsProvider, setResidencyNoticeSink } from "../engine/apis/residency.js";
 import { startWorkerRun, type WorkerRunInput, workerProviderSupportsTools } from "../engine/worker-runtime.js";
@@ -103,6 +108,7 @@ async function main(): Promise<number> {
 	process.stdin.resume();
 
 	const spec = await demux.readSpec();
+	process.title = `clio-coder-worker:${spec.agentId}`;
 	// The worker has no settings view of its own; the dispatcher copied the
 	// operator's configured model ids onto the spec so this process protects
 	// the same residents as the orchestrator.
