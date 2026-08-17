@@ -171,7 +171,20 @@ describe("contracts/skills-cli bundle install", () => {
 		});
 		const project = join(scratch.dir, `grouped-project-${label}`);
 		mkdirSync(project, { recursive: true });
-		return { env: { ...scratch.env, CLIO_CODER_SKILL_CATALOG_DIR: catalog }, project };
+		// --category fans out across every marketplace source tagged with that
+		// category, not just CLIO_CODER_SKILL_CATALOG_DIR: leaving the index
+		// unset falls through to the package's own bundled skill-marketplace.json,
+		// whose "git"-category entries are real GitHub-hosted skills. Installing
+		// them means a real `git clone` per skill, which is where this test's
+		// ~10s wall time and its closeness to runCli's 15s timeout actually came
+		// from — not filesystem work, and not shard contention. An empty index
+		// keeps the category match scoped to this fixture's own catalog.
+		const emptyIndex = join(scratch.dir, `grouped-index-${label}.json`);
+		writeFileSync(emptyIndex, JSON.stringify({ skills: [] }), "utf8");
+		return {
+			env: { ...scratch.env, CLIO_CODER_SKILL_CATALOG_DIR: catalog, CLIO_CODER_SKILL_MARKETPLACE_INDEX: emptyIndex },
+			project,
+		};
 	}
 
 	it("installs one catalog group and leaves the other groups alone", async () => {
