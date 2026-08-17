@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 
 // Deterministic, dependency-free retrieval over Clio's bundled human docs,
@@ -323,7 +323,18 @@ function buildDocumentFrequency(sections: ReadonlyArray<IndexedSection>): Map<st
 function loadDocsIndex(): { ok: true; index: DocsIndex } | { ok: false; message: string } {
 	let root: string;
 	try {
-		root = resolvePackageRoot();
+		// resolvePackageRoot() caches its answer for the life of the process, so
+		// once any caller has resolved it, a later CLIO_CODER_PACKAGE_ROOT change
+		// (a test fixture, most commonly) has no effect on that cached value.
+		// Reading the override directly here, rather than trusting the shared
+		// cache, keeps this module's notion of "docs root" live even when it
+		// isn't the first thing in the process to have resolved a package root.
+		const override = process.env.CLIO_CODER_PACKAGE_ROOT?.trim();
+		if (override) {
+			root = resolve(override);
+		} else {
+			root = resolvePackageRoot();
+		}
 	} catch (err) {
 		return { ok: false, message: err instanceof Error ? err.message : String(err) };
 	}

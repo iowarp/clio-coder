@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
+import { resetXdgCache } from "../../src/core/xdg.js";
 import {
 	type FleetContract,
 	normalizeWriteBoundary,
@@ -62,6 +63,13 @@ describe("contracts/write-boundary", () => {
 		JOURNAL_ROOT = mkdtempSync(join(tmpdir(), "clio-writes-journal-"));
 		savedStateDir = process.env.CLIO_CODER_STATE_DIR;
 		process.env.CLIO_CODER_STATE_DIR = join(JOURNAL_ROOT, ".state");
+		// clioStateDir() caches its resolved directory in a module-level singleton
+		// (src/core/xdg.ts), so under --experimental-test-isolation=none, whichever
+		// file's test calls it first in this shared process locks the value in for
+		// every file after it. Without this reset, dirtyPaths()'s exclusion of the
+		// journal path reads a stale cached dir instead of this file's own
+		// CLIO_CODER_STATE_DIR, and its own journal writes get blamed as violations.
+		resetXdgCache();
 	});
 
 	after(() => {
@@ -69,6 +77,7 @@ describe("contracts/write-boundary", () => {
 		rmSync(JOURNAL_ROOT, { recursive: true, force: true });
 		if (savedStateDir === undefined) delete process.env.CLIO_CODER_STATE_DIR;
 		else process.env.CLIO_CODER_STATE_DIR = savedStateDir;
+		resetXdgCache();
 	});
 
 	function git(root: string, args: string[]): string {
