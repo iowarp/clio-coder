@@ -242,6 +242,14 @@ describe("contracts/overlay width — context activity island", () => {
  */
 const DOTTED_IDENTIFIER = /^[a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+$/u;
 
+/**
+ * A help sentence may name a file, and a file name is shaped like a key. The
+ * keybindings help says to override the renderer controls in settings.yaml,
+ * which reads as the key `settings.yaml` to the scan above. No settings key
+ * ends in a file extension, so a truncated key can never hide behind this.
+ */
+const FILE_NAME = /\.(ya?ml|json|md|jsonl|ts|js)$/u;
+
 function settingsCenter(bodyHeight: number): SettingsCenter {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.autonomy = "auto-edit";
@@ -265,7 +273,7 @@ describe("contracts/overlay width — settings overlay", () => {
 				center.setSelection(section.id, 0);
 				const rendered = stripAnsi(center.render(width).join("\n"));
 				for (const word of rendered.split(/\s+/u)) {
-					if (!DOTTED_IDENTIFIER.test(word)) continue;
+					if (!DOTTED_IDENTIFIER.test(word) || FILE_NAME.test(word)) continue;
 					ok(
 						configPaths.has(word),
 						`at ${width} cols the ${section.id} section printed "${word}", which is no settings key`,
