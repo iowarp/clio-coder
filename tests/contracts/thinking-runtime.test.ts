@@ -229,6 +229,39 @@ describe("contracts/llama.cpp response-schema payload patch", () => {
 		deepStrictEqual(patched.response_format, { type: "json_object", schema: responseSchema });
 	});
 
+	it("removes the tool surface for a synthesis-locked worker round on OpenAI-family APIs", () => {
+		const model = { api: "openai-completions" } as Parameters<typeof patchWorkerRequestPayload>[1];
+		const tools = [{ type: "function", function: { name: "read", parameters: { type: "object" } } }];
+		const patched = patchWorkerRequestPayload({ model: "coder-model", messages: [], tools, tool_choice: "auto" }, model, {
+			runtimeId: "llamacpp",
+			toolSurfaceLocked: true,
+		}) as Record<string, unknown>;
+		// llama.cpp keeps rendering tools under tool_choice none and returns
+		// the model's markup as content, so the lock removes the surface itself.
+		strictEqual("tools" in patched, false);
+		strictEqual("tool_choice" in patched, false);
+		strictEqual(patched.model, "coder-model");
+	});
+
+	it("keeps tool_choice none for a synthesis-locked Anthropic round because tool history needs tools", () => {
+		const model = { api: "anthropic-messages" } as Parameters<typeof patchWorkerRequestPayload>[1];
+		const tools = [{ name: "read", input_schema: { type: "object" } }];
+		const patched = patchWorkerRequestPayload({ model: "m", messages: [], tools }, model, {
+			runtimeId: "anthropic",
+			toolSurfaceLocked: true,
+		}) as Record<string, unknown>;
+		strictEqual(patched.tools, tools);
+		deepStrictEqual(patched.tool_choice, { type: "none" });
+	});
+
+	it("leaves a payload without tools alone under the surface lock", () => {
+		const model = { api: "openai-completions" } as Parameters<typeof patchWorkerRequestPayload>[1];
+		strictEqual(
+			patchWorkerRequestPayload({ model: "m", messages: [] }, model, { runtimeId: "llamacpp", toolSurfaceLocked: true }),
+			undefined,
+		);
+	});
+
 	it("refuses to silently apply responseSchema to another runtime", () => {
 		const model = { api: "openai-completions" } as Parameters<typeof patchWorkerRequestPayload>[1];
 		throws(
