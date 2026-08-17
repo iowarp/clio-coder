@@ -414,6 +414,20 @@ function checkCiScripts(): void {
 }
 
 // ---------------------------------------------------------------------------
+// skills-pin: skills/registry.yaml must match the catalog content hashes.
+// be2b5ccb rewrote a skill's instructions and never repinned; `npm run
+// skills:check` (`pin-skills.ts --check`) only ran inside the full `ci`
+// chain, and `npm run lint` never called it, so nothing caught the drift
+// until the full gate ran. This delegates to the same `--check` mode `lint`
+// now runs, rather than reimplementing the hash comparison, so there is one
+// definition of "stale".
+// ---------------------------------------------------------------------------
+async function checkSkillsPin(): Promise<void> {
+	const result = await runProcess("node", ["--import", "tsx", "scripts/pin-skills.ts", "--check"], {});
+	if (result.status !== 0) fail("skills-pin", result.output.trim());
+}
+
+// ---------------------------------------------------------------------------
 // defaults-yaml: DEFAULT_SETTINGS_YAML must parse to exactly DEFAULT_SETTINGS.
 // Was tests/contracts/defaults-yaml.test.ts.
 // ---------------------------------------------------------------------------
@@ -1045,6 +1059,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["export-hygiene", checkExportHygiene],
 	["boundaries", checkBoundaries],
 	["ci-scripts", checkCiScripts],
+	["skills-pin", checkSkillsPin],
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],
 	["environment-variable-inventory", checkEnvironmentVariableInventory],
