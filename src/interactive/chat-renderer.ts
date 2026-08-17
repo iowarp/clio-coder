@@ -355,7 +355,7 @@ const LEADING_SYSTEM_REMINDER = /^\s*<system-reminder>[\s\S]*?<\/system-reminder
  * leading reminder scaffolding so a /fork or /resume redraw does not attribute
  * it to the operator (#81).
  */
-export function replayedUserText(entry: MessageEntry): string {
+function replayedUserText(entry: MessageEntry): string {
 	const obj = payloadObject(entry.payload);
 	if (typeof obj?.operatorText === "string") return obj.operatorText;
 	let text = extractTurnText(entry.payload);
