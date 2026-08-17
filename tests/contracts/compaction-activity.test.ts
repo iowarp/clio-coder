@@ -265,7 +265,8 @@ function persistentSession(bus: ReturnType<typeof createSafeEventBus>): SessionC
 	return createSessionBundle(context).contract;
 }
 
-function seedPersistentCompactionHistory(session: SessionContract): void {
+/** Returns the id of the last appended turn: the session's leaf once seeding is done. */
+function seedPersistentCompactionHistory(session: SessionContract): string {
 	const firstUser = session.append({ parentId: null, kind: "user", payload: { text: "old request to summarize" } });
 	const firstAssistant = session.append({
 		parentId: firstUser.id,
@@ -277,7 +278,12 @@ function seedPersistentCompactionHistory(session: SessionContract): void {
 		kind: "user",
 		payload: { text: "recent request to retain" },
 	});
-	session.append({ parentId: recentUser.id, kind: "assistant", payload: { text: "recent response to retain" } });
+	const recentAssistant = session.append({
+		parentId: recentUser.id,
+		kind: "assistant",
+		payload: { text: "recent response to retain" },
+	});
+	return recentAssistant.id;
 }
 
 function persistedEntries(session: SessionContract): SessionEntry[] {
@@ -288,11 +294,29 @@ function persistedEntries(session: SessionContract): SessionEntry[] {
 
 function sessionWithProductionFailure(base: SessionContract, failure: ProductionFailure): SessionContract {
 	if (failure === "session-read") {
-		const current = base.current();
-		if (!current) throw new Error("test setup requires a current session");
+		// current() is the domain's in-memory pointer (extension.ts: `() =>
+		// state?.meta ?? null`); it never touches disk, so faking its id here
+		// does not model "a session read failed" the way it looks like it does.
+		// It used to also feed session.tree()'s meta.id, which was the point:
+		// runCompactionFlow (forced mode) reads via session.tree(meta.id), whose
+		// engine call resolves the id by scanning sessions/<hash>/<id> on disk
+		// and throws "session not found: <id>" for one that was never created.
+		// The trouble is that any other code that runs first and merely
+		// resolves this same fake id's paths (sessionPaths() mkdirs the
+		// directory it computes, even just to check for a snapshots file) turns
+		// "no such directory" into "directory exists but is empty," and the next
+		// read gets a raw ENOENT instead. Production's real resetForSession call
+		// runs against a session that is genuinely current and readable, so it
+		// never faces that fake id at all; only the read this scenario is
+		// actually testing should. Fail tree() directly instead of lying about
+		// the session's own identity, so current() stays real for anything else
+		// that touches it (resetForSession's own snapshot lookup among them).
 		return {
 			...base,
-			current: () => ({ ...current, id: "missing-compaction-session" }),
+			tree(sessionId) {
+				const id = sessionId ?? base.current()?.id ?? "unknown";
+				throw new Error(`session not found: ${id}`);
+			},
 		};
 	}
 	if (failure === "summary-append") {
@@ -311,7 +335,7 @@ async function runProductionFailureScenario(
 	failure: ProductionFailure,
 	mode: CompactionMode,
 ): Promise<{ activities: ContextActivityPayload[]; visible: string }> {
-	const isolated = isolateClioEnv(`clio-compaction-${failure}-${mode}-`);
+	const isolated = await isolateClioEnv(`clio-compaction-${failure}-${mode}-`);
 	const bus = createSafeEventBus();
 	const activities = compactionActivities(bus);
 	const events: ChatLoopEvent[] = [];
@@ -324,7 +348,7 @@ async function runProductionFailureScenario(
 
 	try {
 		baseSession.create({ cwd: isolated.dir, model: "model", target: "test-target" });
-		seedPersistentCompactionHistory(baseSession);
+		const seededLeafId = seedPersistentCompactionHistory(baseSession);
 		const session = sessionWithProductionFailure(baseSession, failure);
 		faux.setResponses([
 			failure === "provider-stream"
@@ -342,7 +366,17 @@ async function runProductionFailureScenario(
 			providers: productionProviders,
 			knownTargets: () => new Set(["test-target"]),
 			session,
-			readSessionEntries: () => persistedEntries(session),
+			// The automatic path's own session-read is the mask stage's
+			// deps.readSessionEntries() call, not session.tree() (that is what
+			// forced mode reads instead, via runCompactionFlow); fail it the same
+			// way sessionWithProductionFailure fails tree() for forced mode, and
+			// for the same reason: real "the read failed" rather than a faked
+			// session identity that other, unrelated reads (resetForSession's own
+			// snapshot lookup) would trip over first.
+			readSessionEntries: () => {
+				if (failure === "session-read") throw new Error(`session not found: ${session.current()?.id ?? "unknown"}`);
+				return persistedEntries(session);
+			},
 			autoCompact: createProductionAutoCompact(session, () => currentSettings, productionProviders),
 			bus,
 			createAgent: createFakeAgentFactory(
@@ -360,8 +394,32 @@ async function runProductionFailureScenario(
 		} as never);
 		loop.onEvent((event) => events.push(event));
 
-		if (mode === "forced") await loop.compact();
-		else await loop.submit("continue after automatic compaction");
+		if (mode === "forced") {
+			// compact() never appends a turn (it calls session.appendEntry for the
+			// summary sidecar, never session.append), so it never needs the
+			// interactive layer's own last-turn-id tracker synced to this
+			// directly seeded history. Production still calls resetForSession once
+			// when a chat loop attaches to a session with existing history, but
+			// forced mode's own read path (runCompactionFlow's session.tree(meta.id)
+			// call, in production reached through the same code whether or not
+			// resetForSession ran first) is what this failure scenario is actually
+			// exercising: resetting first changes what it observes without
+			// protecting anything forced mode relies on, so it stays out of this
+			// branch.
+			await loop.compact();
+		} else {
+			// submit() appends the user's turn through turn-persistence.ts, which
+			// parents it on the interactive layer's own tracked last-turn-id
+			// (session-switch-atomicity.test.ts documents the invariant this
+			// protects: a turn can only extend the current session's own leaf).
+			// That tracker starts null and this harness seeded the session's
+			// history directly through the domain contract, bypassing it, so it
+			// must be told the real leaf before the first submit the same way
+			// orchestrator.ts's boot-time resume does for a session loaded with
+			// existing turns.
+			loop.resetForSession(seededLeafId);
+			await loop.submit("continue after automatic compaction");
+		}
 
 		return { activities, visible: JSON.stringify(events) };
 	} finally {
@@ -579,7 +637,7 @@ describe("contracts/production compaction failure wiring", () => {
 	}
 
 	it("preserves an empty production session as a legitimate no-op", async () => {
-		const isolated = isolateClioEnv("clio-compaction-no-op-");
+		const isolated = await isolateClioEnv("clio-compaction-no-op-");
 		const bus = createSafeEventBus();
 		const activities = compactionActivities(bus);
 		const events: ChatLoopEvent[] = [];
@@ -626,7 +684,7 @@ describe("contracts/production compaction failure wiring", () => {
 	});
 
 	it("compacts and replays the selected branch immediately after a tree switch", async () => {
-		const isolated = isolateClioEnv("clio-compaction-active-branch-");
+		const isolated = await isolateClioEnv("clio-compaction-active-branch-");
 		const bus = createSafeEventBus();
 		const faux = registerFauxProvider({
 			provider: "production-compaction-active-branch",
