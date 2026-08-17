@@ -9,6 +9,12 @@
  * hanging hook cannot block the TUI from exiting. The cap is 500ms by
  * default and can be overridden via CLIO_CODER_SHUTDOWN_HOOK_MS for tests.
  * Timed-out hooks are logged and shutdown continues to the next hook.
+ *
+ * Every diagnostic here is written after the TUI has stopped: the interactive
+ * controller stops the terminal before it calls shutdown(), and the signal path
+ * stops it from a drain hook, which precedes persist. The renderer is gone, so
+ * a diagnostic goes to stderr and is wrapped to the terminal width so it does
+ * not overrun the frame the TUI just handed back.
  */
 
 import { BusChannels } from "./bus-events.js";
@@ -26,6 +32,46 @@ const SIGNAL_EXIT_CODES: Partial<Record<NodeJS.Signals, number>> = {
 	SIGINT: 130,
 	SIGTERM: 143,
 };
+
+/**
+ * Break `text` into lines no wider than `width` columns, at spaces where
+ * possible and mid-word when a single token is wider than the terminal.
+ */
+export function wrapToWidth(text: string, width: number): string[] {
+	if (!Number.isFinite(width) || width < 1) return [text];
+	const lines: string[] = [];
+	let current = "";
+	for (const word of text.split(/\s+/).filter((w) => w.length > 0)) {
+		let token = word;
+		while (token.length > width) {
+			if (current) {
+				lines.push(current);
+				current = "";
+			}
+			lines.push(token.slice(0, width));
+			token = token.slice(width);
+		}
+		if (!current) current = token;
+		else if (current.length + 1 + token.length <= width) current = `${current} ${token}`;
+		else {
+			lines.push(current);
+			current = token;
+		}
+	}
+	if (current) lines.push(current);
+	return lines.length > 0 ? lines : [""];
+}
+
+/**
+ * Emit a shutdown notice on stderr, wrapped to the terminal width when stderr
+ * or stdout is a TTY. Off a TTY the text goes out unwrapped, since a log
+ * consumer wants one record per line.
+ */
+export function writeShutdownNotice(text: string): void {
+	const width = process.stderr.columns ?? process.stdout.columns;
+	const lines = width === undefined ? [text] : wrapToWidth(text, width);
+	process.stderr.write(`${lines.join("\n")}\n`);
+}
 
 export function resolveShutdownHookBudgetMs(): number {
 	const raw = process.env.CLIO_CODER_SHUTDOWN_HOOK_MS;
@@ -142,13 +188,13 @@ class TerminationCoordinator {
 			if (!hook) continue;
 			const t0 = process.hrtime.bigint();
 			const completed = await runWithBudget(hook, budgetMs, (err) => {
-				console.error("[clio:termination] hook failed:", err);
+				const message = err instanceof Error ? err.message : String(err);
+				writeShutdownNotice(`[clio:termination] ${phase}[${i}] failed: ${message}`);
+				if (err instanceof Error && err.stack) log(err.stack);
 			});
 			const dt = Number(process.hrtime.bigint() - t0) / 1e6;
 			if (!completed) {
-				process.stderr.write(
-					`[clio:termination] ${phase}[${i}] exceeded ${budgetMs}ms budget; abandoning and continuing shutdown\n`,
-				);
+				writeShutdownNotice(`[clio:termination] ${phase}[${i}] exceeded ${budgetMs}ms budget; shutdown continues`);
 			}
 			log(`  ${phase}[${i}] ${dt.toFixed(1)}ms${completed ? "" : " (timed out)"}`);
 		}
