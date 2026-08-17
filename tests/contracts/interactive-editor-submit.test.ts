@@ -30,6 +30,9 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 	const stderr: string[] = [];
 	const events: string[] = [];
 	const queued: string[] = [];
+	const submits: Array<{ text: string; steering?: string }> = [];
+	let interruptRefusal: string | null = null;
+	let clearQueuedCalls = 0;
 	const steers: Array<{ runId: string; text: string }> = [];
 	const notices: Array<{ level: string; text: string; key: string }> = [];
 	const editor: EditorSubmitEditor = {
@@ -58,7 +61,15 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 				queued.push(message);
 				return queueAccepted;
 			},
-			clearQueuedFollowUps: () => restored,
+			clearQueuedFollowUps: () => {
+				clearQueuedCalls += 1;
+				return restored;
+			},
+			interruptRefusal: () => interruptRefusal,
+			submit: async (message, options) => {
+				submits.push({ text: message, ...(options?.steering ? { steering: options.steering } : {}) });
+				events.push(`submit:${options?.steering ?? "default"}:${message}`);
+			},
 		},
 		dispatch: {
 			snapshot: () => ({ running }) as ReturnType<DispatchContract["snapshot"]>,
@@ -80,6 +91,7 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 		history,
 		stderr,
 		queued,
+		submits,
 		steers,
 		notices,
 		setText: (next: string) => {
@@ -95,6 +107,10 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 		setQueueAccepted: (next: boolean) => {
 			queueAccepted = next;
 		},
+		setInterruptRefusal: (next: string | null) => {
+			interruptRefusal = next;
+		},
+		clearQueuedCalls: () => clearQueuedCalls,
 	};
 }
 
@@ -216,6 +232,70 @@ describe("contracts/interactive editor submit", () => {
 		strictEqual(harness.getText(), "look at @plot.png");
 		deepStrictEqual(harness.queued, []);
 		deepStrictEqual(harness.stderr, ["[follow-up] image references cannot be queued while a response is streaming\n"]);
+	});
+
+	it("interrupt while idle is a plain send through the normal submit path", () => {
+		const harness = createHarness();
+		harness.setText("just send it");
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.interruptFromEditor();
+
+		deepStrictEqual(harness.events, ["set:", "set:", "dispatch:just send it", "render", "render"]);
+		deepStrictEqual(harness.submits, []);
+	});
+
+	it("interrupt while streaming restores the queue to the editor and submits in interrupt mode", async () => {
+		const harness = createHarness({ streaming: true });
+		harness.setText("  stop and read this  ");
+		harness.setRestored(["earlier steer", "earlier follow-up"]);
+		harness.deps.expandSubmit = async () => ({ text: "expanded stop", images: [] });
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.interruptFromEditor();
+		strictEqual(harness.getText(), "  stop and read this  ", "the draft stays until expansion accepts it");
+		await flushAsync();
+
+		deepStrictEqual(harness.submits, [{ text: "expanded stop", steering: "interrupt" }]);
+		deepStrictEqual(harness.history, ["stop and read this"]);
+		strictEqual(harness.getText(), "earlier steer\n\nearlier follow-up", "queued texts come back like Esc");
+		deepStrictEqual(harness.queued, [], "an interrupt never rides the follow-up queue");
+		strictEqual(harness.clearQueuedCalls(), 1);
+		deepStrictEqual(harness.events, [
+			"history:stop and read this",
+			"set:earlier steer\n\nearlier follow-up",
+			"render",
+			"submit:interrupt:expanded stop",
+		]);
+	});
+
+	it("a refused interrupt leaves the queue alone and still hands the text to the chat loop", async () => {
+		const harness = createHarness({ streaming: true });
+		harness.setText("also check X");
+		harness.setRestored(["earlier steer"]);
+		harness.setInterruptRefusal("an attached dispatch is running");
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.interruptFromEditor();
+		await flushAsync();
+
+		deepStrictEqual(harness.submits, [{ text: "also check X", steering: "interrupt" }]);
+		strictEqual(harness.getText(), "", "nothing was cancelled, so nothing is restored");
+		strictEqual(harness.clearQueuedCalls(), 0);
+	});
+
+	it("preserves the draft when a streaming interrupt contains an image", async () => {
+		const harness = createHarness({ streaming: true });
+		harness.setText("look at @plot.png");
+		harness.deps.expandSubmit = async () => ({ text: "look", images: [{}] });
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.interruptFromEditor();
+		await flushAsync();
+
+		strictEqual(harness.getText(), "look at @plot.png");
+		deepStrictEqual(harness.submits, []);
+		deepStrictEqual(harness.stderr, ["[interrupt] image references cannot be sent while a response is streaming\n"]);
 	});
 
 	it("restores queued follow-ups ahead of the current draft", () => {

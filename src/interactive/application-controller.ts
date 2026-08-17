@@ -12,6 +12,7 @@ const CLOSED_ACTION_ORDER = [
 	"clio.tool.liveOutput",
 	"clio.editor.external",
 	"clio.message.followUp",
+	"clio.message.interrupt",
 	"clio.message.dequeue",
 	"clio.thinking.expand",
 	"clio.thinking.expandAll",

@@ -305,10 +305,11 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 
 | Binding | Action |
 | --- | --- |
-| `Enter` | Send draft prompt (when idle) or steer active assistant run (when streaming). |
+| `Enter` | Send draft prompt (when idle) or deliver it at the next slot of the active run (when streaming). |
 | `Shift+Enter` / `Ctrl+J` | Insert a newline into multiline editor input. |
-| `Alt+Enter` | Queue the current draft as a follow-up message delivered after the active run finishes. |
-| `Alt+Up` | Restore queued steering and follow-up messages to the editor. |
+| `Alt+Enter` | End of turn: queue the current draft for delivery when the active run settles. |
+| `Alt+I` | Interrupt: cancel the active run and deliver the current draft now. Refused while an attached dispatch runs or a permission ask is parked; the draft then queues for the next slot. |
+| `Alt+Up` | Restore queued next-slot and end-of-turn messages to the editor. |
 | `Shift+Tab` | Cycle orchestrator thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). |
 | `Alt+T` | Open the session tree navigator (`/tree`). |
 | `Alt+U` | Toggle the footer dashboard between compact (quiet 2-zone) and expanded (4-zone urgency) layouts. |
@@ -332,10 +333,21 @@ When scripting Clio inside tmux, prefer `tmux send-keys C-m` for submit/confirm 
 
 ## Live Steering
 
-During an active assistant stream, pressing `Enter` sends the current editor
-text as steering for the active run instead of waiting for the turn to finish.
-The input is delivered through `agent.steer` before the next model turn.
-`Alt+Enter` keeps the after-run follow-up behavior.
+While a run is active, the key that submits a message chooses when it lands.
+There are three modes, chosen per message; the default is next slot.
+
+| Mode | Key | Delivery |
+| --- | --- | --- |
+| Next slot | `Enter` | Between tool batches, mid-run, through `agent.steer`. The agent keeps going and reads the message before its next model call. |
+| End of turn | `Alt+Enter` | When the whole run settles and Clio would hand control back, through `agent.followUp`. A turn is the whole run, not one model round. |
+| Interrupt | `Alt+I` (or `Ctrl+G`, `i`) | Cancels the in-flight work the way `Esc` does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the message as a fresh prompt. Anything already queued returns to the editor. |
+
+Interrupt is refused in two states and the message is queued for the next slot
+instead, with a notice saying why: while an attached dispatch is running (the
+abort would kill the worker's run with no receipt; steer it with `@<agent>` or
+cancel it with `Esc`) and while a permission ask is parked (it is already
+waiting on you). A steer that arrives as the run ends is resubmitted as a fresh
+prompt. Headless `--steer-channel` lines are always next-slot steers.
 
 For running dispatches, the editor also accepts:
 

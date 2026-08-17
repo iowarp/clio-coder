@@ -1520,6 +1520,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			: {}),
 		toolRegistry,
+		hasAttachedDispatch: () => dispatchBackground.size() > 0,
 	});
 
 	// Coordinated shutdown (SIGINT/SIGTERM, TUI quit) must abort any in-flight
