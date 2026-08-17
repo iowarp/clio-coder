@@ -161,10 +161,19 @@ export function safetyOneLiner(level: string): string {
 	}
 }
 
+/**
+ * What "approval-required" resolves to for the session: one operator
+ * confirmation per parked call. The level fragments say which calls park;
+ * this line says what parking means, and it is role text because a worker's
+ * parked call resolves through its `onPermission` routing instead.
+ */
+export const SESSION_APPROVAL_SEMANTICS =
+	"Ask decisions pause that exact call for one operator confirmation, which grants only the parked action; cancellation cancels the parked call cleanly.";
+
 function renderSafetySection(safetyFragment: LoadedFragment, level: string): string {
 	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level)}`;
 	const body = safetyFragment.body.trim();
-	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
+	return body.length > 0 ? `${oneLine}\n${SESSION_APPROVAL_SEMANTICS}\n\n${body}` : oneLine;
 }
 
 function renderRuntimeBlock(inputs: SessionPromptInputs): string {
@@ -191,9 +200,28 @@ function renderRuntimeBlock(inputs: SessionPromptInputs): string {
  */
 function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
 	if (inputs.providerSupportsTools === false) return false;
-	const names = new Set((inputs.toolNames ?? []).map((name) => name.trim()));
-	const hinted = new Set((inputs.toolPromptHints ?? []).map((entry) => entry.tool.trim()));
-	return names.has("dispatch") || hinted.has("dispatch");
+	return toolSurfaceHasTool(inputs.toolNames, inputs.toolPromptHints, "dispatch");
+}
+
+/**
+ * Whether the session can list and load skills. The Skills passage and the
+ * Tool Contract's skills clause follow the same rule as dispatch: text about
+ * `context` renders only when `context` is on the surface.
+ */
+function sessionCanListSkills(inputs: SessionPromptInputs): boolean {
+	if (inputs.providerSupportsTools === false) return false;
+	return toolSurfaceHasTool(inputs.toolNames, inputs.toolPromptHints, "context");
+}
+
+/** One lookup for every "is this tool on the surface" predicate, over names and hints alike. */
+function toolSurfaceHasTool(
+	toolNames: ReadonlyArray<string> | undefined,
+	toolPromptHints: ReadonlyArray<ToolPromptHint> | undefined,
+	tool: string,
+): boolean {
+	const names = new Set((toolNames ?? []).map((name) => name.trim()));
+	const hinted = new Set((toolPromptHints ?? []).map((entry) => entry.tool.trim()));
+	return names.has(tool) || hinted.has(tool);
 }
 
 function renderFleetBlock(inputs: SessionPromptInputs): string {
@@ -212,9 +240,8 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	const names = [
 		...new Set((inputs.toolNames ?? []).map((name) => name.trim()).filter((name) => name.length > 0)),
 	].sort();
-	const hintedTools = new Set((inputs.toolPromptHints ?? []).map((entry) => entry.tool.trim()));
 	const canDispatch = sessionCanDispatch(inputs);
-	const canListSkills = names.includes("context") || hintedTools.has("context");
+	const canListSkills = sessionCanListSkills(inputs);
 	const inventoryGuidance = [
 		// Asked twice in one session which tools it had, a live model gave two
 		// different answers and invented `web_find`. The authoritative list is one
@@ -269,36 +296,17 @@ function workerPermissionSentence(mode: WorkerPromptInputs["onPermission"]): str
 	}
 }
 
-function renderWorkerOperatingContract(operatingContract: LoadedFragment, inputs: WorkerPromptInputs): string {
-	// The session contract's `# Skills` passage teaches suggesting a skill to
-	// the operator and listing the marketplace. A worker has neither: it can
-	// load only recipe-bound names (the bound-skill block says so) and its
-	// reply goes to the orchestrator, so the passage could only send it to a
-	// listing it cannot act on. Every worker prompt drops it.
-	const skillsHeading = "\n# Skills\n";
-	const skillsAt = operatingContract.body.indexOf(skillsHeading);
-	const skillAwareBody = skillsAt >= 0 ? operatingContract.body.slice(0, skillsAt) : operatingContract.body;
-	const operatingPermission =
-		inputs.autonomy === "read-only"
-			? "This read-only worker denies mutating calls without requesting approval."
-			: workerPermissionSentence(inputs.onPermission);
-	const workerBody = skillAwareBody.replace(
-		/Safety policy is authoritative[\s\S]*?Do not retry the same blocked\naction through another tool\./,
-		[
-			"Safety policy is authoritative for every tool call. Allow decisions run normally.",
-			operatingPermission,
-			"Hard blocks (destructive git, protected artifacts, project or path policy violations) remain hard blocks. When a call is blocked, pivot to a safer approach or explain the blocker. Do not retry the same blocked action through another tool.",
-		].join("\n"),
-	);
-	return [
-		workerBody.trim(),
-		"# Assigned Task Contract",
-		"The assigned task is authoritative. Role guidance is a persona, not a replacement task.",
-		"Do not invent a different task, source tree, file path, or implementation plan.",
-		"If the assigned task asks for an exact response, a direct answer, or no tool use, answer it directly without tool calls.",
-		"Use tools only when necessary for the assigned task and admitted by the worker tool contract.",
-		WORKER_CLAIM_GUIDANCE,
-	].join("\n\n");
+/**
+ * The constitutional contract renders byte-identical for session and worker.
+ * Role text is separate: the coordinator's `operating.delegation` and
+ * `operating.skills` never reach a worker (its reply goes to the
+ * orchestrator, it cannot suggest a skill to an operator, and no builtin
+ * admits `dispatch`), and the worker's `operating.worker` never reaches the
+ * session. What "approval-required" resolves to for a worker is stated once,
+ * in its safety section, by `workerPermissionSentence`.
+ */
+function renderWorkerOperatingContract(operatingContract: LoadedFragment, workerContract: LoadedFragment): string {
+	return [operatingContract.body.trim(), workerContract.body.trim(), WORKER_CLAIM_GUIDANCE].join("\n\n");
 }
 
 function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
@@ -465,8 +473,15 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		identityBody = `${identity.body.trim()}\n\n${rendered.trim()}`;
 	}
 
+	// Role text gated on the surface, following the Fleet-block rule: text
+	// about a tool renders only when the tool is there to be called.
+	const delegation = sessionCanDispatch(session) ? table.byId.get("operating.delegation") : undefined;
+	const skills = sessionCanListSkills(session) ? table.byId.get("operating.skills") : undefined;
+
 	push("identity", identityBody);
 	push("operating-contract", operatingContract.body);
+	if (delegation) push("delegation", delegation.body);
+	if (skills) push("skills", skills.body);
 	push("safety", renderSafetySection(safety, autonomyLevel));
 	push("runtime", renderRuntimeBlock(session));
 	push("tool-contract", renderToolContractBlock(session));
@@ -479,7 +494,14 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	}
 
 	const systemPrompt = parts.join("\n\n");
-	const baseFragments = [identity, ...(selfAwareness ? [selfAwareness] : []), operatingContract, safety];
+	const baseFragments = [
+		identity,
+		...(selfAwareness ? [selfAwareness] : []),
+		operatingContract,
+		...(delegation ? [delegation] : []),
+		...(skills ? [skills] : []),
+		safety,
+	];
 	const fragmentManifest: FragmentManifestEntry[] = baseFragments.map((f) => ({
 		id: f.id,
 		relPath: f.relPath,
@@ -525,6 +547,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	}
 	const identity = lookupFragment(table, "identity.clio-worker", "worker identity");
 	const operatingContract = lookupFragment(table, "operating.contract", "operating contract");
+	const workerContract = lookupFragment(table, "operating.worker", "worker contract");
 	const safety = lookupFragment(table, `safety.${inputs.autonomy}`, "safety");
 
 	const parts: string[] = [];
@@ -537,20 +560,24 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	};
 
 	push("identity", identity.body);
-	push("operating-contract", renderWorkerOperatingContract(operatingContract, inputs));
+	push("operating-contract", renderWorkerOperatingContract(operatingContract, workerContract));
 	push("tool-contract", renderWorkerToolContractBlock(inputs));
 	push("safety", renderWorkerSafetySection(safety, inputs));
 	push("persona", inputs.persona.body);
 
 	const systemPrompt = parts.join("\n\n");
-	const fragmentManifest: FragmentManifestEntry[] = [identity, operatingContract, safety, inputs.persona].map(
-		(fragment) => ({
-			id: fragment.id,
-			relPath: fragment.relPath,
-			contentHash: fragment.contentHash,
-			dynamic: fragment.dynamic,
-		}),
-	);
+	const fragmentManifest: FragmentManifestEntry[] = [
+		identity,
+		operatingContract,
+		workerContract,
+		safety,
+		inputs.persona,
+	].map((fragment) => ({
+		id: fragment.id,
+		relPath: fragment.relPath,
+		contentHash: fragment.contentHash,
+		dynamic: fragment.dynamic,
+	}));
 
 	return {
 		systemPrompt,

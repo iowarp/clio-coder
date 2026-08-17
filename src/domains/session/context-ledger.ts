@@ -170,6 +170,8 @@ export interface ContextLedger {
 const SEGMENT_CATEGORY: Readonly<Record<string, ContextLedgerCategory>> = {
 	identity: "system",
 	"operating-contract": "system",
+	delegation: "agents",
+	skills: "skills",
 	safety: "system",
 	runtime: "system",
 	"tool-contract": "system",
