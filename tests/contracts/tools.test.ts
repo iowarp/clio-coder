@@ -380,6 +380,17 @@ describe("contracts/tools basic happy paths", () => {
 		strictEqual(readFileSync(filePath, "utf8"), "two");
 	});
 
+	it("writeTool reports the written byte count as the ledger's shown size, not the confirmation length", async () => {
+		const root = scratchDir();
+		const filePath = join(root, "sized.txt");
+		const content = "x".repeat(4753);
+
+		const result = await writeTool.run({ path: filePath, content });
+		strictEqual(result.kind, "ok");
+		const observation = result.details?.observation as { shownBytes?: unknown } | undefined;
+		strictEqual(observation?.shownBytes, 4753);
+	});
+
 	it("writeTool notes when an overwrite drops the trailing newline", async () => {
 		const root = scratchDir();
 		const filePath = join(root, "note.txt");

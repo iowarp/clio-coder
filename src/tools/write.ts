@@ -39,7 +39,11 @@ export const writeTool: ToolSpec = {
 			if (previousEndedWithNewline && !content.endsWith("\n")) {
 				output += `\nnote: ${pathArg} no longer ends with a newline; the previous content did`;
 			}
-			return { kind: "ok", output, details: { paths: [filePath] } };
+			// The transcript ledger sizes a call from details.observation.shownBytes
+			// before it falls back to the length of the returned text. A write's
+			// text is a confirmation sentence, so without this the ledger printed
+			// the sentence's length as the file size.
+			return { kind: "ok", output, details: { paths: [filePath], observation: { shownBytes: bytes } } };
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `write: ${msg}` };
