@@ -67,10 +67,13 @@ async function writeTerminalArtifact(
 		return { kind: "error", message: `artifact: ${err instanceof Error ? err.message : String(err)}` };
 	}
 	const rel = path.relative(cwd, target) || rawPath;
+	const bytes = Buffer.byteLength(body, "utf8");
 	return {
 		kind: "ok",
-		output: `wrote ${kind} artifact (${Buffer.byteLength(body, "utf8")}B) to ${rel}`,
-		details: { kind, paths: [target] },
+		output: `wrote ${kind} artifact (${bytes}B) to ${rel}`,
+		// shownBytes is the artifact's real size; the ledger otherwise measures
+		// this confirmation sentence (a 4753B plan rendered as "60B", #76).
+		details: { kind, paths: [target], observation: { shownBytes: bytes } },
 		// Writing the artifact is the whole turn; terminate skips the follow-up
 		// LLM call that would only restate what was just written.
 		terminate: true,

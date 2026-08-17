@@ -57,6 +57,18 @@ describe("contracts/artifact placement", () => {
 		strictEqual(existsSync(join(cwd, CLIO_ARTIFACT_DIR, "REPORT.md")), false);
 	});
 
+	it("reports the artifact's byte count as the ledger's shown size, not the confirmation length", async () => {
+		const tool = createArtifactTool({ getCwd: () => cwd });
+		const content = `# plan\n\n${"detail ".repeat(700)}`;
+		const result = await tool.run({ kind: "plan", content });
+
+		strictEqual(result.kind, "ok");
+		const bytes = Buffer.byteLength(content, "utf8");
+		const observation = result.details?.observation as { shownBytes?: unknown } | undefined;
+		strictEqual(observation?.shownBytes, bytes);
+		if (result.kind === "ok") ok(result.output.includes(`(${bytes}B)`), result.output);
+	});
+
 	it("refuses a path that escapes the workspace", async () => {
 		const tool = createArtifactTool({ getCwd: () => cwd });
 		const result = await tool.run({ kind: "report", path: "../escape.md", content: "body" });
