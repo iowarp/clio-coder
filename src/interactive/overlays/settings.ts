@@ -191,7 +191,6 @@ export const SETTINGS_LABELS_BY_ID = {
 	"terminal.showTerminalProgress": "Terminal progress badges",
 	"terminal.outputVerbosity": "Output detail",
 	theme: "Theme",
-	identity: "Identity",
 	runtimePlugins: "Runtime plugins",
 	"compaction.model": "Compaction model",
 	"compaction.systemPrompt": "Compaction prompt",
@@ -257,7 +256,6 @@ export const SETTINGS_SECTION_ROWS = {
 	retry: ["retry.enabled", "retry.maxRetries", "retry.baseDelayMs", "retry.maxDelayMs"],
 	terminal: ["terminal.showTerminalProgress", "terminal.outputVerbosity", "theme"],
 	advanced: [
-		"identity",
 		"runtimePlugins",
 		"compaction.model",
 		"compaction.systemPrompt",
@@ -310,7 +308,6 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"terminal.showTerminalProgress": "Emit OSC 9;4 progress badges during agent turns.",
 	"terminal.outputVerbosity": "How much reasoning, tool input, and live tool output appears in the transcript.",
 	theme: "Color palette. Clio ships a single tuned palette.",
-	identity: "Name Clio uses for itself in the system prompt.",
 	runtimePlugins: "npm packages exporting clioRuntimes: RuntimeDescriptor[].",
 	"compaction.model": "Dedicated summarization model; blank uses the orchestrator.",
 	"compaction.systemPrompt": "Path to a compaction prompt override; blank uses the built-in.",
@@ -1366,10 +1363,6 @@ export function buildSettingItems(
 			affordance: "single clio-coder palette",
 			readOnly: true,
 		}),
-		settingItem("identity", settings.identity, {
-			submenu: editTextSubmenu("Edit identity name"),
-			affordance: "free text",
-		}),
 		settingItem("runtimePlugins", settings.runtimePlugins.length > 0 ? settings.runtimePlugins.join(", ") : "(none)", {
 			submenu: editTextSubmenu("Edit runtime plugins comma-separated list", "Restart Clio to load changes."),
 			affordance: "free text",
@@ -1839,11 +1832,6 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		case "terminal.outputVerbosity":
 			if (value === "minimal" || value === "default" || value === "verbose") settings.terminal.outputVerbosity = value;
 			return;
-		case "identity": {
-			const trimmed = value.trim();
-			if (trimmed) settings.identity = trimmed;
-			return;
-		}
 		case "runtimePlugins":
 			settings.runtimePlugins = value
 				.split(",")

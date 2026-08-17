@@ -815,11 +815,6 @@ describe("contracts/settings center", () => {
 				assert: (s) => strictEqual(s.terminal.outputVerbosity, "verbose"),
 			},
 			{
-				id: "identity",
-				value: "atlas",
-				assert: (s) => strictEqual(s.identity, "atlas"),
-			},
-			{
 				id: "runtimePlugins",
 				value: "@scope/a, @scope/b",
 				assert: (s) => deepStrictEqual(s.runtimePlugins, ["@scope/a", "@scope/b"]),
@@ -1280,7 +1275,7 @@ describe("contracts/settings center", () => {
 					closed += 1;
 				},
 			});
-			center.setSelection("advanced", 0); // identity, a text editor
+			center.setSelection("advanced", 0); // runtime plugins, a text editor
 			center.handleInput(ENTER);
 			for (const character of "draft") center.handleInput(character);
 			for (const width of widths) {
@@ -1290,7 +1285,7 @@ describe("contracts/settings center", () => {
 			}
 			center.handleInput(ESC);
 			strictEqual(center.getSelection().depth, "rows");
-			strictEqual(center.getSelection().rowId, "identity");
+			strictEqual(center.getSelection().rowId, "runtimePlugins");
 			center.handleInput(ESC);
 			strictEqual(center.getSelection().depth, "sections");
 			center.handleInput(ESC);

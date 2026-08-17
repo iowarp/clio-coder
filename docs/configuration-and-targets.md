@@ -125,7 +125,6 @@ Terminology used in code and receipts:
 
 ```yaml
 version: 1
-identity: clio
 autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto (enforced at tool admission; the safety net applies at every level)
 
 targets:
@@ -506,7 +505,6 @@ Recently selected models are runtime state and live in `recent-models.json` unde
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
 | `version` | `1` | integer, currently `1` only | restart |
-| `identity` | `clio` | string | restart |
 | `targets` | `[]` | list of target descriptors, each with a unique id and a registered runtime | immediately for the catalog, next session for routing |
 | `runtimePlugins` | `[]` | list of plugin descriptors | restart |
 | `fleet.nodes` | `[]` | list of node descriptors | next dispatch |
