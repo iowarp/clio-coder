@@ -913,13 +913,17 @@ testCase(18, "TUI task journeys at narrow, normal, and wide sizes", async () => 
 		[80, 24],
 		[160, 50],
 	]) {
+		// The prompt placeholder is the readiness signal. The footer's "idle" badge
+		// that this used to wait on was removed in 29a34c91, after which the
+		// keystrokes below were never sent and both PTY cases timed out at 40s
+		// while the process sat at an untouched prompt (issue #100).
 		const result = await runInPty(launcher, [], {
 			cols,
 			rows,
 			cwd: ROOT,
 			env,
 			timeoutMs: 40_000,
-			readyWhen: /idle/,
+			readyWhen: /Ask Clio/,
 			input: [
 				{ afterMs: 500, data: "/help\r" },
 				{ afterMs: 1_500, data: String.fromCharCode(27) },
@@ -973,7 +977,7 @@ testCase(19, "NO_COLOR, non-TTY, SIGINT, and terminal teardown", async () => {
 		cwd: ROOT,
 		env,
 		timeoutMs: 40_000,
-		readyWhen: /idle/,
+		readyWhen: /Ask Clio/,
 		input: [
 			{ afterMs: 500, data: String.fromCharCode(3) },
 			{ afterMs: 650, data: String.fromCharCode(3) },
@@ -985,7 +989,7 @@ testCase(19, "NO_COLOR, non-TTY, SIGINT, and terminal teardown", async () => {
 		cwd: ROOT,
 		env: { ...env, NO_COLOR: "1" },
 		timeoutMs: 40_000,
-		readyWhen: /idle/,
+		readyWhen: /Ask Clio/,
 		input: [
 			{ afterMs: 500, data: String.fromCharCode(3) },
 			{ afterMs: 650, data: String.fromCharCode(3) },
