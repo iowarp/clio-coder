@@ -830,10 +830,9 @@ describe("contracts/prompts", () => {
 				"Harness model: direct tools are attached schemas; fleet agents are workers behind dispatch; skills are operator-activated workflows reached through context. Keep these capability sets distinct.",
 				'When answering capability-inventory questions, copy the Direct tools line above verbatim rather than recalling the attached schemas, and make no calls; add dispatch(list:true) only if agents or the fleet are requested; add context(scope="skills") only if skills are requested (it lists installed and marketplace skills).',
 				"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
-				'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available, explicit broad repository/codebase exploration uses agent:"auto" before repo-wide reads.',
-				'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded agent:"auto" handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
+				'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded.',
+				"Validate with verify or git diff before final claims.",
 				'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
-				'List installed and installable skills with context(scope="skills") only when the task is skill-shaped or the operator asks about or names a skill; if one matches, suggest the operator run /skill:<name> (which offers to install a marketplace skill), and never load a skill the operator did not request.',
 				FLEET_ROUTING_GUIDANCE,
 				TOOL_HINTS.ask_user.hint,
 				TOOL_HINTS.code_nav.hint,
@@ -885,14 +884,16 @@ describe("contracts/prompts", () => {
 				sessionInputs: { providerSupportsTools: true, toolPromptHints: [TOOL_HINTS.dispatch] },
 			});
 			ok(withDispatch.systemPrompt.includes(FLEET_ROUTING_GUIDANCE));
+			// The routing sentence carries only what nothing else does: the pin
+			// rule. Broad exploration and handoff/receipt discipline live in
+			// operating.delegation, stated once.
 			for (const route of [
-				"pin the `agent` id from the Fleet section above",
+				"pin the `agent` id from the Fleet section",
 				'agent:"auto" baselines from the task text and is a fallback, not a router',
-				"Broad repo/codebase exploration goes to a worker before repo-wide reads",
-				"Give each dispatch a concrete handoff and synthesize its receipt",
 			]) {
 				ok(withDispatch.systemPrompt.includes(route), route);
 			}
+			strictEqual(withDispatch.systemPrompt.includes("Broad repo/codebase exploration goes to a worker"), false);
 			const withoutDispatch = compile(table, {
 				identity: "identity.clio",
 				operatingContract: "operating.contract",
@@ -902,7 +903,7 @@ describe("contracts/prompts", () => {
 			strictEqual(withoutDispatch.systemPrompt.includes(FLEET_ROUTING_GUIDANCE), false);
 		});
 
-		it("gates skill listing to skill-shaped tasks and teaches routing order plus failure recovery", () => {
+		it("states each routing rule once: the tool contract keeps validation and failure recovery, not restatements", () => {
 			const table = loadFragments();
 			const result = compile(table, {
 				identity: "identity.clio",
@@ -918,21 +919,23 @@ describe("contracts/prompts", () => {
 			const prompt = result.systemPrompt;
 
 			// Ordinary multi-step coding never spends a skill-listing call; the old
-			// broad trigger must stay gone.
+			// broad trigger must stay gone, and so must the tool contract's own
+			// paraphrase of the Skills passage: skills guidance renders once, from
+			// operating.skills, only when `context` is on the surface.
 			strictEqual(prompt.includes("For a multi-step task, list installed skills"), false);
-			ok(
-				prompt.includes(
-					'List installed and installable skills with context(scope="skills") only when the task is skill-shaped',
-				),
-			);
-			ok(prompt.includes("never load a skill the operator did not request"));
+			strictEqual(prompt.includes("List installed and installable skills"), false);
+			strictEqual(prompt.includes("# Skills"), false);
 
-			// The deterministic routing order and failure recovery are static base
-			// lines, present regardless of which hinted tools are on the surface.
-			ok(prompt.includes("Routing order: use structured observe tools before bash for narrow inspection"));
-			ok(prompt.includes('treat broad reconnaissance as a bounded agent:"auto" handoff'));
-			ok(prompt.includes("dispatch other bounded parallel or delegated subwork, and synthesize receipts"));
-			ok(prompt.includes("validate with verify or git diff before final claims"));
+			// Delegation is not restated in the tool contract or the retrieval
+			// hints either: the "broad exploration goes to a worker" rule lives in
+			// operating.delegation and nowhere else, so two phrasings can never
+			// disagree again about agent:"auto" versus a pinned id.
+			strictEqual(prompt.includes("Routing order:"), false);
+			strictEqual(prompt.includes('agent:"auto"'), false);
+			strictEqual(prompt.includes("reconnaissance worker"), false);
+			// Validation and failure recovery are static base lines, present
+			// regardless of which hinted tools are on the surface.
+			ok(prompt.includes("Validate with verify or git diff before final claims."));
 			ok(prompt.includes("do not retry the same shape blindly"));
 			ok(prompt.includes('query context(scope="docs")'));
 		});
@@ -1187,8 +1190,11 @@ describe("contracts/prompts", () => {
 			const res = await compileProjectPrompt(cwd);
 			const systemPrompt = res.systemPrompt;
 			ok(systemPrompt.includes("# Retrieval Hints"));
-			ok(systemPrompt.includes("inspect with code_nav, context, grep, or read before answering"));
+			ok(systemPrompt.includes("everything else about the repository must be fetched, not assumed"));
 			ok(systemPrompt.includes("Never invent file paths, automatic tool behavior, or mutable repo details"));
+			// The narrow-orientation tool list is stated once, in the Tool Contract.
+			ok(systemPrompt.includes('prefer context(scope="workspace"), code_nav, grep, and read'));
+			strictEqual(systemPrompt.includes("inspect with code_nav, context, grep, or read before answering"), false);
 		});
 
 		it("activates path-scoped project rules from prompt working paths", async () => {
