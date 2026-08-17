@@ -429,4 +429,79 @@ describe("contracts/session-tree-continuity", () => {
 
 		await contract.close();
 	});
+
+	// issue #94, finding 5: the /tree pin lived in memory only, so a switch made
+	// without a follow-up message was silently lost on quit and resume put the
+	// operator back on the abandoned tip via computeLeafId's timestamp inference.
+	it("a /tree switch with no follow-up message survives quit and resume", async () => {
+		const first = createSessionBundle(stubContext());
+		const { sessionId, a1, a2 } = seedBranchedSession(first.contract);
+		// seedBranchedSession already switches to a1 and appends u3/a3 on the new
+		// branch; switch back to a1 again and quit without sending anything.
+		first.contract.switchTurn(a1);
+		await first.contract.close();
+
+		const second = createSessionBundle(stubContext());
+		const resumed = second.contract.resume(sessionId);
+		strictEqual(resumed.id, sessionId);
+		strictEqual(second.contract.tree(sessionId).leafId, a1, "the persisted pin wins over timestamp inference");
+		ok(a1 !== a2, "sanity: a1 and a2 are actually different turns");
+
+		await second.contract.close();
+	});
+
+	// issue #94: fork's positional cut for unanchored sidecars (task board,
+	// routing notices, leafless workerRun) is now the rule active-path replay
+	// follows too, so /tree switch and /fork of the same turn agree on what the
+	// model sees. Before this fix, filterEntriesToActivePath kept every
+	// unanchored sidecar regardless of file position while fork.ts's
+	// sessionEntryBelongsToPath dropped anything written after the fork point;
+	// the same turn reached the two ways produced two different task boards.
+	it("/tree switch and /fork of the same turn reconstruct the same task board", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const ledgerFields = { subgoals: [], activeRunIds: [], requiredValidationEvidence: [] };
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "u1" } });
+		contract.appendEntry({
+			kind: "taskLedger",
+			parentTurnId: null,
+			goals: [{ id: "board", title: "board as of a1", status: "active" }],
+			...ledgerFields,
+		});
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "a1" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "u2" } });
+		contract.appendEntry({
+			kind: "taskLedger",
+			parentTurnId: null,
+			goals: [{ id: "board", title: "board as of a2, on the abandoned branch", status: "active" }],
+			...ledgerFields,
+		});
+		contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "a2" } });
+
+		// Reconstruction 1: /tree switch back to a1, then replay/fold as of a1.
+		contract.switchTurn(a1.id);
+		const liveEntries = filterEntriesToActivePath(sessionEntries(meta.id), a1.id);
+		const liveLedgers = liveEntries.filter(
+			(entry): entry is TaskLedgerEntry => (entry as { kind?: string }).kind === "taskLedger",
+		);
+		strictEqual(liveLedgers.length, 1, "only the taskLedger written at or before a1 is visible");
+		strictEqual(liveLedgers[0]?.goals[0]?.title, "board as of a1");
+		await contract.close();
+
+		// Reconstruction 2: /fork at a1 from a fresh contract over the same file.
+		const second = createSessionBundle(stubContext());
+		second.contract.resume(meta.id);
+		const forkedMeta = second.contract.fork(a1.id);
+		const forkedLedgers = sessionEntries(forkedMeta.id).filter(
+			(entry): entry is TaskLedgerEntry => (entry as { kind?: string }).kind === "taskLedger",
+		);
+		strictEqual(forkedLedgers.length, 1);
+		strictEqual(forkedLedgers[0]?.goals[0]?.title, "board as of a1");
+
+		// Same turn, two reconstruction paths, same board.
+		strictEqual(liveLedgers[0]?.goals[0]?.title, forkedLedgers[0]?.goals[0]?.title);
+
+		await second.contract.close();
+	});
 });

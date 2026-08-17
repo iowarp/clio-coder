@@ -48,6 +48,26 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		context.bus.emit(BusChannels.SessionResumed, { sessionId, via, at: Date.now() });
 	}
 
+	function emitTurnSwitched(sessionId: string, turnId: string): void {
+		context.bus.emit(BusChannels.SessionTurnSwitched, { sessionId, turnId, at: Date.now() });
+	}
+
+	/**
+	 * The leaf to resume onto: the persisted `/tree` pin when it still names a
+	 * real turn in this session's tree, otherwise the inferred newest-node leaf.
+	 * A pin surviving here is what makes a `/tree` switch made without a
+	 * follow-up message survive quit + resume instead of silently reverting to
+	 * the abandoned tip (issue #94).
+	 */
+	function resolveLeafOnOpen(resumed: {
+		state: SessionManagerState;
+		nodes: ReadonlyArray<TreeInputNode>;
+	}): string | null {
+		const pinned = resumed.state.meta.pinnedLeafTurnId;
+		if (pinned && resumed.nodes.some((node) => node.id === pinned)) return pinned;
+		return computeLeafId(resumed.nodes);
+	}
+
 	async function closeCurrent(reason: ParkReason = "close"): Promise<void> {
 		if (!state) return;
 		const s = state;
@@ -170,6 +190,14 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			}
 			const record = appendTurn(state, turn);
 			currentTurnId = record.id;
+			// A fresh append moves the leaf past whatever /tree pinned earlier
+			// (or this append could not have been made: see the invariant above),
+			// so the persisted pin is stale and must not outlive it. Once cleared,
+			// resolveLeafOnOpen's timestamp inference is trustworthy again.
+			if (state.meta.pinnedLeafTurnId !== undefined && state.meta.pinnedLeafTurnId !== null) {
+				state.meta.pinnedLeafTurnId = null;
+				persistSessionMeta(state);
+			}
 			return record;
 		},
 		appendEntry(entry: SessionEntryInput) {
@@ -215,7 +243,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				void prior.writer.close();
 			}
 			state = resumed.state;
-			currentTurnId = computeLeafId(resumed.nodes);
+			currentTurnId = resolveLeafOnOpen(resumed);
 			emitResume(resumed.state.meta.id, "resume");
 			return resumed.state.meta;
 		},
@@ -262,7 +290,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				void prior.writer.close();
 			}
 			state = resumed.state;
-			currentTurnId = computeLeafId(resumed.nodes);
+			currentTurnId = resolveLeafOnOpen(resumed);
 			emitResume(resumed.state.meta.id, "switch_branch");
 			return resumed.state.meta;
 		},
@@ -274,6 +302,13 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				throw new Error(`session.switchTurn: turn not found: ${turnId}`);
 			}
 			currentTurnId = turnId;
+			// Persist the pin immediately, not just in memory: without this, a
+			// switch made without a follow-up message was silently lost on quit
+			// because resume() had nothing but timestamp inference to fall back
+			// on and always landed back on the abandoned tip (issue #94).
+			state.meta.pinnedLeafTurnId = turnId;
+			persistSessionMeta(state);
+			emitTurnSwitched(state.meta.id, turnId);
 			return state.meta;
 		},
 		editLabel(turnId, label, sessionId) {

@@ -624,8 +624,11 @@ async function runCompactionFlow(
 	// Summarize only the active branch: after a /tree switch the raw file
 	// still holds abandoned sibling turns, and a summary that folds them in
 	// would persist abandoned content back into the active context. The full
-	// file read stays in place for the task board, protected artifacts, and
-	// the masking rewrite, which are session-global.
+	// file read stays in place for protected artifacts and the masking
+	// rewrite, which are session-global. The task board is not: it used to
+	// read the full file too (last taskLedger entry in file order, with no
+	// branch filter at all), which was a second, independent instance of this
+	// same bug. See the taskBoard wiring below for the fix.
 	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
 	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
 	if (entries.length === 0) return null;
@@ -1183,16 +1186,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// One task board per orchestrator: the tasks tool mutates it, the turn-end
 	// open-tasks nudge reads it, and the footer/overlay render it. Keyed on the
 	// current session id so resume/fork/new refolds it from taskLedger entries.
+	// Folding through filterEntriesToActivePath (not the raw file) is what
+	// keeps a /resume from picking up whichever branch happened to write its
+	// taskLedger entry last in file order; readEntries here used to skip that
+	// filter entirely (issue #94).
 	const taskBoard = createTaskBoardStore({
 		getSessionId: () => session?.current()?.id ?? null,
 		readEntries: () => {
 			const meta = session?.current();
-			return meta ? readSessionEntriesForCompact(meta.id) : [];
+			if (!meta) return [];
+			const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
+			return filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), leafTurnId);
 		},
 		appendEntry: (entry) => {
 			session?.appendEntry(entry);
 		},
 	});
+	// getSessionId alone never notices a /tree switch: it moves the active
+	// append point inside the same session, so the id-keyed cache above kept
+	// showing the abandoned branch's board (issue #94). SessionTurnSwitched is
+	// the signal that switch actually happened; invalidate() forces the next
+	// read to refold from the now-current leaf.
+	bus.on(BusChannels.SessionTurnSwitched, () => taskBoard.invalidate());
 	// Link in-flight dispatch runs to the live board via the ledger's
 	// activeRunIds field: a run is tracked from the moment its child process is
 	// live until it finalizes either way. attach/detach are no-ops when no board

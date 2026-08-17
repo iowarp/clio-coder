@@ -175,6 +175,41 @@ describe("contracts/task-board store", () => {
 		strictEqual(store.snapshot(), null);
 	});
 
+	// issue #94: a /tree switch moves the active append point inside the same
+	// session, so getSessionId() alone never noticed the branch changed and the
+	// cache kept showing the abandoned branch's board. invalidate() is what the
+	// SessionTurnSwitched bus signal calls to force the next read to refold.
+	it("does not refold on its own when the session id is unchanged, and does after invalidate()", () => {
+		const boardA: TaskBoardSnapshot = {
+			title: "Board A",
+			tasks: [{ id: "t1", title: "a", status: "pending" }],
+			activeRunIds: [],
+		};
+		const boardB: TaskBoardSnapshot = {
+			title: "Board B (abandoned branch)",
+			tasks: [{ id: "t1", title: "b", status: "active" }],
+			activeRunIds: [],
+		};
+		let entries: unknown[] = [
+			{ ...toTaskLedgerEntryFields(boardA, new Date()), turnId: "turn-1", timestamp: "2026-07-03T00:00:00.000Z" },
+		];
+		const store = createTaskBoardStore({
+			getSessionId: () => "session-a",
+			readEntries: () => entries,
+		});
+		deepStrictEqual(store.snapshot(), boardA);
+
+		// The ledger now folds to a different board (the /tree switch's filtered
+		// active-path read), but the session id is still "session-a".
+		entries = [
+			{ ...toTaskLedgerEntryFields(boardB, new Date()), turnId: "turn-2", timestamp: "2026-07-03T00:01:00.000Z" },
+		];
+		deepStrictEqual(store.snapshot(), boardA, "same session id: cache is not stale by that signal alone");
+
+		store.invalidate();
+		deepStrictEqual(store.snapshot(), boardB, "invalidate() forces the next read to refold");
+	});
+
 	it("links and unlinks dispatch runs through the board's activeRunIds", () => {
 		const { store, appended } = plannedStore();
 		store.attachRun("run-01H");

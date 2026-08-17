@@ -47,6 +47,14 @@ export type ClioSessionMetaExtension = {
 	workspace?: WorkspaceSnapshot;
 	/** Ordered record of skills activated in this session. */
 	skillActivations?: SkillActivation[];
+	/**
+	 * The turn `/tree` last switched the append point to, persisted so it
+	 * survives quit + resume. `resume()`/`switchBranch()` prefer this over
+	 * inferring the leaf from timestamps (`computeLeafId`) when it still
+	 * names a real turn; a plain append clears it, since once the tree grows
+	 * past it the inferred newest-node leaf is correct again.
+	 */
+	pinnedLeafTurnId?: string | null;
 };
 
 export type SessionMeta = ClioSessionMeta & ClioSessionMetaExtension;

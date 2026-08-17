@@ -100,6 +100,15 @@ export interface TaskBoardStore {
 	attachRun(runId: string): void;
 	/** Unlink a finished dispatch run; a no-op when it was never attached. */
 	detachRun(runId: string): void;
+	/**
+	 * Force the next read to refold from the ledger even if `getSessionId()`
+	 * reports the same id it did last time. A `/tree` switch moves the active
+	 * append point without changing which session is open, so the id-keyed
+	 * cache alone never noticed the branch change and kept showing the
+	 * abandoned branch's board (issue #94). Callers invalidate on the bus
+	 * signal that switch emits.
+	 */
+	invalidate(): void;
 }
 
 export function taskBoardCounts(board: Pick<TaskBoardSnapshot, "tasks">): TaskBoardCounts {
@@ -323,11 +332,13 @@ function applyStatusMutation(
 
 export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardStore {
 	let cachedSessionId: string | null | undefined;
+	let dirty = true;
 	let board: TaskBoardSnapshot | null = null;
 
 	const syncToSession = (): void => {
 		const sessionId = deps.getSessionId?.() ?? null;
-		if (cachedSessionId === sessionId) return;
+		if (!dirty && cachedSessionId === sessionId) return;
+		dirty = false;
 		cachedSessionId = sessionId;
 		try {
 			board = deps.readEntries ? foldTaskBoard(deps.readEntries()) : null;
@@ -370,6 +381,9 @@ export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardSt
 			if (board === null || !board.activeRunIds.includes(runId)) return;
 			board = { ...board, activeRunIds: board.activeRunIds.filter((id) => id !== runId) };
 			persist(board);
+		},
+		invalidate(): void {
+			dirty = true;
 		},
 	};
 }
