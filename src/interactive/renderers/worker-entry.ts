@@ -118,12 +118,66 @@ function railLines(text: string, token: ClioToken, width: number): string[] {
 	return wrapTextWithAnsi(text, contentWidth).map((row) => `${dim(RAIL)}${theme.fg(token, row)}`);
 }
 
+/** A worker's terminal answer when it is one JSON object, as a structured result contract asks for. */
+function structuredAnswer(text: string): Record<string, unknown> | null {
+	const trimmed = text.trim();
+	if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null;
+	try {
+		const parsed: unknown = JSON.parse(trimmed);
+		return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+			? (parsed as Record<string, unknown>)
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+const isStringArray = (value: unknown): value is string[] =>
+	Array.isArray(value) && value.every((entry) => typeof entry === "string");
+
+/**
+ * A mutation report as prose: the paths it changed, each validation with its
+ * verdict and evidence, then the summary and commit line. Null when the object
+ * is not that shape.
+ */
+function mutationReportLines(value: Record<string, unknown>): string[] | null {
+	if (!isStringArray(value.mutatedPaths) || !Array.isArray(value.validations)) return null;
+	const lines: string[] = [];
+	lines.push(value.mutatedPaths.length === 0 ? "changed nothing" : `changed ${value.mutatedPaths.join(", ")}`);
+	for (const validation of value.validations) {
+		if (typeof validation !== "object" || validation === null) continue;
+		const check = validation as Record<string, unknown>;
+		const name = typeof check.name === "string" ? check.name : "validation";
+		const glyph = check.passed === true ? GLYPH.ok : check.passed === false ? GLYPH.error : GLYPH.queued;
+		const evidence =
+			typeof check.evidence === "string" && check.evidence.trim().length > 0 ? `: ${check.evidence.trim()}` : "";
+		lines.push(`${glyph} ${name}${evidence}`);
+	}
+	if (typeof value.summary === "string" && value.summary.trim().length > 0) lines.push(value.summary.trim());
+	if (typeof value.commitMessage === "string" && value.commitMessage.trim().length > 0) {
+		lines.push(`commit: ${value.commitMessage.trim()}`);
+	}
+	return lines;
+}
+
+/**
+ * The body's source lines. A structured answer (a result-contract JSON object)
+ * never reaches the rail raw: a mutation report reads as prose, and any other
+ * object is pretty-printed so its keys line up instead of wrapping mid-string.
+ * Truncated text is not one object and passes through as the prose it is.
+ */
+function bodySourceLines(entry: WorkerEntryState): string[] {
+	const structured = entry.droppedLines === 0 ? structuredAnswer(entry.text) : null;
+	if (structured === null) return entry.text.split("\n");
+	return mutationReportLines(structured) ?? JSON.stringify(structured, null, 2).split("\n");
+}
+
 function bodyLines(entry: WorkerEntryState, width: number, unbounded: boolean): string[] {
 	// A worker that produced no prose (a pure tool run, a run that failed before
 	// its first token) gets no rail at all rather than one blank rail row.
 	if (entry.text.length === 0) return [];
 	const contentWidth = Math.max(1, width - RAIL_WIDTH);
-	const source = entry.text.split("\n");
+	const source = bodySourceLines(entry);
 	const capped = unbounded || source.length <= BODY_LINE_LIMIT ? source : source.slice(0, BODY_LINE_LIMIT);
 	const hiddenLines = entry.droppedLines + (source.length - capped.length);
 	const out: string[] = [];
