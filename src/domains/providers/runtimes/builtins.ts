@@ -4,7 +4,7 @@
  * registered are skipped, so tests and boot paths that poke pieces of the
  * registry before the providers domain starts won't double-register.
  *
- * Third-party runtimes from ~/.clio-coder/runtimes/ or npm plugins are loaded
+ * Third-party runtimes from ~/.config/clio-coder/runtimes/ or npm plugins are loaded
  * separately by `loadPluginRuntimes` in `./plugins.ts`.
  */
 

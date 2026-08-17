@@ -26,7 +26,7 @@ Documentation routing:
 - Source layout -> docs/architecture.md
 - Why the dispatch domain is not split -> docs/dispatch-architecture-rationale.md
 - Prompt envelope reuse -> docs/prompt-envelope-and-tools.md
-- In-depth reference for all 19 worker tools -> docs/tool-usage.md
+- In-depth reference for all 20 worker tools -> docs/tool-usage.md
 - Developer guide to implementing custom model runtimes and inference server integrations -> docs/provider-adapter-cookbook.md
 - Built-in agent recipes -> docs/built-in-agents.md
 - Artifact browsing -> docs/observability.md

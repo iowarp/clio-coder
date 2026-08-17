@@ -12,7 +12,7 @@ This matrix maps every top-level directory in `src/` and every domain directory 
 | `src/engine/acp/` | ACP protocol server, transport adapters, tool mediators, permission forwarding, error taxonomy | [acp.md](acp.md) | `documented` | Dedicated ACP specification covering server wiring, permission mediation, timeouts, error taxonomy, and security boundaries. |
 | `src/entry/` | Application bootstrapping, CLI router, interactive loop entry point | [architecture.md](architecture.md), [installation-and-lifecycle.md](installation-and-lifecycle.md) | `documented` | Documented in architecture compilation boundaries and lifecycle guides. |
 | `src/interactive/` | TUI architecture, screens, overlays, keybindings, panels, theme tokens, width matrices | [tui-design.md](tui-design.md), [commands-and-modes.md](commands-and-modes.md) | `documented` | Fully documented in TUI design specification and commands reference. |
-| `src/tools/` | 19 built-in tools across 7 planes, registry, policy engine bindings, observation envelope bounds | [tool-usage.md](tool-usage.md), [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) | `documented` | Comprehensive 19-tool reference with schemas, examples, and envelope size constraints. |
+| `src/tools/` | 20 built-in tools across 7 planes, registry, policy engine bindings, observation envelope bounds | [tool-usage.md](tool-usage.md), [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) | `documented` | Comprehensive 20-tool reference with schemas, examples, and envelope size constraints. |
 | `src/utils/` | Image manipulation, photon operations, git execution utilities | [architecture.md](architecture.md), [tool-usage.md](tool-usage.md) | `documented` | Utility helpers documented within tool usage and architectural boundaries. |
 | `src/worker/` | Worker subprocess lifecycle, NDJSON transport, heartbeat timers, control lane demuxing, spec contracts | [worker-dispatch-mechanics.md](worker-dispatch-mechanics.md) | `documented` | Complete reference for NDJSON socket protocols, watchdog timers, and exit status mapping. |
 | `src/domains/agents/` | 12 built-in recipes, agent catalog, recipe schema, fleet commands, fleet contract v4 | [built-in-agents.md](built-in-agents.md), [fleet-dispatch.md](fleet-dispatch.md) | `documented` | Documented in built-in agent recipes guide and fleet dispatch architecture. |
@@ -42,5 +42,5 @@ This matrix maps every top-level directory in `src/` and every domain directory 
 In addition to source subsystem mappings, the documentation set includes cross-cutting contracts:
 
 1. [artifact-versions.md](artifact-versions.md): Canonical version registry and migration contract for all 9 serialized artifact schemas across Clio Coder.
-2. [glossary.md](glossary.md): Formal definitions of 17 core architectural concepts mapped to their TypeScript types in `src/`.
+2. [glossary.md](glossary.md): Formal definitions of 40 core architectural concepts mapped to their TypeScript types in `src/`.
 3. [troubleshooting.md](troubleshooting.md): Comprehensive diagnostic and remediation guide keyed by exact user-facing error strings.

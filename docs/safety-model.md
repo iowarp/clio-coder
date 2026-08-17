@@ -75,7 +75,7 @@ Escalation can never hang a run. Every escalated ask resolves by an operator dec
 
 ## Operating Posture and Visible Tools
 
-Clio operates under a single operating posture with a standard, unified visible toolset. The 19 built-in tools are organized in seven planes; each plane is one policy unit for action class, size posture, and concurrency, asserted at bootstrap by `src/tools/policy.ts` so the classifier and the registered specs can never drift apart silently.
+Clio operates under a single operating posture with a standard, unified visible toolset. The 20 built-in tools are organized in seven planes; each plane is one policy unit for action class, size posture, and concurrency, asserted at bootstrap by `src/tools/policy.ts` so the classifier and the registered specs can never drift apart silently.
 
 | Plane | Tools | Action class |
 | --- | --- | --- |

@@ -59,8 +59,8 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 | `.clio-coder/wiki-prev/` | Runtime state | Previous wiki, retained for rollback during generation. | Yes. | Kept, not named |
 | `.clio-coder/worktrees/` | Runtime state | Git worktrees for `compete` candidate groups. | Prefer `git worktree remove`; a plain delete leaves git metadata behind. | Kept, not named |
 
-`~/.clio-coder/runtimes/` is a separate, user-level directory for third-party runtime
-plugins. It is not part of any repository.
+`~/.config/clio-coder/runtimes/` holds third-party runtime plugins. It lives under the
+user configuration directory, not in any repository.
 
 None of `.clio-coder/` is published by Clio's own package. The directories Clio ships
 (`src/domains/agents/builtins/`, `src/domains/agents/fleets/`, `skills/workflow/cut-it/`, `skills/git/`,
