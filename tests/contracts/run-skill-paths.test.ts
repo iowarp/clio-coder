@@ -7,12 +7,6 @@ import { explicitSkillPathErrors, runClioRun } from "../../src/cli/run.js";
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
 function scratchSkillDir(frontmatter: string[]): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-run-skill-"));
 	scratchRoots.push(root);
@@ -23,6 +17,16 @@ function scratchSkillDir(frontmatter: string[]): string {
 }
 
 describe("clio-coder run explicit --skill path preflight", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("reports a missing path with the resolved location", () => {
 		const errors = explicitSkillPathErrors(["/no/such/skill-path"]);
 		strictEqual(errors.length, 1);

@@ -19,10 +19,6 @@ import { detectProjectProfile } from "../../src/domains/session/workspace/projec
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 function scratchProject(prefix: string): string {
 	const root = mkdtempSync(join(tmpdir(), prefix));
 	scratchRoots.push(root);
@@ -93,6 +89,14 @@ function expectIncomplete(
 }
 
 describe("contracts/workspace-files", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("keeps Git-visible source files aligned across index, profile, fingerprint, and incremental updates", async () => {
 		const cwd = scratchProject("clio-workspace-files-git-");
 		git(cwd, ["init"]);

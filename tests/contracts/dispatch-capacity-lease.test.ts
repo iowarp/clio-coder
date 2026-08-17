@@ -30,13 +30,18 @@ function home(): string {
 	isolated = isolateClioEnv("clio-lease-");
 	return isolated.dir;
 }
-afterEach(() => {
-	isolated?.restore();
-	isolated = null;
-});
 const limits = { global: 1, nodes: { local: 1, mini: 1 } };
 
 describe("durable dispatch capacity leases", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		isolated?.restore();
+		isolated = null;
+	});
+
 	it("two processes cannot acquire one capacity slot", async () => {
 		home();
 		const spawn = (id: string, startAtMs?: number) =>

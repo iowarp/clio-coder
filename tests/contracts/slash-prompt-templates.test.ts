@@ -66,10 +66,6 @@ function harness(list: PromptTemplateList): DispatchHarness {
 	return { submitted, notices, opened, ctx };
 }
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 /**
  * `/name` is how every agent on the machine invokes the commands in the roots
  * Clio reads, and the parser answered "is not a command" for all of them: the
@@ -78,6 +74,14 @@ afterEach(() => {
  * prompt roots bought nothing until this branch asks about them.
  */
 describe("contracts/slash prompt templates", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("submits a trusted template's line so the submit path expands it", async () => {
 		const home = scratchDir();
 		const cwd = scratchDir();

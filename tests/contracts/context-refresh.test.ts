@@ -22,12 +22,6 @@ import { readClioState } from "../../src/domains/context/state.js";
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
 function scratchProject(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-refresh-"));
 	scratchRoots.push(root);
@@ -114,6 +108,16 @@ function context(events: ContextActivityPayload[]): DomainContext {
 }
 
 describe("contracts/context-refresh", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("rebuilds the codewiki and state without changing CLIO-CODER.md bytes", async () => {
 		const cwd = scratchProject();
 		const before = writeFixtureClioMd(cwd);

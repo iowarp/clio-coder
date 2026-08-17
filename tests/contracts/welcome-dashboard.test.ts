@@ -116,12 +116,6 @@ const mockObservability = {
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
 function scratchDashboardProject(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-welcome-dashboard-"));
 	scratchRoots.push(root);
@@ -162,6 +156,16 @@ function dashboardStatsFor(cwd: string) {
 }
 
 describe("welcome-dashboard and footer integration tests", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("derives stats correctly from providers and settings", () => {
 		const stats = deriveWelcomeDashboardStats({
 			providers: mockProviders,

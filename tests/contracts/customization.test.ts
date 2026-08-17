@@ -9,183 +9,190 @@ import { loadOperatorProfile, renderOperatorProfile } from "../../src/domains/co
 import { loadProjectRules, selectActiveRules } from "../../src/domains/context/project-rules.js";
 
 const roots: string[] = [];
-afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
-function scratch(): { cwd: string; userPath: string } {
-	const cwd = mkdtempSync(join(tmpdir(), "clio-cust-"));
-	roots.push(cwd);
-	mkdirSync(join(cwd, ".clio-coder"), { recursive: true });
-	return { cwd, userPath: join(cwd, "user-settings.yaml") };
-}
-
-function write(path: string, contents: string): void {
-	mkdirSync(join(path, ".."), { recursive: true });
-	writeFileSync(path, contents, "utf8");
-}
-
-describe("contracts/3a scoped settings layering", () => {
-	it("applies built-in < user < project < project.local precedence with per-key sources", () => {
-		const { cwd, userPath } = scratch();
-		write(userPath, "autonomy: suggest\nmodelSelector:\n  recentLimit: 5\n");
-		write(join(cwd, ".clio-coder", "settings.yaml"), "autonomy: read-only\nbudget:\n  sessionCeilingUsd: 10\n");
-		write(join(cwd, ".clio-coder", "settings.local.yaml"), "theme: midnight\n");
-
-		const result = readLayeredSettings(cwd, { userPath });
-		strictEqual(result.settings.autonomy, "read-only");
-		strictEqual(result.settings.modelSelector.recentLimit, 5);
-		strictEqual(result.settings.budget.sessionCeilingUsd, 10);
-		strictEqual(result.settings.theme, "midnight");
-
-		strictEqual(settingsSourceFor(result.sources, "autonomy"), "project");
-		strictEqual(settingsSourceFor(result.sources, "modelSelector.recentLimit"), "user");
-		strictEqual(settingsSourceFor(result.sources, "budget.sessionCeilingUsd"), "project");
-		strictEqual(settingsSourceFor(result.sources, "theme"), "project.local");
-		// A key no layer set falls back to built-in.
-		strictEqual(settingsSourceFor(result.sources, "version"), "built-in");
+// Wrapped in its own describe so the top-level beforeEach/afterEach below
+// scope to this file's suites, not the whole process, under
+// --experimental-test-isolation=none (every file shares one root test
+// context there, so an unscoped top-level hook runs around every test in
+// every file).
+describe("contracts/customization", () => {
+	afterEach(() => {
+		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
-	it("strips credentials from project layers and never lets them reach effective settings", () => {
-		const { cwd, userPath } = scratch();
-		write(userPath, "autonomy: suggest\n");
-		write(
-			join(cwd, ".clio-coder", "settings.yaml"),
-			"targets:\n  - id: t\n    runtime: ollama\n    auth:\n      apiKey: SUPER_SECRET\n",
-		);
-		const result = readLayeredSettings(cwd, { userPath });
-		ok(
-			result.issues.some((issue) => issue.message.includes("credentials")),
-			"expected a credentials diagnostic",
-		);
-		ok(!JSON.stringify(result.settings).includes("SUPER_SECRET"), "credential must not survive into effective settings");
+	function scratch(): { cwd: string; userPath: string } {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-cust-"));
+		roots.push(cwd);
+		mkdirSync(join(cwd, ".clio-coder"), { recursive: true });
+		return { cwd, userPath: join(cwd, "user-settings.yaml") };
+	}
+
+	function write(path: string, contents: string): void {
+		mkdirSync(join(path, ".."), { recursive: true });
+		writeFileSync(path, contents, "utf8");
+	}
+
+	describe("contracts/3a scoped settings layering", () => {
+		it("applies built-in < user < project < project.local precedence with per-key sources", () => {
+			const { cwd, userPath } = scratch();
+			write(userPath, "autonomy: suggest\nmodelSelector:\n  recentLimit: 5\n");
+			write(join(cwd, ".clio-coder", "settings.yaml"), "autonomy: read-only\nbudget:\n  sessionCeilingUsd: 10\n");
+			write(join(cwd, ".clio-coder", "settings.local.yaml"), "theme: midnight\n");
+
+			const result = readLayeredSettings(cwd, { userPath });
+			strictEqual(result.settings.autonomy, "read-only");
+			strictEqual(result.settings.modelSelector.recentLimit, 5);
+			strictEqual(result.settings.budget.sessionCeilingUsd, 10);
+			strictEqual(result.settings.theme, "midnight");
+
+			strictEqual(settingsSourceFor(result.sources, "autonomy"), "project");
+			strictEqual(settingsSourceFor(result.sources, "modelSelector.recentLimit"), "user");
+			strictEqual(settingsSourceFor(result.sources, "budget.sessionCeilingUsd"), "project");
+			strictEqual(settingsSourceFor(result.sources, "theme"), "project.local");
+			// A key no layer set falls back to built-in.
+			strictEqual(settingsSourceFor(result.sources, "version"), "built-in");
+		});
+
+		it("strips credentials from project layers and never lets them reach effective settings", () => {
+			const { cwd, userPath } = scratch();
+			write(userPath, "autonomy: suggest\n");
+			write(
+				join(cwd, ".clio-coder", "settings.yaml"),
+				"targets:\n  - id: t\n    runtime: ollama\n    auth:\n      apiKey: SUPER_SECRET\n",
+			);
+			const result = readLayeredSettings(cwd, { userPath });
+			ok(
+				result.issues.some((issue) => issue.message.includes("credentials")),
+				"expected a credentials diagnostic",
+			);
+			ok(!JSON.stringify(result.settings).includes("SUPER_SECRET"), "credential must not survive into effective settings");
+		});
+
+		it("degrades a malformed project layer to the lower layers with an issue", () => {
+			const { cwd, userPath } = scratch();
+			write(userPath, "autonomy: suggest\n");
+			write(join(cwd, ".clio-coder", "settings.yaml"), ":\n  - [bad yaml");
+			const result = readLayeredSettings(cwd, { userPath });
+			strictEqual(result.settings.autonomy, "suggest");
+			ok(result.issues.length >= 1);
+		});
+
+		it("attributes project validation failures to the project layer", () => {
+			const { cwd, userPath } = scratch();
+			write(userPath, "autonomy: suggest\n");
+			write(join(cwd, ".clio-coder", "settings.yaml"), "targets:\n  - id: 7\n    runtime: ollama\n");
+			const result = readLayeredSettings(cwd, { userPath });
+			ok(result.issues.some((issue) => issue.origin === "project" && issue.path === "targets[0].id"));
+		});
 	});
 
-	it("degrades a malformed project layer to the lower layers with an issue", () => {
-		const { cwd, userPath } = scratch();
-		write(userPath, "autonomy: suggest\n");
-		write(join(cwd, ".clio-coder", "settings.yaml"), ":\n  - [bad yaml");
-		const result = readLayeredSettings(cwd, { userPath });
-		strictEqual(result.settings.autonomy, "suggest");
-		ok(result.issues.length >= 1);
+	describe("contracts/3b path-scoped rules", () => {
+		it("loads unconditional and path-scoped rules with hash and token accounting", () => {
+			const { cwd } = scratch();
+			write(join(cwd, ".clio-coder", "rules", "always.md"), "# Always\nUse tabs.\n");
+			write(
+				join(cwd, ".clio-coder", "rules", "python.md"),
+				"---\npaths:\n  - '**/*.py'\nexcludes:\n  - '**/*.lock'\n---\n# Python\nType-hint everything.\n",
+			);
+			const loaded = loadProjectRules(cwd);
+			strictEqual(loaded.rules.length, 2);
+			// Deterministic order by id for cache stability.
+			deepStrictEqual(
+				loaded.rules.map((rule) => rule.id),
+				["always.md", "python.md"],
+			);
+			for (const rule of loaded.rules) {
+				strictEqual(rule.hash.length, 16);
+				ok(rule.tokenEstimate > 0);
+			}
+			deepStrictEqual(loaded.excludes, ["**/*.lock"]);
+
+			// Unconditional always loads; path-scoped loads only when a matching file
+			// is already in working context.
+			const noContext = selectActiveRules(loaded.rules, []);
+			deepStrictEqual(
+				noContext.map((rule) => rule.id),
+				["always.md"],
+			);
+			const withPython = selectActiveRules(loaded.rules, ["src/app.py"]);
+			deepStrictEqual(
+				withPython.map((rule) => rule.id),
+				["always.md", "python.md"],
+			);
+		});
+
+		it("never activates a disabled rule", () => {
+			const { cwd } = scratch();
+			write(join(cwd, ".clio-coder", "rules", "off.md"), "---\nenabled: false\n---\n# Off\n");
+			const loaded = loadProjectRules(cwd);
+			strictEqual(selectActiveRules(loaded.rules, []).length, 0);
+		});
+
+		it("skips malformed frontmatter instead of loading it unconditionally", () => {
+			const { cwd } = scratch();
+			write(join(cwd, ".clio-coder", "rules", "bad.md"), "---\npaths: '**/*.ts'\n---\n# Bad\nDo not load this.\n");
+			write(join(cwd, ".clio-coder", "rules", "unclosed.md"), "---\npaths:\n  - '**/*.ts'\n# Missing close\n");
+			const loaded = loadProjectRules(cwd);
+			strictEqual(loaded.rules.length, 0);
+			ok(loaded.issues.some((issue) => issue.includes("frontmatter paths")));
+			ok(loaded.issues.some((issue) => issue.includes("missing closing marker")));
+		});
 	});
 
-	it("attributes project validation failures to the project layer", () => {
-		const { cwd, userPath } = scratch();
-		write(userPath, "autonomy: suggest\n");
-		write(join(cwd, ".clio-coder", "settings.yaml"), "targets:\n  - id: 7\n    runtime: ollama\n");
-		const result = readLayeredSettings(cwd, { userPath });
-		ok(result.issues.some((issue) => issue.origin === "project" && issue.path === "targets[0].id"));
-	});
-});
+	describe("contracts/3c operator profile", () => {
+		it("merges user and project profiles and caps the rendered section", () => {
+			const { cwd, userPath } = scratch();
+			write(userPath, "responsePosture: thorough\nvalidationPreference: manual\n");
+			write(join(cwd, ".clio-coder", "profile.yaml"), "responsePosture: concise\ncommitMessageStyle: conventional\n");
+			const loaded = loadOperatorProfile(cwd, { userPath });
+			strictEqual(loaded.origin, "project");
+			strictEqual(loaded.profile.responsePosture, "concise");
+			strictEqual(loaded.profile.validationPreference, "manual");
+			strictEqual(loaded.profile.commitMessageStyle, "conventional");
 
-describe("contracts/3b path-scoped rules", () => {
-	it("loads unconditional and path-scoped rules with hash and token accounting", () => {
-		const { cwd } = scratch();
-		write(join(cwd, ".clio-coder", "rules", "always.md"), "# Always\nUse tabs.\n");
-		write(
-			join(cwd, ".clio-coder", "rules", "python.md"),
-			"---\npaths:\n  - '**/*.py'\nexcludes:\n  - '**/*.lock'\n---\n# Python\nType-hint everything.\n",
-		);
-		const loaded = loadProjectRules(cwd);
-		strictEqual(loaded.rules.length, 2);
-		// Deterministic order by id for cache stability.
-		deepStrictEqual(
-			loaded.rules.map((rule) => rule.id),
-			["always.md", "python.md"],
-		);
-		for (const rule of loaded.rules) {
-			strictEqual(rule.hash.length, 16);
-			ok(rule.tokenEstimate > 0);
-		}
-		deepStrictEqual(loaded.excludes, ["**/*.lock"]);
+			const rendered = renderOperatorProfile(loaded.profile);
+			ok(rendered.text.includes("Operator profile"));
+			ok(rendered.tokenEstimate > 0);
+		});
 
-		// Unconditional always loads; path-scoped loads only when a matching file
-		// is already in working context.
-		const noContext = selectActiveRules(loaded.rules, []);
-		deepStrictEqual(
-			noContext.map((rule) => rule.id),
-			["always.md"],
-		);
-		const withPython = selectActiveRules(loaded.rules, ["src/app.py"]);
-		deepStrictEqual(
-			withPython.map((rule) => rule.id),
-			["always.md", "python.md"],
-		);
+		it("rejects invalid enum values without throwing and caps local-only paths", () => {
+			const { cwd, userPath } = scratch();
+			const manyPaths = Array.from({ length: 50 }, (_, i) => `  - secret-${i}/`).join("\n");
+			write(userPath, `responsePosture: aggressive\nlocalOnlyPaths:\n${manyPaths}\n`);
+			const loaded = loadOperatorProfile(cwd, { userPath });
+			strictEqual(loaded.profile.responsePosture, undefined);
+			ok(loaded.issues.some((issue) => issue.includes("responsePosture")));
+			ok((loaded.profile.localOnlyPaths?.length ?? 0) <= 8);
+			const rendered = renderOperatorProfile(loaded.profile);
+			ok(rendered.text.length <= 700);
+		});
 	});
 
-	it("never activates a disabled rule", () => {
-		const { cwd } = scratch();
-		write(join(cwd, ".clio-coder", "rules", "off.md"), "---\nenabled: false\n---\n# Off\n");
-		const loaded = loadProjectRules(cwd);
-		strictEqual(selectActiveRules(loaded.rules, []).length, 0);
-	});
+	describe("contracts/3d config inspect graph", () => {
+		it("reports project rules, profile, hooks, and settings sources in the JSON contract", () => {
+			const { cwd } = scratch();
+			write(join(cwd, ".clio-coder", "settings.yaml"), "autonomy: read-only\n");
+			write(join(cwd, ".clio-coder", "rules", "r.md"), "# Rule\nbody\n");
+			write(join(cwd, ".clio-coder", "profile.yaml"), "responsePosture: concise\n");
+			write(join(cwd, ".clio-coder", "hooks.yaml"), "- on: turn_start\n  kind: prompt\n  message: hi\n");
 
-	it("skips malformed frontmatter instead of loading it unconditionally", () => {
-		const { cwd } = scratch();
-		write(join(cwd, ".clio-coder", "rules", "bad.md"), "---\npaths: '**/*.ts'\n---\n# Bad\nDo not load this.\n");
-		write(join(cwd, ".clio-coder", "rules", "unclosed.md"), "---\npaths:\n  - '**/*.ts'\n# Missing close\n");
-		const loaded = loadProjectRules(cwd);
-		strictEqual(loaded.rules.length, 0);
-		ok(loaded.issues.some((issue) => issue.includes("frontmatter paths")));
-		ok(loaded.issues.some((issue) => issue.includes("missing closing marker")));
-	});
-});
+			const graph = buildCustomizationGraph(cwd);
+			// Serializable contract.
+			const roundTrip = JSON.parse(JSON.stringify(graph)) as typeof graph;
+			deepStrictEqual(roundTrip.entries.length, graph.entries.length);
 
-describe("contracts/3c operator profile", () => {
-	it("merges user and project profiles and caps the rendered section", () => {
-		const { cwd, userPath } = scratch();
-		write(userPath, "responsePosture: thorough\nvalidationPreference: manual\n");
-		write(join(cwd, ".clio-coder", "profile.yaml"), "responsePosture: concise\ncommitMessageStyle: conventional\n");
-		const loaded = loadOperatorProfile(cwd, { userPath });
-		strictEqual(loaded.origin, "project");
-		strictEqual(loaded.profile.responsePosture, "concise");
-		strictEqual(loaded.profile.validationPreference, "manual");
-		strictEqual(loaded.profile.commitMessageStyle, "conventional");
+			// The project settings key is attributed to the project layer.
+			const autonomy = graph.settings.find((entry) => entry.key === "autonomy");
+			strictEqual(autonomy?.source, "project");
 
-		const rendered = renderOperatorProfile(loaded.profile);
-		ok(rendered.text.includes("Operator profile"));
-		ok(rendered.tokenEstimate > 0);
-	});
+			const categories = new Set(graph.entries.map((entry) => entry.category));
+			ok(categories.has("rule"), "expected a rule entry");
+			ok(categories.has("operator-profile"), "expected an operator-profile entry");
+			ok(categories.has("hook"), "expected a hook entry");
 
-	it("rejects invalid enum values without throwing and caps local-only paths", () => {
-		const { cwd, userPath } = scratch();
-		const manyPaths = Array.from({ length: 50 }, (_, i) => `  - secret-${i}/`).join("\n");
-		write(userPath, `responsePosture: aggressive\nlocalOnlyPaths:\n${manyPaths}\n`);
-		const loaded = loadOperatorProfile(cwd, { userPath });
-		strictEqual(loaded.profile.responsePosture, undefined);
-		ok(loaded.issues.some((issue) => issue.includes("responsePosture")));
-		ok((loaded.profile.localOnlyPaths?.length ?? 0) <= 8);
-		const rendered = renderOperatorProfile(loaded.profile);
-		ok(rendered.text.length <= 700);
-	});
-});
-
-describe("contracts/3d config inspect graph", () => {
-	it("reports project rules, profile, hooks, and settings sources in the JSON contract", () => {
-		const { cwd } = scratch();
-		write(join(cwd, ".clio-coder", "settings.yaml"), "autonomy: read-only\n");
-		write(join(cwd, ".clio-coder", "rules", "r.md"), "# Rule\nbody\n");
-		write(join(cwd, ".clio-coder", "profile.yaml"), "responsePosture: concise\n");
-		write(join(cwd, ".clio-coder", "hooks.yaml"), "- on: turn_start\n  kind: prompt\n  message: hi\n");
-
-		const graph = buildCustomizationGraph(cwd);
-		// Serializable contract.
-		const roundTrip = JSON.parse(JSON.stringify(graph)) as typeof graph;
-		deepStrictEqual(roundTrip.entries.length, graph.entries.length);
-
-		// The project settings key is attributed to the project layer.
-		const autonomy = graph.settings.find((entry) => entry.key === "autonomy");
-		strictEqual(autonomy?.source, "project");
-
-		const categories = new Set(graph.entries.map((entry) => entry.category));
-		ok(categories.has("rule"), "expected a rule entry");
-		ok(categories.has("operator-profile"), "expected an operator-profile entry");
-		ok(categories.has("hook"), "expected a hook entry");
-
-		const rule = graph.entries.find((entry) => entry.category === "rule" && entry.id === "r.md");
-		ok(rule?.hash, "rule must carry a hash");
-		ok((rule?.contextCostTokens ?? 0) > 0, "rule must carry a context cost");
-		ok(typeof rule?.reloadClass === "string", "every entry carries a reload class");
+			const rule = graph.entries.find((entry) => entry.category === "rule" && entry.id === "r.md");
+			ok(rule?.hash, "rule must carry a hash");
+			ok((rule?.contextCostTokens ?? 0) > 0, "rule must carry a context cost");
+			ok(typeof rule?.reloadClass === "string", "every entry carries a reload class");
+		});
 	});
 });

@@ -26,12 +26,6 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 const roots: string[] = [];
 let isolated: ReturnType<typeof isolateClioEnv> | null = null;
 
-afterEach(() => {
-	isolated?.restore();
-	isolated = null;
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 function envelope(id: string, overrides: Partial<RunEnvelope> = {}): RunEnvelope {
 	return {
 		id,
@@ -157,6 +151,16 @@ const INDEPENDENT_GATE_CORRELATION = {
 } as const;
 
 describe("dispatch route quality", { concurrency: false }, () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		isolated?.restore();
+		isolated = null;
+		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("not_applicable is unmeasured rather than successful quality", () => {
 		const subject = receipt("read-only", { verification: { state: "not_applicable", basis: "read-only-agent" } });
 		strictEqual(reduceRouteQuality({ subject, receipts: [subject] }).label, "unmeasured");

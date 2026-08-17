@@ -43,10 +43,6 @@ const CATALOG = {
 
 const realFetch = globalThis.fetch;
 
-afterEach(() => {
-	globalThis.fetch = realFetch;
-});
-
 interface FetchLog {
 	url: string;
 	authorization: string | undefined;
@@ -69,6 +65,14 @@ function ctx(authToken?: string): ProbeContext {
 }
 
 describe("contracts/alcf-runtime", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		globalThis.fetch = realFetch;
+	});
+
 	it("is registered as a built-in OAuth cloud runtime", () => {
 		const registry = createRuntimeRegistry();
 		registerBuiltinRuntimes(registry);

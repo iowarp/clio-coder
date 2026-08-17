@@ -31,10 +31,6 @@ const completeBootstrapState: BootstrapGenerationState = {
 	outputBytes: 1024,
 };
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 function scratchProject(): string {
 	const cwd = mkdtempSync(join(tmpdir(), "clio-context-state-"));
 	scratchRoots.push(cwd);
@@ -47,6 +43,14 @@ function writeRawBootstrapState(cwd: string, lastBootstrap: unknown): void {
 }
 
 describe("contracts/context-state", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("round-trips bounded bootstrap generation telemetry", () => {
 		const cwd = scratchProject();
 
