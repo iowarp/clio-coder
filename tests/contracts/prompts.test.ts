@@ -284,6 +284,53 @@ describe("contracts/prompts", () => {
 		});
 	});
 
+	describe("contracts/prompts fragment loader", () => {
+		it("loads wiki.page and wiki.plan through the same loader as every other fragment (#92)", () => {
+			// Before this, fragment-loader.ts's walk() explicitly skipped any
+			// directory named "wiki", and prompts/fragments/wiki/{page,plan}.md
+			// were read by a hand-rolled readFileSync in context/wiki/prompts.ts
+			// with no id, no version, no content hash, and no hot reload. They now
+			// carry the same frontmatter contract as everything under fragments/.
+			const table = loadFragments();
+			for (const id of ["wiki.page", "wiki.plan"] as const) {
+				const fragment = table.byId.get(id);
+				ok(fragment, `${id} must be registered`);
+				strictEqual(fragment.id, id);
+				strictEqual(fragment.version, 1);
+				ok(fragment.description.trim().length > 0);
+				strictEqual(fragment.dynamic, false);
+				ok(/^[0-9a-f]{64}$/.test(fragment.contentHash), "contentHash must be a real sha256 hex digest");
+				ok(fragment.relPath.startsWith("wiki/"));
+			}
+		});
+
+		it("wiki fragment bodies still carry the unsubstituted {{token}} placeholders context/wiki/prompts.ts binds per dispatch", () => {
+			// The loader has no template-substitution feature of its own (the same
+			// division identity.self-awareness uses for its own {TOKEN}
+			// placeholders in compiler.ts): it hands back the raw body, and the
+			// consumer substitutes. A loader-side change here would silently break
+			// context/wiki/prompts.ts's readWikiFragment with no type error, since
+			// both sides only agree through this string contract.
+			const table = loadFragments();
+			const page = table.byId.get("wiki.page");
+			ok(page);
+			ok(page.body.includes("{{pagePath}}"));
+			ok(page.body.includes("{{pageRelPath}}"));
+			ok(page.body.includes("{{pageTitle}}"));
+			const plan = table.byId.get("wiki.plan");
+			ok(plan);
+			ok(plan.body.includes("{{planPath}}"));
+		});
+
+		it("walk() no longer special-cases a directory named wiki: every fragments/**/*.md file loads", () => {
+			const table = loadFragments();
+			ok(
+				table.byId.size >= 14,
+				`expected at least 14 fragments (12 pre-#92 plus wiki.page and wiki.plan), got ${table.byId.size}`,
+			);
+		});
+	});
+
 	describe("contracts/prompts identity anti-leak safety", () => {
 		it("loads identity.clio with correct organisation, name, and vendor rejection clauses", () => {
 			const table = loadFragments();
