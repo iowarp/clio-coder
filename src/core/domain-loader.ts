@@ -17,7 +17,7 @@
 import { BusChannels } from "./bus-events.js";
 import type { SafeEventBus } from "./event-bus.js";
 import { getSharedBus } from "./shared-bus.js";
-import { resolveShutdownHookBudgetMs, runWithBudget } from "./termination.js";
+import { resolveShutdownHookBudgetMs, runWithBudget, writeShutdownNotice } from "./termination.js";
 
 export interface DomainManifest {
 	name: string;
@@ -105,10 +105,12 @@ export async function loadDomains(modules: ReadonlyArray<DomainModule>): Promise
 			const stopFn = ext.stop.bind(ext);
 			const t0 = debug ? process.hrtime.bigint() : 0n;
 			const completed = await runWithBudget(stopFn, budgetMs, (err) => {
-				console.error(`[clio:domain-loader] ${name}.stop() failed:`, err);
+				const message = err instanceof Error ? err.message : String(err);
+				writeShutdownNotice(`[clio:domain-loader] ${name}.stop() failed: ${message}`);
+				if (debug && err instanceof Error && err.stack) process.stderr.write(`${err.stack}\n`);
 			});
 			if (!completed) {
-				process.stderr.write(`[clio:domain-loader] ${name}.stop() exceeded ${budgetMs}ms budget; abandoning\n`);
+				writeShutdownNotice(`[clio:domain-loader] ${name}.stop() exceeded ${budgetMs}ms budget; abandoning`);
 			}
 			if (debug) {
 				const dt = Number(process.hrtime.bigint() - t0) / 1e6;
