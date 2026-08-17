@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+// The process table is the only place an integrator can identify a running Clio
+// Coder without sniffing script paths, and the bin name never reaches it because
+// the entry is a node script. Set it before anything can fail so `--version` and
+// a crashed boot are both legible to `ps`, `pgrep -f`, and htop.
+process.title = "clio-coder";
+
 // Only argument parsing and boot tracing load statically. Every subcommand is
 // imported dynamically through the command registry (see `dispatch`), so a bare `clio`
 // (interactive) or `clio-coder --version` pays for its own module graph and nothing
