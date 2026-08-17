@@ -20,8 +20,8 @@ describe("contracts/safety", () => {
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-safety-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-safety-");
 	});
 
 	afterEach(() => {
@@ -478,8 +478,8 @@ describe("contracts/safety damage-control scan surface", () => {
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-safety-scan-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-safety-scan-");
 	});
 
 	afterEach(() => {
@@ -569,8 +569,8 @@ describe("contracts/safety credential damage control", () => {
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-safety-cred-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-safety-cred-");
 	});
 
 	afterEach(() => {

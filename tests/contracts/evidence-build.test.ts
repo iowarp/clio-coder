@@ -28,9 +28,9 @@ import type {
 import { buildEvidence, loadEvidenceGateDecisions } from "../../src/domains/evidence/index.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
-function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promise<T> {
+async function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promise<T> {
 	const originalEnv = { ...process.env };
-	const scratch = newScratchClioHome("clio-evidence-build-");
+	const scratch = await newScratchClioHome("clio-evidence-build-");
 	return Promise.resolve()
 		.then(() => fn(scratch))
 		.finally(() => {

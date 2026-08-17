@@ -24,7 +24,7 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft } from "../../src/domains
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
-let isolated: ReturnType<typeof isolateClioEnv> | null = null;
+let isolated: Awaited<ReturnType<typeof isolateClioEnv>> | null = null;
 
 function envelope(id: string, overrides: Partial<RunEnvelope> = {}): RunEnvelope {
 	return {
@@ -204,8 +204,8 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		strictEqual(reduceRouteQuality({ subject, receipts: [subject] }).label, "unmeasured");
 	});
 
-	it("independent gate pass labels the referenced builder and not the reviewer", () => {
-		isolated = isolateClioEnv("clio-route-quality-gate-");
+	it("independent gate pass labels the referenced builder and not the reviewer", async () => {
+		isolated = await isolateClioEnv("clio-route-quality-gate-");
 		const builder = receipt("builder", {
 			quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null }),
 		});
@@ -239,8 +239,8 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		);
 	});
 
-	it("correlated self-review remains visible and unmeasured", () => {
-		isolated = isolateClioEnv("clio-route-quality-correlated-");
+	it("correlated self-review remains visible and unmeasured", async () => {
+		isolated = await isolateClioEnv("clio-route-quality-correlated-");
 		const builder = receipt("builder");
 		const reviewer = receipt("reviewer", { envelope: { agentId: "builder", wireModelId: "builder-model-v2" } });
 		const gate = writeGateDecision({
@@ -261,8 +261,8 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		strictEqual(reduced.correlatedGates.length, 1);
 	});
 
-	it("tampered gate or mismatched subject digest contributes no label", () => {
-		isolated = isolateClioEnv("clio-route-quality-tampered-");
+	it("tampered gate or mismatched subject digest contributes no label", async () => {
+		isolated = await isolateClioEnv("clio-route-quality-tampered-");
 		const builder = receipt("builder");
 		const reviewer = receipt("reviewer", { envelope: { agentId: "reviewer", wireModelId: "reviewer-model" } });
 		const gate = writeGateDecision({

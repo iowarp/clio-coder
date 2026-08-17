@@ -139,8 +139,8 @@ describe("contracts/safety ordering: audit rows stay readable without per-row fs
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-safety-audit-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-safety-audit-");
 	});
 
 	afterEach(() => {

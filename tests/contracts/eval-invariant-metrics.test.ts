@@ -258,7 +258,7 @@ function streamMetrics(events: ReadonlyArray<unknown>): Record<string, number | 
 
 describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	it("reads a sealed, authenticated, self-consistent run as intact", async () => {
-		const isolated = isolateClioEnv("clio-soak-intact-");
+		const isolated = await isolateClioEnv("clio-soak-intact-");
 		try {
 			await sealRun();
 
@@ -274,7 +274,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("reports an unsealed run as unsealed and judges no seal it does not have", async () => {
-		const isolated = isolateClioEnv("clio-soak-unsealed-");
+		const isolated = await isolateClioEnv("clio-soak-unsealed-");
 		try {
 			// A journal that exists and is empty is an observation: the item ran
 			// and sealed nothing. It is not an absence, and it is not success.
@@ -295,8 +295,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		strictEqual(Object.keys(receiptInvariantMetrics(null, 0)).length, 0);
 	});
 
-	it("reads batched tool calls and results as matched by toolCallId", () => {
-		const isolated = isolateClioEnv("clio-soak-ledger-intact-");
+	it("reads batched tool calls and results as matched by toolCallId", async () => {
+		const isolated = await isolateClioEnv("clio-soak-ledger-intact-");
 		try {
 			writeSession(isolated.dir, "session-1", [
 				sessionEntry("assistant", { content: [{ type: "toolCall" }, { type: "toolCall" }] }),
@@ -317,8 +317,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("fails ledger.formatVersion on a version 2 transcript and takes the lowest version", () => {
-		const isolated = isolateClioEnv("clio-soak-ledger-v2-");
+	it("fails ledger.formatVersion on a version 2 transcript and takes the lowest version", async () => {
+		const isolated = await isolateClioEnv("clio-soak-ledger-v2-");
 		try {
 			writeSession(isolated.dir, "session-v3", []);
 			writeSession(isolated.dir, "session-v2", [], {
@@ -339,8 +339,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("fails ledger.toolPairsUnmatched on a dangling tool call", () => {
-		const isolated = isolateClioEnv("clio-soak-ledger-dangling-");
+	it("fails ledger.toolPairsUnmatched on a dangling tool call", async () => {
+		const isolated = await isolateClioEnv("clio-soak-ledger-dangling-");
 		try {
 			writeSession(isolated.dir, "session-1", [sessionEntry("tool_call", { toolCallId: "dangling" })]);
 			strictEqual(sessionInvariantMetrics(stateDirOf(isolated.dir))["ledger.toolPairsUnmatched"], 1);
@@ -349,8 +349,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("fails ledger.toolPairsUnmatched on an orphan tool result", () => {
-		const isolated = isolateClioEnv("clio-soak-ledger-orphan-result-");
+	it("fails ledger.toolPairsUnmatched on an orphan tool result", async () => {
+		const isolated = await isolateClioEnv("clio-soak-ledger-orphan-result-");
 		try {
 			writeSession(isolated.dir, "session-1", [sessionEntry("tool_result", { toolCallId: "orphan" })]);
 			strictEqual(sessionInvariantMetrics(stateDirOf(isolated.dir))["ledger.toolPairsUnmatched"], 1);
@@ -359,8 +359,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("fails ledger.assistantBetweenCallAndResult when the model completed another message first", () => {
-		const isolated = isolateClioEnv("clio-soak-ledger-assistant-between-");
+	it("fails ledger.assistantBetweenCallAndResult when the model completed another message first", async () => {
+		const isolated = await isolateClioEnv("clio-soak-ledger-assistant-between-");
 		try {
 			writeSession(isolated.dir, "session-1", [
 				sessionEntry("tool_call", { toolCallId: "late-result" }),
@@ -376,8 +376,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("fails ledger.formatVersion closed when the transcript has no header", () => {
-		const isolated = isolateClioEnv("clio-soak-ledger-no-header-");
+	it("fails ledger.formatVersion closed when the transcript has no header", async () => {
+		const isolated = await isolateClioEnv("clio-soak-ledger-no-header-");
 		try {
 			const sessionDir = join(stateDirOf(isolated.dir), "sessions", "cwd-hash", "session-1");
 			mkdirSync(sessionDir, { recursive: true });
@@ -393,8 +393,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("leaves ledger metrics absent when the item wrote no session", () => {
-		const isolated = isolateClioEnv("clio-soak-ledger-absent-");
+	it("leaves ledger metrics absent when the item wrote no session", async () => {
+		const isolated = await isolateClioEnv("clio-soak-ledger-absent-");
 		try {
 			mkdirSync(stateDirOf(isolated.dir), { recursive: true });
 			strictEqual(Object.keys(sessionInvariantMetrics(stateDirOf(isolated.dir))).length, 0);
@@ -403,8 +403,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("proves compaction continuity from successful reads of the same path on both sides of the summary", () => {
-		const isolated = isolateClioEnv("clio-soak-continuity-intact-");
+	it("proves compaction continuity from successful reads of the same path on both sides of the summary", async () => {
+		const isolated = await isolateClioEnv("clio-soak-continuity-intact-");
 		try {
 			writeSession(isolated.dir, "session-1", [
 				sessionEntry("tool_call", { toolCallId: "read-before", name: "read", args: { path: "planted-fact.txt" } }),
@@ -424,8 +424,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("fails continuity promises when the transcript has no compaction summary", () => {
-		const isolated = isolateClioEnv("clio-soak-continuity-no-summary-");
+	it("fails continuity promises when the transcript has no compaction summary", async () => {
+		const isolated = await isolateClioEnv("clio-soak-continuity-no-summary-");
 		try {
 			writeSession(isolated.dir, "session-1", [
 				sessionEntry("tool_call", { toolCallId: "read-before", name: "read", args: { path: "planted-fact.txt" } }),
@@ -441,8 +441,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("fails continuity.answeredFromPreCompaction when the final turn never rereads the planted path", () => {
-		const isolated = isolateClioEnv("clio-soak-continuity-no-post-read-");
+	it("fails continuity.answeredFromPreCompaction when the final turn never rereads the planted path", async () => {
+		const isolated = await isolateClioEnv("clio-soak-continuity-no-post-read-");
 		try {
 			writeSession(isolated.dir, "session-1", [
 				sessionEntry("tool_call", { toolCallId: "read-before", name: "read", args: { path: "planted-fact.txt" } }),
@@ -461,7 +461,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("fails receipt.integrityValid when a sealed receipt is edited after sealing", async () => {
-		const isolated = isolateClioEnv("clio-soak-tampered-");
+		const isolated = await isolateClioEnv("clio-soak-tampered-");
 		try {
 			const runId = await sealRun();
 			strictEqual(metricsFor(isolated.dir)["receipt.integrityValid"], true);
@@ -480,7 +480,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("fails receipt.integrityValid when the ledger no longer carries the run the receipt names", async () => {
-		const isolated = isolateClioEnv("clio-soak-no-envelope-");
+		const isolated = await isolateClioEnv("clio-soak-no-envelope-");
 		try {
 			await sealRun();
 			strictEqual(metricsFor(isolated.dir)["receipt.integrityValid"], true);
@@ -498,7 +498,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("fails receipt.integrityValid when a sealed receipt no longer parses", async () => {
-		const isolated = isolateClioEnv("clio-soak-unreadable-");
+		const isolated = await isolateClioEnv("clio-soak-unreadable-");
 		try {
 			const runId = await sealRun();
 
@@ -515,7 +515,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("fails receipt.outcomeMatchesExit when a receipt claims success beside a nonzero exit", async () => {
-		const isolated = isolateClioEnv("clio-soak-outcome-drift-");
+		const isolated = await isolateClioEnv("clio-soak-outcome-drift-");
 		try {
 			await sealRun({ outcome: "succeeded", exitCode: 3 });
 
@@ -527,7 +527,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("fails receipt.outcomeMatchesExit when the sealed run disagrees with the process exit status", async () => {
-		const isolated = isolateClioEnv("clio-soak-process-drift-");
+		const isolated = await isolateClioEnv("clio-soak-process-drift-");
 		try {
 			// The receipt is internally consistent and integrity-valid. It says the
 			// run succeeded; the process it ran in exited nonzero.
@@ -543,7 +543,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("reconciles a nested SIGINT receipt against the measured chaos exit instead of the clean harness exit", async () => {
-		const isolated = isolateClioEnv("clio-soak-chaos-exit-");
+		const isolated = await isolateClioEnv("clio-soak-chaos-exit-");
 		try {
 			await sealRun({ outcome: "canceled", exitCode: 130 });
 			const journal = readRunJournal(stateDirOf(isolated.dir));
@@ -561,7 +561,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("reports no orphan when the workers a receipt attested are gone", async () => {
-		const isolated = isolateClioEnv("clio-soak-no-orphan-");
+		const isolated = await isolateClioEnv("clio-soak-no-orphan-");
 		try {
 			// A pid that has certainly exited: this process's own child, awaited.
 			const dead = spawnSync(process.execPath, ["-e", ""]).pid ?? 1;
@@ -576,7 +576,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("fails process.orphanedChildren when an attested worker outlives its run", async () => {
-		const isolated = isolateClioEnv("clio-soak-orphan-");
+		const isolated = await isolateClioEnv("clio-soak-orphan-");
 		const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
 		try {
 			await sealRun({ attestedPid: child.pid ?? process.pid });
@@ -591,7 +591,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("leaves the process invariants absent when no receipt attested a worker", async () => {
-		const isolated = isolateClioEnv("clio-soak-no-attestation-");
+		const isolated = await isolateClioEnv("clio-soak-no-attestation-");
 		try {
 			// The main-agent path runs in the orchestrator's own process and
 			// attests no worker, so there is nothing here to judge.
@@ -703,8 +703,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		strictEqual(metrics["stream.usageDoubleCounted"], false);
 	});
 
-	it("reads a sealed rollback verdict as a detected and repaired violation", () => {
-		const isolated = isolateClioEnv("clio-soak-boundary-rolled-");
+	it("reads a sealed rollback verdict as a detected and repaired violation", async () => {
+		const isolated = await isolateClioEnv("clio-soak-boundary-rolled-");
 		try {
 			writeVerdict(isolated.dir, "root-1", "wave-1", {
 				status: "rolled-back",
@@ -723,8 +723,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("counts a rollback it could not complete separately from one it could", () => {
-		const isolated = isolateClioEnv("clio-soak-boundary-incomplete-");
+	it("counts a rollback it could not complete separately from one it could", async () => {
+		const isolated = await isolateClioEnv("clio-soak-boundary-incomplete-");
 		try {
 			// A path already dirty when the snapshot was taken cannot be restored
 			// from content git has. That is the honest failure, and it must stay
@@ -745,8 +745,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("fails boundary.verdictSealed when a verdict no longer parses", () => {
-		const isolated = isolateClioEnv("clio-soak-boundary-corrupt-");
+	it("fails boundary.verdictSealed when a verdict no longer parses", async () => {
+		const isolated = await isolateClioEnv("clio-soak-boundary-corrupt-");
 		try {
 			writeVerdict(isolated.dir, "root-1", "wave-1", { status: "clean", reason: null });
 			writeFileSync(join(stateDirOf(isolated.dir), "write-boundaries", "root-1", "wave-1.json"), "{ truncated", "utf8");
@@ -759,8 +759,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("fails boundary.verdictSealed when a verdict carries no baseline commit", () => {
-		const isolated = isolateClioEnv("clio-soak-boundary-baseline-");
+	it("fails boundary.verdictSealed when a verdict carries no baseline commit", async () => {
+		const isolated = await isolateClioEnv("clio-soak-boundary-baseline-");
 		try {
 			// A verdict without the commit it was computed against measured the
 			// checkout against nothing nameable.
@@ -773,8 +773,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("fails boundary.verdictSealed when a verdict carries no digest", () => {
-		const isolated = isolateClioEnv("clio-soak-boundary-digest-");
+	it("fails boundary.verdictSealed when a verdict carries no digest", async () => {
+		const isolated = await isolateClioEnv("clio-soak-boundary-digest-");
 		try {
 			writeVerdict(isolated.dir, "root-1", "wave-1", { status: "clean", reason: null, digest: "" });
 
@@ -785,8 +785,8 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 		}
 	});
 
-	it("leaves the boundary invariants absent when the run enforced no boundary", () => {
-		const isolated = isolateClioEnv("clio-soak-boundary-absent-");
+	it("leaves the boundary invariants absent when the run enforced no boundary", async () => {
+		const isolated = await isolateClioEnv("clio-soak-boundary-absent-");
 		try {
 			// Absent, never zero: a run that enforced nothing answered none of
 			// these questions, and a threshold on an absent metric fails closed.
@@ -797,7 +797,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("sums what the receipts sealed, and says so with its own provenance", async () => {
-		const isolated = isolateClioEnv("clio-soak-usage-sum-");
+		const isolated = await isolateClioEnv("clio-soak-usage-sum-");
 		try {
 			// Two attempts, deliberately distinguishable, so a sum is checked
 			// rather than assumed from a single receipt.
@@ -815,7 +815,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("reports no receipt usage when a sealed receipt is edited after sealing", async () => {
-		const isolated = isolateClioEnv("clio-soak-usage-tampered-");
+		const isolated = await isolateClioEnv("clio-soak-usage-tampered-");
 		try {
 			const runId = await sealRun({ tokenCount: 700, costUsd: 0.25 });
 			strictEqual(usageMetricsFor(isolated.dir)["receiptUsage.measured"], true);
@@ -837,7 +837,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("reports no receipt usage when a receipt file no longer parses", async () => {
-		const isolated = isolateClioEnv("clio-soak-usage-unreadable-");
+		const isolated = await isolateClioEnv("clio-soak-usage-unreadable-");
 		try {
 			const runId = await sealRun({ tokenCount: 700, costUsd: 0.25 });
 			await sealRun({ tokenCount: 300, costUsd: 0.75 });
@@ -856,7 +856,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("reports no receipt usage when a receipt has no envelope to authenticate against", async () => {
-		const isolated = isolateClioEnv("clio-soak-usage-unauthenticated-");
+		const isolated = await isolateClioEnv("clio-soak-usage-unauthenticated-");
 		try {
 			await sealRun({ tokenCount: 700, costUsd: 0.25 });
 			// No envelope means no authority to verify against. An unauthenticated
@@ -872,7 +872,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("reports a run that sealed nothing as unmeasured rather than free", async () => {
-		const isolated = isolateClioEnv("clio-soak-usage-unsealed-");
+		const isolated = await isolateClioEnv("clio-soak-usage-unsealed-");
 		try {
 			// A readable journal with no receipts is an observation: the item ran
 			// and sealed nothing. That is unmeasured, and it is not a zero cost.
@@ -893,7 +893,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("keeps stream-observed and receipt-sealed accounting as separate readings", async () => {
-		const isolated = isolateClioEnv("clio-soak-usage-provenance-");
+		const isolated = await isolateClioEnv("clio-soak-usage-provenance-");
 		try {
 			await sealRun({ tokenCount: 700, costUsd: 0.25 });
 
@@ -910,7 +910,7 @@ describe("contracts/eval invariant metrics", { concurrency: false }, () => {
 	});
 
 	it("ignores files that are not receipts and keeps a stray directory out of the count", async () => {
-		const isolated = isolateClioEnv("clio-soak-stray-");
+		const isolated = await isolateClioEnv("clio-soak-stray-");
 		try {
 			await sealRun();
 			writeFileSync(join(stateDirOf(isolated.dir), "receipts", "notes.txt"), "not a receipt", "utf8");

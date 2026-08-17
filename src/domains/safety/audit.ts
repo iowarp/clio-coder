@@ -204,7 +204,13 @@ let dateFormatter = new Intl.DateTimeFormat("en-CA", DATE_OPTIONS);
 function localDateString(d: Date): string {
 	if (process.env.TZ !== dateFormatterZone) {
 		dateFormatterZone = process.env.TZ;
-		dateFormatter = new Intl.DateTimeFormat("en-CA", DATE_OPTIONS);
+		// The zone is passed explicitly, not left for Intl to pick up from
+		// process.env.TZ implicitly: see src/interactive/format-time.ts's
+		// syncZone() for the traced repro (issue #84) of a rebuilt formatter
+		// resolving to the wrong zone while process.env.TZ read correctly at
+		// both construction and format time. Same idiom, same fix.
+		const zone = dateFormatterZone === undefined ? undefined : { timeZone: dateFormatterZone };
+		dateFormatter = new Intl.DateTimeFormat("en-CA", { ...DATE_OPTIONS, ...zone });
 	}
 	return dateFormatter.format(d);
 }

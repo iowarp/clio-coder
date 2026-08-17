@@ -24,8 +24,8 @@ function writeSettings(dir: string, patch: Record<string, unknown>): void {
 describe("contracts/default-target verdict", { concurrency: false }, () => {
 	let dir: string;
 
-	beforeEach(() => {
-		dir = newScratchClioHome("clio-default-target-");
+	beforeEach(async () => {
+		dir = await newScratchClioHome("clio-default-target-");
 		// The scratch home is an empty directory. Creating the config root here
 		// keeps the bootstrap, which is not what these cases are about, out of
 		// the way.

@@ -47,11 +47,11 @@ function pendingPolicy(name: string) {
 }
 
 describe("contracts/skills fresh install: the marketplace with nothing configured", () => {
-	let isolated: ReturnType<typeof isolateClioEnv>;
+	let isolated: Awaited<ReturnType<typeof isolateClioEnv>>;
 	let project: string;
 
-	before(() => {
-		isolated = isolateClioEnv("clio-fresh-install-");
+	before(async () => {
+		isolated = await isolateClioEnv("clio-fresh-install-");
 		delete process.env.CLIO_CODER_SKILL_CATALOG_DIR;
 		delete process.env.CLIO_CODER_SKILL_MARKETPLACE_INDEX;
 	});

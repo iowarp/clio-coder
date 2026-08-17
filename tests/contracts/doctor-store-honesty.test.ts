@@ -21,10 +21,10 @@ function isRoot(): boolean {
 }
 
 describe("contracts/doctor store honesty", { concurrency: false }, () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-doctor-stores-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-doctor-stores-");
 		initializeClioHome();
 	});
 

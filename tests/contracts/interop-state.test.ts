@@ -1,14 +1,9 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { resetXdgCache } from "../../src/core/xdg.js";
 import { interopStatePath, readInteropReport, writeInteropReport } from "../../src/domains/interop/state.js";
 import type { InteropReport } from "../../src/domains/interop/types.js";
-
-const scratchRoots: string[] = [];
-let savedHome: string | undefined;
+import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const REPORT: InteropReport = {
 	version: 1,
@@ -33,21 +28,20 @@ describe("interop state file", () => {
 	// Nested inside the describe, not at module top level: under
 	// --experimental-test-isolation=none every file shares one root test
 	// context, so a top-level beforeEach/afterEach runs around every test in
-	// every file, not just this one's.
-	beforeEach(() => {
-		const root = mkdtempSync(join(tmpdir(), "clio-interop-state-"));
-		scratchRoots.push(root);
-		savedHome = process.env.CLIO_CODER_HOME;
-		process.env.CLIO_CODER_HOME = root;
-		mkdirSync(root, { recursive: true });
-		resetXdgCache();
+	// every file, not just this one's. Routed through isolateClioEnv() rather
+	// than a hand-rolled save/mutate/restore of CLIO_CODER_HOME: that duplicate
+	// of the same idiom was exactly what raced against interop-consent.test.ts's
+	// own copy at full-suite scale (issue #84) — isolateClioEnv() now serializes
+	// every in-process env window process-wide, so this only closes the gap by
+	// going through it instead of re-implementing it.
+	let isolated: IsolatedClioEnv;
+
+	beforeEach(async () => {
+		isolated = await isolateClioEnv("clio-interop-state-");
 	});
 
 	afterEach(() => {
-		if (savedHome === undefined) delete process.env.CLIO_CODER_HOME;
-		else process.env.CLIO_CODER_HOME = savedHome;
-		resetXdgCache();
-		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+		isolated.restore();
 	});
 
 	it("round-trips a report through the state dir", () => {

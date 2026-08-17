@@ -15,8 +15,8 @@ import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env
 
 describe("contracts/session-boundary", () => {
 	let scratch: string;
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-session-boundary-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-session-boundary-");
 	});
 	afterEach(() => clearScratchClioHome(scratch));
 

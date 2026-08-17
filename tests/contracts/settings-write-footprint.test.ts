@@ -33,8 +33,8 @@ function addedLines(before: string, after: string): string[] {
 describe("contracts/settings-write-footprint", () => {
 	let scratch = "";
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-settings-footprint-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-settings-footprint-");
 	});
 
 	afterEach(() => {

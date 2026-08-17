@@ -128,8 +128,8 @@ describe("contracts/finish-contract-tail-read", () => {
 	let scratch: string;
 	const ORIGINAL_ENV = { ...process.env };
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-tail-read-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-tail-read-");
 	});
 
 	afterEach(async () => {

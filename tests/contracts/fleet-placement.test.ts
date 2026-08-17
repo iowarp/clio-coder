@@ -304,8 +304,8 @@ describe("fleet placement resolution order", () => {
 });
 
 describe("fleet preflight store", () => {
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 	});
 	after(() => {
 		restoreDispatchState();

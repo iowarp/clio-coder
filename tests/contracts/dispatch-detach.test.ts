@@ -150,8 +150,8 @@ const approvedDispatch = {
 };
 
 describe("detached dispatch + collect", () => {
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 	});
 	after(() => {
 		restoreDispatchState();

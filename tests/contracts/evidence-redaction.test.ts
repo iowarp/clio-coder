@@ -144,8 +144,8 @@ describe("contracts/evidence-redaction (B3)", () => {
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-evidence-redact-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-evidence-redact-");
 	});
 
 	afterEach(() => {

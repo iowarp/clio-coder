@@ -38,15 +38,15 @@ async function captureAuth(args: ReadonlyArray<string>): Promise<{ code: number;
 }
 
 describe("contracts/auth login against an unwritable credentials store", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 	let configDir: string;
 	let credentials: string;
 	// A process running as root writes through mode 0500 regardless, so the
 	// premise of this test does not hold there.
 	const asRoot = process.getuid?.() === 0;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-auth-write-failure-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-auth-write-failure-");
 		configDir = join(scratch.dir, "config");
 		credentials = join(configDir, "credentials.yaml");
 	});

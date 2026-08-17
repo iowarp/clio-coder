@@ -26,8 +26,8 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 // The state dir is memoized, so a bare env edit would silently leave every test
 // in this file sharing one store. Reset the cache with the env.
 let isolated: IsolatedClioEnv | null = null;
-function home(): string {
-	isolated = isolateClioEnv("clio-lease-");
+async function home(): Promise<string> {
+	isolated = await isolateClioEnv("clio-lease-");
 	return isolated.dir;
 }
 const limits = { global: 1, nodes: { local: 1, mini: 1 } };
@@ -43,7 +43,7 @@ describe("durable dispatch capacity leases", () => {
 	});
 
 	it("two processes cannot acquire one capacity slot", async () => {
-		home();
+		await home();
 		const spawn = (id: string, startAtMs?: number) =>
 			fork(
 				join(process.cwd(), "tests/fixtures/capacity-lease-child.ts"),
@@ -68,7 +68,7 @@ describe("durable dispatch capacity leases", () => {
 		second.kill();
 	});
 	it("concurrent processes racing one slot produce exactly one lease", async () => {
-		home();
+		await home();
 		const startAtMs = Date.now() + 1_500;
 		const children = ["a", "b", "c", "d"].map((id) =>
 			fork(join(process.cwd(), "tests/fixtures/capacity-lease-child.ts"), [id, String(startAtMs)], {
@@ -90,8 +90,8 @@ describe("durable dispatch capacity leases", () => {
 			for (const child of children) child.kill();
 		}
 	});
-	it("plan reservation transfers atomically into an assignment lease", () => {
-		home();
+	it("plan reservation transfers atomically into an assignment lease", async () => {
+		await home();
 		const reservation = createDispatchReservation({
 			topology: "parallel",
 			tasks: [{ memberId: "step", wave: 0, nodeId: "local", costUpperBoundUsd: 1 }],
@@ -111,8 +111,8 @@ describe("durable dispatch capacity leases", () => {
 		strictEqual(lease.assignmentId, "assignment");
 		strictEqual(getDispatchReservation(reservation.ownerId)?.members[0]?.status, "consumed");
 	});
-	it("retry rebinds one lease instead of acquiring a second", () => {
-		home();
+	it("retry rebinds one lease instead of acquiring a second", async () => {
+		await home();
 		// The production retry path re-enters acquisition with the assignment id it
 		// already holds, on whichever node the retry resolved.
 		const first = acquireCapacityLease({ assignmentId: "a", nodeId: "local", limits });
@@ -121,8 +121,8 @@ describe("durable dispatch capacity leases", () => {
 		strictEqual(listCapacityLeases().length, 1);
 		strictEqual(listCapacityLeases()[0]?.nodeId, "mini");
 	});
-	it("live birth token prevents stale pid reuse reclamation", () => {
-		home();
+	it("live birth token prevents stale pid reuse reclamation", async () => {
+		await home();
 		const lease = acquireCapacityLease({
 			assignmentId: "a",
 			nodeId: "local",
@@ -136,8 +136,8 @@ describe("durable dispatch capacity leases", () => {
 		heartbeatCapacityLease(lease.leaseId, 50, 100);
 		strictEqual(listCapacityLeases({ nowMs: 149, probe: { birthToken: () => "birth" } }).length, 1);
 	});
-	it("a live owner keeps its lease through a lock stall longer than the ttl", () => {
-		home();
+	it("a live owner keeps its lease through a lock stall longer than the ttl", async () => {
+		await home();
 		// Every admission mutation blocks the event loop waiting for the state
 		// lock, so a holder stuck behind one also stops heartbeating. Forty-five
 		// seconds of that used to put a 30s lease past expiry and hand the slot
@@ -156,8 +156,8 @@ describe("durable dispatch capacity leases", () => {
 		strictEqual(after.length, 1);
 		strictEqual(after[0]?.leaseId, lease.leaseId);
 	});
-	it("a dead owner is reclaimed even while its lease is unexpired", () => {
-		home();
+	it("a dead owner is reclaimed even while its lease is unexpired", async () => {
+		await home();
 		acquireCapacityLease({
 			assignmentId: "a",
 			nodeId: "local",
@@ -170,8 +170,8 @@ describe("durable dispatch capacity leases", () => {
 		});
 		strictEqual(listCapacityLeases({ nowMs: 1_000, probe: { birthToken: () => null } }).length, 0);
 	});
-	it("a lease from another host is never adjudicated, and a legacy host-less lease still is", () => {
-		home();
+	it("a lease from another host is never adjudicated, and a legacy host-less lease still is", async () => {
+		await home();
 		const at = new Date(0).toISOString();
 		const lease = (leaseId: string, host?: string) => ({
 			leaseId,
@@ -201,14 +201,14 @@ describe("durable dispatch capacity leases", () => {
 			hostname(),
 		);
 	});
-	it("the lock acquire budget stays under the lease ttl", () => {
+	it("the lock acquire budget stays under the lease ttl", async () => {
 		ok(
 			FILE_LOCK_ACQUIRE_TIMEOUT_MS < DEFAULT_CAPACITY_LEASE_TTL_MS,
 			`a caller may block ${FILE_LOCK_ACQUIRE_TIMEOUT_MS}ms on the admission lock, which must stay under the ${DEFAULT_CAPACITY_LEASE_TTL_MS}ms it holds a lease for`,
 		);
 	});
-	it("dead and expired owners are reclaimed", () => {
-		home();
+	it("dead and expired owners are reclaimed", async () => {
+		await home();
 		acquireCapacityLease({
 			assignmentId: "a",
 			nodeId: "local",
@@ -221,8 +221,8 @@ describe("durable dispatch capacity leases", () => {
 		});
 		strictEqual(listCapacityLeases({ nowMs: 21, probe: { birthToken: () => null } }).length, 0);
 	});
-	it("draining rejects new leases and preserves running work", () => {
-		home();
+	it("draining rejects new leases and preserves running work", async () => {
+		await home();
 		acquireCapacityLease({ assignmentId: "a", nodeId: "local", limits });
 		setCapacityDraining(true);
 		strictEqual(listCapacityLeases().length, 1);
@@ -235,8 +235,8 @@ describe("durable dispatch capacity leases", () => {
 		ok(error instanceof Error);
 		match(error.message, /draining/);
 	});
-	it("draining rejects plan reservations before they hold capacity", () => {
-		home();
+	it("draining rejects plan reservations before they hold capacity", async () => {
+		await home();
 		setCapacityDraining(true, { nowMs: 1_000, ttlMs: 10_000 });
 		throws(
 			() =>
@@ -268,8 +268,8 @@ describe("durable dispatch capacity leases", () => {
 			"active",
 		);
 	});
-	it("draining blocks a previously reserved member before lease transfer", () => {
-		home();
+	it("draining blocks a previously reserved member before lease transfer", async () => {
+		await home();
 		const reservation = createDispatchReservation({
 			topology: "parallel",
 			tasks: [{ memberId: "step", wave: 0, nodeId: "local", costUpperBoundUsd: 1 }],
@@ -296,8 +296,8 @@ describe("durable dispatch capacity leases", () => {
 		strictEqual(getDispatchReservation(reservation.ownerId)?.members[0]?.status, "held");
 		strictEqual(listCapacityLeases({ nowMs: 1_002 }).length, 0);
 	});
-	it("an abandoned operator drain expires instead of wedging the machine", () => {
-		home();
+	it("an abandoned operator drain expires instead of wedging the machine", async () => {
+		await home();
 		const drain = setCapacityDraining(true, { nowMs: 1_000, ttlMs: 10 });
 		strictEqual(drain?.requestedByPid, process.pid);
 		strictEqual(capacityDrain(1_005)?.requestedByPid, process.pid);
@@ -305,8 +305,8 @@ describe("durable dispatch capacity leases", () => {
 		const lease = acquireCapacityLease({ assignmentId: "a", nodeId: "local", limits, nowMs: 1_011 });
 		strictEqual(lease.assignmentId, "a");
 	});
-	it("rejects a malformed durable drain instead of treating it as permanent", () => {
-		home();
+	it("rejects a malformed durable drain instead of treating it as permanent", async () => {
+		await home();
 		writeCapacityStateUnsafe({
 			version: 2,
 			draining: {
@@ -319,8 +319,8 @@ describe("durable dispatch capacity leases", () => {
 		});
 		throws(() => capacityDrain(), /invalid schema/);
 	});
-	it("an unsupported birth-token source falls back to owner liveness", () => {
-		home();
+	it("an unsupported birth-token source falls back to owner liveness", async () => {
+		await home();
 		acquireCapacityLease({
 			assignmentId: "a",
 			nodeId: "local",
@@ -334,8 +334,8 @@ describe("durable dispatch capacity leases", () => {
 		strictEqual(listCapacityLeases({ nowMs: 20, probe: { ...synthetic, alive: () => true } }).length, 1);
 		strictEqual(listCapacityLeases({ nowMs: 20, probe: { ...synthetic, alive: () => false } }).length, 0);
 	});
-	it("the lease bound fails admission closed instead of dropping a lease", () => {
-		home();
+	it("the lease bound fails admission closed instead of dropping a lease", async () => {
+		await home();
 		const at = new Date(1_000).toISOString();
 		writeCapacityStateUnsafe({
 			version: 2,

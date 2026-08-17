@@ -199,8 +199,8 @@ const JUDGE_WINNER_1_REPORT = JSON.stringify({
 });
 
 describe("ACP gate role authority", () => {
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 	});
 	afterEach(() => {
 		restoreDispatchState();
