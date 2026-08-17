@@ -36,7 +36,7 @@ import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js"
 import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import { renderToolResultOnly } from "./renderers/tool-execution.js";
-import { readWorkerReceiptFacts } from "./worker-receipts.js";
+import { readWorkerReceiptFactsForReplay } from "./worker-receipts.js";
 import { workerEntriesFromRunEntries } from "./worker-replay.js";
 import type { WorkerReceiptReader } from "./worker-stream.js";
 
@@ -883,7 +883,7 @@ export function rehydrateChatPanelFromTurns(
 	// a failover replays as the one run it was rather than as two.
 	const workerStates = workerEntriesFromRunEntries(
 		selected.filter((entry): entry is WorkerRunEntry => entry.kind === "workerRun"),
-		options.readWorkerReceipt ?? readWorkerReceiptFacts,
+		options.readWorkerReceipt ?? readWorkerReceiptFactsForReplay,
 	);
 	const placedAssignments = new Set<string>();
 	for (const entry of selected) {
