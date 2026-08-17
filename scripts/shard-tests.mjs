@@ -16,18 +16,41 @@
  * "lane 3" reproduces by rerunning lane 3 alone (`--shard 3`), not by
  * guessing which files happened to land together.
  *
- * Weighting comes from .superpowers/uniq.json, per-file milliseconds from a
- * real run. Splitting by file count would let one 100s file share a lane
+ * Weighting comes from scripts/shard-weights.json, per-file milliseconds
+ * from a real run, checked in because it is a build input that every lane
+ * assignment (including a fresh clone's first CI run) depends on, not
+ * scratch. Splitting by file count would let one 100s file share a lane
  * with nine 1s files while another lane gets ten 10s files; splitting by
  * measured cost balances the lanes instead. A file missing from that map
  * (new since the measurement, or never profiled) falls back to the median
- * of the known costs.
+ * of the known costs. If the weights file itself is ever missing, every
+ * file falls back to the same uniform weight, which keeps lane assignment
+ * deterministic (still file-count based) but unbalanced until the file is
+ * restored.
+ *
+ * scripts/shard-weights.json is machine-generated, not hand-edited. Each
+ * entry is `{ "file": "<repo-relative path>", "ms": <wall-clock ms> }`,
+ * one `node --test` process per file, run standalone rather than under
+ * `--experimental-test-isolation=none` so the number reflects one file's
+ * own cost and is not diluted by whatever else shared its lane's process
+ * that run. Regenerate it whenever the file list or the relative cost of
+ * the slow files has drifted enough that `--list` shows lopsided lane
+ * totals (a new large test file is the common trigger); a few files off by
+ * a fixed fallback median is not worth a regeneration. Command:
+ *
+ *   node scripts/shard-tests.mjs --emit-weights > scripts/shard-weights.json
+ *
+ * This runs every matched file through its own process and takes roughly
+ * as long as the old one-process-per-file `npm test` did (minutes, not the
+ * sharded run's seconds), because that per-file isolation is the point: it
+ * is measuring the same cost `--list` will later divide across lanes.
  *
  * Usage:
  *   node scripts/shard-tests.mjs [pattern...]
  *   node scripts/shard-tests.mjs --lanes 4
  *   node scripts/shard-tests.mjs --shard 2          (rerun lane 2 alone)
  *   node scripts/shard-tests.mjs --list              (print the assignment, run nothing)
+ *   node scripts/shard-tests.mjs --emit-weights      (regenerate shard-weights.json; prints to stdout)
  *   node scripts/shard-tests.mjs -- --test-name-pattern=foo   (forwarded to every lane)
  *
  * CLIO_TEST_LANES overrides the lane count the same way --lanes does; the
@@ -42,7 +65,7 @@ import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const UNIQ_JSON = resolve(REPO_ROOT, ".superpowers/uniq.json");
+const SHARD_WEIGHTS_JSON = resolve(REPO_ROOT, "scripts/shard-weights.json");
 const DEFAULT_PATTERNS = ["tests/contracts/**/*.test.ts", "tests/smoke/**/*.test.ts"];
 const RUNNER_ARGS = [
 	"--import",
@@ -52,6 +75,8 @@ const RUNNER_ARGS = [
 	"--test",
 	"--experimental-test-isolation=none",
 ];
+/** Same runner, one file at a time, for `--emit-weights`: no isolation flag, since each process already covers exactly one file. */
+const EMIT_WEIGHTS_RUNNER_ARGS = ["--import", "tsx", "--import", "./tests/harness/tmp-root.ts", "--test"];
 
 function posix(path) {
 	return path.split(sep).join("/");
@@ -109,10 +134,25 @@ function expandPatterns(patterns) {
 	return [...files].sort((left, right) => left.localeCompare(right));
 }
 
+/**
+ * Checked-in weights are the normal case, but a missing or unreadable file
+ * must not take `npm test` down with it: every file falls back to the same
+ * weight, which keeps `assignLanes` deterministic (it degrades to a
+ * file-count split) instead of throwing before a single test runs.
+ */
 function loadWeights() {
-	const raw = JSON.parse(readFileSync(UNIQ_JSON, "utf8"));
 	const byFile = new Map();
-	for (const entry of raw) byFile.set(entry.file, entry.ms);
+	if (existsSync(SHARD_WEIGHTS_JSON)) {
+		try {
+			const raw = JSON.parse(readFileSync(SHARD_WEIGHTS_JSON, "utf8"));
+			for (const entry of raw) byFile.set(entry.file, entry.ms);
+		} catch (error) {
+			process.stderr.write(
+				`shard-tests: ${SHARD_WEIGHTS_JSON} is present but unreadable (${error.message}); falling back to uniform weights\n`,
+			);
+			byFile.clear();
+		}
+	}
 	const known = [...byFile.values()].sort((left, right) => left - right);
 	const median = known.length === 0 ? 200 : known[Math.floor(known.length / 2)];
 	return { byFile, fallback: median };
@@ -143,7 +183,7 @@ function assignLanes(files, weights, laneCount) {
 }
 
 function parseArgs(argv) {
-	const out = { patterns: [], lanes: undefined, shard: undefined, list: false, forward: [] };
+	const out = { patterns: [], lanes: undefined, shard: undefined, list: false, emitWeights: false, forward: [] };
 	let index = 0;
 	for (; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -165,6 +205,10 @@ function parseArgs(argv) {
 		}
 		if (arg === "--list") {
 			out.list = true;
+			continue;
+		}
+		if (arg === "--emit-weights") {
+			out.emitWeights = true;
 			continue;
 		}
 		out.patterns.push(arg);
@@ -212,13 +256,48 @@ function runLane(name, files, forward) {
 	});
 }
 
+/** One file, its own process, wall-clock ms. This is the number `--emit-weights` records. */
+function timeFile(file) {
+	return new Promise((resolvePromise) => {
+		const started = Date.now();
+		const args = [...EMIT_WEIGHTS_RUNNER_ARGS, file];
+		const child = spawn(process.execPath, args, {
+			cwd: REPO_ROOT,
+			env: process.env,
+			stdio: ["ignore", "ignore", "ignore"],
+		});
+		child.on("close", () => {
+			resolvePromise({ file, ms: Date.now() - started });
+		});
+	});
+}
+
+/**
+ * Sequential on purpose: running files concurrently here would measure
+ * contention, exactly the thing the sharded runner exists to avoid, and
+ * would produce a weights file that mis-describes standalone cost.
+ */
+async function emitWeights(files) {
+	const entries = [];
+	for (const [index, file] of files.entries()) {
+		process.stderr.write(`[${index + 1}/${files.length}] timing ${file}\n`);
+		entries.push(await timeFile(file));
+	}
+	entries.sort((left, right) => left.file.localeCompare(right.file));
+	process.stdout.write(`${JSON.stringify(entries, null, 1)}\n`);
+	return 0;
+}
+
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
+	const files = expandPatterns(args.patterns);
+	if (files.length === 0) throw new Error(`no test files matched: ${args.patterns.join(", ")}`);
+
+	if (args.emitWeights) return emitWeights(files);
+
 	const envLanes = Number.parseInt(process.env.CLIO_TEST_LANES ?? "", 10);
 	const requested = args.lanes ?? (Number.isInteger(envLanes) ? envLanes : undefined) ?? availableParallelism();
 	const laneCount = Math.max(1, requested);
-	const files = expandPatterns(args.patterns);
-	if (files.length === 0) throw new Error(`no test files matched: ${args.patterns.join(", ")}`);
 	const weights = loadWeights();
 	const lanes = assignLanes(files, weights, Math.min(laneCount, files.length));
 
