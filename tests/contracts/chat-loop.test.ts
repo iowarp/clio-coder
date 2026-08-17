@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Type } from "typebox";
 import { BusChannels, type LoopBlockedPayload } from "../../src/core/bus-events.js";
 import type { ClioSettings } from "../../src/core/config.js";
@@ -1429,6 +1429,20 @@ function createClockStepAgentFactory(record: { starts: number; aborts: number },
 }
 
 describe("contracts/chat-loop stream stall escalation", () => {
+	// The runtime unrefs the stall watchdog on purpose: a real request holds the
+	// event loop open and the timer must not keep a settled headless run alive.
+	// The fake agents here hold nothing open, so on Node 22 the loop drains
+	// before the watchdog can fire and the runner cancels the pending await.
+	// A ref'd interval stands in for the in-flight request.
+	let keepAlive: ReturnType<typeof setInterval> | null = null;
+	beforeEach(() => {
+		keepAlive = setInterval(() => {}, 1_000);
+	});
+	afterEach(() => {
+		if (keepAlive !== null) clearInterval(keepAlive);
+		keepAlive = null;
+	});
+
 	it("aborts a silently stalled stream, retries the ladder, and exhausts into a typed failure", async () => {
 		const cfg = settings();
 		cfg.retry = { enabled: true, maxRetries: 2, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 40 };
