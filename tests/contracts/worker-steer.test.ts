@@ -723,6 +723,105 @@ describe("contracts/worker-steer", () => {
 			}
 		});
 
+		it("an identical call re-issued after the operator approved it runs on the remembered answer without a new card", async () => {
+			const events: unknown[] = [];
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-remember-one" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-remember-two" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage("remembered and continued"),
+				],
+				{ onPermission: "escalate", escalation: { timeoutMs: 5_000, fallback: "deny" } },
+			);
+			try {
+				const handle = permissionHandle(startWorkerRun(input, (event) => events.push(event)));
+				const first = await waitFor(
+					() => permissionEvent(events, "clio_permission_escalated"),
+					"worker did not emit clio_permission_escalated",
+				);
+				const firstRequestId = first.payload?.requestId;
+				strictEqual(typeof firstRequestId, "string");
+				handle.resolvePermission(firstRequestId as string, "approve");
+				const result = await handle.promise;
+
+				strictEqual(result.exitCode, 0);
+				// One card for two identical calls.
+				strictEqual(permissionEvents(events, "clio_permission_escalated").length, 1);
+				const resolved = permissionEvents(events, "clio_permission_resolved");
+				strictEqual(resolved.length, 2);
+				strictEqual(resolved[0]?.payload?.source, "operator");
+				strictEqual(resolved[1]?.payload?.source, "remembered");
+				strictEqual(resolved[1]?.payload?.decision, "approved");
+				ok(String(resolved[1]?.payload?.reason ?? "").includes(firstRequestId as string));
+				strictEqual(
+					toolFinishes(events)
+						.map((finish) => finish.outcome)
+						.join(","),
+					"ok,ok",
+				);
+			} finally {
+				unregister();
+			}
+		});
+
+		it("an identical call re-issued after the operator denied it is denied again and told so", async () => {
+			const events: unknown[] = [];
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-redeny-one" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-redeny-two" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf other" }, { id: "call-redeny-three" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage("denied twice and continued"),
+				],
+				{ onPermission: "escalate", escalation: { timeoutMs: 5_000, fallback: "deny" } },
+			);
+			try {
+				const handle = permissionHandle(startWorkerRun(input, (event) => events.push(event)));
+				const first = await waitFor(
+					() => permissionEvent(events, "clio_permission_escalated"),
+					"worker did not emit clio_permission_escalated",
+				);
+				const firstRequestId = first.payload?.requestId;
+				strictEqual(typeof firstRequestId, "string");
+				handle.resolvePermission(firstRequestId as string, "deny");
+				// The third call is a different command, so it is a new decision.
+				const third = await waitFor(
+					() =>
+						permissionEvents(events, "clio_permission_escalated").find(
+							(event) => event.payload?.requestId !== firstRequestId,
+						),
+					"a different command did not escalate on its own",
+				);
+				strictEqual(third.payload?.target, "printf other");
+				handle.resolvePermission(third.payload?.requestId as string, "approve");
+				const result = await handle.promise;
+
+				strictEqual(result.exitCode, 0);
+				strictEqual(permissionEvents(events, "clio_permission_escalated").length, 2);
+				const resolved = permissionEvents(events, "clio_permission_resolved");
+				strictEqual(resolved.length, 3);
+				strictEqual(resolved[1]?.payload?.source, "remembered");
+				strictEqual(resolved[1]?.payload?.decision, "denied");
+				const finishes = toolFinishes(events);
+				strictEqual(finishes.map((finish) => finish.outcome).join(","), "blocked,blocked,ok");
+				const repeated = String(finishes[1]?.reason ?? "");
+				ok(repeated.includes("already denied earlier in this run"), repeated);
+				ok(repeated.includes(firstRequestId as string), repeated);
+			} finally {
+				unregister();
+			}
+		});
+
 		it("timeout applies the configured fail fallback and reports source timeout", async () => {
 			const events: unknown[] = [];
 			const { input, unregister } = fauxRuntimeInput(

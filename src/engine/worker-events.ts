@@ -29,8 +29,10 @@ export interface ClioPermissionResolvedEvent {
 		/**
 		 * Resolution provenance. Policy deny/fail uses "policy"; escalation
 		 * resolutions distinguish operator decisions from timeout fallbacks.
+		 * "remembered" answers an identical call with the operator's earlier
+		 * decision from this run, without a new escalation.
 		 */
-		source?: "operator" | "timeout" | "policy";
+		source?: "operator" | "timeout" | "policy" | "remembered";
 		/** Approval request id this resolution answers. */
 		requestId?: string;
 		/** Resolved outcome for an escalation; escalate path only. */
