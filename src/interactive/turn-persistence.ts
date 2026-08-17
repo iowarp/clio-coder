@@ -9,7 +9,8 @@ import type { ClioSettings } from "../core/config.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
-import type { SessionContract } from "../domains/session/contract.js";
+import type { SessionContract, TurnInput } from "../domains/session/contract.js";
+import type { ClioTurnRecord } from "../engine/session.js";
 import type { AgentEvent, AgentMessage, Usage } from "../engine/types.js";
 import {
 	type AssistantCallTiming,
@@ -97,6 +98,28 @@ const SESSION_TRACE_AGENT = "orchestrator";
 export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistence {
 	const { state } = deps;
 	const persistedAssistantMessages = new WeakSet<object>();
+
+	// --- ledger appends -------------------------------------------------------
+	// Every turn this loop writes parents onto `state.lastTurnId`, the loop's own
+	// copy of the session leaf. session.append refuses a parent that is not the
+	// session's current leaf, and a refusal used to leave that copy stale, so
+	// every later submit failed the same way until the operator ran /resume.
+	// A stale copy has one known producer: a caller of resetForSession that
+	// passed a leaf captured before another turn landed. Whatever produced it,
+	// the right parent is the session's real leaf, so re-sync to it and append
+	// once more; a second refusal is a genuine session fault and propagates.
+	const appendTurn = (session: SessionContract, turn: Omit<TurnInput, "parentId">): ClioTurnRecord => {
+		try {
+			return session.append({ ...turn, parentId: state.lastTurnId } as TurnInput);
+		} catch (err) {
+			const current = session.current();
+			if (!current) throw err;
+			const leaf = session.tree(current.id).leafId;
+			if (leaf === state.lastTurnId) throw err;
+			state.lastTurnId = leaf;
+			return session.append({ ...turn, parentId: leaf } as TurnInput);
+		}
+	};
 
 	// --- trace mirror ---------------------------------------------------------
 	// One open runs/phases pair per operator turn, opened by the user row that
@@ -227,9 +250,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			return;
 		}
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
-		const turn = deps.session.append({
+		const turn = appendTurn(deps.session, {
 			kind: "assistant",
-			parentId: state.lastTurnId,
 			payload,
 		});
 		state.lastTurnId = turn.id;
@@ -268,9 +290,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				if (settings.orchestrator.model) input.model = settings.orchestrator.model;
 				deps.session.create(input);
 			}
-			const userTurn = deps.session.append({
+			const userTurn = appendTurn(deps.session, {
 				kind: "user",
-				parentId: state.lastTurnId,
 				payload: { text },
 			});
 			state.lastTurnId = userTurn.id;
@@ -282,9 +303,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 
 		appendToolCallTurn(event): void {
 			if (!deps.session) return;
-			const turn = deps.session.append({
+			const turn = appendTurn(deps.session, {
 				kind: "tool_call",
-				parentId: state.lastTurnId,
 				payload: {
 					toolCallId: event.toolCallId,
 					name: event.toolName,
@@ -318,9 +338,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			// instead of re-deriving it from result text.
 			if (event.outcome !== undefined) payload.outcome = event.outcome;
 			if (event.blockReason !== undefined) payload.blockReason = event.blockReason;
-			const turn = deps.session.append({
+			const turn = appendTurn(deps.session, {
 				kind: "tool_result",
-				parentId: state.lastTurnId,
 				payload,
 			});
 			state.lastTurnId = turn.id;
@@ -350,9 +369,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 
 		appendTerminalToolAssistantTurn(terminal): void {
 			if (!deps.session) return;
-			const turn = deps.session.append({
+			const turn = appendTurn(deps.session, {
 				kind: "assistant",
-				parentId: state.lastTurnId,
 				payload: {
 					text: "",
 					stopReason: "stop",
@@ -385,9 +403,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				payload.synthetic = true;
 				payload.source = "middleware_request_continuation";
 			}
-			const userTurn = deps.session.append({
+			const userTurn = appendTurn(deps.session, {
 				kind: "user",
-				parentId: state.lastTurnId,
 				payload,
 			});
 			state.lastTurnId = userTurn.id;

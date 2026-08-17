@@ -1,4 +1,5 @@
 import { runBashCommand } from "../core/bash-exec.js";
+import type { PendingSkillRequest } from "../core/skill-activation.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import type { ChatLoop } from "./chat-loop.js";
@@ -44,6 +45,10 @@ function isRejectedCommand(command: SlashCommand): boolean {
 export interface EditorSubmitExpansion {
 	text: string;
 	images: ReadonlyArray<unknown>;
+	/** Paths the draft referenced inline; the idle path hands them to the chat loop for rule scoping. */
+	workingContextPaths?: ReadonlyArray<string>;
+	/** Skill requests parsed out of the draft; the idle path hands them to the chat loop as the pending-skill policy. */
+	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 }
 
 export interface EditorSubmitEditor {
@@ -68,6 +73,8 @@ type EditorSubmitSession = Pick<SessionContract, "appendEntry" | "current" | "tr
 export interface EditorSubmitSessionTranscript {
 	ensureSessionForLocalEntry(): void;
 	refreshChatContextFromSession(leafTurnId: string | null): void;
+	/** Count a prompt the operator submitted; the idle path does this through the slash runtime. */
+	recordSubmittedTurn(): void;
 }
 
 export interface EditorSubmitDeps {
@@ -161,7 +168,13 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				if (entry.kind === "bashExecution") {
 					deps.chatPanel.appendReplayBlock((width) => renderBashExecutionEntry(entry, width));
 				}
-				deps.sessionTranscript.refreshChatContextFromSession(parentTurnId);
+				// `parentTurnId` was the leaf when the command started and stays the
+				// entry's anchor. The chat leaf is a different question: a prompt
+				// may have landed while the command ran, so restore the leaf the
+				// session has now, not the one captured then. Restoring the stale
+				// one wedged every later submit on a parent that was no longer
+				// the leaf.
+				deps.sessionTranscript.refreshChatContextFromSession(deps.session?.tree().leafId ?? parentTurnId);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				deps.io.stderr(`[bash] ${msg}\n`);
@@ -307,7 +320,19 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			const restored = deps.chat.interruptRefusal() === null ? deps.chat.clearQueuedFollowUps() : [];
 			deps.editor.setText(restored.join("\n\n"));
 			deps.ui.requestRender();
-			await deps.chat.submit(submitted.text, { steering: "interrupt" });
+			// An interrupt is a fresh prompt, so it carries what the idle path
+			// carries: the launchpad collapse, the submitted-turn count, and the
+			// expansion's working-context paths and pending skill requests. Only
+			// images stay behind, rejected above, as they are for a follow-up.
+			deps.collapseLaunchpadBeforeSubmit?.();
+			deps.sessionTranscript.recordSubmittedTurn();
+			const paths = submitted.workingContextPaths ?? [];
+			const skillRequests = submitted.pendingSkillRequests ?? [];
+			await deps.chat.submit(submitted.text, {
+				steering: "interrupt",
+				...(paths.length > 0 ? { workingContextPaths: paths } : {}),
+				...(skillRequests.length > 0 ? { pendingSkillRequests: skillRequests } : {}),
+			});
 		})().catch((err) => {
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.io.stderr(`[interrupt] ${msg}\n`);
