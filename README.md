@@ -42,6 +42,24 @@ CLIO stands for Context Layer for Input/Output. Clio Coder is the interactive
 coding agent in IOWarp's ecosystem of agentic science, named for the Greek
 muse of history and built by the Gnosis Research Center at Illinois Tech.
 
+### Get started
+
+Requires Node.js `>=22.19.0`. Three commands, in order:
+
+```bash
+npm install -g @iowarp/clio-coder
+clio-coder configure      # pick a model provider or a local server
+clio-coder                # start the interactive session in any project directory
+```
+
+`configure` is the wizard: it lists the runtimes, asks for the endpoint and
+model, probes it, and saves it as the chat and worker target. Skip it and bare
+`clio-coder` starts the same wizard when no usable target is configured. In the
+first session, type a request in plain words, or `/help` for the command
+palette; `/settings` (or `/targets`) changes the model later; `/quit` leaves.
+`clio-coder doctor` reports the install's health, and on a home nothing has set
+up yet it says so in one row and exits 0.
+
 ### Pick your path
 
 |  | You are | Start here |
@@ -108,12 +126,11 @@ experiment-protocol guides.
 
 ## Install
 
-From npm:
-
-```bash
-npm install -g @iowarp/clio-coder
-clio-coder --version
-```
+From npm, the three commands under [Get started](#get-started) are the whole
+install. `clio-coder --version` and `clio-coder doctor` confirm which build
+answered and whether the home is set up. To follow a dist-tag instead of
+`latest`, `clio-coder upgrade --channel=beta`; the upgrade path is described in
+[docs/installation-and-lifecycle.md](docs/installation-and-lifecycle.md).
 
 From source, pinned to this release:
 
@@ -169,8 +186,10 @@ details live in [docs/installation-and-lifecycle.md](docs/installation-and-lifec
 ## Five-minute start
 
 Run Clio from the repository you want to work on and point one target at a
-running model server. This example uses LM Studio; other local runtime ids
-include `ollama-native`, `llamacpp`, `vllm`, and `sglang`.
+running model server. The wizard under [Get started](#get-started) does this
+interactively; the flags below do the same thing from a script. This example
+uses LM Studio; other local runtime ids include `ollama-native`, `llamacpp`,
+`vllm`, and `sglang`.
 
 ```bash
 cd /path/to/your/repo
@@ -196,8 +215,10 @@ clio-coder run "Summarize this repository layout and identify the main entry poi
 clio-coder                   # interactive terminal UI
 ```
 
-Inside the TUI, `/targets`, `/agents`, `/fleet`, and `/skill` confirm what the
-session can see. `/help` opens the interactive help center.
+Inside the TUI, `/settings` shows the target, fleet, and routing the session
+uses (`/targets` and `/fleet` open straight into their sections), `/agents` and
+`/skill` list what it can dispatch and run, and `/help` opens the interactive
+help center.
 
 ## Bring your own model
 
