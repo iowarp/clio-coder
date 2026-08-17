@@ -204,11 +204,12 @@ function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
 }
 
 /**
- * Whether the session can list and load skills. The Skills passage and the
- * Tool Contract's skills clause follow the same rule as dispatch: text about
- * `context` renders only when `context` is on the surface.
+ * Whether `context` is on the session's surface. The Skills passage, the docs
+ * routing directive, and the Tool Contract's skills clause follow the same
+ * rule as dispatch: text that teaches a call to `context` renders only when
+ * `context` is there to be called.
  */
-function sessionCanListSkills(inputs: SessionPromptInputs): boolean {
+function sessionHasContext(inputs: SessionPromptInputs): boolean {
 	if (inputs.providerSupportsTools === false) return false;
 	return toolSurfaceHasTool(inputs.toolNames, inputs.toolPromptHints, "context");
 }
@@ -241,7 +242,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		...new Set((inputs.toolNames ?? []).map((name) => name.trim()).filter((name) => name.length > 0)),
 	].sort();
 	const canDispatch = sessionCanDispatch(inputs);
-	const canListSkills = sessionCanListSkills(inputs);
+	const canListSkills = sessionHasContext(inputs);
 	const inventoryGuidance = [
 		// Asked twice in one session which tools it had, a live model gave two
 		// different answers and invented `web_find`. The authoritative list is one
@@ -448,19 +449,25 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 
 	let identityBody = identity.body;
 	const selfAwareness = identity.id === "identity.clio" ? table.byId.get("identity.self-awareness") : undefined;
+	// The routing directive teaches a call to `context`, so like the Skills
+	// passage it renders only when `context` is on the surface. The paths and
+	// the code-outranks-docs rule name no tool and stay unconditional.
+	const docsRouting = selfAwareness && sessionHasContext(session) ? table.byId.get("identity.docs-routing") : undefined;
 	if (selfAwareness) {
 		const packageRoot = resolvePackageRoot();
 		const rendered = selfAwareness.body
 			.replace("{CLIO_DOCS_PATH}", join(packageRoot, "docs"))
 			.replace("{CLIO_SRC_PATH}", join(packageRoot, "src"))
 			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codewiki.json"));
-		identityBody = `${identity.body.trim()}\n\n${rendered.trim()}`;
+		identityBody = [identity.body.trim(), rendered.trim(), ...(docsRouting ? [docsRouting.body.trim()] : [])].join(
+			"\n\n",
+		);
 	}
 
 	// Role text gated on the surface, following the Fleet-block rule: text
 	// about a tool renders only when the tool is there to be called.
 	const delegation = sessionCanDispatch(session) ? table.byId.get("operating.delegation") : undefined;
-	const skills = sessionCanListSkills(session) ? table.byId.get("operating.skills") : undefined;
+	const skills = sessionHasContext(session) ? table.byId.get("operating.skills") : undefined;
 
 	push("identity", identityBody);
 	push("operating-contract", operatingContract.body);
@@ -481,6 +488,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	const baseFragments = [
 		identity,
 		...(selfAwareness ? [selfAwareness] : []),
+		...(docsRouting ? [docsRouting] : []),
 		operatingContract,
 		...(delegation ? [delegation] : []),
 		...(skills ? [skills] : []),
