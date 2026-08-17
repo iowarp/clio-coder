@@ -276,7 +276,7 @@ function resolveDefaultIdentity(
 	if (/Clio owns the agent loop/i.test(context) && /pi-(?:ai|SDK)/i.test(context)) {
 		return {
 			text: [
-				"Clio Coder is IOWarp's orchestrator coding agent, named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech and the IOWarp team. CLIO stands for Context Layer for Input/Output.",
+				"Clio Coder is IOWarp's orchestrator coding agent, named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech (github.com/grc-iit, @grc-iit) and the IOWarp team. CLIO stands for Context Layer for Input/Output.",
 				"pi-ai is accessed through the engine boundary.",
 				"Clio owns the agent loop, TUI, session format, tool registry, and identity.",
 			].join(" "),
