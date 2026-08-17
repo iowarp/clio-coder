@@ -4,6 +4,7 @@ import type { SessionMeta } from "../contract.js";
 import { isSessionHeader, type SessionEntry } from "../entries.js";
 import { enrichForkMeta } from "../history.js";
 import { type SessionManagerState, startSession } from "../manager.js";
+import { entryBelongsToPath } from "./active-path.js";
 
 /**
  * Single-point fork-from-parent-turn orchestration. Closes the caller's
@@ -80,32 +81,21 @@ function treeFromLinearPath(path: ReadonlyArray<LinkedRecord>): SessionTreeNode[
 }
 
 /**
- * Unanchored sidecars (parentTurnId null) carry no turn pointer, so file
- * position is the only branch signal: anything written after the fork-point
- * turn belongs to the timeline that diverged from it, not to the fork.
- * `atOrBeforeForkPoint` is that positional verdict, computed by the caller.
+ * Fork-specific tightening of the shared `entryBelongsToPath` verdict. A fork
+ * is a snapshot frozen at `parentTurnId`: a compaction summary written after
+ * that point did not exist at the fork moment even when its `firstKeptTurnId`
+ * names an ancestor turn, so it must not ride along just because that turn
+ * happens to be on the path. Live `/tree`-switch replay does not need this
+ * extra gate (see the comment on the shared function for why), which is the
+ * one place fork and live replay still deliberately disagree.
  */
 function sessionEntryBelongsToPath(
 	entry: SessionEntry,
 	pathIds: ReadonlySet<string>,
 	atOrBeforeForkPoint: boolean,
 ): boolean {
-	if (entry.kind === "message") return pathIds.has(entry.turnId);
-	if (entry.kind === "label") return pathIds.has(entry.targetTurnId);
-	if (entry.kind === "sessionInfo") return entry.targetTurnId ? pathIds.has(entry.targetTurnId) : false;
-	if (entry.kind === "compactionSummary") {
-		// A summary describes history as of its write position. One written
-		// after the fork point did not exist when the forked timeline split,
-		// even when its firstKeptTurnId lands on the fork path; copying it
-		// would open the fork at the summary boundary and hide the transcript.
-		if (!atOrBeforeForkPoint) return false;
-		if (entry.firstKeptTurnId.length > 0 && pathIds.has(entry.firstKeptTurnId)) return true;
-	}
-	return entry.parentTurnId === null ? atOrBeforeForkPoint : pathIds.has(entry.parentTurnId);
-}
-
-function entryBelongsToPath(entry: SessionEntry, pathIds: ReadonlySet<string>, atOrBeforeForkPoint: boolean): boolean {
-	return sessionEntryBelongsToPath(entry, pathIds, atOrBeforeForkPoint);
+	if (entry.kind === "compactionSummary" && !atOrBeforeForkPoint) return false;
+	return entryBelongsToPath(entry, pathIds, atOrBeforeForkPoint);
 }
 
 function branchEntriesFromParent(
@@ -124,7 +114,7 @@ function branchEntriesFromParent(
 	const pathIds = new Set(path.map((record) => record.id));
 	const forkPointIndex = parsed.findIndex((entry) => linkedRecordFromEntry(entry).id === leafTurnId);
 	const entries = parsed.filter((entry, index) =>
-		entryBelongsToPath(entry, pathIds, forkPointIndex >= 0 && index <= forkPointIndex),
+		sessionEntryBelongsToPath(entry, pathIds, forkPointIndex >= 0 && index <= forkPointIndex),
 	);
 	return {
 		parentCurrentPath,

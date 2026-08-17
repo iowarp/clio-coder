@@ -38,6 +38,10 @@ interface TreeRow {
 	depth: number;
 	node: TreeSnapshotNode;
 	sessionId: string;
+	/** This row is the session's active append point: where the next message lands. */
+	isActiveTip: boolean;
+	/** Enter on this row will move the append point; false for structural rows. */
+	switchable: boolean;
 }
 
 type Submode = "browse" | "edit-label";
@@ -108,12 +112,29 @@ function isLeaf(node: TreeSnapshotNode): boolean {
 	return node.children.length === 0;
 }
 
+/**
+ * `switchTurn` validates against message-tree nodes only (tree.json), so a
+ * structural row that /tree draws on top of it (a compaction marker or a
+ * fork's returned-from-branch summary) throws "turn not found" if Enter is
+ * pressed on it. Before issue #94 the row rendered exactly like a switchable
+ * one and gave no sign it would fail.
+ */
+function isSwitchable(node: TreeSnapshotNode): boolean {
+	return node.kind !== "compaction" && node.kind !== "branch";
+}
+
 function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 	const rows: TreeRow[] = [];
 	const walk = (id: string, depth: number): void => {
 		const node = snapshot.nodesById[id];
 		if (!node) return;
-		rows.push({ depth, node, sessionId: snapshot.sessionId });
+		rows.push({
+			depth,
+			node,
+			sessionId: snapshot.sessionId,
+			isActiveTip: snapshot.leafId !== null && node.id === snapshot.leafId,
+			switchable: isSwitchable(node),
+		});
 		// Indentation marks a fork, not a step. Every message is a child of the
 		// one before it, so indenting per child made depth equal message count:
 		// a seventeen-message session rendered as a seventeen-level staircase
@@ -137,24 +158,34 @@ const ROW_PREVIEW_BUDGET = 55;
 export function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: number }): string {
 	const theme = clioTheme();
 	const indent = "  ".repeat(row.depth);
-	const glyph = isLeaf(row.node) ? GLYPH.running : "○";
+	// The active tip is where the next message lands; it gets its own glyph so
+	// a branched session shows exactly one live tip instead of every childless
+	// node reading the same as every other (issue #94). Other leaves still get
+	// a leaf glyph, just not the one that claims to be current.
+	const glyph = row.isActiveTip ? GLYPH.active : isLeaf(row.node) ? GLYPH.running : "○";
 	const turnId = shortTurnId(row.node.id);
 	const rawPreview = row.node.preview && row.node.preview.length > 0 ? row.node.preview : fallbackPreview(row.node);
 	const labelText = row.node.label ? ` · label:"${row.node.label}"` : "";
+	// Enter cannot switch to a structural row (switchTurn only knows message
+	// turns), so it says so instead of looking like every switchable row.
+	const inertText = row.switchable ? "" : " (fixed)";
 	// A plain copy of the prefix and label drives the width math; the rendered
 	// versions below carry color, so every measurement uses visibleWidth.
 	const plainPrefix = `${indent}${glyph} ${row.node.kind.padEnd(12)} ${turnId}  `;
 	const previewBudget = Math.min(
 		ROW_PREVIEW_BUDGET,
-		Math.max(1, opts.width - visibleWidth(plainPrefix) - visibleWidth(labelText)),
+		Math.max(1, opts.width - visibleWidth(plainPrefix) - visibleWidth(labelText) - visibleWidth(inertText)),
 	);
 	const preview = clampPreview(rawPreview, previewBudget);
 	// The node glyph and kind are structural scaffolding and render dim; the turn
 	// id and preview are content and render muted; the optional label reads as a
-	// dim key with a muted value.
-	const styledPrefix = `${theme.fg("dim", `${indent}${glyph} ${row.node.kind.padEnd(12)}`)} ${theme.fg("muted", turnId)}  `;
+	// dim key with a muted value. The active tip's glyph renders in accent so it
+	// stands out against every other row.
+	const glyphStyled = row.isActiveTip ? theme.fg("accent", glyph) : theme.fg("dim", glyph);
+	const styledPrefix = `${indent}${glyphStyled}${theme.fg("dim", ` ${row.node.kind.padEnd(12)}`)} ${theme.fg("muted", turnId)}  `;
 	const styledLabel = labelText ? `${theme.fg("dim", " · label:")}${theme.fg("muted", `"${row.node.label}"`)}` : "";
-	const main = `${styledPrefix}${theme.fg("muted", preview)}${styledLabel}`;
+	const styledInert = inertText ? theme.fg("dim", inertText) : "";
+	const main = `${styledPrefix}${theme.fg("muted", preview)}${styledLabel}${styledInert}`;
 	if (!opts.showTimestamps) return truncateToWidth(main, opts.width, "", true);
 	const ts = `${dateLocal(row.node.at)} ${clockLocal(row.node.at)}`;
 	if (opts.width < ts.length + 12) return truncateToWidth(main, opts.width, "", true);
@@ -298,6 +329,10 @@ export class TreeOverlayView implements Component {
 		if (matchesKey(data, "enter") || data === "\n") {
 			const row = this.currentRow();
 			if (!row) return;
+			if (!row.switchable) {
+				this.setStatus(`[tree] ${row.node.kind} rows mark a moment in the timeline; they are not a place to switch to`);
+				return;
+			}
 			this.deps.onSwitchTurn(row.node.id);
 			this.deps.onClose();
 			return;

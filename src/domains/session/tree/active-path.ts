@@ -12,8 +12,14 @@ import type { MessageEntry, SessionEntry } from "../entries.js";
  *   - message entries on the active path,
  *   - sidecar entries anchored to a path turn (parentTurnId or targetTurnId),
  *   - compaction summaries whose firstKeptTurnId or parent lands on the path,
- *   - unanchored sidecars (parentTurnId null), which cannot be attributed to
- *     a branch and keep their historical always-included behavior.
+ *   - unanchored sidecars (parentTurnId null) written at or before the leaf's
+ *     position in the file. `fork.ts` shares this same rule (`entryBelongsToPath`
+ *     below) for the same reason: an unanchored sidecar records state as of
+ *     the moment it was written, and a sidecar written after the turn a
+ *     reconstruction stands at was not visible then, on any branch. Before
+ *     issue #94 this filter kept every unanchored sidecar regardless of
+ *     position while fork applied the positional cut, so the same turn
+ *     reached by /tree switch versus /fork saw two different task boards.
  *
  * A plain chain is returned unchanged unless a live caller explicitly pins an
  * earlier leaf. That preserves historical linear replay (including old parent
@@ -47,7 +53,8 @@ export function filterEntriesToActivePath(entries: ReadonlyArray<SessionEntry>, 
 		// as the root rather than failing the whole replay.
 		current = messagesById.get(current.parentTurnId);
 	}
-	return entries.filter((entry) => entryOnActivePath(entry, pathIds));
+	const leafIndex = entries.findIndex((entry) => entry.kind === "message" && entry.turnId === leaf.turnId);
+	return entries.filter((entry, index) => entryBelongsToPath(entry, pathIds, leafIndex >= 0 && index <= leafIndex));
 }
 
 /**
@@ -87,12 +94,44 @@ function hasBranch(messages: ReadonlyArray<MessageEntry>): boolean {
 	return false;
 }
 
-function entryOnActivePath(entry: SessionEntry, pathIds: ReadonlySet<string>): boolean {
+/**
+ * Shared verdict for whether a session entry belongs to a reconstruction
+ * standing at the turn `pathIds` traces back to. Used by both live
+ * `/tree`-switch replay (above) and `/fork` (`fork.ts`), so the two surfaces
+ * agree on the one thing that was inconsistent between them: an unanchored
+ * sidecar (`parentTurnId === null`, e.g. `taskLedger`, a routing notice, a
+ * leafless `workerRun`) carries no turn pointer, so file position is the only
+ * signal available for it. `atOrBeforeLeaf` is that positional verdict,
+ * computed by the caller: was the entry written at or before the leaf's
+ * position in the file. A sidecar written after the leaf's position was not
+ * visible when a reconstruction standing at that leaf would have looked, on
+ * any branch, so it is excluded (issue #94; before this fix, live replay kept
+ * every unanchored sidecar regardless of position while fork dropped anything
+ * after the fork point, so the same turn reached the two ways produced two
+ * different task boards).
+ *
+ * `compactionSummary` is deliberately not given the same positional
+ * treatment here: a compaction anchored to a turn on the path is ordinarily
+ * appended after that turn's own message (compaction runs on top of a
+ * finished conversation, not before it), so gating it by leaf position would
+ * drop the compaction that legitimately covers the leaf itself. `fork.ts`
+ * layers its own, stricter compaction gate on top of this function, because
+ * a fork represents a snapshot frozen at one moment and a compaction written
+ * after that moment did not exist at the fork point even when its anchor
+ * turn is an ancestor. A `sessionInfo` entry with no `targetTurnId` is a
+ * session-wide fact (e.g. a rename), not scoped to any branch or moment, so
+ * it is always kept.
+ */
+export function entryBelongsToPath(
+	entry: SessionEntry,
+	pathIds: ReadonlySet<string>,
+	atOrBeforeLeaf: boolean,
+): boolean {
 	if (entry.kind === "message") return pathIds.has(entry.turnId);
 	if (entry.kind === "label") return pathIds.has(entry.targetTurnId);
 	if (entry.kind === "sessionInfo") return entry.targetTurnId === undefined || pathIds.has(entry.targetTurnId);
 	if (entry.kind === "compactionSummary" && entry.firstKeptTurnId.length > 0 && pathIds.has(entry.firstKeptTurnId)) {
 		return true;
 	}
-	return entry.parentTurnId === null || pathIds.has(entry.parentTurnId);
+	return entry.parentTurnId === null ? atOrBeforeLeaf : pathIds.has(entry.parentTurnId);
 }
