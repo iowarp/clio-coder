@@ -180,6 +180,39 @@ describe("worker block replay", () => {
 		ok(rendered.includes(`└ ${GLYPH.ok} ok · 4.8k tok · 9.6s · contract pass`), rendered);
 	});
 
+	it("renders a mutation-report answer as prose instead of raw JSON", () => {
+		const report = {
+			mutatedPaths: ["src/discount.ts"],
+			validations: [{ name: "npx tsx --test test/discount.test.ts", passed: true, evidence: "tests 3, pass 3, fail 0" }],
+			commitMessage: "Skip bogus-kind check in applyDiscount, keep numeric bounds validation",
+			summary: "Remove the else branch in applyDiscount that threw InvalidDiscountError for unknown discount kinds",
+		};
+		const rendered = replay([workerRunEntry()], () => ({
+			outcome: "succeeded",
+			contract: "pass",
+			text: JSON.stringify(report),
+		}));
+		ok(rendered.includes("│ changed src/discount.ts"), rendered);
+		ok(rendered.includes(`│ ${GLYPH.ok} npx tsx --test test/discount.test.ts: tests 3, pass 3, fail 0`), rendered);
+		ok(rendered.includes("│ Remove the else branch in applyDiscount"), rendered);
+		ok(rendered.includes("│ commit: Skip bogus-kind check"), rendered);
+		ok(!rendered.includes('{"mutatedPaths"'), rendered);
+	});
+
+	it("pretty-prints any other structured answer under the rail", () => {
+		const rendered = replay([workerRunEntry()], () => ({
+			outcome: "succeeded",
+			text: JSON.stringify({ verdict: "pass", checks: [{ name: "npm run typecheck", passed: true }] }),
+		}));
+		ok(rendered.includes('│   "verdict": "pass",'), rendered);
+		ok(!rendered.includes('│ {"verdict"'), rendered);
+	});
+
+	it("leaves prose that merely mentions braces alone", () => {
+		const rendered = replay([workerRunEntry()], () => ({ outcome: "succeeded", text: "Done. Set {a: 1} in config." }));
+		ok(rendered.includes("│ Done. Set {a: 1} in config."), rendered);
+	});
+
 	it("lists a replayed block among the panel's worker states, so /share can name it after a resume", () => {
 		const panel = replayPanel([workerRunEntry()], () => ({ outcome: "succeeded", text: "Hello! I'm the coder worker." }));
 		const [state] = panel.workerStates();
