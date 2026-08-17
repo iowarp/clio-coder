@@ -100,7 +100,7 @@ fleet:
       maxWorkers: 1
 ```
 
-`clioEntry` may override the remote invocation (default `clio-coder worker`).
+`clioCoderEntry` may override the remote invocation (default `clio-coder worker`).
 Node ids must be unique and `local` is reserved.
 
 Worker profiles can pin work to a node: `workers.profiles.<name>.node` routes

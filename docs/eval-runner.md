@@ -15,8 +15,8 @@ The CLI commands under `clio-coder eval` support running, validating, reporting,
 
 ```bash
 clio-coder eval validate --suite <suite.yaml>
-clio-coder eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-entry <path>]
-clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-entry <path>]
+clio-coder eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-coder-entry <path>]
+clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-coder-entry <path>]
 clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
 clio-coder eval compare <baselineEvalId> <candidateEvalId>
 clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]

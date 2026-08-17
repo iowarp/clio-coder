@@ -65,7 +65,7 @@ export interface SshNodeEndpoint {
 	 * verifies both). Operators with non-PATH installs point this at their
 	 * entry, e.g. `/opt/clio-coder/bin/clio-coder worker`.
 	 */
-	clioEntry?: string;
+	clioCoderEntry?: string;
 	/**
 	 * Residency posture exported to the remote worker. Defaults to "observe":
 	 * remote workers must never evict models resident on their node. "manage"
@@ -127,7 +127,9 @@ function remoteEnvAssignments(node: SshNodeEndpoint): string {
 
 export function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string): string {
 	const entry =
-		node.clioEntry !== undefined && node.clioEntry.trim().length > 0 ? node.clioEntry.trim() : DEFAULT_REMOTE_CLIO_ENTRY;
+		node.clioCoderEntry !== undefined && node.clioCoderEntry.trim().length > 0
+			? node.clioCoderEntry.trim()
+			: DEFAULT_REMOTE_CLIO_ENTRY;
 	return `cd ${shellQuote(cwd)} && exec env ${remoteEnvAssignments(node)} ${entry}`;
 }
 

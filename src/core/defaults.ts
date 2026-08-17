@@ -203,7 +203,7 @@ export interface FleetNodeSettings {
 	port?: number;
 	identityFile?: string;
 	/** Remote worker-entry invocation; defaults to `clio-coder worker` on the remote PATH. */
-	clioEntry?: string;
+	clioCoderEntry?: string;
 	/** Advisory routing labels (e.g. gpu, high-memory). */
 	labels?: string[];
 	/** Per-node concurrent worker cap. */
