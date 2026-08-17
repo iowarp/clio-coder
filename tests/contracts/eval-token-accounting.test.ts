@@ -106,7 +106,7 @@ describe("contracts/eval token accounting", () => {
 			version: 4,
 			evalId: "eval-1",
 			suite: { id: "v1-task-file", hash: "h" },
-			clio: { version: "0.3.0", commit: null, entry: "dist/cli/index.js" },
+			clio: { version: "0.3.1", commit: null, entry: "dist/cli/index.js" },
 			environment: { platform: "linux", node: "v22" },
 			matrix: { target: "local", model: null, thinking: null },
 			summary: {
@@ -158,7 +158,7 @@ describe("contracts/eval token accounting", () => {
 			version: 4,
 			evalId: "eval-1",
 			suite: { id: "s", hash: "h" },
-			clio: { version: "0.3.0", commit: null, entry: "dist/cli/index.js" },
+			clio: { version: "0.3.1", commit: null, entry: "dist/cli/index.js" },
 			environment: { platform: "linux", node: "v22" },
 			matrix: { target: "local", model: null, thinking: null },
 			results: [],
@@ -191,7 +191,7 @@ describe("contracts/eval token accounting", () => {
 				version: 4,
 				evalId: "eval-1",
 				suite: { id: "s", hash: "h" },
-				clio: { version: "0.3.0", commit: null, entry: "dist/cli/index.js" },
+				clio: { version: "0.3.1", commit: null, entry: "dist/cli/index.js" },
 				environment: { platform: "linux", node: "v22" },
 				matrix: { target: "local", model: null, thinking: null },
 				summary: {
