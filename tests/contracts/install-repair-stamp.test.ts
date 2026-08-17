@@ -18,11 +18,11 @@ import { readStateInfo } from "../../src/domains/lifecycle/state.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("contracts/install and repair stamps", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 	let installPath: string;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-install-stamp-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-install-stamp-");
 		installPath = join(scratch.dir, "state", "install.json");
 	});
 

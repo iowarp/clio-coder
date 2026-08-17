@@ -863,8 +863,8 @@ function stubContext(): DomainContext {
 }
 
 describe("dispatch records fleet placement", () => {
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 	});
 	after(() => {
 		restoreDispatchState();

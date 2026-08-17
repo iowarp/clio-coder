@@ -99,7 +99,7 @@ describe("contracts/observation shared turn budget", () => {
 	});
 
 	it("lets session offload reads bypass an exhausted turn pool without charging it", async () => {
-		isolatedClioEnv = isolateClioEnv("clio-offload-budget-");
+		isolatedClioEnv = await isolateClioEnv("clio-offload-budget-");
 		const budget = 1024;
 		const previous = process.env[OBSERVATION_TURN_BUDGET_ENV];
 		process.env[OBSERVATION_TURN_BUDGET_ENV] = String(budget);
@@ -141,8 +141,8 @@ describe("contracts/observation shared turn budget", () => {
 		}
 	});
 
-	it("recognizes only files inside the current session's scratch offload directory", () => {
-		isolatedClioEnv = isolateClioEnv("clio-offload-path-");
+	it("recognizes only files inside the current session's scratch offload directory", async () => {
+		isolatedClioEnv = await isolateClioEnv("clio-offload-path-");
 		const sessionId = "session-A";
 		const stateDir = join(isolatedClioEnv.dir, "state");
 		const ownDir = join(stateDir, "scratch", sessionId);

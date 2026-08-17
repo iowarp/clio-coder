@@ -74,8 +74,8 @@ function hangingWorker(): SpawnedWorker {
 }
 
 describe("dead-node failover", () => {
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 	});
 	after(() => {
 		restoreDispatchState();

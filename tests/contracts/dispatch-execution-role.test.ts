@@ -73,8 +73,8 @@ function routeFixture(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
 }
 
 describe("dispatch execution roles", () => {
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 	});
 	after(() => {
 		restoreDispatchState();

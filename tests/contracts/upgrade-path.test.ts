@@ -73,10 +73,10 @@ function seedHomeFrom030(dir: string): void {
 }
 
 describe("contracts/upgrade path from 0.3.0", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-upgrade-path-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-upgrade-path-");
 		seedHomeFrom030(scratch.dir);
 	});
 
@@ -126,9 +126,9 @@ describe("contracts/upgrade path from 0.3.0", () => {
 		strictEqual(takeUpgradeNotice(), null);
 	});
 
-	it("a fresh install has no notice", () => {
+	it("a fresh install has no notice", async () => {
 		scratch.restore();
-		scratch = isolateClioEnv("clio-upgrade-path-fresh-");
+		scratch = await isolateClioEnv("clio-upgrade-path-fresh-");
 		initializeClioHome();
 		strictEqual(readStateInfo()?.upgradedFrom, undefined);
 		strictEqual(takeUpgradeNotice(), null);

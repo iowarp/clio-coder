@@ -485,10 +485,10 @@ describe("contracts/config", () => {
  * fixing keys. The reload now goes through formatSettingsFailure and the bus.
  */
 describe("contracts/config runtime reload failure", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-config-reload-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-config-reload-");
 		writeFileSync(settingsPath(), DEFAULT_SETTINGS_YAML, "utf8");
 	});
 
@@ -625,10 +625,10 @@ describe("contracts/config runtime reload failure", () => {
 });
 
 describe("contracts/config stale scope refs", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-config-scope-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-config-scope-");
 	});
 
 	afterEach(() => {

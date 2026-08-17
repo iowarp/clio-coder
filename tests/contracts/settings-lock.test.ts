@@ -29,8 +29,8 @@ function seededSettings(): ClioSettings {
 describe("contracts/settings-lock", () => {
 	let scratch = "";
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-settings-lock-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-settings-lock-");
 		updateSettings(() => seededSettings());
 	});
 

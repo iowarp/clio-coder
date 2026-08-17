@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
@@ -12,7 +12,7 @@ import { buildEvidence } from "../../src/domains/evidence/index.js";
 import { readAccountabilitySummary } from "../../src/domains/observability/accountability.js";
 import { readEvidenceIndex } from "../../src/domains/observability/evidence-index.js";
 import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
-import { newScratchClioHome } from "../harness/scratch-env.js";
+import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 /**
  * Drive the auto-build path in-process: emit a DispatchCompleted on the bus and
@@ -28,10 +28,10 @@ interface Scratch {
 	stateDir: string;
 }
 
-function makeScratch(): Scratch {
+async function makeScratch(): Promise<Scratch> {
 	// newScratchClioHome points the CLIO_* env at a fresh scratch home and resets
 	// the XDG cache; we still mkdir the data/state dirs this suite seeds directly.
-	const dir = newScratchClioHome("clio-auto-evidence-");
+	const dir = await newScratchClioHome("clio-auto-evidence-");
 	const dataDir = join(dir, "data");
 	const stateDir = join(dir, "state");
 	mkdirSync(dataDir, { recursive: true });
@@ -227,14 +227,18 @@ describe("auto-build evidence on dispatch completion", { concurrency: false }, (
 	let scratch: Scratch;
 	const savedEnv = { ...process.env };
 
-	beforeEach(() => {
-		scratch = makeScratch();
+	beforeEach(async () => {
+		scratch = await makeScratch();
 	});
 
 	afterEach(() => {
+		// clearScratchClioHome() releases the process-wide env lock that
+		// newScratchClioHome() (in beforeEach) queued behind; the manual
+		// full-env restore below is additional (newScratchClioHome doesn't
+		// restore process.env on its own), not a substitute for it.
+		clearScratchClioHome(scratch.dir);
 		resetXdgCache();
 		process.env = { ...savedEnv };
-		rmSync(scratch.dir, { recursive: true, force: true });
 	});
 
 	it("builds a bundle and writes a no-validation index row with no CLI call", async () => {

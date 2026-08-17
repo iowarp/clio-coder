@@ -7,7 +7,6 @@ import { parse as parseYaml } from "yaml";
 import { readSettings, settingsPath, updateSettings } from "../../src/core/config.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { initializeClioHome } from "../../src/core/init.js";
-import { resetXdgCache } from "../../src/core/xdg.js";
 import { createInteropBundle } from "../../src/domains/interop/extension.js";
 import {
 	acceptInteropAgents,
@@ -17,9 +16,7 @@ import {
 	renderProposalEntry,
 } from "../../src/domains/interop/index.js";
 import type { InteropAgentRecord, InteropReport } from "../../src/domains/interop/types.js";
-
-const scratchRoots: string[] = [];
-let savedHome: string | undefined;
+import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 function report(fingerprint: string): InteropReport {
 	return {
@@ -73,20 +70,24 @@ describe("interop consent", () => {
 	// Nested inside the describe, not at module top level: under
 	// --experimental-test-isolation=none every file shares one root test
 	// context, so a top-level beforeEach/afterEach runs around every test in
-	// every file, not just this one's.
-	beforeEach(() => {
-		const root = mkdtempSync(join(tmpdir(), "clio-interop-consent-"));
-		scratchRoots.push(root);
-		savedHome = process.env.CLIO_CODER_HOME;
-		process.env.CLIO_CODER_HOME = root;
-		resetXdgCache();
+	// every file, not just this one's. Routed through isolateClioEnv() rather
+	// than a hand-rolled save/mutate/restore of CLIO_CODER_HOME: that duplicate
+	// of the same idiom was exactly what raced against interop-state.test.ts's
+	// own copy at full-suite scale (issue #84) — isolateClioEnv() now serializes
+	// every in-process env window process-wide, so this only closes the gap by
+	// going through it instead of re-implementing it.
+	let isolated: IsolatedClioEnv;
+	// Unrelated to CLIO_CODER_HOME: a plain scratch dir some tests pass as an
+	// explicit `home`/`cwd` argument, not through the environment.
+	const scratchRoots: string[] = [];
+
+	beforeEach(async () => {
+		isolated = await isolateClioEnv("clio-interop-consent-");
 		initializeClioHome();
 	});
 
 	afterEach(() => {
-		if (savedHome === undefined) delete process.env.CLIO_CODER_HOME;
-		else process.env.CLIO_CODER_HOME = savedHome;
-		resetXdgCache();
+		isolated.restore();
 		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 

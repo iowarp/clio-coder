@@ -42,8 +42,8 @@ function payloadText(payload: unknown): string | undefined {
 describe("contracts/persistence", () => {
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-persistence-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-persistence-");
 	});
 
 	afterEach(() => {

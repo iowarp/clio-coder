@@ -35,8 +35,20 @@ let dateFormatter = new Intl.DateTimeFormat("en-CA", DATE_OPTIONS);
 function syncZone(): void {
 	if (process.env.TZ === builtForZone) return;
 	builtForZone = process.env.TZ;
-	clockFormatter = new Intl.DateTimeFormat("en-GB", CLOCK_OPTIONS);
-	dateFormatter = new Intl.DateTimeFormat("en-CA", DATE_OPTIONS);
+	// The zone is passed explicitly, not left for Intl to pick up from
+	// process.env.TZ implicitly, because it doesn't reliably do so: under a
+	// shared test process that constructs many formatters across many zones,
+	// a rebuilt formatter was observed to resolve to America/Chicago while
+	// process.env.TZ read Asia/Kolkata at the exact moment of construction
+	// and of the .format() call right after (issue #84, tests/contracts
+	// instrumentation traced it to Intl's own zone resolution, not a stale
+	// env var). An explicit timeZone option bypasses whatever cached default
+	// resolution goes stale there, so this is correct regardless of whether
+	// that turns out to be a V8/ICU bug that ever gets fixed. Do not "simplify"
+	// this back to relying on process.env.TZ implicitly.
+	const zone = builtForZone === undefined ? undefined : { timeZone: builtForZone };
+	clockFormatter = new Intl.DateTimeFormat("en-GB", { ...CLOCK_OPTIONS, ...zone });
+	dateFormatter = new Intl.DateTimeFormat("en-CA", { ...DATE_OPTIONS, ...zone });
 }
 
 function toEpochMs(instant: Instant): number | null {

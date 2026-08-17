@@ -68,8 +68,8 @@ function seedBranchedSession(contract: SessionContract): {
 describe("contracts/session-tree-continuity", () => {
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-tree-continuity-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-tree-continuity-");
 	});
 
 	afterEach(() => {

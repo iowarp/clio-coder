@@ -65,8 +65,21 @@ export function makeDispatchBundle(
 
 let isolated: IsolatedClioEnv | null = null;
 
-export function isolateDispatchState(): void {
-	isolated = isolateClioEnv("clio-dispatch-state-");
+/**
+ * Several call sites re-isolate per test in `beforeEach` but only call
+ * `restoreDispatchState()` once, in `after`, at the end of the whole describe
+ * (an intentional "leave the leftover scratch dirs for one bulk cleanup"
+ * shortcut, harmless before isolateClioEnv() gained a process-wide lock).
+ * Now that the lock exists, a second acquire before the first releases would
+ * deadlock every test after it. Releasing whatever this module is still
+ * holding before acquiring the next one preserves the "beforeEach re-isolates"
+ * behavior those call sites rely on without needing an intervening
+ * `restoreDispatchState()`, and cleans up the previous scratch dir eagerly
+ * instead of leaking it to the end of the run as a side effect.
+ */
+export async function isolateDispatchState(): Promise<void> {
+	isolated?.restore();
+	isolated = await isolateClioEnv("clio-dispatch-state-");
 }
 
 export function restoreDispatchState(): void {

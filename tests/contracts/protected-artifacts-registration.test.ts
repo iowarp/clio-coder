@@ -279,7 +279,7 @@ describe("protected-artifacts registration", () => {
 	});
 
 	it("write-ahead protection survives append failure, reload, and process restart until reconciliation", async () => {
-		const isolated = isolateClioEnv("clio-protection-journal-");
+		const isolated = await isolateClioEnv("clio-protection-journal-");
 		const session = createSessionBundle(sessionContext()).contract;
 		const meta = session.create({ cwd: "/repo" });
 		try {
@@ -359,7 +359,7 @@ describe("protected-artifacts registration", () => {
 	});
 
 	it("fails closed on a corrupt pending-protection journal", async () => {
-		const isolated = isolateClioEnv("clio-protection-corrupt-");
+		const isolated = await isolateClioEnv("clio-protection-corrupt-");
 		const session = createSessionBundle(sessionContext()).contract;
 		const meta = session.create({ cwd: "/repo" });
 		try {
@@ -386,7 +386,7 @@ describe("protected-artifacts registration", () => {
 	});
 
 	it("retains the write-ahead record until the session append is synchronously durable", async () => {
-		const isolated = isolateClioEnv("clio-protection-flush-");
+		const isolated = await isolateClioEnv("clio-protection-flush-");
 		const session = createSessionBundle(sessionContext()).contract;
 		const meta = session.create({ cwd: "/repo" });
 		try {
