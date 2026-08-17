@@ -73,6 +73,7 @@
 		"format": "biome format --write .",
 		"lint": "biome check . && node --import tsx scripts/check-hygiene.ts",
 		"test:file": "node --import tsx --import ./tests/harness/tmp-root.ts --test",
+		"pretest": "test -f dist/assets/codewiki.json && [ -z \"$(find src -newer dist/assets/codewiki.json -type f -print -quit)\" ] || npm run build",
 		"test": "node scripts/shard-tests.mjs",
 		"test:coverage": "node --import tsx --import ./tests/harness/tmp-root.ts --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.d.ts' 'tests/contracts/**/*.test.ts' 'tests/smoke/**/*.test.ts'",
 		"test:repeat": "node tests/harness/repeat-tests.mjs",
