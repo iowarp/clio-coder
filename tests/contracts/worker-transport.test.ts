@@ -106,6 +106,23 @@ async function waitForDescendantPid(logPath: string, timeoutMs = 5_000): Promise
 	throw new Error("the stub never logged a descendant pid");
 }
 
+/**
+ * Wait for the `hang-hard` stub to log that it has installed its SIGTERM
+ * ignore-handler. A fixed real-time sleep here raced under a loaded runner:
+ * abort's SIGTERM could reach the child before the handler (or even the
+ * stdin-line handler that installs it) had run, so the child died on the
+ * default disposition instead of surviving to trigger the SIGKILL escalation
+ * and remote-kill fallback the test exists to observe.
+ */
+async function waitForReady(logPath: string, timeoutMs = 5_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() <= deadline) {
+		if (readFileSync(logPath, "utf8").includes("ready")) return;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	throw new Error("the stub never logged that it was ready to ignore SIGTERM");
+}
+
 /** Liveness by signal 0: it probes without delivering anything. */
 function isProcessAlive(pid: number): boolean {
 	try {
@@ -179,6 +196,8 @@ describe("ssh worker transport channel contract", () => {
 	});
 	beforeEach(() => {
 		process.env.FAKE_SSH_ARGV_LOG = fake.argvLog;
+		process.env.FAKE_SSH_READY_LOG = fake.readyLog;
+		writeFileSync(fake.readyLog, "", "utf8");
 	});
 
 	function transport(scenario: string, shutdownGraceMs = 500) {
@@ -349,9 +368,10 @@ describe("ssh worker transport channel contract", () => {
 
 	it("escalates a stuck channel to SIGKILL plus a remote kill fallback", async () => {
 		const worker = transport("hang-hard", 60).spawn(TEST_SPEC, { cwd: "/w" });
-		// Real time on purpose: the stub installs the SIGTERM handler this test
-		// depends on after its announce, and exposes nothing observable between.
-		await new Promise((resolve) => setTimeout(resolve, 200));
+		// The stub logs once its SIGTERM ignore-handler is installed, so the test
+		// waits on that fact instead of a fixed real-time budget that a loaded
+		// runner can blow through before the handler exists.
+		await waitForReady(fake.readyLog);
 		worker.abort();
 		const result = await worker.promise;
 		strictEqual(result.signal, "SIGKILL");
@@ -677,13 +697,17 @@ describe("worker attestation and transport bounds", () => {
 		// The remote half of the same rule: the fallback names the group.
 		process.env.FAKE_SSH_SCENARIO = "hang-hard";
 		process.env.FAKE_SSH_ARGV_LOG = fake.argvLog;
+		process.env.FAKE_SSH_READY_LOG = fake.readyLog;
 		writeFileSync(fake.argvLog, "", "utf8");
+		writeFileSync(fake.readyLog, "", "utf8");
 		const remote = createSshWorkerTransport(SSH_NODE, { sshBinary: fake.binary, shutdownGraceMs: 60 }).spawn(TEST_SPEC, {
 			cwd: "/w",
 		});
-		// Real time for the same reason as the SIGKILL escalation test above: the
-		// remote stub's SIGTERM handler is installed after the announce.
-		await new Promise((resolve) => setTimeout(resolve, 250));
+		// Wait on the stub's own readiness signal rather than a fixed real-time
+		// budget: same race as the SIGKILL escalation test above, where abort's
+		// SIGTERM could otherwise reach the child before its ignore-handler (or
+		// even its stdin-line handler) had run.
+		await waitForReady(fake.readyLog);
 		remote.abort();
 		await remote.promise;
 		const killDeadline = Date.now() + 2000;
