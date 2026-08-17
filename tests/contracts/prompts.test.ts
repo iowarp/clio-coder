@@ -617,14 +617,33 @@ describe("contracts/prompts", () => {
 			}
 		});
 
-		it("operating contract carries skill awareness with the operator gate intact", () => {
+		it("skills passage carries skill awareness with the operator gate intact, only when context is on the surface", () => {
 			const table = loadFragments();
-			const result = compile(table, {
+			// Role text is gated on the surface: the Skills passage teaches calling
+			// context(scope="skills"), so it renders only when `context` is attached.
+			const without = compile(table, {
 				identity: "identity.clio",
 				operatingContract: "operating.contract",
 				safety: "safety.auto-edit",
 				sessionInputs: { provider: "p", model: "m" },
 			});
+			strictEqual(without.systemPrompt.includes("# Skills"), false);
+			strictEqual(
+				without.sections.some((section) => section.id === "skills"),
+				false,
+			);
+			strictEqual(
+				without.fragmentManifest.some((f) => f.id === "operating.skills"),
+				false,
+			);
+			const result = compile(table, {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety: "safety.auto-edit",
+				sessionInputs: { provider: "p", model: "m", toolNames: ["context"] },
+			});
+			ok(result.sections.some((section) => section.id === "skills"));
+			ok(result.fragmentManifest.some((f) => f.id === "operating.skills"));
 			// The fragment is hard-wrapped; compare against whitespace-normalized text.
 			const flat = result.systemPrompt.replace(/\s+/g, " ");
 			// The passage tells the agent to check the catalog on skill-shaped tasks
@@ -644,12 +663,28 @@ describe("contracts/prompts", () => {
 
 		it("operating contract qualifies delegated evidence and requires parent spot-checks", () => {
 			const table = loadFragments();
-			const result = compile(table, {
+			// Delegation is role text gated on the surface: without `dispatch` the
+			// whole passage is absent, the same way the Fleet block already is.
+			const without = compile(table, {
 				identity: "identity.clio",
 				operatingContract: "operating.contract",
 				safety: "safety.auto-edit",
 				sessionInputs: { provider: "p", model: "m" },
 			});
+			strictEqual(without.systemPrompt.includes("# Delegation"), false);
+			strictEqual(without.systemPrompt.includes("A sealed run receipt"), false);
+			strictEqual(
+				without.fragmentManifest.some((f) => f.id === "operating.delegation"),
+				false,
+			);
+			const result = compile(table, {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety: "safety.auto-edit",
+				sessionInputs: { provider: "p", model: "m", toolNames: ["dispatch"] },
+			});
+			ok(result.sections.some((section) => section.id === "delegation"));
+			ok(result.fragmentManifest.some((f) => f.id === "operating.delegation"));
 			const flat = result.systemPrompt.replace(/\s+/g, " ");
 			// Receipt integrity and evidence verification are separate; raw worker
 			// prose is never called verified evidence without qualification.
@@ -685,7 +720,7 @@ describe("contracts/prompts", () => {
 				identity: "identity.clio",
 				operatingContract: "operating.contract",
 				safety: "safety.auto-edit",
-				sessionInputs: { provider: "p", model: "m" },
+				sessionInputs: { provider: "p", model: "m", toolNames: ["dispatch"] },
 			});
 			const flat = result.systemPrompt.replace(/\s+/g, " ");
 			ok(flat.includes("The operator can also run workers themselves with /run and /delegate"));
@@ -707,7 +742,7 @@ describe("contracts/prompts", () => {
 				identity: "identity.clio",
 				operatingContract: "operating.contract",
 				safety: "safety.auto-edit",
-				sessionInputs: { provider: "p", model: "m" },
+				sessionInputs: { provider: "p", model: "m", toolNames: ["dispatch"] },
 			});
 			const flat = result.systemPrompt.replace(/\s+/g, " ");
 			// The four non-evidence triggers match the deterministic notices dispatch
