@@ -200,6 +200,9 @@ function skillRows(skills: ReadonlyArray<Skill>): string[][] {
 		skill.trusted ? "trusted" : "untrusted",
 		skill.disableModelInvocation ? "manual" : "model",
 		skill.hash.slice(0, 12),
+		// Blank for the ordinary operator-installed case; a worker install is
+		// the anomaly worth a column, so it is the only value that ever prints.
+		skill.provenance?.installedBy ?? "",
 		skill.description,
 	]);
 }
@@ -210,7 +213,7 @@ function printList(skills: ReadonlyArray<Skill>): void {
 		return;
 	}
 	process.stdout.write(
-		formatColumns([["name", "scope", "source", "trust", "invoke", "hash", "description"], ...skillRows(skills)]),
+		formatColumns([["name", "scope", "source", "trust", "invoke", "hash", "by", "description"], ...skillRows(skills)]),
 	);
 }
 
@@ -224,6 +227,9 @@ function printInspect(skill: Skill): void {
 	process.stdout.write(`trusted: ${skill.trusted}\n`);
 	process.stdout.write(`disableModelInvocation: ${skill.disableModelInvocation}\n`);
 	process.stdout.write(`hash: ${skill.hash}\n`);
+	if (skill.provenance?.installedBy) {
+		process.stdout.write(`installed-by: ${skill.provenance.installedBy}\n`);
+	}
 	if (skill.diagnostics.length > 0) {
 		process.stdout.write("diagnostics:\n");
 		for (const diag of skill.diagnostics) process.stdout.write(`  ${diag.type}: ${diag.message}\n`);

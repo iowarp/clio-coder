@@ -117,6 +117,16 @@ export function parseSkillSourceSpec(source: string): SkillSourceSpec | null {
 	return { kind: "local", path: path.resolve(expanded), original: trimmed };
 }
 
+/**
+ * Whether this process is running inside a dispatched worker rather than the
+ * operator's own interactive session. `worker/entry.ts` sets this on itself at
+ * launch, so it rides the environment into every bash-tool child a worker
+ * spawns, including a `clio-coder skills install` a worker runs directly.
+ */
+function installingAsWorker(): boolean {
+	return process.env.CLIO_CODER_WORKER_RUN === "1";
+}
+
 function yamlQuote(value: string): string {
 	return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
@@ -126,6 +136,8 @@ interface ProvenanceFields {
 	installedAt: string;
 	updatedAt?: string;
 	installedHash: string;
+	/** Who ran the install: a dispatched worker, or (unmarked) the operator. */
+	installedBy?: "worker";
 }
 
 /**
@@ -152,6 +164,7 @@ function injectProvenanceFrontmatter(rawText: string, fields: ProvenanceFields):
 		`installed-hash: ${yamlQuote(fields.installedHash)}`,
 		// Audit is a human decision; installs always land unreviewed.
 		"audit: unknown",
+		...(fields.installedBy ? [`installed-by: ${yamlQuote(fields.installedBy)}`] : []),
 	];
 	const clioIndex = kept.findIndex((line) => /^clio:/.test(line));
 	if (clioIndex >= 0 && !/^clio:\s*$/.test(kept[clioIndex] as string)) {
@@ -317,6 +330,7 @@ export function installSkillFromSource(input: InstallSkillInput): InstallSkillRe
 					sourceUrl: spec.original,
 					installedAt: new Date().toISOString(),
 					installedHash,
+					...(installingAsWorker() ? { installedBy: "worker" as const } : {}),
 				}),
 				"utf8",
 			);
@@ -384,6 +398,9 @@ function updateOne(skill: Skill, force: boolean): SkillUpdateReport {
 					installedAt: skill.provenance?.installedAt ?? new Date().toISOString(),
 					updatedAt: new Date().toISOString(),
 					installedHash: remoteHash,
+					// Who installed a skill is set once; an update, worker- or
+					// operator-run, does not change who put it there originally.
+					...(skill.provenance?.installedBy ? { installedBy: skill.provenance.installedBy } : {}),
 				}),
 				"utf8",
 			);
