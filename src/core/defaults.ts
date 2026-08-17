@@ -612,7 +612,7 @@ retry:
 #   internalDispatchTimeoutMs   wall-clock cap for one internal generator
 #                               dispatch (wiki documenter, bootstrap scout).
 # Each value also has a per-process env override (CLIO_CODER_TURN_TOOL_CALL_BUDGET,
-# CLIO_CODER_WORKER_TOOL_CALL_CAP, CLIO_CODER_MAX_RUNS, CLIO_CODER_READ_MAX_BYTES,
+# CLIO_CODER_WORKER_TOOL_CALL_CAP, CLIO_CODER_MAX_DISPATCH_RUNS, CLIO_CODER_READ_MAX_BYTES,
 # CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES, CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS) meant
 # for CI and one-off experiments.
 guardrails:
