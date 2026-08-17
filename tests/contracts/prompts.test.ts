@@ -1,6 +1,6 @@
 import { notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -289,19 +289,10 @@ describe("contracts/prompts identity anti-leak safety", () => {
 		ok(selfAwareness.body.includes("docs/skills-marketplace.md"));
 	});
 
-	it("every docs/*.md path named in identity.self-awareness exists in the checkout and matches the pack manifest", () => {
-		const table = loadFragments();
-		const selfAwareness = table.byId.get("identity.self-awareness");
-		ok(selfAwareness, "identity.self-awareness must be registered");
-		const matches = [...selfAwareness.body.matchAll(/docs\/[a-zA-Z0-9_-]+\.md/g)].map((m) => m[0]);
-		ok(matches.length >= 40, `expected at least 40 doc links, found ${matches.length}`);
-		const root = resolvePackageRoot();
-		const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { files: string[] };
-		for (const docRel of matches) {
-			ok(existsSync(join(root, docRel)), `${docRel} must exist in the checkout`);
-		}
-		ok(pkg.files.includes("docs/*.md"), "package.json files must include docs/*.md");
-	});
+	// The doc-existence check for every docs/*.md path named in
+	// identity.self-awareness moved to scripts/check-hygiene.ts (the "prompts"
+	// rule): it reads the checkout and the pack manifest off disk and asserts
+	// on their structure, not on anything this file compiles.
 });
 
 describe("contracts/prompts compiler logic", () => {
