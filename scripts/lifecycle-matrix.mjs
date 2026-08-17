@@ -235,12 +235,27 @@ function freshHome(name) {
 const PREFIX = () => child("prefix");
 const LAUNCHER = () => join(PREFIX(), "bin", "clio-coder");
 
+/**
+ * Outcome of the case-2 install, read by the driver. Every case after 2 runs
+ * the installed launcher, so when the install failed they are reported as
+ * skipped with npm's exit code and stderr attached to case 2, instead of
+ * cascading a launcher-not-found failure per case that says nothing about the
+ * code under test (issue #103).
+ */
+const INSTALL = { failed: false, reason: "" };
+
 function installPackage(env) {
 	mkdirSync(PREFIX(), { recursive: true });
+	// A cache of its own, under the root: the operator's `~/.npm/_cacache` is
+	// shared with whatever else is running on the machine (a concurrent
+	// `test:coverage` also packs and installs this tarball), and a failure
+	// there would be invisible from here.
+	const cache = child("npm-cache");
+	mkdirSync(cache, { recursive: true });
 	return run(
 		"npm",
 		["install", "--global", "--prefix", PREFIX(), "--no-audit", "--no-fund", "--loglevel=error", PACK.tarball],
-		{ env, timeoutMs: 300_000 },
+		{ env: { ...env, npm_config_cache: cache }, timeoutMs: 300_000 },
 	);
 }
 
@@ -297,6 +312,15 @@ testCase(2, "clean install into a temporary prefix", () => {
 	const launcher = LAUNCHER();
 	const after = snapshot(join(prefix, "bin"));
 	const stat = existsSync(launcher) ? lstatSync(launcher) : null;
+	// Read the entry only when it exists. A failed install has no entry, and a
+	// throw here would replace this record, npm's exit code and stderr with it,
+	// by a stack trace.
+	const entry = join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js");
+	const entryHead = existsSync(entry) ? readFileSync(entry, "utf8").split("\n", 1)[0] : "";
+	if (install.exitCode !== 0 || !existsSync(launcher)) {
+		INSTALL.failed = true;
+		INSTALL.reason = `case 2 install failed (npm exit ${install.exitCode ?? install.signal ?? "unknown"})`;
+	}
 	return {
 		command: install.command,
 		exitCode: install.exitCode,
@@ -308,12 +332,7 @@ testCase(2, "clean install into a temporary prefix", () => {
 			["install succeeded", install.exitCode === 0],
 			["launcher exists", existsSync(launcher)],
 			["launcher is executable", stat !== null && (stat.mode & 0o111) !== 0],
-			[
-				"entry has an ESM shebang",
-				readFileSync(join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js"), "utf8")
-					.split("\n", 1)[0]
-					.startsWith("#!"),
-			],
+			["entry has an ESM shebang", entryHead.startsWith("#!")],
 		],
 	};
 });
@@ -1096,7 +1115,19 @@ async function main() {
 		const startedAt = performance.now();
 		let record;
 		try {
-			const result = await entry.body();
+			// Everything after case 2 drives the launcher case 2 installed. Without
+			// it each case would fail on a missing binary (or, for the PTY cases,
+			// sit out a 40s timeout), so they are skipped with the reason instead.
+			const result =
+				INSTALL.failed && Number(entry.id) > 2
+					? {
+							command: "(not run)",
+							exitCode: null,
+							status: "not-run",
+							notes: `skipped: ${INSTALL.reason}; see case 2 for npm's exit code and stderr`,
+							checks: [],
+						}
+					: await entry.body();
 			const checks = (result.checks ?? []).map(([name, passed]) => ({ name, passed: passed === true }));
 			const failed = checks.filter((check) => !check.passed);
 			record = {
