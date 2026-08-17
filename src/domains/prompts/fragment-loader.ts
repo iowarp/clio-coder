@@ -46,7 +46,6 @@ function walk(root: string): string[] {
 	for (const entry of entries) {
 		const full = path.join(root, entry.name);
 		if (entry.isDirectory()) {
-			if (entry.name === "wiki") continue;
 			out.push(...walk(full));
 			continue;
 		}
