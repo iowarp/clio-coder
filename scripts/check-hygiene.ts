@@ -34,6 +34,7 @@ import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../src/core/defaults.js
 import { resolvePackageRoot } from "../src/core/package-root.js";
 import { OPTIONAL_RECIPE_KEYS, RECIPE_KEYS } from "../src/domains/agents/recipe-schema.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
+import { listDocsCorpus } from "../src/tools/context/docs-engine.js";
 import { runBoundaryCheck } from "../tests/boundaries/check-boundaries.js";
 
 const root = resolvePackageRoot(import.meta.url);
@@ -1031,9 +1032,12 @@ function checkPackaging(): void {
 }
 
 // ---------------------------------------------------------------------------
-// prompts: the one doc-existence assertion carried by
-// tests/contracts/prompts.test.ts, which otherwise exercises real prompt
-// compilation and stays a test.
+// prompts: the prompt no longer carries a doc routing table; it names two
+// docs and directs the model to context(scope="docs") for the rest. Prove
+// the two named docs exist, the directive is phrased as a call rather than
+// an availability note, the docs ship, and the docs engine's own corpus
+// covers every doc in the checkout, so nothing the directive promises is
+// missing from what context(scope="docs") can actually return.
 // ---------------------------------------------------------------------------
 function checkPromptsDocLinks(): void {
 	const table = loadFragments();
@@ -1042,15 +1046,37 @@ function checkPromptsDocLinks(): void {
 		fail("prompts", "identity.self-awareness must be registered");
 		return;
 	}
-	const matches = [...selfAwareness.body.matchAll(/docs\/[a-zA-Z0-9_-]+\.md/g)].map((m) => m[0]);
-	if (matches.length < 40)
-		fail("prompts", `expected at least 40 doc links in identity.self-awareness, found ${matches.length}`);
-	const pkg = JSON.parse(readRoot("package.json")) as { files: string[] };
-	for (const docRel of matches) {
+	const routing = table.byId.get("identity.docs-routing");
+	if (!routing) {
+		fail("prompts", "identity.docs-routing must be registered");
+	} else if (!/call context \(scope="docs", query=<the question>\) before answering/.test(routing.body)) {
+		fail(
+			"prompts",
+			'identity.docs-routing must direct the model to call context(scope="docs") before answering, not merely note that docs exist',
+		);
+	}
+	const named = [...selfAwareness.body.matchAll(/docs\/[a-zA-Z0-9_-]+\.md/g)].map((m) => m[0]);
+	for (const docRel of named) {
 		if (!existsSync(join(root, docRel)))
 			fail("prompts", `${docRel}, named in identity.self-awareness, must exist in the checkout`);
 	}
+	const pkg = JSON.parse(readRoot("package.json")) as { files: string[] };
 	if (!pkg.files.includes("docs/*.md")) fail("prompts", "package.json files must include docs/*.md");
+
+	// Corpus coverage: the directive promises every bundled doc is one call away.
+	const onDisk = readdirSync(join(root, "docs"))
+		.filter((name) => name.endsWith(".md"))
+		.map((name) => `docs/${name}`)
+		.sort();
+	const corpus = listDocsCorpus();
+	if (!corpus.ok) {
+		fail("prompts", `docs corpus failed to load: ${corpus.message}`);
+		return;
+	}
+	const listed = new Set((corpus.payload as { corpus: { files: string[] } }).corpus.files);
+	for (const docRel of onDisk) {
+		if (!listed.has(docRel)) fail("prompts", `${docRel} is in the checkout but not in the context(scope="docs") corpus`);
+	}
 }
 
 // ---------------------------------------------------------------------------

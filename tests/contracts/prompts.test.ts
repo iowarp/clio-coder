@@ -295,8 +295,8 @@ describe("contracts/prompts", () => {
 			ok(selfAwareness.body.includes("docs/skills-marketplace.md"));
 		});
 
-		// The doc-existence check for every docs/*.md path named in
-		// identity.self-awareness moved to scripts/check-hygiene.ts (the "prompts"
+		// The doc-existence check for the docs/*.md paths named in
+		// identity.self-awareness lives in scripts/check-hygiene.ts (the "prompts"
 		// rule): it reads the checkout and the pack manifest off disk and asserts
 		// on their structure, not on anything this file compiles.
 	});
@@ -322,6 +322,55 @@ describe("contracts/prompts", () => {
 			ok(result.systemPrompt.includes("docs/skills-marketplace.md"));
 			strictEqual(result.systemPrompt.includes("{CLIO_DOCS_PATH}"), false);
 			ok(result.fragmentManifest.some((f) => f.id === "identity.self-awareness"));
+		});
+
+		it('routes questions about Clio herself through context(scope="docs") as a directive, only when context is attached', () => {
+			// The 42-row doc routing table that used to live in identity.self-awareness
+			// is gone; the corpus is reachable through one context call, and every
+			// search response lists every bundled doc. The replacement must read as
+			// something to do, not something that is true: a passive "docs exist"
+			// note is what once sent the model grepping the workspace for a skill.
+			const table = loadFragments();
+			const routing = table.byId.get("identity.docs-routing");
+			ok(routing, "identity.docs-routing must be registered");
+			ok(
+				routing.body.includes(
+					'call context (scope="docs", query=<the question>) before answering and before any grep, find, or read',
+				),
+			);
+			ok(routing.body.includes("not in the working tree"));
+			strictEqual(/Documentation routing:|-> docs\//.test(table.byId.get("identity.self-awareness")?.body ?? ""), false);
+			const withContext = compile(table, {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety: "safety.auto-edit",
+				sessionInputs: { provider: "p", model: "m", toolNames: ["context", "read"] },
+			});
+			ok(withContext.systemPrompt.includes(routing.body.trim()));
+			ok(withContext.fragmentManifest.some((f) => f.id === "identity.docs-routing"));
+			// Directive sits inside the identity section, right after the paths it
+			// tells the model to read from.
+			ok(
+				withContext.systemPrompt.indexOf("Installed documentation:") <
+					withContext.systemPrompt.indexOf("# Clio documentation routing"),
+			);
+			ok(
+				withContext.systemPrompt.indexOf("# Clio documentation routing") <
+					withContext.systemPrompt.indexOf("# Operating Contract"),
+			);
+			const withoutContext = compile(table, {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety: "safety.auto-edit",
+				sessionInputs: { provider: "p", model: "m", toolNames: ["read"] },
+			});
+			strictEqual(withoutContext.systemPrompt.includes("# Clio documentation routing"), false);
+			strictEqual(
+				withoutContext.fragmentManifest.some((f) => f.id === "identity.docs-routing"),
+				false,
+			);
+			// The paths and the code-outranks-docs rule name no tool and stay.
+			ok(withoutContext.systemPrompt.includes("Documentation routes, code decides"));
 		});
 
 		it("worker prompt bytes are untouched by self-awareness", () => {
