@@ -223,15 +223,6 @@ class TerminationCoordinator {
 	}
 
 	/**
-	 * Hand SIGINT to a foreground owner and return the call that takes it back.
-	 *
-	 * Boot arms this coordinator before any interactive surface exists, and Node
-	 * runs signal listeners in registration order, so a TUI that merely added its
-	 * own listener would lose every first press to a shutdown already underway.
-	 * One owner holds the interrupt at a time and the transfer is explicit.
-	 * SIGTERM is not part of the handover; it is never an interactive gesture.
-	 */
-	/**
 	 * Report something the operator should read after the process is gone,
 	 * such as which signal ended it. Nothing here knows whether a TUI is on
 	 * screen, but it does know that the terminal teardown is a drain hook: so
@@ -254,6 +245,15 @@ class TerminationCoordinator {
 		for (const text of this.pendingNotices.splice(0)) writeShutdownNotice(text);
 	}
 
+	/**
+	 * Hand SIGINT to a foreground owner and return the call that takes it back.
+	 *
+	 * Boot arms this coordinator before any interactive surface exists, and Node
+	 * runs signal listeners in registration order, so a TUI that merely added its
+	 * own listener would lose every first press to a shutdown already underway.
+	 * One owner holds the interrupt at a time and the transfer is explicit.
+	 * SIGTERM is not part of the handover; it is never an interactive gesture.
+	 */
 	releaseInterruptOwnership(): () => void {
 		const handler = this.signalHandler;
 		if (!handler) return () => {};

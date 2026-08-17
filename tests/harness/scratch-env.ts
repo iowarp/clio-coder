@@ -19,7 +19,7 @@
  * files' beforeEach/afterEach even when neither file's own test bodies do
  * anything concurrent (issue #84: `interop-consent.test.ts` and
  * `interop-state.test.ts`, both fully synchronous test bodies, still clobbered
- * each other's `CLIO_CODER_HOME` at full-suite scale — the gap the runner
+ * each other's `CLIO_CODER_HOME` at full-suite scale; the gap the runner
  * itself inserts between hook invocations was enough). Acquiring an
  * in-process lock before mutating `process.env` and releasing it on restore
  * serializes every window process-wide, so two isolated-env regions from

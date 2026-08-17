@@ -177,7 +177,7 @@ describe("contracts/skills-cli bundle install", () => {
 		// whose "git"-category entries are real GitHub-hosted skills. Installing
 		// them means a real `git clone` per skill, which is where this test's
 		// ~10s wall time and its closeness to runCli's 15s timeout actually came
-		// from — not filesystem work, and not shard contention. An empty index
+		// from. It was not filesystem work, and not shard contention. An empty index
 		// keeps the category match scoped to this fixture's own catalog.
 		const emptyIndex = join(scratch.dir, `grouped-index-${label}.json`);
 		writeFileSync(emptyIndex, JSON.stringify({ skills: [] }), "utf8");
