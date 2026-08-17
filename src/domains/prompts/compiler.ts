@@ -77,6 +77,13 @@ export interface WorkerPromptInputs {
 	onPermission: "deny" | "fail" | "escalate";
 	/** One stable persona: the recipe body or bounded override, including bound-skill mechanics. */
 	persona: RenderedPromptFragment;
+	/**
+	 * The session's `additionalFragments` channel, mirrored for a worker: active
+	 * project rules scoped to this run's working context and the operator
+	 * profile, when either renders non-empty. Rendered last, after persona, the
+	 * same order `compile()` uses for its own `additionalFragments`.
+	 */
+	additionalFragments?: ReadonlyArray<RenderedPromptFragment>;
 }
 
 export interface FragmentManifestEntry {
@@ -521,7 +528,12 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 /**
  * Compile the canonical stable prompt for one mediated fleet worker.
  * Dynamic task, project, memory, pipeline, and per-run posture messages do
- * not belong here. The section order is a protocol invariant.
+ * not belong here; those ride in dispatch's `dynamicPromptMessages`. The one
+ * exception is `additionalFragments`: the operator-editable layer (project
+ * rules scoped to this run, the operator profile) that mirrors the session's
+ * own `additionalFragments` channel, so a worker whose task touches a ruled
+ * path reads the same rule the session would. The section order is a
+ * protocol invariant.
  */
 export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs): CompiledSessionPrompt {
 	if (inputs.persona.dynamic) {
@@ -556,6 +568,9 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	push("tool-contract", renderWorkerToolContractBlock(inputs));
 	push("safety", renderWorkerSafetySection(safety, inputs));
 	push("persona", inputs.persona.body);
+	for (const fragment of inputs.additionalFragments ?? []) {
+		push(fragment.id, fragment.body);
+	}
 
 	const systemPrompt = parts.join("\n\n");
 	const fragmentManifest: FragmentManifestEntry[] = [
@@ -564,6 +579,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 		workerContract,
 		safety,
 		inputs.persona,
+		...(inputs.additionalFragments ?? []),
 	].map((fragment) => ({
 		id: fragment.id,
 		relPath: fragment.relPath,
