@@ -16,5 +16,6 @@ export {
 	type MigrationRunResult,
 	runPending,
 } from "./migrations/index.js";
-export { ensureClioState, readStateInfo, type StateInfo } from "./state.js";
+export { ensureClioState, readStateInfo, type StateInfo, takeUpgradeNotice, type UpgradeTransition } from "./state.js";
+export { describeUpgradeNotice } from "./upgrade-notice.js";
 export { getVersionInfo, type VersionInfo } from "./version.js";

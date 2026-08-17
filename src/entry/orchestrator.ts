@@ -48,7 +48,12 @@ import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
-import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
+import {
+	describeUpgradeNotice,
+	ensureClioState,
+	LifecycleDomainModule,
+	takeUpgradeNotice,
+} from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import {
 	buildMemoryPromptSection,
@@ -883,6 +888,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// false under headless and ACP.
 	const interopReport = interactive && interop ? await interop.detect({ cwd: process.cwd() }) : null;
 	const initialNotices = interactive ? [...(contextDomain?.startupHints() ?? [])] : [];
+	// Once per version, interactive only: headless and ACP have no operator at
+	// the keyboard to tell, and the record is left unclaimed for the boot that does.
+	const upgrade = interactive ? takeUpgradeNotice() : null;
+	if (upgrade !== null) initialNotices.push(describeUpgradeNotice(upgrade));
 	if (interop && interopReport) {
 		const interopHint = interop.bootHint(interopReport);
 		if (interopHint !== null) initialNotices.push(interopHint);

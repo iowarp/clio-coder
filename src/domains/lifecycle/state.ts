@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { initializeClioHome } from "../../core/init.js";
 import { clioStatePath } from "../../core/xdg.js";
@@ -10,8 +10,17 @@ export interface StateInfo {
 	upgradedAt?: string;
 	/** When the record itself was rebuilt. Never the same claim as an install. */
 	repairedAt?: string;
+	/** The version on record before the most recent version change. */
+	upgradedFrom?: string;
+	/** The version whose upgrade notice has already been shown once. */
+	noticedVersion?: string;
 	platform: string;
 	nodeVersion: string;
+}
+
+export interface UpgradeTransition {
+	from: string;
+	to: string;
 }
 
 export interface StateInfoRead {
@@ -50,4 +59,35 @@ export function ensureClioState(): StateInfo {
 	const info = readStateInfo();
 	if (!info) throw new Error("state metadata was not written by initializeClioHome()");
 	return info;
+}
+
+/**
+ * The version transition the operator has not been told about yet, or null.
+ * `initializeClioHome` refreshes `install.json` silently on every boot, so by
+ * the time anything can speak the record already says the current version;
+ * `upgradedFrom` is what remembers where it came from. Claiming the notice
+ * stamps `noticedVersion`, so it is shown once per version and never again.
+ * A record without an `upgradedFrom`, or one already noticed, yields null and
+ * writes nothing.
+ */
+export function takeUpgradeNotice(): UpgradeTransition | null {
+	const path = join(clioStatePath(), "install.json");
+	let raw: Record<string, unknown>;
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+		raw = parsed as Record<string, unknown>;
+	} catch {
+		return null;
+	}
+	const { version, upgradedFrom, noticedVersion } = raw;
+	if (typeof version !== "string" || typeof upgradedFrom !== "string") return null;
+	if (upgradedFrom === version || noticedVersion === version) return null;
+	try {
+		writeFileSync(path, `${JSON.stringify({ ...raw, noticedVersion: version }, null, 2)}\n`, "utf8");
+	} catch {
+		// A record that cannot be rewritten still gets its notice; it will repeat
+		// on the next boot, which is the lesser wrong against staying silent.
+	}
+	return { from: upgradedFrom, to: version };
 }
