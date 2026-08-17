@@ -340,8 +340,9 @@ function checkCiScripts(): void {
 		fail("ci-scripts", "scripts.test:coverage must scope coverage to src/**/*.ts");
 	expectScript("prepublishOnly", "npm run ci:release");
 
-	// Hosted CI runs the release gate, including dist integrity, exactly once
-	// per node-version lane in the shape it must.
+	// Hosted CI is one job. The node-version matrix applies to the same work
+	// on both lanes: no step may single out a lane with `if:`, so neither lane
+	// can pass while silently skipping half the gate.
 	const ciCommands = runCommands(".github/workflows/ci.yml", "ci");
 	const ciSteps = workflowJob(".github/workflows/ci.yml", "ci").steps;
 	const setupNode = ciSteps.find((step) => step.uses === "actions/setup-node@v6");
@@ -352,22 +353,29 @@ function checkCiScripts(): void {
 		fail("ci-scripts", "ci.yml setup-node must read node-version from the matrix");
 	if (ciCommands.includes("npm run test:live"))
 		fail("ci-scripts", "ordinary CI must not run live/model-dependent smoke tests");
+	// A check runs on every node lane, because runtime behavior can differ
+	// between versions and a check pinned to one lane leaves the other
+	// unverified. A report describes the suite rather than a runtime, so
+	// running it twice pays for the same numbers twice. The coverage summary
+	// is the one report here, and it is named rather than pattern-matched so
+	// that adding a second pinned step is a deliberate edit to this list.
+	const REPORT_STEPS = new Set(["Tests with coverage summary"]);
+	const gatedSteps = ciSteps.filter((step) => typeof step.if === "string" && !REPORT_STEPS.has(step.name ?? ""));
+	if (gatedSteps.length > 0)
+		fail(
+			"ci-scripts",
+			`no ci.yml check may gate on matrix.node-version: ${gatedSteps.map((step) => step.name ?? step.run).join(", ")}`,
+		);
 	const gateStep = ciSteps.find((step) => step.run === "npm run ci:release");
-	if (gateStep?.if !== "matrix.node-version == 22")
-		fail("ci-scripts", "the full release gate must run once, gated on matrix.node-version == 22");
-	const buildStep = ciSteps.find((step) => step.run === "npm run build");
-	if (buildStep?.if !== "matrix.node-version == 24")
-		fail("ci-scripts", "the 24 lane must build dist for the smoke tests");
+	if (!gateStep) fail("ci-scripts", "ci.yml must run the full release gate on every lane");
 	const coverageStep = ciSteps.find((step) => step.run?.includes("npm run test:coverage"));
-	if (coverageStep?.if !== "matrix.node-version == 24")
-		fail("ci-scripts", "npm run test:coverage must run only on the 24 lane");
+	if (!coverageStep) fail("ci-scripts", "ci.yml must run the coverage-instrumented suite");
 	if (!coverageStep?.run?.includes("set -o pipefail"))
 		fail("ci-scripts", "the coverage run must set -o pipefail so tee cannot mask a failing suite");
 	const repeatStep = ciSteps.find((step) => step.run === "npm run test:repeat");
-	if (repeatStep?.if !== "matrix.node-version == 24")
-		fail("ci-scripts", "npm run test:repeat must run only on the 24 lane");
-	if (ciCommands.includes("npm run test"))
-		fail("ci-scripts", "no CI lane may run the plain suite alongside the gate or coverage run");
+	if (!repeatStep) fail("ci-scripts", "ci.yml must run the shuffled repeat lane on every lane");
+	if (ciCommands.includes("npm run test") || ciCommands.includes("npm run build"))
+		fail("ci-scripts", "no ci.yml step may run the plain suite or build outside npm run ci:release");
 
 	// Release triggers from version tags and refuses a tag that disagrees with
 	// package.json.
