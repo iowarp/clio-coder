@@ -42,6 +42,9 @@
 	"bin": {
 		"clio-coder": "dist/cli/index.js"
 	},
+	"exports": {
+		"./package.json": "./package.json"
+	},
 	"files": [
 		"dist",
 		"!dist/**/*.map",
