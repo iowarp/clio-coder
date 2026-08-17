@@ -242,6 +242,7 @@ function stubContext(
 		budgetCurrentUsd?: number;
 		auditSink?: ToolCallAuditInput[];
 		completionSink?: CompletionContractAuditInput[];
+		knowledgeBase?: ProvidersContract["knowledgeBase"];
 	} = {},
 ): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -312,7 +313,7 @@ function stubContext(
 		},
 		getDetectedReasoning: () => null,
 		probeReasoningForModel: async () => null,
-		knowledgeBase: null,
+		knowledgeBase: options.knowledgeBase ?? null,
 	};
 
 	const config: ConfigContract = {
@@ -501,6 +502,12 @@ describe("contracts/dispatch", () => {
 				id: `stripped-${agentId}`,
 				runtime: strippedRuntime.id,
 				defaultModel: "test-model",
+				// An explicit operator override, not a runtime placeholder. Since
+				// #106 a bare `defaultCapabilities.tools: false` on a tool-carrying
+				// protocol is read as "nobody answered" and admits the run, so a
+				// case that means "this target genuinely takes no tools" has to say
+				// so explicitly.
+				capabilities: { tools: false },
 			};
 			const strippedContext = stubContext({
 				target: strippedTarget,
@@ -6313,5 +6320,124 @@ describe("contracts/dispatch route admission defaults", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.defaults.maxTokens = 4096;
 		strictEqual(admissionMaxOutputTokens(settings), 4096);
+	});
+});
+
+/**
+ * #106. A knowledge-base miss on a local model id is routine, not an answer.
+ * Reading it as "this model has no tools" narrowed every dispatch's tool
+ * surface to nothing and denied the run, on the same target whose chat path
+ * was calling tools in the same session. Measured live against a llama.cpp
+ * server serving `Qwen3.8-27B-IQ4_NL-262K`, which is in no catalog entry.
+ */
+describe("contracts/dispatch tool-capability admission", () => {
+	beforeEach(isolateDispatchState);
+	afterEach(restoreDispatchState);
+
+	const OPENAI_COMPAT_RUNTIME: RuntimeDescriptor = {
+		id: "openai-compat",
+		displayName: "Generic OpenAI-compatible",
+		kind: "http",
+		apiFamily: "openai-completions",
+		auth: "api-key",
+		// The shipped descriptor's conservative placeholder: a generic protocol
+		// runtime cannot know what an arbitrary local server has loaded.
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: false },
+		synthesizeModel: () => ({ id: "Qwen3.8-27B-IQ4_NL-262K", provider: "openai-compat" }) as never,
+	};
+
+	const LOCAL_TARGET: TargetDescriptor = {
+		id: "local-fleet",
+		runtime: "openai-compat",
+		defaultModel: "Qwen3.8-27B-IQ4_NL-262K",
+	};
+
+	const CODER_RECIPE: AgentRecipe = {
+		...agentRecipeFixture(),
+		id: "coder",
+		name: "coder",
+		capabilityClass: "workspace-edit",
+		tools: ["read", "write", "edit"],
+		toolRequirements: { required: ["read", { anyOf: ["write", "edit"] }], optional: [] },
+	};
+
+	function knowledgeBaseSaying(tools: boolean): ProvidersContract["knowledgeBase"] {
+		return {
+			entries: () => [],
+			reload: () => {},
+			lookup: () => ({
+				entry: { family: "qwen3.8-27b", matchPatterns: ["qwen3.8"], capabilities: { tools } },
+				matchKind: "family",
+			}),
+		} as unknown as ProvidersContract["knowledgeBase"];
+	}
+
+	async function dispatchOnce(knowledgeBase: ProvidersContract["knowledgeBase"]): Promise<WorkerSpec | null> {
+		const context = stubContext({
+			target: LOCAL_TARGET,
+			runtime: OPENAI_COMPAT_RUNTIME,
+			recipes: [CODER_RECIPE],
+			...(knowledgeBase ? { knowledgeBase } : {}),
+		});
+		let capturedSpec: WorkerSpec | null = null;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 7200,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: emptyEvents(),
+					heartbeatAt: { current: Date.now() },
+					abort: () => {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "edit src/greeting.ts",
+			});
+			await handle.finalPromise;
+			return capturedSpec;
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	}
+
+	it("admits a coder against an openai-compat target whose model no catalog entry names", async () => {
+		const spec = await dispatchOnce(null);
+		ok(spec !== null, "the run must reach worker spawn rather than being denied at admission");
+		const tools = new Set((spec as WorkerSpec).allowedTools ?? []);
+		ok(tools.has("read"), `read must survive tool narrowing; got ${[...tools].join(", ")}`);
+		ok(tools.has("edit"), `edit must survive tool narrowing; got ${[...tools].join(", ")}`);
+	});
+
+	it("still denies a model whose knowledge-base entry says it takes no tools", async () => {
+		await rejects(dispatchOnce(knowledgeBaseSaying(false)), /missing required tools/);
+	});
+
+	it("admits a model whose knowledge-base entry says it takes tools", async () => {
+		const spec = await dispatchOnce(knowledgeBaseSaying(true));
+		ok(spec !== null, "an explicit knowledge-base yes must admit the run");
+	});
+
+	/**
+	 * The worker re-derives its own tool surface from
+	 * `spec.runtimeResolution.capabilities.tools` and attests the signature. When
+	 * the orchestrator admitted on an unanswered tool question but shipped the
+	 * merged decision's `false`, the two processes narrowed differently and every
+	 * announcement was refused for tool surface drift. Measured live against
+	 * llama.cpp: three failover attempts, exit 1, contract not-reached.
+	 */
+	it("ships its own tool decision to the worker rather than the merged capability decision", async () => {
+		const spec = await dispatchOnce(null);
+		ok(spec !== null);
+		strictEqual(
+			(spec as WorkerSpec).runtimeResolution?.capabilities.tools,
+			true,
+			"the worker must be told the decision the run was admitted under",
+		);
 	});
 });
