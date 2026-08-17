@@ -729,6 +729,8 @@ function validateFleetNode(issues: Issues, path: string, value: unknown, seen: S
 		"user",
 		"port",
 		"identityFile",
+		"clioCoderEntry",
+		// Pre-0.3.1 spelling, still read.
 		"clioEntry",
 		"labels",
 		"maxWorkers",
@@ -766,9 +768,15 @@ function validateFleetNode(issues: Issues, path: string, value: unknown, seen: S
 		const v = expectString(issues, `${path}.identityFile`, value.identityFile);
 		if (v !== undefined) node.identityFile = v;
 	}
+	// The key was `clioEntry` before 0.3.1. Both spellings read; the new one
+	// wins when a node carries both.
 	if ("clioEntry" in value) {
 		const v = expectString(issues, `${path}.clioEntry`, value.clioEntry);
-		if (v !== undefined) node.clioEntry = v;
+		if (v !== undefined) node.clioCoderEntry = v;
+	}
+	if ("clioCoderEntry" in value) {
+		const v = expectString(issues, `${path}.clioCoderEntry`, value.clioCoderEntry);
+		if (v !== undefined) node.clioCoderEntry = v;
 	}
 	if ("labels" in value) {
 		const v = expectStringArray(issues, `${path}.labels`, value.labels);

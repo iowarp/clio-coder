@@ -80,7 +80,7 @@ describe("fleet settings validation", () => {
 			user: "ops",
 			port: 2222,
 			identityFile: "~/.ssh/id_fleet",
-			clioEntry: "/opt/clio/bin/clio worker",
+			clioCoderEntry: "/opt/clio/bin/clio worker",
 			labels: ["gpu"],
 			maxWorkers: 1,
 			residency: "observe",

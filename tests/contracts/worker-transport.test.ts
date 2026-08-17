@@ -136,9 +136,9 @@ describe("ssh argv and remote command construction", () => {
 		);
 	});
 
-	it("honors per-node residency and clioEntry overrides", () => {
+	it("honors per-node residency and clioCoderEntry overrides", () => {
 		const command = buildRemoteWorkerCommand(
-			{ ...SSH_NODE, residency: "manage", clioEntry: "/opt/clio/bin/clio worker" },
+			{ ...SSH_NODE, residency: "manage", clioCoderEntry: "/opt/clio/bin/clio worker" },
 			"/w",
 		);
 		strictEqual(

@@ -179,7 +179,9 @@ function buildPreflightScript(
 	targets: ReadonlyArray<FleetPreflightTarget> = [],
 ): string {
 	const entry =
-		node.clioEntry !== undefined && node.clioEntry.trim().length > 0 ? node.clioEntry.trim() : "clio-coder worker";
+		node.clioCoderEntry !== undefined && node.clioCoderEntry.trim().length > 0
+			? node.clioCoderEntry.trim()
+			: "clio-coder worker";
 	// Version-check the CLI the worker invocation resolves to: strip the
 	// trailing `worker` subcommand to get the base CLI invocation.
 	const cliBase = entry.endsWith(" worker") ? entry.slice(0, -" worker".length) : null;
@@ -365,7 +367,7 @@ export async function runFleetNodePreflight(
 	const clioLine = lines.find((line) => line.startsWith("clio="));
 	const clioValue = clioLine?.slice("clio=".length) ?? "missing";
 	if (clioValue === "custom-entry") {
-		// A custom clioEntry that is not `<cli> worker` cannot be version-probed;
+		// A custom clioCoderEntry that is not `<cli> worker` cannot be version-probed;
 		// the operator vouches for it. Presence is asserted, match is assumed.
 		checks.clioPresent = true;
 		checks.versionMatch = true;
@@ -379,7 +381,7 @@ export async function runFleetNodePreflight(
 	if (!checks.pathParity)
 		failures.push(`project root ${projectRoot} missing on node (disjoint filesystems are unsupported)`);
 	if (!checks.clioPresent)
-		failures.push("clio-coder not found on remote PATH (set fleet.nodes[].clioEntry or install clio-coder)");
+		failures.push("clio-coder not found on remote PATH (set fleet.nodes[].clioCoderEntry or install clio-coder)");
 	else if (!checks.versionMatch) {
 		failures.push(
 			`clio-coder version mismatch (local ${parseSemver(localVersion) ?? localVersion}, remote ${record.remoteVersion ?? "unknown"})`,

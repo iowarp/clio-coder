@@ -22,8 +22,8 @@ const HELP = `clio-coder eval <command>
 
 Commands:
   clio-coder eval validate --suite <suite.yaml>
-  clio-coder eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-entry <path>]
-  clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-entry <path>]
+  clio-coder eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-coder-entry <path>]
+  clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-coder-entry <path>]
   clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
   clio-coder eval compare <baselineEvalId> <candidateEvalId>
   clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
@@ -99,8 +99,9 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 				index += 1;
 				continue;
 			}
-			if (arg === "--clio-entry") {
-				parsed.clioEntry = requiredValue(args, index, "--clio-entry");
+			// `--clio-entry` is the pre-0.3.1 spelling and still parses.
+			if (arg === "--clio-coder-entry" || arg === "--clio-entry") {
+				parsed.clioEntry = requiredValue(args, index, arg);
 				index += 1;
 				continue;
 			}
@@ -207,7 +208,7 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 		if (parsed.model !== undefined) resolveOptions.model = parsed.model;
 		const suite = resolveSuiteForRun(loaded.suite, resolveOptions);
 		// Runner commands execute with cwd inside prepared eval workspaces, so a
-		// relative --clio-entry must be pinned to the invoking directory here.
+		// relative --clio-coder-entry must be pinned to the invoking directory here.
 		const clioEntry = resolve(parsed.clioEntry ?? process.argv[1] ?? "dist/cli/index.js");
 		const artifact = await runEvalSuiteV2({ ...loaded, suite }, { clioEntry });
 		const artifactPath = await writeEvalArtifactV4(clioDataDir(), artifact, parsed.out);

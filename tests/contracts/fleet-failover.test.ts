@@ -322,10 +322,10 @@ describe("fleet preflight runner", () => {
 		strictEqual(record.resources?.vramBytes, null);
 	});
 
-	it("asserts presence but skips the version probe for a custom clioEntry", async () => {
+	it("asserts presence but skips the version probe for a custom clioCoderEntry", async () => {
 		process.env.FAKE_PREFLIGHT_EXIT = "0";
 		process.env.FAKE_PREFLIGHT_STDOUT = ["clio-preflight/1", "cwd=ok", "clio=custom-entry", "state=ok", ""].join("\n");
-		const record = await runFleetNodePreflight({ ...NODE, clioEntry: "/opt/custom/run-worker" }, "/shared/app", {
+		const record = await runFleetNodePreflight({ ...NODE, clioCoderEntry: "/opt/custom/run-worker" }, "/shared/app", {
 			sshBinary: shim,
 		});
 		strictEqual(record.ok, true);
