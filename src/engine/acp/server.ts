@@ -1,12 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
-import { BusChannels } from "../../core/bus-events.js";
+import { BusChannels, type LoopBlockedPayload } from "../../core/bus-events.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
+import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
+import type { ProvidersContract } from "../../domains/providers/contract.js";
+import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../../domains/safety/autonomy.js";
-import type { SessionContract } from "../../domains/session/contract.js";
+import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
+import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
+import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import type { ToolRegistry } from "../../tools/registry.js";
+import type { AgentMessage } from "../types.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
 import type {
@@ -37,16 +43,50 @@ export interface AcpServerChat {
 	onEvent(handler: (event: AcpServerEvent) => void): () => void;
 	isStreaming(): boolean;
 	getSessionId(): string | null;
+	/** Replace provider context and the next persisted parent after session/load. */
+	resetForSession?(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
 	dispose?(): void;
+}
+
+export interface AcpRoutingSnapshot {
+	target: string | null;
+	model: string | null;
+}
+
+export type AcpThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+export interface AcpSafeSettingsSnapshot extends AcpRoutingSnapshot {
+	thinkingLevel: AcpThinkingLevel;
+	autonomy: AutonomyLevel;
+}
+
+export type AcpSafeSettingsPatch = Partial<{
+	"orchestrator.target": string | null;
+	"orchestrator.model": string | null;
+	"orchestrator.thinkingLevel": AcpThinkingLevel;
+	autonomy: AutonomyLevel;
+}>;
+
+export interface AcpSettingsControl {
+	read(): AcpSafeSettingsSnapshot;
+	commit(patch: AcpSafeSettingsPatch): AcpSafeSettingsSnapshot;
 }
 
 export interface ClioAcpServerOptions {
 	transport: AcpJsonRpcPeerTransport;
 	chat: AcpServerChat;
 	session?: SessionContract;
+	providers?: ProvidersContract;
+	settings?: AcpSettingsControl;
 	toolRegistry?: ToolRegistry;
 	bus?: SafeEventBus;
 	autonomy?: () => AutonomyLevel;
+	/** Initial effective next-turn route captured when a session is bound. */
+	routing?: () => AcpRoutingSnapshot;
+	/** Durable rich-entry reader used by standard session/load. */
+	readSessionEntries?: (sessionId: string) => ReadonlyArray<SessionEntry>;
+	/** Builds the provider context; this is deliberately separate from client replay. */
+	buildReplayMessages?: (entries: ReadonlyArray<SessionEntry>, leafTurnId: string | null) => ReadonlyArray<AgentMessage>;
 	onActiveSessionAutonomyChange?: (level: AutonomyLevel | null) => void;
 	cwd?: string;
 	version?: string;
@@ -63,11 +103,19 @@ interface AcpServerSession {
 	id: string;
 	cwd: string;
 	autonomy: AutonomyLevel;
+	autonomySource: "settings" | "session";
+	target: string | null;
+	model: string | null;
+	createdAt: string;
 	activePrompt: ActivePrompt | null;
 }
 
 interface ActivePrompt {
 	cancelled: boolean;
+	/** The server approval ceiling won; distinct from operator cancellation/denial. */
+	permissionExpired: boolean;
+	/** The ACP presentation ceiling won before a 129th tool call reached the wire. */
+	toolCallLimitReached: boolean;
 	errored: boolean;
 	errorMessage?: string;
 	/** Machine-readable reason from the first admission notice of this turn. */
@@ -236,6 +284,14 @@ const ACP_TRUNCATION_SUFFIX = "…[truncated]";
 
 const ACP_TRUNCATION_SUFFIX_BYTES = Buffer.byteLength(ACP_TRUNCATION_SUFFIX, "utf8");
 
+/** Workbench's frozen bounds for standard ACP tool-call presentation fields. */
+const ACP_MAX_LOCATION_PATH_BYTES = 4 * 1024;
+const ACP_MAX_TOOL_TITLE_BYTES = 512;
+
+/** W001-A1 cardinality bounds for one live prompt and one load replay. */
+const ACP_MAX_LIVE_TOOL_CALLS = 128;
+const ACP_MAX_REPLAY_TOOL_CALLS = 8192;
+
 /** Depth past which `boundRawRecord` stops walking and elides the subtree. */
 const ACP_MAX_RAW_RECORD_DEPTH = 8;
 
@@ -355,7 +411,7 @@ function toolLocations(toolName: string | undefined, args: unknown, cwd: string)
 	if (!isRecord(args)) return null;
 	const path = args.path;
 	if (typeof path !== "string" || path.length === 0) return null;
-	return [{ path: resolvePath(cwd, path) }];
+	return [{ path: boundString(resolvePath(cwd, path), ACP_MAX_LOCATION_PATH_BYTES) }];
 }
 
 function utf8Bytes(value: string): number {
@@ -364,6 +420,29 @@ function utf8Bytes(value: string): number {
 
 function emptyUsage(): AcpServerUsage {
 	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+}
+
+function createActivePromptState(): ActivePrompt {
+	return {
+		cancelled: false,
+		permissionExpired: false,
+		toolCallLimitReached: false,
+		errored: false,
+		sentAssistantChars: 0,
+		sentThinkingChars: 0,
+		updatesSent: 0,
+		sawTurnEnd: false,
+		stopReason: "end_turn",
+		usage: emptyUsage(),
+		usageMessages: new WeakSet<object>(),
+		toolCallWireIds: new Map<string, string[]>(),
+		usedWireIds: new Set<string>(),
+		openToolCalls: new Set<string>(),
+		terminalToolCalls: new Set<string>(),
+		toolCallSnapshots: new Map<string, AcpToolCallSnapshot>(),
+		lastEmittedToolCallId: null,
+		toolCallSequence: 0,
+	};
 }
 
 function finite(value: unknown): number {
@@ -654,8 +733,13 @@ function handleChatEvent(
 	active: ActivePrompt,
 	cwd: string,
 	diagnostics: ((line: string) => void) | undefined,
+	onToolCallLimitReached: () => void,
 ): void {
 	const event = eventRecord(rawEvent);
+	// Once the approval ceiling wins, the prompt is terminal. Registry
+	// cancellation may still make engine promises unwind and emit ordinary tool
+	// or assistant events; none of those are part of a continuing model turn.
+	if (active.permissionExpired || active.toolCallLimitReached) return;
 	if (event.type === "text_delta") {
 		const text = eventTextDelta(event);
 		if (text.length === 0) return;
@@ -681,6 +765,15 @@ function handleChatEvent(
 		return;
 	}
 	if (event.type === "tool_execution_start") {
+		// Tool starts are emitted before registry validation/admission, so Clio's
+		// configurable execution guard is not a wire-cardinality guarantee. Stop
+		// before minting or emitting the 129th id; the prompt handler resolves with
+		// ACP's standard max_turn_requests reason after the underlying run unwinds.
+		if (active.usedWireIds.size >= ACP_MAX_LIVE_TOOL_CALLS) {
+			active.toolCallLimitReached = true;
+			onToolCallLimitReached();
+			return;
+		}
 		const toolName = eventString(event, "toolName");
 		const toolCallId = startToolCallId(active, eventString(event, "toolCallId"));
 		active.openToolCalls.add(toolCallId);
@@ -697,7 +790,7 @@ function handleChatEvent(
 		sendUpdate(transport, sessionId, active, {
 			sessionUpdate: "tool_call",
 			toolCallId,
-			title: toolName ?? "tool",
+			title: boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
 			kind: toolKind(toolName),
 			status: "in_progress" satisfies AcpToolCallStatus,
 			rawInput: snapshot.rawInput,
@@ -727,7 +820,7 @@ function handleChatEvent(
 		sendUpdate(transport, sessionId, active, {
 			sessionUpdate: "tool_call_update",
 			toolCallId,
-			title: toolName ?? "tool",
+			title: boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
 			kind: toolKind(toolName),
 			status: toolStatus(event),
 			...(output.length > 0 ? { content: toolCallContent(output) } : {}),
@@ -772,9 +865,371 @@ function handleChatEvent(
 	// (customType "clio.routing-notice") instead of inventing update kinds.
 }
 
+const ACP_MAX_SESSION_ID_BYTES = 128;
+const ACP_MAX_TARGET_ID_BYTES = 128;
+const ACP_MAX_MODEL_ID_BYTES = 256;
+const ACP_MAX_LABEL_BYTES = 256;
+const ACP_MAX_PREVIEW_BYTES = 512;
+const ACP_MAX_REPLAY_TURNS = 64;
+const ACP_MAX_REPLAY_BYTES = 4 * 1024 * 1024;
+const ACP_REPLAY_META_KEY = "clio-coder/replay";
+
+function hasControlCharacters(value: string): boolean {
+	for (const character of value) {
+		const codePoint = character.codePointAt(0);
+		if (codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f)) return true;
+	}
+	return false;
+}
+
+function requireBoundedClientString(
+	value: unknown,
+	name: string,
+	maxBytes: number,
+	options: { allowEmpty?: boolean } = {},
+): string {
+	if (typeof value !== "string" || (!options.allowEmpty && value.length === 0)) {
+		throw new AcpRequestError(-32602, `${name} is required`, { code: "invalid_params" });
+	}
+	if (utf8Bytes(value) > maxBytes || hasControlCharacters(value)) {
+		throw new AcpRequestError(-32602, `${name} is invalid`, { code: "invalid_params" });
+	}
+	return value;
+}
+
+function safeStoredString(value: unknown, maxBytes: number, fallback = ""): string {
+	if (typeof value !== "string") return fallback;
+	let safe = "";
+	for (const character of value) {
+		const codePoint = character.codePointAt(0);
+		safe += codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f) ? " " : character;
+	}
+	return boundString(safe, maxBytes);
+}
+
+function safeStoredIdentifier(value: unknown, maxBytes: number): string | null {
+	if (typeof value !== "string" || value.length === 0 || hasControlCharacters(value) || utf8Bytes(value) > maxBytes) {
+		return null;
+	}
+	return value;
+}
+
+/**
+ * A selected route cannot be represented as null merely to satisfy the wire
+ * bound: null means genuinely unselected in W001. Refuse the affected method
+ * instead, with the fixed internal-error envelope, until the operator repairs
+ * the local configuration.
+ */
+function safeConfiguredIdentifier(value: unknown, maxBytes: number): string | null {
+	if (value === null || value === undefined) return null;
+	const safe = safeStoredIdentifier(value, maxBytes);
+	if (safe === null) {
+		throw new AcpRequestError(-32000, "configured route cannot be represented safely", { code: "internal_error" });
+	}
+	return safe;
+}
+
+function safeIso(value: unknown): string {
+	if (typeof value === "string" && !hasControlCharacters(value)) {
+		const timestamp = Date.parse(value);
+		if (Number.isFinite(timestamp)) return new Date(timestamp).toISOString();
+	}
+	return new Date(0).toISOString();
+}
+
+function payloadRecord(payload: unknown): Record<string, unknown> | null {
+	return isRecord(payload) ? payload : null;
+}
+
+function replayTextBlocks(entry: MessageEntry): { text: string[]; thinking: string[] } {
+	const text: string[] = [];
+	const thinking: string[] = [];
+	if (typeof entry.payload === "string") text.push(entry.payload);
+	const payload = payloadRecord(entry.payload);
+	if (payload === null) return { text, thinking };
+	if (typeof payload.text === "string") text.push(payload.text);
+	if (!Array.isArray(payload.content)) return { text, thinking };
+	// A rich payload's `text` is the flattened copy of `content`. Prefer the
+	// original blocks so a replay does not duplicate the same prose.
+	if (payload.content.length > 0) text.length = 0;
+	for (const block of payload.content) {
+		if (!isRecord(block)) continue;
+		if (block.type === "text" && typeof block.text === "string") text.push(block.text);
+		if (block.type === "thinking") {
+			if (typeof block.thinking === "string") thinking.push(block.thinking);
+			else if (typeof block.text === "string") thinking.push(block.text);
+		}
+	}
+	return { text, thinking };
+}
+
+interface AcpReplayFrame {
+	update: Record<string, unknown>;
+}
+
+interface AcpReplayTurn {
+	frames: AcpReplayFrame[];
+	toolCalls: number;
+}
+
+interface PreparedAcpReplay {
+	params: Array<AcpSessionUpdateParams & { _meta: Record<string, unknown> }>;
+	turns: number;
+	truncated: boolean;
+}
+
+function replayMessageChunks(
+	frames: AcpReplayFrame[],
+	sessionUpdate: "user_message_chunk" | "agent_message_chunk" | "agent_thought_chunk",
+	texts: ReadonlyArray<string>,
+): void {
+	for (const text of texts) {
+		for (const chunk of chunkText(text, ACP_MAX_CHUNK_BYTES)) {
+			if (chunk.length === 0) continue;
+			frames.push({ update: { sessionUpdate, content: textContent(chunk) } });
+		}
+	}
+}
+
+function replayToolCall(entry: MessageEntry): { engineId: string; name: string; args: unknown } {
+	const payload = payloadRecord(entry.payload);
+	return {
+		engineId:
+			typeof payload?.toolCallId === "string" && payload.toolCallId.length > 0
+				? payload.toolCallId
+				: `persisted-tool-${entry.turnId}`,
+		name: safeStoredString(payload?.name ?? payload?.toolName, 64, "tool") || "tool",
+		args: payload?.args,
+	};
+}
+
+function closeUnrecordedReplayCalls(active: ActivePrompt, frames: AcpReplayFrame[]): void {
+	for (const toolCallId of active.openToolCalls) {
+		frames.push({
+			update: {
+				sessionUpdate: "tool_call_update",
+				toolCallId,
+				status: "failed" satisfies AcpToolCallStatus,
+				content: toolCallContent("unrecorded"),
+			},
+		});
+		active.terminalToolCalls.add(toolCallId);
+	}
+	active.openToolCalls.clear();
+}
+
+/**
+ * Build client-visible replay from original active-branch transcript entries.
+ * Provider-only synthetic context never enters this projection.
+ */
+function prepareAcpReplay(
+	entries: ReadonlyArray<SessionEntry>,
+	leafTurnId: string | null,
+	sessionId: string,
+): PreparedAcpReplay {
+	const branch = filterEntriesToActivePath(entries, leafTurnId ?? undefined);
+	const turns: AcpReplayTurn[] = [];
+	const ids = createActivePromptState();
+	let current: AcpReplayTurn | null = null;
+	for (const entry of branch) {
+		if (entry.kind !== "message") continue;
+		const payload = payloadRecord(entry.payload);
+		if (entry.role === "user") {
+			// Middleware continuations are provider context, not operator authorship.
+			if (payload?.synthetic === true) continue;
+			if (current !== null) closeUnrecordedReplayCalls(ids, current.frames);
+			current = { frames: [], toolCalls: 0 };
+			turns.push(current);
+			const operatorText =
+				typeof payload?.operatorText === "string" ? [payload.operatorText] : replayTextBlocks(entry).text;
+			replayMessageChunks(current.frames, "user_message_chunk", operatorText);
+			continue;
+		}
+		if (current === null) continue;
+		if (entry.role === "assistant") {
+			const blocks = replayTextBlocks(entry);
+			replayMessageChunks(current.frames, "agent_thought_chunk", blocks.thinking);
+			replayMessageChunks(current.frames, "agent_message_chunk", blocks.text);
+			continue;
+		}
+		if (entry.role === "tool_call") {
+			const call = replayToolCall(entry);
+			const toolCallId = startToolCallId(ids, call.engineId);
+			ids.openToolCalls.add(toolCallId);
+			ids.lastEmittedToolCallId = toolCallId;
+			current.toolCalls += 1;
+			current.frames.push({
+				update: {
+					sessionUpdate: "tool_call",
+					toolCallId,
+					title: call.name,
+					kind: toolKind(call.name),
+					status: "in_progress" satisfies AcpToolCallStatus,
+					rawInput: boundRawRecord(call.args),
+				},
+			});
+			continue;
+		}
+		if (entry.role === "tool_result") {
+			const engineId = typeof payload?.toolCallId === "string" ? payload.toolCallId : undefined;
+			const toolCallId = endToolCallId(ids, engineId);
+			if (toolCallId === null || ids.terminalToolCalls.has(toolCallId)) continue;
+			ids.openToolCalls.delete(toolCallId);
+			ids.terminalToolCalls.add(toolCallId);
+			const failed = payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked";
+			const output = boundString(outputText(payload?.result), ACP_MAX_CHUNK_BYTES);
+			const name = safeStoredString(payload?.toolName, 64, "tool") || "tool";
+			current.frames.push({
+				update: {
+					sessionUpdate: "tool_call_update",
+					toolCallId,
+					title: name,
+					kind: toolKind(name),
+					status: (failed ? "failed" : "completed") satisfies AcpToolCallStatus,
+					...(output.length > 0 ? { content: toolCallContent(output) } : {}),
+					rawOutput: boundRawRecord({ result: payload?.result, isError: failed }),
+				},
+			});
+		}
+	}
+	if (current !== null) closeUnrecordedReplayCalls(ids, current.frames);
+
+	let selected = turns.slice(-ACP_MAX_REPLAY_TURNS);
+	let truncated = selected.length !== turns.length;
+	let selectedToolCalls = selected.reduce((total, turn) => total + turn.toolCalls, 0);
+	while (selectedToolCalls > ACP_MAX_REPLAY_TOOL_CALLS && selected.length > 0) {
+		selectedToolCalls -= selected[0]?.toolCalls ?? 0;
+		selected = selected.slice(1);
+		truncated = true;
+	}
+	let decorated: Array<AcpSessionUpdateParams & { _meta: Record<string, unknown> }> = [];
+	for (;;) {
+		decorated = selected.flatMap((turn, index) =>
+			turn.frames.map((frame) => ({
+				sessionId,
+				update: frame.update,
+				_meta: { [ACP_REPLAY_META_KEY]: { turn: index + 1 } },
+			})),
+		);
+		const bytes = decorated.reduce(
+			(total, params) =>
+				total + Buffer.byteLength(JSON.stringify({ jsonrpc: "2.0", method: "session/update", params }), "utf8") + 1,
+			0,
+		);
+		if (bytes <= ACP_MAX_REPLAY_BYTES || selected.length === 0) break;
+		selected = selected.slice(1);
+		truncated = true;
+	}
+	return { params: decorated, turns: selected.length, truncated };
+}
+
+function sessionResultMeta(
+	session: AcpServerSession,
+	resumed: boolean,
+	replayed?: { turns: number; truncated: boolean },
+): Record<string, unknown> {
+	return {
+		sessionId: session.id,
+		target: session.target,
+		model: session.model,
+		autonomy: session.autonomy,
+		createdAt: safeIso(session.createdAt),
+		resumed,
+		...(replayed !== undefined ? { replayed } : {}),
+	};
+}
+
+const ACP_SAFE_SETTINGS_KEYS = [
+	"orchestrator.target",
+	"orchestrator.model",
+	"orchestrator.thinkingLevel",
+	"autonomy",
+] as const;
+const ACP_THINKING_LEVELS = new Set<AcpThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const ACP_AUTONOMY_LEVELS = new Set<AutonomyLevel>(["read-only", "suggest", "auto-edit", "full-auto"]);
+const ACP_MAX_TARGETS = 64;
+const ACP_MAX_TARGET_MODELS = 64;
+// Workbench's frozen reader ceiling is 256 KiB per JSON-RPC line. Reserve
+// 16 KiB for the response envelope/request id and keep this result a stable
+// prefix of whole targets/model ids.
+const ACP_MAX_TARGET_LIST_RESULT_BYTES = 240 * 1024;
+const ACP_EMPTY_TRUNCATED_TARGET_LIST_BYTES = utf8Bytes(
+	JSON.stringify({ targets: [], _meta: { "clio-coder/truncated": true } }),
+);
+// Session summaries share the same Workbench JSON-RPC line ceiling. Keep a
+// stable newest-first prefix of whole rows and reserve 16 KiB for the envelope.
+const ACP_MAX_SESSION_LIST_RESULT_BYTES = 240 * 1024;
+const ACP_EMPTY_TRUNCATED_SESSION_LIST_BYTES = utf8Bytes(
+	JSON.stringify({ sessions: [], truncated: true, _meta: { "clio-coder/truncated": true } }),
+);
+
+function safeSettingsProjection(snapshot: AcpSafeSettingsSnapshot): Record<string, unknown> {
+	const thinkingLevel = ACP_THINKING_LEVELS.has(snapshot.thinkingLevel) ? snapshot.thinkingLevel : "off";
+	const autonomy = ACP_AUTONOMY_LEVELS.has(snapshot.autonomy) ? snapshot.autonomy : DEFAULT_AUTONOMY_LEVEL;
+	return {
+		settings: {
+			orchestrator: {
+				target: safeConfiguredIdentifier(snapshot.target, ACP_MAX_TARGET_ID_BYTES),
+				model: safeConfiguredIdentifier(snapshot.model, ACP_MAX_MODEL_ID_BYTES),
+				thinkingLevel,
+			},
+			autonomy,
+		},
+		editable: [...ACP_SAFE_SETTINGS_KEYS],
+	};
+}
+
+function safeTargetModels(status: ReturnType<ProvidersContract["list"]>[number]): string[] {
+	const candidates = [status.target.defaultModel, ...(status.target.wireModels ?? []), ...status.discoveredModels];
+	const seen = new Set<string>();
+	const models: string[] = [];
+	for (const candidate of candidates) {
+		const id = safeStoredIdentifier(candidate, ACP_MAX_MODEL_ID_BYTES);
+		if (id === null || seen.has(id)) continue;
+		seen.add(id);
+		models.push(id);
+		if (models.length === ACP_MAX_TARGET_MODELS) break;
+	}
+	return models;
+}
+
+interface AcpSafeTargetProjection {
+	id: string;
+	runtime: string;
+	models: string[];
+	isOrchestrator: boolean;
+}
+
+function safeTargetProjection(status: ReturnType<ProvidersContract["list"]>[number]): AcpSafeTargetProjection | null {
+	const id = safeStoredIdentifier(status.target.id, ACP_MAX_TARGET_ID_BYTES);
+	const runtime = safeStoredIdentifier(status.target.runtime, 64);
+	if (id === null || runtime === null) return null;
+	return {
+		id,
+		runtime,
+		models: safeTargetModels(status),
+		isOrchestrator: status.runtime !== null && isOrchestratorEligibleRuntime(status.runtime),
+	};
+}
+
+function safeProbeReason(
+	providers: ProvidersContract,
+	status: ReturnType<ProvidersContract["list"]>[number],
+): "not-configured" | "unreachable" | "unsupported" | null {
+	if (status.runtime === null || typeof status.runtime.probe !== "function") return "unsupported";
+	try {
+		if (status.runtime.auth !== "none" && !providers.auth.statusForTarget(status.target, status.runtime).available) {
+			return "not-configured";
+		}
+	} catch {
+		return "not-configured";
+	}
+	return status.available && status.health.status === "healthy" ? null : "unreachable";
+}
+
 interface AcpPermissionBridge {
 	unregister(): void;
-	/** Settles the outstanding permission request, if any, as a denial. */
+	/** Settles the outstanding permission request, if any, as cancellation. */
 	cancelPending(reason: string): void;
 }
 
@@ -798,6 +1253,7 @@ function installPermissionBridge(input: {
 	 */
 	toolCallSnapshot: (wireId: string) => AcpToolCallSnapshot | null;
 	permissionTimeoutMs: number;
+	expireActivePrompt: () => void;
 }): AcpPermissionBridge {
 	if (!input.toolRegistry) return { unregister: () => {}, cancelPending: () => {} };
 	let pendingCancel: ((reason: string) => void) | null = null;
@@ -811,7 +1267,11 @@ function installPermissionBridge(input: {
 			tool: call.tool,
 			actionClass: decision.classification.actionClass,
 		});
-		const emitResolution = (payload: { status: "granted" | "denied"; decidedBy: string; reason?: string }): void => {
+		const emitResolution = (payload: {
+			status: "granted" | "denied" | "expired";
+			decidedBy: string;
+			reason?: string;
+		}): void => {
 			input.bus?.emit(BusChannels.PermissionResolved, {
 				status: payload.status,
 				requestId: meta.requestId,
@@ -833,6 +1293,20 @@ function installPermissionBridge(input: {
 					decidedBy: "error",
 					...(details !== undefined ? { tool: details.tool, actionClass: details.actionClass } : {}),
 					reason,
+				});
+			}
+		};
+		const emitQueuedExpiryResolutions = (currentRequestId: string): void => {
+			for (const requestId of queuedRequestIds) {
+				if (requestId === currentRequestId) continue;
+				const details = queuedRequestDetails.get(requestId);
+				input.bus?.emit(BusChannels.PermissionResolved, {
+					status: "expired",
+					requestId,
+					origin: "acp-server",
+					decidedBy: "timeout",
+					...(details !== undefined ? { tool: details.tool, actionClass: details.actionClass } : {}),
+					reason: "permission approval expired",
 				});
 			}
 		};
@@ -888,26 +1362,28 @@ function installPermissionBridge(input: {
 				pendingCancel = (reason: string) => resolveCancelled({ kind: "cancelled", reason });
 			});
 			try {
-				const answered = input.transport
-					.request<AcpRequestPermissionResponse>(
-						"session/request_permission",
-						{
-							sessionId,
-							toolCall: {
-								sessionUpdate: "tool_call",
-								toolCallId,
-								title: call.tool,
-								kind: toolKind(call.tool),
-								status: "pending",
-								rawInput: snapshot.rawInput,
-								...(snapshot.locations !== undefined ? { locations: snapshot.locations } : {}),
+				const answered = Promise.resolve()
+					.then(() =>
+						input.transport.request<AcpRequestPermissionResponse>(
+							"session/request_permission",
+							{
+								sessionId,
+								toolCall: {
+									sessionUpdate: "tool_call",
+									toolCallId,
+									title: boundString(call.tool, ACP_MAX_TOOL_TITLE_BYTES),
+									kind: toolKind(call.tool),
+									status: "pending",
+									rawInput: snapshot.rawInput,
+									...(snapshot.locations !== undefined ? { locations: snapshot.locations } : {}),
+								},
+								options: [
+									{ optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+									{ optionId: "reject-once", name: "Reject", kind: "reject_once" },
+								],
 							},
-							options: [
-								{ optionId: "allow-once", name: "Allow once", kind: "allow_once" },
-								{ optionId: "reject-once", name: "Reject", kind: "reject_once" },
-							],
-						},
-						input.permissionTimeoutMs,
+							input.permissionTimeoutMs,
+						),
 					)
 					.then(
 						(response) => ({ kind: "response" as const, response }),
@@ -945,11 +1421,18 @@ function installPermissionBridge(input: {
 				const message = `ACP permission request failed: ${err instanceof Error ? err.message : String(err)}`;
 				if (err instanceof AcpTimeoutError) {
 					emitResolution({
-						status: "denied",
+						status: "expired",
 						decidedBy: "timeout",
-						reason: message,
+						reason: "permission approval expired",
 					});
-					input.toolRegistry?.cancelParkedCall(meta.requestId, message);
+					emitQueuedExpiryResolutions(meta.requestId);
+					queuedRequestIds.clear();
+					queuedRequestDetails.clear();
+					// The registry has no non-denial settlement primitive. Cancel every
+					// parked call only to let the aborted run unwind; the prompt handler
+					// fails terminally before the model can observe/retry those verdicts.
+					input.toolRegistry?.cancelParkedCalls("permission approval expired");
+					input.expireActivePrompt();
 					return;
 				}
 				emitResolution({
@@ -982,7 +1465,10 @@ const ACP_PROMPT_SETTLE_BOUND_MS = 5000;
 
 export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<number> {
 	const sessions = new Map<string, AcpServerSession>();
+	const workspaceInstanceId = randomUUID();
 	let initialized = false;
+	let loopBlockedEventsEnabled = false;
+	let eventSequence = 0;
 	let activeSessionId: string | null = null;
 	let activePromptState: ActivePrompt | null = null;
 	let sessionCreated = false;
@@ -994,6 +1480,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// trailing slash, or a `/.` suffix is recognised rather than refused.
 	const canonicalCwd = realpathSync(options.cwd ?? process.cwd());
 	const permissionTimeoutMs = options.permissionTimeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS;
+	if (
+		!Number.isSafeInteger(permissionTimeoutMs) ||
+		permissionTimeoutMs < 1 ||
+		permissionTimeoutMs > MAX_TIMER_DELAY_MS
+	) {
+		throw new Error(`ACP permission timeout must be between 1 and ${MAX_TIMER_DELAY_MS} milliseconds`);
+	}
 	const permission = installPermissionBridge({
 		transport: options.transport,
 		toolRegistry: options.toolRegistry,
@@ -1009,17 +1502,115 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		toolCallSnapshot: (wireId) =>
 			activePromptState === null ? null : (activePromptState.toolCallSnapshots.get(wireId) ?? null),
 		permissionTimeoutMs,
+		expireActivePrompt: () => {
+			if (activePromptState === null) return;
+			activePromptState.permissionExpired = true;
+			options.chat.cancel();
+		},
 	});
+	const unsubscribeLoopBlocked =
+		options.bus?.on(BusChannels.LoopBlocked, (payload: LoopBlockedPayload) => {
+			if (!initialized || !loopBlockedEventsEnabled || activeSessionId === null || activePromptState === null) return;
+			if (
+				!Number.isSafeInteger(payload.repeatCount) ||
+				payload.repeatCount < 1 ||
+				!Number.isSafeInteger(payload.blocksThisTurn) ||
+				payload.blocksThisTurn < 1 ||
+				!Number.isSafeInteger(payload.budget) ||
+				payload.budget < 1 ||
+				!(["block", "lockout", "stop"] as ReadonlyArray<string>).includes(payload.disposition) ||
+				payload.interrupted !== (payload.disposition === "stop")
+			) {
+				return;
+			}
+			const tool = safeStoredString(payload.tool, 64).trim();
+			if (tool.length === 0) return;
+			eventSequence += 1;
+			try {
+				options.transport.notify("clio-coder/event", {
+					version: 1,
+					workspaceInstanceId,
+					sessionId: activeSessionId,
+					turnId: safeStoredIdentifier(payload.turnId, ACP_MAX_SESSION_ID_BYTES),
+					sequence: eventSequence,
+					kind: "safety.loopBlocked",
+					terminal: false,
+					payload: {
+						toolCallId: null,
+						tool,
+						repeatCount: payload.repeatCount,
+						blocksThisTurn: payload.blocksThisTurn,
+						budget: payload.budget,
+						disposition: payload.disposition,
+						interrupted: payload.interrupted,
+						shape: null,
+					},
+				});
+			} catch {
+				options.diagnostics?.("failed to send an opted-in ACP event");
+			}
+		}) ?? (() => {});
 
 	const requireInitialized = (): void => {
 		if (!initialized) throw new AcpRequestError(-32000, "initialize must be called first", { code: "not_initialized" });
 	};
 
 	const sessionIdOf = (params: unknown): string => {
-		if (!isRecord(params) || typeof params.sessionId !== "string" || params.sessionId.length === 0) {
-			throw new AcpRequestError(-32602, "sessionId is required", { code: "invalid_params" });
+		return requireBoundedClientString(
+			isRecord(params) ? params.sessionId : undefined,
+			"sessionId",
+			ACP_MAX_SESSION_ID_BYTES,
+		);
+	};
+
+	const assertParamKeys = (params: unknown, allowed: ReadonlySet<string>): Record<string, unknown> => {
+		if (params === undefined) return {};
+		if (!isRecord(params) || Object.keys(params).some((key) => !allowed.has(key))) {
+			throw new AcpRequestError(-32602, "invalid method parameters", { code: "invalid_params" });
 		}
-		return params.sessionId;
+		return params;
+	};
+
+	const canonicalSessionCwd = (requested: unknown): string => {
+		const mismatch = (): AcpRequestError =>
+			new AcpRequestError(-32000, "session cwd does not match the server workspace", {
+				code: "session_cwd_mismatch",
+			});
+		if (typeof requested !== "string" || requested.trim().length === 0 || !isAbsolute(requested)) throw mismatch();
+		let sessionCwd: string;
+		try {
+			sessionCwd = realpathSync(resolvePath(requested));
+		} catch {
+			throw mismatch();
+		}
+		if (sessionCwd !== canonicalCwd) throw mismatch();
+		return sessionCwd;
+	};
+
+	const workspaceHistory = (): SessionMeta[] => {
+		const history = options.session?.history() ?? [];
+		return history.filter((meta) => {
+			if (safeStoredIdentifier(meta.id, ACP_MAX_SESSION_ID_BYTES) === null) return false;
+			try {
+				return realpathSync(resolvePath(meta.cwd)) === canonicalCwd;
+			} catch {
+				return false;
+			}
+		});
+	};
+
+	const workspaceMeta = (sessionId: string): SessionMeta => {
+		const meta = workspaceHistory().find((candidate) => candidate.id === sessionId);
+		if (!meta) throw new AcpRequestError(-32000, "unknown ACP session", { code: "session_unknown" });
+		return meta;
+	};
+
+	const routingSnapshot = (): AcpRoutingSnapshot => {
+		const route = options.routing?.() ?? { target: null, model: null };
+		return {
+			target: safeConfiguredIdentifier(route.target, ACP_MAX_TARGET_ID_BYTES),
+			model: safeConfiguredIdentifier(route.model, ACP_MAX_MODEL_ID_BYTES),
+		};
 	};
 
 	const getSession = (params: unknown): AcpServerSession => {
@@ -1041,6 +1632,26 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				supported: [1],
 			});
 		}
+		const clientCapabilities = isRecord(params) && isRecord(params.clientCapabilities) ? params.clientCapabilities : null;
+		const clientMeta =
+			clientCapabilities !== null && isRecord(clientCapabilities._meta) ? clientCapabilities._meta : null;
+		const eventRequest =
+			clientMeta !== null && isRecord(clientMeta["clio-coder/events"]) ? clientMeta["clio-coder/events"] : null;
+		const requestedEventKinds = eventRequest !== null ? eventRequest.kinds : null;
+		loopBlockedEventsEnabled =
+			eventRequest !== null &&
+			eventRequest.version === 1 &&
+			Array.isArray(requestedEventKinds) &&
+			requestedEventKinds.length <= 16 &&
+			requestedEventKinds.every(
+				(kind) => typeof kind === "string" && utf8Bytes(kind) <= 64 && !hasControlCharacters(kind),
+			) &&
+			requestedEventKinds.includes("safety.loopBlocked");
+		const canLoadSession =
+			options.session !== undefined &&
+			options.readSessionEntries !== undefined &&
+			options.buildReplayMessages !== undefined &&
+			options.chat.resetForSession !== undefined;
 		initialized = true;
 		return {
 			protocolVersion: 1,
@@ -1050,7 +1661,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				...(options.version !== undefined ? { version: options.version } : {}),
 			},
 			agentCapabilities: {
-				loadSession: false,
+				loadSession: canLoadSession,
 				promptCapabilities: { audio: false, embeddedContext: false, image: false },
 				mcpCapabilities: { http: false, sse: false },
 				// Clio mediates every tool through its own safety policy and supports an
@@ -1058,8 +1669,32 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				// schema). Both are advertised via the _meta extension slot so strict
 				// clients never observe a non-spec capability field.
 				_meta: {
-					[ACP_SESSION_META_KEY]: { close: true },
-					"clio-coder/tools": "mediated",
+					[ACP_SESSION_META_KEY]: {
+						close: true,
+						list: options.session !== undefined,
+						label: options.session !== undefined,
+						delete: options.session !== undefined,
+						autonomy: true,
+					},
+					"clio-coder/settings": {
+						get_safe: options.settings !== undefined,
+						patch_safe: options.settings !== undefined,
+					},
+					"clio-coder/targets": {
+						list: options.providers !== undefined,
+						probe: options.providers !== undefined,
+					},
+					...(options.bus
+						? {
+								"clio-coder/events": {
+									version: 1,
+									notification: "clio-coder/event",
+									kinds: ["safety.loopBlocked"],
+									workspaceInstanceId,
+								},
+							}
+						: {}),
+					...(options.toolRegistry !== undefined ? { "clio-coder/tools": "mediated" } : {}),
 				},
 			},
 			authMethods: [],
@@ -1074,35 +1709,354 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (sessionCreated) {
 			throw new AcpRequestError(-32000, "this server hosts one session per process", { code: "session_limit" });
 		}
-		// The message names no path: the mismatch is the client's to resolve from
-		// the cwd it launched the server with, and an error frame is not a place
-		// to disclose the host's directory layout.
-		const mismatch = (): AcpRequestError =>
-			new AcpRequestError(-32000, "session cwd does not match the server workspace", {
-				code: "session_cwd_mismatch",
-			});
-		// Absolute and non-blank before anything touches the filesystem. A relative
-		// `cwd` resolves against whatever directory this process happens to be in,
-		// so `"."` or `"sub"` could name the workspace by accident and the client
-		// would believe it had pinned a path it never sent.
-		const requested = isRecord(params) ? params.cwd : undefined;
-		if (typeof requested !== "string" || requested.trim().length === 0 || !isAbsolute(requested)) throw mismatch();
-		let sessionCwd: string;
-		try {
-			sessionCwd = realpathSync(resolvePath(requested));
-		} catch {
-			throw mismatch();
-		}
-		if (sessionCwd !== canonicalCwd) throw mismatch();
-		const meta = options.session?.create({ cwd: canonicalCwd });
+		const sessionCwd = canonicalSessionCwd(isRecord(params) ? params.cwd : undefined);
+		const route = routingSnapshot();
+		const createInput: { cwd: string; target?: string; model?: string } = { cwd: sessionCwd };
+		if (route.target !== null) createInput.target = route.target;
+		if (route.model !== null) createInput.model = route.model;
+		const meta = options.session?.create(createInput);
 		const id = meta?.id ?? randomUUID();
+		if (safeStoredIdentifier(id, ACP_MAX_SESSION_ID_BYTES) === null) {
+			throw new AcpRequestError(-32000, "session creation failed", { code: "internal_error" });
+		}
 		const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
+		const boundTarget = safeConfiguredIdentifier(meta?.target ?? route.target, ACP_MAX_TARGET_ID_BYTES);
+		const boundModel = safeConfiguredIdentifier(meta?.model ?? route.model, ACP_MAX_MODEL_ID_BYTES);
+		const session: AcpServerSession = {
+			id,
+			cwd: sessionCwd,
+			autonomy,
+			autonomySource: "settings",
+			target: boundTarget,
+			model: boundModel,
+			createdAt: meta?.createdAt ?? new Date().toISOString(),
+			activePrompt: null,
+		};
 		sessionCreated = true;
-		sessions.set(id, { id, cwd: canonicalCwd, autonomy, activePrompt: null });
+		sessions.set(id, session);
 		// NewSessionResponse is { sessionId, modes?, models?, _meta? }; cwd is not a
 		// schema field. Clio runs a single-session-per-process server pinned to the
 		// launch cwd, so no extra fields are needed.
-		return { sessionId: id };
+		return { sessionId: id, _meta: { [ACP_SESSION_META_KEY]: sessionResultMeta(session, false) } };
+	});
+
+	options.transport.onRequest("session/load", async (params) => {
+		requireInitialized();
+		if (sessionCreated) {
+			throw new AcpRequestError(-32000, "this server hosts one session per process", { code: "session_limit" });
+		}
+		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers"]));
+		const id = sessionIdOf(request);
+		canonicalSessionCwd(request.cwd);
+		if (!Array.isArray(request.mcpServers) || request.mcpServers.length !== 0) {
+			throw new AcpRequestError(-32602, "mcpServers must be an empty array", { code: "invalid_params" });
+		}
+		const stored = workspaceMeta(id);
+		if (stored.endedAt === null) {
+			throw new AcpRequestError(-32000, "session may already be open", { code: "session_open" });
+		}
+		const storedTarget = safeConfiguredIdentifier(stored.target, ACP_MAX_TARGET_ID_BYTES);
+		const storedModel = safeConfiguredIdentifier(stored.model, ACP_MAX_MODEL_ID_BYTES);
+		if (
+			options.session === undefined ||
+			options.readSessionEntries === undefined ||
+			options.buildReplayMessages === undefined ||
+			options.chat.resetForSession === undefined
+		) {
+			throw new AcpRequestError(-32000, "session loading is unavailable", { code: "internal_error" });
+		}
+
+		let leafTurnId: string | null;
+		let replayMessages: ReadonlyArray<AgentMessage>;
+		let replay: PreparedAcpReplay;
+		try {
+			leafTurnId = options.session.tree(id).leafId;
+			const entries = options.readSessionEntries(id);
+			replayMessages = options.buildReplayMessages(entries, leafTurnId);
+			replay = prepareAcpReplay(entries, leafTurnId, id);
+		} catch {
+			throw new AcpRequestError(-32000, "session could not be loaded", { code: "internal_error" });
+		}
+
+		let resumed: SessionMeta;
+		try {
+			resumed = options.session.resume(id);
+			if (resumed.id !== id || options.session.current()?.id !== id) throw new Error("resume identity mismatch");
+			options.chat.resetForSession(leafTurnId, replayMessages);
+		} catch {
+			if (options.session.current()?.id === id) {
+				try {
+					await options.session.close();
+				} catch {
+					// Best effort: no replay has been emitted and the slot remains unused.
+				}
+			}
+			throw new AcpRequestError(-32000, "session could not be loaded", { code: "internal_error" });
+		}
+
+		const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
+		const session: AcpServerSession = {
+			id,
+			cwd: canonicalCwd,
+			autonomy,
+			autonomySource: "settings",
+			target: storedTarget,
+			model: storedModel,
+			createdAt: stored.createdAt,
+			activePrompt: null,
+		};
+		sessionCreated = true;
+		sessions.set(id, session);
+		for (const replayParams of replay.params) options.transport.notify("session/update", replayParams);
+		return {
+			_meta: {
+				[ACP_SESSION_META_KEY]: sessionResultMeta(session, true, {
+					turns: replay.turns,
+					truncated: replay.truncated,
+				}),
+			},
+		};
+	});
+
+	options.transport.onRequest("clio-coder/session/list", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["limit"]));
+		const limit = request.limit === undefined ? 50 : request.limit;
+		if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 200) {
+			throw new AcpRequestError(-32602, "limit must be an integer from 1 to 200", { code: "invalid_params" });
+		}
+		const history = workspaceHistory();
+		const projected: Array<Record<string, unknown>> = [];
+		let budgetBytes = ACP_EMPTY_TRUNCATED_SESSION_LIST_BYTES;
+		let budgetExhausted = false;
+		for (const meta of history.slice(0, limit as number)) {
+			const hosted = sessions.has(meta.id);
+			const label = safeStoredString(meta.name, ACP_MAX_LABEL_BYTES).trim();
+			const preview = safeStoredString(meta.firstMessagePreview, ACP_MAX_PREVIEW_BYTES).replace(/\s+/gu, " ").trim();
+			const item = {
+				sessionId: meta.id,
+				label: label.length > 0 ? label : null,
+				preview,
+				createdAt: safeIso(meta.createdAt),
+				updatedAt: safeIso(meta.lastActivityAt ?? meta.endedAt ?? meta.createdAt),
+				turns: Number.isSafeInteger(meta.messageCount) && (meta.messageCount ?? 0) >= 0 ? meta.messageCount : 0,
+				target: safeStoredIdentifier(meta.target, ACP_MAX_TARGET_ID_BYTES),
+				model: safeStoredIdentifier(meta.model, ACP_MAX_MODEL_ID_BYTES),
+				state: hosted ? "open" : meta.endedAt === null ? "unknown" : "closed",
+				hosted,
+			};
+			const itemBytes = utf8Bytes(JSON.stringify(item));
+			const separatorBytes = projected.length > 0 ? 1 : 0;
+			if (budgetBytes + separatorBytes + itemBytes > ACP_MAX_SESSION_LIST_RESULT_BYTES) {
+				budgetExhausted = true;
+				break;
+			}
+			projected.push(item);
+			budgetBytes += separatorBytes + itemBytes;
+		}
+		return {
+			sessions: projected,
+			truncated: history.length > projected.length,
+			...(budgetExhausted ? { _meta: { "clio-coder/truncated": true } } : {}),
+		};
+	});
+
+	options.transport.onRequest("clio-coder/session/label", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId", "label"]));
+		const id = sessionIdOf(request);
+		workspaceMeta(id);
+		const label = requireBoundedClientString(request.label, "label", ACP_MAX_LABEL_BYTES, { allowEmpty: true });
+		if (options.session === undefined) {
+			throw new AcpRequestError(-32000, "session naming is unavailable", { code: "internal_error" });
+		}
+		try {
+			options.session.setName(label, id);
+		} catch {
+			throw new AcpRequestError(-32000, "session label could not be saved", { code: "internal_error" });
+		}
+		return {};
+	});
+
+	options.transport.onRequest("clio-coder/session/delete", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		const id = sessionIdOf(request);
+		const meta = workspaceMeta(id);
+		if (sessions.has(id) || meta.endedAt === null) {
+			throw new AcpRequestError(-32000, "session may already be open", { code: "session_open" });
+		}
+		if (options.session === undefined) {
+			throw new AcpRequestError(-32000, "session deletion is unavailable", { code: "internal_error" });
+		}
+		try {
+			options.session.deleteSession(id);
+		} catch {
+			throw new AcpRequestError(-32000, "session could not be deleted", { code: "internal_error" });
+		}
+		return {};
+	});
+
+	options.transport.onRequest("clio-coder/session/autonomy", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId", "level"]));
+		const session = getSession(request);
+		if (request.level === undefined) return { level: session.autonomy, source: session.autonomySource };
+		if (
+			typeof request.level !== "string" ||
+			!(["read-only", "suggest", "auto-edit", "full-auto"] as ReadonlyArray<string>).includes(request.level)
+		) {
+			throw new AcpRequestError(-32602, "invalid autonomy level", { code: "invalid_params" });
+		}
+		if (session.activePrompt !== null) {
+			throw new AcpRequestError(-32000, "cannot change autonomy during an active prompt", { code: "prompt_active" });
+		}
+		session.autonomy = request.level as AutonomyLevel;
+		session.autonomySource = "session";
+		return { level: session.autonomy, source: session.autonomySource };
+	});
+
+	options.transport.onRequest("clio-coder/settings/get_safe", (params) => {
+		requireInitialized();
+		assertParamKeys(params, new Set());
+		if (options.settings === undefined) {
+			throw new AcpRequestError(-32000, "safe settings are unavailable", { code: "internal_error" });
+		}
+		return safeSettingsProjection(options.settings.read());
+	});
+
+	options.transport.onRequest("clio-coder/settings/patch_safe", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["patch"]));
+		if (!isRecord(request.patch)) {
+			throw new AcpRequestError(-32602, "patch must be an object", { code: "invalid_params" });
+		}
+		if (activePromptState !== null) {
+			throw new AcpRequestError(-32000, "cannot patch settings during an active prompt", { code: "prompt_active" });
+		}
+		if (options.settings === undefined) {
+			throw new AcpRequestError(-32000, "safe settings are unavailable", { code: "internal_error" });
+		}
+		const patch: AcpSafeSettingsPatch = {};
+		for (const [key, value] of Object.entries(request.patch)) {
+			if (!(ACP_SAFE_SETTINGS_KEYS as ReadonlyArray<string>).includes(key)) {
+				throw new AcpRequestError(-32602, "patch contains an unknown setting", { code: "invalid_params" });
+			}
+			switch (key) {
+				case "orchestrator.target": {
+					if (value === null) {
+						patch[key] = null;
+						break;
+					}
+					const target = requireBoundedClientString(value, key, ACP_MAX_TARGET_ID_BYTES);
+					if (options.providers?.getTarget(target) === null || options.providers === undefined) {
+						throw new AcpRequestError(-32602, "target is not configured", {
+							code: "invalid_params",
+							reason: "target-unknown",
+						});
+					}
+					patch[key] = target;
+					break;
+				}
+				case "orchestrator.model":
+					patch[key] = value === null ? null : requireBoundedClientString(value, key, ACP_MAX_MODEL_ID_BYTES);
+					break;
+				case "orchestrator.thinkingLevel":
+					if (typeof value !== "string" || !ACP_THINKING_LEVELS.has(value as AcpThinkingLevel)) {
+						throw new AcpRequestError(-32602, "invalid thinking level", { code: "invalid_params" });
+					}
+					patch[key] = value as AcpThinkingLevel;
+					break;
+				case "autonomy":
+					if (typeof value !== "string" || !ACP_AUTONOMY_LEVELS.has(value as AutonomyLevel)) {
+						throw new AcpRequestError(-32602, "invalid autonomy level", { code: "invalid_params" });
+					}
+					patch[key] = value as AutonomyLevel;
+					break;
+			}
+		}
+		const current = options.settings.read();
+		const nextTarget = patch["orchestrator.target"] === undefined ? current.target : patch["orchestrator.target"];
+		const nextModel = patch["orchestrator.model"] === undefined ? current.model : patch["orchestrator.model"];
+		if (nextTarget === null && nextModel !== null) {
+			throw new AcpRequestError(-32602, "model requires a configured target", { code: "invalid_params" });
+		}
+		try {
+			return safeSettingsProjection(options.settings.commit(patch));
+		} catch {
+			throw new AcpRequestError(-32000, "safe settings could not be updated", { code: "internal_error" });
+		}
+	});
+
+	options.transport.onRequest("clio-coder/targets/list", (params) => {
+		requireInitialized();
+		assertParamKeys(params, new Set());
+		if (options.providers === undefined) {
+			throw new AcpRequestError(-32000, "target discovery is unavailable", { code: "internal_error" });
+		}
+		const targets: AcpSafeTargetProjection[] = [];
+		let budgetExhausted = false;
+		// Budget incrementally from the exact JSON representation. Re-serializing
+		// the growing full result for every one of up to 4,096 model ids turns a
+		// bounded config list into avoidable quadratic work.
+		let budgetBytes = ACP_EMPTY_TRUNCATED_TARGET_LIST_BYTES;
+		for (const status of options.providers.list()) {
+			const projected = safeTargetProjection(status);
+			if (projected === null) continue;
+			const bounded: AcpSafeTargetProjection = { ...projected, models: [] };
+			let boundedBytes = utf8Bytes(JSON.stringify(bounded));
+			const targetSeparatorBytes = targets.length > 0 ? 1 : 0;
+			if (budgetBytes + targetSeparatorBytes + boundedBytes > ACP_MAX_TARGET_LIST_RESULT_BYTES) {
+				budgetExhausted = true;
+				break;
+			}
+			targets.push(bounded);
+			budgetBytes += targetSeparatorBytes + boundedBytes;
+			for (const model of projected.models) {
+				const candidateModels = [...bounded.models, model];
+				const candidate = { ...bounded, models: candidateModels };
+				const candidateBytes = utf8Bytes(JSON.stringify(candidate));
+				if (budgetBytes + candidateBytes - boundedBytes > ACP_MAX_TARGET_LIST_RESULT_BYTES) {
+					budgetExhausted = true;
+					break;
+				}
+				bounded.models.push(model);
+				budgetBytes += candidateBytes - boundedBytes;
+				boundedBytes = candidateBytes;
+			}
+			if (budgetExhausted) break;
+			if (targets.length === ACP_MAX_TARGETS) break;
+		}
+		return {
+			targets,
+			...(budgetExhausted ? { _meta: { "clio-coder/truncated": true } } : {}),
+		};
+	});
+
+	options.transport.onRequest("clio-coder/targets/probe", async (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["targetId"]));
+		const targetId = requireBoundedClientString(request.targetId, "targetId", ACP_MAX_TARGET_ID_BYTES);
+		if (options.providers === undefined || options.providers.getTarget(targetId) === null) {
+			throw new AcpRequestError(-32602, "target is not configured", {
+				code: "invalid_params",
+				reason: "target-unknown",
+			});
+		}
+		try {
+			const status = await options.providers.probeTarget(targetId, { reasoning: false });
+			if (status === null) return { targetId, healthy: false, latencyMs: null, reason: "probe-failed" };
+			const reason = safeProbeReason(options.providers, status);
+			const latencyMs =
+				typeof status.health.latencyMs === "number" &&
+				Number.isFinite(status.health.latencyMs) &&
+				status.health.latencyMs >= 0
+					? Math.round(status.health.latencyMs)
+					: null;
+			return { targetId, healthy: reason === null, latencyMs, reason };
+		} catch {
+			return { targetId, healthy: false, latencyMs: null, reason: "probe-failed" };
+		}
 	});
 
 	const cancelSession = (session: AcpServerSession, reason: string): void => {
@@ -1160,24 +2114,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const text = promptText(params);
 		if (text.length === 0) throw new AcpRequestError(-32602, "prompt text is required", { code: "invalid_params" });
 		if (options.session?.current()?.id !== session.id && options.session) options.session.resume(session.id);
-		const active: ActivePrompt = {
-			cancelled: false,
-			errored: false,
-			sentAssistantChars: 0,
-			sentThinkingChars: 0,
-			updatesSent: 0,
-			sawTurnEnd: false,
-			stopReason: "end_turn",
-			usage: emptyUsage(),
-			usageMessages: new WeakSet<object>(),
-			toolCallWireIds: new Map<string, string[]>(),
-			usedWireIds: new Set<string>(),
-			openToolCalls: new Set<string>(),
-			terminalToolCalls: new Set<string>(),
-			toolCallSnapshots: new Map<string, AcpToolCallSnapshot>(),
-			lastEmittedToolCallId: null,
-			toolCallSequence: 0,
-		};
+		const active = createActivePromptState();
 		session.activePrompt = active;
 		activePromptState = active;
 		activeSessionId = session.id;
@@ -1189,7 +2126,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		});
 		options.onActiveSessionAutonomyChange?.(session.autonomy);
 		const unsubscribe = options.chat.onEvent((event) =>
-			handleChatEvent(event, options.transport, session.id, active, canonicalCwd, options.diagnostics),
+			handleChatEvent(event, options.transport, session.id, active, canonicalCwd, options.diagnostics, () => {
+				permission.cancelPending("tool call limit exceeded");
+				options.toolRegistry?.cancelParkedCalls("tool call limit exceeded");
+				options.chat.cancel();
+			}),
 		);
 		try {
 			await options.chat.submit(text);
@@ -1207,7 +2148,20 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			promptSettled = null;
 			settle();
 		}
-		// Cancellation takes precedence over every other outcome.
+		// Expiry is not a delayed denial or an operator cancellation. It aborts
+		// the run and fails the prompt so the model cannot react to/retry it.
+		if (active.permissionExpired) {
+			settleOpenToolCalls(options.transport, session.id, active, "permission approval expired");
+			throw new AcpRequestError(-32000, "permission approval expired", { code: "permission_expired" });
+		}
+		// W001-A1: a peer that holds bounded per-turn state must never see a
+		// 129th tool start. This is a normal ACP agent-side request ceiling, not a
+		// provider failure or an operator cancellation.
+		if (active.toolCallLimitReached) {
+			settleOpenToolCalls(options.transport, session.id, active, "tool call limit exceeded");
+			return promptResponse("max_turn_requests", active);
+		}
+		// Operator cancellation takes precedence over ordinary turn outcomes.
 		if (active.cancelled) {
 			settleOpenToolCalls(options.transport, session.id, active, "cancelled");
 			return promptResponse("cancelled", active);
@@ -1243,6 +2197,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	return await new Promise<number>((resolve) => {
 		options.transport.onClose(() => {
 			permission.unregister();
+			unsubscribeLoopBlocked();
 			permission.cancelPending("ACP transport closed");
 			for (const session of sessions.values()) cancelSession(session, "ACP transport closed");
 			const inFlight = promptSettled;

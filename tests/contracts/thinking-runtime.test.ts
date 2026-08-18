@@ -6,7 +6,7 @@ import {
 	resolveModelRuntimeCapabilities,
 	resolveModelRuntimeCapabilitiesForModel,
 } from "../../src/domains/providers/model-runtime-capabilities.js";
-import type { CapabilityFlags } from "../../src/domains/providers/types/capability-flags.js";
+import type { CapabilityFlags, ThinkingLevel } from "../../src/domains/providers/types/capability-flags.js";
 import { availableThinkingLevels, EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import { createEngineAi } from "../../src/engine/ai.js";
@@ -396,13 +396,55 @@ describe("contracts/thinking-runtime local reasoning classes", () => {
 		strictEqual(high.thinkingActive, true);
 	});
 
-	it("still sends nothing for off when a family maps no off-effort", () => {
+	it("resolves the strict Qwen3.8 effort vocabulary for every Clio thinking level", () => {
+		const quirks: LocalModelQuirks = {
+			thinking: {
+				mechanism: "effort-levels",
+				effortByLevel: { low: "low", medium: "medium", high: "xhigh", xhigh: "xhigh" },
+			},
+		};
+		const cases: ReadonlyArray<{
+			configured: ThinkingLevel;
+			effective: ThinkingLevel;
+			effort?: "low" | "medium" | "xhigh";
+		}> = [
+			{ configured: "off", effective: "off" },
+			{ configured: "minimal", effective: "low", effort: "low" },
+			{ configured: "low", effective: "low", effort: "low" },
+			{ configured: "medium", effective: "medium", effort: "medium" },
+			{ configured: "high", effective: "high", effort: "xhigh" },
+			{ configured: "xhigh", effective: "xhigh", effort: "xhigh" },
+			{ configured: "max", effective: "xhigh", effort: "xhigh" },
+		];
+
+		for (const expected of cases) {
+			const resolved = resolveModelRuntimeCapabilities({
+				runtimeId: "llamacpp",
+				apiFamily: "openai-completions",
+				modelId: "Qwen3.8-27B",
+				capabilities: qwenCaps,
+				quirks,
+				configuredThinkingLevel: expected.configured,
+			});
+
+			deepStrictEqual(resolved.thinking.supportedLevels, ["off", "low", "medium", "high", "xhigh"]);
+			strictEqual(resolved.thinking.effectiveLevel, expected.effective, `${expected.configured} effective level`);
+			strictEqual(resolved.request.reasoningEffort, expected.effort, `${expected.configured} wire effort`);
+			deepStrictEqual(
+				resolved.request.chatTemplateKwargs,
+				expected.configured === "off" ? { enable_thinking: false } : undefined,
+				`${expected.configured} template toggle`,
+			);
+		}
+	});
+
+	it("keeps the applied effort empty for off when a family maps no off-effort", () => {
 		const quirks: LocalModelQuirks = {
 			thinking: { mechanism: "effort-levels", effortByLevel: { low: "low", high: "high" } },
 		};
 
 		const off = applyThinkingMechanism(quirks, "off", qwenCaps);
-		strictEqual(off.effort, undefined, "a family that reasons only on request keeps the send-nothing behaviour");
+		strictEqual(off.effort, undefined, "off uses the template toggle instead of an invalid effort string");
 		strictEqual(off.thinkingActive, false);
 	});
 });

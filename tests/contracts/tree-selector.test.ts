@@ -57,6 +57,7 @@ function session(): SessionContract {
 		switchBranch: () => ({ id: "session-1" }) as SessionMeta,
 		switchTurn: () => ({ id: "session-1" }) as SessionMeta,
 		editLabel: () => {},
+		setName: () => {},
 		deleteSession: () => {},
 		history: () => [],
 		close: async () => {},

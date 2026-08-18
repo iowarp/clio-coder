@@ -170,6 +170,24 @@ describe("contracts/model knowledge base", () => {
 		strictEqual(hero?.entry.family, "qwopus3.6-35b-a3b-coder");
 		strictEqual(hero?.entry.capabilities.contextWindow, 262144);
 
+		// The official 3.8 family must win over every earlier Qwen substring and
+		// retain the strict template effort map validated by the runtime contracts.
+		const qwen38 = kb.lookup("Qwen3.8-27B-IQ4_NL-262K");
+		strictEqual(qwen38?.entry.family, "qwen3.8-27b");
+		strictEqual(qwen38?.entry.capabilities.contextWindow, 262144);
+		strictEqual(qwen38?.entry.capabilities.maxTokens, 131072);
+		const qwen38Quirks = qwen38?.entry.quirks as LocalModelQuirks | undefined;
+		strictEqual(qwen38Quirks?.thinking?.mechanism, "effort-levels");
+		deepStrictEqual(qwen38Quirks?.thinking?.effortByLevel, {
+			low: "low",
+			medium: "medium",
+			high: "xhigh",
+			xhigh: "xhigh",
+		});
+		strictEqual(qwen38Quirks?.sampling?.thinking?.temperature, 1);
+		strictEqual(qwen38Quirks?.sampling?.instruct?.temperature, 0.7);
+		strictEqual(qwen38Quirks?.sampling?.instruct?.presencePenalty, 1.5);
+
 		// The qat family's `gemma-4-31b-it-qat` patterns are not substrings of
 		// the 12B or 26B ids, so those must not be captured by it.
 		strictEqual(kb.lookup("Gemma-4-12B-it-UD-Q4_K_XL-262K")?.entry.family !== "gemma-4-31b-it-qat-mtp", true);

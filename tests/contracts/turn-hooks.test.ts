@@ -150,6 +150,7 @@ function createSession(entries: SessionEntry[] = []): SessionContract {
 		switchBranch: () => current as SessionMeta,
 		switchTurn: () => current as SessionMeta,
 		editLabel: () => {},
+		setName: () => {},
 		deleteSession: () => {},
 		history: () => (current ? [current] : []),
 		close: async () => {},

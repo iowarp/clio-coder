@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { resolveAcpCwd, runAcpCommand } from "../../src/cli/acp.js";
+import { MAX_TIMER_DELAY_MS } from "../../src/core/timers.js";
 
 async function captureAcp(args: ReadonlyArray<string>): Promise<{ code: number; stdout: string; stderr: string }> {
 	const originalOut = process.stdout.write.bind(process.stdout);
@@ -53,6 +54,13 @@ describe("contracts/acp cli flags", () => {
 		const { code, stdout } = await captureAcp(["--permission-timeout", "soon"]);
 		strictEqual(code, 2);
 		strictEqual(stdout, "", "a rejected invocation must not write to the protocol channel");
+	});
+
+	it("refuses a permission timeout that Node cannot schedule", async () => {
+		const { code, stdout, stderr } = await captureAcp(["--permission-timeout", String(MAX_TIMER_DELAY_MS + 1)]);
+		strictEqual(code, 2);
+		strictEqual(stdout, "", "a rejected invocation must not write to the protocol channel");
+		ok(stderr.includes(String(MAX_TIMER_DELAY_MS)));
 	});
 
 	it("refuses --cwd with no directory after it", async () => {

@@ -167,7 +167,10 @@ function loadWeights() {
  */
 function assignLanes(files, weights, laneCount) {
 	const weighed = files
-		.map((file) => ({ file, weight: weights.byFile.get(file) ?? weights.fallback }))
+		.map((file) => ({
+			file,
+			weight: weights.byFile.get(file) ?? weights.fallback,
+		}))
 		.sort((left, right) => right.weight - left.weight || left.file.localeCompare(right.file));
 	const lanes = Array.from({ length: laneCount }, () => ({ files: [], total: 0 }));
 	for (const { file, weight } of weighed) {
@@ -178,12 +181,21 @@ function assignLanes(files, weights, laneCount) {
 		lanes[target].files.push(file);
 		lanes[target].total += weight;
 	}
-	for (const lane of lanes) lane.files.sort((left, right) => left.localeCompare(right));
+	for (const lane of lanes) {
+		lane.files.sort((left, right) => left.localeCompare(right));
+	}
 	return lanes;
 }
 
 function parseArgs(argv) {
-	const out = { patterns: [], lanes: undefined, shard: undefined, list: false, emitWeights: false, forward: [] };
+	const out = {
+		patterns: [],
+		lanes: undefined,
+		shard: undefined,
+		list: false,
+		emitWeights: false,
+		forward: [],
+	};
 	let index = 0;
 	for (; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -241,7 +253,11 @@ function parseSummary(output) {
 function runLane(name, files, forward) {
 	return new Promise((resolvePromise) => {
 		const args = [...RUNNER_ARGS, ...forward, ...files];
-		const child = spawn(process.execPath, args, { cwd: REPO_ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn(process.execPath, args, {
+			cwd: REPO_ROOT,
+			env: process.env,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
 		let stdout = "";
 		let stderr = "";
 		child.stdout.on("data", (chunk) => {
@@ -251,7 +267,14 @@ function runLane(name, files, forward) {
 			stderr += chunk;
 		});
 		child.on("close", (code) => {
-			resolvePromise({ name, files, code: code ?? 1, stdout, stderr, summary: parseSummary(stdout) });
+			resolvePromise({
+				name,
+				files,
+				code: code ?? 1,
+				stdout,
+				stderr,
+				summary: parseSummary(stdout),
+			});
 		});
 	});
 }
@@ -291,7 +314,9 @@ async function emitWeights(files) {
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
 	const files = expandPatterns(args.patterns);
-	if (files.length === 0) throw new Error(`no test files matched: ${args.patterns.join(", ")}`);
+	if (files.length === 0) {
+		throw new Error(`no test files matched: ${args.patterns.join(", ")}`);
+	}
 
 	if (args.emitWeights) return emitWeights(files);
 

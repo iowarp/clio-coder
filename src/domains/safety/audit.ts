@@ -85,7 +85,7 @@ export interface PermissionAuditRecord {
 	kind: "permission";
 	ts: string;
 	correlationId: string;
-	status: "requested" | "granted" | "denied";
+	status: "requested" | "granted" | "denied" | "expired";
 	requestId?: string;
 	origin?: string;
 	decidedBy?: string;

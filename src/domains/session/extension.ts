@@ -6,7 +6,7 @@ import {
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { performCheckpoint } from "./checkpoint.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
-import type { LabelEntry, SessionEntry } from "./entries.js";
+import type { LabelEntry, SessionEntry, SessionInfoEntry } from "./entries.js";
 import { listSessionsForCwd } from "./history.js";
 import {
 	appendEntry,
@@ -138,6 +138,10 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// to a previewless snapshot. The overlay handles missing previews
 			// gracefully via its kind-label fallback.
 		}
+		const persistedLeaf =
+			bundle.meta.pinnedLeafTurnId && bundle.nodes.some((node) => node.id === bundle.meta.pinnedLeafTurnId)
+				? bundle.meta.pinnedLeafTurnId
+				: computeLeafId(bundle.nodes);
 		return buildTreeSnapshot({
 			meta,
 			nodes: [...bundle.nodes, ...structural],
@@ -146,7 +150,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// The leaf is the next append point, so it is computed over turn nodes
 			// only: a structural node marks a moment in the timeline, never a place
 			// the session continues from.
-			leafId: state?.meta.id === sessionId ? currentTurnId : computeLeafId(bundle.nodes),
+			leafId: state?.meta.id === sessionId ? currentTurnId : persistedLeaf,
 		});
 	}
 
@@ -333,6 +337,28 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				timestamp: new Date().toISOString(),
 				targetTurnId: turnId,
 				label,
+			};
+			appendEntryToSessionFile(targetId, entry);
+		},
+		setName(name, sessionId) {
+			const targetId = sessionId ?? state?.meta.id;
+			if (!targetId) throw new Error("session.setName: no sessionId provided and no current session");
+			// A name is session-wide metadata rather than a turn label. Keep it
+			// unanchored and let history's last-wins SessionInfoEntry fold resolve it.
+			if (state && state.meta.id === targetId) {
+				appendEntry(state, {
+					kind: "sessionInfo",
+					parentTurnId: null,
+					name,
+				} as SessionEntryInput);
+				return;
+			}
+			const entry: SessionInfoEntry = {
+				kind: "sessionInfo",
+				turnId: newTurnId(),
+				parentTurnId: null,
+				timestamp: new Date().toISOString(),
+				name,
 			};
 			appendEntryToSessionFile(targetId, entry);
 		},

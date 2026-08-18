@@ -410,12 +410,12 @@ export interface PermissionRequestedPayload {
 
 /**
  * Published on {@link BusChannels.PermissionResolved} when a parked call is
- * granted or denied (operator decision, headless auto-deny, or a delegated
- * agent's denial relayed by dispatch). Only `status` is guaranteed; emitters
- * attach whatever provenance they have.
+ * granted, denied, or expires internally (operator decision, headless
+ * auto-deny, delegated-agent denial, or internal expiry). Only `status` is
+ * guaranteed; emitters attach whatever provenance they have.
  */
 export interface PermissionResolvedPayload {
-	status: "granted" | "denied";
+	status: "granted" | "denied" | "expired";
 	requestId?: string | undefined;
 	origin?: string | undefined;
 	decidedBy?: string | undefined;

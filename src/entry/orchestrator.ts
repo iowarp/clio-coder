@@ -144,7 +144,7 @@ import {
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
-import { serveClioAcpAgent } from "../engine/acp/server.js";
+import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
 import {
 	type AcpJsonRpcPeerTransport,
 	createStdioServerTransport,
@@ -1381,6 +1381,38 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			mutateSaved?.(saved);
 		});
 	};
+	const readAcpSafeSettings = (): AcpSafeSettingsSnapshot => {
+		const settings = getCurrentSettings();
+		return {
+			target: settings.orchestrator.target,
+			model: settings.orchestrator.model,
+			thinkingLevel: settings.orchestrator.thinkingLevel ?? "off",
+			autonomy: settings.autonomy,
+		};
+	};
+	/**
+	 * ACP safe settings are one atomic persisted mutation followed by infallible
+	 * in-process routing assignment. Persisting first avoids reporting a live
+	 * route that failed to become the future-session default.
+	 */
+	const commitAcpSafeSettings = (patch: AcpSafeSettingsPatch): AcpSafeSettingsSnapshot => {
+		const orchestrator: NonNullable<RoutingPatch["orchestrator"]> = {};
+		if (patch["orchestrator.target"] !== undefined) orchestrator.target = patch["orchestrator.target"];
+		if (patch["orchestrator.model"] !== undefined) orchestrator.model = patch["orchestrator.model"];
+		if (patch["orchestrator.thinkingLevel"] !== undefined) {
+			orchestrator.thinkingLevel = patch["orchestrator.thinkingLevel"];
+		}
+		const routingPatch: RoutingPatch | null = Object.keys(orchestrator).length > 0 ? { orchestrator } : null;
+		persistSavedMutation((saved) => {
+			if (routingPatch !== null) mergeRoutingPatchIntoSettings(saved, routingPatch);
+			if (patch.autonomy !== undefined) saved.autonomy = patch.autonomy;
+		});
+		if (routingPatch !== null) {
+			applyRoutingPatch(sessionRouting, routingPatch);
+			bumpSessionState();
+		}
+		return readAcpSafeSettings();
+	};
 	/**
 	 * Persist a whole-settings blob coming from the effective view (the
 	 * /settings overlay, favorites toggles). Routing edits in the blob are
@@ -1612,9 +1644,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				transport,
 				chat,
 				...(session ? { session } : {}),
+				...(session
+					? {
+							readSessionEntries: readSessionEntriesForCompact,
+							buildReplayMessages: (entries: ReadonlyArray<SessionEntry>, leafTurnId: string | null) =>
+								buildReplayAgentMessagesFromTurns(entries, leafTurnId === null ? {} : { activeLeafTurnId: leafTurnId }),
+						}
+					: {}),
+				providers,
+				settings: {
+					read: readAcpSafeSettings,
+					commit: commitAcpSafeSettings,
+				},
 				toolRegistry,
 				bus,
 				autonomy: resolveBaselineAutonomy,
+				routing: () => {
+					const settings = getCurrentSettings();
+					return {
+						target: settings.orchestrator.target,
+						model: settings.orchestrator.model,
+					};
+				},
 				onActiveSessionAutonomyChange: (level) => {
 					activeAcpSessionAutonomy = level;
 				},
@@ -1894,7 +1945,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					},
 					onNewSession: () => {
-						session.create({ cwd: process.cwd() });
+						const settings = getCurrentSettings();
+						const input: { cwd: string; target?: string; model?: string } = { cwd: process.cwd() };
+						if (settings.orchestrator.target) input.target = settings.orchestrator.target;
+						if (settings.orchestrator.model) input.model = settings.orchestrator.model;
+						session.create(input);
 						ensureTaskMemorySession();
 					},
 					onForkSession: (parentTurnId) => {

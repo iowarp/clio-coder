@@ -14,15 +14,24 @@ import { createSafeEventBus, type SafeEventBus } from "../../src/core/event-bus.
 import { canonicalizeExistingPath } from "../../src/core/path-canonical.js";
 import { MAX_TIMER_DELAY_MS } from "../../src/core/timers.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
 import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
-import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
+import {
+	type AcpSafeSettingsSnapshot,
+	type AcpServerChat,
+	type AcpSettingsControl,
+	serveClioAcpAgent,
+} from "../../src/engine/acp/server.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { createStdioServerTransport, createStdioTransport } from "../../src/engine/acp/transport.js";
+import type { AgentMessage } from "../../src/engine/types.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 interface RpcClient {
@@ -344,6 +353,124 @@ function createMockChat(): AcpServerChat & { submitted: string[]; cancelled: boo
 	};
 }
 
+function createResettableMockChat(): ReturnType<typeof createMockChat> & {
+	resets: Array<{ leafTurnId: string | null; messages: ReadonlyArray<AgentMessage> | undefined }>;
+} {
+	const chat = createMockChat() as ReturnType<typeof createMockChat> & {
+		resets: Array<{ leafTurnId: string | null; messages: ReadonlyArray<AgentMessage> | undefined }>;
+	};
+	chat.resets = [];
+	chat.resetForSession = (leafTurnId, messages) => {
+		chat.resets.push({ leafTurnId, messages });
+	};
+	return chat;
+}
+
+function createLoopEventMockChat(bus: SafeEventBus): ReturnType<typeof createMockChat> {
+	const chat = createMockChat();
+	const submit = chat.submit.bind(chat);
+	chat.submit = async (text: string): Promise<void> => {
+		bus.emit(BusChannels.LoopBlocked, {
+			tool: "bash",
+			repeatCount: 3,
+			blocksThisTurn: 1,
+			budget: 3,
+			interrupted: false,
+			disposition: "block",
+			at: Date.now(),
+			turnId: "turn-1",
+		});
+		bus.emit(BusChannels.LoopBlocked, {
+			tool: "bash",
+			repeatCount: 4,
+			blocksThisTurn: 3,
+			budget: 3,
+			interrupted: false,
+			disposition: "lockout",
+			at: Date.now(),
+			turnId: "turn-1",
+		});
+		await submit(text);
+	};
+	return chat;
+}
+
+function sessionMeta(input: Partial<SessionMeta> & Pick<SessionMeta, "id" | "cwd">): SessionMeta {
+	return {
+		...input,
+		id: input.id,
+		cwd: input.cwd,
+		cwdHash: input.cwdHash ?? "test-cwd-hash",
+		createdAt: input.createdAt ?? "2026-08-18T12:00:00.000Z",
+		endedAt: input.endedAt === undefined ? "2026-08-18T12:01:00.000Z" : input.endedAt,
+		model: input.model ?? null,
+		target: input.target ?? null,
+		clioVersion: input.clioVersion ?? "test",
+		piMonoVersion: input.piMonoVersion ?? "test",
+		platform: input.platform ?? "test",
+		nodeVersion: input.nodeVersion ?? "test",
+		sessionFormatVersion: input.sessionFormatVersion ?? 3,
+	};
+}
+
+function createAcpSessionStore(input: {
+	cwd: string;
+	metas?: ReadonlyArray<SessionMeta>;
+	leafById?: Readonly<Record<string, string | null>>;
+}): {
+	contract: SessionContract;
+	metas: Map<string, SessionMeta>;
+	createInputs: Array<{ cwd?: string; model?: string; target?: string } | undefined>;
+	deleted: string[];
+} {
+	const metas = new Map((input.metas ?? []).map((meta) => [meta.id, meta]));
+	const createInputs: Array<{ cwd?: string; model?: string; target?: string } | undefined> = [];
+	const deleted: string[] = [];
+	let current: SessionMeta | null = null;
+	const contract = {
+		current: () => current,
+		create(createInput?: { cwd?: string; model?: string; target?: string }) {
+			createInputs.push(createInput);
+			const meta = sessionMeta({
+				id: `new-session-${createInputs.length}`,
+				cwd: createInput?.cwd ?? input.cwd,
+				endedAt: null,
+				target: createInput?.target ?? null,
+				model: createInput?.model ?? null,
+			});
+			metas.set(meta.id, meta);
+			current = meta;
+			return meta;
+		},
+		resume(id: string) {
+			const meta = metas.get(id);
+			if (!meta) throw new Error("unknown session");
+			meta.endedAt = null;
+			current = meta;
+			return meta;
+		},
+		tree(id?: string) {
+			const sessionId = id ?? current?.id ?? "";
+			return { rootIds: [], nodesById: {}, childrenById: {}, leafId: input.leafById?.[sessionId] ?? null };
+		},
+		setName(name: string, id?: string) {
+			const meta = metas.get(id ?? current?.id ?? "");
+			if (!meta) throw new Error("unknown session");
+			meta.name = name;
+		},
+		deleteSession(id: string) {
+			if (!metas.delete(id)) throw new Error("unknown session");
+			deleted.push(id);
+		},
+		history: () => [...metas.values()],
+		async close() {
+			if (current) current.endedAt = "2026-08-18T12:02:00.000Z";
+			current = null;
+		},
+	} as unknown as SessionContract;
+	return { contract, metas, createInputs, deleted };
+}
+
 function createCancellableMockChat(): AcpServerChat & { cancelled: boolean; started: Promise<void> } {
 	const listeners = new Set<(event: unknown) => void>();
 	let streaming = false;
@@ -496,6 +623,12 @@ interface AcpServerHarness {
 function startAcpServer(input: {
 	chat: AcpServerChat;
 	cwd?: string;
+	session?: SessionContract;
+	providers?: ProvidersContract;
+	settings?: AcpSettingsControl;
+	routing?: () => { target: string | null; model: string | null };
+	readSessionEntries?: (sessionId: string) => ReadonlyArray<SessionEntry>;
+	buildReplayMessages?: (entries: ReadonlyArray<SessionEntry>, leafTurnId: string | null) => ReadonlyArray<AgentMessage>;
 	toolRegistry?: ToolRegistry;
 	bus?: SafeEventBus;
 	permissionTimeoutMs?: number;
@@ -1109,7 +1242,10 @@ function createNormalizingPermissionRegistry(safety: SafetyContract): ToolRegist
  * parks it under the same engine id. The registry normalizes on the way in, so
  * the arguments the bridge is handed are not the arguments the client rendered.
  */
-function createNormalizedArgsPermissionChat(registry: ToolRegistry): AcpServerChat {
+function createNormalizedArgsPermissionChat(
+	registry: ToolRegistry,
+	argsInput: Record<string, unknown> = { path: "notes/acp-snapshot.txt", content: "x" },
+): AcpServerChat {
 	const listeners = new Set<(event: Record<string, unknown>) => void>();
 	let streaming = false;
 	const emit = (event: Record<string, unknown>): void => {
@@ -1118,7 +1254,7 @@ function createNormalizedArgsPermissionChat(registry: ToolRegistry): AcpServerCh
 	return {
 		async submit(): Promise<void> {
 			streaming = true;
-			const args = { path: "notes/acp-snapshot.txt", content: "x" };
+			const args = argsInput;
 			emit({ type: "tool_execution_start", toolCallId: "engine-call-1", toolName: "write", args });
 			const verdict = await registry.invoke({ tool: ToolNames.Write, args }, { toolCallId: "engine-call-1" });
 			emit({ type: "tool_execution_end", toolCallId: "engine-call-1", toolName: "write", result: verdict.kind });
@@ -1139,9 +1275,12 @@ function createNormalizedArgsPermissionChat(registry: ToolRegistry): AcpServerCh
 	};
 }
 
-async function runAcpPermissionBridge(
-	outcome: "allow" | "reject" | "timeout" | "allow-always",
-): Promise<{ requests: PermissionRequestedPayload[]; resolutions: PermissionResolvedPayload[]; answer: string }> {
+async function runAcpPermissionBridge(outcome: "allow" | "reject" | "timeout" | "allow-always"): Promise<{
+	requests: PermissionRequestedPayload[];
+	resolutions: PermissionResolvedPayload[];
+	answer: string;
+	promptErrorCode: string | null;
+}> {
 	const clientToServer = new PassThrough();
 	const serverToClient = new PassThrough();
 	const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
@@ -1187,7 +1326,13 @@ async function runAcpPermissionBridge(
 		}));
 	}
 	const sessionId = await openSession(client);
-	await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "need permission" }] });
+	let promptErrorCode: string | null = null;
+	try {
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "need permission" }] });
+	} catch (err) {
+		if (outcome !== "timeout") throw err;
+		promptErrorCode = String(errorDetail(err).code);
+	}
 	await client.request("session/close", { sessionId });
 	client.close();
 	await server;
@@ -1195,7 +1340,7 @@ async function runAcpPermissionBridge(
 		.filter((update) => update.sessionUpdate === "agent_message_chunk")
 		.map((update) => (isRecord(update.content) ? String(update.content.text) : ""))
 		.join("");
-	return { requests, resolutions, answer };
+	return { requests, resolutions, answer, promptErrorCode };
 }
 
 async function runAcpQueuedPermissionBridge(): Promise<{
@@ -1865,16 +2010,38 @@ setInterval(() => {}, 1000);
 		// AgentCapabilities must match the ACP v1 schema, which has no
 		// sessionCapabilities / streaming / tools fields.
 		const caps = init.agentCapabilities as Record<string, unknown>;
-		strictEqual(caps.loadSession, false);
+		strictEqual(caps.loadSession, false, "a minimal embedded server must not advertise unavailable load support");
 		ok(isRecord(caps.promptCapabilities), "promptCapabilities must be present");
 		ok(isRecord(caps.mcpCapabilities), "mcpCapabilities must be present");
 		ok(!("sessionCapabilities" in caps), "sessionCapabilities is not an ACP v1 field");
 		ok(!("streaming" in caps), "streaming is not an ACP v1 field");
 		ok(!("tools" in caps), "tools is not an ACP v1 field");
-		// Clio advertises optional session/close support via the _meta extension slot.
+		// Clio advertises optional session controls via the _meta extension slot.
 		ok(isRecord(caps._meta), "clio-coder extensions belong in agentCapabilities._meta");
+		deepStrictEqual((caps._meta as Record<string, unknown>)["clio-coder/session"], {
+			close: true,
+			list: false,
+			label: false,
+			delete: false,
+			autonomy: true,
+		});
+		deepStrictEqual((caps._meta as Record<string, unknown>)["clio-coder/settings"], {
+			get_safe: false,
+			patch_safe: false,
+		});
+		deepStrictEqual((caps._meta as Record<string, unknown>)["clio-coder/targets"], {
+			list: false,
+			probe: false,
+		});
+		ok(!("clio-coder/events" in (caps._meta as Record<string, unknown>)));
+		ok(!("clio-coder/tools" in (caps._meta as Record<string, unknown>)));
 
 		strictEqual(typeof session.sessionId, "string");
+		ok(isRecord((session as Record<string, unknown>)._meta));
+		const sessionMeta = ((session as Record<string, unknown>)._meta as Record<string, unknown>)["clio-coder/session"];
+		ok(isRecord(sessionMeta));
+		strictEqual(sessionMeta.sessionId, session.sessionId);
+		strictEqual(sessionMeta.resumed, false);
 
 		strictEqual(prompt.stopReason, "end_turn");
 		ok(!("usage" in prompt), "usage must not sit at the top level of PromptResponse");
@@ -1892,6 +2059,714 @@ setInterval(() => {}, 1000);
 		ok(updates.some((u) => u.sessionUpdate === "tool_call"));
 		ok(updates.some((u) => u.sessionUpdate === "tool_call_update"));
 		strictEqual(code, 0);
+	});
+
+	it("attributes a new ACP session to the bind-time effective route", async () => {
+		const cwd = realpathSync(process.cwd());
+		const store = createAcpSessionStore({ cwd });
+		const harness = startAcpServer({
+			chat: createMockChat(),
+			session: store.contract,
+			routing: () => ({ target: "local-target", model: "model-a" }),
+		});
+		try {
+			await harness.client.request("initialize", { protocolVersion: 1 });
+			const created = await harness.client.request<Record<string, unknown>>("session/new", { cwd });
+			deepStrictEqual(store.createInputs, [{ cwd, target: "local-target", model: "model-a" }]);
+			const meta = (created._meta as Record<string, unknown>)["clio-coder/session"];
+			ok(isRecord(meta));
+			strictEqual(meta.target, "local-target");
+			strictEqual(meta.model, "model-a");
+			strictEqual(meta.autonomy, "auto-edit");
+			strictEqual(meta.resumed, false);
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("refuses an over-bound configured route instead of misreporting it as unselected", async () => {
+		const harness = startAcpServer({
+			chat: createMockChat(),
+			routing: () => ({ target: "t".repeat(129), model: "model-a" }),
+			settings: {
+				read: () => ({
+					target: "t".repeat(129),
+					model: "model-a",
+					thinkingLevel: "off",
+					autonomy: "auto-edit",
+				}),
+				commit: () => {
+					throw new Error("not used");
+				},
+			},
+		});
+		try {
+			await harness.client.request("initialize", { protocolVersion: 1 });
+			for (const request of [
+				harness.client.request("session/new", { cwd: process.cwd() }),
+				harness.client.request("clio-coder/settings/get_safe", {}),
+			]) {
+				const failure = await rejection(request);
+				strictEqual(errorDetail(failure).code, "internal_error");
+				strictEqual(failure.message, "internal error");
+			}
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("lists, labels, deletes, and fail-closes unknown-open workspace sessions", async () => {
+		const cwd = realpathSync(process.cwd());
+		const closed = sessionMeta({
+			id: "closed-session",
+			cwd,
+			name: "Initial name",
+			firstMessagePreview: "first\nquestion",
+			messageCount: 3,
+			target: "target-a",
+			model: "model-a",
+			lastActivityAt: "2026-08-18T12:03:00.000Z",
+		});
+		const unknown = sessionMeta({ id: "unknown-open", cwd, endedAt: null });
+		const foreign = sessionMeta({ id: "foreign-session", cwd: tmpdir() });
+		const store = createAcpSessionStore({ cwd, metas: [closed, unknown, foreign] });
+		const harness = startAcpServer({ chat: createMockChat(), session: store.contract });
+		try {
+			await harness.client.request("initialize", { protocolVersion: 1 });
+			const listed = await harness.client.request<{ sessions: Array<Record<string, unknown>>; truncated: boolean }>(
+				"clio-coder/session/list",
+				{},
+			);
+			deepStrictEqual(
+				listed.sessions.map((entry) => entry.sessionId),
+				["closed-session", "unknown-open"],
+			);
+			strictEqual(listed.sessions[0]?.state, "closed");
+			strictEqual(listed.sessions[0]?.preview, "first question");
+			strictEqual(listed.sessions[1]?.state, "unknown");
+			strictEqual(listed.truncated, false);
+
+			await harness.client.request("clio-coder/session/label", { sessionId: closed.id, label: "Renamed" });
+			strictEqual(store.metas.get(closed.id)?.name, "Renamed");
+			const controlError = await rejection(
+				harness.client.request("clio-coder/session/label", { sessionId: closed.id, label: "bad\nlabel" }),
+			);
+			strictEqual(errorDetail(controlError).code, "invalid_params");
+
+			const openError = await rejection(harness.client.request("clio-coder/session/delete", { sessionId: unknown.id }));
+			strictEqual(errorDetail(openError).code, "session_open");
+			await harness.client.request("clio-coder/session/delete", { sessionId: closed.id });
+			deepStrictEqual(store.deleted, [closed.id]);
+			const missing = await rejection(harness.client.request("clio-coder/session/delete", { sessionId: foreign.id }));
+			strictEqual(errorDetail(missing).code, "session_unknown");
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("keeps a worst-case session list inside the client frame ceiling and marks aggregate truncation", async () => {
+		const cwd = realpathSync(process.cwd());
+		const metas = Array.from({ length: 200 }, (_, index) =>
+			sessionMeta({
+				id: `session-${String(index).padStart(3, "0")}`,
+				cwd,
+				name: '"'.repeat(256),
+				firstMessagePreview: '"'.repeat(512),
+				messageCount: Number.MAX_SAFE_INTEGER,
+				target: '"'.repeat(128),
+				model: '"'.repeat(256),
+				lastActivityAt: `2026-08-18T12:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`,
+			}),
+		);
+		const store = createAcpSessionStore({ cwd, metas });
+		const harness = startAcpServer({ chat: createMockChat(), session: store.contract });
+		try {
+			await harness.client.request("initialize", { protocolVersion: 1 });
+			const listed = await harness.client.request<Record<string, unknown>>("clio-coder/session/list", { limit: 200 });
+			deepStrictEqual(listed._meta, { "clio-coder/truncated": true });
+			strictEqual(listed.truncated, true);
+			const sessions = listed.sessions as Array<Record<string, unknown>>;
+			ok(sessions.length > 0 && sessions.length < 200);
+			strictEqual(sessions[0]?.sessionId, "session-000", "the bounded result is a stable newest-first prefix");
+			ok(Buffer.byteLength(JSON.stringify(listed), "utf8") <= 240 * 1024);
+			ok(
+				Buffer.byteLength(JSON.stringify({ jsonrpc: "2.0", id: 1, result: listed }), "utf8") <= 256 * 1024,
+				"the complete response must fit Workbench's frozen frame reader",
+			);
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("loads the pinned branch, resets provider context first, and replays before the response", async () => {
+		const cwd = realpathSync(process.cwd());
+		const stored = sessionMeta({
+			id: "load-session",
+			cwd,
+			target: "target-a",
+			model: "model-a",
+			endedAt: "2026-08-18T12:10:00.000Z",
+		});
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				role: "user",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: "2026-08-18T12:00:01.000Z",
+				payload: { text: "first" },
+			},
+			{
+				kind: "message",
+				role: "assistant",
+				turnId: "a1",
+				parentTurnId: "u1",
+				timestamp: "2026-08-18T12:00:02.000Z",
+				payload: {
+					content: [
+						{ type: "thinking", thinking: "thought" },
+						{ type: "text", text: "answer" },
+					],
+				},
+			},
+			{
+				kind: "message",
+				role: "user",
+				turnId: "u2",
+				parentTurnId: "a1",
+				timestamp: "2026-08-18T12:00:03.000Z",
+				payload: { text: "selected branch" },
+			},
+			{
+				kind: "message",
+				role: "tool_call",
+				turnId: "tc",
+				parentTurnId: "u2",
+				timestamp: "2026-08-18T12:00:04.000Z",
+				payload: { toolCallId: "call-1", name: "read", args: { path: "README.md" } },
+			},
+			{
+				kind: "message",
+				role: "tool_result",
+				turnId: "tr",
+				parentTurnId: "tc",
+				timestamp: "2026-08-18T12:00:05.000Z",
+				payload: { toolCallId: "call-1", toolName: "read", result: "ok", isError: false },
+			},
+			{
+				kind: "message",
+				role: "user",
+				turnId: "u3",
+				parentTurnId: "a1",
+				timestamp: "2026-08-18T12:00:06.000Z",
+				payload: { text: "abandoned branch" },
+			},
+		];
+		const store = createAcpSessionStore({ cwd, metas: [stored], leafById: { [stored.id]: "tr" } });
+		const chat = createResettableMockChat();
+		const providerReplay = [{ role: "user", content: [{ type: "text", text: "provider replay" }] }] as AgentMessage[];
+		let buildLeaf: string | null | undefined;
+		const harness = startAcpServer({
+			chat,
+			session: store.contract,
+			readSessionEntries: () => entries,
+			buildReplayMessages: (_source, leaf) => {
+				buildLeaf = leaf;
+				return providerReplay;
+			},
+		});
+		try {
+			const initialized = await harness.client.request<Record<string, unknown>>("initialize", { protocolVersion: 1 });
+			const capabilities = initialized.agentCapabilities as Record<string, unknown>;
+			strictEqual(capabilities.loadSession, true);
+			deepStrictEqual((capabilities._meta as Record<string, unknown>)["clio-coder/session"], {
+				close: true,
+				list: true,
+				label: true,
+				delete: true,
+				autonomy: true,
+			});
+			const loaded = await harness.client.request<Record<string, unknown>>("session/load", {
+				sessionId: stored.id,
+				cwd,
+				mcpServers: [],
+			});
+			strictEqual(buildLeaf, "tr");
+			deepStrictEqual(chat.resets, [{ leafTurnId: "tr", messages: providerReplay }]);
+			const replayNotifications = harness.client.notifications.filter(
+				(frame) => isRecord(frame) && frame.method === "session/update",
+			) as Array<Record<string, unknown>>;
+			const updates = sessionUpdates(replayNotifications);
+			deepStrictEqual(
+				updates.map((update) => update.sessionUpdate),
+				[
+					"user_message_chunk",
+					"agent_thought_chunk",
+					"agent_message_chunk",
+					"user_message_chunk",
+					"tool_call",
+					"tool_call_update",
+				],
+			);
+			ok(!JSON.stringify(updates).includes("abandoned branch"));
+			const replayTurns = replayNotifications.map((frame) => {
+				const params = frame.params as Record<string, unknown>;
+				return ((params._meta as Record<string, unknown>)["clio-coder/replay"] as Record<string, unknown>).turn;
+			});
+			deepStrictEqual(replayTurns, [1, 1, 1, 2, 2, 2]);
+			const responseFrame = harness.client.frames.find(
+				(frame) => isRecord(frame.result) && isRecord((frame.result as Record<string, unknown>)._meta),
+			);
+			ok(responseFrame);
+			const responseIndex = harness.client.frames.indexOf(responseFrame);
+			for (const notification of replayNotifications) {
+				ok(harness.client.frames.indexOf(notification) < responseIndex, "replay must precede the load response");
+			}
+			const meta = (loaded._meta as Record<string, unknown>)["clio-coder/session"];
+			ok(isRecord(meta));
+			strictEqual(meta.resumed, true);
+			deepStrictEqual(meta.replayed, { turns: 2, truncated: false });
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("measures the replay byte cap with the real session id and drops only whole turns", async () => {
+		const cwd = realpathSync(process.cwd());
+		const stored = sessionMeta({
+			id: "s".repeat(128),
+			cwd,
+			endedAt: "2026-08-18T12:10:00.000Z",
+		});
+		// Four turns sit just below 4 MiB when measured with an empty session id,
+		// but above it once all 128 id bytes appear in every 16 KiB chunk. This
+		// pins the exact wire-envelope accounting, not merely a generous case.
+		const turnText = "x".repeat(1_035_000);
+		const entries: SessionEntry[] = Array.from({ length: 4 }, (_, index) => ({
+			kind: "message" as const,
+			role: "user" as const,
+			turnId: `u${index + 1}`,
+			parentTurnId: index === 0 ? null : `u${index}`,
+			timestamp: `2026-08-18T12:00:0${index + 1}.000Z`,
+			payload: { text: turnText },
+		}));
+		const store = createAcpSessionStore({
+			cwd,
+			metas: [stored],
+			leafById: { [stored.id]: "u4" },
+		});
+		const harness = startAcpServer({
+			chat: createResettableMockChat(),
+			session: store.contract,
+			readSessionEntries: () => entries,
+			buildReplayMessages: () => [],
+		});
+		try {
+			await harness.client.request("initialize", { protocolVersion: 1 });
+			const loaded = await harness.client.request<Record<string, unknown>>("session/load", {
+				sessionId: stored.id,
+				cwd,
+				mcpServers: [],
+			});
+			const replayNotifications = harness.client.notifications.filter(
+				(frame) => isRecord(frame) && frame.method === "session/update",
+			) as Array<Record<string, unknown>>;
+			const serializedBytes = replayNotifications.reduce(
+				(total, frame) => total + Buffer.byteLength(JSON.stringify(frame), "utf8") + 1,
+				0,
+			);
+			ok(serializedBytes <= 4 * 1024 * 1024, `replay emitted ${serializedBytes} bytes`);
+			const replayMeta = ((loaded._meta as Record<string, unknown>)["clio-coder/session"] as Record<string, unknown>)
+				.replayed as Record<string, unknown>;
+			strictEqual(replayMeta.truncated, true);
+			ok(typeof replayMeta.turns === "number" && replayMeta.turns > 0 && replayMeta.turns < 4);
+
+			const textByTurn = new Map<number, number>();
+			for (const frame of replayNotifications) {
+				const params = frame.params as Record<string, unknown>;
+				strictEqual(params.sessionId, stored.id);
+				const marker = ((params._meta as Record<string, unknown>)["clio-coder/replay"] as Record<string, unknown>)
+					.turn as number;
+				const update = params.update as Record<string, unknown>;
+				const content = update.content as Record<string, unknown>;
+				textByTurn.set(marker, (textByTurn.get(marker) ?? 0) + String(content.text ?? "").length);
+			}
+			deepStrictEqual(
+				[...textByTurn.keys()],
+				Array.from({ length: replayMeta.turns as number }, (_, index) => index + 1),
+			);
+			for (const bytes of textByTurn.values()) strictEqual(bytes, turnText.length, "a replay turn must not be split");
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("caps replay at 8192 tool starts by dropping whole oldest turns", async () => {
+		const cwd = realpathSync(process.cwd());
+		const stored = sessionMeta({ id: "r", cwd, endedAt: "2026-08-18T12:10:00.000Z" });
+		const entries: SessionEntry[] = [];
+		let parentTurnId: string | null = null;
+		let callIndex = 0;
+		for (let turnIndex = 0; turnIndex < 64; turnIndex += 1) {
+			const userTurnId = `u${turnIndex.toString(36)}`;
+			entries.push({
+				kind: "message",
+				role: "user",
+				turnId: userTurnId,
+				parentTurnId,
+				timestamp: "2026-08-18T12:00:00.000Z",
+				payload: { text: "u" },
+			});
+			parentTurnId = userTurnId;
+			for (let callInTurn = 0; callInTurn < 129; callInTurn += 1) {
+				const turnId = `c${callIndex.toString(36)}`;
+				entries.push({
+					kind: "message",
+					role: "tool_call",
+					turnId,
+					parentTurnId,
+					timestamp: "2026-08-18T12:00:00.000Z",
+					payload: { toolCallId: callIndex.toString(36), name: "t" },
+				});
+				parentTurnId = turnId;
+				callIndex += 1;
+			}
+		}
+		const store = createAcpSessionStore({ cwd, metas: [stored], leafById: { [stored.id]: parentTurnId } });
+		const harness = startAcpServer({
+			chat: createResettableMockChat(),
+			session: store.contract,
+			readSessionEntries: () => entries,
+			buildReplayMessages: () => [],
+		});
+		try {
+			await harness.client.request("initialize", { protocolVersion: 1 });
+			const loaded = await harness.client.request<Record<string, unknown>>("session/load", {
+				sessionId: stored.id,
+				cwd,
+				mcpServers: [],
+			});
+			const replayNotifications = harness.client.notifications.filter(
+				(frame) => isRecord(frame) && frame.method === "session/update",
+			) as Array<Record<string, unknown>>;
+			const starts = sessionUpdates(replayNotifications).filter((update) => update.sessionUpdate === "tool_call");
+			ok(starts.length <= 8192, `replay emitted ${starts.length} tool starts`);
+			const replayMeta = ((loaded._meta as Record<string, unknown>)["clio-coder/session"] as Record<string, unknown>)
+				.replayed as Record<string, unknown>;
+			strictEqual(replayMeta.truncated, true);
+			ok(typeof replayMeta.turns === "number" && replayMeta.turns < 64);
+			const callsByTurn = new Map<number, number>();
+			for (const frame of replayNotifications) {
+				const params = frame.params as Record<string, unknown>;
+				const update = params.update as Record<string, unknown>;
+				if (update.sessionUpdate !== "tool_call") continue;
+				const marker = ((params._meta as Record<string, unknown>)["clio-coder/replay"] as Record<string, unknown>)
+					.turn as number;
+				callsByTurn.set(marker, (callsByTurn.get(marker) ?? 0) + 1);
+			}
+			for (const count of callsByTurn.values()) strictEqual(count, 129, "the cap never splits a retained turn");
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("reads and explicitly overrides a hosted session's autonomy between prompts", async () => {
+		const harness = startAcpServer({ chat: createMockChat(), autonomy: () => "auto-edit" });
+		try {
+			const id = await openSession(harness.client);
+			deepStrictEqual(await harness.client.request("clio-coder/session/autonomy", { sessionId: id }), {
+				level: "auto-edit",
+				source: "settings",
+			});
+			deepStrictEqual(await harness.client.request("clio-coder/session/autonomy", { sessionId: id, level: "read-only" }), {
+				level: "read-only",
+				source: "session",
+			});
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("projects and atomically patches only the frozen safe settings set", async () => {
+		let snapshot: AcpSafeSettingsSnapshot = {
+			target: "target-a",
+			model: "model-a",
+			thinkingLevel: "medium" as const,
+			autonomy: "auto-edit" as const,
+		};
+		const commits: Array<Record<string, unknown>> = [];
+		const settings: AcpSettingsControl = {
+			read: () => snapshot,
+			commit: (patch) => {
+				commits.push({ ...patch });
+				snapshot = {
+					target: patch["orchestrator.target"] === undefined ? snapshot.target : patch["orchestrator.target"],
+					model: patch["orchestrator.model"] === undefined ? snapshot.model : patch["orchestrator.model"],
+					thinkingLevel: patch["orchestrator.thinkingLevel"] ?? snapshot.thinkingLevel,
+					autonomy: patch.autonomy ?? snapshot.autonomy,
+				};
+				return snapshot;
+			},
+		};
+		const providers = {
+			getTarget: (id: string) => (id === "target-b" ? { id, runtime: "runtime-a" } : null),
+		} as unknown as ProvidersContract;
+		const harness = startAcpServer({ chat: createMockChat(), providers, settings });
+		try {
+			await harness.client.request("initialize", { protocolVersion: 1 });
+			const initial = await harness.client.request<Record<string, unknown>>("clio-coder/settings/get_safe", {});
+			deepStrictEqual(initial, {
+				settings: {
+					orchestrator: { target: "target-a", model: "model-a", thinkingLevel: "medium" },
+					autonomy: "auto-edit",
+				},
+				editable: ["orchestrator.target", "orchestrator.model", "orchestrator.thinkingLevel", "autonomy"],
+			});
+			const updated = await harness.client.request<Record<string, unknown>>("clio-coder/settings/patch_safe", {
+				patch: {
+					"orchestrator.target": "target-b",
+					"orchestrator.model": "model-b",
+					"orchestrator.thinkingLevel": "xhigh",
+					autonomy: "read-only",
+				},
+			});
+			strictEqual(commits.length, 1);
+			deepStrictEqual((updated.settings as Record<string, unknown>).orchestrator, {
+				target: "target-b",
+				model: "model-b",
+				thinkingLevel: "xhigh",
+			});
+			strictEqual((updated.settings as Record<string, unknown>).autonomy, "read-only");
+
+			const unknownKey = await rejection(
+				harness.client.request("clio-coder/settings/patch_safe", { patch: { "targets.0.url": "secret" } }),
+			);
+			strictEqual(errorDetail(unknownKey).code, "invalid_params");
+			const unknownTarget = await rejection(
+				harness.client.request("clio-coder/settings/patch_safe", {
+					patch: { "orchestrator.target": "missing" },
+				}),
+			);
+			deepStrictEqual(
+				{ code: errorDetail(unknownTarget).code, reason: errorDetail(unknownTarget).reason },
+				{ code: "invalid_params", reason: "target-unknown" },
+			);
+			strictEqual(commits.length, 1, "invalid patches must not partially commit");
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("lists and probes bounded targets without disclosing provider configuration or prose", async () => {
+		const secret = "SENTINEL_PROVIDER_SECRET";
+		const runtime = {
+			id: "runtime-a",
+			kind: "http",
+			auth: "none",
+			probe: async () => ({ ok: true }),
+			defaultBinaryPath: `/tmp/${secret}`,
+		} as unknown as NonNullable<TargetStatus["runtime"]>;
+		const status = {
+			target: {
+				id: "target-a",
+				runtime: "runtime-a",
+				url: `https://${secret}.invalid/?token=${secret}`,
+				auth: { headers: { Authorization: secret } },
+				defaultModel: "default-model",
+				wireModels: ["configured-model"],
+			},
+			runtime,
+			available: true,
+			reason: secret,
+			health: { status: "healthy", lastCheckAt: "2026-08-18T12:00:00.000Z", lastError: secret, latencyMs: 12.4 },
+			capabilities: {},
+			discoveredModels: ["live-model"],
+			probeNotes: [secret],
+		} as unknown as TargetStatus;
+		let probes = 0;
+		const providers = {
+			list: () => [status],
+			getTarget: (id: string) => (id === status.target.id ? status.target : null),
+			probeTarget: async (id: string, options?: { reasoning?: boolean }) => {
+				strictEqual(id, status.target.id);
+				deepStrictEqual(options, { reasoning: false });
+				probes += 1;
+				return status;
+			},
+			auth: { statusForTarget: () => ({ available: true }) },
+		} as unknown as ProvidersContract;
+		const harness = startAcpServer({ chat: createMockChat(), providers });
+		try {
+			await harness.client.request("initialize", { protocolVersion: 1 });
+			const listed = await harness.client.request<Record<string, unknown>>("clio-coder/targets/list", {});
+			deepStrictEqual(listed, {
+				targets: [
+					{
+						id: "target-a",
+						runtime: "runtime-a",
+						models: ["default-model", "configured-model", "live-model"],
+						isOrchestrator: true,
+					},
+				],
+			});
+			strictEqual(probes, 0, "target listing must not make a network probe");
+			const probed = await harness.client.request<Record<string, unknown>>("clio-coder/targets/probe", {
+				targetId: "target-a",
+			});
+			deepStrictEqual(probed, { targetId: "target-a", healthy: true, latencyMs: 12, reason: null });
+			strictEqual(probes, 1);
+			const unknown = await rejection(harness.client.request("clio-coder/targets/probe", { targetId: "missing" }));
+			strictEqual(errorDetail(unknown).reason, "target-unknown");
+			ok(!JSON.stringify(harness.client.frames).includes(secret));
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("keeps a worst-case target list inside the client frame ceiling and marks aggregate truncation", async () => {
+		const runtime = {
+			id: "runtime-a",
+			kind: "http",
+			auth: "none",
+			probe: async () => ({ ok: true }),
+		} as unknown as NonNullable<TargetStatus["runtime"]>;
+		const statuses = Array.from({ length: 64 }, (_, targetIndex) => {
+			const models = Array.from(
+				{ length: 64 },
+				(_, modelIndex) => `${'"'.repeat(250)}${String(modelIndex).padStart(2, "0")}`,
+			);
+			return {
+				target: {
+					id: `target-${String(targetIndex).padStart(2, "0")}`,
+					runtime: runtime.id,
+					wireModels: models,
+				},
+				runtime,
+				available: true,
+				reason: "ready",
+				health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: 1 },
+				capabilities: {},
+				discoveredModels: [],
+			} as unknown as TargetStatus;
+		});
+		const providers = { list: () => statuses } as unknown as ProvidersContract;
+		const harness = startAcpServer({ chat: createMockChat(), providers });
+		try {
+			await harness.client.request("initialize", { protocolVersion: 1 });
+			const listed = await harness.client.request<Record<string, unknown>>("clio-coder/targets/list", {});
+			deepStrictEqual(listed._meta, { "clio-coder/truncated": true });
+			const targets = listed.targets as Array<{ models: string[] }>;
+			ok(targets.length > 0 && targets.length < 64);
+			ok(targets.reduce((total, target) => total + target.models.length, 0) < 64 * 64);
+			ok(Buffer.byteLength(JSON.stringify(listed), "utf8") <= 240 * 1024);
+			ok(
+				Buffer.byteLength(JSON.stringify({ jsonrpc: "2.0", id: 1, result: listed }), "utf8") <= 256 * 1024,
+				"the complete response must fit Workbench's frozen frame reader",
+			);
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("forwards loop blocks only through the opted-in versioned event envelope", async () => {
+		for (const optedIn of [false, true]) {
+			const bus = createSafeEventBus();
+			const harness = startAcpServer({ chat: createLoopEventMockChat(bus), bus });
+			try {
+				const init = await harness.client.request<Record<string, unknown>>("initialize", {
+					protocolVersion: 1,
+					...(optedIn
+						? {
+								clientCapabilities: {
+									_meta: {
+										"clio-coder/events": { version: 1, kinds: ["safety.loopBlocked"] },
+									},
+								},
+							}
+						: {}),
+				});
+				const id = (await harness.client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() })).sessionId;
+				await harness.client.request("session/prompt", {
+					sessionId: id,
+					prompt: [{ type: "text", text: "loop" }],
+				});
+				const events = harness.client.notifications.filter(
+					(frame) => isRecord(frame) && frame.method === "clio-coder/event",
+				) as Array<Record<string, unknown>>;
+				if (!optedIn) {
+					strictEqual(events.length, 0);
+					continue;
+				}
+				strictEqual(events.length, 2);
+				const capability = ((init.agentCapabilities as Record<string, unknown>)._meta as Record<string, unknown>)[
+					"clio-coder/events"
+				] as Record<string, unknown>;
+				const first = events[0]?.params as Record<string, unknown>;
+				const second = events[1]?.params as Record<string, unknown>;
+				strictEqual(first.workspaceInstanceId, capability.workspaceInstanceId);
+				strictEqual(first.version, 1);
+				strictEqual(first.sessionId, id);
+				strictEqual(first.turnId, "turn-1");
+				strictEqual(first.sequence, 1);
+				strictEqual(second.sequence, 2);
+				strictEqual(first.kind, "safety.loopBlocked");
+				strictEqual(first.terminal, false);
+				deepStrictEqual(first.payload, {
+					toolCallId: null,
+					tool: "bash",
+					repeatCount: 3,
+					blocksThisTurn: 1,
+					budget: 3,
+					disposition: "block",
+					interrupted: false,
+					shape: null,
+				});
+			} finally {
+				harness.client.close();
+				await harness.server;
+			}
+		}
+	});
+
+	it("ignores an event opt-in containing an over-bound unknown kind", async () => {
+		const bus = createSafeEventBus();
+		const harness = startAcpServer({ chat: createLoopEventMockChat(bus), bus });
+		try {
+			await harness.client.request("initialize", {
+				protocolVersion: 1,
+				clientCapabilities: {
+					_meta: {
+						"clio-coder/events": {
+							version: 1,
+							kinds: ["safety.loopBlocked", "x".repeat(65)],
+						},
+					},
+				},
+			});
+			const id = (await harness.client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() })).sessionId;
+			await harness.client.request("session/prompt", {
+				sessionId: id,
+				prompt: [{ type: "text", text: "loop" }],
+			});
+			strictEqual(
+				harness.client.notifications.filter((frame) => isRecord(frame) && frame.method === "clio-coder/event").length,
+				0,
+			);
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
 	});
 
 	it("ACP server permission allow resolves the parked request with acp-client identity", async () => {
@@ -1947,14 +2822,17 @@ setInterval(() => {}, 1000);
 		ok(resolutions.every((resolution) => resolution.reason?.includes("permission transport unavailable")));
 	});
 
-	it("ACP server permission timeout resolves the parked request with timeout identity", async () => {
-		const { requests, resolutions } = await runAcpPermissionBridge("timeout");
+	it("ACP server permission timeout expires and fails the prompt without a model-visible denial", async () => {
+		const { requests, resolutions, answer, promptErrorCode } = await runAcpPermissionBridge("timeout");
 
 		strictEqual(requests.length, 1);
 		strictEqual(resolutions.length, 1);
-		strictEqual(resolutions[0]?.status, "denied");
+		strictEqual(resolutions[0]?.status, "expired");
 		strictEqual(resolutions[0]?.decidedBy, "timeout");
 		strictEqual(resolutions[0]?.requestId, requests[0]?.requestId);
+		strictEqual(resolutions[0]?.reason, "permission approval expired");
+		strictEqual(promptErrorCode, "permission_expired");
+		strictEqual(answer, "");
 	});
 
 	it("rejects explicit unschedulable ACP request timeouts instead of disabling or overflowing the timer", async () => {
@@ -2388,10 +3266,12 @@ setInterval(() => {}, 1000);
 	});
 
 	it("emits absolute locations for path-bearing tools and omits them otherwise", async () => {
+		const oversizedPath = "é".repeat(3000);
 		const { client, server } = startAcpServer({
 			chat: createScriptedChat([
 				{ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "src/x.ts" } },
 				{ type: "tool_execution_start", toolCallId: "t2", toolName: "bash", args: { command: "ls" } },
+				{ type: "tool_execution_start", toolCallId: "t3", toolName: "read", args: { path: oversizedPath } },
 			]),
 		});
 		const sessionId = await openSession(client);
@@ -2399,8 +3279,94 @@ setInterval(() => {}, 1000);
 		const calls = sessionUpdates(client.notifications).filter((update) => update.sessionUpdate === "tool_call");
 		deepStrictEqual(calls[0]?.locations, [{ path: resolve(realpathSync(process.cwd()), "src/x.ts") }]);
 		ok(!("locations" in (calls[1] ?? {})), "a tool with no path field carries no locations at all");
+		const bounded = (calls[2]?.locations as Array<{ path: string }>)[0]?.path ?? "";
+		strictEqual(utf8Bytes(bounded) <= 4096, true);
+		ok(bounded.endsWith("…[truncated]"));
 		client.close();
 		strictEqual(await server, 0);
+	});
+
+	it("reuses the same bounded location path in tool_call and session/request_permission", async () => {
+		const oversizedPath = "é".repeat(3000);
+		const registry = createNormalizingPermissionRegistry(recordingAskSafety([]));
+		const harness = startAcpServer({
+			chat: createNormalizedArgsPermissionChat(registry, { path: oversizedPath, content: "x" }),
+			toolRegistry: registry,
+			permissionTimeoutMs: 2000,
+		});
+		const asks: Array<Record<string, unknown>> = [];
+		harness.client.onRequest("session/request_permission", (params) => {
+			if (isRecord(params) && isRecord(params.toolCall)) asks.push(params.toolCall);
+			return { outcome: { outcome: "selected", optionId: "allow-once" } };
+		});
+		try {
+			const sessionId = await openSession(harness.client);
+			await harness.client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+			const call = sessionUpdates(harness.client.notifications).find((update) => update.sessionUpdate === "tool_call");
+			strictEqual(asks.length, 1);
+			deepStrictEqual(asks[0]?.locations, call?.locations);
+			strictEqual(JSON.stringify(asks[0]?.locations), JSON.stringify(call?.locations), "snapshot is byte-identical");
+			const bounded = (asks[0]?.locations as Array<{ path: string }>)[0]?.path ?? "";
+			strictEqual(utf8Bytes(bounded) <= 4096, true);
+			ok(bounded.endsWith("…[truncated]"));
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("bounds live tool titles on start and terminal updates", async () => {
+		const title = "é".repeat(300);
+		const harness = startAcpServer({
+			chat: createScriptedChat([
+				{ type: "tool_execution_start", toolCallId: "long-title", toolName: title, args: {} },
+				{ type: "tool_execution_end", toolCallId: "long-title", toolName: title, result: "done" },
+			]),
+		});
+		try {
+			const sessionId = await openSession(harness.client);
+			await harness.client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+			const updates = sessionUpdates(harness.client.notifications).filter(
+				(update) => update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update",
+			);
+			strictEqual(updates.length, 2);
+			for (const update of updates) {
+				strictEqual(utf8Bytes(String(update.title)) <= 512, true);
+				ok(String(update.title).endsWith("…[truncated]"));
+			}
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
+	});
+
+	it("resolves max_turn_requests without emitting a 129th live tool call", async () => {
+		const scripted: Array<Record<string, unknown>> = Array.from({ length: 130 }, (_, index) => ({
+			type: "tool_execution_start",
+			toolCallId: `tool-${index + 1}`,
+			toolName: "read",
+			args: { path: `file-${index + 1}` },
+		}));
+		scripted.push({ type: "text_delta", delta: "MUST_NOT_REACH_THE_CLIENT", toolCallId: "", toolName: "", args: {} });
+		const harness = startAcpServer({ chat: createScriptedChat(scripted) });
+		try {
+			const sessionId = await openSession(harness.client);
+			const result = await harness.client.request<{ stopReason: string }>("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "go" }],
+			});
+			strictEqual(result.stopReason, "max_turn_requests");
+			const updates = sessionUpdates(harness.client.notifications);
+			const starts = updates.filter((update) => update.sessionUpdate === "tool_call");
+			const terminals = updates.filter((update) => update.sessionUpdate === "tool_call_update");
+			strictEqual(starts.length, 128);
+			strictEqual(terminals.length, 128, "every rendered call is terminally settled before the response");
+			ok(!JSON.stringify(updates).includes("tool-129"));
+			ok(!JSON.stringify(updates).includes("MUST_NOT_REACH_THE_CLIENT"));
+		} finally {
+			harness.client.close();
+			await harness.server;
+		}
 	});
 
 	it("asks for permission under the same tool call id the client already rendered", async () => {
