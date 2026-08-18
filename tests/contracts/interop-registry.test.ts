@@ -2,10 +2,12 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { scanAgentConfigs } from "../../src/domains/context/adoption.js";
-import { detectInteropAgents, INTEROP_AGENT_KINDS } from "../../src/domains/interop/index.js";
+import type { InteropReport } from "../../src/domains/interop/index.js";
+import { detectInteropAgents, INTEROP_AGENT_KINDS, writeInteropReport } from "../../src/domains/interop/index.js";
 import { defaultSkillRoots } from "../../src/domains/resources/skills/loader.js";
+import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const ADOPTION_PROVIDERS = ["claude-code", "agents", "codex", "gemini", "cursor", "copilot", "opencode"] as const;
 const FOREIGN_SKILL_SOURCES = ["agents", "claude", "codex", "copilot", "opencode"] as const;
@@ -86,6 +88,23 @@ describe("contracts/interop-registry", () => {
 	});
 
 	describe("interop detection", () => {
+		// Every test here calls detectInteropAgents with no `previous`, which falls
+		// back to readInteropReport() for prior decisions. Without isolation that
+		// reads the operator's real interop.json, so a machine with a recorded
+		// report leaks its decisions and versions into what should be a clean
+		// detection. isolateClioEnv() points CLIO_CODER_STATE_DIR at a scratch dir
+		// per test, the same idiom interop-state.test.ts and interop-consent.test.ts
+		// use, so readInteropReport() sees only what a test writes there itself.
+		let isolated: IsolatedClioEnv;
+
+		beforeEach(async () => {
+			isolated = await isolateClioEnv("clio-interop-detect-");
+		});
+
+		afterEach(() => {
+			isolated.restore();
+		});
+
 		it("performs no subprocess and reports absent agents as absent", async () => {
 			const home = scratchDir();
 			const report = await detectInteropAgents({ cwd: scratchDir(), home, probeVersion: false });
@@ -155,6 +174,37 @@ describe("contracts/interop-registry", () => {
 				const bumped = third.agents.find((agent) => agent.kind === "codex");
 				ok(bumped);
 				ok(bumped.fingerprint !== codex.fingerprint, "a version bump is a fresh proposal");
+			} finally {
+				if (saved !== undefined) process.env.PATH = saved;
+			}
+		});
+
+		it("falls back to the recorded report when the caller passes no previous", async () => {
+			const home = scratchDir();
+			const bin = scratchDir();
+			writeFileSync(join(bin, "codex"), "#!/bin/sh\necho 0.9.1\n", { encoding: "utf8", mode: 0o755 });
+			const saved = process.env.PATH;
+			process.env.PATH = bin;
+			try {
+				const first = await detectInteropAgents({ cwd: scratchDir(), home, probeVersion: true });
+				const codex = first.agents.find((agent) => agent.kind === "codex");
+				ok(codex);
+				const recorded: InteropReport = {
+					version: 1,
+					detectedAt: "2026-08-16T00:00:00.000Z",
+					agents: [{ ...codex, decision: "declined", decidedFingerprint: codex.fingerprint }],
+				};
+				writeInteropReport(recorded);
+
+				const second = await detectInteropAgents({ cwd: scratchDir(), home, probeVersion: false });
+				const again = second.agents.find((agent) => agent.kind === "codex");
+				ok(again, "the recorded report's kind is still detected by the live PATH scan");
+				strictEqual(again.decision, "declined", "the recorded decision surfaces with no previous argument");
+				strictEqual(
+					again.version,
+					"0.9.1",
+					"the recorded version carries over for an unprobed run against the same binary",
+				);
 			} finally {
 				if (saved !== undefined) process.env.PATH = saved;
 			}
