@@ -118,6 +118,17 @@ export interface CompiledSessionPrompt {
 	 * selection; the pure compiler leaves it absent.
 	 */
 	projectPreload?: ProjectPreloadClass | null;
+	/**
+	 * Repo-relative `.clio-coder/rules/**` ids selected into this compile, in
+	 * load order. Set only by `compileWorkerPrompt`, which owns rule
+	 * selection; the pure compiler and `compileSessionPrompt` leave it absent.
+	 */
+	rulesApplied?: string[];
+	/**
+	 * Whether the operator profile rendered non-empty content into this
+	 * compile. Set only by `compileWorkerPrompt`.
+	 */
+	operatorProfileApplied?: boolean;
 }
 
 export const FLEET_ROUTING_GUIDANCE_MAX_BYTES = 320;

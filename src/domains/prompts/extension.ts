@@ -112,7 +112,7 @@ export function createPromptsBundle(
 				additionalFragments: [
 					...workspaceRootFragment(cwd),
 					...clioRepoAwarenessFragments(cwd),
-					...customizationFragments(cwd, input.workingContextPaths ?? []),
+					...customizationFragments(cwd, input.workingContextPaths ?? []).fragments,
 				],
 			});
 			return { ...compiled, projectPreload };
@@ -124,10 +124,16 @@ export function createPromptsBundle(
 			}
 			const { cwd: inputCwd, workingContextPaths, ...workerInputs } = input;
 			const cwd = inputCwd ?? process.cwd();
-			return compileWorker(table, {
+			const customization = customizationFragments(cwd, workingContextPaths ?? []);
+			const compiled = compileWorker(table, {
 				...workerInputs,
-				additionalFragments: customizationFragments(cwd, workingContextPaths ?? []),
+				additionalFragments: customization.fragments,
 			});
+			return {
+				...compiled,
+				rulesApplied: customization.activeRuleIds,
+				operatorProfileApplied: customization.operatorProfileApplied,
+			};
 		},
 		reload,
 	};
@@ -158,6 +164,15 @@ export function createPromptsBundle(
 	return { extension, contract };
 }
 
+/** Fragments plus the provenance of which customization sources actually rendered. */
+export interface CustomizationFragmentsResult {
+	fragments: RenderedPromptFragment[];
+	/** Rule ids (posix path under `.clio-coder/rules`) selected into `fragments`, in load order. */
+	activeRuleIds: string[];
+	/** Whether the operator profile rendered non-empty content into `fragments`. */
+	operatorProfileApplied: boolean;
+}
+
 /**
  * Inline prompt fragments for the project's customization surfaces. Unconditional
  * `.clio-coder/rules/**` rules load with project context here; path-scoped rules stay
@@ -165,9 +180,17 @@ export function createPromptsBundle(
  * file is in working context. The operator profile renders as one capped
  * section. Both are deterministic (rules sort by id), so a local model's cached
  * prompt prefix stays stable. Best-effort: a load failure injects nothing.
+ * Callers that seal receipt provenance (dispatch) read `activeRuleIds` and
+ * `operatorProfileApplied` off the result rather than re-deriving them, so the
+ * receipt can never disagree with what actually rendered.
  */
-function customizationFragments(cwd: string, workingContextPaths: ReadonlyArray<string>): RenderedPromptFragment[] {
+export function customizationFragments(
+	cwd: string,
+	workingContextPaths: ReadonlyArray<string>,
+): CustomizationFragmentsResult {
 	const fragments: RenderedPromptFragment[] = [];
+	let activeRuleIds: string[] = [];
+	let operatorProfileApplied = false;
 	try {
 		const loaded = loadProjectRules(cwd);
 		const active = selectActiveRules(loaded.rules, normalizeWorkingContextPaths(cwd, workingContextPaths));
@@ -180,6 +203,7 @@ function customizationFragments(cwd: string, workingContextPaths: ReadonlyArray<
 				contentHash: sha256(body),
 				dynamic: true,
 			});
+			activeRuleIds = active.map((rule) => rule.id);
 		}
 	} catch {
 		// Project rules are best-effort; a load failure must not block compilation.
@@ -195,11 +219,12 @@ function customizationFragments(cwd: string, workingContextPaths: ReadonlyArray<
 				contentHash: sha256(rendered.text),
 				dynamic: true,
 			});
+			operatorProfileApplied = true;
 		}
 	} catch {
 		// The operator profile is best-effort; a load failure injects nothing.
 	}
-	return fragments;
+	return { fragments, activeRuleIds, operatorProfileApplied };
 }
 
 function normalizeWorkingContextPaths(cwd: string, paths: ReadonlyArray<string>): string[] {
