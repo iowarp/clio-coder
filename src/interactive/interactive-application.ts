@@ -410,9 +410,15 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	 * the footer reads it and the input runtime that flips it is built later.
 	 */
 	let leaderArmed = false;
+	/**
+	 * A Ctrl+C armed the double tap and its 500ms window is still open. Owned
+	 * here for the same reason as the leader flag above.
+	 */
+	let shutdownArmed = false;
 	const presentation = createInteractivePresentation({
 		bus: deps.bus,
 		getLeaderArmed: () => leaderArmed,
+		getShutdownArmed: () => shutdownArmed,
 		providers: deps.providers,
 		dispatch: deps.dispatch,
 		observability: deps.observability,
@@ -725,6 +731,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		refreshFooter: () => footer.refresh(),
 		onLeaderStateChange: (pending) => {
 			leaderArmed = pending;
+		},
+		onShutdownArmedChange: (armed) => {
+			shutdownArmed = armed;
 		},
 		dispatchBoard,
 		steerSelectedDispatch,

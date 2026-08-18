@@ -108,4 +108,41 @@ describe("footer last-turn metrics", () => {
 			"the metric strip still shows a nonzero chip",
 		);
 	});
+
+	// Issue #108: the first Ctrl+C at an idle empty prompt left the frame
+	// byte-identical to the idle frame, so nothing told the operator that a
+	// second press inside 500ms quits. An idle strip normally renders empty,
+	// which is why the armed hint has to keep it alive on its own.
+	it("shows the armed Ctrl+C hint on an otherwise empty idle strip, down to narrow terminals", () => {
+		const idle = strip(buildMetricStrip(clioTheme(), INITIAL_STATUS, null, null, null, null, null, 117));
+		strictEqual(idle, "", "an idle strip with nothing armed is still empty");
+
+		const armed = strip(
+			buildMetricStrip(clioTheme(), INITIAL_STATUS, null, null, null, null, null, 117, 6, null, false, true),
+		);
+		strictEqual(armed, "Ctrl+C again to quit");
+
+		// The strip drops a chip it cannot fit whole, and the narrow terminal is
+		// where the operator most needs the press acknowledged.
+		const narrow = strip(
+			buildMetricStrip(clioTheme(), INITIAL_STATUS, null, null, null, null, null, 15, 6, null, false, true),
+		);
+		strictEqual(narrow, "Ctrl+C again");
+
+		// Ranked above every measurement so the cut never takes it first.
+		const busy = strip(
+			buildMetricStrip(clioTheme(), INITIAL_STATUS, null, makeSummary(), null, null, null, 40, 6, null, false, true),
+		);
+		ok(busy.startsWith("Ctrl+C again"), `the hint outranks the turn metrics, got: ${busy}`);
+	});
+
+	it("keeps the armed hint out of the compact secondary line until a press arms it", () => {
+		const unarmed = strip(compactSecondaryLine(idleContext, idleAgent(null), 40));
+		ok(!unarmed.includes("Ctrl+C"), `nothing armed renders no hint, got: ${unarmed}`);
+
+		const armed = strip(
+			compactSecondaryLine(idleContext, idleAgent(null), 40, clioTheme(), undefined, null, null, null, null, false, true),
+		);
+		ok(armed.includes("Ctrl+C again to quit"), `an armed press renders the hint at 40 columns, got: ${armed}`);
+	});
 });
