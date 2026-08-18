@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { THINKING_LEVELS } from "../../../../core/defaults.js";
 import type { ThinkingLevel } from "../../types/capability-flags.js";
 import type { ProbeContext } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
@@ -184,7 +185,7 @@ export function parseLmStudioV1Models(data: unknown): LmStudioModelInfo[] | null
 }
 
 export function lmStudioReasoningLevels(options: ReadonlyArray<string> | undefined): ThinkingLevel[] {
-	if (!options || options.length === 0) return ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+	if (!options || options.length === 0) return [...THINKING_LEVELS];
 	if (options.includes("on") && !options.includes("low") && !options.includes("medium") && !options.includes("high")) {
 		return ["off", "low"];
 	}
