@@ -12,31 +12,8 @@ import {
 	PROTOCOL_VERSION,
 	WebSocketLocalTransport,
 } from "./protocol.ts";
-import { appReducer, type HostEventLike, initialAppState, parseBootstrapPayload } from "./state.ts";
+import { appReducer, initialAppState, parseBootstrapPayload } from "./state.ts";
 import "./styles.css";
-
-const BOOTSTRAP_RETRY_STATUS = 409;
-const BOOTSTRAP_RETRY_DELAY_MS = 50;
-const BOOTSTRAP_RETRY_WINDOW_MS = 15_000;
-
-async function requestBootstrap(signal: AbortSignal): Promise<Response> {
-	const deadline = Date.now() + BOOTSTRAP_RETRY_WINDOW_MS;
-	for (;;) {
-		const response = await fetch("/api/bootstrap", {
-			headers: { accept: "application/json" },
-			cache: "no-store",
-			credentials: "same-origin",
-			signal,
-		});
-		if (response.status !== BOOTSTRAP_RETRY_STATUS) return response;
-		await response.body?.cancel();
-		if (Date.now() >= deadline) {
-			throw new Error("Bootstrap timed out while Workbench settled the previous local control session.");
-		}
-		await new Promise((resolve) => setTimeout(resolve, BOOTSTRAP_RETRY_DELAY_MS));
-		if (signal.aborted) throw signal.reason;
-	}
-}
 
 function App() {
 	const [state, dispatch] = useReducer(appReducer, initialAppState);
@@ -49,7 +26,12 @@ function App() {
 
 		async function connect() {
 			try {
-				const response = await requestBootstrap(abortController.signal);
+				const response = await fetch("/api/bootstrap", {
+					headers: { accept: "application/json" },
+					cache: "no-store",
+					credentials: "same-origin",
+					signal: abortController.signal,
+				});
 				if (!response.ok) throw new Error(`Bootstrap failed with HTTP ${response.status}.`);
 				const bootstrap = parseBootstrapPayload(await response.json());
 				if (!mounted) return;
@@ -62,11 +44,7 @@ function App() {
 				transportRef.current = transport;
 				transport.onEvent((event) => {
 					if (!mounted) return;
-					if (event.kind === "connection.ready") {
-						dispatch({ type: "connection.changed", connection: "connected" });
-						return;
-					}
-					dispatch({ type: "host.event", event: event as unknown as HostEventLike });
+					dispatch({ type: "host.event", event });
 				});
 				transport.onDisconnect((disconnect) => {
 					if (!mounted || disconnect.cause === "client-close") return;
@@ -99,7 +77,7 @@ function App() {
 	}, []);
 
 	const actions = useMemo<WorkbenchActions>(() => {
-		function send<K extends ClientCommandKind>(kind: K, payload: ClientCommandPayloadByKind[K]): void {
+		function send<K extends ClientCommandKind>(kind: K, payload: ClientCommandPayloadByKind[K]): string | null {
 			const transport = transportRef.current;
 			if (!transport || transport.state !== "open") {
 				dispatch({
@@ -107,53 +85,36 @@ function App() {
 					tone: "warning",
 					message: "The local control channel is not ready yet. Wait for the connected status and try again.",
 				});
-				return;
+				return null;
 			}
-			const command = {
-				protocolVersion: PROTOCOL_VERSION,
-				requestId: `request-${crypto.randomUUID()}`,
-				kind,
-				payload,
-			} as ClientCommand;
+			const requestId = `request-${crypto.randomUUID()}`;
+			const command = { protocolVersion: PROTOCOL_VERSION, requestId, kind, payload } as ClientCommand;
 			try {
 				transport.send(command);
+				return requestId;
 			} catch (error) {
 				dispatch({
 					type: "notice.raised",
 					tone: "error",
 					message: error instanceof Error ? error.message : "The local command could not be sent.",
 				});
+				return null;
 			}
 		}
 
 		return {
+			browseProjects(path) {
+				send("project.browse", path === undefined ? {} : { path });
+			},
+			openProject(path) {
+				send("project.open", { path });
+			},
 			selectProject(projectId) {
-				send("project.select", { projectId });
+				const requestId = send("project.select", { projectId });
+				if (requestId !== null) dispatch({ type: "project.select.submitted", requestId, projectId });
 			},
-			selectEngine(projectId, kind) {
-				send("engine.select", { projectId, kind });
-			},
-			probeEngine(projectId) {
-				send("engine.probe", { projectId });
-			},
-			startTurn(projectId, prompt, fakeScenario) {
-				send("turn.start", {
-					projectId,
-					prompt,
-					...(fakeScenario === undefined ? {} : { fakeScenario }),
-				});
-			},
-			cancelTurn(projectId, turnId) {
-				send("turn.cancel", { projectId, turnId });
-			},
-			resolvePermission(projectId, turnId, permissionId, decision) {
-				send("permission.resolve", { projectId, turnId, permissionId, decision });
-			},
-			createProject(displayName, directoryName) {
-				send("project.create", { displayName, directoryName });
-			},
-			registerProject(relativeRoot, displayName) {
-				send("project.register", { relativeRoot, ...(displayName === undefined ? {} : { displayName }) });
+			forgetProject(projectId) {
+				send("project.forget", { projectId });
 			},
 			refreshTree(projectId, directory = []) {
 				send("fs.refresh", { projectId, directory });
@@ -179,6 +140,49 @@ function App() {
 			},
 			confirmDelete(projectId, confirmationId) {
 				send("fs.delete.confirm", { projectId, confirmationId });
+			},
+			newSession(projectId) {
+				send("session.new", { projectId });
+			},
+			loadSession(projectId, sessionId) {
+				send("session.load", { projectId, sessionId });
+			},
+			closeSession(projectId) {
+				send("session.close", { projectId });
+			},
+			listSessions(projectId) {
+				send("session.list", { projectId });
+			},
+			labelSession(projectId, sessionId, label) {
+				send("session.label", { projectId, sessionId, label });
+			},
+			deleteSession(projectId, sessionId) {
+				send("session.delete", { projectId, sessionId });
+			},
+			startTurn(projectId, prompt) {
+				const requestId = send("turn.start", { projectId, prompt });
+				if (requestId !== null) dispatch({ type: "turn.submitted", requestId });
+			},
+			cancelTurn(projectId, turnId) {
+				send("turn.cancel", { projectId, turnId });
+			},
+			resolvePermission(projectId, turnId, permissionId, decision) {
+				send("permission.resolve", { projectId, turnId, permissionId, decision });
+			},
+			getSettings(projectId) {
+				send("settings.get", { projectId });
+			},
+			patchSettings(projectId, patch) {
+				send("settings.patch", { projectId, patch });
+			},
+			listTargets(projectId) {
+				send("targets.list", { projectId });
+			},
+			probeTarget(projectId, targetId) {
+				send("targets.probe", { projectId, targetId });
+			},
+			setAutonomy(projectId, level) {
+				send("autonomy.set", { projectId, level });
 			},
 		};
 	}, []);

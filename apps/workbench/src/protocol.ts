@@ -2,116 +2,107 @@
  * Versioned, JSON-only contract between the Workbench browser and its local host.
  *
  * This module intentionally has no imports and no React dependencies. Both sides
- * can use the same runtime validators without coupling Workbench to Clio's
- * internal modules.
+ * use the same runtime validators. Only validated, bounded DTOs cross this
+ * boundary: no native paths outside the project, no wire identifiers, no raw
+ * ACP frames.
  */
 
-export const PROTOCOL_VERSION = 2 as const;
+export const PROTOCOL_VERSION = 3 as const;
 export const MAX_CLIENT_FRAME_BYTES = 16 * 1024;
-export const MAX_SERVER_EVENT_BYTES = 64 * 1024;
+export const MAX_SERVER_EVENT_BYTES = 256 * 1024;
 
 const MAX_ID_BYTES = 128;
 const MAX_NAME_BYTES = 128;
 const MAX_PATH_DEPTH = 64;
+export const MAX_NATIVE_PATH_BYTES = 4 * 1024;
 
 const encoder = new TextEncoder();
 
 export const CLIENT_COMMAND_KINDS = [
-	"project.create",
-	"project.register",
+	"project.browse",
+	"project.open",
 	"project.select",
+	"project.forget",
 	"fs.refresh",
 	"fs.create-file",
 	"fs.create-folder",
 	"fs.move",
 	"fs.delete.prepare",
 	"fs.delete.confirm",
-	"engine.select",
-	"engine.probe",
+	"session.new",
+	"session.load",
+	"session.close",
+	"session.list",
+	"session.label",
+	"session.delete",
 	"turn.start",
 	"turn.cancel",
 	"permission.resolve",
+	"settings.get",
+	"settings.patch",
+	"targets.list",
+	"targets.probe",
+	"autonomy.set",
 ] as const;
 
 export type ClientCommandKind = (typeof CLIENT_COMMAND_KINDS)[number];
 
-export const ENGINE_KINDS = ["fake", "clio-acp"] as const;
-export type WireEngineKind = (typeof ENGINE_KINDS)[number];
-
-export const ENGINE_PHASES = [
-	"ready",
-	"unprobed",
-	"probing",
-	"unavailable",
+export const CLIO_PHASES = [
 	"starting",
-	"connected",
+	"unbound",
+	"idle",
 	"running",
 	"awaiting-approval",
 	"cancelling",
 	"failed",
+	"closed",
 ] as const;
-export type WireEnginePhase = (typeof ENGINE_PHASES)[number];
+export type WireClioPhase = (typeof CLIO_PHASES)[number];
 
-export const ENGINE_SOURCES = [
-	"simulated-by-workbench",
+export const EVENT_SOURCES = [
 	"reported-by-clio",
 	"observed-on-acp",
 	"observed-by-workbench",
-	"independently-verified",
+	"replayed-from-clio",
 ] as const;
-export type WireEngineSource = (typeof ENGINE_SOURCES)[number];
+export type WireEventSource = (typeof EVENT_SOURCES)[number];
 
-export const READINESS_KEYS = [
-	"runtime",
-	"protocol",
-	"project",
-	"target",
-	"authentication",
-	"provider",
-	"context",
-] as const;
-export type WireReadinessKey = (typeof READINESS_KEYS)[number];
-
-export const READINESS_STATES = ["ready", "unavailable", "failed"] as const;
-export type WireReadinessState = (typeof READINESS_STATES)[number];
-
-export interface WireEngineReadinessFact {
-	readonly key: WireReadinessKey;
-	readonly label: string;
-	readonly state: WireReadinessState;
-	readonly detail: string;
-	readonly source: WireEngineSource;
-}
-
-export interface WireEngineSnapshot {
-	readonly kind: WireEngineKind;
-	readonly phase: WireEnginePhase;
-	readonly facts: readonly WireEngineReadinessFact[];
-	readonly checkedAt?: string;
-}
-
-export const FAKE_SCENARIOS = ["complete", "failure"] as const;
-export type FakeScenario = (typeof FAKE_SCENARIOS)[number];
+export const AUTONOMY_LEVELS = ["read-only", "suggest", "auto-edit", "full-auto"] as const;
+export type WireAutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type WireThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 export const PERMISSION_DECISIONS = ["allow-once", "reject"] as const;
 export type PermissionDecision = (typeof PERMISSION_DECISIONS)[number];
 
-export const PERMISSION_RESOLUTIONS = ["allow-once", "reject", "cancelled", "timeout", "disconnect"] as const;
+export const PERMISSION_RESOLUTIONS = [
+	"allow-once",
+	"reject",
+	"cancelled",
+	"unanswered",
+	"disconnect",
+] as const;
 export type PermissionResolution = (typeof PERMISSION_RESOLUTIONS)[number];
+
+/** `open`: hosted by the live process. `closed`: Clio recorded an end. `unknown`: unended and not hosted here. */
+export const SESSION_STATES = ["open", "closed", "unknown"] as const;
+export type WireSessionState = (typeof SESSION_STATES)[number];
 
 export type ProjectPath = readonly string[];
 
-export interface ProjectCreatePayload {
-	readonly displayName: string;
-	readonly directoryName: string;
+export interface ProjectBrowsePayload {
+	readonly path?: string;
 }
 
-export interface ProjectRegisterPayload {
-	readonly relativeRoot: ProjectPath;
-	readonly displayName?: string;
+export interface ProjectOpenPayload {
+	readonly path: string;
 }
 
 export interface ProjectSelectPayload {
+	readonly projectId: string;
+}
+
+export interface ProjectForgetPayload {
 	readonly projectId: string;
 }
 
@@ -153,19 +144,37 @@ export interface FsDeleteConfirmPayload {
 	readonly confirmationId: string;
 }
 
-export interface EngineSelectPayload {
+export interface SessionNewPayload {
 	readonly projectId: string;
-	readonly kind: WireEngineKind;
 }
 
-export interface EngineProbePayload {
+export interface SessionLoadPayload {
 	readonly projectId: string;
+	readonly sessionId: string;
+}
+
+export interface SessionClosePayload {
+	readonly projectId: string;
+}
+
+export interface SessionListPayload {
+	readonly projectId: string;
+}
+
+export interface SessionLabelPayload {
+	readonly projectId: string;
+	readonly sessionId: string;
+	readonly label: string;
+}
+
+export interface SessionDeletePayload {
+	readonly projectId: string;
+	readonly sessionId: string;
 }
 
 export interface TurnStartPayload {
 	readonly projectId: string;
 	readonly prompt: string;
-	readonly fakeScenario?: FakeScenario;
 }
 
 export interface TurnCancelPayload {
@@ -180,21 +189,65 @@ export interface PermissionResolvePayload {
 	readonly decision: PermissionDecision;
 }
 
+export interface SettingsGetPayload {
+	readonly projectId: string;
+}
+
+export type WireSettingsValue = string | null;
+
+export type WireSettingsPatch = Readonly<
+	Partial<{
+		"orchestrator.target": string | null;
+		"orchestrator.model": string | null;
+		"orchestrator.thinkingLevel": WireThinkingLevel;
+		autonomy: WireAutonomyLevel;
+	}>
+>;
+
+export interface SettingsPatchPayload {
+	readonly projectId: string;
+	readonly patch: WireSettingsPatch;
+}
+
+export interface TargetsListPayload {
+	readonly projectId: string;
+}
+
+export interface TargetsProbePayload {
+	readonly projectId: string;
+	readonly targetId: string;
+}
+
+export interface AutonomySetPayload {
+	readonly projectId: string;
+	readonly level: WireAutonomyLevel;
+}
+
 export interface ClientCommandPayloadByKind {
-	readonly "project.create": ProjectCreatePayload;
-	readonly "project.register": ProjectRegisterPayload;
+	readonly "project.browse": ProjectBrowsePayload;
+	readonly "project.open": ProjectOpenPayload;
 	readonly "project.select": ProjectSelectPayload;
+	readonly "project.forget": ProjectForgetPayload;
 	readonly "fs.refresh": FsRefreshPayload;
 	readonly "fs.create-file": FsCreateFilePayload;
 	readonly "fs.create-folder": FsCreateFolderPayload;
 	readonly "fs.move": FsMovePayload;
 	readonly "fs.delete.prepare": FsDeletePreparePayload;
 	readonly "fs.delete.confirm": FsDeleteConfirmPayload;
-	readonly "engine.select": EngineSelectPayload;
-	readonly "engine.probe": EngineProbePayload;
+	readonly "session.new": SessionNewPayload;
+	readonly "session.load": SessionLoadPayload;
+	readonly "session.close": SessionClosePayload;
+	readonly "session.list": SessionListPayload;
+	readonly "session.label": SessionLabelPayload;
+	readonly "session.delete": SessionDeletePayload;
 	readonly "turn.start": TurnStartPayload;
 	readonly "turn.cancel": TurnCancelPayload;
 	readonly "permission.resolve": PermissionResolvePayload;
+	readonly "settings.get": SettingsGetPayload;
+	readonly "settings.patch": SettingsPatchPayload;
+	readonly "targets.list": TargetsListPayload;
+	readonly "targets.probe": TargetsProbePayload;
+	readonly "autonomy.set": AutonomySetPayload;
 }
 
 export type ClientCommandOf<K extends ClientCommandKind> = Readonly<{
@@ -210,22 +263,24 @@ export type ClientCommand = {
 
 export const SERVER_EVENT_KINDS = [
 	"connection.ready",
+	"project.browse.listing",
+	"project.opened",
+	"project.forgotten",
 	"project.snapshot",
-	"project.created",
-	"project.registered",
-	"project.selected",
 	"fs.changed",
 	"fs.delete.challenge",
-	"engine.state",
+	"clio.state",
+	"session.list",
+	"settings.state",
+	"targets.state",
+	"targets.probed",
 	"turn.started",
 	"turn.text",
 	"turn.thought",
-	"turn.agent",
 	"turn.tool",
-	"turn.change",
+	"turn.loop",
 	"turn.permission.requested",
 	"turn.permission.resolved",
-	"turn.evidence",
 	"turn.terminal",
 	"protocol.error",
 	"command.error",
@@ -234,7 +289,16 @@ export const SERVER_EVENT_KINDS = [
 export type ServerEventKind = (typeof SERVER_EVENT_KINDS)[number];
 
 export type ProtocolErrorCode = "unsupported-version" | "invalid-frame" | "sequence-error" | "internal";
-export type CommandErrorCode = "invalid" | "conflict" | "not-found" | "not-ready" | "internal";
+export const COMMAND_ERROR_CODES = [
+	"invalid",
+	"conflict",
+	"not-found",
+	"not-ready",
+	"refused",
+	"unsupported",
+	"internal",
+] as const;
+export type CommandErrorCode = (typeof COMMAND_ERROR_CODES)[number];
 
 export type ConnectionReadyPayload = Readonly<Record<string, never>>;
 
@@ -255,25 +319,71 @@ export interface WireTreeNode {
 	readonly children?: readonly WireTreeNode[];
 }
 
-export interface WireProjectIdentity {
-	readonly kind: "local-sandbox" | "wsl" | "native";
-	readonly displayPath: string;
-	readonly distro?: string;
-}
-
+/**
+ * The one place a native path crosses to the renderer: the project's own root,
+ * which the user typed or picked. Paths of anything else stay project-relative.
+ */
 export interface WireProjectSummary {
 	readonly id: string;
 	readonly displayName: string;
-	readonly identity: WireProjectIdentity;
+	readonly rootPath: string;
 	readonly lastOpenedAt: string;
+	readonly available: boolean;
 }
 
 export interface WireSessionSummary {
 	readonly id: string;
-	readonly label: string;
+	readonly label: string | null;
 	readonly preview: string;
+	readonly createdAt: string;
 	readonly updatedAt: string;
-	readonly status: "idle" | "active" | "complete" | "canceled" | "failed";
+	readonly turns: number;
+	readonly target: string | null;
+	readonly model: string | null;
+	readonly state: WireSessionState;
+	readonly hosted: boolean;
+}
+
+export interface WireBoundSession {
+	readonly id: string;
+	readonly target: string | null;
+	readonly model: string | null;
+	readonly autonomy: WireAutonomyLevel;
+	readonly autonomySource: "settings" | "session";
+	readonly resumed: boolean;
+	readonly replayedTurns: number;
+	readonly replayTruncated: boolean;
+	readonly createdAt: string;
+}
+
+export interface WireClioCapabilities {
+	readonly load: boolean;
+	readonly list: boolean;
+	readonly label: boolean;
+	readonly delete: boolean;
+	readonly autonomy: boolean;
+	readonly settings: boolean;
+	readonly targets: boolean;
+	readonly loopBlocked: boolean;
+}
+
+export interface WireClioAgent {
+	readonly name: string;
+	readonly version: string;
+}
+
+export interface WireClioFailure {
+	readonly code: string;
+	readonly summary: string;
+}
+
+export interface WireClioSnapshot {
+	readonly phase: WireClioPhase;
+	readonly agent: WireClioAgent | null;
+	readonly capabilities: WireClioCapabilities | null;
+	readonly session: WireBoundSession | null;
+	readonly lastFailure: WireClioFailure | null;
+	readonly checkedAt: string;
 }
 
 export interface WireTimelineItem {
@@ -281,19 +391,22 @@ export interface WireTimelineItem {
 	readonly kind:
 		| "request"
 		| "narrative"
-		| "agent"
+		| "thought"
 		| "tool"
-		| "change"
+		| "loop"
 		| "approval"
-		| "evidence"
 		| "outcome"
 		| "failure";
 	readonly title: string;
 	readonly summary: string;
 	readonly detail?: string;
-	readonly status: "queued" | "active" | "waiting" | "complete" | "canceled" | "failed";
-	readonly timeLabel: string;
+	readonly status: "queued" | "active" | "waiting" | "complete" | "canceled" | "failed" | "replayed";
+	readonly turnId: string;
+	readonly origin: "live" | "replay";
+	readonly startedAt: string | null;
+	readonly endedAt?: string;
 	readonly sequence?: number;
+	readonly source: WireEventSource;
 }
 
 export interface WirePendingPermission {
@@ -302,8 +415,10 @@ export interface WirePendingPermission {
 	readonly title: string;
 	readonly kind: string;
 	readonly locations: readonly WireProjectPath[];
+	readonly requestedAt: string;
+	readonly escalateAt: string;
 	readonly expiresAt: string;
-	readonly source: WireEngineSource;
+	readonly source: WireEventSource;
 }
 
 export interface WireDeleteChallenge {
@@ -314,29 +429,34 @@ export interface WireDeleteChallenge {
 	readonly expiresAt: string;
 }
 
-export interface WireEvidenceRecord {
-	readonly id: string;
-	readonly label: string;
-	readonly detail: string;
-	readonly status: "observed" | "reported" | "unavailable";
-	readonly source: WireEngineSource;
+export interface WireActiveTurn {
+	readonly turnId: string;
+	readonly startedAt: string;
+	readonly toolCalls: number;
+	readonly lastToolTitle: string | null;
+	readonly repeatedShapes: number;
 }
 
-export interface WireChangeRecord {
-	readonly id: string;
-	readonly path: WireProjectPath;
-	readonly summary: string;
-	readonly status: "planned" | "recorded" | "verified";
-	readonly source: WireEngineSource;
+export interface WireSettingsState {
+	readonly settings: Readonly<Record<string, WireSettingsValue>>;
+	readonly editable: readonly string[];
+	readonly options: Readonly<Record<string, readonly string[]>>;
+	readonly checkedAt: string;
 }
 
-export interface WireAgentRecord {
+export interface WireTarget {
 	readonly id: string;
-	readonly name: string;
-	readonly task: string;
-	readonly status: "queued" | "active" | "complete" | "canceled" | "failed";
-	readonly summary: string;
-	readonly source: WireEngineSource;
+	readonly runtime: string;
+	readonly models: readonly string[];
+	readonly isOrchestrator: boolean;
+	readonly health: WireTargetHealth | null;
+}
+
+export interface WireTargetHealth {
+	readonly healthy: boolean;
+	readonly latencyMs: number | null;
+	readonly reason: string | null;
+	readonly probedAt: string;
 }
 
 export interface WireProjectWorkspace {
@@ -344,17 +464,33 @@ export interface WireProjectWorkspace {
 	readonly tree: readonly WireTreeNode[];
 	readonly treeTruncated: boolean;
 	readonly sessions: readonly WireSessionSummary[];
-	readonly selectedSessionId: string | null;
+	readonly sessionsTruncated: boolean;
+	readonly clio: WireClioSnapshot;
 	readonly timeline: readonly WireTimelineItem[];
-	readonly engine: WireEngineSnapshot;
+	readonly timelineTruncated: boolean;
+	readonly activeTurn: WireActiveTurn | null;
 	readonly pendingPermission: WirePendingPermission | null;
 	readonly deleteChallenge: WireDeleteChallenge | null;
-	readonly agents: readonly WireAgentRecord[];
-	readonly changes: readonly WireChangeRecord[];
-	readonly evidence: readonly WireEvidenceRecord[];
-	readonly engineGeneration: string | null;
-	readonly activeTurnId: string | null;
+	readonly settings: WireSettingsState | null;
+	readonly targets: readonly WireTarget[] | null;
+	readonly targetsTruncated: boolean;
+	readonly processGeneration: string | null;
 	readonly lastSequence: number;
+}
+
+export interface WireBrowseEntry {
+	readonly name: string;
+	readonly hidden: boolean;
+	readonly guarded: boolean;
+}
+
+export interface ProjectBrowseListingPayload {
+	readonly path: string;
+	readonly parent: string | null;
+	readonly entries: readonly WireBrowseEntry[];
+	readonly truncated: boolean;
+	readonly openable: boolean;
+	readonly reason: string | null;
 }
 
 export interface ProjectSnapshotPayload {
@@ -362,36 +498,48 @@ export interface ProjectSnapshotPayload {
 	readonly treeTruncated: boolean;
 }
 
-export interface ProjectAddedPayload {
+export interface ProjectOpenedPayload {
 	readonly workspace: WireProjectWorkspace;
 }
 
+export type ProjectForgottenPayload = Readonly<Record<string, never>>;
+
 export interface FsDeleteChallengePayload extends WireDeleteChallenge {}
 
-export type ProjectSelectedPayload = Readonly<Record<string, never>>;
+export interface ClioStatePayload {
+	readonly snapshot: WireClioSnapshot;
+}
 
-export interface EngineStatePayload {
-	readonly snapshot: WireEngineSnapshot;
+export interface SessionListPayload_ {
+	readonly sessions: readonly WireSessionSummary[];
+	readonly truncated: boolean;
+}
+
+export interface SettingsStatePayload {
+	readonly settings: WireSettingsState;
+}
+
+export interface TargetsStatePayload {
+	readonly targets: readonly WireTarget[];
+	/** True when Clio's own byte budget dropped a target or model from the list. */
+	readonly truncated: boolean;
+}
+
+export interface TargetsProbedPayload {
+	readonly targetId: string;
+	readonly health: WireTargetHealth;
 }
 
 export interface TurnStartedPayload {
 	readonly promptSummary: string;
-	readonly fakeScenario?: FakeScenario;
-	readonly source: WireEngineSource;
+	readonly origin: "live" | "replay";
+	readonly startedAt: string | null;
+	readonly source: WireEventSource;
 }
 
 export interface TurnTextPayload {
 	readonly text: string;
-	readonly source: WireEngineSource;
-}
-
-export interface TurnAgentPayload {
-	readonly agentId: string;
-	readonly name: string;
-	readonly task: string;
-	readonly status: "active" | "complete" | "canceled" | "failed";
-	readonly summary: string;
-	readonly source: WireEngineSource;
+	readonly source: WireEventSource;
 }
 
 export interface TurnToolPayload {
@@ -401,36 +549,30 @@ export interface TurnToolPayload {
 	readonly status: "in_progress" | "completed" | "failed" | "canceled";
 	readonly summary: string;
 	readonly locations: readonly WireProjectPath[];
-	readonly source: WireEngineSource;
+	readonly source: WireEventSource;
 }
 
-export interface TurnChangePayload {
-	readonly path: WireProjectPath;
-	readonly summary: string;
-	readonly source: WireEngineSource;
+export const LOOP_DISPOSITIONS = ["block", "lockout", "stop"] as const;
+export type WireLoopDisposition = (typeof LOOP_DISPOSITIONS)[number];
+
+export interface TurnLoopPayload {
+	readonly toolCallId: null;
+	readonly tool: string;
+	readonly repeatCount: number;
+	readonly blocksThisTurn: number;
+	readonly budget: number;
+	readonly disposition: WireLoopDisposition;
+	readonly interrupted: boolean;
+	readonly shape: null;
+	readonly source: WireEventSource;
 }
 
-export interface TurnPermissionRequestedPayload {
-	readonly permissionId: string;
-	readonly toolCallId: string;
-	readonly title: string;
-	readonly kind: string;
-	readonly locations: readonly WireProjectPath[];
-	readonly expiresAt: string;
-	readonly source: WireEngineSource;
-}
+export interface TurnPermissionRequestedPayload extends WirePendingPermission {}
 
 export interface TurnPermissionResolvedPayload {
 	readonly permissionId: string;
 	readonly decision: PermissionResolution;
-	readonly source: WireEngineSource;
-}
-
-export interface TurnEvidencePayload {
-	readonly label: string;
-	readonly detail: string;
-	readonly status: "observed" | "reported" | "unavailable";
-	readonly source: WireEngineSource;
+	readonly source: WireEventSource;
 }
 
 export interface WireUsage {
@@ -453,7 +595,7 @@ export interface TurnTerminalPayload {
 	readonly summary: string;
 	readonly stopReason?: TurnStopReason;
 	readonly usage?: WireUsage;
-	readonly source: WireEngineSource;
+	readonly source: WireEventSource;
 }
 
 export interface ProtocolErrorPayload {
@@ -470,22 +612,24 @@ export interface CommandErrorPayload {
 
 export interface ServerEventPayloadByKind {
 	readonly "connection.ready": ConnectionReadyPayload;
+	readonly "project.browse.listing": ProjectBrowseListingPayload;
+	readonly "project.opened": ProjectOpenedPayload;
+	readonly "project.forgotten": ProjectForgottenPayload;
 	readonly "project.snapshot": ProjectSnapshotPayload;
-	readonly "project.created": ProjectAddedPayload;
-	readonly "project.registered": ProjectAddedPayload;
-	readonly "project.selected": ProjectSelectedPayload;
 	readonly "fs.changed": ProjectSnapshotPayload;
 	readonly "fs.delete.challenge": FsDeleteChallengePayload;
-	readonly "engine.state": EngineStatePayload;
+	readonly "clio.state": ClioStatePayload;
+	readonly "session.list": SessionListPayload_;
+	readonly "settings.state": SettingsStatePayload;
+	readonly "targets.state": TargetsStatePayload;
+	readonly "targets.probed": TargetsProbedPayload;
 	readonly "turn.started": TurnStartedPayload;
 	readonly "turn.text": TurnTextPayload;
 	readonly "turn.thought": TurnTextPayload;
-	readonly "turn.agent": TurnAgentPayload;
 	readonly "turn.tool": TurnToolPayload;
-	readonly "turn.change": TurnChangePayload;
+	readonly "turn.loop": TurnLoopPayload;
 	readonly "turn.permission.requested": TurnPermissionRequestedPayload;
 	readonly "turn.permission.resolved": TurnPermissionResolvedPayload;
-	readonly "turn.evidence": TurnEvidencePayload;
 	readonly "turn.terminal": TurnTerminalPayload;
 	readonly "protocol.error": ProtocolErrorPayload;
 	readonly "command.error": CommandErrorPayload;
@@ -498,7 +642,7 @@ interface ServerEnvelopeBase<K extends ServerEventKind> {
 	readonly eventId: string;
 	readonly kind: K;
 	readonly projectId?: string;
-	readonly engineGeneration?: string;
+	readonly processGeneration?: string;
 	readonly sessionId?: string;
 	readonly turnId?: string;
 	readonly terminal: boolean;
@@ -628,6 +772,14 @@ function expectName(value: unknown, label: string): string {
 	return name;
 }
 
+function expectEntryName(value: unknown, label: string): string {
+	// Real directory listings contain names with surrounding whitespace; the
+	// picker shows them but never trims them.
+	const name = expectString(value, label, { minBytes: 1, maxBytes: 255, noControls: true });
+	if (name === "." || name === ".." || /[\\/]/u.test(name)) return invalid(`${label} is not a valid name`);
+	return name;
+}
+
 function expectDisplayName(value: unknown, label: string): string {
 	return expectString(value, label, {
 		minBytes: 1,
@@ -635,6 +787,19 @@ function expectDisplayName(value: unknown, label: string): string {
 		trim: true,
 		noControls: true,
 	});
+}
+
+/** An absolute native path the user typed, pasted, or picked. Never a project-relative segment list. */
+export function expectNativePath(value: unknown, label: string): string {
+	const path = expectString(value, label, {
+		minBytes: 1,
+		maxBytes: MAX_NATIVE_PATH_BYTES,
+		trim: true,
+		noControls: true,
+	});
+	if (path.includes("\0")) return invalid(`${label} contains a null byte`);
+	if (!path.startsWith("/") && !/^[A-Za-z]:[\\/]/u.test(path)) return invalid(`${label} must be absolute`);
+	return path;
 }
 
 function expectBoolean(value: unknown, label: string): boolean {
@@ -664,27 +829,90 @@ function expectPath(value: unknown, label: string, allowRoot: boolean): ProjectP
 	return value.map((segment, index) => expectName(segment, `${label}[${index}]`));
 }
 
+const MAX_SETTINGS_KEYS = 32;
+const MAX_SETTINGS_KEY_BYTES = 64;
+const MAX_SETTINGS_VALUE_BYTES = 256;
+
+function expectSettingsKey(value: string, label: string): string {
+	const key = expectString(value, label, {
+		minBytes: 1,
+		maxBytes: MAX_SETTINGS_KEY_BYTES,
+		trim: true,
+		noControls: true,
+	});
+	if (!/^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/u.test(key)) return invalid(`${label} is not a valid settings key`);
+	return key;
+}
+
+function expectSettingsValue(value: unknown, label: string): WireSettingsValue {
+	if (value === null) return null;
+	return expectString(value, label, { minBytes: 0, maxBytes: MAX_SETTINGS_VALUE_BYTES, trim: true, noControls: true });
+}
+
+function expectSettingsRecord(value: unknown, label: string): Readonly<Record<string, WireSettingsValue>> {
+	const record = expectRecord(value, label);
+	const keys = Object.keys(record);
+	if (keys.length > MAX_SETTINGS_KEYS) return invalid(`${label} has too many keys`);
+	const result: Record<string, WireSettingsValue> = {};
+	for (const key of keys) {
+		result[expectSettingsKey(key, `${label} key`)] = expectSettingsValue(record[key], `${label}.${key}`);
+	}
+	return result;
+}
+
+function expectSettingsPatch(value: unknown, label: string): WireSettingsPatch {
+	const record = expectRecord(value, label);
+	const keys = Object.keys(record);
+	if (keys.length === 0) return invalid(`${label} must not be empty`);
+	const result: {
+		"orchestrator.target"?: string | null;
+		"orchestrator.model"?: string | null;
+		"orchestrator.thinkingLevel"?: WireThinkingLevel;
+		autonomy?: WireAutonomyLevel;
+	} = {};
+	for (const key of keys) {
+		switch (key) {
+			case "orchestrator.target":
+			case "orchestrator.model":
+				result[key] = record[key] === null ? null : expectString(record[key], `${label}.${key}`, {
+					minBytes: 1,
+					maxBytes: key === "orchestrator.target" ? 128 : 256,
+					trim: true,
+					noControls: true,
+				});
+				break;
+			case "orchestrator.thinkingLevel":
+				result[key] = expectEnum(record[key], `${label}.${key}`, THINKING_LEVELS);
+				break;
+			case "autonomy":
+				result[key] = expectEnum(record[key], `${label}.${key}`, AUTONOMY_LEVELS);
+				break;
+			default:
+				return invalid(`${label} contains an unsupported setting`);
+		}
+	}
+	return result;
+}
+
 function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unknown): ClientCommandPayloadByKind[K] {
 	const label = `${kind} payload`;
 	switch (kind) {
-		case "project.create": {
-			const record = expectExactKeys(value, label, ["displayName", "directoryName"]);
-			return {
-				displayName: expectDisplayName(record.displayName, `${label}.displayName`),
-				directoryName: expectName(record.directoryName, `${label}.directoryName`),
-			} as ClientCommandPayloadByKind[K];
+		case "project.browse": {
+			const record = expectExactKeys(value, label, [], ["path"]);
+			const path = Object.hasOwn(record, "path") ? expectNativePath(record.path, `${label}.path`) : undefined;
+			return { ...(path === undefined ? {} : { path }) } as ClientCommandPayloadByKind[K];
 		}
-		case "project.register": {
-			const record = expectExactKeys(value, label, ["relativeRoot"], ["displayName"]);
-			const displayName = Object.hasOwn(record, "displayName")
-				? expectDisplayName(record.displayName, `${label}.displayName`)
-				: undefined;
-			return {
-				relativeRoot: expectPath(record.relativeRoot, `${label}.relativeRoot`, false),
-				...(displayName === undefined ? {} : { displayName }),
-			} as ClientCommandPayloadByKind[K];
+		case "project.open": {
+			const record = expectExactKeys(value, label, ["path"]);
+			return { path: expectNativePath(record.path, `${label}.path`) } as ClientCommandPayloadByKind[K];
 		}
-		case "project.select": {
+		case "project.select":
+		case "project.forget":
+		case "session.new":
+		case "session.close":
+		case "session.list":
+		case "settings.get":
+		case "targets.list": {
 			const record = expectExactKeys(value, label, ["projectId"]);
 			return { projectId: expectId(record.projectId, `${label}.projectId`) } as ClientCommandPayloadByKind[K];
 		}
@@ -695,14 +923,7 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 				directory: expectPath(record.directory, `${label}.directory`, true),
 			} as ClientCommandPayloadByKind[K];
 		}
-		case "fs.create-file": {
-			const record = expectExactKeys(value, label, ["projectId", "parent", "name"]);
-			return {
-				projectId: expectId(record.projectId, `${label}.projectId`),
-				parent: expectPath(record.parent, `${label}.parent`, true),
-				name: expectName(record.name, `${label}.name`),
-			} as ClientCommandPayloadByKind[K];
-		}
+		case "fs.create-file":
 		case "fs.create-folder": {
 			const record = expectExactKeys(value, label, ["projectId", "parent", "name"]);
 			return {
@@ -745,32 +966,39 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 				confirmationId: expectId(record.confirmationId, `${label}.confirmationId`),
 			} as ClientCommandPayloadByKind[K];
 		}
-		case "engine.select": {
-			const record = expectExactKeys(value, label, ["projectId", "kind"]);
+		case "session.load":
+		case "session.delete": {
+			const record = expectExactKeys(value, label, ["projectId", "sessionId"]);
 			return {
 				projectId: expectId(record.projectId, `${label}.projectId`),
-				kind: expectEnum(record.kind, `${label}.kind`, ENGINE_KINDS),
+				sessionId: expectId(record.sessionId, `${label}.sessionId`),
 			} as ClientCommandPayloadByKind[K];
 		}
-		case "engine.probe": {
-			const record = expectExactKeys(value, label, ["projectId"]);
-			return { projectId: expectId(record.projectId, `${label}.projectId`) } as ClientCommandPayloadByKind[K];
+		case "session.label": {
+			const record = expectExactKeys(value, label, ["projectId", "sessionId", "label"]);
+			const labelText = expectString(record.label, `${label}.label`, {
+				minBytes: 0,
+				maxBytes: 256,
+				trim: true,
+				noControls: true,
+			});
+			return {
+				projectId: expectId(record.projectId, `${label}.projectId`),
+				sessionId: expectId(record.sessionId, `${label}.sessionId`),
+				label: labelText,
+			} as ClientCommandPayloadByKind[K];
 		}
 		case "turn.start": {
-			const record = expectExactKeys(value, label, ["projectId", "prompt"], ["fakeScenario"]);
+			const record = expectExactKeys(value, label, ["projectId", "prompt"]);
 			const prompt = expectString(record.prompt, `${label}.prompt`, {
 				minBytes: 1,
-				maxBytes: 4 * 1024,
+				maxBytes: 8 * 1024,
 				trim: true,
 			});
 			if (prompt.includes("\0")) invalid(`${label}.prompt contains a null character`);
-			const fakeScenario = Object.hasOwn(record, "fakeScenario")
-				? expectEnum(record.fakeScenario, `${label}.fakeScenario`, FAKE_SCENARIOS)
-				: undefined;
 			return {
 				projectId: expectId(record.projectId, `${label}.projectId`),
 				prompt,
-				...(fakeScenario === undefined ? {} : { fakeScenario }),
 			} as ClientCommandPayloadByKind[K];
 		}
 		case "turn.cancel": {
@@ -789,12 +1017,36 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 				decision: expectEnum(record.decision, `${label}.decision`, PERMISSION_DECISIONS),
 			} as ClientCommandPayloadByKind[K];
 		}
+		case "settings.patch": {
+			const record = expectExactKeys(value, label, ["projectId", "patch"]);
+			const patch = expectSettingsPatch(record.patch, `${label}.patch`);
+			return {
+				projectId: expectId(record.projectId, `${label}.projectId`),
+				patch,
+			} as ClientCommandPayloadByKind[K];
+		}
+		case "targets.probe": {
+			const record = expectExactKeys(value, label, ["projectId", "targetId"]);
+			return {
+				projectId: expectId(record.projectId, `${label}.projectId`),
+				targetId: expectOpaqueString(record.targetId, `${label}.targetId`, 128),
+			} as ClientCommandPayloadByKind[K];
+		}
+		case "autonomy.set": {
+			const record = expectExactKeys(value, label, ["projectId", "level"]);
+			return {
+				projectId: expectId(record.projectId, `${label}.projectId`),
+				level: expectEnum(record.level, `${label}.level`, AUTONOMY_LEVELS),
+			} as ClientCommandPayloadByKind[K];
+		}
 	}
 }
 
 export const MAX_WIRE_COLLECTION_ENTRIES = 512;
+export const MAX_WIRE_TIMELINE_ENTRIES = 1_024;
+export const MAX_WIRE_BROWSE_ENTRIES = 512;
 const MAX_WIRE_TREE_NODES = 512;
-const MAX_SERVER_EVENTS_PER_CONNECTION = 16 * 1024;
+const MAX_SERVER_EVENTS_PER_CONNECTION = 64 * 1024;
 
 function expectArray<T>(
 	value: unknown,
@@ -811,6 +1063,10 @@ function expectPresentationText(value: unknown, label: string, maximumBytes = 4 
 	const text = expectString(value, label, { minBytes: 1, maxBytes: maximumBytes, trim: true });
 	if (hasUnsafePresentationCharacter(text)) return invalid(`${label} contains an unsafe control character`);
 	return text;
+}
+
+function expectNullablePresentationText(value: unknown, label: string, maximumBytes = 4 * 1024): string | null {
+	return value === null ? null : expectPresentationText(value, label, maximumBytes);
 }
 
 function expectSanitizedMessage(value: unknown, label: string): string {
@@ -840,38 +1096,8 @@ function validateWireProjectPath(value: unknown, label: string, allowRoot = true
 	return { segments: expectPath(record.segments, `${label}.segments`, allowRoot) };
 }
 
-function validateEngineSource(value: unknown, label: string): WireEngineSource {
-	return expectEnum(value, label, ENGINE_SOURCES);
-}
-
-function validateEngineFact(value: unknown, label: string): WireEngineReadinessFact {
-	const record = expectExactKeys(value, label, ["key", "label", "state", "detail", "source"]);
-	return {
-		key: expectEnum(record.key, `${label}.key`, READINESS_KEYS),
-		label: expectPresentationText(record.label, `${label}.label`, 128),
-		state: expectEnum(record.state, `${label}.state`, READINESS_STATES),
-		detail: expectPresentationText(record.detail, `${label}.detail`, 1024),
-		source: validateEngineSource(record.source, `${label}.source`),
-	};
-}
-
-function validateEngineSnapshot(value: unknown, label: string): WireEngineSnapshot {
-	const record = expectExactKeys(value, label, ["kind", "phase", "facts"], ["checkedAt"]);
-	const facts = expectArray(record.facts, `${label}.facts`, READINESS_KEYS.length, validateEngineFact);
-	if (facts.length !== READINESS_KEYS.length) invalid(`${label}.facts must contain every readiness fact exactly once`);
-	const factKeys = new Set(facts.map((fact) => fact.key));
-	if (factKeys.size !== READINESS_KEYS.length || READINESS_KEYS.some((key) => !factKeys.has(key))) {
-		invalid(`${label}.facts must contain every readiness fact exactly once`);
-	}
-	const checkedAt = Object.hasOwn(record, "checkedAt")
-		? expectTimestamp(record.checkedAt, `${label}.checkedAt`)
-		: undefined;
-	return {
-		kind: expectEnum(record.kind, `${label}.kind`, ENGINE_KINDS),
-		phase: expectEnum(record.phase, `${label}.phase`, ENGINE_PHASES),
-		facts,
-		...(checkedAt === undefined ? {} : { checkedAt }),
-	};
+function validateEventSource(value: unknown, label: string): WireEventSource {
+	return expectEnum(value, label, EVENT_SOURCES);
 }
 
 function validateLocations(value: unknown, label: string): readonly WireProjectPath[] {
@@ -928,72 +1154,166 @@ function validateWireTree(value: unknown, label: string): readonly WireTreeNode[
 	);
 }
 
-function validateWireProjectIdentity(value: unknown, label: string): WireProjectIdentity {
-	const record = expectExactKeys(value, label, ["kind", "displayPath"], ["distro"]);
-	const kind = expectEnum(record.kind, `${label}.kind`, ["local-sandbox", "wsl", "native"] as const);
-	const distro = Object.hasOwn(record, "distro")
-		? expectPresentationText(record.distro, `${label}.distro`, 256)
-		: undefined;
-	if (kind === "wsl" && distro === undefined) invalid(`${label}.distro is required for WSL projects`);
-	if (kind !== "wsl" && distro !== undefined) invalid(`${label}.distro is only valid for WSL projects`);
-	return {
-		kind,
-		displayPath: expectPresentationText(record.displayPath, `${label}.displayPath`),
-		...(distro === undefined ? {} : { distro }),
-	};
-}
-
 function validateWireProjectSummary(value: unknown, label: string): WireProjectSummary {
-	const record = expectExactKeys(value, label, ["id", "displayName", "identity", "lastOpenedAt"]);
+	const record = expectExactKeys(value, label, ["id", "displayName", "rootPath", "lastOpenedAt", "available"]);
 	return {
 		id: expectId(record.id, `${label}.id`),
 		displayName: expectDisplayName(record.displayName, `${label}.displayName`),
-		identity: validateWireProjectIdentity(record.identity, `${label}.identity`),
+		rootPath: expectNativePath(record.rootPath, `${label}.rootPath`),
 		lastOpenedAt: expectTimestamp(record.lastOpenedAt, `${label}.lastOpenedAt`),
+		available: expectBoolean(record.available, `${label}.available`),
 	};
 }
 
 function validateWireSessionSummary(value: unknown, label: string): WireSessionSummary {
-	const record = expectExactKeys(value, label, ["id", "label", "preview", "updatedAt", "status"]);
+	const record = expectExactKeys(value, label, [
+		"id",
+		"label",
+		"preview",
+		"createdAt",
+		"updatedAt",
+		"turns",
+		"target",
+		"model",
+		"state",
+		"hosted",
+	]);
 	return {
 		id: expectId(record.id, `${label}.id`),
-		label: expectPresentationText(record.label, `${label}.label`, 512),
-		preview: expectPresentationText(record.preview, `${label}.preview`),
+		label: expectNullablePresentationText(record.label, `${label}.label`, 256),
+		preview: expectString(record.preview, `${label}.preview`, { minBytes: 0, maxBytes: 512, noControls: true }),
+		createdAt: expectTimestamp(record.createdAt, `${label}.createdAt`),
 		updatedAt: expectTimestamp(record.updatedAt, `${label}.updatedAt`),
-		status: expectEnum(
-			record.status,
-			`${label}.status`,
-			["idle", "active", "complete", "canceled", "failed"] as const,
-		),
+		turns: expectInteger(record.turns, `${label}.turns`),
+		target: expectNullablePresentationText(record.target, `${label}.target`, 128),
+		model: expectNullablePresentationText(record.model, `${label}.model`, 256),
+		state: expectEnum(record.state, `${label}.state`, SESSION_STATES),
+		hosted: expectBoolean(record.hosted, `${label}.hosted`),
+	};
+}
+
+function validateBoundSession(value: unknown, label: string): WireBoundSession {
+	const record = expectExactKeys(value, label, [
+		"id",
+		"target",
+		"model",
+		"autonomy",
+		"autonomySource",
+		"resumed",
+		"replayedTurns",
+		"replayTruncated",
+		"createdAt",
+	]);
+	return {
+		id: expectId(record.id, `${label}.id`),
+		target: expectNullablePresentationText(record.target, `${label}.target`, 128),
+		model: expectNullablePresentationText(record.model, `${label}.model`, 256),
+		autonomy: expectEnum(record.autonomy, `${label}.autonomy`, AUTONOMY_LEVELS),
+		autonomySource: expectEnum(record.autonomySource, `${label}.autonomySource`, ["settings", "session"] as const),
+		resumed: expectBoolean(record.resumed, `${label}.resumed`),
+		replayedTurns: expectInteger(record.replayedTurns, `${label}.replayedTurns`),
+		replayTruncated: expectBoolean(record.replayTruncated, `${label}.replayTruncated`),
+		createdAt: expectTimestamp(record.createdAt, `${label}.createdAt`),
+	};
+}
+
+const CAPABILITY_KEYS = ["load", "list", "label", "delete", "autonomy", "settings", "targets", "loopBlocked"] as const;
+
+function validateCapabilities(value: unknown, label: string): WireClioCapabilities {
+	const record = expectExactKeys(value, label, CAPABILITY_KEYS);
+	const result: Record<string, boolean> = {};
+	for (const key of CAPABILITY_KEYS) result[key] = expectBoolean(record[key], `${label}.${key}`);
+	return result as unknown as WireClioCapabilities;
+}
+
+function validateClioSnapshot(value: unknown, label: string): WireClioSnapshot {
+	const record = expectExactKeys(value, label, [
+		"phase",
+		"agent",
+		"capabilities",
+		"session",
+		"lastFailure",
+		"checkedAt",
+	]);
+	let agent: WireClioAgent | null = null;
+	if (record.agent !== null) {
+		const agentRecord = expectExactKeys(record.agent, `${label}.agent`, ["name", "version"]);
+		agent = {
+			name: expectPresentationText(agentRecord.name, `${label}.agent.name`, 128),
+			version: expectPresentationText(agentRecord.version, `${label}.agent.version`, 128),
+		};
+	}
+	let lastFailure: WireClioFailure | null = null;
+	if (record.lastFailure !== null) {
+		const failure = expectExactKeys(record.lastFailure, `${label}.lastFailure`, ["code", "summary"]);
+		lastFailure = {
+			code: expectId(failure.code, `${label}.lastFailure.code`),
+			summary: expectSanitizedMessage(failure.summary, `${label}.lastFailure.summary`),
+		};
+	}
+	return {
+		phase: expectEnum(record.phase, `${label}.phase`, CLIO_PHASES),
+		agent,
+		capabilities: record.capabilities === null
+			? null
+			: validateCapabilities(record.capabilities, `${label}.capabilities`),
+		session: record.session === null ? null : validateBoundSession(record.session, `${label}.session`),
+		lastFailure,
+		checkedAt: expectTimestamp(record.checkedAt, `${label}.checkedAt`),
 	};
 }
 
 function validateWireTimelineItem(value: unknown, label: string): WireTimelineItem {
-	const record = expectExactKeys(value, label, ["id", "kind", "title", "summary", "status", "timeLabel"], [
-		"detail",
-		"sequence",
-	]);
+	const record = expectExactKeys(
+		value,
+		label,
+		["id", "kind", "title", "summary", "status", "turnId", "origin", "startedAt", "source"],
+		["detail", "sequence", "endedAt"],
+	);
 	const detail = Object.hasOwn(record, "detail") ? expectPresentationText(record.detail, `${label}.detail`) : undefined;
 	const sequence = Object.hasOwn(record, "sequence")
 		? expectInteger(record.sequence, `${label}.sequence`, 1)
 		: undefined;
+	const endedAt = Object.hasOwn(record, "endedAt") ? expectTimestamp(record.endedAt, `${label}.endedAt`) : undefined;
+	const kind = expectEnum(
+		record.kind,
+		`${label}.kind`,
+		["request", "narrative", "thought", "tool", "loop", "approval", "outcome", "failure"] as const,
+	);
+	const status = expectEnum(
+		record.status,
+		`${label}.status`,
+		["queued", "active", "waiting", "complete", "canceled", "failed", "replayed"] as const,
+	);
+	const origin = expectEnum(record.origin, `${label}.origin`, ["live", "replay"] as const);
+	const startedAt = record.startedAt === null ? null : expectTimestamp(record.startedAt, `${label}.startedAt`);
+	const source = validateEventSource(record.source, `${label}.source`);
+	if (origin === "replay") {
+		if (startedAt !== null) invalid(`${label}.startedAt must be null for replay history`);
+		if (endedAt !== undefined) invalid(`${label}.endedAt must be omitted for replay history`);
+		if (source !== "replayed-from-clio") invalid(`${label}.source must identify replay history`);
+		if (kind === "outcome" || kind === "failure") invalid(`${label}.kind cannot claim a replay outcome`);
+		if (status !== "replayed" && !(kind === "tool" && ["complete", "canceled", "failed"].includes(status))) {
+			invalid(`${label}.status must stay neutral unless a replayed tool supplied its terminal status`);
+		}
+	} else {
+		if (startedAt === null) invalid(`${label}.startedAt must identify when a live item began`);
+		if (source === "replayed-from-clio") invalid(`${label}.source cannot identify live activity as replay history`);
+		if (status === "replayed") invalid(`${label}.status cannot identify live activity as replay history`);
+	}
 	return {
 		id: expectId(record.id, `${label}.id`),
-		kind: expectEnum(
-			record.kind,
-			`${label}.kind`,
-			["request", "narrative", "agent", "tool", "change", "approval", "evidence", "outcome", "failure"] as const,
-		),
+		kind,
 		title: expectPresentationText(record.title, `${label}.title`, 512),
-		summary: expectPresentationText(record.summary, `${label}.summary`),
+		summary: expectString(record.summary, `${label}.summary`, { minBytes: 0, maxBytes: 64 * 1024 + 64 }),
 		...(detail === undefined ? {} : { detail }),
-		status: expectEnum(
-			record.status,
-			`${label}.status`,
-			["queued", "active", "waiting", "complete", "canceled", "failed"] as const,
-		),
-		timeLabel: expectPresentationText(record.timeLabel, `${label}.timeLabel`, 128),
+		status,
+		turnId: expectId(record.turnId, `${label}.turnId`),
+		origin,
+		startedAt,
+		...(endedAt === undefined ? {} : { endedAt }),
 		...(sequence === undefined ? {} : { sequence }),
+		source,
 	};
 }
 
@@ -1004,6 +1324,8 @@ function validateWirePendingPermission(value: unknown, label: string): WirePendi
 		"title",
 		"kind",
 		"locations",
+		"requestedAt",
+		"escalateAt",
 		"expiresAt",
 		"source",
 	]);
@@ -1013,8 +1335,10 @@ function validateWirePendingPermission(value: unknown, label: string): WirePendi
 		title: expectPresentationText(record.title, `${label}.title`, 512),
 		kind: expectPresentationText(record.kind, `${label}.kind`, 64),
 		locations: validateLocations(record.locations, `${label}.locations`),
+		requestedAt: expectTimestamp(record.requestedAt, `${label}.requestedAt`),
+		escalateAt: expectTimestamp(record.escalateAt, `${label}.escalateAt`),
 		expiresAt: expectTimestamp(record.expiresAt, `${label}.expiresAt`),
-		source: validateEngineSource(record.source, `${label}.source`),
+		source: validateEventSource(record.source, `${label}.source`),
 	};
 }
 
@@ -1029,42 +1353,69 @@ function validateWireDeleteChallenge(value: unknown, label: string): WireDeleteC
 	};
 }
 
-function validateWireEvidence(value: unknown, label: string): WireEvidenceRecord {
-	const record = expectExactKeys(value, label, ["id", "label", "detail", "status", "source"]);
+function validateActiveTurn(value: unknown, label: string): WireActiveTurn {
+	const record = expectExactKeys(value, label, ["turnId", "startedAt", "toolCalls", "lastToolTitle", "repeatedShapes"]);
 	return {
-		id: expectId(record.id, `${label}.id`),
-		label: expectPresentationText(record.label, `${label}.label`, 512),
-		detail: expectPresentationText(record.detail, `${label}.detail`),
-		status: expectEnum(record.status, `${label}.status`, ["observed", "reported", "unavailable"] as const),
-		source: validateEngineSource(record.source, `${label}.source`),
+		turnId: expectId(record.turnId, `${label}.turnId`),
+		startedAt: expectTimestamp(record.startedAt, `${label}.startedAt`),
+		toolCalls: expectInteger(record.toolCalls, `${label}.toolCalls`),
+		lastToolTitle: expectNullablePresentationText(record.lastToolTitle, `${label}.lastToolTitle`, 512),
+		repeatedShapes: expectInteger(record.repeatedShapes, `${label}.repeatedShapes`),
 	};
 }
 
-function validateWireChange(value: unknown, label: string): WireChangeRecord {
-	const record = expectExactKeys(value, label, ["id", "path", "summary", "status", "source"]);
+function validateSettingsState(value: unknown, label: string): WireSettingsState {
+	const record = expectExactKeys(value, label, ["settings", "editable", "options", "checkedAt"]);
+	const settings = expectSettingsRecord(record.settings, `${label}.settings`);
+	const editable = expectArray(
+		record.editable,
+		`${label}.editable`,
+		MAX_SETTINGS_KEYS,
+		(entry, entryLabel) => expectSettingsKey(entry as string, entryLabel),
+	);
+	const optionsRecord = expectRecord(record.options, `${label}.options`);
+	const options: Record<string, readonly string[]> = {};
+	const optionKeys = Object.keys(optionsRecord);
+	if (optionKeys.length > MAX_SETTINGS_KEYS) invalid(`${label}.options has too many keys`);
+	for (const key of optionKeys) {
+		options[expectSettingsKey(key, `${label}.options key`)] = expectArray(
+			optionsRecord[key],
+			`${label}.options.${key}`,
+			256,
+			(entry, entryLabel) => expectPresentationText(entry, entryLabel, MAX_SETTINGS_VALUE_BYTES),
+		);
+	}
+	return { settings, editable, options, checkedAt: expectTimestamp(record.checkedAt, `${label}.checkedAt`) };
+}
+
+function validateTargetHealth(value: unknown, label: string): WireTargetHealth {
+	const record = expectExactKeys(value, label, ["healthy", "latencyMs", "reason", "probedAt"]);
 	return {
-		id: expectId(record.id, `${label}.id`),
-		path: validateWireProjectPath(record.path, `${label}.path`, false),
-		summary: expectPresentationText(record.summary, `${label}.summary`),
-		status: expectEnum(record.status, `${label}.status`, ["planned", "recorded", "verified"] as const),
-		source: validateEngineSource(record.source, `${label}.source`),
+		healthy: expectBoolean(record.healthy, `${label}.healthy`),
+		latencyMs: record.latencyMs === null ? null : expectInteger(record.latencyMs, `${label}.latencyMs`),
+		reason: expectNullablePresentationText(record.reason, `${label}.reason`, 128),
+		probedAt: expectTimestamp(record.probedAt, `${label}.probedAt`),
 	};
 }
 
-function validateWireAgent(value: unknown, label: string): WireAgentRecord {
-	const record = expectExactKeys(value, label, ["id", "name", "task", "status", "summary", "source"]);
+function validateTarget(value: unknown, label: string): WireTarget {
+	const record = expectExactKeys(value, label, ["id", "runtime", "models", "isOrchestrator", "health"]);
 	return {
-		id: expectId(record.id, `${label}.id`),
-		name: expectPresentationText(record.name, `${label}.name`, 512),
-		task: expectPresentationText(record.task, `${label}.task`),
-		status: expectEnum(
-			record.status,
-			`${label}.status`,
-			["queued", "active", "complete", "canceled", "failed"] as const,
+		id: expectPresentationText(record.id, `${label}.id`, 128),
+		runtime: expectPresentationText(record.runtime, `${label}.runtime`, 64),
+		models: expectArray(
+			record.models,
+			`${label}.models`,
+			64,
+			(entry, entryLabel) => expectPresentationText(entry, entryLabel, 256),
 		),
-		summary: expectPresentationText(record.summary, `${label}.summary`),
-		source: validateEngineSource(record.source, `${label}.source`),
+		isOrchestrator: expectBoolean(record.isOrchestrator, `${label}.isOrchestrator`),
+		health: record.health === null ? null : validateTargetHealth(record.health, `${label}.health`),
 	};
+}
+
+function validateTargets(value: unknown, label: string): readonly WireTarget[] {
+	return expectArray(value, label, 64, validateTarget);
 }
 
 function validateWireWorkspace(value: unknown, label: string): WireProjectWorkspace {
@@ -1073,16 +1424,17 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 		"tree",
 		"treeTruncated",
 		"sessions",
-		"selectedSessionId",
+		"sessionsTruncated",
+		"clio",
 		"timeline",
-		"engine",
+		"timelineTruncated",
+		"activeTurn",
 		"pendingPermission",
 		"deleteChallenge",
-		"agents",
-		"changes",
-		"evidence",
-		"engineGeneration",
-		"activeTurnId",
+		"settings",
+		"targets",
+		"targetsTruncated",
+		"processGeneration",
 		"lastSequence",
 	]);
 	return {
@@ -1095,25 +1447,21 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 			MAX_WIRE_COLLECTION_ENTRIES,
 			validateWireSessionSummary,
 		),
-		selectedSessionId: expectNullableId(record.selectedSessionId, `${label}.selectedSessionId`),
-		timeline: expectArray(
-			record.timeline,
-			`${label}.timeline`,
-			MAX_WIRE_COLLECTION_ENTRIES,
-			validateWireTimelineItem,
-		),
-		engine: validateEngineSnapshot(record.engine, `${label}.engine`),
+		sessionsTruncated: expectBoolean(record.sessionsTruncated, `${label}.sessionsTruncated`),
+		clio: validateClioSnapshot(record.clio, `${label}.clio`),
+		timeline: expectArray(record.timeline, `${label}.timeline`, MAX_WIRE_TIMELINE_ENTRIES, validateWireTimelineItem),
+		timelineTruncated: expectBoolean(record.timelineTruncated, `${label}.timelineTruncated`),
+		activeTurn: record.activeTurn === null ? null : validateActiveTurn(record.activeTurn, `${label}.activeTurn`),
 		pendingPermission: record.pendingPermission === null
 			? null
 			: validateWirePendingPermission(record.pendingPermission, `${label}.pendingPermission`),
 		deleteChallenge: record.deleteChallenge === null
 			? null
 			: validateWireDeleteChallenge(record.deleteChallenge, `${label}.deleteChallenge`),
-		agents: expectArray(record.agents, `${label}.agents`, MAX_WIRE_COLLECTION_ENTRIES, validateWireAgent),
-		changes: expectArray(record.changes, `${label}.changes`, MAX_WIRE_COLLECTION_ENTRIES, validateWireChange),
-		evidence: expectArray(record.evidence, `${label}.evidence`, MAX_WIRE_COLLECTION_ENTRIES, validateWireEvidence),
-		engineGeneration: expectNullableId(record.engineGeneration, `${label}.engineGeneration`),
-		activeTurnId: expectNullableId(record.activeTurnId, `${label}.activeTurnId`),
+		settings: record.settings === null ? null : validateSettingsState(record.settings, `${label}.settings`),
+		targets: record.targets === null ? null : validateTargets(record.targets, `${label}.targets`),
+		targetsTruncated: expectBoolean(record.targetsTruncated, `${label}.targetsTruncated`),
+		processGeneration: expectNullableId(record.processGeneration, `${label}.processGeneration`),
 		lastSequence: expectInteger(record.lastSequence, `${label}.lastSequence`),
 	};
 }
@@ -1123,6 +1471,25 @@ function validateProjectSnapshotPayload(value: unknown, label: string): ProjectS
 	return {
 		tree: validateWireTree(record.tree, `${label}.tree`),
 		treeTruncated: expectBoolean(record.treeTruncated, `${label}.treeTruncated`),
+	};
+}
+
+function validateBrowseListing(value: unknown, label: string): ProjectBrowseListingPayload {
+	const record = expectExactKeys(value, label, ["path", "parent", "entries", "truncated", "openable", "reason"]);
+	return {
+		path: expectNativePath(record.path, `${label}.path`),
+		parent: record.parent === null ? null : expectNativePath(record.parent, `${label}.parent`),
+		entries: expectArray(record.entries, `${label}.entries`, MAX_WIRE_BROWSE_ENTRIES, (entry, entryLabel) => {
+			const entryRecord = expectExactKeys(entry, entryLabel, ["name", "hidden", "guarded"]);
+			return {
+				name: expectEntryName(entryRecord.name, `${entryLabel}.name`),
+				hidden: expectBoolean(entryRecord.hidden, `${entryLabel}.hidden`),
+				guarded: expectBoolean(entryRecord.guarded, `${entryLabel}.guarded`),
+			};
+		}),
+		truncated: expectBoolean(record.truncated, `${label}.truncated`),
+		openable: expectBoolean(record.openable, `${label}.openable`),
+		reason: expectNullablePresentationText(record.reason, `${label}.reason`, 512),
 	};
 }
 
@@ -1147,32 +1514,70 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 	const label = `${kind} payload`;
 	switch (kind) {
 		case "connection.ready":
+		case "project.forgotten":
 			return expectExactKeys(value, label, []) as ConnectionReadyPayload;
+		case "project.browse.listing":
+			return validateBrowseListing(value, label);
 		case "project.snapshot":
 		case "fs.changed":
 			return validateProjectSnapshotPayload(value, label);
-		case "project.created":
-		case "project.registered": {
+		case "project.opened": {
 			const record = expectExactKeys(value, label, ["workspace"]);
 			return { workspace: validateWireWorkspace(record.workspace, `${label}.workspace`) };
 		}
-		case "project.selected":
-			return expectExactKeys(value, label, []) as ProjectSelectedPayload;
 		case "fs.delete.challenge":
 			return validateWireDeleteChallenge(value, label);
-		case "engine.state": {
+		case "clio.state": {
 			const record = expectExactKeys(value, label, ["snapshot"]);
-			return { snapshot: validateEngineSnapshot(record.snapshot, `${label}.snapshot`) };
+			return { snapshot: validateClioSnapshot(record.snapshot, `${label}.snapshot`) };
+		}
+		case "session.list": {
+			const record = expectExactKeys(value, label, ["sessions", "truncated"]);
+			return {
+				sessions: expectArray(
+					record.sessions,
+					`${label}.sessions`,
+					MAX_WIRE_COLLECTION_ENTRIES,
+					validateWireSessionSummary,
+				),
+				truncated: expectBoolean(record.truncated, `${label}.truncated`),
+			};
+		}
+		case "settings.state": {
+			const record = expectExactKeys(value, label, ["settings"]);
+			return { settings: validateSettingsState(record.settings, `${label}.settings`) };
+		}
+		case "targets.state": {
+			const record = expectExactKeys(value, label, ["targets", "truncated"]);
+			return {
+				targets: validateTargets(record.targets, `${label}.targets`),
+				truncated: expectBoolean(record.truncated, `${label}.truncated`),
+			};
+		}
+		case "targets.probed": {
+			const record = expectExactKeys(value, label, ["targetId", "health"]);
+			return {
+				targetId: expectPresentationText(record.targetId, `${label}.targetId`, 128),
+				health: validateTargetHealth(record.health, `${label}.health`),
+			};
 		}
 		case "turn.started": {
-			const record = expectExactKeys(value, label, ["promptSummary", "source"], ["fakeScenario"]);
-			const fakeScenario = Object.hasOwn(record, "fakeScenario")
-				? expectEnum(record.fakeScenario, `${label}.fakeScenario`, FAKE_SCENARIOS)
-				: undefined;
+			const record = expectExactKeys(value, label, ["promptSummary", "origin", "startedAt", "source"]);
+			const origin = expectEnum(record.origin, `${label}.origin`, ["live", "replay"] as const);
+			const startedAt = record.startedAt === null ? null : expectTimestamp(record.startedAt, `${label}.startedAt`);
+			const source = validateEventSource(record.source, `${label}.source`);
+			if (origin === "replay") {
+				if (startedAt !== null) invalid(`${label}.startedAt must be null for replay history`);
+				if (source !== "replayed-from-clio") invalid(`${label}.source must identify replay history`);
+			} else {
+				if (startedAt === null) invalid(`${label}.startedAt must identify when a live turn began`);
+				if (source === "replayed-from-clio") invalid(`${label}.source cannot identify a live turn as replay history`);
+			}
 			return {
-				promptSummary: expectPresentationText(record.promptSummary, `${label}.promptSummary`, 512),
-				...(fakeScenario === undefined ? {} : { fakeScenario }),
-				source: validateEngineSource(record.source, `${label}.source`),
+				promptSummary: expectPresentationText(record.promptSummary, `${label}.promptSummary`, 8 * 1024),
+				origin,
+				startedAt,
+				source,
 			};
 		}
 		case "turn.text":
@@ -1180,22 +1585,7 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 			const record = expectExactKeys(value, label, ["text", "source"]);
 			return {
 				text: expectStreamText(record.text, `${label}.text`),
-				source: validateEngineSource(record.source, `${label}.source`),
-			};
-		}
-		case "turn.agent": {
-			const record = expectExactKeys(value, label, ["agentId", "name", "task", "status", "summary", "source"]);
-			return {
-				agentId: expectId(record.agentId, `${label}.agentId`),
-				name: expectPresentationText(record.name, `${label}.name`, 512),
-				task: expectPresentationText(record.task, `${label}.task`),
-				status: expectEnum(
-					record.status,
-					`${label}.status`,
-					["active", "complete", "canceled", "failed"] as const,
-				),
-				summary: expectPresentationText(record.summary, `${label}.summary`),
-				source: validateEngineSource(record.source, `${label}.source`),
+				source: validateEventSource(record.source, `${label}.source`),
 			};
 		}
 		case "turn.tool": {
@@ -1219,52 +1609,43 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 				),
 				summary: expectPresentationText(record.summary, `${label}.summary`),
 				locations: validateLocations(record.locations, `${label}.locations`),
-				source: validateEngineSource(record.source, `${label}.source`),
+				source: validateEventSource(record.source, `${label}.source`),
 			};
 		}
-		case "turn.change": {
-			const record = expectExactKeys(value, label, ["path", "summary", "source"]);
-			return {
-				path: validateWireProjectPath(record.path, `${label}.path`, false),
-				summary: expectPresentationText(record.summary, `${label}.summary`),
-				source: validateEngineSource(record.source, `${label}.source`),
-			};
-		}
-		case "turn.permission.requested": {
+		case "turn.loop": {
 			const record = expectExactKeys(value, label, [
-				"permissionId",
 				"toolCallId",
-				"title",
-				"kind",
-				"locations",
-				"expiresAt",
+				"tool",
+				"repeatCount",
+				"blocksThisTurn",
+				"budget",
+				"disposition",
+				"interrupted",
+				"shape",
 				"source",
 			]);
+			if (record.toolCallId !== null) invalid(`${label}.toolCallId must be null for event version 1`);
+			if (record.shape !== null) invalid(`${label}.shape must be null for event version 1`);
 			return {
-				permissionId: expectId(record.permissionId, `${label}.permissionId`),
-				toolCallId: expectId(record.toolCallId, `${label}.toolCallId`),
-				title: expectPresentationText(record.title, `${label}.title`, 512),
-				kind: expectPresentationText(record.kind, `${label}.kind`, 64),
-				locations: validateLocations(record.locations, `${label}.locations`),
-				expiresAt: expectTimestamp(record.expiresAt, `${label}.expiresAt`),
-				source: validateEngineSource(record.source, `${label}.source`),
+				toolCallId: null,
+				tool: expectPresentationText(record.tool, `${label}.tool`, 64),
+				repeatCount: expectInteger(record.repeatCount, `${label}.repeatCount`),
+				blocksThisTurn: expectInteger(record.blocksThisTurn, `${label}.blocksThisTurn`),
+				budget: expectInteger(record.budget, `${label}.budget`),
+				disposition: expectEnum(record.disposition, `${label}.disposition`, LOOP_DISPOSITIONS),
+				interrupted: expectBoolean(record.interrupted, `${label}.interrupted`),
+				shape: null,
+				source: validateEventSource(record.source, `${label}.source`),
 			};
 		}
+		case "turn.permission.requested":
+			return validateWirePendingPermission(value, label);
 		case "turn.permission.resolved": {
 			const record = expectExactKeys(value, label, ["permissionId", "decision", "source"]);
 			return {
 				permissionId: expectId(record.permissionId, `${label}.permissionId`),
 				decision: expectEnum(record.decision, `${label}.decision`, PERMISSION_RESOLUTIONS),
-				source: validateEngineSource(record.source, `${label}.source`),
-			};
-		}
-		case "turn.evidence": {
-			const record = expectExactKeys(value, label, ["label", "detail", "status", "source"]);
-			return {
-				label: expectPresentationText(record.label, `${label}.label`, 512),
-				detail: expectPresentationText(record.detail, `${label}.detail`),
-				status: expectEnum(record.status, `${label}.status`, ["observed", "reported", "unavailable"] as const),
-				source: validateEngineSource(record.source, `${label}.source`),
+				source: validateEventSource(record.source, `${label}.source`),
 			};
 		}
 		case "turn.terminal": {
@@ -1282,7 +1663,7 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 				summary: expectSanitizedMessage(record.summary, `${label}.summary`),
 				...(stopReason === undefined ? {} : { stopReason }),
 				...(usage === undefined ? {} : { usage }),
-				source: validateEngineSource(record.source, `${label}.source`),
+				source: validateEventSource(record.source, `${label}.source`),
 			};
 		}
 		case "protocol.error": {
@@ -1306,11 +1687,7 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 				? expectId(record.requestId, `${label}.requestId`)
 				: undefined;
 			return {
-				code: expectEnum(
-					record.code,
-					`${label}.code`,
-					["invalid", "conflict", "not-found", "not-ready", "internal"] as const,
-				),
+				code: expectEnum(record.code, `${label}.code`, COMMAND_ERROR_CODES),
 				message: expectSanitizedMessage(record.message, `${label}.message`),
 				...(requestId === undefined ? {} : { requestId }),
 			};
@@ -1371,26 +1748,31 @@ export function encodeClientCommand(command: ClientCommand): string {
 	return encodeJsonFrame(validateClientCommand(command), MAX_CLIENT_FRAME_BYTES, "client frame");
 }
 
-const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>(["connection.ready", "protocol.error"]);
+const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
+	"connection.ready",
+	"protocol.error",
+	"project.browse.listing",
+]);
 const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
+	"project.opened",
+	"project.forgotten",
 	"project.snapshot",
-	"project.created",
-	"project.registered",
-	"project.selected",
 	"fs.changed",
 	"fs.delete.challenge",
-	"engine.state",
+	"clio.state",
+	"session.list",
+	"settings.state",
+	"targets.state",
+	"targets.probed",
 ]);
 const TURN_EVENT_KINDS = new Set<ServerEventKind>([
 	"turn.started",
 	"turn.text",
 	"turn.thought",
-	"turn.agent",
 	"turn.tool",
-	"turn.change",
+	"turn.loop",
 	"turn.permission.requested",
 	"turn.permission.resolved",
-	"turn.evidence",
 	"turn.terminal",
 ]);
 const TERMINAL_EVENT_KINDS = new Set<ServerEventKind>([
@@ -1398,18 +1780,22 @@ const TERMINAL_EVENT_KINDS = new Set<ServerEventKind>([
 	"protocol.error",
 ]);
 
+export function isTurnEventKind(kind: ServerEventKind): boolean {
+	return TURN_EVENT_KINDS.has(kind);
+}
+
 function validateContext(
 	kind: ServerEventKind,
 	record: Record<string, unknown>,
-): Pick<ServerEnvelopeBase<ServerEventKind>, "projectId" | "engineGeneration" | "sessionId" | "turnId"> {
+): Pick<ServerEnvelopeBase<ServerEventKind>, "projectId" | "processGeneration" | "sessionId" | "turnId"> {
 	const hasProject = Object.hasOwn(record, "projectId");
-	const hasGeneration = Object.hasOwn(record, "engineGeneration");
+	const hasGeneration = Object.hasOwn(record, "processGeneration");
 	const hasSession = Object.hasOwn(record, "sessionId");
 	const hasTurn = Object.hasOwn(record, "turnId");
 
 	if (NO_CONTEXT_EVENT_KINDS.has(kind)) {
 		if (hasProject || hasGeneration || hasSession || hasTurn) {
-			invalid(`${kind} must not carry project, engine-generation, session, or turn IDs`);
+			invalid(`${kind} must not carry project, process-generation, session, or turn IDs`);
 		}
 		return {};
 	}
@@ -1419,17 +1805,17 @@ function validateContext(
 	}
 	if (TURN_EVENT_KINDS.has(kind)) {
 		if (!hasProject || !hasGeneration || !hasSession || !hasTurn) {
-			invalid(`${kind} must carry projectId, engineGeneration, sessionId, and turnId`);
+			invalid(`${kind} must carry projectId, processGeneration, sessionId, and turnId`);
 		}
 		return {
 			projectId: expectId(record.projectId, "server event.projectId"),
-			engineGeneration: expectId(record.engineGeneration, "server event.engineGeneration"),
+			processGeneration: expectId(record.processGeneration, "server event.processGeneration"),
 			sessionId: expectId(record.sessionId, "server event.sessionId"),
 			turnId: expectId(record.turnId, "server event.turnId"),
 		};
 	}
 	// command.error may be global or scoped. Context must remain hierarchical.
-	if (hasGeneration) invalid(`${kind} cannot carry an engine generation`);
+	if (hasGeneration) invalid(`${kind} cannot carry a process generation`);
 	if (hasTurn && !hasSession) invalid(`${kind} cannot carry turnId without sessionId`);
 	if ((hasSession || hasTurn) && !hasProject) invalid(`${kind} cannot carry session/turn IDs without projectId`);
 	return {
@@ -1444,7 +1830,7 @@ export function validateServerEvent(value: unknown): ServerEvent {
 		value,
 		"server event",
 		["protocolVersion", "workspaceInstanceId", "sequence", "eventId", "kind", "terminal", "payload"],
-		["projectId", "engineGeneration", "sessionId", "turnId"],
+		["projectId", "processGeneration", "sessionId", "turnId"],
 	);
 	if (record.protocolVersion !== PROTOCOL_VERSION) {
 		throw new ProtocolValidationError(

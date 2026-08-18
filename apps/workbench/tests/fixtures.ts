@@ -3,106 +3,147 @@ import {
 	type ServerEventKind,
 	type ServerEventOf,
 	type ServerEventPayloadByKind,
-	type WireAgentRecord,
-	type WireChangeRecord,
-	type WireEngineKind,
-	type WireEnginePhase,
-	type WireEngineReadinessFact,
-	type WireEngineSnapshot,
-	type WireEvidenceRecord,
-	type WirePendingPermission,
+	type WireClioSnapshot,
+	type WireProjectWorkspace,
 	type WireSessionSummary,
 	type WireTimelineItem,
 	type WireTreeNode,
 } from "../src/protocol.ts";
-import type { BootstrapPayload } from "../src/state.ts";
+import type { WireBootstrap } from "../src/state.ts";
 
-const source = "simulated-by-workbench" as const;
+export const FIXTURE_PROJECT_ID = "project-alpha-0001";
+export const FIXTURE_ROOT = "/tmp/workbench-fixture/alpha";
 
-export function engineSnapshotFixture(
-	phase: WireEnginePhase = "ready",
-	kind: WireEngineKind = "fake",
-	facts?: readonly WireEngineReadinessFact[],
-): WireEngineSnapshot {
+export function clioSnapshotFixture(
+	phase: WireClioSnapshot["phase"] = "idle",
+	overrides: Partial<WireClioSnapshot> = {},
+): WireClioSnapshot {
 	return {
-		kind,
 		phase,
-		facts: facts ?? [
-			{ key: "runtime", label: "Runtime", state: "ready", detail: "Available", source },
-			{ key: "protocol", label: "Protocol", state: "ready", detail: "Negotiated", source },
-			{ key: "project", label: "Project", state: "ready", detail: "Bounded", source },
-			{ key: "target", label: "Target", state: "ready", detail: "Configured", source },
-			{ key: "authentication", label: "Authentication", state: "ready", detail: "Available", source },
-			{ key: "provider", label: "Provider", state: "ready", detail: "Available", source },
-			{ key: "context", label: "Context", state: "ready", detail: "Available", source },
-		],
-		checkedAt: "2026-08-17T12:00:00.000Z",
+		agent: { name: "clio-coder", version: "0.3.2" },
+		capabilities: {
+			load: true,
+			list: true,
+			label: true,
+			delete: true,
+			autonomy: true,
+			settings: true,
+			targets: true,
+			loopBlocked: true,
+		},
+		session: {
+			id: "session-alpha-0001",
+			target: "lmstudio",
+			model: "qwen3.8-27b",
+			autonomy: "auto-edit",
+			autonomySource: "settings",
+			resumed: false,
+			replayedTurns: 0,
+			replayTruncated: false,
+			createdAt: "2026-08-18T12:00:00.000Z",
+		},
+		lastFailure: null,
+		checkedAt: "2026-08-18T12:00:00.000Z",
+		...overrides,
 	};
 }
 
-export function workspaceFixture(id: string, displayName: string) {
-	const workspace = {
+export function sessionSummaryFixture(
+	id = "session-alpha-0001",
+	overrides: Partial<WireSessionSummary> = {},
+): WireSessionSummary {
+	return {
+		id,
+		label: null,
+		preview: "Audit the convergence study",
+		createdAt: "2026-08-18T12:00:00.000Z",
+		updatedAt: "2026-08-18T12:05:00.000Z",
+		turns: 2,
+		target: "lmstudio",
+		model: "qwen3.8-27b",
+		state: "open",
+		hosted: true,
+		...overrides,
+	};
+}
+
+export function workspaceFixture(
+	id = FIXTURE_PROJECT_ID,
+	displayName = "Alpha",
+	overrides: Partial<WireProjectWorkspace> = {},
+): WireProjectWorkspace {
+	return {
 		project: {
 			id,
 			displayName,
-			identity: { kind: "local-sandbox" as const, displayPath: `sandbox://scaffold/${displayName.toLowerCase()}` },
-			lastOpenedAt: "2026-08-17T12:00:00.000Z",
+			rootPath: FIXTURE_ROOT,
+			lastOpenedAt: "2026-08-18T12:00:00.000Z",
+			available: true,
 		},
 		tree: [] as WireTreeNode[],
 		treeTruncated: false,
-		sessions: [] as WireSessionSummary[],
-		selectedSessionId: null as string | null,
+		sessions: [sessionSummaryFixture()],
+		sessionsTruncated: false,
+		clio: clioSnapshotFixture(),
 		timeline: [] as WireTimelineItem[],
-		engine: engineSnapshotFixture(),
-		pendingPermission: null as WirePendingPermission | null,
+		timelineTruncated: false,
+		activeTurn: null,
+		pendingPermission: null,
 		deleteChallenge: null,
-		agents: [] as WireAgentRecord[],
-		changes: [] as WireChangeRecord[],
-		evidence: [] as WireEvidenceRecord[],
-		engineGeneration: null as string | null,
-		activeTurnId: null as string | null,
+		settings: null,
+		targets: null,
+		targetsTruncated: false,
+		processGeneration: "generation-alpha-0001",
 		lastSequence: 0,
+		...overrides,
 	};
-	return workspace;
 }
 
-export function bootstrapFixture() {
-	const bootstrap = {
+export function bootstrapFixture(overrides: Partial<WireBootstrap> = {}): WireBootstrap {
+	return {
 		protocolVersion: PROTOCOL_VERSION,
 		appName: "Clio Workbench" as const,
 		workspaceInstanceId: "workspace-fixture-0001",
 		localToken: "token-fixture-0000000000000001",
 		mode: "browser" as const,
-		selectedProjectId: "project-alpha-0001",
-		projects: [workspaceFixture("project-alpha-0001", "Alpha"), workspaceFixture("project-beta-0002", "Beta")],
-		registerableSandboxFolders: ["gamma"],
-		sandboxLabel: "Controlled test sandbox",
-		securityNote: "This fixture has no generic filesystem authority.",
-	} satisfies BootstrapPayload;
-	return bootstrap;
+		openProjectId: FIXTURE_PROJECT_ID,
+		workspace: workspaceFixture(),
+		recent: [{
+			id: FIXTURE_PROJECT_ID,
+			displayName: "Alpha",
+			rootPath: FIXTURE_ROOT,
+			lastOpenedAt: "2026-08-18T12:00:00.000Z",
+			available: true,
+		}],
+		homePath: "/home/operator",
+		stateDirNote: "Workbench keeps only its recent-project list under /tmp/workbench-fixture/state.",
+		securityNote: "Workbench enforces the project boundary in its own code; Deno grants are broad.",
+		...overrides,
+	};
 }
 
 const TURN_EVENT_KINDS = new Set<ServerEventKind>([
 	"turn.started",
 	"turn.text",
 	"turn.thought",
-	"turn.agent",
 	"turn.tool",
-	"turn.change",
+	"turn.loop",
 	"turn.permission.requested",
 	"turn.permission.resolved",
-	"turn.evidence",
 	"turn.terminal",
 ]);
 
 const PROJECT_EVENT_KINDS = new Set<ServerEventKind>([
+	"project.opened",
+	"project.forgotten",
 	"project.snapshot",
-	"project.created",
-	"project.registered",
-	"project.selected",
 	"fs.changed",
 	"fs.delete.challenge",
-	"engine.state",
+	"clio.state",
+	"session.list",
+	"settings.state",
+	"targets.state",
+	"targets.probed",
 ]);
 
 export interface ServerEventFixtureOptions {
@@ -110,7 +151,7 @@ export interface ServerEventFixtureOptions {
 	readonly eventId?: string;
 	readonly workspaceInstanceId?: string;
 	readonly projectId?: string;
-	readonly engineGeneration?: string;
+	readonly processGeneration?: string;
 	readonly sessionId?: string;
 	readonly turnId?: string;
 }
@@ -123,13 +164,13 @@ export function serverEventFixture<K extends ServerEventKind>(
 	const sequence = options.sequence ?? 1;
 	const context = TURN_EVENT_KINDS.has(kind)
 		? {
-			projectId: options.projectId ?? "project-alpha-0001",
-			engineGeneration: options.engineGeneration ?? "generation-alpha-0001",
+			projectId: options.projectId ?? FIXTURE_PROJECT_ID,
+			processGeneration: options.processGeneration ?? "generation-alpha-0001",
 			sessionId: options.sessionId ?? "session-alpha-0001",
-			turnId: options.turnId ?? "turn-alpha-0001",
+			turnId: options.turnId ?? "turn-1",
 		}
 		: PROJECT_EVENT_KINDS.has(kind)
-		? { projectId: options.projectId ?? "project-alpha-0001" }
+		? { projectId: options.projectId ?? FIXTURE_PROJECT_ID }
 		: {};
 	return {
 		protocolVersion: PROTOCOL_VERSION,

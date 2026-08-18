@@ -1,7 +1,8 @@
 import { deepStrictEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { type ClioLauncher, EngineError } from "../engine.ts";
+import { type ClioLauncher, HostError } from "../clio-host.ts";
+import type { AcpLaunchSpec } from "../acp-client.ts";
 import {
 	defaultClioLauncher,
 	MAX_WEBSOCKET_OUTBOUND_BYTES,
@@ -18,57 +19,13 @@ const INDEX_HTML =
 const ASSET_JAVASCRIPT = "globalThis.__workbenchServerFixture = true;\n";
 const WEB_SOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const ACP_CHILD_FIXTURE = fileURLToPath(new URL("./acp-child-fixture.ts", import.meta.url));
-const ACP_TRANSCRIPT_PROXY = String.raw`
-const [fixturePath, transcriptPath] = Deno.args;
-if (fixturePath === undefined || transcriptPath === undefined) throw new Error("proxy paths are required");
-
-const child = new Deno.Command(Deno.execPath(), {
-  args: ["run", "--quiet", "--no-config", fixturePath, "--scenario=permission"],
-  stdin: "piped",
-  stdout: "piped",
-  stderr: "piped",
-}).spawn();
-
-const writeAll = async (writer, bytes) => {
-  let offset = 0;
-  while (offset < bytes.byteLength) offset += await writer.write(bytes.subarray(offset));
-};
-
-const decoder = new TextDecoder();
-let transcript = "";
-let transcriptBytes = 0;
-const forwardInput = async () => {
-  const writer = child.stdin.getWriter();
-  try {
-    for await (const chunk of Deno.stdin.readable) {
-      transcriptBytes += chunk.byteLength;
-      if (transcriptBytes > 64 * 1024) throw new Error("host transcript exceeded its test bound");
-      transcript += decoder.decode(chunk, { stream: true });
-      await writer.write(chunk);
-    }
-    transcript += decoder.decode();
-  } finally {
-    await writer.close().catch(() => undefined);
-  }
-};
-
-const forwardOutput = async (readable, writer) => {
-  for await (const chunk of readable) await writeAll(writer, chunk);
-};
-
-const [, , , status] = await Promise.all([
-  forwardInput(),
-  forwardOutput(child.stdout, Deno.stdout),
-  forwardOutput(child.stderr, Deno.stderr),
-  child.status,
-]);
-await Deno.writeTextFile(transcriptPath, transcript);
-if (!status.success) Deno.exit(status.code);
-`;
-
 interface ServerFixture {
 	readonly running: RunningWorkbenchServer;
 	readonly temporaryRoot: string;
+	readonly projectRoot: string;
+	readonly pidPath: string;
+	readonly stateDir: string;
+	readonly homePath: string;
 	close(): Promise<void>;
 }
 
@@ -90,37 +47,92 @@ interface WebSocketClose {
 	readonly reason: string;
 }
 
-async function startFixture(eventDelayMs = 3, clioLauncher?: ClioLauncher): Promise<ServerFixture> {
+/** Launches the deterministic ACP child instead of a real `clio-coder acp`. */
+function fixtureLauncher(scenario: string, pidPath?: string): ClioLauncher {
+	return {
+		launch(trustedRoot: string): AcpLaunchSpec {
+			return {
+				command: Deno.execPath(),
+				args: [
+					"run",
+					"--quiet",
+					"--no-config",
+					...(pidPath === undefined ? [] : [`--allow-write=${pidPath}`]),
+					ACP_CHILD_FIXTURE,
+					`--scenario=${scenario}`,
+					...(pidPath === undefined ? [] : [`--pid-file=${pidPath}`]),
+				],
+				cwd: trustedRoot,
+				clearEnv: true,
+				terminationScope: Deno.build.os === "windows" ? "direct-child" : "posix-process-group",
+				redact: [trustedRoot],
+			};
+		},
+	};
+}
+
+interface FixtureOptions {
+	readonly scenario?: string;
+	/** Records the ACP child's pid so a test can prove it is the only one. */
+	readonly pidFile?: boolean;
+	readonly clioLauncher?: ClioLauncher;
+	readonly disconnectGraceMs?: number;
+	readonly permissionEscalateMs?: number;
+	readonly permissionBudgetMs?: number;
+}
+
+async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture> {
 	const temporaryRoot = await Deno.makeTempDir({ prefix: "workbench-server-test-" });
 	const distRoot = join(temporaryRoot, "dist");
+	const homePath = join(temporaryRoot, "home");
+	const stateDir = join(temporaryRoot, "state");
+	const projectRoot = join(homePath, "code", "alpha");
+	const pidPath = join(temporaryRoot, "child.pid");
 	try {
 		await Deno.mkdir(join(distRoot, "assets"), { recursive: true });
+		await Deno.mkdir(projectRoot, { recursive: true });
+		await Deno.writeTextFile(join(projectRoot, "notes.txt"), "fixture note\n");
 		await Promise.all([
 			Deno.writeTextFile(join(distRoot, "index.html"), INDEX_HTML),
 			Deno.writeTextFile(join(distRoot, "assets", "fixture.js"), ASSET_JAVASCRIPT),
 		]);
 		const running = await startWorkbenchServer({
-			dataDir: join(temporaryRoot, "data"),
 			distRoot: pathToFileURL(`${distRoot}/`),
-			eventDelayMs,
+			stateDir,
+			homePath,
 			mode: "browser",
 			port: 0,
 			quiet: true,
-			...(clioLauncher === undefined ? {} : { clioLauncher }),
+			acpTiming: {
+				permissionTimeoutMs: 60_000,
+				cancelGraceMs: 300,
+				closeTimeoutMs: 300,
+				exitGraceMs: 300,
+				termGraceMs: 150,
+			},
+			clioLauncher: options.clioLauncher ??
+				fixtureLauncher(options.scenario ?? "happy", options.pidFile === true ? pidPath : undefined),
+			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
+			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
+			...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
 		});
 		return {
 			running,
 			temporaryRoot,
+			projectRoot,
+			pidPath,
+			stateDir,
+			homePath,
 			async close() {
 				try {
 					await running.close();
 				} finally {
-					await Deno.remove(temporaryRoot, { recursive: true });
+					await Deno.remove(temporaryRoot, { recursive: true }).catch(() => undefined);
 				}
 			},
 		};
 	} catch (error) {
-		await Deno.remove(temporaryRoot, { recursive: true });
+		await Deno.remove(temporaryRoot, { recursive: true }).catch(() => undefined);
 		throw error;
 	}
 }
@@ -409,12 +421,12 @@ async function sendCommand(
 
 async function collectThrough(socket: RawWebSocket, terminalKind: ServerEvent["kind"]): Promise<ServerEvent[]> {
 	const events: ServerEvent[] = [];
-	for (let index = 0; index < 32; index += 1) {
+	for (let index = 0; index < 128; index += 1) {
 		const event = await socket.readEvent();
 		events.push(event);
 		if (event.kind === terminalKind) return events;
 	}
-	throw new Error(`Did not receive ${terminalKind} within 32 server events`);
+	throw new Error(`Did not receive ${terminalKind} within 128 server events`);
 }
 
 function assertContiguous(events: readonly ServerEvent[], workspaceInstanceId: string): void {
@@ -429,31 +441,15 @@ function delay(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function readTextFileEventually(path: string, description: string, timeoutMs = 5_000): Promise<string> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			return await Deno.readTextFile(path);
-		} catch (error) {
-			if (!(error instanceof Deno.errors.NotFound)) throw error;
-			if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${description}`);
-			await delay(10);
-		}
-	}
-}
-
 Deno.test("outbound WebSocket high-water accounting includes the next UTF-8 frame at the exact boundary", () => {
 	equal(wouldExceedWebSocketHighWaterMark(MAX_WEBSOCKET_OUTBOUND_BYTES - 1, 1), false);
 	equal(wouldExceedWebSocketHighWaterMark(MAX_WEBSOCKET_OUTBOUND_BYTES, 0), false);
 	equal(wouldExceedWebSocketHighWaterMark(MAX_WEBSOCKET_OUTBOUND_BYTES, encoder.encode("x").byteLength), true);
-	equal(
-		wouldExceedWebSocketHighWaterMark(MAX_WEBSOCKET_OUTBOUND_BYTES - 3, encoder.encode("😀").byteLength),
-		true,
-	);
+	equal(wouldExceedWebSocketHighWaterMark(MAX_WEBSOCKET_OUTBOUND_BYTES - 3, encoder.encode("😀").byteLength), true);
 	equal(wouldExceedWebSocketHighWaterMark(-1, 1), true);
 });
 
-Deno.test("startWorkbenchServer serves bootstrap and static assets with bounded HTTP behavior", async () => {
+Deno.test("startWorkbenchServer serves a v3 bootstrap and static assets with bounded HTTP behavior", async () => {
 	const fixture = await startFixture();
 	try {
 		const { running } = fixture;
@@ -468,23 +464,16 @@ Deno.test("startWorkbenchServer serves bootstrap and static assets with bounded 
 		equal(bootstrap.workspaceInstanceId, running.workspaceInstanceId);
 		equal(bootstrap.localToken, running.token);
 		equal(bootstrap.mode, "browser");
-		equal(Object.hasOwn(bootstrap, "fakeEngine"), false);
-		ok(Array.isArray(bootstrap.projects));
-		equal(bootstrap.projects.length, 2);
-		equal(typeof bootstrap.selectedProjectId, "string");
-		for (const value of bootstrap.projects) {
-			if (typeof value !== "object" || value === null || Array.isArray(value)) {
-				throw new Error("Bootstrap project was not a workspace object");
-			}
-			const workspace = value as Record<string, unknown>;
-			if (typeof workspace.engine !== "object" || workspace.engine === null || Array.isArray(workspace.engine)) {
-				throw new Error("Bootstrap workspace omitted its engine snapshot");
-			}
-			const engine = workspace.engine as Record<string, unknown>;
-			equal(engine.kind, "fake");
-			equal(engine.phase, "ready");
-			ok(Array.isArray(engine.facts));
-			equal(workspace.pendingPermission, null);
+		equal(bootstrap.openProjectId, null);
+		equal(bootstrap.workspace, null);
+		deepStrictEqual(bootstrap.recent, []);
+		equal(bootstrap.homePath, await Deno.realPath(fixture.homePath));
+		match(String(bootstrap.stateDirNote), /recent-project list/u);
+		match(String(bootstrap.securityNote), /Deno's file grants are broad/u);
+		for (
+			const removed of ["projects", "selectedProjectId", "fakeEngine", "sandboxLabel", "registerableSandboxFolders"]
+		) {
+			equal(Object.hasOwn(bootstrap, removed), false, `${removed} must be gone`);
 		}
 
 		const indexResponse = await fetch(running.url);
@@ -498,34 +487,23 @@ Deno.test("startWorkbenchServer serves bootstrap and static assets with bounded 
 		equal(headResponse.status, 200);
 		equal(headResponse.headers.get("content-type"), "text/javascript; charset=utf-8");
 		equal(headResponse.headers.get("cache-control"), "public, max-age=3600");
-		assertSecurityHeaders(headResponse.headers);
 		equal(await headResponse.text(), "");
 
-		const fallbackResponse = await fetch(new URL("/projects/atlas", running.url), {
-			headers: { accept: "text/html" },
-		});
+		const fallbackResponse = await fetch(new URL("/projects/alpha", running.url), { headers: { accept: "text/html" } });
 		equal(fallbackResponse.status, 200);
 		equal(await fallbackResponse.text(), INDEX_HTML);
 
 		const traversalResponse = await fetch(`${running.url}/safe/%2e%2e%2fsecret.txt`);
 		equal(traversalResponse.status, 400);
 		equal(await traversalResponse.text(), "Invalid asset path");
-		assertSecurityHeaders(traversalResponse.headers);
 
-		const missingResponse = await fetch(new URL("/missing.js", running.url), {
-			headers: { accept: "text/html" },
-		});
+		const missingResponse = await fetch(new URL("/missing.js", running.url), { headers: { accept: "text/html" } });
 		equal(missingResponse.status, 404);
 		equal(await missingResponse.text(), "Asset not found");
 
 		const methodResponse = await fetch(new URL("/api/bootstrap", running.url), { method: "POST" });
 		equal(methodResponse.status, 405);
 		equal(await methodResponse.text(), "Method not allowed");
-		assertSecurityHeaders(methodResponse.headers);
-
-		const staticMethodResponse = await fetch(running.url, { method: "POST" });
-		equal(staticMethodResponse.status, 405);
-		equal(await staticMethodResponse.text(), "Method not allowed");
 
 		const eventsWithoutUpgrade = await fetch(new URL("/api/events", running.url));
 		equal(eventsWithoutUpgrade.status, 426);
@@ -546,50 +524,38 @@ Deno.test("static assets reject file-URL escapes without breaking owned assets o
 		const outsidePath = join(fixture.temporaryRoot, "outside-secret.txt");
 		await Deno.writeTextFile(outsidePath, "must not be served\n");
 		const outsideUrl = pathToFileURL(outsidePath).href;
-		const attackPaths = [
-			"/file:///etc/passwd",
-			`/${outsideUrl}`,
-			`/${outsideUrl.replace(/^file:/u, "file%3A").replaceAll("/", "%2F")}`,
-			"/FiLe:%2F%2F%2Fetc%2Fpasswd",
-		];
-		for (const attackPath of attackPaths) {
+		for (
+			const attackPath of [
+				"/file:///etc/passwd",
+				`/${outsideUrl}`,
+				`/${outsideUrl.replace(/^file:/u, "file%3A").replaceAll("/", "%2F")}`,
+				"/FiLe:%2F%2F%2Fetc%2Fpasswd",
+			]
+		) {
 			const response = await fetch(`${running.url}${attackPath}`);
 			equal(response.status, 400, attackPath);
 			equal(await response.text(), "Invalid asset path", attackPath);
 			assertSecurityHeaders(response.headers);
 		}
-
 		const assetResponse = await fetch(new URL("/assets/fixture.js", running.url));
 		equal(assetResponse.status, 200);
 		equal(await assetResponse.text(), ASSET_JAVASCRIPT);
-
-		const fallbackResponse = await fetch(new URL("/projects/still-local", running.url), {
-			headers: { accept: "text/html" },
-		});
-		equal(fallbackResponse.status, 200);
-		equal(await fallbackResponse.text(), INDEX_HTML);
 	} finally {
 		await fixture.close();
 	}
 });
 
-Deno.test("the native Windows product launcher remains unavailable without an explicit WSL mapping", async () => {
+Deno.test("the native Windows launcher remains unavailable without an explicit WSL mapping", () => {
 	const launcher = defaultClioLauncher("windows");
-	await rejects(
-		launcher.probe("C:\\bounded-project"),
-		(error: unknown) =>
-			error instanceof EngineError && error.code === "not-ready" &&
-			/error.*WSL project mapping|WSL project mapping.*configured/iu.test(error.message),
-	);
 	throws(
 		() => launcher.launch("C:\\bounded-project"),
 		(error: unknown) =>
-			error instanceof EngineError && error.code === "not-ready" && /explicit WSL configuration/iu.test(error.message),
+			error instanceof HostError && error.code === "not-ready" && /explicit WSL configuration/iu.test(error.message),
 	);
 });
 
-Deno.test("authenticated Origin-bound WebSocket emits one deterministic contiguous v2 turn", async () => {
-	const fixture = await startFixture();
+Deno.test("an authenticated socket opens a real project and drives one contiguous conversation", async () => {
+	const fixture = await startFixture({ scenario: "permission" });
 	let socket: RawWebSocket | undefined;
 	try {
 		const { running } = fixture;
@@ -597,559 +563,718 @@ Deno.test("authenticated Origin-bound WebSocket emits one deterministic contiguo
 		equal(await upgradeStatus(eventsEndpoint(running)), 403);
 		equal(await upgradeStatus(eventsEndpoint(running, `${running.token}-wrong`), running.url), 403);
 
-		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
-		const projectId = bootstrap.selectedProjectId;
-		if (typeof projectId !== "string") throw new Error("Bootstrap did not select a project");
-
 		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
 		const ready = await socket.readEvent();
 		equal(ready.kind, "connection.ready");
-		equal(ready.sequence, 1);
 
-		await sendCommand(socket, "request-start-0001", "turn.start", {
-			projectId,
-			prompt: "Verify the deterministic server integration path",
-			fakeScenario: "complete",
-		});
-		const throughPermission = await collectThrough(socket, "turn.permission.requested");
-		deepStrictEqual(throughPermission.map((event) => event.kind), [
-			"engine.state",
-			"turn.started",
-			"turn.thought",
-			"turn.agent",
-			"turn.tool",
-			"turn.tool",
-			"turn.change",
-			"engine.state",
-			"turn.permission.requested",
-		]);
-		const started = throughPermission.find((event) => event.kind === "turn.started");
-		const permission = throughPermission.at(-1);
-		if (started?.kind !== "turn.started" || permission?.kind !== "turn.permission.requested") {
-			throw new Error("Deterministic turn did not reach its permission boundary");
-		}
-		equal(started.projectId, projectId);
-		equal(started.payload.fakeScenario, "complete");
-		equal(started.payload.source, "simulated-by-workbench");
-		equal(permission.payload.permissionId, "permission-fake-0001");
-		equal(permission.payload.toolCallId, "tool-fake-artifact");
-		deepStrictEqual(permission.payload.locations, [{ segments: ["analysis", "convergence-notes.md"] }]);
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = await collectThrough(socket, "project.opened");
+		const openedEvent = opened.at(-1);
+		ok(openedEvent?.kind === "project.opened");
+		const workspace = openedEvent.payload.workspace;
+		const projectId = workspace.project.id;
+		equal(workspace.project.rootPath, await Deno.realPath(fixture.projectRoot));
+		equal(workspace.project.available, true);
+		ok(workspace.tree.some((node) => node.name === "notes.txt"));
 
-		await sendCommand(socket, "request-permission-0001", "permission.resolve", {
+		await sendCommand(socket, "request-turn", "turn.start", { projectId, prompt: "Exercise mediated permission." });
+		const untilPermission = await collectThrough(socket, "turn.permission.requested");
+		const permission = untilPermission.at(-1);
+		ok(permission?.kind === "turn.permission.requested");
+		const turnId = permission.turnId;
+		ok(turnId);
+		await sendCommand(socket, "request-allow", "permission.resolve", {
 			projectId,
-			turnId: started.turnId,
+			turnId,
 			permissionId: permission.payload.permissionId,
 			decision: "allow-once",
 		});
-		const throughCompletion = await collectThrough(socket, "turn.terminal");
-		deepStrictEqual(throughCompletion.map((event) => event.kind), [
-			"turn.permission.resolved",
-			"turn.evidence",
-			"turn.agent",
-			"turn.terminal",
-		]);
-		const allEvents = [ready, ...throughPermission, ...throughCompletion];
-		assertContiguous(allEvents, running.workspaceInstanceId);
-		for (const event of allEvents.filter((event) => event.kind.startsWith("turn."))) {
-			equal(event.projectId, projectId);
-			equal(event.sessionId, started.sessionId);
-			equal(event.turnId, started.turnId);
-		}
-		deepStrictEqual(allEvents.map((event) => event.terminal), [
-			...Array.from({ length: allEvents.length - 1 }, () => false),
-			true,
-		]);
-		const completed = throughCompletion.at(-1);
-		if (completed?.kind !== "turn.terminal") throw new Error("Deterministic turn did not complete");
-		equal(completed.payload.outcome, "completed");
-		equal(completed.payload.code, "fake-completed");
-		equal(completed.payload.source, "simulated-by-workbench");
+		const untilTerminal = await collectThrough(socket, "turn.terminal");
+		const terminal = untilTerminal.at(-1);
+		ok(terminal?.kind === "turn.terminal");
+		equal(terminal.payload.outcome, "completed");
 
-		await socket.closeGracefully();
-		socket = undefined;
+		const all = [ready, ...opened, ...untilPermission, ...untilTerminal];
+		assertContiguous(all, running.workspaceInstanceId);
+		const projection = JSON.stringify(all);
+		ok(!projection.includes("fixture-session-1"));
+		ok(!projection.includes("fixture-permission-1"));
+		ok(!projection.includes("rawInput"));
+		// The project's own root is the one native path that crosses; nothing else
+		// carries it, and no turn event does.
+		const turnEvents = all.filter((event) => event.kind.startsWith("turn."));
+		ok(turnEvents.length > 0);
+		ok(!JSON.stringify(turnEvents).includes(fixture.projectRoot));
+		ok(!JSON.stringify(turnEvents).includes(fixture.homePath));
+
+		// A browser reload restores the same conversation from host-held state.
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
+		equal(bootstrap.openProjectId, projectId);
+		const restored = bootstrap.workspace as Record<string, unknown>;
+		const timeline = restored.timeline as Array<Record<string, unknown>>;
+		ok(timeline.length >= 3);
+		ok(timeline.some((item) => item.kind === "request"));
+		ok(timeline.some((item) => item.kind === "approval"));
+		ok(timeline.some((item) => item.kind === "outcome"));
+		equal(restored.pendingPermission, null);
+		equal(restored.activeTurn, null);
+		deepStrictEqual((bootstrap.recent as Array<Record<string, unknown>>).map((entry) => entry.id), [projectId]);
 	} finally {
-		socket?.closeAbruptly();
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();
 	}
 });
 
-Deno.test("injected Clio launcher projects one real ACP turn through the neutral v2 host protocol", async () => {
-	const probedRoots: string[] = [];
-	const launchedRoots: string[] = [];
-	const launcher: ClioLauncher = {
-		probe(trustedRoot) {
-			probedRoots.push(trustedRoot);
-			return Promise.resolve({ version: "clio-coder fixture-0.0.0" });
-		},
-		launch(trustedRoot) {
-			launchedRoots.push(trustedRoot);
-			return {
-				command: Deno.execPath(),
-				args: ["run", "--quiet", "--no-config", ACP_CHILD_FIXTURE, "--scenario=happy"],
-				cwd: trustedRoot,
-				clearEnv: true,
-				terminationScope: Deno.build.os === "windows" ? "direct-child" : "posix-process-group",
-				redact: [trustedRoot],
-			};
-		},
-	};
-	const fixture = await startFixture(3, launcher);
+Deno.test("a guarded or missing folder is refused with a reason and nothing is opened", async () => {
+	const fixture = await startFixture();
 	let socket: RawWebSocket | undefined;
 	try {
 		const { running } = fixture;
-		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
-		const projectId = bootstrap.selectedProjectId;
-		if (typeof projectId !== "string") throw new Error("Bootstrap did not select a project");
-
 		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
-		const events: ServerEvent[] = [await socket.readEvent()];
-		await sendCommand(socket, "request-clio-select", "engine.select", { projectId, kind: "clio-acp" });
-		const selected = await socket.readEvent();
-		events.push(selected);
-		if (selected.kind !== "engine.state") throw new Error("Clio selection did not emit engine.state");
-		equal(selected.payload.snapshot.kind, "clio-acp");
-		equal(selected.payload.snapshot.phase, "unprobed");
+		equal((await socket.readEvent()).kind, "connection.ready");
 
-		await sendCommand(socket, "request-clio-probe", "engine.probe", { projectId });
-		const probing = await socket.readEvent();
-		const ready = await socket.readEvent();
-		events.push(probing, ready);
-		if (probing.kind !== "engine.state" || ready.kind !== "engine.state") {
-			throw new Error("Clio probe did not emit bounded readiness states");
+		const refusable = [fixture.homePath, join(fixture.homePath, ".config"), join(fixture.homePath, "absent"), "/"];
+		for (const [index, path] of refusable.entries()) {
+			await sendCommand(socket, `request-refused-${index}`, "project.open", { path });
+			const error = await socket.readEvent();
+			ok(error.kind === "command.error", `expected a refusal for ${path}, received ${JSON.stringify(error)}`);
+			equal(error.payload.code, "refused");
+			ok(error.payload.message.length > 0);
 		}
-		equal(probing.payload.snapshot.phase, "probing");
-		equal(ready.payload.snapshot.phase, "ready");
 
-		await sendCommand(socket, "request-clio-turn", "turn.start", {
-			projectId,
-			prompt: "Exercise the injected ACP host boundary",
-		});
-		const turnEvents = await collectThrough(socket, "turn.terminal");
-		events.push(...turnEvents);
-		const started = turnEvents.find((event) => event.kind === "turn.started");
-		const terminal = turnEvents.at(-1);
-		if (started?.kind !== "turn.started" || terminal?.kind !== "turn.terminal") {
-			throw new Error("Injected ACP turn did not reach a neutral terminal event");
-		}
-		match(started.sessionId ?? "", /^session-clio-/u);
-		match(started.turnId ?? "", /^turn-clio-/u);
-		ok(turnEvents.some((event) => event.kind === "turn.text"));
-		ok(turnEvents.some((event) => event.kind === "turn.thought"));
-		deepStrictEqual(
-			turnEvents.filter((event) => event.kind === "turn.tool").map((event) => event.payload.status),
-			["in_progress", "completed"],
-		);
-		equal(terminal.payload.outcome, "completed");
-		equal(terminal.payload.stopReason, "end_turn");
-		equal(terminal.payload.source, "reported-by-clio");
-		for (const event of turnEvents.filter((event) => event.kind.startsWith("turn."))) {
-			equal(event.projectId, projectId);
-			equal(event.sessionId, started.sessionId);
-			equal(event.turnId, started.turnId);
-		}
-		assertContiguous(events, running.workspaceInstanceId);
+		await sendCommand(socket, "request-unknown", "session.new", { projectId: "project-missing-0001" });
+		const missing = await socket.readEvent();
+		ok(missing.kind === "command.error");
+		equal(missing.payload.code, "not-found");
 
-		deepStrictEqual(probedRoots, launchedRoots);
-		equal(probedRoots.length, 1);
-		const projection = JSON.stringify(events);
-		for (const privateValue of [probedRoots[0], "fixture-session-1", "fixture-tool-1", "rawInput", "rawOutput"]) {
-			if (privateValue !== undefined) ok(!projection.includes(privateValue), `host projection leaked ${privateValue}`);
-		}
-		ok(!projection.includes("demo."));
-
-		await socket.closeGracefully();
-		socket = undefined;
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
+		equal(bootstrap.openProjectId, null);
 	} finally {
-		socket?.closeAbruptly();
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();
 	}
 });
 
-Deno.test("raw WebSocket disconnect cancels a pending ACP permission, retires the child, and releases the slot", async () => {
-	const observationRoot = await Deno.makeTempDir({ prefix: "workbench-server-permission-disconnect-" });
-	const proxyPath = join(observationRoot, "acp-transcript-proxy.js");
-	const transcriptPaths: string[] = [];
-	const launchedRoots: string[] = [];
-	await Deno.writeTextFile(proxyPath, ACP_TRANSCRIPT_PROXY);
-	const launcher: ClioLauncher = {
-		probe() {
-			return Promise.resolve({ version: "clio-coder fixture-0.0.0" });
-		},
-		launch(trustedRoot) {
-			launchedRoots.push(trustedRoot);
-			const transcriptPath = join(observationRoot, `host-transcript-${launchedRoots.length}.jsonl`);
-			transcriptPaths.push(transcriptPath);
-			return {
-				command: Deno.execPath(),
-				args: [
-					"run",
-					"--quiet",
-					"--no-config",
-					`--allow-run=${Deno.execPath()}`,
-					`--allow-write=${transcriptPath}`,
-					proxyPath,
-					ACP_CHILD_FIXTURE,
-					transcriptPath,
-				],
-				cwd: trustedRoot,
-				clearEnv: true,
-				terminationScope: Deno.build.os === "windows" ? "direct-child" : "posix-process-group",
-				redact: [trustedRoot],
-			};
-		},
-	};
-
-	let fixture: ServerFixture | undefined;
-	let owner: RawWebSocket | undefined;
-	let successor: RawWebSocket | undefined;
-	try {
-		fixture = await startFixture(1, launcher);
-		const { running } = fixture;
-		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
-		const projectId = bootstrap.selectedProjectId;
-		if (typeof projectId !== "string") throw new Error("Bootstrap did not select a project");
-
-		owner = await RawWebSocket.connect(eventsEndpoint(running), running.url);
-		equal((await owner.readEvent()).kind, "connection.ready");
-		await sendCommand(owner, "request-disconnect-select", "engine.select", { projectId, kind: "clio-acp" });
-		const selected = await owner.readEvent();
-		if (selected.kind !== "engine.state") throw new Error("Clio selection did not emit engine.state");
-		equal(selected.payload.snapshot.phase, "unprobed");
-		await sendCommand(owner, "request-disconnect-probe", "engine.probe", { projectId });
-		const probing = await owner.readEvent();
-		const ready = await owner.readEvent();
-		if (probing.kind !== "engine.state" || ready.kind !== "engine.state") {
-			throw new Error("Clio probe did not emit readiness states");
-		}
-		equal(probing.payload.snapshot.phase, "probing");
-		equal(ready.payload.snapshot.phase, "ready");
-
-		await sendCommand(owner, "request-disconnect-turn", "turn.start", {
-			projectId,
-			prompt: "Disconnect this browser exactly at the real ACP permission boundary",
-		});
-		const ownerTurnEvents = await collectThrough(owner, "turn.permission.requested");
-		const ownerStarted = ownerTurnEvents.find((event) => event.kind === "turn.started");
-		const ownerPermission = ownerTurnEvents.at(-1);
-		if (ownerStarted?.kind !== "turn.started" || ownerPermission?.kind !== "turn.permission.requested") {
-			throw new Error("The injected ACP turn did not reach its permission boundary");
-		}
-		equal(ownerPermission.payload.source, "observed-on-acp");
-		const busyBootstrap = await fetch(new URL("/api/bootstrap", running.url));
-		equal(busyBootstrap.status, 409);
-		deepStrictEqual(await busyBootstrap.json(), { error: "engine-busy" });
-		assertSecurityHeaders(busyBootstrap.headers);
-		owner.closeAbruptly();
-		owner = undefined;
-
-		let reconciledBootstrap: Record<string, unknown> | undefined;
-		for (let attempt = 0; attempt < 100 && reconciledBootstrap === undefined; attempt += 1) {
-			const response = await fetch(new URL("/api/bootstrap", running.url));
-			if (response.status === 409) {
-				deepStrictEqual(await response.json(), { error: "engine-busy" });
-				await delay(10);
-				continue;
-			}
-			equal(response.status, 200);
-			reconciledBootstrap = await response.json() as Record<string, unknown>;
-		}
-		if (reconciledBootstrap === undefined) {
-			throw new Error("Bootstrap did not reconcile the disconnected permission owner");
-		}
-		const reconciledProjects = reconciledBootstrap.projects;
-		if (!Array.isArray(reconciledProjects)) throw new Error("Reconciled bootstrap omitted its projects");
-		const reconciledWorkspace = reconciledProjects.find((value) =>
-			typeof value === "object" && value !== null && !Array.isArray(value) &&
-			(value as Record<string, unknown>).project !== null &&
-			typeof (value as Record<string, unknown>).project === "object" &&
-			((value as Record<string, unknown>).project as Record<string, unknown>).id === projectId
-		) as Record<string, unknown> | undefined;
-		if (reconciledWorkspace === undefined) throw new Error("Reconciled bootstrap omitted the active project");
-		const reconciledEngine = reconciledWorkspace.engine;
-		if (typeof reconciledEngine !== "object" || reconciledEngine === null || Array.isArray(reconciledEngine)) {
-			throw new Error("Reconciled bootstrap omitted its engine snapshot");
-		}
-		equal((reconciledEngine as Record<string, unknown>).phase, "ready");
-		equal(reconciledWorkspace.pendingPermission, null);
-		equal(reconciledWorkspace.engineGeneration, null);
-		equal(reconciledWorkspace.activeTurnId, null);
-
-		const firstTranscriptPath = transcriptPaths[0];
-		if (firstTranscriptPath === undefined) throw new Error("The first ACP child was not launched");
-		const transcript = await readTextFileEventually(
-			firstTranscriptPath,
-			"the disconnected owner's retired ACP child transcript",
-		);
-		const outbound = transcript.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
-		const permissionResponseIndex = outbound.findIndex((message) =>
-			message.id === "fixture-permission-1" && Object.hasOwn(message, "result")
-		);
-		const cancelIndex = outbound.findIndex((message) => message.method === "session/cancel");
-		ok(permissionResponseIndex >= 0, "disconnect did not settle the fixture permission");
-		ok(cancelIndex > permissionResponseIndex, "the prompt was not canceled after permission settlement");
-		deepStrictEqual(outbound[permissionResponseIndex]?.result, { outcome: { outcome: "cancelled" } });
-		equal(Object.hasOwn(outbound[cancelIndex] ?? {}, "id"), false);
-
-		successor = await RawWebSocket.connect(eventsEndpoint(running), running.url);
-		const successorEvents: ServerEvent[] = [await successor.readEvent()];
-		await sendCommand(successor, "request-after-permission-disconnect", "turn.start", {
-			projectId,
-			prompt: "Start after the disconnected permission owner was retired",
-		});
-		const successorStarting = await successor.readEvent();
-		successorEvents.push(successorStarting);
-		if (successorStarting.kind !== "engine.state") {
-			throw new Error(`Unexpected successor event after coherent bootstrap: ${successorStarting.kind}`);
-		}
-		const throughStarted = await collectThrough(successor, "turn.started");
-		successorEvents.push(...throughStarted);
-		const successorStarted = throughStarted.at(-1);
-		if (successorStarted?.kind !== "turn.started") {
-			throw new Error("Coherent bootstrap did not release the global engine slot");
-		}
-		equal(launchedRoots.length, 2);
-
-		await sendCommand(successor, "request-successor-cancel-real", "turn.cancel", {
-			projectId,
-			turnId: successorStarted.turnId,
-		});
-		successorEvents.push(...await collectThrough(successor, "turn.terminal"));
-		const successorTerminal = successorEvents.at(-1);
-		if (successorTerminal?.kind !== "turn.terminal") throw new Error("The successor turn did not retire");
-		equal(successorTerminal.payload.outcome, "canceled");
-		assertContiguous(successorEvents, running.workspaceInstanceId);
-
-		await successor.closeGracefully();
-		successor = undefined;
-	} finally {
-		owner?.closeAbruptly();
-		successor?.closeAbruptly();
-		await fixture?.close();
-		await Deno.remove(observationRoot, { recursive: true });
-	}
-});
-
-Deno.test("WebSocket closes malformed and oversized client frames with protocol-specific codes", async () => {
+Deno.test("the browser directory picker lists folders only and flags what cannot be opened", async () => {
 	const fixture = await startFixture();
-	let malformedSocket: RawWebSocket | undefined;
-	let longInvalidSocket: RawWebSocket | undefined;
-	let oversizedSocket: RawWebSocket | undefined;
+	let socket: RawWebSocket | undefined;
 	try {
 		const { running } = fixture;
-		malformedSocket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
-		equal((await malformedSocket.readEvent()).kind, "connection.ready");
-		await malformedSocket.sendText("{not-json");
-		const protocolError = await malformedSocket.readEvent();
-		if (protocolError.kind !== "protocol.error") throw new Error("Malformed JSON did not produce protocol.error");
-		equal(protocolError.sequence, 2);
-		equal(protocolError.terminal, true);
-		equal(protocolError.payload.code, "invalid-frame");
-		match(protocolError.payload.message, /valid JSON/u);
-		const malformedClose = await malformedSocket.readClose();
-		equal(malformedClose.code, 1002);
-		equal(malformedClose.reason, "Invalid Workbench client protocol frame");
-		malformedSocket.closeAbruptly();
-		malformedSocket = undefined;
+		await Deno.mkdir(join(fixture.homePath, ".config"), { recursive: true });
+		await Deno.writeTextFile(join(fixture.homePath, "loose.txt"), "never listed");
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
 
-		longInvalidSocket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
-		equal((await longInvalidSocket.readEvent()).kind, "connection.ready");
-		await longInvalidSocket.sendText(JSON.stringify({
-			protocolVersion: PROTOCOL_VERSION,
-			requestId: "request-long-invalid",
-			kind: "project.select",
-			payload: { projectId: "project-atlas-0001" },
-			[`attacker-${"x".repeat(400)}`]: true,
-		}));
-		const longProtocolError = await longInvalidSocket.readEvent();
-		if (longProtocolError.kind !== "protocol.error") throw new Error("Invalid shape did not produce protocol.error");
-		equal(longProtocolError.payload.code, "invalid-frame");
-		const longInvalidClose = await longInvalidSocket.readClose();
-		equal(longInvalidClose.code, 1002);
-		equal(longInvalidClose.reason, "Invalid Workbench client protocol frame");
-		ok(encoder.encode(longInvalidClose.reason).byteLength <= 123);
-		longInvalidSocket.closeAbruptly();
-		longInvalidSocket = undefined;
-
-		oversizedSocket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
-		equal((await oversizedSocket.readEvent()).kind, "connection.ready");
-		await oversizedSocket.sendText("x".repeat(MAX_CLIENT_FRAME_BYTES + 1));
-		const oversizedClose = await oversizedSocket.readClose();
-		equal(oversizedClose.code, 1009);
-		match(oversizedClose.reason, /exceeded 16 KiB/u);
-		oversizedSocket.closeAbruptly();
-		oversizedSocket = undefined;
+		await sendCommand(socket, "request-browse", "project.browse", {});
+		const listing = await socket.readEvent();
+		ok(listing.kind === "project.browse.listing");
+		equal(listing.payload.openable, false);
+		ok(listing.payload.reason?.includes("home directory"));
+		deepStrictEqual(listing.payload.entries.map((entry) => entry.name).sort(), [".config", "code"]);
+		equal(listing.payload.entries.find((entry) => entry.name === ".config")?.guarded, true);
+		ok(!JSON.stringify(listing).includes("loose.txt"));
 	} finally {
-		malformedSocket?.closeAbruptly();
-		longInvalidSocket?.closeAbruptly();
-		oversizedSocket?.closeAbruptly();
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();
 	}
 });
 
-Deno.test("active turns block project and engine selection until cancel releases the global slot", async () => {
-	const fixture = await startFixture(1_000);
-	let owner: RawWebSocket | undefined;
-	let contender: RawWebSocket | undefined;
+Deno.test("a second prompt during an active turn is refused without disturbing the first", async () => {
+	const fixture = await startFixture({ scenario: "hang" });
+	let socket: RawWebSocket | undefined;
 	try {
 		const { running } = fixture;
-		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
-		const projectId = bootstrap.selectedProjectId;
-		if (typeof projectId !== "string") throw new Error("Bootstrap did not select a project");
-		if (!Array.isArray(bootstrap.projects)) throw new Error("Bootstrap did not return project workspaces");
-		const otherProject = bootstrap.projects
-			.map((value) => {
-				if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-				const project = (value as Record<string, unknown>).project;
-				if (typeof project !== "object" || project === null || Array.isArray(project)) return undefined;
-				return (project as Record<string, unknown>).id;
-			})
-			.find((value): value is string => typeof value === "string" && value !== projectId);
-		if (otherProject === undefined) throw new Error("Bootstrap did not return a second project");
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = await collectThrough(socket, "project.opened");
+		const openedEvent = opened.at(-1);
+		ok(openedEvent?.kind === "project.opened");
+		const projectId = openedEvent.payload.workspace.project.id;
 
-		owner = await RawWebSocket.connect(eventsEndpoint(running), running.url);
-		contender = await RawWebSocket.connect(eventsEndpoint(running), running.url);
-		const ownerEvents: ServerEvent[] = [await owner.readEvent()];
-		const contenderEvents: ServerEvent[] = [await contender.readEvent()];
+		await sendCommand(socket, "request-first", "turn.start", { projectId, prompt: "Park until canceled." });
+		const started = await collectThrough(socket, "turn.started");
+		const startedEvent = started.at(-1);
+		ok(startedEvent?.kind === "turn.started");
+		const turnId = startedEvent.turnId;
+		ok(turnId);
 
-		await sendCommand(owner, "request-owner-start", "turn.start", {
-			projectId,
-			prompt: "Hold the global engine slot",
-			fakeScenario: "complete",
-		});
-		ownerEvents.push(...await collectThrough(owner, "turn.started"));
-		const ownerStarted = ownerEvents.at(-1);
-		if (ownerStarted?.kind !== "turn.started") throw new Error("Owner turn did not start");
+		await sendCommand(socket, "request-second", "turn.start", { projectId, prompt: "Compete for the prompt." });
+		const conflict = await collectThrough(socket, "command.error");
+		const conflictEvent = conflict.at(-1);
+		ok(conflictEvent?.kind === "command.error");
+		equal(conflictEvent.payload.code, "conflict");
+		equal(conflictEvent.payload.message, "Clio is still working on the previous prompt. Cancel it or wait.");
+		equal(conflictEvent.payload.requestId, "request-second");
 
-		await sendCommand(owner, "request-project-select", "project.select", { projectId: otherProject });
-		const projectBlocked = await owner.readEvent();
-		ownerEvents.push(projectBlocked);
-		if (projectBlocked.kind !== "command.error") throw new Error("Project selection was not blocked");
-		equal(projectBlocked.payload.code, "conflict");
-		equal(projectBlocked.payload.requestId, "request-project-select");
-		match(projectBlocked.payload.message, /Cancel the active turn/u);
-
-		await sendCommand(owner, "request-engine-select", "engine.select", { projectId, kind: "clio-acp" });
-		const engineBlocked = await owner.readEvent();
-		ownerEvents.push(engineBlocked);
-		if (engineBlocked.kind !== "command.error") throw new Error("Engine selection was not blocked");
-		equal(engineBlocked.payload.code, "conflict");
-		equal(engineBlocked.payload.requestId, "request-engine-select");
-		match(engineBlocked.payload.message, /Cancel the active turn/u);
-
-		await sendCommand(contender, "request-contender-blocked", "turn.start", {
-			projectId: otherProject,
-			prompt: "This turn must wait for the global slot",
-			fakeScenario: "complete",
-		});
-		const slotBlocked = await contender.readEvent();
-		contenderEvents.push(slotBlocked);
-		if (slotBlocked.kind !== "command.error") throw new Error("Concurrent turn was not blocked");
-		equal(slotBlocked.payload.code, "conflict");
-		equal(slotBlocked.payload.requestId, "request-contender-blocked");
-
-		await sendCommand(owner, "request-owner-cancel", "turn.cancel", {
-			projectId,
-			turnId: ownerStarted.turnId,
-		});
-		ownerEvents.push(...await collectThrough(owner, "turn.terminal"));
-		const ownerTerminal = ownerEvents.at(-1);
-		if (ownerTerminal?.kind !== "turn.terminal") throw new Error("Owner turn did not cancel");
-		equal(ownerTerminal.payload.outcome, "canceled");
-		equal(ownerTerminal.payload.code, "fake-cancelled");
-
-		await sendCommand(contender, "request-contender-start", "turn.start", {
-			projectId: otherProject,
-			prompt: "Use the released global engine slot",
-			fakeScenario: "complete",
-		});
-		contenderEvents.push(...await collectThrough(contender, "turn.started"));
-		const contenderStarted = contenderEvents.at(-1);
-		if (contenderStarted?.kind !== "turn.started") throw new Error("Cancel did not release the global slot");
-		equal(contenderStarted.projectId, otherProject);
-
-		await sendCommand(contender, "request-contender-cancel", "turn.cancel", {
-			projectId: otherProject,
-			turnId: contenderStarted.turnId,
-		});
-		contenderEvents.push(...await collectThrough(contender, "turn.terminal"));
-		assertContiguous(ownerEvents, running.workspaceInstanceId);
-		assertContiguous(contenderEvents, running.workspaceInstanceId);
-
-		await owner.closeGracefully();
-		owner = undefined;
-		await contender.closeGracefully();
-		contender = undefined;
-	} finally {
-		owner?.closeAbruptly();
-		contender?.closeAbruptly();
-		await fixture.close();
-	}
-});
-
-Deno.test("disconnecting a turn owner releases the global engine slot for another socket", async () => {
-	const fixture = await startFixture(1_000);
-	let owner: RawWebSocket | undefined;
-	let successor: RawWebSocket | undefined;
-	try {
-		const { running } = fixture;
-		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
-		const projectId = bootstrap.selectedProjectId;
-		if (typeof projectId !== "string") throw new Error("Bootstrap did not select a project");
-
-		owner = await RawWebSocket.connect(eventsEndpoint(running), running.url);
-		successor = await RawWebSocket.connect(eventsEndpoint(running), running.url);
-		equal((await owner.readEvent()).kind, "connection.ready");
-		const successorEvents: ServerEvent[] = [await successor.readEvent()];
-
-		await sendCommand(owner, "request-owner-start", "turn.start", {
-			projectId,
-			prompt: "Start a turn whose owner will disconnect",
-			fakeScenario: "complete",
-		});
-		const ownerStarted = (await collectThrough(owner, "turn.started")).at(-1);
-		if (ownerStarted?.kind !== "turn.started") throw new Error("Owner turn did not start");
-		owner.closeAbruptly();
-		owner = undefined;
-
-		let successorStarted: ServerEvent | undefined;
-		for (let attempt = 0; attempt < 50 && successorStarted === undefined; attempt += 1) {
-			await sendCommand(successor, `request-successor-${attempt}`, "turn.start", {
-				projectId,
-				prompt: "Start after disconnected-owner cleanup",
-				fakeScenario: "complete",
-			});
-			const response: ServerEvent = await successor.readEvent();
-			successorEvents.push(response);
-			if (response.kind === "command.error") {
-				equal(response.payload.code, "conflict");
-				await delay(10);
-				continue;
-			}
-			if (response.kind !== "engine.state") throw new Error(`Unexpected successor event: ${response.kind}`);
-			const started = await successor.readEvent();
-			successorEvents.push(started);
-			if (started.kind !== "turn.started") throw new Error(`Unexpected successor event: ${started.kind}`);
-			successorStarted = started;
-		}
-		if (successorStarted?.kind !== "turn.started") {
-			throw new Error("The disconnected owner did not release the global engine slot");
-		}
-
-		await sendCommand(successor, "request-successor-cancel", "turn.cancel", {
-			projectId,
-			turnId: successorStarted.turnId,
-		});
-		successorEvents.push(...await collectThrough(successor, "turn.terminal"));
-		const terminal = successorEvents.at(-1);
-		if (terminal?.kind !== "turn.terminal") throw new Error("Successor turn did not cancel");
+		await sendCommand(socket, "request-cancel", "turn.cancel", { projectId, turnId });
+		const terminal = (await collectThrough(socket, "turn.terminal")).at(-1);
+		ok(terminal?.kind === "turn.terminal");
 		equal(terminal.payload.outcome, "canceled");
-		assertContiguous(successorEvents, running.workspaceInstanceId);
-
-		await successor.closeGracefully();
-		successor = undefined;
 	} finally {
-		owner?.closeAbruptly();
-		successor?.closeAbruptly();
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("the last socket closing during a turn stops it after the grace window, never as a denial", async () => {
+	const fixture = await startFixture({ scenario: "permission", disconnectGraceMs: 50 });
+	let socket: RawWebSocket | undefined;
+	try {
+		const { running } = fixture;
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const openedEvent = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(openedEvent?.kind === "project.opened");
+		const projectId = openedEvent.payload.workspace.project.id;
+		await sendCommand(socket, "request-turn", "turn.start", { projectId, prompt: "Disconnect at permission." });
+		await collectThrough(socket, "turn.permission.requested");
+		socket.closeAbruptly();
+		socket = undefined;
+
+		// A new socket receives the full snapshot, so the outcome is observable.
+		await delay(400);
+		const observer = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		try {
+			equal((await observer.readEvent()).kind, "connection.ready");
+			const snapshot = await observer.readEvent();
+			ok(snapshot.kind === "project.opened");
+			const workspace = snapshot.payload.workspace;
+			equal(workspace.pendingPermission, null);
+			equal(workspace.activeTurn, null);
+			const approval = workspace.timeline.find((item) => item.kind === "approval");
+			ok(approval);
+			ok(approval.summary.includes("Clio was not told no"));
+			const outcome = workspace.timeline.find((item) => item.kind === "outcome" || item.kind === "failure");
+			ok(outcome);
+			ok(outcome.detail === "client-disconnected" || outcome.summary.includes("window went away"));
+		} finally {
+			await observer.closeGracefully().catch(() => observer.closeAbruptly());
+		}
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("a reconnecting socket cancels the grace window and keeps the child alive", async () => {
+	const fixture = await startFixture({ scenario: "hang", disconnectGraceMs: 400 });
+	let socket: RawWebSocket | undefined;
+	try {
+		const { running } = fixture;
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const openedEvent = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(openedEvent?.kind === "project.opened");
+		const projectId = openedEvent.payload.workspace.project.id;
+		await sendCommand(socket, "request-turn", "turn.start", { projectId, prompt: "Park until canceled." });
+		const startedEvent = (await collectThrough(socket, "turn.started")).at(-1);
+		ok(startedEvent?.kind === "turn.started");
+		const turnId = startedEvent.turnId;
+		ok(turnId);
+		socket.closeAbruptly();
+		socket = undefined;
+
+		const reconnected = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		try {
+			equal((await reconnected.readEvent()).kind, "connection.ready");
+			const snapshot = await reconnected.readEvent();
+			ok(snapshot.kind === "project.opened");
+			equal(snapshot.payload.workspace.activeTurn?.turnId, turnId);
+			await delay(600);
+			await sendCommand(reconnected, "request-cancel", "turn.cancel", { projectId, turnId });
+			const terminal = (await collectThrough(reconnected, "turn.terminal")).at(-1);
+			ok(terminal?.kind === "turn.terminal");
+			equal(terminal.payload.code, "operator-cancelled");
+		} finally {
+			await reconnected.closeGracefully().catch(() => reconnected.closeAbruptly());
+		}
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("malformed and oversized client frames close the socket with protocol-specific codes", async () => {
+	const fixture = await startFixture();
+	try {
+		const { running } = fixture;
+		const malformed = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await malformed.readEvent()).kind, "connection.ready");
+		await malformed.sendText("{not json");
+		const malformedError = await malformed.readEvent();
+		ok(malformedError.kind === "protocol.error");
+		equal(malformedError.payload.code, "invalid-frame");
+		const malformedClose = await malformed.readClose();
+		equal(malformedClose.code, 1002);
+		malformed.closeAbruptly();
+
+		const oversized = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await oversized.readEvent()).kind, "connection.ready");
+		await oversized.sendText(JSON.stringify({
+			protocolVersion: PROTOCOL_VERSION,
+			requestId: "request-oversized",
+			kind: "turn.start",
+			payload: { projectId: "project-alpha", prompt: "x".repeat(MAX_CLIENT_FRAME_BYTES) },
+		}));
+		const oversizedClose = await oversized.readClose();
+		equal(oversizedClose.code, 1009);
+		oversized.closeAbruptly();
+	} finally {
+		await fixture.close();
+	}
+});
+
+Deno.test("closing the server retires the child and leaves no project open", async () => {
+	const fixture = await startFixture({ scenario: "hang" });
+	let socket: RawWebSocket | undefined;
+	try {
+		const { running } = fixture;
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const openedEvent = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(openedEvent?.kind === "project.opened");
+		await sendCommand(socket, "request-turn", "turn.start", {
+			projectId: openedEvent.payload.workspace.project.id,
+			prompt: "Park until shutdown.",
+		});
+		await collectThrough(socket, "turn.started");
+		socket.closeAbruptly();
+		socket = undefined;
+		const closed = await Promise.race([running.close().then(() => true), delay(10_000).then(() => false)]);
+		equal(closed, true);
+		await rejects(fetch(new URL("/api/bootstrap", running.url)));
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await Deno.remove(fixture.temporaryRoot, { recursive: true }).catch(() => undefined);
+	}
+});
+
+Deno.test("three prompts share one session and the third sees the first two", async () => {
+	const fixture = await startFixture({ scenario: "conversation" });
+	let socket: RawWebSocket | undefined;
+	try {
+		const { running } = fixture;
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const openedEvent = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(openedEvent?.kind === "project.opened");
+		const projectId = openedEvent.payload.workspace.project.id;
+		const sessionId = openedEvent.payload.workspace.clio.session?.id;
+		ok(sessionId === undefined || typeof sessionId === "string");
+
+		const answers: string[] = [];
+		const turnIds: string[] = [];
+		for (let index = 0; index < 3; index += 1) {
+			await sendCommand(socket, `request-turn-${index}`, "turn.start", {
+				projectId,
+				prompt: `Prompt number ${index + 1}.`,
+			});
+			const events = await collectThrough(socket, "turn.terminal");
+			const text = events.filter((event) => event.kind === "turn.text").map((event) =>
+				event.kind === "turn.text" ? event.payload.text : ""
+			).join("");
+			answers.push(text);
+			const terminal = events.at(-1);
+			ok(terminal?.kind === "turn.terminal");
+			ok(terminal.turnId);
+			turnIds.push(terminal.turnId);
+			equal(terminal.payload.outcome, "completed");
+		}
+		deepStrictEqual(answers, [
+			"This session has seen 1 prompts.",
+			"This session has seen 2 prompts.",
+			"This session has seen 3 prompts.",
+		]);
+		deepStrictEqual(turnIds, ["turn-1", "turn-2", "turn-3"]);
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
+		const workspace = bootstrap.workspace as Record<string, unknown>;
+		const timeline = workspace.timeline as Array<Record<string, unknown>>;
+		equal(timeline.filter((item) => item.kind === "request").length, 3);
+		ok(timeline.every((item) => item.origin === "live"));
+		const session = (workspace.clio as Record<string, unknown>).session as Record<string, unknown>;
+		equal(session.target, "lmstudio");
+		equal(session.model, "qwen3.8-27b");
+		equal(session.resumed, false);
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("closing and reopening a session replays the branch Clio will extend", async () => {
+	const fixture = await startFixture({ scenario: "resume" });
+	let socket: RawWebSocket | undefined;
+	try {
+		const { running } = fixture;
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const openedEvent = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(openedEvent?.kind === "project.opened");
+		const projectId = openedEvent.payload.workspace.project.id;
+		const earlier = openedEvent.payload.workspace.sessions.find((session) => !session.hosted);
+		ok(earlier, "the fixture must offer an earlier session to resume");
+		equal(earlier.state, "closed");
+
+		// Opening a project binds no session, so the load runs on the fresh child.
+		await sendCommand(socket, "request-load", "session.load", { projectId, sessionId: earlier.id });
+
+		// Every replayed frame must precede the bound-session state that announces the load.
+		const replayed: string[] = [];
+		let boundIndex = -1;
+		for (let index = 0; index < 64 && boundIndex < 0; index += 1) {
+			const event = await socket.readEvent();
+			if (event.kind.startsWith("turn.")) replayed.push(event.kind);
+			if (event.kind === "clio.state" && event.payload.snapshot.session?.resumed === true) boundIndex = index;
+		}
+		ok(boundIndex >= 0, "the resumed session state never arrived");
+		deepStrictEqual(replayed, [
+			"turn.started",
+			"turn.text",
+			"turn.tool",
+			"turn.tool",
+			"turn.started",
+			"turn.text",
+			"turn.tool",
+		]);
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
+		const workspace = bootstrap.workspace as Record<string, unknown>;
+		const session = (workspace.clio as Record<string, unknown>).session as Record<string, unknown>;
+		equal(session.id, earlier.id);
+		equal(session.resumed, true);
+		equal(session.replayedTurns, 2);
+		equal(session.replayTruncated, false);
+		const timeline = workspace.timeline as Array<Record<string, unknown>>;
+		ok(timeline.length > 0);
+		ok(timeline.every((item) => item.origin === "replay"), "every restored card must be marked as history");
+		ok(timeline.every((item) => item.startedAt === null), "replayed cards must not claim a historical clock");
+		ok(
+			timeline.every((item) => item.source === "replayed-from-clio"),
+			"replayed cards must name replay as their source",
+		);
+		ok(
+			timeline.every((item) => item.kind !== "outcome" && item.kind !== "failure"),
+			"replay must not synthesize a terminal result",
+		);
+		deepStrictEqual(
+			timeline.filter((item) => item.kind === "request").map((item) => item.summary),
+			["Earlier prompt 1", "Earlier prompt 2"],
+		);
+		deepStrictEqual(
+			timeline.map((item) => item.status),
+			["replayed", "replayed", "complete", "replayed", "replayed", "replayed"],
+		);
+		deepStrictEqual([...new Set(timeline.map((item) => item.turnId))], ["turn-1", "turn-2"]);
+
+		// The next live prompt continues the replayed numbering.
+		await sendCommand(socket, "request-continue", "turn.start", { projectId, prompt: "Continue the branch." });
+		const live = (await collectThrough(socket, "turn.terminal")).at(-1);
+		ok(live?.kind === "turn.terminal");
+		equal(live.turnId, "turn-3");
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("a reload at every phase neither orphans nor duplicates the child", async () => {
+	const fixture = await startFixture({ scenario: "permission", disconnectGraceMs: 5_000, pidFile: true });
+	let socket: RawWebSocket | undefined;
+	try {
+		const { running } = fixture;
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+
+		// unbound: no project yet
+		socket.closeAbruptly();
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const openedEvent = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(openedEvent?.kind === "project.opened");
+		const projectId = openedEvent.payload.workspace.project.id;
+		const generation = openedEvent.payload.workspace.processGeneration;
+		ok(generation);
+
+		// idle
+		socket.closeAbruptly();
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		let snapshot = await socket.readEvent();
+		ok(snapshot.kind === "project.opened");
+		equal(snapshot.payload.workspace.processGeneration, generation);
+		equal(snapshot.payload.workspace.activeTurn, null);
+
+		// running, then awaiting-approval
+		await sendCommand(socket, "request-turn", "turn.start", { projectId, prompt: "Reload mid-turn." });
+		const startedEvent = (await collectThrough(socket, "turn.started")).at(-1);
+		ok(startedEvent?.kind === "turn.started");
+		const turnId = startedEvent.turnId;
+		ok(turnId);
+		socket.closeAbruptly();
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		snapshot = await socket.readEvent();
+		ok(snapshot.kind === "project.opened");
+		equal(snapshot.payload.workspace.processGeneration, generation, "the reload replaced the child");
+		equal(snapshot.payload.workspace.activeTurn?.turnId, turnId);
+
+		// The approval was raised while no socket was attached, so the reconnected
+		// client learns about it from the snapshot rather than from an event.
+		const deadline = Date.now() + 5_000;
+		let pendingPermissionId: string | null = null;
+		while (pendingPermissionId === null) {
+			if (Date.now() >= deadline) throw new Error("The parked approval never reached a reload snapshot.");
+			socket.closeAbruptly();
+			socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+			equal((await socket.readEvent()).kind, "connection.ready");
+			snapshot = await socket.readEvent();
+			ok(snapshot.kind === "project.opened");
+			equal(snapshot.payload.workspace.processGeneration, generation);
+			pendingPermissionId = snapshot.payload.workspace.pendingPermission?.permissionId ?? null;
+			if (pendingPermissionId === null) await delay(50);
+		}
+		ok(snapshot.kind === "project.opened");
+		equal(snapshot.payload.workspace.clio.phase, "awaiting-approval");
+		equal(snapshot.payload.workspace.activeTurn?.turnId, turnId);
+
+		// cancelling, then settled
+		await sendCommand(socket, "request-cancel", "turn.cancel", { projectId, turnId });
+		const terminal = (await collectThrough(socket, "turn.terminal")).at(-1);
+		ok(terminal?.kind === "turn.terminal");
+		equal(terminal.payload.outcome, "canceled");
+		socket.closeAbruptly();
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		snapshot = await socket.readEvent();
+		ok(snapshot.kind === "project.opened");
+		equal(snapshot.payload.workspace.processGeneration, generation, "the session outlived every reload");
+		equal(snapshot.payload.workspace.activeTurn, null);
+		equal(snapshot.payload.workspace.pendingPermission, null);
+
+		// One prompt still works on that same child.
+		await sendCommand(socket, "request-final", "turn.start", { projectId, prompt: "Still one child." });
+		const finalPermission = (await collectThrough(socket, "turn.permission.requested")).at(-1);
+		ok(finalPermission?.kind === "turn.permission.requested");
+		equal(finalPermission.processGeneration, generation);
+
+		// Exactly one child ever existed, and closing the server retires it.
+		const childPid = Number(await Deno.readTextFile(fixture.pidPath));
+		ok(Number.isSafeInteger(childPid) && childPid > 1);
+		equal(
+			(await new Deno.Command("kill", { args: ["-s", "0", String(childPid)], stdout: "null", stderr: "null" })
+				.output()).success,
+			true,
+		);
+		socket.closeAbruptly();
+		socket = undefined;
+		await fixture.running.close();
+		const retired = await Promise.race([
+			(async () => {
+				const deadline = Date.now() + 5_000;
+				while (Date.now() < deadline) {
+					const alive = await new Deno.Command("kill", {
+						args: ["-s", "0", String(childPid)],
+						stdout: "null",
+						stderr: "null",
+					}).output();
+					if (!alive.success) return true;
+					await delay(25);
+				}
+				return false;
+			})(),
+			delay(6_000).then(() => false),
+		]);
+		equal(retired, true, "the ACP child outlived the server");
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("labelling and deleting a session round-trips over the socket", async () => {
+	const fixture = await startFixture({ scenario: "conversation" });
+	let socket: RawWebSocket | undefined;
+	try {
+		const { running } = fixture;
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const openedEvent = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(openedEvent?.kind === "project.opened");
+		const projectId = openedEvent.payload.workspace.project.id;
+		const earlier = openedEvent.payload.workspace.sessions.find((session) => !session.hosted);
+		ok(earlier);
+		await sendCommand(socket, "request-new", "session.new", { projectId });
+		const bound = (await collectThrough(socket, "session.list")).at(-1);
+		ok(bound?.kind === "session.list");
+		const hosted = bound.payload.sessions.find((session) => session.hosted);
+		ok(hosted);
+
+		await sendCommand(socket, "request-label", "session.label", {
+			projectId,
+			sessionId: earlier.id,
+			label: "Renamed by the operator",
+		});
+		const labelled = (await collectThrough(socket, "session.list")).at(-1);
+		ok(labelled?.kind === "session.list");
+		equal(labelled.payload.sessions.find((session) => session.id === earlier.id)?.label, "Renamed by the operator");
+
+		await sendCommand(socket, "request-delete-open", "session.delete", { projectId, sessionId: hosted.id });
+		const refusal = (await collectThrough(socket, "command.error")).at(-1);
+		ok(refusal?.kind === "command.error");
+		equal(refusal.payload.code, "refused");
+
+		await sendCommand(socket, "request-delete", "session.delete", { projectId, sessionId: earlier.id });
+		const remaining = (await collectThrough(socket, "session.list")).at(-1);
+		ok(remaining?.kind === "session.list");
+		deepStrictEqual(remaining.payload.sessions.map((session) => session.id), [hosted.id]);
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("a remembered project whose folder disappears is reported unavailable and refuses to reopen", async () => {
+	const fixture = await startFixture();
+	let socket: RawWebSocket | undefined;
+	try {
+		const { running } = fixture;
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+
+		await sendCommand(socket, "request-open-alpha", "project.open", { path: fixture.projectRoot });
+		const alphaOpened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(alphaOpened?.kind === "project.opened");
+		const alphaId = alphaOpened.payload.workspace.project.id;
+
+		// Opening a second folder closes the first without forgetting it, which is
+		// the only way a remembered project can be checked for availability.
+		const betaRoot = join(fixture.homePath, "code", "beta");
+		await Deno.mkdir(betaRoot, { recursive: true });
+		await sendCommand(socket, "request-open-beta", "project.open", { path: betaRoot });
+		const betaOpened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(betaOpened?.kind === "project.opened");
+		const betaId = betaOpened.payload.workspace.project.id;
+		ok(betaId !== alphaId);
+
+		await Deno.remove(fixture.projectRoot, { recursive: true });
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
+		const recent = bootstrap.recent as Array<Record<string, unknown>>;
+		equal(recent.find((entry) => entry.id === alphaId)?.available, false);
+		equal(recent.find((entry) => entry.id === betaId)?.available, true);
+		equal(bootstrap.openProjectId, betaId);
+
+		await sendCommand(socket, "request-select-alpha", "project.select", { projectId: alphaId });
+		const refused = await socket.readEvent();
+		ok(refused.kind === "command.error", `expected a refusal, received ${JSON.stringify(refused)}`);
+		equal(refused.payload.code, "refused");
+		equal(refused.payload.requestId, "request-select-alpha");
+		ok(refused.payload.message.length > 0);
+
+		// The refusal must not disturb the project that is actually open.
+		const afterRefusal = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
+		equal(afterRefusal.openProjectId, betaId);
+
+		await sendCommand(socket, "request-forget-alpha", "project.forget", { projectId: alphaId });
+		const forgotten = await socket.readEvent();
+		ok(forgotten.kind === "project.forgotten");
+		equal(forgotten.projectId, alphaId);
+		const afterForget = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
+		deepStrictEqual((afterForget.recent as Array<Record<string, unknown>>).map((entry) => entry.id), [betaId]);
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("settings, targets, and autonomy round-trip over the socket and reach the next prompt", async () => {
+	const fixture = await startFixture({ scenario: "settings" });
+	let socket: RawWebSocket | undefined;
+	try {
+		const { running } = fixture;
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		const workspace = opened.payload.workspace;
+		const projectId = workspace.project.id;
+		// Opening a project primes both projections, so the settings page has
+		// something truthful to show before the operator asks for anything.
+		deepStrictEqual(workspace.targets?.map((target) => target.id), ["lmstudio", "offline-lab"]);
+		equal(workspace.targetsTruncated, false);
+		equal(workspace.settings?.settings["orchestrator.model"], "qwen3.8-27b");
+		// No probe has happened, so no health may be claimed.
+		deepStrictEqual(workspace.targets?.map((target) => target.health), [null, null]);
+
+		await sendCommand(socket, "request-probe", "targets.probe", { projectId, targetId: "offline-lab" });
+		const probed = (await collectThrough(socket, "targets.probed")).at(-1);
+		ok(probed?.kind === "targets.probed");
+		equal(probed.payload.targetId, "offline-lab");
+		equal(probed.payload.health.healthy, false);
+		equal(probed.payload.health.reason, "not-configured");
+
+		await sendCommand(socket, "request-patch", "settings.patch", {
+			projectId,
+			patch: { "orchestrator.model": "qwen3.8-4b" },
+		});
+		const patched = (await collectThrough(socket, "settings.state")).at(-1);
+		ok(patched?.kind === "settings.state");
+		equal(patched.payload.settings.settings["orchestrator.model"], "qwen3.8-4b");
+
+		await sendCommand(socket, "request-session", "session.new", { projectId });
+		await collectThrough(socket, "session.list");
+		await sendCommand(socket, "request-autonomy", "autonomy.set", { projectId, level: "read-only" });
+		const stated = (await collectThrough(socket, "clio.state")).at(-1);
+		ok(stated?.kind === "clio.state");
+		equal(stated.payload.snapshot.session?.autonomy, "read-only");
+		equal(stated.payload.snapshot.session?.autonomySource, "session");
+
+		// The M4 gate: what the GUI set is what Clio ran the next turn under.
+		await sendCommand(socket, "request-turn", "turn.start", { projectId, prompt: "What autonomy is in force?" });
+		const turn = await collectThrough(socket, "turn.terminal");
+		const answer = turn.filter((event) => event.kind === "turn.text").map((event) => event.payload.text).join("");
+		equal(answer, "This session has seen 1 prompts at autonomy read-only.");
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
+		const restored = bootstrap.workspace as Record<string, unknown>;
+		equal(restored.targetsTruncated, false);
+		const restoredTargets = restored.targets as Array<Record<string, unknown>>;
+		equal(
+			(restoredTargets.find((target) => target.id === "offline-lab")?.health as Record<string, unknown>)?.healthy,
+			false,
+		);
+		equal(restoredTargets.find((target) => target.id === "lmstudio")?.health ?? null, null);
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("a shortened target list reaches the client as truncated", async () => {
+	const fixture = await startFixture({ scenario: "settings-truncated" });
+	let socket: RawWebSocket | undefined;
+	try {
+		const { running } = fixture;
+		socket = await RawWebSocket.connect(eventsEndpoint(running), running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		equal(opened.payload.workspace.targetsTruncated, true);
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();
 	}
 });

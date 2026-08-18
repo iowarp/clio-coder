@@ -1,22 +1,21 @@
-import { deepStrictEqual, equal, match, notDeepStrictEqual, ok, throws } from "node:assert/strict";
-import {
-	MAX_WIRE_COLLECTION_ENTRIES,
-	type ServerEvent,
-	type WireEngineReadinessFact,
-	type WirePendingPermission,
-} from "../src/protocol.ts";
+import { deepStrictEqual, equal, ok, throws } from "node:assert/strict";
+import type { WirePendingPermission } from "../src/protocol.ts";
 import {
 	appReducer,
-	formatProjectPath,
 	initialAppState,
-	MAX_TIMELINE_STREAM_BYTES,
+	isPromptBlocked,
 	parseBootstrapPayload,
-	selectedWorkspace,
-	TIMELINE_STREAM_TRUNCATION_MARKER,
+	workspaceConsistencyError,
 } from "../src/state.ts";
-import { bootstrapFixture, engineSnapshotFixture, serverEventFixture, workspaceFixture } from "./fixtures.ts";
+import {
+	bootstrapFixture,
+	clioSnapshotFixture,
+	FIXTURE_PROJECT_ID,
+	serverEventFixture,
+	workspaceFixture,
+} from "./fixtures.ts";
 
-const source = "simulated-by-workbench" as const;
+const source = "observed-on-acp" as const;
 
 function pendingPermissionFixture(): WirePendingPermission {
 	return {
@@ -25,523 +24,437 @@ function pendingPermissionFixture(): WirePendingPermission {
 		title: "Update a project file",
 		kind: "edit",
 		locations: [{ segments: ["src", "model.ts"] }],
-		expiresAt: "2026-08-17T12:05:00.000Z",
+		requestedAt: "2026-08-18T12:04:00.000Z",
+		escalateAt: "2026-08-18T12:04:45.000Z",
+		expiresAt: "2026-08-18T12:14:00.000Z",
 		source,
 	};
 }
 
-function withFact(
-	key: WireEngineReadinessFact["key"],
-	state: WireEngineReadinessFact["state"],
-): readonly WireEngineReadinessFact[] {
-	return engineSnapshotFixture().facts.map((fact) => fact.key === key ? { ...fact, state } : fact);
+function readyState() {
+	return appReducer(initialAppState, {
+		type: "bootstrap.loaded",
+		payload: parseBootstrapPayload(structuredClone(bootstrapFixture()) as unknown),
+	});
 }
 
-Deno.test("bootstrap validation accepts only an exact, internally consistent v2 wire payload", () => {
+Deno.test("bootstrap validation accepts only an exact, internally consistent v3 payload", () => {
 	const bootstrap = bootstrapFixture();
-	deepStrictEqual(parseBootstrapPayload(structuredClone(bootstrap)), bootstrap);
+	deepStrictEqual(parseBootstrapPayload(structuredClone(bootstrap) as unknown), bootstrap);
 
-	const invalidSelection = structuredClone(bootstrap) as unknown as Record<string, unknown>;
-	invalidSelection.selectedProjectId = "project-missing-9999";
-	throws(() => parseBootstrapPayload(invalidSelection), /selected project is missing/u);
+	const wrongVersion = structuredClone(bootstrap) as unknown as Record<string, unknown>;
+	wrongVersion.protocolVersion = 2;
+	throws(() => parseBootstrapPayload(wrongVersion), /protocolVersion must be 3/u);
 
-	const incompatible = structuredClone(bootstrap) as unknown as Record<string, unknown>;
-	incompatible.protocolVersion = 1;
-	throws(() => parseBootstrapPayload(incompatible), /protocolVersion must be 2/u);
+	const v2Alias = structuredClone(bootstrap) as unknown as Record<string, unknown>;
+	v2Alias.selectedProjectId = FIXTURE_PROJECT_ID;
+	throws(() => parseBootstrapPayload(v2Alias), /unknown field "selectedProjectId"/u);
 
-	const v1Alias = structuredClone(bootstrap) as unknown as Record<string, unknown>;
-	v1Alias.fakeEngine = true;
-	throws(() => parseBootstrapPayload(v1Alias), /unknown field "fakeEngine"/u);
+	const nestedAlias = structuredClone(bootstrap) as unknown as { workspace: Record<string, unknown> };
+	nestedAlias.workspace.engine = { phase: "ready" };
+	throws(() => parseBootstrapPayload(nestedAlias), /unknown field.*engine/u);
 
-	const nestedAlias = structuredClone(bootstrap) as unknown as {
-		projects: Array<Record<string, unknown>>;
-	};
-	nestedAlias.projects[0]!.engineState = "ready";
-	throws(() => parseBootstrapPayload(nestedAlias), /unknown field.*engineState/u);
+	const halfOpen = structuredClone(bootstrap) as unknown as Record<string, unknown>;
+	halfOpen.workspace = null;
+	throws(() => parseBootstrapPayload(halfOpen), /present or absent together/u);
 
-	const awaitingWithoutPermission = structuredClone(bootstrap) as unknown as {
-		projects: Array<{ engine: { phase: string } }>;
-	};
-	awaitingWithoutPermission.projects[0]!.engine.phase = "awaiting-approval";
-	throws(() => parseBootstrapPayload(awaitingWithoutPermission), /pendingPermission must be present exactly/u);
+	const mismatched = structuredClone(bootstrap) as unknown as Record<string, unknown>;
+	mismatched.openProjectId = "project-other-0002";
+	throws(() => parseBootstrapPayload(mismatched), /workspace is invalid|does not describe/u);
 
-	const permissionWithoutTurn = structuredClone(bootstrap) as unknown as {
-		projects: Array<{
-			engine: { phase: string };
-			pendingPermission: WirePendingPermission | null;
-			engineGeneration: string | null;
-			activeTurnId: string | null;
-		}>;
-	};
-	permissionWithoutTurn.projects[0]!.engine.phase = "awaiting-approval";
-	permissionWithoutTurn.projects[0]!.pendingPermission = pendingPermissionFixture();
-	permissionWithoutTurn.projects[0]!.engineGeneration = null;
-	permissionWithoutTurn.projects[0]!.activeTurnId = null;
-	throws(() => parseBootstrapPayload(permissionWithoutTurn), /pendingPermission requires an activeTurnId/u);
-
-	const generationWithoutTurn = structuredClone(bootstrap);
-	generationWithoutTurn.projects[0]!.engineGeneration = "generation-without-turn-0001";
-	throws(() => parseBootstrapPayload(generationWithoutTurn), /must be present or absent together/u);
-
-	const turnWithoutGeneration = structuredClone(bootstrap);
-	turnWithoutGeneration.projects[0]!.activeTurnId = "turn-without-generation-0001";
-	throws(() => parseBootstrapPayload(turnWithoutGeneration), /must be present or absent together/u);
+	const relativeHome = structuredClone(bootstrap) as unknown as Record<string, unknown>;
+	relativeHome.homePath = "operator";
+	throws(() => parseBootstrapPayload(relativeHome), /homePath must be absolute/u);
 });
 
-Deno.test("bootstrap restores a consistent authoritative pending permission", () => {
-	const bootstrap = bootstrapFixture();
-	const alpha = bootstrap.projects[0]!;
-	alpha.engine = engineSnapshotFixture("awaiting-approval");
-	alpha.engineGeneration = "generation-bootstrap-0001";
-	alpha.activeTurnId = "turn-bootstrap-0001";
-	alpha.pendingPermission = pendingPermissionFixture();
-	const parsed = parseBootstrapPayload(structuredClone(bootstrap));
+Deno.test("a bootstrap with no open project is valid and leaves the app waiting for a folder", () => {
+	const bootstrap = bootstrapFixture({ openProjectId: null, workspace: null, recent: [] });
+	const parsed = parseBootstrapPayload(structuredClone(bootstrap) as unknown);
 	const state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: parsed });
-	const workspace = state.projects[alpha.project.id]!;
-
-	equal(workspace.engine.phase, "awaiting-approval");
-	deepStrictEqual(workspace.pendingPermission, pendingPermissionFixture());
+	equal(state.boot, "ready");
+	equal(state.open, null);
+	deepStrictEqual(state.recent, []);
+	ok(state.announcement.includes("Open a project"));
+	equal(isPromptBlocked(state.open), true);
 });
 
-Deno.test("bootstrap projects are projected from authoritative engine and path DTOs", () => {
-	const bootstrap = bootstrapFixture();
-	const alpha = bootstrap.projects[0]!;
-	alpha.changes.push({
-		id: "change-bootstrap-0001",
-		path: { segments: ["src", "solver.ts"] },
-		summary: "Recorded solver change",
-		status: "recorded",
-		source,
+Deno.test("an approval that contradicts the phase is refused in both directions", () => {
+	const awaitingWithout = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+		clio: clioSnapshotFixture("awaiting-approval"),
 	});
-	alpha.agents.push({
-		id: "agent-bootstrap-0001",
-		name: "Verifier",
-		task: "Check the solver",
-		status: "complete",
-		summary: "Solver checked",
-		source,
-	});
-	alpha.evidence.push({
-		id: "evidence-bootstrap-0001",
-		label: "Focused test",
-		detail: "Passed",
-		status: "observed",
-		source,
-	});
+	ok(workspaceConsistencyError(awaitingWithout)?.includes("pendingPermission must be present exactly"));
 
-	const state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: bootstrap });
-	const workspace = state.projects[alpha.project.id]!;
-	equal(workspace.engine.kind, "fake");
-	equal(workspace.engine.phase, "ready");
-	equal(workspace.pendingPermission, null);
-	equal(workspace.changes[0]?.path, "src/solver.ts");
-	equal(workspace.changes[0]?.source, source);
-	equal(workspace.agents[0]?.target, "Solver checked");
-	equal(workspace.evidence[0]?.source, source);
-	equal(formatProjectPath({ segments: [] }), "/");
-	equal(formatProjectPath({ segments: ["src", "solver.ts"] }), "src/solver.ts");
+	const pendingWhileIdle = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+		pendingPermission: pendingPermissionFixture(),
+		activeTurn: {
+			turnId: "turn-1",
+			startedAt: "2026-08-18T12:03:00.000Z",
+			toolCalls: 1,
+			lastToolTitle: null,
+			repeatedShapes: 0,
+		},
+	});
+	ok(workspaceConsistencyError(pendingWhileIdle)?.includes("pendingPermission must be present exactly"));
+
+	const withoutTurn = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+		clio: clioSnapshotFixture("awaiting-approval"),
+		pendingPermission: pendingPermissionFixture(),
+		activeTurn: null,
+	});
+	ok(withoutTurn && workspaceConsistencyError(withoutTurn)?.includes("requires an active turn"));
+
+	const consistent = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+		clio: clioSnapshotFixture("awaiting-approval"),
+		pendingPermission: pendingPermissionFixture(),
+		activeTurn: {
+			turnId: "turn-1",
+			startedAt: "2026-08-18T12:03:00.000Z",
+			toolCalls: 1,
+			lastToolTitle: null,
+			repeatedShapes: 0,
+		},
+	});
+	equal(workspaceConsistencyError(consistent), null);
+	const bootstrap = bootstrapFixture({ workspace: consistent });
+	const parsed = parseBootstrapPayload(structuredClone(bootstrap) as unknown);
+	const state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: parsed });
+	deepStrictEqual(state.open?.projection.pendingPermission, pendingPermissionFixture());
 });
 
-Deno.test("project selection is separate from identity and v2 events never leak across projects or workspaces", () => {
-	let state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: bootstrapFixture() });
-	const betaBefore = structuredClone(state.projects["project-beta-0002"]);
+Deno.test("a contradictory project.opened is refused without replacing the open project", () => {
+	const state = readyState();
+	const event = serverEventFixture("project.opened", {
+		workspace: workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", { clio: clioSnapshotFixture("awaiting-approval") }),
+	}, { sequence: 2 });
+	const next = appReducer(state, { type: "host.event", event });
+	equal(next.notice?.tone, "error");
+	deepStrictEqual(next.open?.clio, state.open?.clio);
+});
 
-	state = appReducer(state, {
-		type: "host.event",
-		event: serverEventFixture("engine.state", { snapshot: engineSnapshotFixture("running") }, { sequence: 1 }),
-	});
+Deno.test("turn events fold into the projection and clear the pending submission", () => {
+	let state = readyState();
+	state = appReducer(state, { type: "turn.submitted", requestId: "request-1" });
+	equal(state.pendingTurnStart, "request-1");
 	state = appReducer(state, {
 		type: "host.event",
 		event: serverEventFixture("turn.started", {
-			promptSummary: "Only Alpha changes",
-			fakeScenario: "complete",
-			source,
+			promptSummary: "Audit the convergence study",
+			origin: "live",
+			startedAt: "2026-08-18T12:03:00.000Z",
+			source: "observed-by-workbench",
 		}, { sequence: 2 }),
 	});
+	equal(state.pendingTurnStart, null);
+	equal(state.open?.projection.activeTurn?.turnId, "turn-1");
 
-	equal(state.projects["project-alpha-0001"]?.engine.phase, "running");
-	equal(state.projects["project-alpha-0001"]?.activeTurnId, "turn-alpha-0001");
-	equal(state.projects["project-alpha-0001"]?.timeline.length, 1);
-	deepStrictEqual(state.projects["project-beta-0002"], betaBefore);
-
-	const beforeForeignWorkspace = state;
 	state = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("engine.state", { snapshot: engineSnapshotFixture("failed") }, {
-			sequence: 3,
-			workspaceInstanceId: "workspace-foreign-0002",
-		}),
+		event: serverEventFixture("turn.text", { text: "Reading the notes.", source }, { sequence: 3 }),
 	});
-	equal(state, beforeForeignWorkspace);
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("turn.tool", {
+			toolCallId: "tool-1",
+			title: "Read notes.md",
+			kind: "read",
+			status: "in_progress",
+			summary: "reading",
+			locations: [{ segments: ["notes.md"] }],
+			source,
+		}, { sequence: 4 }),
+	});
+	equal(state.open?.projection.activeTurn?.toolCalls, 1);
+	// Clio's own name for the call rather than the generic kind label.
+	equal(state.open?.projection.activeTurn?.lastToolTitle, "reading");
 
-	state = appReducer(state, { type: "project.selected", projectId: "project-beta-0002" });
-	equal(state.selectedProjectId, "project-beta-0002");
-	equal(selectedWorkspace(state)?.project.displayName, "Beta");
-	equal(state.projects["project-alpha-0001"]?.project.id, "project-alpha-0001");
-	notDeepStrictEqual(state.projects["project-alpha-0001"], state.projects["project-beta-0002"]);
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("turn.terminal", {
+			outcome: "completed",
+			code: "clio-completed",
+			summary: "Clio finished this turn.",
+			source: "reported-by-clio",
+		}, { sequence: 5 }),
+	});
+	equal(state.open?.projection.activeTurn, null);
+	deepStrictEqual(
+		state.open?.projection.timeline.map((item) => item.kind),
+		["request", "narrative", "tool", "outcome"],
+	);
 });
 
-Deno.test("responsive drawers remain mutually exclusive across breakpoint state changes", () => {
-	let state = appReducer(initialAppState, { type: "drawer.left", open: true });
-	equal(state.leftDrawerOpen, true);
-	equal(state.rightDrawerOpen, false);
-
-	state = appReducer(state, { type: "drawer.right", open: true });
-	equal(state.leftDrawerOpen, false);
-	equal(state.rightDrawerOpen, true);
-
-	state = appReducer(state, { type: "drawer.right", open: false });
-	equal(state.leftDrawerOpen, false);
-	equal(state.rightDrawerOpen, false);
-});
-
-Deno.test("turn events are isolated by the opaque engine generation as well as session and turn", () => {
-	let state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: bootstrapFixture() });
-	state = appReducer(state, {
+Deno.test("events for another project or an older sequence are ignored", () => {
+	const state = readyState();
+	const foreign = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("turn.started", { promptSummary: "Generation-bound turn", source }, { sequence: 1 }),
-	});
-	const beforeWrongGeneration = structuredClone(state.projects["project-alpha-0001"]);
-
-	state = appReducer(state, {
-		type: "host.event",
-		event: serverEventFixture("turn.text", { text: "stale generation", source }, {
+		event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture("failed") }, {
 			sequence: 2,
-			engineGeneration: "generation-stale-9999",
+			projectId: "project-other-0002",
 		}),
 	});
-	deepStrictEqual(state.projects["project-alpha-0001"], beforeWrongGeneration);
+	equal(foreign.open?.clio.phase, "idle");
 
-	state = appReducer(state, {
+	const replayed = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("turn.text", { text: "current generation", source }, { sequence: 3 }),
+		event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture("failed") }, { sequence: 0 }),
 	});
-	equal(state.projects["project-alpha-0001"]?.timeline.at(-1)?.summary, "current generation");
-});
+	equal(replayed.open?.clio.phase, "idle");
 
-Deno.test("neutral turn events coalesce streams, tools, and agents while retaining provenance and safe paths", () => {
-	let state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: bootstrapFixture() });
-	let sequence = 0;
-	const apply = (event: ServerEvent) => {
-		state = appReducer(state, { type: "host.event", event });
-	};
-	const options = () => ({ sequence: ++sequence });
-
-	apply(serverEventFixture("engine.state", { snapshot: engineSnapshotFixture("running") }, options()));
-	apply(serverEventFixture("turn.started", {
-		promptSummary: "Audit the numerical solver",
-		fakeScenario: "complete",
-		source,
-	}, options()));
-	apply(serverEventFixture("turn.text", { text: "Hello ", source }, options()));
-	apply(serverEventFixture("turn.text", { text: "world", source }, options()));
-	apply(serverEventFixture("turn.thought", { text: "Check the boundary.", source }, options()));
-	apply(serverEventFixture("turn.agent", {
-		agentId: "agent-verifier-0001",
-		name: "Verifier",
-		task: "Check convergence",
-		status: "active",
-		summary: "Verification started",
-		source,
-	}, options()));
-	apply(serverEventFixture("turn.agent", {
-		agentId: "agent-verifier-0001",
-		name: "Verifier",
-		task: "Check convergence",
-		status: "complete",
-		summary: "Verification completed",
-		source,
-	}, options()));
-	apply(serverEventFixture("turn.tool", {
-		toolCallId: "tool-read-0001",
-		title: "Read solver",
-		kind: "read",
-		status: "in_progress",
-		summary: "Reading solver evidence",
-		locations: [{ segments: ["src", "solver.ts"] }],
-		source,
-	}, options()));
-	apply(serverEventFixture("turn.tool", {
-		toolCallId: "tool-read-0001",
-		title: "Read solver",
-		kind: "read",
-		status: "completed",
-		summary: "Solver evidence read",
-		locations: [{ segments: ["src", "solver.ts"] }],
-		source,
-	}, options()));
-	apply(serverEventFixture("turn.change", {
-		path: { segments: ["src", "solver.ts"] },
-		summary: "Recorded a bounded solver change",
-		source,
-	}, options()));
-
-	let workspace = state.projects["project-alpha-0001"]!;
-	equal(workspace.timeline.filter((item) => item.title === "Fake engine").length, 1);
-	equal(workspace.timeline.find((item) => item.title === "Fake engine")?.summary, "Hello world");
-	equal(workspace.timeline.filter((item) => item.kind === "agent").length, 1);
-	equal(workspace.timeline.filter((item) => item.kind === "tool").length, 1);
-	equal(workspace.timeline.find((item) => item.kind === "tool")?.status, "complete");
-	equal(workspace.timeline.find((item) => item.kind === "tool")?.detail, "read · src/solver.ts");
-	equal(workspace.agents.length, 1);
-	equal(workspace.agents[0]?.status, "complete");
-	equal(workspace.agents[0]?.source, source);
-	equal(workspace.changes[0]?.path, "src/solver.ts");
-	equal(workspace.changes[0]?.source, source);
-
-	const completedTool = workspace.timeline.find((item) => item.kind === "tool");
-	apply(serverEventFixture("turn.tool", {
-		toolCallId: "tool-read-0001",
-		title: "Read solver",
-		kind: "read",
-		status: "in_progress",
-		summary: "Stale replay",
-		locations: [{ segments: ["src", "solver.ts"] }],
-		source,
-	}, { sequence: sequence - 1 }));
-	workspace = state.projects["project-alpha-0001"]!;
-	deepStrictEqual(workspace.timeline.find((item) => item.kind === "tool"), completedTool);
-});
-
-Deno.test("stream coalescing is UTF-8 byte bounded with a stable marker and runtime collections stay capped", () => {
-	let state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: bootstrapFixture() });
-	let sequence = 1;
-	state = appReducer(state, {
+	const foreignWorkspace = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("turn.started", { promptSummary: "Bound the renderer stream", source }, { sequence }),
-	});
-	const chunk = "😀".repeat(4096);
-	for (let index = 0; index < 6; index += 1) {
-		state = appReducer(state, {
-			type: "host.event",
-			event: serverEventFixture("turn.text", { text: chunk, source }, { sequence: ++sequence }),
-		});
-	}
-	let workspace = state.projects["project-alpha-0001"]!;
-	const stream = workspace.timeline.find((item) => item.title === "Fake engine")!;
-	ok(new TextEncoder().encode(stream.summary).byteLength <= MAX_TIMELINE_STREAM_BYTES);
-	ok(stream.summary.endsWith(TIMELINE_STREAM_TRUNCATION_MARKER));
-	const stableSummary = stream.summary;
-
-	state = appReducer(state, {
-		type: "host.event",
-		event: serverEventFixture("turn.text", { text: "ignored after truncation", source }, { sequence: ++sequence }),
-	});
-	equal(
-		state.projects["project-alpha-0001"]?.timeline.find((item) => item.title === "Fake engine")?.summary,
-		stableSummary,
-	);
-
-	for (let index = 0; index < MAX_WIRE_COLLECTION_ENTRIES + 8; index += 1) {
-		state = appReducer(state, {
-			type: "host.event",
-			event: serverEventFixture("turn.evidence", {
-				label: `Bounded evidence ${index}`,
-				detail: "Observed fixture evidence",
-				status: "observed",
-				source,
-			}, { sequence: ++sequence }),
-		});
-	}
-	workspace = state.projects["project-alpha-0001"]!;
-	equal(workspace.evidence.length, MAX_WIRE_COLLECTION_ENTRIES);
-	equal(workspace.timeline.length, MAX_WIRE_COLLECTION_ENTRIES);
-	equal(workspace.evidence.at(-1)?.label, `Bounded evidence ${MAX_WIRE_COLLECTION_ENTRIES + 7}`);
-});
-
-Deno.test("permissions bind to the active turn, resolve by ID, announce urgently, and clear terminally", () => {
-	let state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: bootstrapFixture() });
-	let sequence = 0;
-	const apply = (event: ServerEvent) => {
-		state = appReducer(state, { type: "host.event", event });
-	};
-	const options = () => ({ sequence: ++sequence });
-
-	apply(serverEventFixture("engine.state", { snapshot: engineSnapshotFixture("running") }, options()));
-	apply(serverEventFixture("turn.started", { promptSummary: "Update the solver", source }, options()));
-	apply(serverEventFixture("engine.state", { snapshot: engineSnapshotFixture("awaiting-approval") }, options()));
-	apply(serverEventFixture("turn.permission.requested", {
-		permissionId: "permission-edit-0001",
-		toolCallId: "tool-edit-0001",
-		title: "Update solver file",
-		kind: "edit",
-		locations: [{ segments: ["src", "solver.ts"] }],
-		expiresAt: "2026-08-17T12:05:00.000Z",
-		source,
-	}, options()));
-
-	let workspace = state.projects["project-alpha-0001"]!;
-	equal(workspace.pendingPermission?.permissionId, "permission-edit-0001");
-	equal(workspace.pendingPermission?.toolCallId, "tool-edit-0001");
-	deepStrictEqual(workspace.pendingPermission?.locations, [{ segments: ["src", "solver.ts"] }]);
-	const approvalItem = workspace.timeline.find((item) => item.kind === "approval");
-	match(approvalItem?.summary ?? "", /edit permission requested for src\/solver\.ts/u);
-	match(approvalItem?.detail ?? "", /Allow once for src\/solver\.ts/u);
-	match(state.announcement, /requires your decision/u);
-
-	apply(serverEventFixture("turn.permission.resolved", {
-		permissionId: "permission-other-0002",
-		decision: "reject",
-		source,
-	}, options()));
-	equal(state.projects["project-alpha-0001"]?.pendingPermission?.permissionId, "permission-edit-0001");
-	equal(state.projects["project-alpha-0001"]?.timeline.some((item) => item.title === "Permission resolved"), false);
-
-	apply(serverEventFixture("turn.terminal", {
-		outcome: "canceled",
-		code: "operator-cancelled",
-		summary: "Canceled by the operator.",
-		stopReason: "cancelled",
-		source,
-	}, options()));
-	workspace = state.projects["project-alpha-0001"]!;
-	equal(workspace.pendingPermission, null);
-	equal(workspace.activeTurnId, null);
-	equal(workspace.timeline.at(-1)?.status, "canceled");
-	equal(workspace.sessions.find((session) => session.id === "session-alpha-0001")?.status, "canceled");
-});
-
-Deno.test("all terminal outcomes map explicitly and authoritative engine state changes only from snapshots", () => {
-	for (const outcome of ["completed", "canceled", "failed"] as const) {
-		let state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: bootstrapFixture() });
-		state = appReducer(state, {
-			type: "host.event",
-			event: serverEventFixture("engine.state", { snapshot: engineSnapshotFixture("running") }, { sequence: 1 }),
-		});
-		state = appReducer(state, {
-			type: "host.event",
-			event: serverEventFixture("turn.started", { promptSummary: `${outcome} request`, source }, { sequence: 2 }),
-		});
-		state = appReducer(state, {
-			type: "host.event",
-			event: serverEventFixture("turn.terminal", {
-				outcome,
-				code: `fixture-${outcome}`,
-				summary: `Turn ${outcome}.`,
-				...(outcome === "canceled" ? { stopReason: "cancelled" as const } : {}),
-				source,
-			}, { sequence: 3 }),
-		});
-
-		let workspace = state.projects["project-alpha-0001"]!;
-		equal(workspace.engine.phase, "running");
-		equal(workspace.activeTurnId, null);
-		equal(workspace.timeline.at(-1)?.kind, outcome === "failed" ? "failure" : "outcome");
-		equal(
-			workspace.timeline.at(-1)?.status,
-			outcome === "completed" ? "complete" : outcome === "canceled" ? "canceled" : "failed",
-		);
-		if (outcome === "failed") match(state.announcement, /Turn failed/u);
-
-		const finalPhase = outcome === "failed" ? "failed" : "ready";
-		state = appReducer(state, {
-			type: "host.event",
-			event: serverEventFixture("engine.state", { snapshot: engineSnapshotFixture(finalPhase) }, { sequence: 4 }),
-		});
-		workspace = state.projects["project-alpha-0001"]!;
-		equal(workspace.engine.phase, finalPhase);
-	}
-});
-
-Deno.test("authoritative v2 engine snapshots retain exact phases and readiness facts", () => {
-	let state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: bootstrapFixture() });
-	let sequence = 0;
-	const applySnapshot = (
-		phase: Parameters<typeof engineSnapshotFixture>[0],
-		facts?: readonly WireEngineReadinessFact[],
-	) => {
-		const snapshot = engineSnapshotFixture(phase, "clio-acp", facts);
-		state = appReducer(state, {
-			type: "host.event",
-			event: serverEventFixture("engine.state", { snapshot }, {
-				sequence: ++sequence,
-			}),
-		});
-		const engine = state.projects["project-alpha-0001"]!.engine;
-		deepStrictEqual(engine, snapshot);
-		return engine;
-	};
-
-	equal(applySnapshot("unprobed").phase, "unprobed");
-	equal(applySnapshot("probing").phase, "probing");
-	equal(
-		applySnapshot("unavailable", withFact("runtime", "unavailable")).facts.find((fact) => fact.key === "runtime")
-			?.state,
-		"unavailable",
-	);
-	equal(
-		applySnapshot("unavailable", withFact("runtime", "failed")).facts.find((fact) => fact.key === "runtime")
-			?.state,
-		"failed",
-	);
-	equal(
-		applySnapshot("unavailable", withFact("target", "unavailable")).facts.find((fact) => fact.key === "target")
-			?.state,
-		"unavailable",
-	);
-	equal(applySnapshot("failed").phase, "failed");
-	equal(
-		applySnapshot("failed", withFact("target", "unavailable")).facts.find((fact) => fact.key === "target")?.state,
-		"unavailable",
-	);
-
-	const fakePartialFacts = engineSnapshotFixture().facts.map((fact) =>
-		fact.key === "protocol" || fact.key === "target" ? { ...fact, state: "unavailable" as const } : fact
-	);
-	const ready = applySnapshot("ready", fakePartialFacts);
-	equal(ready.phase, "ready");
-	equal(ready.facts.find((fact) => fact.key === "protocol")?.state, "unavailable");
-	equal(ready.facts.find((fact) => fact.key === "target")?.state, "unavailable");
-});
-
-Deno.test("registered workspaces are projected, selected, and rejected when event identity contradicts payload", () => {
-	let state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: bootstrapFixture() });
-	const gamma = workspaceFixture("project-gamma-0003", "Gamma");
-	gamma.engine = engineSnapshotFixture("unprobed", "clio-acp");
-
-	state = appReducer(state, {
-		type: "host.event",
-		event: serverEventFixture("project.registered", { workspace: gamma }, {
-			sequence: 1,
-			projectId: gamma.project.id,
-		}),
-	});
-	equal(state.selectedProjectId, gamma.project.id);
-	equal(state.projects[gamma.project.id]?.engine.kind, "clio-acp");
-	equal(state.projects[gamma.project.id]?.engine.phase, "unprobed");
-
-	const beforeMismatch = state;
-	state = appReducer(state, {
-		type: "host.event",
-		event: serverEventFixture("project.registered", { workspace: workspaceFixture("project-delta-0004", "Delta") }, {
+		event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture("failed") }, {
 			sequence: 2,
-			projectId: "project-not-delta-9999",
+			workspaceInstanceId: "workspace-other-0002",
 		}),
 	});
-	equal(state, beforeMismatch);
+	equal(foreignWorkspace.open?.clio.phase, "idle");
 });
 
-Deno.test("protocol and command errors remain bounded notices with protocol failure changing connection state", () => {
-	let state = appReducer(initialAppState, { type: "bootstrap.loaded", payload: bootstrapFixture() });
+Deno.test("a command error becomes a visible notice and releases the composer", () => {
+	let state = readyState();
+	state = appReducer(state, { type: "turn.submitted", requestId: "request-1" });
 	state = appReducer(state, {
 		type: "host.event",
 		event: serverEventFixture("command.error", {
-			code: "not-ready",
-			message: "The selected engine is not ready.",
-			requestId: "request-fixture-0001",
-		}, { sequence: 1 }),
+			code: "conflict",
+			message: "Clio is still working on the previous prompt. Cancel it or wait.",
+			requestId: "request-1",
+		}, { sequence: 2 }),
 	});
-	equal(state.notice?.message, "The selected engine is not ready.");
-	equal(state.connection, "connecting");
+	equal(state.notice?.tone, "warning");
+	equal(state.pendingTurnStart, null);
+	equal(state.announcement, "Clio is still working on the previous prompt. Cancel it or wait.");
+});
+
+Deno.test("a protocol error fails the connection", () => {
+	const state = appReducer(readyState(), {
+		type: "host.event",
+		event: serverEventFixture("protocol.error", { code: "invalid-frame", message: "bad frame" }, { sequence: 2 }),
+	});
+	equal(state.connection, "failed");
+	equal(state.notice?.tone, "error");
+});
+
+Deno.test("opening a project replaces the workspace and updates the recent list", () => {
+	const state = readyState();
+	const opened = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("project.opened", {
+			workspace: workspaceFixture("project-beta-0002", "Beta"),
+		}, { sequence: 2, projectId: "project-beta-0002" }),
+	});
+	equal(opened.open?.project.id, "project-beta-0002");
+	equal(opened.recent.length, 2);
+	equal(opened.recent[0]?.id, "project-beta-0002");
+	equal(opened.leftDrawerOpen, false);
+
+	const forgotten = appReducer(opened, {
+		type: "host.event",
+		event: serverEventFixture("project.forgotten", {}, { sequence: 3, projectId: "project-beta-0002" }),
+	});
+	equal(forgotten.open, null);
+	deepStrictEqual(forgotten.recent.map((entry) => entry.id), [FIXTURE_PROJECT_ID]);
+});
+
+Deno.test("session, settings, and target events land on the open workspace", () => {
+	let state = readyState();
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("session.list", {
+			sessions: [],
+			truncated: true,
+		}, { sequence: 2 }),
+	});
+	deepStrictEqual(state.open?.sessions, []);
+	equal(state.open?.sessionsTruncated, true);
 
 	state = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("protocol.error", {
-			code: "sequence-error",
-			message: "The local event sequence was invalid.",
+		event: serverEventFixture("targets.state", {
+			targets: [{
+				id: "lmstudio",
+				runtime: "openai-compatible",
+				models: ["qwen3.8-27b"],
+				isOrchestrator: true,
+				health: null,
+			}],
+			truncated: true,
+		}, { sequence: 3 }),
+	});
+	equal(state.open?.targets?.[0]?.health, null);
+	equal(state.open?.targetsTruncated, true);
+
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("targets.probed", {
+			targetId: "lmstudio",
+			health: { healthy: true, latencyMs: 12, reason: null, probedAt: "2026-08-18T12:06:00.000Z" },
+		}, { sequence: 4 }),
+	});
+	equal(state.open?.targets?.[0]?.health?.healthy, true);
+
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("settings.state", {
+			settings: {
+				settings: { "orchestrator.target": "lmstudio" },
+				editable: ["orchestrator.target"],
+				options: { "orchestrator.target": ["lmstudio", "openai"] },
+				checkedAt: "2026-08-18T12:06:00.000Z",
+			},
+		}, { sequence: 5 }),
+	});
+	deepStrictEqual(state.open?.settings?.editable, ["orchestrator.target"]);
+});
+
+Deno.test("a browse listing is held until it is dismissed", () => {
+	let state = readyState();
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("project.browse.listing", {
+			path: "/home/operator",
+			parent: "/home",
+			entries: [{ name: "code", hidden: false, guarded: false }],
+			truncated: false,
+			openable: false,
+			reason: "Your home directory cannot be opened as a project; choose a folder inside it.",
 		}, { sequence: 2 }),
 	});
-	equal(state.notice?.message, "The local event sequence was invalid.");
-	equal(state.connection, "failed");
-	ok(state.announcement.includes("sequence"));
+	equal(state.browse?.entries.length, 1);
+	equal(appReducer(state, { type: "browse.dismissed" }).browse, null);
+});
+
+Deno.test("a reconnected socket restarts the sequence window", () => {
+	let state = readyState();
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture("running") }, { sequence: 9 }),
+	});
+	equal(state.open?.clio.phase, "running");
+	state = appReducer(state, { type: "connection.changed", connection: "disconnected" });
+	state = appReducer(state, { type: "connection.changed", connection: "connected" });
+	equal(state.lastSequence, 0);
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture("idle") }, { sequence: 1 }),
+	});
+	equal(state.open?.clio.phase, "idle");
+});
+
+Deno.test("the composer is blocked exactly while Clio is occupied", () => {
+	const state = readyState();
+	equal(isPromptBlocked(state.open), false);
+	for (const phase of ["running", "awaiting-approval", "cancelling"] as const) {
+		const busy = appReducer(state, {
+			type: "host.event",
+			event: serverEventFixture("clio.state", { snapshot: clioSnapshotFixture(phase) }, { sequence: 2 }),
+		});
+		equal(isPromptBlocked(busy.open), true, `expected ${phase} to block the composer`);
+	}
+});
+
+Deno.test("a refused select is the only thing that marks a remembered folder unopenable", () => {
+	const ready = readyState();
+	const beta = {
+		id: "project-beta-0002",
+		displayName: "Beta",
+		rootPath: "/tmp/workbench-fixture/beta",
+		lastOpenedAt: "2026-08-18T11:00:00.000Z",
+		available: true,
+	};
+	const withBeta = appReducer(ready, {
+		type: "bootstrap.loaded",
+		payload: parseBootstrapPayload(
+			structuredClone(bootstrapFixture({ recent: [...bootstrapFixture().recent, beta] })) as unknown,
+		),
+	});
+	equal(withBeta.recent.length, 2);
+
+	// A refusal that answers this exact select is the host saying the canonical
+	// path failed the guards or is no longer a directory.
+	const submitted = appReducer(withBeta, {
+		type: "project.select.submitted",
+		requestId: "request-select-beta",
+		projectId: beta.id,
+	});
+	deepStrictEqual(submitted.pendingProjectSelect, { requestId: "request-select-beta", projectId: beta.id });
+	const refused = appReducer(submitted, {
+		type: "host.event",
+		event: serverEventFixture("command.error", {
+			code: "refused",
+			message: "That directory does not exist.",
+			requestId: "request-select-beta",
+		}, { sequence: 2, projectId: beta.id }),
+	});
+	equal(refused.recent.find((entry) => entry.id === beta.id)?.available, false);
+	equal(refused.recent.find((entry) => entry.id === FIXTURE_PROJECT_ID)?.available, true);
+	equal(refused.pendingProjectSelect, null);
+	equal(refused.notice?.tone, "warning");
+
+	// A conflict says a prompt is running, not that the folder is gone.
+	const conflicted = appReducer(
+		appReducer(withBeta, { type: "project.select.submitted", requestId: "request-select-2", projectId: beta.id }),
+		{
+			type: "host.event",
+			event: serverEventFixture("command.error", {
+				code: "conflict",
+				message: "Clio is still working in the open project.",
+				requestId: "request-select-2",
+			}, { sequence: 3, projectId: beta.id }),
+		},
+	);
+	equal(conflicted.recent.find((entry) => entry.id === beta.id)?.available, true);
+	equal(conflicted.pendingProjectSelect, null);
+
+	// A refusal that belongs to some other command leaves every row alone.
+	const unrelated = appReducer(
+		appReducer(withBeta, { type: "project.select.submitted", requestId: "request-select-3", projectId: beta.id }),
+		{
+			type: "host.event",
+			event: serverEventFixture("command.error", {
+				code: "refused",
+				message: "That path is outside the project.",
+				requestId: "request-move-1",
+			}, { sequence: 4, projectId: FIXTURE_PROJECT_ID }),
+		},
+	);
+	equal(unrelated.recent.find((entry) => entry.id === beta.id)?.available, true);
+	deepStrictEqual(unrelated.pendingProjectSelect, { requestId: "request-select-3", projectId: beta.id });
+});
+
+Deno.test("a select that succeeds or is forgotten clears the pending selection", () => {
+	const submitted = appReducer(readyState(), {
+		type: "project.select.submitted",
+		requestId: "request-select-alpha",
+		projectId: FIXTURE_PROJECT_ID,
+	});
+	const opened = appReducer(submitted, {
+		type: "host.event",
+		event: serverEventFixture("project.opened", {
+			workspace: workspaceFixture(FIXTURE_PROJECT_ID, "Alpha"),
+		}, { sequence: 2, projectId: FIXTURE_PROJECT_ID }),
+	});
+	equal(opened.pendingProjectSelect, null);
+
+	const forgotten = appReducer(submitted, {
+		type: "host.event",
+		event: serverEventFixture("project.forgotten", {}, { sequence: 3, projectId: FIXTURE_PROJECT_ID }),
+	});
+	equal(forgotten.pendingProjectSelect, null);
+});
+
+Deno.test("the desktop notification preference is in-memory only and defaults to on", () => {
+	equal(initialAppState.desktopNotifications, true);
+	const muted = appReducer(readyState(), { type: "notifications.set", enabled: false });
+	equal(muted.desktopNotifications, false);
+	equal(appReducer(muted, { type: "notifications.set", enabled: true }).desktopNotifications, true);
+	// The bootstrap payload carries no such field, so re-bootstrapping over a live
+	// socket neither sets nor clears what the operator just chose. A real page
+	// reload starts from the initial state, where it is on and the browser's own
+	// permission is still the thing that decides whether anything is posted.
+	const bootstrapped = appReducer(muted, {
+		type: "bootstrap.loaded",
+		payload: parseBootstrapPayload(structuredClone(bootstrapFixture()) as unknown),
+	});
+	equal(bootstrapped.desktopNotifications, false);
 });
