@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { runClioCommand } from "./clio.js";
 import { restoreStdout, takeOverStdout, writeRawStdout } from "./output-guard.js";
@@ -45,6 +46,19 @@ function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
 	return flags;
 }
 
+/**
+ * The workspace root the server is pinned to, resolved and then canonicalized
+ * through the filesystem. A symlinked launch path is the reason: `process.cwd()`
+ * reports the physical path after chdir, so a session request carrying the same
+ * string the process was launched with used to be refused as a different
+ * workspace. One canonical form on both sides removes that class of mismatch.
+ * Throws when the path cannot be resolved, which the caller reports as an
+ * unusable `--cwd`.
+ */
+export function resolveAcpCwd(value: string): string {
+	return realpathSync(path.resolve(value));
+}
+
 export async function runAcpCommand(
 	args: ReadonlyArray<string>,
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
@@ -62,9 +76,11 @@ export async function runAcpCommand(
 	// Boot has to happen in the workspace the sessions will use: settings
 	// resolution, project context, and the session ledger all read process.cwd(),
 	// and the server refuses a session whose cwd is not the one it booted in.
+	// The path is canonicalized before the chdir so the launch root and every
+	// later comparison against process.cwd() speak the same physical path.
 	if (flags.cwd !== undefined) {
 		try {
-			process.chdir(flags.cwd);
+			process.chdir(resolveAcpCwd(flags.cwd));
 		} catch {
 			printError(`--cwd is not a directory this process can enter: ${flags.cwd}`);
 			return 2;
@@ -78,7 +94,15 @@ export async function runAcpCommand(
 			...(options.noSkills ? { noSkills: true } : {}),
 			...(options.skillPaths && options.skillPaths.length > 0 ? { skillPaths: options.skillPaths } : {}),
 			acp: {
-				transportOptions: { write: writeRawStdout },
+				// Stdout is JSON-RPC only. An unclassified handler failure answers the
+				// client with fixed host text; the original message, which nothing in
+				// this process authored, goes to the stderr tail.
+				transportOptions: {
+					write: writeRawStdout,
+					diagnostics: (line) => {
+						process.stderr.write(`[clio:acp] ${line}\n`);
+					},
+				},
 				...(flags.permissionTimeoutMs === undefined ? {} : { permissionTimeoutMs: flags.permissionTimeoutMs }),
 			},
 		});
