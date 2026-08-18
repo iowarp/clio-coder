@@ -5,9 +5,11 @@ import {
 	ACP_MAX_FRAME_BYTES,
 	ACP_MAX_PENDING_REQUESTS,
 	ACP_MAX_STDERR_TAIL_BYTES,
+	ACP_REMOTE_ERROR_CODES,
 	AcpClient,
 	AcpClientError,
 	type AcpClientTiming,
+	type AcpExtensionEvent,
 	type AcpFailure,
 	type AcpLaunchSpec,
 	AcpLineFramer,
@@ -54,12 +56,18 @@ interface RecordedFailure {
 	readonly failure: AcpFailure;
 }
 
+interface RecordedExtensionEvent {
+	readonly generation: string;
+	readonly event: AcpExtensionEvent;
+}
+
 interface FixtureHarness {
 	readonly root: string;
 	readonly client: AcpClient;
 	readonly updates: RecordedUpdate[];
 	readonly permissions: RecordedPermission[];
 	readonly failures: RecordedFailure[];
+	readonly extensionEvents: RecordedExtensionEvent[];
 }
 
 function fixtureLaunch(
@@ -99,6 +107,7 @@ async function withFixture(
 	const updates: RecordedUpdate[] = [];
 	const permissions: RecordedPermission[] = [];
 	const failures: RecordedFailure[] = [];
+	const extensionEvents: RecordedExtensionEvent[] = [];
 	const client = AcpClient.spawn(
 		fixtureLaunch(root, scenario, options.redact, options.terminationScope),
 		{
@@ -107,10 +116,11 @@ async function withFixture(
 				onPermission: (generation: string, request: AcpPermissionRequest) => permissions.push({ generation, request }),
 			}),
 			onFailure: (generation, failure) => failures.push({ generation, failure }),
+			onExtensionEvent: (generation: string, event: AcpExtensionEvent) => extensionEvents.push({ generation, event }),
 		},
 		options.timing ?? ordinaryTiming,
 	);
-	const harness = { root, client, updates, permissions, failures };
+	const harness = { root, client, updates, permissions, failures, extensionEvents };
 	try {
 		await run(harness);
 	} finally {
@@ -128,6 +138,20 @@ async function waitFor(
 	while (!predicate()) {
 		if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${message}.`);
 		await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+	}
+}
+
+async function allowFixturePermissions(
+	harness: FixtureHarness,
+	startIndex: number,
+	count: number,
+): Promise<void> {
+	for (let offset = 0; offset < count; offset += 1) {
+		const index = startIndex + offset;
+		await waitFor(() => harness.permissions.length > index, `permission ${index + 1}`);
+		const request = harness.permissions[index]?.request;
+		ok(request);
+		await request.resolve("allow_once");
 	}
 }
 
@@ -175,11 +199,32 @@ async function initializeAndCreateSession(harness: FixtureHarness): Promise<void
 			loadSession: false,
 			promptCapabilities: { audio: false, embeddedContext: false, image: false },
 			mcpCapabilities: { http: false, sse: false },
-			_meta: { "clio-coder/session": { close: true }, "clio-coder/tools": "mediated" },
+			_meta: {
+				"clio-coder/session": { close: true },
+				"clio-coder/events": {
+					version: 1,
+					notification: "clio-coder/event",
+					kinds: ["safety.loopBlocked"],
+					workspaceInstanceId: "fixture-workspace-1",
+				},
+				"clio-coder/tools": "mediated",
+			},
 		},
 		authMethods: [],
 	});
-	deepStrictEqual(await newSession(harness.client, harness.root), { sessionId: fixtureSessionId });
+	deepStrictEqual(await newSession(harness.client, harness.root), {
+		sessionId: fixtureSessionId,
+		_meta: {
+			"clio-coder/session": {
+				sessionId: fixtureSessionId,
+				target: "lmstudio",
+				model: "qwen3.8-27b",
+				autonomy: "auto-edit",
+				createdAt: "2026-08-18T12:00:00.000Z",
+				resumed: false,
+			},
+		},
+	});
 }
 
 function assertSafeFailure(harness: FixtureHarness, expectedCode: AcpFailure["code"]): void {
@@ -277,6 +322,37 @@ Deno.test("AcpLineFramer accepts blank EOF but rejects nonblank or invalid UTF-8
 	);
 });
 
+Deno.test("the fixture bounds stdin at one MiB of UTF-8 and resumes after discarding the line", async () => {
+	const child = new Deno.Command(Deno.execPath(), {
+		args: ["run", "--quiet", "--no-config", fixturePath, "--scenario=happy"],
+		stdin: "piped",
+		stdout: "piped",
+		stderr: "piped",
+	}).spawn();
+	const outputPromise = child.output();
+	const writer = child.stdin.getWriter();
+	const oversizedUtf8 = "€".repeat(Math.floor((1024 * 1024) / 3) + 1);
+	const initializeFrame = JSON.stringify({
+		jsonrpc: "2.0",
+		id: 7,
+		method: "initialize",
+		params: { protocolVersion: 1, clientInfo: { name: "byte-bound-test", version: "0.0.0" } },
+	});
+	await writer.write(encoder.encode(`${oversizedUtf8}\n${initializeFrame}\n`));
+	await writer.close();
+	const output = await outputPromise;
+	equal(output.success, true);
+	const frames = decoder.decode(output.stdout).trim().split("\n").map((line) =>
+		JSON.parse(line) as Record<string, unknown>
+	);
+	const oversized = frames.find((frame) => frame.id === null);
+	ok(oversized);
+	equal((JSON.stringify(oversized).match(/input_line_too_large/gu) ?? []).length, 1);
+	const initialized = frames.find((frame) => frame.id === 7);
+	ok(initialized);
+	ok(Object.hasOwn(initialized, "result"));
+});
+
 Deno.test("localAcpLaunch builds the frozen node CLI argv and validates every caller-controlled field", () => {
 	const root = resolve(Deno.cwd(), "trusted project");
 	const cliEntry = join(root, "dist", "cli", "index.js");
@@ -300,7 +376,8 @@ Deno.test("localAcpLaunch builds the frozen node CLI argv and validates every ca
 	for (const invoke of invalidCalls) {
 		throws(invoke, (error: unknown) => assertClientError(error, AcpClientError, "invalid-launch"));
 	}
-	for (const timeout of [0, 300_001]) {
+	// The permission ceiling is the ACP client's 1 800 000 ms bound, not the old 300 s one.
+	for (const timeout of [0, 1_800_001]) {
 		throws(
 			() => localAcpLaunch("node", root, timeout),
 			(error: unknown) => assertClientError(error, AcpClientError, "invalid-timeout"),
@@ -356,16 +433,19 @@ Deno.test("spawned fixture completes initialize, new, ordered prompt updates, us
 		deepStrictEqual(harness.updates.map(({ update }) => update), [
 			{
 				type: "message",
+				replay: null,
 				sessionId: fixtureSessionId,
 				text: "Fixture turn started. ",
 			},
 			{
 				type: "thought",
+				replay: null,
 				sessionId: fixtureSessionId,
 				text: "Inspecting deterministic input. ",
 			},
 			{
 				type: "tool",
+				replay: null,
 				variant: "start",
 				sessionId: fixtureSessionId,
 				toolCallId: fixtureToolCallId,
@@ -376,6 +456,7 @@ Deno.test("spawned fixture completes initialize, new, ordered prompt updates, us
 			},
 			{
 				type: "tool",
+				replay: null,
 				variant: "update",
 				sessionId: fixtureSessionId,
 				toolCallId: fixtureToolCallId,
@@ -386,6 +467,7 @@ Deno.test("spawned fixture completes initialize, new, ordered prompt updates, us
 			},
 			{
 				type: "message",
+				replay: null,
 				sessionId: fixtureSessionId,
 				text: "Fixture turn complete.",
 			},
@@ -399,6 +481,16 @@ Deno.test("spawned fixture completes initialize, new, ordered prompt updates, us
 				cancelActive: false,
 			}),
 		);
+	});
+});
+
+Deno.test("ordinary fixture session lists omit aggregate truncation metadata", async () => {
+	await withFixture("conversation", async (harness) => {
+		await initialize(harness.client);
+		await newSession(harness.client, harness.root);
+		const result = await harness.client.request("clio-coder/session/list", {}, 2_000);
+		ok(typeof result === "object" && result !== null && !Array.isArray(result));
+		equal(Object.hasOwn(result, "_meta"), false);
 	});
 });
 
@@ -747,7 +839,7 @@ Deno.test("a duplicate response resolves once and then fails the connection clos
 });
 
 Deno.test("remote JSON-RPC errors expose only bounded Clio metadata and a generic local message", async () => {
-	await withFixture("remote-error-extra", async (harness) => {
+	await withFixture("remote-error-protocol-version", async (harness) => {
 		let observed: unknown;
 		try {
 			await initialize(harness.client);
@@ -756,18 +848,52 @@ Deno.test("remote JSON-RPC errors expose only bounded Clio metadata and a generi
 		}
 		ok(observed instanceof AcpRemoteError);
 		equal(observed.code, "remote-error");
-		equal(observed.rpcCode, -32_000);
+		equal(observed.rpcCode, -32_602);
 		deepStrictEqual(observed.remote, {
 			version: 1,
-			code: "fixture_rejected",
-			reason: "test",
+			code: "protocol_version_unsupported",
 			supported: [1],
 		});
-		equal(observed.message, "The ACP peer rejected initialize (JSON-RPC -32000).");
+		equal(observed.message, "The ACP peer rejected initialize (JSON-RPC -32602).");
 		const serialized = JSON.stringify(observed);
 		ok(!serialized.includes("fixture-secret"));
 		ok(!serialized.includes("untrusted"));
 		deepStrictEqual(harness.failures, []);
+	});
+});
+
+Deno.test("the remote error metadata vocabulary is the frozen eighteen code set", () => {
+	deepStrictEqual(ACP_REMOTE_ERROR_CODES, [
+		"not_initialized",
+		"already_initialized",
+		"protocol_version_unsupported",
+		"invalid_params",
+		"session_cwd_mismatch",
+		"session_limit",
+		"session_unknown",
+		"session_open",
+		"prompt_active",
+		"prompt_not_admitted",
+		"permission_expired",
+		"turn_failed",
+		"parse_error",
+		"invalid_request",
+		"input_line_too_large",
+		"invalid_request_id",
+		"method_not_found",
+		"internal_error",
+	]);
+});
+
+Deno.test("remote-error-extra fails the connection as unknown remote metadata", async () => {
+	await withFixture("remote-error-extra", async (harness) => {
+		await rejects(
+			initialize(harness.client),
+			(error: unknown) => assertClientError(error, AcpClientError, "protocol-failure"),
+		);
+		await waitFor(() => harness.failures.length === 1, "one protocol failure");
+		deepStrictEqual(harness.failures.map(({ failure }) => failure.code), ["protocol-failure"]);
+		deepStrictEqual(harness.extensionEvents, []);
 	});
 });
 
@@ -1093,4 +1219,140 @@ Deno.test({
 			match(harness.client.stderrTail(), /intentionally ignored SIGTERM/);
 		});
 	},
+});
+
+Deno.test("the extension event surface is advertised independently and delivered only after opt in", async () => {
+	// Advertisement names server support. Client opt in controls emission.
+	await withFixture("seventeen-bash", async (harness) => {
+		const initialized = await initialize(harness.client);
+		const meta = ((initialized as { agentCapabilities?: { _meta?: Record<string, unknown> } }).agentCapabilities ?? {})
+			._meta ?? {};
+		deepStrictEqual(meta["clio-coder/events"], {
+			version: 1,
+			notification: "clio-coder/event",
+			kinds: ["safety.loopBlocked"],
+			workspaceInstanceId: "fixture-workspace-1",
+		});
+		await newSession(harness.client, harness.root);
+
+		const turn = prompt(harness.client, {});
+		for (let call = 0; call < 5; call += 1) {
+			await waitFor(() => harness.permissions.length === call + 1, `permission ${call + 1}`);
+			const request = harness.permissions[call]?.request;
+			ok(request);
+			await request.resolve("allow_once");
+		}
+		deepStrictEqual(harness.extensionEvents, []);
+		await harness.client.notify("session/cancel", { sessionId: fixtureSessionId }).catch(() => undefined);
+		await turn.catch(() => undefined);
+	});
+
+	// With the opt-in the same run advertises the notification and reports the loop.
+	await withFixture("seventeen-bash", async (harness) => {
+		const initialized = await initialize(harness.client, {
+			clientCapabilities: { _meta: { "clio-coder/events": { version: 1, kinds: ["safety.loopBlocked"] } } },
+		});
+		const meta = ((initialized as { agentCapabilities?: { _meta?: Record<string, unknown> } }).agentCapabilities ?? {})
+			._meta ?? {};
+		deepStrictEqual(meta["clio-coder/events"], {
+			version: 1,
+			notification: "clio-coder/event",
+			kinds: ["safety.loopBlocked"],
+			workspaceInstanceId: "fixture-workspace-1",
+		});
+		await newSession(harness.client, harness.root);
+
+		const turn = prompt(harness.client, {});
+		for (let call = 0; call < 4; call += 1) {
+			await waitFor(() => harness.permissions.length === call + 1, `permission ${call + 1}`);
+			const request = harness.permissions[call]?.request;
+			ok(request);
+			await request.resolve("allow_once");
+		}
+		await waitFor(() => harness.extensionEvents.length > 0, "a loop-blocked event");
+		const first = harness.extensionEvents[0];
+		ok(first);
+		equal(first.event.kind, "safety.loopBlocked");
+		equal(first.event.sequence, 1);
+		equal(first.event.payload.tool, "bash");
+		equal(first.event.payload.repeatCount, 3);
+		equal(first.event.payload.shape, null);
+		await harness.client.notify("session/cancel", { sessionId: fixtureSessionId }).catch(() => undefined);
+		await turn.catch(() => undefined);
+	});
+});
+
+for (
+	const scenario of [
+		"event-without-opt-in",
+		"event-workspace-mismatch",
+		"event-session-mismatch",
+		"event-terminal-invalid",
+		"event-tool-fields-invalid",
+		"event-count-invalid",
+		"event-interruption-invalid",
+	] as const
+) {
+	Deno.test(`${scenario} fails the ACP connection before publication`, async () => {
+		await withFixture(scenario, async (harness) => {
+			const optIn = scenario === "event-without-opt-in" ? {} : {
+				clientCapabilities: {
+					_meta: { "clio-coder/events": { version: 1, kinds: ["safety.loopBlocked"] } },
+				},
+			};
+			await initialize(harness.client, optIn);
+			await newSession(harness.client, harness.root);
+			const turn = prompt(harness.client);
+			await allowFixturePermissions(harness, 0, 3);
+			await rejects(turn, (error: unknown) => assertClientError(error, AcpClientError, "protocol-failure"));
+			await waitFor(() => harness.failures.length === 1, "one protocol failure");
+			deepStrictEqual(harness.extensionEvents, []);
+			equal(harness.failures[0]?.failure.code, "protocol-failure");
+		});
+	});
+}
+
+for (const scenario of ["event-sequence-repeat", "event-turn-changed"] as const) {
+	Deno.test(`${scenario} fails after one valid event without publishing the second`, async () => {
+		await withFixture(scenario, async (harness) => {
+			await initialize(harness.client, {
+				clientCapabilities: {
+					_meta: { "clio-coder/events": { version: 1, kinds: ["safety.loopBlocked"] } },
+				},
+			});
+			await newSession(harness.client, harness.root);
+			const turn = prompt(harness.client);
+			await allowFixturePermissions(harness, 0, 6);
+			await rejects(turn, (error: unknown) => assertClientError(error, AcpClientError, "protocol-failure"));
+			await waitFor(() => harness.failures.length === 1, "one protocol failure");
+			equal(harness.extensionEvents.length, 1);
+			equal(harness.extensionEvents[0]?.event.sequence, 1);
+			equal(harness.failures[0]?.failure.code, "protocol-failure");
+		});
+	});
+}
+
+Deno.test("extension event sequence increases across prompts in one child process", async () => {
+	await withFixture("seventeen-bash", async (harness) => {
+		await initialize(harness.client, {
+			clientCapabilities: {
+				_meta: { "clio-coder/events": { version: 1, kinds: ["safety.loopBlocked"] } },
+			},
+		});
+		await newSession(harness.client, harness.root);
+
+		const first = prompt(harness.client);
+		await allowFixturePermissions(harness, 0, 17);
+		await first;
+		const firstSequences = harness.extensionEvents.map(({ event }) => event.sequence);
+		ok(firstSequences.length > 0);
+		const firstMaximum = Math.max(...firstSequences);
+
+		const second = prompt(harness.client);
+		await allowFixturePermissions(harness, 17, 3);
+		await waitFor(() => harness.extensionEvents.length > firstSequences.length, "the next prompt event");
+		equal(harness.extensionEvents[firstSequences.length]?.event.sequence, firstMaximum + 1);
+		await harness.client.notify("session/cancel", { sessionId: fixtureSessionId });
+		await second;
+	});
 });

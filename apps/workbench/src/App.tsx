@@ -1,32 +1,26 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { Dispatch, FormEvent, KeyboardEvent, ReactNode } from "react";
-import type { FakeScenario, WireEngineKind, WireEnginePhase, WireEngineSource } from "./protocol.ts";
-import {
-	type AppAction,
-	type AppState,
-	type DeleteChallenge,
-	formatProjectPath,
-	type ProjectPath,
-	type ProjectWorkspaceState,
-	selectedWorkspace,
-	type TimelineItem,
-	type TreeNode,
-} from "./state.ts";
+import { AUTONOMY_LEVELS, THINKING_LEVELS } from "./protocol.ts";
+import type {
+	WireAutonomyLevel,
+	WireClioPhase,
+	WireDeleteChallenge,
+	WireEventSource,
+	WirePendingPermission,
+	WireProjectSummary,
+	WireSessionSummary,
+	WireSettingsPatch,
+	WireTarget,
+	WireTimelineItem,
+	WireTreeNode,
+} from "./protocol.ts";
+import { type AppAction, type AppState, formatProjectPath, isPromptBlocked, type OpenWorkspaceState } from "./state.ts";
 
 export interface WorkbenchActions {
-	selectEngine(projectId: string, kind: WireEngineKind): void;
-	probeEngine(projectId: string): void;
-	startTurn(projectId: string, prompt: string, fakeScenario?: FakeScenario): void;
-	cancelTurn(projectId: string, turnId: string): void;
-	resolvePermission(
-		projectId: string,
-		turnId: string,
-		permissionId: string,
-		decision: "allow-once" | "reject",
-	): void;
+	browseProjects(path?: string): void;
+	openProject(path: string): void;
 	selectProject(projectId: string): void;
-	createProject(displayName: string, directoryName: string): void;
-	registerProject(relativeRoot: readonly string[], displayName?: string): void;
+	forgetProject(projectId: string): void;
 	refreshTree(projectId: string, directory?: readonly string[]): void;
 	createNode(projectId: string, parent: readonly string[], name: string, kind: "file" | "folder"): void;
 	moveNode(
@@ -37,6 +31,20 @@ export interface WorkbenchActions {
 	): void;
 	prepareDelete(projectId: string, target: readonly string[], expectedNodeVersion?: string): void;
 	confirmDelete(projectId: string, confirmationId: string): void;
+	newSession(projectId: string): void;
+	loadSession(projectId: string, sessionId: string): void;
+	closeSession(projectId: string): void;
+	listSessions(projectId: string): void;
+	labelSession(projectId: string, sessionId: string, label: string): void;
+	deleteSession(projectId: string, sessionId: string): void;
+	startTurn(projectId: string, prompt: string): void;
+	cancelTurn(projectId: string, turnId: string): void;
+	resolvePermission(projectId: string, turnId: string, permissionId: string, decision: "allow-once" | "reject"): void;
+	getSettings(projectId: string): void;
+	patchSettings(projectId: string, patch: WireSettingsPatch): void;
+	listTargets(projectId: string): void;
+	probeTarget(projectId: string, targetId: string): void;
+	setAutonomy(projectId: string, level: WireAutonomyLevel): void;
 }
 
 interface WorkbenchViewProps {
@@ -45,7 +53,6 @@ interface WorkbenchViewProps {
 	actions: WorkbenchActions;
 }
 
-type ProjectDialog = "create" | "register" | null;
 type FileDialog = "create-file" | "create-folder" | "move" | "delete" | null;
 
 const FOCUSABLE_SELECTOR =
@@ -90,47 +97,88 @@ function useMediaQuery(query: string): boolean {
 	return matches;
 }
 
-const ENGINE_PHASE_PRESENTATION: Record<WireEnginePhase, { label: string; tone: string }> = {
-	ready: { label: "Ready", tone: "success" },
-	unprobed: { label: "Readiness not checked", tone: "warning" },
-	probing: { label: "Checking readiness", tone: "info" },
-	unavailable: { label: "Unavailable", tone: "warning" },
-	starting: { label: "Starting Clio", tone: "info" },
-	connected: { label: "Clio connected", tone: "success" },
-	running: { label: "Running", tone: "action" },
-	"awaiting-approval": { label: "Awaiting permission", tone: "warning" },
-	cancelling: { label: "Cancelling", tone: "warning" },
-	failed: { label: "Failed", tone: "error" },
-};
-
-const ENGINE_NAMES: Record<WireEngineKind, string> = {
-	fake: "Fake",
-	"clio-acp": "Clio",
-};
-
-function isEngineOperationActive(phase: WireEnginePhase): boolean {
-	return phase === "starting" || phase === "connected" || phase === "running" ||
-		phase === "awaiting-approval" || phase === "cancelling";
+/** Ticks once a second while a turn runs so the operator sees work progressing. */
+function useElapsedSeconds(startedAt: string | null): number {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (startedAt === null) return;
+		setNow(Date.now());
+		const timer = setInterval(() => setNow(Date.now()), 1_000);
+		return () => clearInterval(timer);
+	}, [startedAt]);
+	if (startedAt === null) return 0;
+	const started = Date.parse(startedAt);
+	if (Number.isNaN(started)) return 0;
+	return Math.max(0, Math.floor((now - started) / 1_000));
 }
 
-const SOURCE_LABELS: Record<WireEngineSource, string> = {
-	"simulated-by-workbench": "Simulated by Workbench",
+/** A single shared clock so many cards can show elapsed time without many timers. */
+function useNow(active: boolean): number {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!active) return;
+		setNow(Date.now());
+		const timer = setInterval(() => setNow(Date.now()), 1_000);
+		return () => clearInterval(timer);
+	}, [active]);
+	return now;
+}
+
+export function formatDuration(seconds: number): string {
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+const PHASE_PRESENTATION: Record<WireClioPhase, { label: string; tone: string }> = {
+	starting: { label: "Starting Clio", tone: "info" },
+	unbound: { label: "No session", tone: "info" },
+	idle: { label: "Idle", tone: "success" },
+	running: { label: "Running", tone: "action" },
+	"awaiting-approval": { label: "Awaiting approval", tone: "warning" },
+	cancelling: { label: "Stopping", tone: "warning" },
+	failed: { label: "Failed", tone: "error" },
+	closed: { label: "Closed", tone: "info" },
+};
+
+const SOURCE_LABELS: Record<WireEventSource, string> = {
 	"reported-by-clio": "Reported by Clio",
 	"observed-on-acp": "Observed on ACP",
 	"observed-by-workbench": "Observed by Workbench",
-	"independently-verified": "Independently verified",
+	"replayed-from-clio": "Replayed from Clio",
 };
 
-function sourceLabel(source: WireEngineSource | undefined): string | null {
-	return source ? SOURCE_LABELS[source] : null;
+const AUTONOMY_LABELS: Record<WireAutonomyLevel, string> = {
+	"read-only": "read only",
+	suggest: "suggest",
+	"auto-edit": "auto edit",
+	"full-auto": "full auto",
+};
+
+function isAutonomyLevel(value: string): value is WireAutonomyLevel {
+	return (AUTONOMY_LEVELS as readonly string[]).includes(value);
 }
 
-function formatPermissionLocation(path: { readonly segments: readonly string[] }): string {
-	return path.segments.length > 0 ? path.segments.join("/") : "unavailable";
+function settingsPatch(key: string, value: string): WireSettingsPatch | null {
+	if (key === "orchestrator.target" || key === "orchestrator.model") {
+		return { [key]: value.length === 0 ? null : value };
+	}
+	if (key === "orchestrator.thinkingLevel" && (THINKING_LEVELS as readonly string[]).includes(value)) {
+		return { "orchestrator.thinkingLevel": value as (typeof THINKING_LEVELS)[number] };
+	}
+	if (key === "autonomy" && isAutonomyLevel(value)) return { autonomy: value };
+	return null;
 }
 
-function formatTimeLabel(value: string): string {
-	if (value === "now") return value;
+const SESSION_STATE_LABELS: Record<WireSessionSummary["state"], string> = {
+	open: "open",
+	closed: "closed",
+	unknown: "unknown",
+};
+
+const UNKNOWN_SESSION_NOTE = "Clio cannot tell whether another process still holds this session.";
+
+function formatTimestamp(value: string): string {
 	const timestamp = new Date(value);
 	return Number.isNaN(timestamp.getTime())
 		? "unavailable"
@@ -173,9 +221,9 @@ function LoadingScreen() {
 				<span />
 			</div>
 			<BrandLockup />
-			<p>Calibrating the localhost instrument…</p>
+			<p>Starting the localhost instrument…</p>
 			<div className="boot-screen__rule" />
-			<small>Engine checks are explicit and never alter Clio configuration.</small>
+			<small>Workbench talks to one Clio process and never edits Clio configuration behind your back.</small>
 		</main>
 	);
 }
@@ -213,12 +261,12 @@ function PanelHeading({ eyebrow, title, headingId, action }: {
 	);
 }
 
-function pathKey(path: ProjectPath | readonly string[]): string {
+function pathKey(path: Readonly<{ segments: readonly string[] }> | readonly string[]): string {
 	const segments = "segments" in path ? path.segments : path;
-	return segments.join("\u001f");
+	return segments.join("");
 }
 
-function parentPath(path: readonly string[]): string[] {
+function parentPath(path: readonly string[]): readonly string[] {
 	return path.slice(0, -1);
 }
 
@@ -228,9 +276,9 @@ function TreeBranch({
 	onSelect,
 	level = 1,
 }: {
-	nodes: TreeNode[];
+	nodes: readonly WireTreeNode[];
 	selected: string | null;
-	onSelect(node: TreeNode): void;
+	onSelect(node: WireTreeNode): void;
 	level?: number;
 }) {
 	return (
@@ -266,50 +314,207 @@ function TreeBranch({
 	);
 }
 
+function OpenProjectForm({ onOpen, onBrowse, busy }: {
+	onOpen(path: string): void;
+	onBrowse(): void;
+	busy: boolean;
+}) {
+	const [path, setPath] = useState("");
+	const inputId = useId();
+	function submit(event: FormEvent) {
+		event.preventDefault();
+		const trimmed = path.trim();
+		if (trimmed.length === 0) return;
+		onOpen(trimmed);
+	}
+	return (
+		<form className="open-project" onSubmit={submit}>
+			<label htmlFor={inputId}>Project folder</label>
+			<div className="open-project__row">
+				<input
+					id={inputId}
+					name="projectPath"
+					value={path}
+					spellCheck={false}
+					autoComplete="off"
+					placeholder="/home/you/code/your-project"
+					onChange={(event) => setPath(event.target.value)}
+				/>
+				<button type="submit" className="button button--primary" disabled={busy || path.trim().length === 0}>
+					Open
+				</button>
+			</div>
+			<button type="button" className="button button--quiet open-project__browse" onClick={onBrowse}>
+				Browse folders
+			</button>
+		</form>
+	);
+}
+
+function SessionRow({ session, open, actions, busy, onDelete }: {
+	session: WireSessionSummary;
+	open: OpenWorkspaceState;
+	actions: WorkbenchActions;
+	busy: boolean;
+	onDelete(session: WireSessionSummary): void;
+}) {
+	const [editing, setEditing] = useState(false);
+	const [draft, setDraft] = useState(session.label ?? "");
+	const bound = open.clio.session?.id === session.id;
+	const unknown = session.state === "unknown";
+	const capabilities = open.clio.capabilities;
+	const title = session.label ?? (session.preview.length > 0 ? session.preview : "Untitled session");
+
+	function commitLabel(event: FormEvent) {
+		event.preventDefault();
+		actions.labelSession(open.project.id, session.id, draft.trim());
+		setEditing(false);
+	}
+
+	return (
+		<article className={`session-row${bound ? " is-bound" : ""}`}>
+			<span className={`session-row__mark session-row__mark--${session.state}`} aria-hidden="true" />
+			<div className="session-row__body">
+				{editing
+					? (
+						<form className="session-row__rename" onSubmit={commitLabel}>
+							<label>
+								<span className="sr-only">Label for {title}</span>
+								<input
+									value={draft}
+									maxLength={256}
+									placeholder="Name this session"
+									onChange={(event) => setDraft(event.target.value)}
+									onKeyDown={(event) => {
+										if (event.key === "Escape") {
+											setDraft(session.label ?? "");
+											setEditing(false);
+										}
+									}}
+								/>
+							</label>
+							<button type="submit" className="button button--quiet">Save</button>
+						</form>
+					)
+					: <h3>{title}</h3>}
+				<p className="session-row__meta">
+					{SESSION_STATE_LABELS[session.state]} · {session.turns} turns · {formatTimestamp(session.updatedAt)}
+					{session.target === null ? "" : ` · ${session.target}`}
+					{session.model === null ? "" : ` · ${session.model}`}
+				</p>
+				{unknown && <p className="session-row__note">{UNKNOWN_SESSION_NOTE}</p>}
+			</div>
+			<div className="session-row__actions">
+				{bound ? <span className="session-row__badge">bound</span> : (
+					<button
+						type="button"
+						className="button button--quiet"
+						disabled={busy || unknown || capabilities?.load !== true}
+						onClick={() => actions.loadSession(open.project.id, session.id)}
+					>
+						Resume
+					</button>
+				)}
+				{!editing && capabilities?.label === true && (
+					<button
+						type="button"
+						className="button button--quiet"
+						disabled={busy}
+						onClick={() => {
+							setDraft(session.label ?? "");
+							setEditing(true);
+						}}
+					>
+						Rename
+					</button>
+				)}
+				<button
+					type="button"
+					className="button button--quiet"
+					disabled={busy || bound || unknown || capabilities?.delete !== true}
+					onClick={() => onDelete(session)}
+				>
+					Delete
+				</button>
+			</div>
+		</article>
+	);
+}
+
+/** Deleting a session is permanent, so Workbench asks before the server is told. */
+function SessionDeleteModal({ session, projectId, actions, onClose }: {
+	session: WireSessionSummary;
+	projectId: string;
+	actions: WorkbenchActions;
+	onClose(): void;
+}) {
+	const title = session.label ?? (session.preview.length > 0 ? session.preview : "Untitled session");
+	return (
+		<Modal title="Delete this session" eyebrow="PERMANENT · NOT RECOVERABLE" onClose={onClose}>
+			<div className="delete-confirmation">
+				<div className="delete-confirmation__target">
+					<span>SESSION</span>
+					<code>{title}</code>
+				</div>
+				<p>
+					Clio deletes this session and its {session.turns}{" "}
+					recorded turns. Workbench cannot bring them back, and neither can Clio.
+				</p>
+				<div className="modal__actions">
+					<button type="button" className="button button--quiet" onClick={onClose}>Keep session</button>
+					<button
+						type="button"
+						className="button button--danger"
+						onClick={() => {
+							actions.deleteSession(projectId, session.id);
+							onClose();
+						}}
+					>
+						Delete permanently
+					</button>
+				</div>
+			</div>
+		</Modal>
+	);
+}
+
 function ProjectRail({
 	state,
-	workspace,
 	dispatch,
-	onProjectDialog,
-	onSelectProject,
+	actions,
 	selectedNode,
 	onSelectNode,
 	onFileDialog,
-	onRefresh,
-	slotActive,
+	onDeleteSession,
 	isDrawer,
 	obscured,
 }: {
 	state: AppState;
-	workspace: ProjectWorkspaceState;
 	dispatch: Dispatch<AppAction>;
-	onProjectDialog(dialog: ProjectDialog): void;
-	onSelectProject(projectId: string): void;
-	selectedNode: TreeNode | null;
-	onSelectNode(node: TreeNode): void;
+	actions: WorkbenchActions;
+	selectedNode: WireTreeNode | null;
+	onSelectNode(node: WireTreeNode): void;
 	onFileDialog(dialog: FileDialog): void;
-	onRefresh(): void;
-	slotActive: boolean;
+	onDeleteSession(session: WireSessionSummary): void;
 	isDrawer: boolean;
 	obscured: boolean;
 }) {
-	const projects = Object.values(state.projects);
+	const open = state.open;
+	// Only a live turn locks project switching; having no project open must never
+	// disable the control that opens one.
+	const busy = open !== null && isPromptBlocked(open);
 	const unavailable = obscured || (isDrawer && !state.leftDrawerOpen);
 	return (
 		<aside
 			id="project-rail"
-			className={`left-rail instrument-panel${state.leftDrawerOpen ? " is-open" : ""}`}
+			className={`left-rail${isDrawer && state.leftDrawerOpen ? " is-open" : ""}`}
 			aria-label="Projects, files, and sessions"
 			aria-hidden={unavailable ? true : undefined}
 			inert={unavailable}
 		>
 			<div className="left-rail__brand">
-				<BrandLockup />
-				<div className="left-rail__brand-actions">
-					<StatusMark
-						tone={state.connection === "connected" ? "success" : state.connection === "connecting" ? "info" : "error"}
-						label={state.connection === "connected" ? "Local channel" : state.connection}
-					/>
+				<BrandLockup compact />
+				{isDrawer && (
 					<button
 						type="button"
 						className="icon-button left-rail__close"
@@ -318,326 +523,243 @@ function ProjectRail({
 						<Glyph>×</Glyph>
 						<span className="sr-only">Close projects and files</span>
 					</button>
-				</div>
+				)}
 			</div>
 
 			<section className="rail-section rail-section--projects" aria-labelledby="project-library-title">
-				<PanelHeading
-					eyebrow="LIBRARY"
-					title="Projects"
-					headingId="project-library-title"
-					action={
-						<div className="segmented-actions" aria-label="Project actions">
-							<button
-								type="button"
-								className="icon-button"
-								onClick={() => onProjectDialog("register")}
-								disabled={slotActive}
-								title={slotActive ? "Cancel the active turn before changing projects." : undefined}
-							>
-								<Glyph>↳</Glyph>
-								<span className="sr-only">Register existing sandbox project</span>
-							</button>
-							<button
-								type="button"
-								className="icon-button"
-								onClick={() => onProjectDialog("create")}
-								disabled={slotActive}
-								title={slotActive ? "Cancel the active turn before changing projects." : undefined}
-							>
-								<Glyph>＋</Glyph>
-								<span className="sr-only">Create sandbox project</span>
-							</button>
-						</div>
-					}
+				<PanelHeading eyebrow="PROJECT" title="Open a folder" headingId="project-library-title" />
+				<OpenProjectForm
+					onOpen={(path) => actions.openProject(path)}
+					onBrowse={() => actions.browseProjects()}
+					busy={busy}
 				/>
 				<div className="project-list">
-					{projects.map(({ project, engine }) => {
-						const phase = ENGINE_PHASE_PRESENTATION[engine.phase];
-						const selected = project.id === state.selectedProjectId;
-						const switchBlocked = slotActive && !selected;
-						return (
+					{state.recent.length === 0
+						? <p className="rail-empty">No project has been opened yet.</p>
+						: state.recent.map((project: WireProjectSummary) => {
+							const isOpen = open?.project.id === project.id;
+							const missing = !project.available;
+							return (
+								<div className={`project-card-row${missing ? " is-missing" : ""}`} key={project.id}>
+									<button
+										type="button"
+										className={`project-card${isOpen ? " is-selected" : ""}`}
+										aria-pressed={isOpen}
+										disabled={busy || missing}
+										onClick={() => actions.selectProject(project.id)}
+										title={project.rootPath}
+									>
+										<span className="project-card__body">
+											<strong>{project.displayName}</strong>
+											<small>{project.rootPath}</small>
+											{missing && <small className="project-card__missing">cannot be opened</small>}
+										</span>
+									</button>
+									{missing
+										? (
+											<div className="project-recovery">
+												<p className="project-recovery__reason">
+													Workbench can no longer open this folder. It may have been moved, renamed, or deleted, or it
+													may now be a location Workbench refuses to open. Removing it from this list changes nothing on
+													disk.
+												</p>
+												<button
+													type="button"
+													className="button button--quiet"
+													disabled={busy}
+													onClick={() => actions.forgetProject(project.id)}
+												>
+													Remove {project.displayName} from this list
+												</button>
+											</div>
+										)
+										: (
+											<button
+												type="button"
+												className="icon-button"
+												disabled={busy}
+												onClick={() => actions.forgetProject(project.id)}
+											>
+												<Glyph>×</Glyph>
+												<span className="sr-only">Forget {project.displayName}</span>
+											</button>
+										)}
+								</div>
+							);
+						})}
+				</div>
+				{busy && <p className="project-lock-note">Clio is working. Projects can be switched between turns.</p>}
+			</section>
+
+			{open && (
+				<>
+					<section className="rail-section rail-section--files" aria-labelledby="files-title">
+						<PanelHeading
+							eyebrow="FILES"
+							title={open.project.displayName}
+							headingId="files-title"
+							action={
+								<button
+									type="button"
+									className="icon-button"
+									onClick={() => actions.refreshTree(open.project.id)}
+									title="Refresh project tree"
+								>
+									<Glyph>⟳</Glyph>
+									<span className="sr-only">Refresh project tree</span>
+								</button>
+							}
+						/>
+						<div className="file-toolbar" aria-label="File operations">
+							<button type="button" className="button button--quiet" onClick={() => onFileDialog("create-file")}>
+								New file
+							</button>
+							<button type="button" className="button button--quiet" onClick={() => onFileDialog("create-folder")}>
+								New folder
+							</button>
 							<button
 								type="button"
-								key={project.id}
-								className={`project-card${selected ? " is-selected" : ""}`}
-								onClick={() => !selected && onSelectProject(project.id)}
-								aria-pressed={selected}
-								aria-disabled={switchBlocked || undefined}
-								disabled={switchBlocked}
-								title={switchBlocked ? "Cancel the active turn before switching projects." : undefined}
+								className="button button--quiet"
+								disabled={selectedNode === null}
+								onClick={() => onFileDialog("move")}
 							>
-								<span className="project-card__ordinal">
-									{String(projects.findIndex((item) => item.project.id === project.id) + 1).padStart(2, "0")}
-								</span>
-								<span className="project-card__body">
-									<strong>{project.displayName}</strong>
-									<code>{project.identity.displayPath}</code>
-								</span>
-								<span className={`project-card__state project-card__state--${phase.tone}`}>
-									<span aria-hidden="true">
-										{engine.phase === "running" || engine.phase === "cancelling" ? "◆" : "●"}
-									</span>
-									<span className="sr-only">
-										{ENGINE_NAMES[engine.kind]} engine; {phase.label}
-									</span>
-								</span>
+								Rename
 							</button>
-						);
-					})}
-				</div>
-				{slotActive && (
-					<p className="project-lock-note">
-						Cancel the active turn before switching projects or engines.
-					</p>
-				)}
-			</section>
+							<button
+								type="button"
+								className="button button--quiet"
+								disabled={selectedNode === null}
+								onClick={() => onFileDialog("delete")}
+							>
+								Delete
+							</button>
+						</div>
+						<div className="tree-viewport">
+							{open.tree.length === 0
+								? <div className="compact-empty">This project has no files yet.</div>
+								: (
+									<TreeBranch
+										nodes={open.tree}
+										selected={selectedNode ? pathKey(selectedNode.path) : null}
+										onSelect={onSelectNode}
+									/>
+								)}
+							{open.treeTruncated && <p className="tree-note">Tree capped at the project safety limit.</p>}
+						</div>
+					</section>
 
-			<section className="rail-section rail-section--files" aria-labelledby="files-title">
-				<PanelHeading
-					eyebrow="PROJECT SCOPE"
-					title="Files"
-					headingId="files-title"
-					action={
-						<button type="button" className="icon-button" onClick={onRefresh} title="Refresh project tree">
-							<Glyph>↻</Glyph>
-							<span className="sr-only">Refresh project tree</span>
-						</button>
-					}
-				/>
-				<div className="file-toolbar" aria-label="File operations">
-					<button type="button" onClick={() => onFileDialog("create-file")}>
-						<Glyph>＋≡</Glyph> File
-					</button>
-					<button type="button" onClick={() => onFileDialog("create-folder")}>
-						<Glyph>＋▱</Glyph> Folder
-					</button>
-					<button type="button" onClick={() => onFileDialog("move")} disabled={!selectedNode?.operable}>
-						<Glyph>↱</Glyph> Move
-					</button>
-					<button type="button" onClick={() => onFileDialog("delete")} disabled={!selectedNode?.operable}>
-						<Glyph>×</Glyph> Delete
-					</button>
-				</div>
-				<div className="tree-viewport">
-					{workspace.tree.length > 0
-						? (
-							<TreeBranch
-								nodes={workspace.tree}
-								selected={selectedNode ? pathKey(selectedNode.path) : null}
-								onSelect={onSelectNode}
-							/>
-						)
-						: (
-							<div className="compact-empty">
-								<Glyph>∅</Glyph>
-								<p>This project has no visible files yet.</p>
-							</div>
+					<section className="rail-section rail-section--sessions" aria-labelledby="sessions-title">
+						<PanelHeading
+							eyebrow="SESSIONS"
+							title="Conversations"
+							headingId="sessions-title"
+							action={
+								<button
+									type="button"
+									className="button button--quiet"
+									disabled={busy}
+									onClick={() => actions.newSession(open.project.id)}
+								>
+									New
+								</button>
+							}
+						/>
+						<div className="session-list">
+							{open.sessions.length === 0
+								? <p className="rail-empty">Clio has no session for this project yet.</p>
+								: open.sessions.map((session) => (
+									<SessionRow
+										key={session.id}
+										session={session}
+										open={open}
+										actions={actions}
+										busy={busy}
+										onDelete={onDeleteSession}
+									/>
+								))}
+						</div>
+						{open.sessionsTruncated && (
+							<p className="tree-note">This list is shortened; Clio has more sessions than are shown.</p>
 						)}
-					{workspace.treeTruncated && <p className="tree-note">Tree capped at the project safety limit.</p>}
-				</div>
-			</section>
-
-			<section className="rail-section rail-section--sessions" aria-labelledby="sessions-title">
-				<PanelHeading
-					eyebrow={workspace.engine.kind === "clio-acp" ? "CURRENT PROCESS · NO RESUME" : "PROJECT HISTORY"}
-					title="Sessions"
-					headingId="sessions-title"
-				/>
-				<div className="session-list">
-					{workspace.sessions.length > 0
-						? (
-							workspace.sessions.map((session) => (
-								<article className="session-row" key={session.id}>
-									<span className={`session-row__mark session-row__mark--${session.status}`} aria-hidden="true" />
-									<span>
-										<strong>{session.label}</strong>
-										<small>{session.preview}</small>
-									</span>
-									<time>{formatTimeLabel(session.updatedAt)}</time>
-								</article>
-							))
-						)
-						: <p className="rail-empty">No completed session has been recorded for this project.</p>}
-				</div>
-				{workspace.engine.kind === "clio-acp" && (
-					<p className="tree-note">ACP session load, replay, and resume are unavailable.</p>
-				)}
-			</section>
+						{open.clio.capabilities?.list === false && (
+							<p className="tree-note">This Clio cannot list its earlier sessions over ACP.</p>
+						)}
+					</section>
+				</>
+			)}
 		</aside>
 	);
 }
 
-function ReadinessStrip({
-	workspace,
-	onSelect,
-	onProbe,
-	locked,
-}: {
-	workspace: ProjectWorkspaceState;
-	onSelect(kind: WireEngineKind): void;
-	onProbe(): void;
-	locked: boolean;
-}) {
-	const { engine } = workspace;
-	const phase = ENGINE_PHASE_PRESENTATION[engine.phase];
-	const isClio = engine.kind === "clio-acp";
-	const controlsLocked = locked || engine.phase === "probing";
-	const detail = isClio
-		? "Workbench sends this prompt only through the configured Clio target. That target may be remote."
-		: "Fake mode makes no provider request. Its activity is deterministic and simulated by Workbench.";
-	return (
-		<section className={`readiness-strip readiness-strip--${phase.tone}`} aria-labelledby="readiness-title">
-			<div className="readiness-strip__calibration" aria-hidden="true">
-				<span>0</span>
-				<i />
-				<i />
-				<i />
-				<i />
-				<span>1</span>
-			</div>
-			<div className="readiness-strip__body">
-				<div className="readiness-strip__summary">
-					<div className="eyebrow" id="readiness-title">
-						ENGINE READINESS · {ENGINE_NAMES[engine.kind].toUpperCase()}
-					</div>
-					<strong>{phase.label}</strong>
-					<p>{detail}</p>
-				</div>
-				<div className="readiness-strip__controls">
-					<label className="scenario-select">
-						<span>Project engine</span>
-						<select
-							value={engine.kind}
-							onChange={(event) => onSelect(event.target.value as WireEngineKind)}
-							disabled={controlsLocked}
-							title={engine.phase === "probing"
-								? "Wait for the readiness check before changing engines."
-								: locked
-								? "Cancel the active turn before changing engines."
-								: undefined}
-						>
-							<option value="fake">Fake</option>
-							<option value="clio-acp">Clio</option>
-						</select>
-					</label>
-					{isClio && (
-						<button
-							type="button"
-							className="button button--primary readiness-strip__probe"
-							onClick={onProbe}
-							disabled={locked || engine.phase === "probing"}
-							title={locked ? "Cancel the active turn before checking readiness." : undefined}
-						>
-							{engine.phase === "probing" ? "Checking…" : "Check Clio readiness"}
-						</button>
-					)}
-				</div>
-			</div>
-			{isClio && (
-				<ul className="readiness-strip__facts" aria-label="Clio readiness facts">
-					{engine.facts.map((fact) => (
-						<li key={fact.key} title={`${fact.label}: ${fact.detail} · ${SOURCE_LABELS[fact.source]}`}>
-							<span>{fact.label}</span>
-							<strong className={`readiness-fact readiness-fact--${fact.state}`}>{fact.state}</strong>
-							<small>{SOURCE_LABELS[fact.source]}</small>
-						</li>
-					))}
-				</ul>
-			)}
-		</section>
-	);
-}
+/** A tool that has been open this long is worth saying so about, in seconds. */
+const LONG_RUNNING_TOOL_SECONDS = 30;
 
-function TimelineCard({ item }: { item: TimelineItem }) {
-	const labels: Record<TimelineItem["kind"], string> = {
-		request: "REQUEST",
-		narrative: "NARRATIVE",
-		agent: "AGENT",
-		tool: "TOOL / ACTION",
-		change: "CHANGE",
-		approval: "PERMISSION",
-		evidence: "CHECK",
-		outcome: "OUTCOME",
-		failure: "FAILURE",
-	};
-	const provenance = sourceLabel(item.source);
+function TimelineCard({ item, nowMs }: { item: WireTimelineItem; nowMs: number }) {
+	const startedMs = item.startedAt === null ? Number.NaN : Date.parse(item.startedAt);
+	const activeSeconds = item.status === "active" && Number.isFinite(startedMs)
+		? Math.max(0, Math.floor((nowMs - startedMs) / 1_000))
+		: 0;
+	const longRunning = item.kind === "tool" && activeSeconds >= LONG_RUNNING_TOOL_SECONDS;
 	return (
-		<article className={`timeline-card timeline-card--${item.kind} timeline-card--${item.status}`}>
+		<article
+			className={`timeline-card timeline-card--${item.kind} is-${item.status}${
+				item.origin === "replay" ? " timeline-card--replay" : ""
+			}${longRunning ? " timeline-card--long" : ""}`}
+		>
 			<div className="timeline-card__meta">
-				<span>{labels[item.kind]}</span>
-				{provenance && <span className="timeline-card__source">{provenance}</span>}
-				<time>{item.timeLabel}</time>
-				{item.sequence !== undefined && <code>#{String(item.sequence).padStart(3, "0")}</code>}
+				<span className="timeline-card__kind">{item.kind}</span>
+				<span className="timeline-card__source">{SOURCE_LABELS[item.source]}</span>
+				{item.origin === "replay" && <span className="timeline-card__replay">earlier</span>}
+				{longRunning && <span className="timeline-card__long">still running · {formatDuration(activeSeconds)}</span>}
 			</div>
 			<h3>{item.title}</h3>
-			<p>{item.summary}</p>
+			<p className="timeline-card__summary">{item.summary}</p>
 			{item.detail && <pre className="timeline-card__detail">{item.detail}</pre>}
 			<div className="timeline-card__status">
 				<StatusMark
 					tone={item.status === "failed"
 						? "error"
-						: item.status === "active"
-						? "action"
-						: item.status === "waiting"
-						? "warning"
-						: "success"}
+						: item.status === "complete"
+						? "success"
+						: item.status === "replayed"
+						? "neutral"
+						: "info"}
 					label={item.status}
 				/>
+				{item.startedAt !== null && <time dateTime={item.startedAt}>{formatTimestamp(item.startedAt)}</time>}
 			</div>
 		</article>
 	);
 }
 
 function PermissionCard({
-	workspace,
+	permission,
+	escalated,
+	elapsed,
 	onResolve,
 }: {
-	workspace: ProjectWorkspaceState;
+	permission: WirePendingPermission;
+	escalated: boolean;
+	elapsed: number;
 	onResolve(decision: "allow-once" | "reject"): void;
 }) {
-	const permission = workspace.pendingPermission;
-	if (!permission) return null;
-	const isSimulated = permission.source === "simulated-by-workbench";
-	const locations = permission.locations.length > 0
-		? permission.locations.map(formatPermissionLocation).join(", ")
-		: "Unavailable";
+	const locations = permission.locations.map((location) => formatProjectPath(location));
 	return (
-		<section className="approval-card" aria-labelledby="permission-title">
+		<section
+			className={`approval-card${escalated ? " approval-card--escalated" : ""}`}
+			aria-labelledby="permission-title"
+		>
 			<div className="approval-card__signal" aria-hidden="true">!</div>
 			<div className="approval-card__body">
-				<div className="eyebrow">PERMISSION NEEDED · ONE USE</div>
+				<div className="eyebrow">APPROVAL NEEDED · ONE USE</div>
 				<h3 id="permission-title">{permission.title}</h3>
-				{isSimulated
-					? (
-						<p>
-							The Workbench simulation is demonstrating a bounded <strong>{permission.kind}</strong>{" "}
-							permission boundary. No Clio or provider request is involved.
-						</p>
-					)
-					: (
-						<p>
-							Clio requested permission for a bounded <strong>{permission.kind}</strong> action.
-						</p>
-					)}
-				<dl>
-					<div>
-						<dt>Provenance</dt>
-						<dd>{SOURCE_LABELS[permission.source]}</dd>
-					</div>
-					<div>
-						<dt>Project-relative location</dt>
-						<dd>{locations}</dd>
-					</div>
-					<div>
-						<dt>Expires</dt>
-						<dd>{new Date(permission.expiresAt).toLocaleTimeString()}</dd>
-					</div>
-					<div>
-						<dt>Consequence</dt>
-						<dd>Allow once applies only to this exact action. Reject denies it without granting future authority.</dd>
-					</div>
-				</dl>
+				<p>
+					{permission.kind} access to {locations.length === 0 ? "this turn" : locations.join(", ")}. Waiting{" "}
+					{formatDuration(elapsed)}.
+				</p>
+				<p className="approval-card__note">
+					Nothing runs until you answer. Workbench never answers for you.
+				</p>
 				<div className="approval-card__actions">
 					<button type="button" className="button button--quiet" onClick={() => onResolve("reject")}>Reject</button>
 					<button type="button" className="button button--action" onClick={() => onResolve("allow-once")}>
@@ -649,45 +771,92 @@ function PermissionCard({
 	);
 }
 
+/**
+ * Sits above the scrolling conversation rather than inside it, because the card
+ * the operator missed in the recorded session was anchored where the timeline
+ * happened to be. Prominent but never focus-trapping: the operator may keep
+ * reading, scrolling, and typing while an approval waits.
+ */
+function ApprovalBanner({
+	permission,
+	escalated,
+	elapsed,
+	onResolve,
+}: {
+	permission: WirePendingPermission;
+	escalated: boolean;
+	elapsed: number;
+	onResolve(decision: "allow-once" | "reject"): void;
+}) {
+	return (
+		<section
+			className={`approval-banner${escalated ? " approval-banner--escalated" : ""}`}
+			role="region"
+			aria-labelledby="approval-banner-title"
+		>
+			<div className="approval-banner__signal" aria-hidden="true">!</div>
+			<div className="approval-banner__body">
+				<div className="eyebrow">{escalated ? "APPROVAL WAITING · ESCALATED" : "APPROVAL NEEDED"}</div>
+				<strong id="approval-banner-title">{permission.title}</strong>
+				<span className="approval-banner__facts">
+					{permission.kind} · waiting {formatDuration(elapsed)}
+				</span>
+			</div>
+			<div className="approval-banner__actions">
+				<button type="button" className="button button--quiet" onClick={() => onResolve("reject")}>
+					Reject
+				</button>
+				<button type="button" className="button button--action" onClick={() => onResolve("allow-once")}>
+					Allow once
+				</button>
+				<span className="approval-banner__keys">Alt+A allows once · Alt+R rejects</span>
+			</div>
+		</section>
+	);
+}
+
 function ConversationCanvas({
-	workspace,
 	state,
 	dispatch,
 	actions,
-	engineLocked,
 	obscured,
+	nowMs,
 }: {
-	workspace: ProjectWorkspaceState;
 	state: AppState;
 	dispatch: Dispatch<AppAction>;
 	actions: WorkbenchActions;
-	engineLocked: boolean;
 	obscured: boolean;
+	nowMs: number;
 }) {
-	const [draft, setDraft] = useState(
-		"Audit the convergence study, preserve the raw data, and report what the checks actually prove.",
-	);
-	const [scenario, setScenario] = useState<"complete" | "failure">("complete");
-	const timelineEnd = useRef<HTMLDivElement>(null);
-	const isClio = workspace.engine.kind === "clio-acp";
-	const isBusy = workspace.activeTurnId !== null || workspace.pendingPermission !== null ||
-		isEngineOperationActive(workspace.engine.phase);
-	const canStart = !engineLocked && !isBusy && (!isClio || workspace.engine.phase === "ready");
+	const open = state.open;
+	const [prompt, setPrompt] = useState("");
+	const projection = open?.projection ?? null;
+	const activeTurn = projection?.activeTurn ?? null;
+	const pendingPermission = projection?.pendingPermission ?? null;
+	const elapsed = useElapsedSeconds(activeTurn?.startedAt ?? null);
+	const busy = isPromptBlocked(open);
+	const canSubmit = open !== null && !busy && prompt.trim().length > 0 && state.pendingTurnStart === null;
+	const permissionWait = pendingPermission === null
+		? 0
+		: Math.max(0, Math.floor((nowMs - Date.parse(pendingPermission.requestedAt)) / 1_000));
+	const permissionEscalated = pendingPermission !== null && nowMs >= Date.parse(pendingPermission.escalateAt);
 
-	useEffect(() => {
-		if (isBusy && workspace.timeline.length > 0) timelineEnd.current?.scrollIntoView({ block: "nearest" });
-	}, [isBusy, workspace.timeline.length]);
+	function resolvePending(decision: "allow-once" | "reject"): void {
+		if (open === null || pendingPermission === null || activeTurn === null) return;
+		actions.resolvePermission(open.project.id, activeTurn.turnId, pendingPermission.permissionId, decision);
+	}
 
 	function submit(event: FormEvent) {
 		event.preventDefault();
-		if (!canStart || draft.trim().length === 0) return;
-		actions.startTurn(workspace.project.id, draft.trim(), isClio ? undefined : scenario);
+		if (!canSubmit || open === null) return;
+		actions.startTurn(open.project.id, prompt.trim());
+		setPrompt("");
 	}
 
 	function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
 		if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
 			event.preventDefault();
-			event.currentTarget.form?.requestSubmit();
+			submit(event as unknown as FormEvent);
 		}
 	}
 
@@ -703,439 +872,144 @@ function ConversationCanvas({
 					<button
 						type="button"
 						className="icon-button"
-						onClick={() => dispatch({ type: "drawer.left", open: true })}
 						aria-controls="project-rail"
 						aria-expanded={state.leftDrawerOpen}
+						onClick={() => dispatch({ type: "drawer.left", open: !state.leftDrawerOpen })}
 					>
-						<Glyph>☷</Glyph>
+						<Glyph>≡</Glyph>
 						<span className="sr-only">Open projects and files</span>
 					</button>
 				</div>
 				<div className="conversation__identity">
-					<div className="eyebrow">ACTIVE PROJECT · ONE ENGINE SLOT</div>
-					<h1>{workspace.project.displayName}</h1>
-					<code>{workspace.project.identity.displayPath}</code>
+					<div className="eyebrow">ACTIVE PROJECT</div>
+					<h1>{open === null ? "No project open" : open.project.displayName}</h1>
+					{open && <p className="conversation__root">{open.project.rootPath}</p>}
 				</div>
 				<div className="conversation__telemetry">
-					<div>
-						<span>HOST</span>
-						<strong>{state.mode}</strong>
-					</div>
-					<div>
-						<span>ENGINE</span>
-						<strong>{ENGINE_NAMES[workspace.engine.kind]} · {workspace.engine.phase}</strong>
-					</div>
-					<div>
-						<span>STREAM</span>
-						<strong>{workspace.lastSequence || "—"}</strong>
-					</div>
-				</div>
-				<div className="mobile-controls">
+					{open && (
+						<StatusMark
+							tone={PHASE_PRESENTATION[open.clio.phase].tone}
+							label={PHASE_PRESENTATION[open.clio.phase].label}
+						/>
+					)}
 					<button
 						type="button"
-						className="icon-button"
-						onClick={() => dispatch({ type: "drawer.right", open: true })}
-						aria-controls="activity-rail"
-						aria-expanded={state.rightDrawerOpen}
+						className="button button--quiet"
+						onClick={() => dispatch({ type: "settings.opened", open: true })}
 					>
-						<Glyph>◫</Glyph>
-						<span className="sr-only">Open activity and evidence</span>
+						Settings
 					</button>
 				</div>
 			</header>
 
-			<div className="conversation__scroll">
-				<ReadinessStrip
-					workspace={workspace}
-					onSelect={(kind) => actions.selectEngine(workspace.project.id, kind)}
-					onProbe={() => actions.probeEngine(workspace.project.id)}
-					locked={engineLocked}
+			{pendingPermission !== null && activeTurn !== null && (
+				<ApprovalBanner
+					permission={pendingPermission}
+					escalated={permissionEscalated}
+					elapsed={permissionWait}
+					onResolve={resolvePending}
 				/>
-				<section className="field-note" aria-labelledby="field-note-title">
-					<div className="field-note__folio">FIELD NOTE · {workspace.project.displayName.toUpperCase()} / 01</div>
-					<div>
-						<div className="eyebrow">LOCALHOST-FIRST INSTRUMENT</div>
-						<h2 id="field-note-title">A visible chain from request to evidence</h2>
-						{isClio
-							? (
-								<p>
-									This timeline shows bounded facts observed through ACP. Clio-reported actions remain distinct from
-									Workbench-observed or independently verified evidence.
-								</p>
-							)
-							: (
-								<p>
-									This session uses a deterministic fake stream. It demonstrates ordering, activity, permission,
-									cancellation, changes, and checks without starting Clio or presenting simulated evidence as real.
-								</p>
-							)}
-					</div>
-					<div className="field-note__stamp">
-						{isClio
-							? (
-								<>
-									CLIO<br />ACP
-								</>
-							)
-							: (
-								<>
-									FAKE<br />ENGINE
-								</>
-							)}
-					</div>
-				</section>
+			)}
 
-				<section
-					className="evidence-timeline"
-					aria-label="Request, work, change, check, and outcome timeline"
-					aria-live="polite"
-				>
-					<div className="evidence-timeline__axis" aria-hidden="true">
-						<span>REQUEST</span>
-						<span>WORK</span>
-						<span>CHANGE</span>
-						<span>CHECK</span>
-						<span>OUTCOME</span>
-					</div>
-					{workspace.timeline.length === 0
-						? (
-							<div className="timeline-empty">
-								<div className="timeline-empty__reticle" aria-hidden="true">
-									<span />
-									<span />
-								</div>
-								<h2>No activity recorded for this project</h2>
-								<p>
-									{isClio
-										? "Check readiness, then submit the field note to start a Clio turn."
-										: "Submit the field note below to run the deterministic evidence sequence."}
-								</p>
-							</div>
-						)
-						: (
-							workspace.timeline.map((item) => <TimelineCard key={item.id} item={item} />)
-						)}
-					<PermissionCard
-						workspace={workspace}
-						onResolve={(decision) => {
-							if (workspace.pendingPermission && workspace.activeTurnId) {
-								actions.resolvePermission(
-									workspace.project.id,
-									workspace.activeTurnId,
-									workspace.pendingPermission.permissionId,
-									decision,
-								);
-							}
-						}}
-					/>
-					<div ref={timelineEnd} />
-				</section>
+			{/* Focusable so a keyboard user can scroll the conversation without a pointer. */}
+			<div className="conversation__scroll" tabIndex={0} role="region" aria-label="Conversation history">
+				{open === null
+					? (
+						<section className="field-note" aria-labelledby="field-note-title">
+							<div className="eyebrow">LOCALHOST-FIRST INSTRUMENT</div>
+							<h2 id="field-note-title">Open a folder to start</h2>
+							<p>
+								Workbench drives one real Clio process for the folder you open. Prompts go only to the Clio target you
+								have configured, which may be a remote model.
+							</p>
+							<p className="field-note__stamp">{state.securityNote}</p>
+							<p className="field-note__stamp">{state.stateDirNote}</p>
+						</section>
+					)
+					: (
+						<>
+							{open.clio.lastFailure && (
+								<section className="conversation__failure" role="status">
+									<div className="eyebrow">CLIO REPORTED A FAILURE</div>
+									<p>{open.clio.lastFailure.summary}</p>
+									<code>{open.clio.lastFailure.code}</code>
+								</section>
+							)}
+							{(projection?.timelineTruncated === true || open.clio.session?.replayTruncated === true) && (
+								<p className="timeline-note">Earlier turns are not shown; Clio still has the full context.</p>
+							)}
+							<section
+								className="evidence-timeline"
+								aria-label="Request, work, approval, and outcome timeline"
+								aria-live="polite"
+							>
+								{projection === null || projection.timeline.length === 0
+									? (
+										<div className="timeline-empty">
+											<div className="timeline-empty__reticle" aria-hidden="true">◎</div>
+											<p>Nothing has run in this session yet.</p>
+										</div>
+									)
+									: projection.timeline.map((item) => <TimelineCard item={item} nowMs={nowMs} key={item.id} />)}
+							</section>
+							{pendingPermission !== null && activeTurn !== null && (
+								<PermissionCard
+									permission={pendingPermission}
+									escalated={permissionEscalated}
+									elapsed={permissionWait}
+									onResolve={resolvePending}
+								/>
+							)}
+						</>
+					)}
 			</div>
 
-			<form className={`composer${isBusy ? " composer--active" : ""}`} onSubmit={submit}>
+			<form className="composer" onSubmit={submit}>
 				<div className="composer__mode">
-					<span className="composer__mode-label">{isBusy ? "RUNNING" : "MESSAGE"}</span>
-					<span>
-						{isBusy
-							? `${ENGINE_NAMES[workspace.engine.kind]} engine is producing ordered events`
-							: isClio && workspace.engine.phase !== "ready"
-							? "Check Clio readiness before starting a turn"
-							: "Describe the next research objective"}
+					<span className="composer__mode-label">{busy ? "RUNNING" : "MESSAGE"}</span>
+					<span className="composer__status" role="status">
+						{activeTurn
+							? `${formatDuration(elapsed)} · ${activeTurn.toolCalls} tool calls${
+								activeTurn.lastToolTitle === null ? "" : ` · ${activeTurn.lastToolTitle}`
+							}${activeTurn.repeatedShapes > 0 ? ` · ${activeTurn.repeatedShapes} repeated` : ""}`
+							: open === null
+							? "Open a project folder to talk to Clio."
+							: "Ready for your next prompt."}
 					</span>
 				</div>
 				<div className="composer__input-row">
 					<textarea
-						value={draft}
-						onChange={(event) => setDraft(event.target.value)}
+						value={prompt}
+						onChange={(event) => setPrompt(event.target.value)}
 						onKeyDown={onComposerKeyDown}
-						disabled={isBusy}
-						rows={2}
-						aria-label="Research request"
-						placeholder="Explain the scientific coding goal…"
+						placeholder={open === null ? "Open a project first" : "Ask Clio to do something in this project"}
+						aria-label="Prompt for Clio"
+						rows={3}
+						disabled={open === null}
 					/>
-					{isBusy && workspace.activeTurnId
+					{activeTurn
 						? (
 							<button
 								type="button"
 								className="composer__submit composer__submit--cancel"
-								onClick={() => actions.cancelTurn(workspace.project.id, workspace.activeTurnId ?? "")}
-								disabled={workspace.engine.phase === "cancelling"}
+								onClick={() => open && actions.cancelTurn(open.project.id, activeTurn.turnId)}
 							>
-								<Glyph>■</Glyph>
-								<span>Cancel</span>
+								Stop
 							</button>
 						)
 						: (
-							<button
-								type="submit"
-								className="composer__submit"
-								disabled={draft.trim().length === 0 || !canStart}
-							>
-								<Glyph>↗</Glyph>
-								<span>{isClio ? "Run with Clio" : "Run fake session"}</span>
+							<button type="submit" className="composer__submit" disabled={!canSubmit}>
+								Send
 							</button>
 						)}
 				</div>
 				<div className="composer__footer">
-					{!isClio && (
-						<label>
-							<span>Fake outcome</span>
-							<select
-								value={scenario}
-								onChange={(event) => setScenario(event.target.value as "complete" | "failure")}
-								disabled={isBusy}
-							>
-								<option value="complete">Complete after permission</option>
-								<option value="failure">Fail with bounded diagnostic</option>
-							</select>
-						</label>
-					)}
-					<small>
-						<span className="composer__shortcut">
-							<kbd>Ctrl</kbd> + <kbd>Enter</kbd> to run ·
-						</span>
-						<span className="composer__privacy">
-							{isClio
-								? "Prompt goes only through the configured Clio target; that target may be remote"
-								: "Fake mode makes no provider request"}
-						</span>
-					</small>
+					{busy && !activeTurn && <span className="composer__notice">Clio is finishing the previous prompt.</span>}
+					<span className="composer__shortcut">Ctrl or Cmd + Enter sends</span>
+					<span className="composer__privacy">Prompts go only to the Clio target you configured.</span>
 				</div>
 			</form>
 		</main>
-	);
-}
-
-function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
-	return (
-		<div className="metric">
-			<span>{label}</span>
-			<strong>{value}</strong>
-			<small>{detail}</small>
-		</div>
-	);
-}
-
-function ActivityPanel({ workspace }: { workspace: ProjectWorkspaceState }) {
-	return (
-		<div className="right-panel__content">
-			<section className="engine-slot">
-				<div className="engine-slot__dial" aria-hidden="true">
-					<span>{workspace.engine.phase === "running" ? "RUN" : workspace.engine.kind === "fake" ? "FK" : "CL"}</span>
-				</div>
-				<div>
-					<div className="eyebrow">PROJECT ENGINE SLOT</div>
-					<h3>{ENGINE_NAMES[workspace.engine.kind]} · {workspace.engine.phase}</h3>
-					<p>Keyed to {workspace.project.displayName}; no other project state is attached.</p>
-				</div>
-			</section>
-			<div className="metric-grid">
-				<Metric label="AGENTS" value={String(workspace.agents.length).padStart(2, "0")} detail="this project turn" />
-				<Metric label="EVENTS" value={String(workspace.lastSequence).padStart(3, "0")} detail="monotonic" />
-			</div>
-			<section className="right-section">
-				<PanelHeading eyebrow="ENGINE ACTIVITY" title="Activity" />
-				{workspace.agents.length === 0
-					? (
-						<div className="panel-empty">
-							<Glyph>⌁</Glyph>
-							<p>No agent is active for this project.</p>
-						</div>
-					)
-					: (
-						workspace.agents.map((agent) => (
-							<article className="agent-card" key={agent.id}>
-								<div className="agent-card__head">
-									<div className="agent-card__avatar" aria-hidden="true">E1</div>
-									<div>
-										<h3>{agent.name}</h3>
-										<StatusMark tone={agent.status === "active" ? "action" : "success"} label={agent.status} />
-									</div>
-								</div>
-								<p>{agent.task}</p>
-								<dl>
-									<div>
-										<dt>Provenance</dt>
-										<dd>{SOURCE_LABELS[agent.source]}</dd>
-									</div>
-									<div>
-										<dt>Elapsed</dt>
-										<dd>{agent.elapsed}</dd>
-									</div>
-								</dl>
-							</article>
-						))
-					)}
-			</section>
-			<section className="right-section safety-note">
-				<div className="eyebrow">BOUNDARY NOTE</div>
-				<p>
-					Only one engine slot can be active. Cancel the live turn or permission before changing projects or engines.
-				</p>
-			</section>
-		</div>
-	);
-}
-
-function ChangesPanel({ workspace }: { workspace: ProjectWorkspaceState }) {
-	return (
-		<div className="right-panel__content">
-			<section className="attribution-banner">
-				<div aria-hidden="true">≠</div>
-				<p>
-					<strong>Attribution is explicit.</strong>{" "}
-					Attributed changes below are not broad Git status; each keeps its reported or observed provenance.
-				</p>
-			</section>
-			<section className="right-section">
-				<PanelHeading eyebrow="ATTRIBUTED EVENT STREAM" title="Changes & artifacts" />
-				{workspace.changes.length === 0
-					? (
-						<div className="panel-empty">
-							<Glyph>∅</Glyph>
-							<p>No attributed change has been recorded in this project state.</p>
-						</div>
-					)
-					: workspace.changes.map((change) => (
-						<article className="change-card" key={change.id}>
-							<div className="change-card__path">
-								<Glyph>＋</Glyph>
-								<code>{change.path}</code>
-							</div>
-							<p>{change.summary}</p>
-							<small className="provenance-label">{SOURCE_LABELS[change.source]}</small>
-							<StatusMark tone="info" label={change.status} />
-						</article>
-					))}
-			</section>
-			<section className="right-section right-section--disabled">
-				<div className="eyebrow">NOT AVAILABLE</div>
-				<h3>Diff and reveal actions</h3>
-				<p>These require validated artifact references from real ACP. No generic file reader is exposed.</p>
-				<button type="button" className="button button--quiet" disabled>Open artifact</button>
-			</section>
-		</div>
-	);
-}
-
-function EvidencePanel({ workspace }: { workspace: ProjectWorkspaceState }) {
-	const independentlyVerified = workspace.evidence.some((record) => record.source === "independently-verified");
-	return (
-		<div className="right-panel__content">
-			<section className="evidence-ledger">
-				<div className="evidence-ledger__head">
-					<div>
-						<span>RECORD</span>
-						<strong>{workspace.evidence.length || "—"}</strong>
-					</div>
-					<StatusMark
-						tone={independentlyVerified ? "success" : workspace.evidence.length ? "info" : "neutral"}
-						label={independentlyVerified
-							? "independently verified"
-							: workspace.evidence.length
-							? "provenance recorded"
-							: "not recorded"}
-					/>
-				</div>
-				<p>
-					Evidence appears only with an explicit source. Narrative or a successful terminal result never receives an
-					independent verification mark by implication.
-				</p>
-			</section>
-			<section className="right-section">
-				<PanelHeading eyebrow="PROVENANCE" title="Evidence record" />
-				{workspace.evidence.length === 0
-					? (
-						<div className="panel-empty">
-							<Glyph>○</Glyph>
-							<p>No checks have been observed for this project.</p>
-						</div>
-					)
-					: workspace.evidence.map((record, index) => (
-						<article className="evidence-card" key={record.id}>
-							<div className="evidence-card__number">{String(index + 1).padStart(2, "0")}</div>
-							<div>
-								<h3>{record.label}</h3>
-								<p>{record.detail}</p>
-								<small className="provenance-label">{SOURCE_LABELS[record.source]}</small>
-								<StatusMark
-									tone={record.source === "independently-verified"
-										? "success"
-										: record.status === "unavailable"
-										? "neutral"
-										: "info"}
-									label={record.status}
-								/>
-							</div>
-						</article>
-					))}
-			</section>
-			<section className="right-section uncertainty-card">
-				<div className="eyebrow">KNOWN UNCERTAINTY</div>
-				<p>
-					Receipt signatures, model identity, and independent verification remain unavailable unless a separate observed
-					record provides them.
-				</p>
-			</section>
-		</div>
-	);
-}
-
-function RightRail(
-	{ state, workspace, dispatch, isDrawer, obscured }: {
-		state: AppState;
-		workspace: ProjectWorkspaceState;
-		dispatch: Dispatch<AppAction>;
-		isDrawer: boolean;
-		obscured: boolean;
-	},
-) {
-	const tabs = [
-		{ id: "team" as const, label: "Team" },
-		{ id: "changes" as const, label: "Changes", count: workspace.changes.length },
-		{ id: "evidence" as const, label: "Evidence", count: workspace.evidence.length },
-	];
-	const unavailable = obscured || (isDrawer && !state.rightDrawerOpen);
-	return (
-		<aside
-			id="activity-rail"
-			className={`right-rail instrument-panel${state.rightDrawerOpen ? " is-open" : ""}`}
-			aria-label="Activity and evidence"
-			aria-hidden={unavailable ? true : undefined}
-			inert={unavailable}
-		>
-			<div className="right-rail__header">
-				<div>
-					<div className="eyebrow">LIVE INSTRUMENT</div>
-					<h2>Activity & evidence</h2>
-				</div>
-				<button
-					type="button"
-					className="icon-button right-rail__close"
-					onClick={() => dispatch({ type: "drawer.right", open: false })}
-				>
-					<Glyph>×</Glyph>
-					<span className="sr-only">Close activity and evidence</span>
-				</button>
-			</div>
-			<div className="rail-tabs" aria-label="Activity views">
-				{tabs.map((tab) => (
-					<button
-						type="button"
-						aria-pressed={state.rightPanel === tab.id}
-						className={state.rightPanel === tab.id ? "is-selected" : ""}
-						onClick={() => dispatch({ type: "panel.selected", panel: tab.id })}
-						key={tab.id}
-					>
-						{tab.label}
-						{tab.count !== undefined && <span>{tab.count}</span>}
-					</button>
-				))}
-			</div>
-			{state.rightPanel === "team" && <ActivityPanel workspace={workspace} />}
-			{state.rightPanel === "changes" && <ChangesPanel workspace={workspace} />}
-			{state.rightPanel === "evidence" && <EvidencePanel workspace={workspace} />}
-		</aside>
 	);
 }
 
@@ -1186,102 +1060,261 @@ function Modal(
 	);
 }
 
-function ProjectOperationModal({
-	dialog,
-	registerableFolders,
-	onClose,
-	actions,
-}: {
-	dialog: Exclude<ProjectDialog, null>;
-	registerableFolders: string[];
-	onClose(): void;
+function BrowseModal({ state, actions, onClose }: {
+	state: AppState;
 	actions: WorkbenchActions;
+	onClose(): void;
 }) {
-	const [displayName, setDisplayName] = useState("");
-	const [directoryName, setDirectoryName] = useState("");
-	const [selectedFolder, setSelectedFolder] = useState(registerableFolders[0] ?? "");
-	function submit(event: FormEvent) {
-		event.preventDefault();
-		if (dialog === "create") {
-			if (!displayName.trim() || !directoryName.trim()) return;
-			actions.createProject(displayName.trim(), directoryName.trim());
-		} else {
-			if (!selectedFolder) return;
-			actions.registerProject([selectedFolder], displayName.trim() || undefined);
-		}
-		onClose();
-	}
+	const listing = state.browse;
+	if (listing === null) return null;
 	return (
-		<Modal
-			title={dialog === "create" ? "Create project folder" : "Register existing project"}
-			eyebrow="CONTROLLED PROJECT SANDBOX"
-			onClose={onClose}
-		>
-			<form className="modal-form" onSubmit={submit}>
-				<p className="modal-form__note">
-					This developer-alpha flow is restricted to the server-owned sandbox. Native and WSL paths are typed seams
-					only.
+		<Modal title="Choose a project folder" eyebrow="DIRECTORIES ONLY" onClose={onClose}>
+			<div className="browse">
+				<p className="browse__path">
+					<code>{listing.path}</code>
 				</p>
-				<label>
-					<span>Project name</span>
-					<input
-						value={displayName}
-						onChange={(event) => setDisplayName(event.target.value)}
-						placeholder={dialog === "create" ? "Orbital Solver" : "Optional display name"}
-						pattern={NON_BLANK_PATTERN}
-						title="Enter at least one non-space character."
-						required={dialog === "create"}
-					/>
-				</label>
-				{dialog === "create"
-					? (
-						<label>
-							<span>Folder name</span>
-							<input
-								value={directoryName}
-								onChange={(event) => setDirectoryName(event.target.value)}
-								placeholder="orbital-solver"
-								pattern={NON_BLANK_PATTERN}
-								title="Enter at least one non-space character."
-								required
-							/>
-						</label>
-					)
-					: (
-						<label>
-							<span>Available sandbox folder</span>
-							<select value={selectedFolder} onChange={(event) => setSelectedFolder(event.target.value)} required>
-								{registerableFolders.length === 0 && <option value="">No unregistered folders</option>}
-								{registerableFolders.map((folder) => <option value={folder} key={folder}>{folder}</option>)}
-							</select>
-						</label>
-					)}
-				<div className="modal__actions">
-					<button type="button" className="button button--quiet" onClick={onClose}>Cancel</button>
-					<button type="submit" className="button button--primary">
-						{dialog === "create" ? "Create project" : "Register project"}
+				{listing.reason !== null && <p className="browse__reason">{listing.reason}</p>}
+				<div className="browse__actions">
+					<button
+						type="button"
+						className="button button--quiet"
+						disabled={listing.parent === null}
+						onClick={() => listing.parent !== null && actions.browseProjects(listing.parent)}
+					>
+						Up one folder
+					</button>
+					<button
+						type="button"
+						className="button button--primary"
+						disabled={!listing.openable}
+						onClick={() => {
+							actions.openProject(listing.path);
+							onClose();
+						}}
+					>
+						Open this folder
 					</button>
 				</div>
-			</form>
+				<ul className="browse__list">
+					{listing.entries.length === 0 && <li className="browse__empty">No folders here.</li>}
+					{listing.entries.map((entry) => (
+						<li key={entry.name}>
+							<button
+								type="button"
+								className={`browse__entry${entry.hidden ? " is-hidden-entry" : ""}`}
+								onClick={() => actions.browseProjects(`${listing.path.replace(/\/$/u, "")}/${entry.name}`)}
+							>
+								<Glyph>▱</Glyph>
+								<span>{entry.name}</span>
+								{entry.guarded && <span className="browse__flag">not openable</span>}
+							</button>
+						</li>
+					))}
+				</ul>
+				{listing.truncated && <p className="browse__note">Only the first folders are listed.</p>}
+			</div>
+		</Modal>
+	);
+}
+
+/** One configured target, its models, and the outcome of a probe if one happened. */
+function TargetRow({ target, projectId, actions }: {
+	target: WireTarget;
+	projectId: string;
+	actions: WorkbenchActions;
+}) {
+	const health = target.health;
+	return (
+		<li className="target-row">
+			<div className="target-row__identity">
+				<strong>{target.id}</strong>
+				<small>{target.isOrchestrator ? `${target.runtime} · orchestrator` : target.runtime}</small>
+				<small className="target-row__models">
+					{target.models.length === 0 ? "no models reported" : target.models.join(", ")}
+				</small>
+			</div>
+			<div className="target-row__health">
+				{health === null ? <small className="target-row__unprobed">not probed</small> : (
+					<>
+						<StatusMark tone={health.healthy ? "success" : "error"} label={health.healthy ? "healthy" : "unhealthy"} />
+						<small>
+							{health.reason ?? (health.latencyMs === null ? "no latency reported" : `${health.latencyMs} ms`)}
+							{` · probed ${formatTimestamp(health.probedAt)}`}
+						</small>
+					</>
+				)}
+				<button
+					type="button"
+					className="button button--quiet"
+					onClick={() => actions.probeTarget(projectId, target.id)}
+				>
+					Probe {target.id}
+				</button>
+			</div>
+		</li>
+	);
+}
+
+/**
+ * The only place that may ask the browser for notification permission. The
+ * effective state is the browser's, not a stored preference, so the control
+ * never claims notifications are on when the browser is blocking them.
+ */
+function ApprovalNotificationSetting(
+	{ enabled, onChange }: { enabled: boolean; onChange(enabled: boolean): void },
+) {
+	const [granted, setGranted] = useState<NotificationPermission | "unsupported">(() =>
+		typeof Notification === "undefined" ? "unsupported" : Notification.permission
+	);
+	return (
+		<section className="settings__notifications" aria-labelledby="settings-notifications-title">
+			<h3 id="settings-notifications-title" className="settings__heading">Approvals</h3>
+			{granted === "unsupported" && <p className="settings__note">This browser cannot post desktop notifications.</p>}
+			{granted === "denied" && <p className="settings__note">Your browser is blocking notifications for this page.</p>}
+			{granted === "default" && (
+				<button
+					type="button"
+					className="button button--quiet"
+					onClick={() => {
+						void Notification.requestPermission().then((next) => setGranted(next)).catch(() => undefined);
+					}}
+				>
+					Desktop notifications for approvals
+				</button>
+			)}
+			{granted === "granted" && (
+				<label className="settings__toggle">
+					<input type="checkbox" checked={enabled} onChange={(event) => onChange(event.target.checked)} />
+					Desktop notifications for approvals
+				</label>
+			)}
+			<p className="settings__note">
+				A notification carries the tool title only. Workbench never puts a project path in one.
+			</p>
+		</section>
+	);
+}
+
+function SettingsModal({ state, actions, dispatch, onClose }: {
+	state: AppState;
+	actions: WorkbenchActions;
+	dispatch: Dispatch<AppAction>;
+	onClose(): void;
+}) {
+	const onNotificationsChange = (enabled: boolean) => dispatch({ type: "notifications.set", enabled });
+	const open = state.open;
+	const busy = isPromptBlocked(open);
+	const settings = open?.settings ?? null;
+	const editable = settings?.editable ?? [];
+	const targets = open?.targets ?? null;
+	return (
+		<Modal title="Clio settings" eyebrow="READ AND WRITTEN THROUGH CLIO" onClose={onClose}>
+			<div className="settings">
+				{open === null && <p>Open a project before reading Clio's settings.</p>}
+				{open !== null && open.clio.capabilities?.settings !== true && (
+					<p className="settings__unavailable">This Clio does not expose settings over ACP.</p>
+				)}
+				{open !== null && settings === null && open.clio.capabilities?.settings === true && (
+					<button
+						type="button"
+						className="button button--quiet"
+						onClick={() => actions.getSettings(open.project.id)}
+					>
+						Load settings
+					</button>
+				)}
+				{open !== null && settings !== null && (
+					<dl className="settings__list">
+						{Object.entries(settings.settings).map(([key, value]) => {
+							const options = settings.options[key] ?? [];
+							const canEdit = editable.includes(key) && !busy;
+							return (
+								<div key={key}>
+									<dt>{key}</dt>
+									<dd>
+										{options.length === 0 ? <code>{value ?? "unset"}</code> : (
+											<select
+												aria-label={`Set ${key}`}
+												value={value ?? ""}
+												disabled={!canEdit}
+												onChange={(event) => {
+													const patch = settingsPatch(key, event.target.value);
+													if (patch !== null) actions.patchSettings(open.project.id, patch);
+												}}
+											>
+												{(key === "orchestrator.target" || key === "orchestrator.model") && (
+													<option value="">unset</option>
+												)}
+												{options.map((option) => <option value={option} key={option}>{option}</option>)}
+											</select>
+										)}
+									</dd>
+								</div>
+							);
+						})}
+					</dl>
+				)}
+				{busy && <p className="settings__note">Settings change between turns. Clio is working right now.</p>}
+
+				<ApprovalNotificationSetting enabled={state.desktopNotifications} onChange={onNotificationsChange} />
+
+				{open !== null && (
+					<section className="settings__targets" aria-labelledby="settings-targets-title">
+						<h3 id="settings-targets-title" className="settings__heading">Targets</h3>
+						{open.clio.capabilities?.targets !== true
+							? <p className="settings__unavailable">This Clio does not expose targets over ACP.</p>
+							: targets === null
+							? (
+								<button
+									type="button"
+									className="button button--quiet"
+									onClick={() => actions.listTargets(open.project.id)}
+								>
+									Load targets
+								</button>
+							)
+							: targets.length === 0
+							? <p className="settings__note">Clio reports no configured targets.</p>
+							: (
+								<ul className="target-list">
+									{targets.map((target) => (
+										<TargetRow key={target.id} target={target} projectId={open.project.id} actions={actions} />
+									))}
+								</ul>
+							)}
+						{open.targetsTruncated && (
+							<p className="settings__note">
+								This list is shortened; Clio has more targets or models than are shown.
+							</p>
+						)}
+						{targets !== null && targets.length > 0 && (
+							<p className="settings__note">A target's health is shown only after you probe it.</p>
+						)}
+					</section>
+				)}
+				<p className="settings__note">{state.securityNote}</p>
+			</div>
 		</Modal>
 	);
 }
 
 function FileOperationModal({
 	dialog,
-	workspace,
+	open,
 	selectedNode,
 	onClose,
 	actions,
 }: {
 	dialog: Exclude<FileDialog, null>;
-	workspace: ProjectWorkspaceState;
-	selectedNode: TreeNode | null;
+	open: OpenWorkspaceState;
+	selectedNode: WireTreeNode | null;
 	onClose(): void;
 	actions: WorkbenchActions;
 }) {
 	const [name, setName] = useState(selectedNode?.name ?? "");
-	const [destinationParent, setDestinationParent] = useState(parentPath(selectedNode?.path.segments ?? []).join("/"));
+	const [destinationParent, setDestinationParent] = useState(
+		parentPath(selectedNode?.path.segments ?? []).join("/"),
+	);
 	const selectedParent = selectedNode?.kind === "directory"
 		? selectedNode.path.segments
 		: parentPath(selectedNode?.path.segments ?? []);
@@ -1289,26 +1322,18 @@ function FileOperationModal({
 	function submit(event: FormEvent) {
 		event.preventDefault();
 		if (dialog === "delete") {
-			if (selectedNode) {
-				actions.prepareDelete(workspace.project.id, selectedNode.path.segments, selectedNode.nodeVersion);
-			}
+			if (selectedNode) actions.prepareDelete(open.project.id, selectedNode.path.segments, selectedNode.nodeVersion);
 		} else if (dialog === "move") {
 			if (!selectedNode || !name.trim()) return;
-			const parent = destinationParent.split("/").filter(Boolean);
 			actions.moveNode(
-				workspace.project.id,
+				open.project.id,
 				selectedNode.path.segments,
-				{ parent, name: name.trim() },
+				{ parent: destinationParent.split("/").filter(Boolean), name: name.trim() },
 				selectedNode.nodeVersion,
 			);
 		} else {
 			if (!name.trim()) return;
-			actions.createNode(
-				workspace.project.id,
-				selectedParent,
-				name.trim(),
-				dialog === "create-file" ? "file" : "folder",
-			);
+			actions.createNode(open.project.id, selectedParent, name.trim(), dialog === "create-file" ? "file" : "folder");
 		}
 		onClose();
 	}
@@ -1320,7 +1345,7 @@ function FileOperationModal({
 		? "Rename or move"
 		: "Prepare confirmed delete";
 	return (
-		<Modal title={title} eyebrow={`PROJECT SCOPE · ${workspace.project.displayName.toUpperCase()}`} onClose={onClose}>
+		<Modal title={title} eyebrow={`PROJECT SCOPE · ${open.project.displayName.toUpperCase()}`} onClose={onClose}>
 			<form className="modal-form" onSubmit={submit}>
 				{dialog === "delete"
 					? (
@@ -1350,8 +1375,7 @@ function FileOperationModal({
 								<span>{dialog === "move" ? "Destination name" : "Name"}</span>
 								<input
 									value={name}
-									onChange={(event) =>
-										setName(event.target.value)}
+									onChange={(event) => setName(event.target.value)}
 									placeholder={dialog === "create-file" ? "notes.md" : "results"}
 									pattern={NON_BLANK_PATTERN}
 									title="Enter at least one non-space character."
@@ -1359,9 +1383,8 @@ function FileOperationModal({
 								/>
 							</label>
 							<p className="modal-form__note">
-								Destination parent:{" "}
-								<code>{dialog === "move" ? destinationParent || "/" : parentLabel}</code>. Existing entries are never
-								overwritten.
+								Destination parent: <code>{dialog === "move" ? destinationParent || "/" : parentLabel}</code>{" "}
+								Existing entries are never overwritten.
 							</p>
 						</>
 					)}
@@ -1372,7 +1395,7 @@ function FileOperationModal({
 						className={`button ${dialog === "delete" ? "button--danger" : "button--primary"}`}
 						disabled={dialog === "delete" && !selectedNode}
 					>
-						{dialog === "delete" ? "Inspect and prepare" : "Apply in sandbox"}
+						{dialog === "delete" ? "Inspect and prepare" : "Apply in project"}
 					</button>
 				</div>
 			</form>
@@ -1386,7 +1409,7 @@ function DeleteConfirmationModal({
 	onClose,
 	actions,
 }: {
-	challenge: DeleteChallenge;
+	challenge: WireDeleteChallenge;
 	projectId: string;
 	onClose(): void;
 	actions: WorkbenchActions;
@@ -1398,7 +1421,7 @@ function DeleteConfirmationModal({
 					<span>TARGET</span>
 					<code>{challenge.displayPath}</code>
 				</div>
-				<p>The server bound this challenge to the exact project, path, and inspected node fingerprint.</p>
+				<p>The host bound this challenge to the exact project, path, and inspected node fingerprint.</p>
 				<dl>
 					<div>
 						<dt>Expires</dt>
@@ -1427,18 +1450,45 @@ function DeleteConfirmationModal({
 	);
 }
 
-function BottomStatus({ state, workspace, obscured }: {
+function BottomStatus({ state, actions, obscured, approvalEscalated }: {
 	state: AppState;
-	workspace: ProjectWorkspaceState;
+	actions: WorkbenchActions;
 	obscured: boolean;
+	approvalEscalated: boolean;
 }) {
-	const operationActive = workspace.activeTurnId !== null || workspace.pendingPermission !== null ||
-		isEngineOperationActive(workspace.engine.phase);
-	const operationLabel = workspace.engine.phase === "cancelling"
-		? `cancelling ${ENGINE_NAMES[workspace.engine.kind].toLowerCase()} turn`
-		: `${ENGINE_NAMES[workspace.engine.kind].toLowerCase()} turn`;
-	const factState = (key: "target" | "authentication" | "context") =>
-		workspace.engine.facts.find((fact) => fact.key === key)?.state ?? "unavailable";
+	const open = state.open;
+	const session = open?.clio.session ?? null;
+	const activeTurn = open?.projection.activeTurn ?? null;
+	const elapsed = useElapsedSeconds(activeTurn?.startedAt ?? null);
+	const phase = open?.clio.phase ?? "closed";
+	const operation = open === null
+		? "no project"
+		: phase === "awaiting-approval"
+		? "awaiting approval"
+		: phase === "cancelling"
+		? "stopping"
+		: activeTurn
+		? `running ${formatDuration(elapsed)}`
+		: "idle";
+	const autonomyEditable = open !== null && session !== null && open.clio.capabilities?.autonomy === true &&
+		!isPromptBlocked(open);
+	// Settings describe what Clio would bind next, which is a different fact from
+	// what the bound session is running on. Only show it when the two disagree.
+	//
+	// The two facts reach the bound session on different schedules and must never
+	// share a label. Clio reads target and model routing at prompt time, so a
+	// patch to either lands on this session's next turn. Autonomy is pinned at
+	// session/new for the life of the process, so a patched global autonomy
+	// reaches only the next session and the bound one moves through
+	// clio-coder/session/autonomy instead.
+	const nextTarget = open?.settings?.settings["orchestrator.target"] ?? null;
+	const nextModel = open?.settings?.settings["orchestrator.model"] ?? null;
+	const nextTurnDiffers = open?.settings != null && session !== null &&
+		(nextTarget !== session.target || nextModel !== session.model);
+	const settingsAutonomy = open?.settings?.settings["autonomy"] ?? null;
+	const nextSessionAutonomy = settingsAutonomy !== null && isAutonomyLevel(settingsAutonomy) ? settingsAutonomy : null;
+	const nextSessionDiffers = session !== null && nextSessionAutonomy !== null &&
+		nextSessionAutonomy !== session.autonomy;
 	return (
 		<footer
 			className="status-bar"
@@ -1446,134 +1496,198 @@ function BottomStatus({ state, workspace, obscured }: {
 			aria-hidden={obscured ? true : undefined}
 			inert={obscured}
 		>
-			<div>
+			<div className="status-bar__connection">
 				<StatusMark tone={state.connection === "connected" ? "success" : "error"} label={state.connection} />
 				<span>{state.mode} host · 127.0.0.1 · token bound</span>
 			</div>
-			<div>
-				<span>Target</span>
-				<strong>{factState("target")}</strong>
+			<div className="status-bar__project">
+				<span>Project</span>
+				<strong>{open === null ? "none" : open.project.displayName}</strong>
 			</div>
-			<div>
-				<span>Authentication</span>
-				<strong>{factState("authentication")}</strong>
+			<div className="status-bar__session">
+				<span>Session bound to</span>
+				<strong>
+					{session === null ? "no session" : `${session.target ?? "unselected"} · ${session.model ?? "unselected"}`}
+				</strong>
 			</div>
-			<div>
-				<span>Context</span>
-				<strong>{factState("context")}</strong>
+			{nextTurnDiffers && (
+				<div className="status-bar__next-turn">
+					<span>Next turn</span>
+					<strong>{`${nextTarget ?? "unselected"} · ${nextModel ?? "unselected"}`}</strong>
+				</div>
+			)}
+			{nextSessionDiffers && nextSessionAutonomy !== null && (
+				<div className="status-bar__next-session">
+					<span>Next session</span>
+					<strong>{`${AUTONOMY_LABELS[nextSessionAutonomy]} autonomy`}</strong>
+				</div>
+			)}
+			<div className="status-bar__autonomy">
+				<span>Autonomy</span>
+				{session === null ? <strong>unbound</strong> : (
+					<>
+						<select
+							aria-label="Session autonomy"
+							value={session.autonomy}
+							disabled={!autonomyEditable}
+							onChange={(event) =>
+								open && actions.setAutonomy(open.project.id, event.target.value as WireAutonomyLevel)}
+						>
+							{(Object.keys(AUTONOMY_LABELS) as WireAutonomyLevel[]).map((level) => (
+								<option value={level} key={level}>{AUTONOMY_LABELS[level]}</option>
+							))}
+						</select>
+						<small>
+							{session.autonomySource === "session" ? "set for this session" : "inherited from settings"}
+						</small>
+					</>
+				)}
 			</div>
-			<div className={operationActive ? "status-bar__operation is-active" : "status-bar__operation"}>
+			<div
+				className={`status-bar__operation${activeTurn !== null ? " is-active" : ""}${
+					approvalEscalated ? " is-escalated" : ""
+				}`}
+			>
 				<span>Operation</span>
-				<strong>{operationActive ? operationLabel : "idle"}</strong>
+				<strong>{approvalEscalated ? `${operation} · escalated` : operation}</strong>
 			</div>
 		</footer>
 	);
 }
 
 export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) {
-	const workspace = selectedWorkspace(state);
+	const open = state.open;
 	const leftRailIsDrawer = useMediaQuery("(max-width: 790px)");
-	const rightRailIsDrawer = useMediaQuery("(max-width: 1050px)");
-	const [projectDialog, setProjectDialog] = useState<ProjectDialog>(null);
 	const [fileDialog, setFileDialog] = useState<FileDialog>(null);
-	const [selectedNodes, setSelectedNodes] = useState<Record<string, TreeNode | null>>({});
+	const [selectedNode, setSelectedNode] = useState<WireTreeNode | null>(null);
+	const [sessionToDelete, setSessionToDelete] = useState<WireSessionSummary | null>(null);
 	const previousLeftDrawerOpen = useRef(state.leftDrawerOpen);
-	const previousRightDrawerOpen = useRef(state.rightDrawerOpen);
-	const selectedNode = workspace ? (selectedNodes[workspace.project.id] ?? null) : null;
-	const slotActive = Object.values(state.projects).some((project) =>
-		project.activeTurnId !== null || project.pendingPermission !== null || isEngineOperationActive(project.engine.phase)
+	const pendingPermission = open?.projection.pendingPermission ?? null;
+	const activeTurn = open?.projection.activeTurn ?? null;
+	// One clock for the whole shell, so the banner, the tool cards, and the status
+	// bar can never disagree about how long something has been waiting.
+	const nowMs = useNow(activeTurn !== null || pendingPermission !== null);
+	const approvalEscalated = pendingPermission !== null && nowMs >= Date.parse(pendingPermission.escalateAt);
+	const escalatedSeconds = pendingPermission === null ? 0 : Math.max(
+		0,
+		Math.floor((Date.parse(pendingPermission.escalateAt) - Date.parse(pendingPermission.requestedAt)) / 1_000),
 	);
-	const modalIsOpen = projectDialog !== null || fileDialog !== null || Boolean(workspace?.deleteChallenge);
+	const modalIsOpen = fileDialog !== null || Boolean(open?.deleteChallenge) || state.browse !== null ||
+		state.settingsOpen || sessionToDelete !== null;
 	const leftDrawerObscures = leftRailIsDrawer && state.leftDrawerOpen;
-	const rightDrawerObscures = rightRailIsDrawer && state.rightDrawerOpen;
-	const backgroundObscured = modalIsOpen || leftDrawerObscures || rightDrawerObscures;
+	const backgroundObscured = modalIsOpen || leftDrawerObscures;
 
 	useEffect(() => {
 		setFileDialog(null);
-	}, [state.selectedProjectId]);
+		setSelectedNode(null);
+		setSessionToDelete(null);
+	}, [open?.project.id]);
 
 	useEffect(() => {
 		if (leftRailIsDrawer && state.leftDrawerOpen) {
 			document.querySelector<HTMLButtonElement>(".left-rail__close")?.focus();
 		} else if (leftRailIsDrawer && previousLeftDrawerOpen.current) {
-			document.querySelector<HTMLButtonElement>(".mobile-controls:first-child button")?.focus();
+			document.querySelector<HTMLButtonElement>(".mobile-controls button")?.focus();
 		}
 		previousLeftDrawerOpen.current = state.leftDrawerOpen;
 	}, [leftRailIsDrawer, state.leftDrawerOpen]);
 
 	useEffect(() => {
-		if (rightRailIsDrawer && state.rightDrawerOpen) {
-			document.querySelector<HTMLButtonElement>(".right-rail__close")?.focus();
-		} else if (rightRailIsDrawer && previousRightDrawerOpen.current) {
-			document.querySelector<HTMLButtonElement>(".mobile-controls:last-child button")?.focus();
-		}
-		previousRightDrawerOpen.current = state.rightDrawerOpen;
-	}, [rightRailIsDrawer, state.rightDrawerOpen]);
-
-	useEffect(() => {
-		if (modalIsOpen || (!leftDrawerObscures && !rightDrawerObscures)) return;
+		if (modalIsOpen || !leftDrawerObscures) return;
 		const constrainDrawerFocus = (event: globalThis.KeyboardEvent) => {
 			if (event.key === "Escape") {
 				dispatch({ type: "drawer.left", open: false });
-				dispatch({ type: "drawer.right", open: false });
 				return;
 			}
-			const activeDrawer = document.querySelector<HTMLElement>(
-				leftDrawerObscures ? "#project-rail" : "#activity-rail",
-			);
-			if (activeDrawer) containTabKey(event, activeDrawer);
+			const drawer = document.querySelector<HTMLElement>("#project-rail");
+			if (drawer) containTabKey(event, drawer);
 		};
 		document.addEventListener("keydown", constrainDrawerFocus);
 		return () => document.removeEventListener("keydown", constrainDrawerFocus);
-	}, [dispatch, leftDrawerObscures, modalIsOpen, rightDrawerObscures]);
+	}, [dispatch, leftDrawerObscures, modalIsOpen]);
+
+	// The approval is the one thing the operator must not miss.
+	useEffect(() => {
+		const previous = document.title;
+		document.title = pendingPermission === null ? "Clio Workbench" : "● Approval needed — Clio Workbench";
+		return () => {
+			document.title = previous;
+		};
+	}, [pendingPermission?.permissionId ?? null]);
+
+	// Alt+A and Alt+R answer the card from wherever the operator is. Suppressed
+	// while a modal is up, so a dialog's own controls stay unambiguous.
+	useEffect(() => {
+		if (pendingPermission === null || activeTurn === null || open === null || modalIsOpen) return;
+		const answer = (event: globalThis.KeyboardEvent) => {
+			if (!event.altKey || event.ctrlKey || event.metaKey) return;
+			const key = event.key.toLowerCase();
+			if (key !== "a" && key !== "r") return;
+			event.preventDefault();
+			actions.resolvePermission(
+				open.project.id,
+				activeTurn.turnId,
+				pendingPermission.permissionId,
+				key === "a" ? "allow-once" : "reject",
+			);
+		};
+		document.addEventListener("keydown", answer);
+		return () => document.removeEventListener("keydown", answer);
+	}, [actions, activeTurn?.turnId, modalIsOpen, open?.project.id, pendingPermission?.permissionId]);
+
+	// One desktop notification per card, and only if permission was already
+	// granted. Nothing here ever asks for it; the settings toggle does that.
+	useEffect(() => {
+		if (pendingPermission === null || !state.desktopNotifications) return;
+		if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+		try {
+			// Title only. A path in a notification would leave the project boundary.
+			const posted = new Notification("Clio Workbench: approval needed", { body: pendingPermission.title });
+			return () => posted.close();
+		} catch {
+			// A browser that refuses to construct one is not a Workbench failure.
+		}
+	}, [pendingPermission?.permissionId ?? null, state.desktopNotifications]);
 
 	if (state.boot === "loading") return <LoadingScreen />;
-	if (state.boot === "failed" || !workspace) {
-		return <FailureScreen message={state.bootError ?? "No selected project was returned."} />;
-	}
+	if (state.boot === "failed") return <FailureScreen message={state.bootError ?? "Workbench could not start."} />;
 
 	return (
 		<div className="workbench-shell">
 			<div className="ambient-grid" aria-hidden="true" />
 			<div className="sr-only" aria-live="assertive" aria-atomic="true">{state.announcement}</div>
+			<div className="sr-only" aria-live="assertive" aria-atomic="true">
+				{approvalEscalated ? `An approval has been waiting for ${escalatedSeconds} seconds.` : ""}
+			</div>
 			<div
-				className={`drawer-scrim${leftDrawerObscures || rightDrawerObscures ? " is-visible" : ""}`}
-				onClick={() => {
-					dispatch({ type: "drawer.left", open: false });
-					dispatch({ type: "drawer.right", open: false });
-				}}
+				className={`drawer-scrim${leftDrawerObscures ? " is-visible" : ""}`}
+				onClick={() => dispatch({ type: "drawer.left", open: false })}
 				aria-hidden="true"
 			/>
 			<ProjectRail
 				state={state}
-				workspace={workspace}
 				dispatch={dispatch}
-				onProjectDialog={setProjectDialog}
-				onSelectProject={actions.selectProject}
+				actions={actions}
 				selectedNode={selectedNode}
-				onSelectNode={(node) => setSelectedNodes((current) => ({ ...current, [workspace.project.id]: node }))}
+				onSelectNode={setSelectedNode}
 				onFileDialog={setFileDialog}
-				onRefresh={() => actions.refreshTree(workspace.project.id)}
-				slotActive={slotActive}
+				onDeleteSession={setSessionToDelete}
 				isDrawer={leftRailIsDrawer}
-				obscured={modalIsOpen || rightDrawerObscures}
+				obscured={modalIsOpen}
 			/>
 			<ConversationCanvas
-				workspace={workspace}
 				state={state}
 				dispatch={dispatch}
 				actions={actions}
-				engineLocked={slotActive}
 				obscured={backgroundObscured}
+				nowMs={nowMs}
 			/>
-			<RightRail
+			<BottomStatus
 				state={state}
-				workspace={workspace}
-				dispatch={dispatch}
-				isDrawer={rightRailIsDrawer}
-				obscured={modalIsOpen || leftDrawerObscures}
+				actions={actions}
+				obscured={backgroundObscured}
+				approvalEscalated={approvalEscalated}
 			/>
-			<BottomStatus state={state} workspace={workspace} obscured={backgroundObscured} />
 			{state.notice && (
 				<div className={`app-notice app-notice--${state.notice.tone}`} role="alert">
 					<span aria-hidden="true">!</span>
@@ -1584,29 +1698,43 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 					</button>
 				</div>
 			)}
-
-			{projectDialog && (
-				<ProjectOperationModal
-					dialog={projectDialog}
-					registerableFolders={state.registerableSandboxFolders}
-					onClose={() => setProjectDialog(null)}
+			{state.browse !== null && (
+				<BrowseModal
+					state={state}
 					actions={actions}
+					onClose={() => dispatch({ type: "browse.dismissed" })}
 				/>
 			)}
-			{fileDialog && (
+			{state.settingsOpen && (
+				<SettingsModal
+					state={state}
+					actions={actions}
+					dispatch={dispatch}
+					onClose={() => dispatch({ type: "settings.opened", open: false })}
+				/>
+			)}
+			{sessionToDelete !== null && open && (
+				<SessionDeleteModal
+					session={sessionToDelete}
+					projectId={open.project.id}
+					actions={actions}
+					onClose={() => setSessionToDelete(null)}
+				/>
+			)}
+			{fileDialog && open && (
 				<FileOperationModal
 					dialog={fileDialog}
-					workspace={workspace}
+					open={open}
 					selectedNode={selectedNode}
 					onClose={() => setFileDialog(null)}
 					actions={actions}
 				/>
 			)}
-			{workspace.deleteChallenge && (
+			{open?.deleteChallenge && (
 				<DeleteConfirmationModal
-					challenge={workspace.deleteChallenge}
-					projectId={workspace.project.id}
-					onClose={() => actions.refreshTree(workspace.project.id)}
+					challenge={open.deleteChallenge}
+					projectId={open.project.id}
+					onClose={() => actions.refreshTree(open.project.id)}
 					actions={actions}
 				/>
 			)}

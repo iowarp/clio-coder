@@ -10,7 +10,7 @@ interface TestLayout {
 
 async function withLayout(run: (layout: TestLayout) => Promise<void>): Promise<void> {
 	const root = await Deno.makeTempDir({ prefix: "workbench-project-store-" });
-	const sandbox = join(root, "sandbox");
+	const sandbox = join(root, "workspace");
 	const outside = join(root, "outside");
 	await Deno.mkdir(sandbox);
 	await Deno.mkdir(outside);
@@ -24,6 +24,34 @@ async function withLayout(run: (layout: TestLayout) => Promise<void>): Promise<v
 function opaqueIdFactory(): () => string {
 	let sequence = 0;
 	return () => `opaque-${String(++sequence).padStart(8, "0")}`;
+}
+
+interface StoreSeed {
+	readonly id?: string;
+	readonly displayName: string;
+	readonly directory: string;
+}
+
+/**
+ * Registers real directories as roots. The runtime canonicalizes and guards a
+ * path before it reaches the store, so these tests do the same.
+ */
+async function storeWith(
+	sandbox: string,
+	seeds: readonly StoreSeed[],
+	options: { now?: () => number; deleteConfirmationTtlMs?: number } = {},
+): Promise<ProjectStore> {
+	const store = new ProjectStore({ idFactory: opaqueIdFactory(), ...options });
+	for (const seed of seeds) {
+		const path = join(sandbox, seed.directory);
+		await Deno.mkdir(path, { recursive: true });
+		await store.registerRoot({
+			canonicalPath: await Deno.realPath(path),
+			displayName: seed.displayName,
+			...(seed.id === undefined ? {} : { id: seed.id }),
+		});
+	}
+	return store;
 }
 
 async function expectStoreError(promise: Promise<unknown>, code: ProjectStoreErrorCode): Promise<void> {
@@ -47,40 +75,20 @@ function greatestDepth(root: ProjectTreeNode): number {
 	return Math.max(root.path.length, ...(root.children ?? []).map(greatestDepth));
 }
 
-Deno.test("seeded, created, and registered projects keep opaque IDs and isolate mutations", async () => {
+Deno.test("registered roots keep opaque identifiers and isolate mutations", async () => {
 	await withLayout(async ({ sandbox }) => {
-		await Deno.mkdir(join(sandbox, "existing"));
-		const store = await ProjectStore.open({
-			sandboxRoot: sandbox,
-			sandboxId: "test-sandbox",
-			idFactory: opaqueIdFactory(),
-			seeds: [
-				{
-					id: "project-alpha-0001",
-					displayName: "Alpha",
-					relativeRoot: ["alpha"],
-					createIfMissing: true,
-				},
-				{
-					id: "project-beta-0002",
-					displayName: "Beta",
-					relativeRoot: ["beta"],
-					createIfMissing: true,
-				},
-			],
-		});
+		const store = await storeWith(sandbox, [
+			{ id: "project-alpha-0001", displayName: "Alpha", directory: "alpha" },
+			{ id: "project-beta-0002", displayName: "Beta", directory: "beta" },
+		]);
 
 		const [alpha, beta] = store.listProjects();
 		ok(alpha);
 		ok(beta);
 		equal(alpha.id, "project-alpha-0001");
 		equal(beta.id, "project-beta-0002");
-		deepStrictEqual(alpha.identity, {
-			kind: "local-sandbox",
-			sandboxId: "test-sandbox",
-			relativeRoot: ["alpha"],
-		});
-		ok(!JSON.stringify(alpha).includes(sandbox), "renderer DTO must not contain the absolute sandbox root");
+		equal(alpha.identity.kind, "native");
+		equal(alpha.identity.canonicalPath, await Deno.realPath(join(sandbox, "alpha")));
 
 		await store.createFile({ projectId: alpha.id, parent: [], name: "shared.txt" });
 		await store.createFile({ projectId: beta.id, parent: [], name: "shared.txt" });
@@ -100,22 +108,50 @@ Deno.test("seeded, created, and registered projects keep opaque IDs and isolate 
 		await store.confirmDelete({ projectId: alpha.id, confirmationId: deleteAlpha.confirmationId });
 		ok((await Deno.lstat(join(sandbox, "beta", "shared.txt"))).isFile);
 
-		const created = await store.createProject({ displayName: "Gamma", directoryName: "gamma" });
-		const duplicate = await store.registerProject({ displayName: "Ignored duplicate name", relativeRoot: ["gamma"] });
-		equal(duplicate.id, created.id, "registering the same canonical root must preserve its ID");
-		const existing = await store.registerProject({ relativeRoot: ["existing"] });
-		equal(existing.displayName, "existing");
-		ok(store.listProjects().some((project) => project.id === created.id));
+		// Re-registering the same canonical root keeps its identifier and refreshes its name.
+		const again = await store.registerRoot({
+			canonicalPath: await Deno.realPath(join(sandbox, "alpha")),
+			displayName: "Alpha renamed",
+		});
+		equal(again.id, alpha.id);
+		equal(again.displayName, "Alpha renamed");
+		equal(store.listProjects().length, 2);
+
+		store.unregister(beta.id);
+		deepStrictEqual(store.listProjects().map((project) => project.id), [alpha.id]);
+	});
+});
+
+Deno.test("a root must be an existing canonical directory that is not a symlink", async () => {
+	await withLayout(async ({ sandbox }) => {
+		const store = new ProjectStore({ idFactory: opaqueIdFactory() });
+		await Deno.mkdir(join(sandbox, "real"));
+		await Deno.writeTextFile(join(sandbox, "file.txt"), "not a directory");
+		await Deno.symlink(join(sandbox, "real"), join(sandbox, "link"), { type: "dir" });
+
+		await expectStoreError(
+			store.registerRoot({ canonicalPath: "relative/path", displayName: "Relative" }),
+			"invalid_path",
+		);
+		await expectStoreError(
+			store.registerRoot({ canonicalPath: join(sandbox, "absent"), displayName: "Absent" }),
+			"not_found",
+		);
+		await expectStoreError(
+			store.registerRoot({ canonicalPath: join(sandbox, "file.txt"), displayName: "File" }),
+			"not_directory",
+		);
+		await expectStoreError(
+			store.registerRoot({ canonicalPath: join(sandbox, "link"), displayName: "Link" }),
+			"symlink_blocked",
+		);
+		equal(store.listProjects().length, 0);
 	});
 });
 
 Deno.test("segment-array paths reject traversal, absolute forms, separators, and controls", async () => {
 	await withLayout(async ({ sandbox, outside }) => {
-		const store = await ProjectStore.open({
-			sandboxRoot: sandbox,
-			idFactory: opaqueIdFactory(),
-			seeds: [{ id: "project-safe-0001", displayName: "Safe", relativeRoot: ["safe"], createIfMissing: true }],
-		});
+		const store = await storeWith(sandbox, [{ id: "project-safe-0001", displayName: "Safe", directory: "safe" }]);
 		const projectId = store.listProjects()[0]?.id as string;
 		await Deno.writeTextFile(join(outside, "sentinel.txt"), "outside");
 
@@ -145,8 +181,11 @@ Deno.test("tree exposes symlinks as blocked leaves and operations never follow t
 		await Deno.symlink(outside, join(sandbox, "alpha", "escape"), { type: "dir" });
 		await Deno.symlink(outside, join(sandbox, "linked-project"), { type: "dir" });
 
-		const store = await ProjectStore.open({ sandboxRoot: sandbox, idFactory: opaqueIdFactory() });
-		const alpha = await store.registerProject({ displayName: "Alpha", relativeRoot: ["alpha"] });
+		const store = await storeWith(sandbox, []);
+		const alpha = await store.registerRoot({
+			canonicalPath: await Deno.realPath(join(sandbox, "alpha")),
+			displayName: "Alpha",
+		});
 		const tree = await store.getTree({ projectId: alpha.id });
 		const link = findNode(tree.root, ["escape"]);
 		ok(link);
@@ -169,7 +208,7 @@ Deno.test("tree exposes symlinks as blocked leaves and operations never follow t
 			"symlink_blocked",
 		);
 		await expectStoreError(
-			store.registerProject({ displayName: "Linked", relativeRoot: ["linked-project"] }),
+			store.registerRoot({ canonicalPath: join(sandbox, "linked-project"), displayName: "Linked" }),
 			"symlink_blocked",
 		);
 		equal(await Deno.readTextFile(join(outside, "sentinel.txt")), "outside");
@@ -180,16 +219,10 @@ Deno.test("tree exposes symlinks as blocked leaves and operations never follow t
 Deno.test("delete challenges are project-bound, one-use, expiring, and fingerprint-bound", async () => {
 	await withLayout(async ({ sandbox }) => {
 		let now = Date.parse("2026-08-17T12:00:00.000Z");
-		const store = await ProjectStore.open({
-			sandboxRoot: sandbox,
-			idFactory: opaqueIdFactory(),
-			now: () => now,
-			deleteConfirmationTtlMs: 100,
-			seeds: [
-				{ id: "project-alpha-0001", displayName: "Alpha", relativeRoot: ["alpha"], createIfMissing: true },
-				{ id: "project-beta-0002", displayName: "Beta", relativeRoot: ["beta"], createIfMissing: true },
-			],
-		});
+		const store = await storeWith(sandbox, [
+			{ id: "project-alpha-0001", displayName: "Alpha", directory: "alpha" },
+			{ id: "project-beta-0002", displayName: "Beta", directory: "beta" },
+		], { now: () => now, deleteConfirmationTtlMs: 100 });
 		const [alpha, beta] = store.listProjects();
 		ok(alpha);
 		ok(beta);
@@ -241,11 +274,7 @@ Deno.test("delete challenges are project-bound, one-use, expiring, and fingerpri
 
 Deno.test("move is serialized and refuses an existing destination without clobbering either entry", async () => {
 	await withLayout(async ({ sandbox }) => {
-		const store = await ProjectStore.open({
-			sandboxRoot: sandbox,
-			idFactory: opaqueIdFactory(),
-			seeds: [{ id: "project-moves-0001", displayName: "Moves", relativeRoot: ["moves"], createIfMissing: true }],
-		});
+		const store = await storeWith(sandbox, [{ id: "project-moves-0001", displayName: "Moves", directory: "moves" }]);
 		const projectId = store.listProjects()[0]?.id as string;
 		await store.createFile({ projectId, parent: [], name: "source.txt" });
 		await store.createFile({ projectId, parent: [], name: "destination.txt" });
@@ -304,8 +333,11 @@ Deno.test("recursive trees never exceed five levels or two hundred total nodes",
 			),
 		);
 
-		const store = await ProjectStore.open({ sandboxRoot: sandbox, idFactory: opaqueIdFactory() });
-		const project = await store.registerProject({ displayName: "Large", relativeRoot: ["large"] });
+		const store = new ProjectStore({ idFactory: opaqueIdFactory() });
+		const project = await store.registerRoot({
+			canonicalPath: await Deno.realPath(projectRoot),
+			displayName: "Large",
+		});
 		const tree = await store.getTree({ projectId: project.id, maxDepth: 99, maxNodes: 999 });
 		equal(tree.maxDepth, 5);
 		equal(tree.maxNodes, 200);
@@ -317,11 +349,7 @@ Deno.test("recursive trees never exceed five levels or two hundred total nodes",
 
 Deno.test("registered root identity changes fail closed", async () => {
 	await withLayout(async ({ sandbox }) => {
-		const store = await ProjectStore.open({
-			sandboxRoot: sandbox,
-			idFactory: opaqueIdFactory(),
-			seeds: [{ id: "project-root-0001", displayName: "Root", relativeRoot: ["root"], createIfMissing: true }],
-		});
+		const store = await storeWith(sandbox, [{ id: "project-root-0001", displayName: "Root", directory: "root" }]);
 		const projectId = store.listProjects()[0]?.id as string;
 		await Deno.rename(join(sandbox, "root"), join(sandbox, "original-root"));
 		await Deno.mkdir(join(sandbox, "root"));
@@ -335,8 +363,11 @@ Deno.test("trusted root resolution returns the exact canonical project root", as
 	await withLayout(async ({ sandbox }) => {
 		const projectRoot = join(sandbox, "trusted");
 		await Deno.mkdir(projectRoot);
-		const store = await ProjectStore.open({ sandboxRoot: sandbox, idFactory: opaqueIdFactory() });
-		const project = await store.registerProject({ displayName: "Trusted", relativeRoot: ["trusted"] });
+		const store = new ProjectStore({ idFactory: opaqueIdFactory() });
+		const project = await store.registerRoot({
+			canonicalPath: await Deno.realPath(projectRoot),
+			displayName: "Trusted",
+		});
 
 		equal(await store.resolveTrustedRoot(project.id), await Deno.realPath(projectRoot));
 	});
@@ -344,7 +375,7 @@ Deno.test("trusted root resolution returns the exact canonical project root", as
 
 Deno.test("trusted root resolution rejects an unknown project", async () => {
 	await withLayout(async ({ sandbox }) => {
-		const store = await ProjectStore.open({ sandboxRoot: sandbox, idFactory: opaqueIdFactory() });
+		const store = await storeWith(sandbox, []);
 
 		await expectStoreError(store.resolveTrustedRoot("project-missing-0001"), "project_not_found");
 	});
@@ -352,14 +383,10 @@ Deno.test("trusted root resolution rejects an unknown project", async () => {
 
 Deno.test("trusted root resolution fails closed after a registered root is replaced or symlinked", async () => {
 	await withLayout(async ({ sandbox }) => {
-		const store = await ProjectStore.open({
-			sandboxRoot: sandbox,
-			idFactory: opaqueIdFactory(),
-			seeds: [
-				{ id: "project-replaced-0001", displayName: "Replaced", relativeRoot: ["replaced"], createIfMissing: true },
-				{ id: "project-symlinked-0002", displayName: "Symlinked", relativeRoot: ["symlinked"], createIfMissing: true },
-			],
-		});
+		const store = await storeWith(sandbox, [
+			{ id: "project-replaced-0001", displayName: "Replaced", directory: "replaced" },
+			{ id: "project-symlinked-0002", displayName: "Symlinked", directory: "symlinked" },
+		]);
 
 		await Deno.rename(join(sandbox, "replaced"), join(sandbox, "original-replaced"));
 		await Deno.mkdir(join(sandbox, "replaced"));

@@ -3,28 +3,16 @@ import { isAbsolute, join, relative, sep } from "node:path";
 export type ProjectId = string;
 export type ProjectPath = readonly string[];
 
-export interface LocalSandboxProjectIdentity {
-	kind: "local-sandbox";
-	sandboxId: string;
-	relativeRoot: string[];
-}
-
 export interface NativeProjectIdentity {
 	kind: "native";
 	platform: "linux" | "darwin" | "windows";
 	canonicalPath: string;
 }
 
-export interface WslProjectIdentity {
-	kind: "wsl";
-	distro: string;
-	linuxPath: string;
-}
+/** Tagged so a later backend never has to infer an operating system from a path string. */
+export type ProjectIdentity = NativeProjectIdentity;
 
-/** Tagged now so later backends never have to infer an operating system from a path string. */
-export type ProjectIdentity = LocalSandboxProjectIdentity | NativeProjectIdentity | WslProjectIdentity;
-
-/** Contains no host-absolute path or filesystem capability. */
+/** The registered project: its canonical root is the one native path the renderer may see. */
 export interface ProjectSummary {
 	id: ProjectId;
 	displayName: string;
@@ -65,21 +53,12 @@ export interface TreeRequest {
 	maxNodes?: number;
 }
 
-export interface CreateProjectRequest {
+export interface RegisterRootRequest {
+	/** Already canonicalized (realpath) by the caller after its own guards ran. */
+	canonicalPath: string;
 	displayName: string;
-	directoryName: string;
-}
-
-export interface RegisterProjectRequest {
-	displayName?: string;
-	relativeRoot: ProjectPath;
-}
-
-export interface SeedProjectRequest {
 	id?: ProjectId;
-	displayName: string;
-	relativeRoot: ProjectPath;
-	createIfMissing?: boolean;
+	platform?: NativeProjectIdentity["platform"];
 }
 
 export interface CreateEntryRequest {
@@ -132,9 +111,6 @@ export interface DeleteChallenge {
 }
 
 export interface ProjectStoreOptions {
-	sandboxRoot: string;
-	sandboxId?: string;
-	seeds?: readonly SeedProjectRequest[];
 	idFactory?: () => string;
 	now?: () => number;
 	deleteConfirmationTtlMs?: number;
@@ -156,7 +132,6 @@ export type ProjectStoreErrorCode =
 	| "outside_project"
 	| "permission_denied"
 	| "project_not_found"
-	| "project_overlap"
 	| "root_changed"
 	| "stale_entry"
 	| "symlink_blocked"
@@ -191,7 +166,7 @@ interface RootIdentity {
 interface StoredProject {
 	id: ProjectId;
 	displayName: string;
-	identity: LocalSandboxProjectIdentity;
+	identity: NativeProjectIdentity;
 	createdAt: string;
 	lastOpenedAt: string;
 	revision: number;
@@ -239,9 +214,6 @@ class SerialExecutor {
 }
 
 export class ProjectStore {
-	readonly #sandboxId: string;
-	readonly #canonicalSandboxRoot: string;
-	readonly #sandboxRootIdentity: RootIdentity;
 	readonly #idFactory: () => string;
 	readonly #now: () => number;
 	readonly #deleteConfirmationTtlMs: number;
@@ -251,14 +223,7 @@ export class ProjectStore {
 	readonly #registryExecutor = new SerialExecutor();
 	readonly #projectExecutors = new Map<ProjectId, SerialExecutor>();
 
-	private constructor(
-		options: ProjectStoreOptions,
-		canonicalSandboxRoot: string,
-		sandboxRootIdentity: RootIdentity,
-	) {
-		this.#sandboxId = options.sandboxId ?? "local-development";
-		this.#canonicalSandboxRoot = canonicalSandboxRoot;
-		this.#sandboxRootIdentity = sandboxRootIdentity;
+	constructor(options: ProjectStoreOptions = {}) {
 		this.#idFactory = options.idFactory ?? (() => crypto.randomUUID());
 		this.#now = options.now ?? (() => Date.now());
 		this.#deleteConfirmationTtlMs = options.deleteConfirmationTtlMs ?? DEFAULT_DELETE_TTL_MS;
@@ -266,31 +231,6 @@ export class ProjectStore {
 		if (!Number.isSafeInteger(this.#deleteConfirmationTtlMs) || this.#deleteConfirmationTtlMs <= 0) {
 			throw new ProjectStoreError("filesystem_error", "The delete confirmation lifetime is invalid.");
 		}
-	}
-
-	static async open(options: ProjectStoreOptions): Promise<ProjectStore> {
-		try {
-			await Deno.mkdir(options.sandboxRoot, { recursive: true });
-		} catch (error) {
-			throw mapFilesystemError(error, "filesystem_error", "The project sandbox could not be prepared.");
-		}
-		const suppliedRootInfo = await safeLstat(options.sandboxRoot, "The project sandbox is unavailable.");
-		if (suppliedRootInfo.isSymlink) {
-			throw new ProjectStoreError("symlink_blocked", "The project sandbox cannot be a symbolic link.");
-		}
-		if (!suppliedRootInfo.isDirectory) {
-			throw new ProjectStoreError("not_directory", "The project sandbox is not a directory.");
-		}
-
-		const canonicalSandboxRoot = await safeRealPath(options.sandboxRoot, "The project sandbox is unavailable.");
-		const canonicalRootInfo = await safeLstat(canonicalSandboxRoot, "The project sandbox is unavailable.");
-		const store = new ProjectStore(options, canonicalSandboxRoot, rootIdentity(canonicalRootInfo));
-
-		for (const seed of options.seeds ?? []) {
-			await store.seedProject(seed);
-		}
-
-		return store;
 	}
 
 	listProjects(): ProjectSummary[] {
@@ -307,75 +247,64 @@ export class ProjectStore {
 		return project.canonicalRoot;
 	}
 
-	async createProject(request: CreateProjectRequest): Promise<ProjectSummary> {
+	/**
+	 * Registers a real directory as a project root. The caller has already
+	 * canonicalized the path and applied the refuse-to-open guards; the store
+	 * only proves the root is a directory and remembers its identity so a later
+	 * swap underneath the same path is detected.
+	 */
+	async registerRoot(request: RegisterRootRequest): Promise<ProjectSummary> {
 		return await this.#registryExecutor.run(async () => {
 			const displayName = validateDisplayName(request.displayName);
-			const directoryName = validateEntryName(request.directoryName);
-			await this.#assertSandboxRoot();
-			const target = join(this.#canonicalSandboxRoot, directoryName);
-			assertContained(this.#canonicalSandboxRoot, target);
-
-			try {
-				await Deno.mkdir(target);
-			} catch (error) {
-				throw mapFilesystemError(error, "filesystem_error", "The project directory could not be created.");
+			if (
+				typeof request.canonicalPath !== "string" || !isAbsolute(request.canonicalPath) ||
+				request.canonicalPath.includes("\0")
+			) {
+				throw new ProjectStoreError("invalid_path", "A project root must be an absolute canonical path.");
 			}
-
-			try {
-				return await this.#registerResolvedProject({
-					displayName,
-					relativeRoot: [directoryName],
-				});
-			} catch (error) {
-				// The directory is known to be newly created and empty. Avoid leaving it behind if registry validation fails.
-				try {
-					await Deno.remove(target);
-				} catch {
-					// Preserve the original domain error; cleanup is best effort only.
-				}
-				throw error;
+			const info = await safeLstat(request.canonicalPath, "The project root does not exist.");
+			if (info.isSymlink) throw new ProjectStoreError("symlink_blocked", "A project root cannot be a symbolic link.");
+			if (!info.isDirectory) throw new ProjectStoreError("not_directory", "A project root must be a directory.");
+			const canonical = await safeRealPath(request.canonicalPath, "The project root does not exist.");
+			if (!sameCanonicalPath(canonical, request.canonicalPath)) {
+				throw new ProjectStoreError("invalid_path", "A project root must already be canonical.");
 			}
-		});
-	}
-
-	async registerProject(request: RegisterProjectRequest): Promise<ProjectSummary> {
-		return await this.#registryExecutor.run(async () => {
-			const relativeRoot = validateProjectPath(request.relativeRoot, false);
-			const displayName = validateDisplayName(request.displayName ?? relativeRoot.at(-1) ?? "Project");
-			return await this.#registerResolvedProject({ displayName, relativeRoot });
-		});
-	}
-
-	async seedProject(request: SeedProjectRequest): Promise<ProjectSummary> {
-		return await this.#registryExecutor.run(async () => {
-			const relativeRoot = validateProjectPath(request.relativeRoot, false);
-			const displayName = validateDisplayName(request.displayName);
-			if (request.id !== undefined) validateOpaqueId(request.id);
-			await this.#assertSandboxRoot();
-
-			if (request.createIfMissing) {
-				if (relativeRoot.length !== 1) {
-					throw new ProjectStoreError(
-						"invalid_path",
-						"A seeded project can create only one direct child of the controlled sandbox.",
-					);
-				}
-				const target = join(this.#canonicalSandboxRoot, relativeRoot[0] as string);
-				try {
-					await Deno.mkdir(target);
-				} catch (error) {
-					if (!(error instanceof Deno.errors.AlreadyExists)) {
-						throw mapFilesystemError(error, "filesystem_error", "The seeded project could not be created.");
-					}
+			for (const existing of this.#projects.values()) {
+				if (sameCanonicalPath(existing.canonicalRoot, canonical)) {
+					existing.lastOpenedAt = new Date(this.#now()).toISOString();
+					existing.displayName = displayName;
+					return toProjectSummary(existing);
 				}
 			}
-
-			return await this.#registerResolvedProject({
+			const id = request.id ?? this.#nextOpaqueId("project");
+			validateOpaqueId(id);
+			if (this.#projects.has(id)) {
+				throw new ProjectStoreError("invalid_project_id", "The requested project identifier is already registered.");
+			}
+			const now = new Date(this.#now()).toISOString();
+			const project: StoredProject = {
+				id,
 				displayName,
-				relativeRoot,
-				requestedId: request.id,
-			});
+				identity: { kind: "native", platform: request.platform ?? platformOf(), canonicalPath: canonical },
+				createdAt: now,
+				lastOpenedAt: now,
+				revision: 0,
+				canonicalRoot: canonical,
+				rootIdentity: rootIdentity(info),
+			};
+			this.#projects.set(id, project);
+			this.#projectExecutors.set(id, new SerialExecutor());
+			return toProjectSummary(project);
 		});
+	}
+
+	unregister(projectId: ProjectId): void {
+		validateOpaqueId(projectId);
+		this.#projects.delete(projectId);
+		this.#projectExecutors.delete(projectId);
+		for (const [id, challenge] of this.#deleteChallenges) {
+			if (challenge.projectId === projectId) this.#deleteChallenges.delete(id);
+		}
 	}
 
 	async getTree(request: TreeRequest): Promise<ProjectTree> {
@@ -691,57 +620,6 @@ export class ProjectStore {
 		});
 	}
 
-	async #registerResolvedProject(input: {
-		displayName: string;
-		relativeRoot: string[];
-		requestedId?: ProjectId;
-	}): Promise<ProjectSummary> {
-		await this.#assertSandboxRoot();
-		const resolved = await this.#resolveFromRoot(this.#canonicalSandboxRoot, input.relativeRoot);
-		if (!resolved.info.isDirectory) {
-			throw new ProjectStoreError("not_directory", "A registered project must be a directory.");
-		}
-
-		for (const existing of this.#projects.values()) {
-			if (sameCanonicalPath(existing.canonicalRoot, resolved.canonicalPath)) {
-				return toProjectSummary(existing);
-			}
-			if (
-				isCanonicalAncestor(existing.canonicalRoot, resolved.canonicalPath) ||
-				isCanonicalAncestor(resolved.canonicalPath, existing.canonicalRoot)
-			) {
-				throw new ProjectStoreError(
-					"project_overlap",
-					"Registered project roots cannot contain one another in the controlled sandbox.",
-				);
-			}
-		}
-
-		const id = input.requestedId ?? this.#nextOpaqueId("project");
-		validateOpaqueId(id);
-		if (this.#projects.has(id)) {
-			throw new ProjectStoreError("invalid_project_id", "The requested project identifier is already registered.");
-		}
-		const now = new Date(this.#now()).toISOString();
-		const project: StoredProject = {
-			id,
-			displayName: input.displayName,
-			identity: {
-				kind: "local-sandbox",
-				sandboxId: this.#sandboxId,
-				relativeRoot: [...input.relativeRoot],
-			},
-			createdAt: now,
-			lastOpenedAt: now,
-			revision: 0,
-			canonicalRoot: resolved.canonicalPath,
-			rootIdentity: rootIdentity(resolved.info),
-		};
-		this.#projects.set(id, project);
-		this.#projectExecutors.set(id, new SerialExecutor());
-		return toProjectSummary(project);
-	}
-
 	async #resolveProjectEntry(project: StoredProject, path: string[]): Promise<ResolvedEntry> {
 		await this.#assertProjectRoot(project);
 		return await this.#resolveFromRoot(project.canonicalRoot, path);
@@ -783,19 +661,7 @@ export class ProjectStore {
 		};
 	}
 
-	async #assertSandboxRoot(): Promise<void> {
-		const info = await safeLstat(this.#canonicalSandboxRoot, "The project sandbox changed or disappeared.");
-		if (info.isSymlink || !info.isDirectory || !rootIdentitiesEqual(this.#sandboxRootIdentity, rootIdentity(info))) {
-			throw new ProjectStoreError("root_changed", "The project sandbox changed or disappeared.");
-		}
-		const canonical = await safeRealPath(this.#canonicalSandboxRoot, "The project sandbox changed or disappeared.");
-		if (!sameCanonicalPath(canonical, this.#canonicalSandboxRoot)) {
-			throw new ProjectStoreError("root_changed", "The project sandbox changed or disappeared.");
-		}
-	}
-
 	async #assertProjectRoot(project: StoredProject): Promise<void> {
-		await this.#assertSandboxRoot();
 		const info = await safeLstat(project.canonicalRoot, "The registered project changed or disappeared.");
 		if (info.isSymlink || !info.isDirectory || !rootIdentitiesEqual(project.rootIdentity, rootIdentity(info))) {
 			throw new ProjectStoreError("root_changed", "The registered project changed or disappeared.");
@@ -804,7 +670,6 @@ export class ProjectStore {
 		if (!sameCanonicalPath(canonical, project.canonicalRoot)) {
 			throw new ProjectStoreError("root_changed", "The registered project changed or disappeared.");
 		}
-		assertContained(this.#canonicalSandboxRoot, canonical);
 	}
 
 	#requireProject(projectId: ProjectId): StoredProject {
@@ -935,15 +800,15 @@ function hasControlCharacter(value: string): boolean {
 	return false;
 }
 
+function platformOf(): NativeProjectIdentity["platform"] {
+	return Deno.build.os === "windows" ? "windows" : Deno.build.os === "darwin" ? "darwin" : "linux";
+}
+
 function toProjectSummary(project: StoredProject): ProjectSummary {
 	return {
 		id: project.id,
 		displayName: project.displayName,
-		identity: {
-			kind: "local-sandbox",
-			sandboxId: project.identity.sandboxId,
-			relativeRoot: [...project.identity.relativeRoot],
-		},
+		identity: { ...project.identity },
 		createdAt: project.createdAt,
 		lastOpenedAt: project.lastOpenedAt,
 		revision: project.revision,
@@ -994,12 +859,6 @@ function assertContained(root: string, candidate: string): void {
 
 function sameCanonicalPath(left: string, right: string): boolean {
 	return relative(left, right) === "" && relative(right, left) === "";
-}
-
-function isCanonicalAncestor(parent: string, candidate: string): boolean {
-	const relativePath = relative(parent, candidate);
-	return relativePath !== "" && !isAbsolute(relativePath) && relativePath !== ".." &&
-		!relativePath.startsWith(`..${sep}`);
 }
 
 function pathsEqual(left: ProjectPath, right: ProjectPath): boolean {

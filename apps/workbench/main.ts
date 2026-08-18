@@ -1,17 +1,17 @@
-import { extname, join } from "node:path";
+import { extname } from "node:path";
 import {
 	type ClioLauncher,
+	ClioProjectHost,
 	createLocalClioLauncher,
-	EngineCoordinator,
-	EngineError,
-	type EngineEvent,
-	type EnginePhase,
-	type EngineProject,
-	type EngineSink,
-} from "./engine.ts";
+	HostError,
+	type HostEvent,
+	type HostSink,
+} from "./clio-host.ts";
+import type { AcpClientTiming } from "./acp-client.ts";
 import { ProjectStore, ProjectStoreError, type ProjectSummary, type ProjectTreeNode } from "./project-store.ts";
 import {
 	type ClientCommand,
+	type CommandErrorCode,
 	encodeServerEvent,
 	MAX_CLIENT_FRAME_BYTES,
 	parseClientCommand,
@@ -21,24 +21,23 @@ import {
 	type ServerEventKind,
 	type ServerEventPayloadByKind,
 	validateServerEvent,
+	type WireDeleteChallenge,
+	type WireProjectSummary,
 	type WireProjectWorkspace,
 	type WireTreeNode,
 } from "./src/protocol.ts";
+import { applyTurnEvent, emptyTurnProjection, type TurnEventInput, type TurnProjection } from "./src/timeline.ts";
+import { type RecentProject, WorkbenchState, WorkbenchStateError } from "./workbench-state.ts";
 
 const APP_NAME = "Clio Workbench" as const;
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const DEFAULT_PORT = 4173;
-const DEFAULT_EVENT_DELAY_MS = 145;
+/** How long the host waits after the last browser goes away before it stops a live turn. */
+export const DEFAULT_DISCONNECT_GRACE_MS = 10_000;
 const INVALID_CLIENT_FRAME_CLOSE_REASON = "Invalid Workbench client protocol frame";
 const SLOW_CLIENT_CLOSE_REASON = "Workbench client fell behind";
-const BOOTSTRAP_BLOCKING_PHASES: ReadonlySet<EnginePhase> = new Set([
-	"probing",
-	"starting",
-	"connected",
-	"running",
-	"awaiting-approval",
-	"cancelling",
-]);
+const TREE_DEPTH = 5;
+const TREE_NODES = 200;
 export const MAX_WEBSOCKET_OUTBOUND_BYTES = 256 * 1024;
 const encoder = new TextEncoder();
 const CSP = [
@@ -77,6 +76,9 @@ const MIME_TYPES: Readonly<Record<string, string>> = {
 	".woff2": "font/woff2",
 };
 
+export const SECURITY_NOTE =
+	"Workbench enforces the project boundary in its own code against the canonical root you opened; Deno's file grants are broad at launch, so that boundary is not a sandbox.";
+
 export function wouldExceedWebSocketHighWaterMark(bufferedAmount: number, encodedFrameBytes: number): boolean {
 	if (
 		!Number.isSafeInteger(bufferedAmount) || bufferedAmount < 0 ||
@@ -86,21 +88,26 @@ export function wouldExceedWebSocketHighWaterMark(bufferedAmount: number, encode
 }
 
 interface RuntimeCliOptions {
-	dataDir: string;
 	port: number;
 	smokeMs?: number;
 }
 
 export interface WorkbenchServerOptions {
-	dataDir: string;
 	hostname?: string;
 	port?: number;
-	eventDelayMs?: number;
 	quiet?: boolean;
 	mode?: "browser" | "desktop";
 	distRoot?: URL;
 	clioLauncher?: ClioLauncher;
-	engineCoordinator?: EngineCoordinator;
+	/** Overrides the Workbench state directory (tests). */
+	stateDir?: string;
+	/** Overrides `$HOME` for the guards and browser (tests). */
+	homePath?: string;
+	disconnectGraceMs?: number;
+	permissionEscalateMs?: number;
+	permissionBudgetMs?: number;
+	promptTimeoutMs?: number;
+	acpTiming?: AcpClientTiming;
 }
 
 export interface RunningWorkbenchServer {
@@ -109,7 +116,7 @@ export interface RunningWorkbenchServer {
 	readonly token: string;
 	readonly mode: "browser" | "desktop";
 	readonly workspaceInstanceId: string;
-	readonly store: ProjectStore;
+	readonly stateDir: string;
 	close(): Promise<void>;
 }
 
@@ -122,19 +129,16 @@ function parsePositiveInteger(value: string, label: string, maximum: number): nu
 }
 
 function parseCliOptions(args: readonly string[]): RuntimeCliOptions {
-	let dataDir = ".workbench-data";
 	let port = DEFAULT_PORT;
 	let smokeMs: number | undefined;
 	for (const argument of args) {
-		if (argument.startsWith("--data-dir=")) dataDir = argument.slice("--data-dir=".length);
-		else if (argument.startsWith("--port=")) {
+		if (argument.startsWith("--port=")) {
 			port = parsePositiveInteger(argument.slice("--port=".length), "port", 65_535);
 		} else if (argument.startsWith("--smoke-ms=")) {
 			smokeMs = parsePositiveInteger(argument.slice("--smoke-ms=".length), "smoke-ms", 120_000);
 		} else throw new Error(`Unknown Workbench argument: ${argument}`);
 	}
-	if (dataDir.length === 0) throw new Error("data-dir cannot be empty.");
-	return { dataDir, port, ...(smokeMs === undefined ? {} : { smokeMs }) };
+	return { port, ...(smokeMs === undefined ? {} : { smokeMs }) };
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -157,13 +161,6 @@ function textResponse(value: string, status: number): Response {
 			"content-type": "text/plain; charset=utf-8",
 		},
 	});
-}
-
-class BootstrapBusyError extends Error {
-	constructor() {
-		super("Workbench is settling an active engine operation before bootstrap.");
-		this.name = "BootstrapBusyError";
-	}
 }
 
 function normalizeStaticRoot(value: URL): URL {
@@ -200,42 +197,6 @@ function treeNodeToWire(node: ProjectTreeNode): WireTreeNode {
 	};
 }
 
-function displayPathFor(project: ProjectSummary): string {
-	if (project.identity.kind === "local-sandbox") {
-		return `sandbox://${project.identity.sandboxId}/${project.identity.relativeRoot.join("/")}`;
-	}
-	if (project.identity.kind === "wsl") return `WSL ${project.identity.distro} project`;
-	return `${project.identity.platform} native project`;
-}
-
-function projectIdentityToWire(project: ProjectSummary): WireProjectWorkspace["project"]["identity"] {
-	return project.identity.kind === "wsl"
-		? { kind: "wsl", displayPath: displayPathFor(project), distro: project.identity.distro }
-		: { kind: project.identity.kind, displayPath: displayPathFor(project) };
-}
-
-function initialTimeline(projectId: string): WireProjectWorkspace["timeline"] {
-	if (projectId !== "project-atlas-0001") return [];
-	return [
-		{
-			id: "history-atlas-request",
-			kind: "request",
-			title: "Establish the convergence-study baseline",
-			summary: "A preserved scaffold note demonstrating project-keyed session history.",
-			status: "complete",
-			timeLabel: "earlier",
-		},
-		{
-			id: "history-atlas-outcome",
-			kind: "outcome",
-			title: "Baseline recorded",
-			summary: "Presentation fixture only — no real check, edit, or Clio turn is claimed.",
-			status: "complete",
-			timeLabel: "earlier",
-		},
-	];
-}
-
 /**
  * Selects the product launcher for the host platform. Native Windows launch is
  * deliberately unavailable: `wslAcpLaunch` remains a typed integration seam,
@@ -244,122 +205,147 @@ function initialTimeline(projectId: string): WireProjectWorkspace["timeline"] {
 export function defaultClioLauncher(platform = Deno.build.os): ClioLauncher {
 	if (platform !== "windows") return createLocalClioLauncher();
 	return {
-		probe() {
-			return Promise.reject(
-				new EngineError(
-					"not-ready",
-					"Native Windows Clio launch is unavailable until a WSL project mapping is configured.",
-				),
-			);
-		},
 		launch() {
-			throw new EngineError("not-ready", "Native Windows Clio launch requires an explicit WSL configuration.");
+			throw new HostError("not-ready", "Native Windows Clio launch requires an explicit WSL configuration.");
 		},
 	};
 }
 
-class WorkbenchRuntime {
+interface OpenProject {
+	readonly project: ProjectSummary;
+	readonly host: ClioProjectHost;
+	projection: TurnProjection;
+	tree: readonly WireTreeNode[];
+	treeTruncated: boolean;
+	deleteChallenge: WireDeleteChallenge | null;
+}
+
+type EventContext = { projectId?: string; processGeneration?: string; sessionId?: string; turnId?: string };
+
+class WorkbenchRuntime implements HostSink {
 	readonly workspaceInstanceId = `workspace-${crypto.randomUUID()}`;
 	readonly token = `${crypto.randomUUID()}${crypto.randomUUID().replaceAll("-", "")}`;
 	readonly #store: ProjectStore;
+	readonly #state: WorkbenchState;
+	readonly #launcher: ClioLauncher;
 	readonly #mode: "browser" | "desktop";
 	readonly #quiet: boolean;
 	readonly #distRoot: URL;
-	readonly #engine: EngineCoordinator;
+	readonly #disconnectGraceMs: number;
+	readonly #hostOptions: Pick<
+		WorkbenchServerOptions,
+		"permissionEscalateMs" | "permissionBudgetMs" | "promptTimeoutMs" | "acpTiming"
+	>;
 	readonly #sockets = new Set<SocketSession>();
+	#open: OpenProject | null = null;
 	#origin = "";
-	#activeTurn: Readonly<{ owner: SocketSession; projectId: string; turnId: string }> | null = null;
 	#commandQueue: Promise<void> = Promise.resolve();
+	#graceTimer: ReturnType<typeof setTimeout> | null = null;
 	#closed = false;
 
 	constructor(
 		store: ProjectStore,
+		state: WorkbenchState,
 		options:
-			& Required<Pick<WorkbenchServerOptions, "eventDelayMs" | "quiet" | "mode" | "distRoot">>
-			& Pick<WorkbenchServerOptions, "clioLauncher" | "engineCoordinator">,
+			& Required<Pick<WorkbenchServerOptions, "quiet" | "mode" | "distRoot" | "disconnectGraceMs">>
+			& Pick<
+				WorkbenchServerOptions,
+				"clioLauncher" | "permissionEscalateMs" | "permissionBudgetMs" | "promptTimeoutMs" | "acpTiming"
+			>,
 	) {
 		this.#store = store;
+		this.#state = state;
 		this.#quiet = options.quiet;
 		this.#mode = options.mode;
 		this.#distRoot = normalizeStaticRoot(options.distRoot);
-		if (options.clioLauncher !== undefined && options.engineCoordinator !== undefined) {
-			throw new Error("Configure either a Clio launcher or an engine coordinator, not both.");
-		}
-		this.#engine = options.engineCoordinator ?? new EngineCoordinator({
-			launcher: options.clioLauncher ?? defaultClioLauncher(),
-			eventDelayMs: options.eventDelayMs,
-		});
+		this.#launcher = options.clioLauncher ?? defaultClioLauncher();
+		this.#disconnectGraceMs = options.disconnectGraceMs;
+		this.#hostOptions = {
+			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
+			...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
+			...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }),
+			...(options.acpTiming === undefined ? {} : { acpTiming: options.acpTiming }),
+		};
 	}
 
 	setOrigin(origin: string): void {
 		this.#origin = origin;
 	}
 
-	bootstrap(): Promise<Record<string, unknown>> {
-		return this.#serialize(() => this.#buildBootstrap());
+	get stateDir(): string {
+		return this.#state.stateDir;
 	}
 
-	async #buildBootstrap(): Promise<Record<string, unknown>> {
-		if (
-			this.#store.listProjects().some((project) =>
-				BOOTSTRAP_BLOCKING_PHASES.has(this.#engine.snapshot(project.id).phase)
-			)
-		) throw new BootstrapBusyError();
-		const projects = await Promise.all(this.#store.listProjects().map((project) => this.workspace(project.id)));
-		const selectedProjectId = projects[0]?.project.id;
-		if (!selectedProjectId) throw new Error("The controlled sandbox has no seeded project.");
+	// ---------------------------------------------------------------- bootstrap
+
+	async bootstrap(): Promise<Record<string, unknown>> {
+		const open = this.#open;
 		return {
 			protocolVersion: PROTOCOL_VERSION,
 			appName: APP_NAME,
 			workspaceInstanceId: this.workspaceInstanceId,
 			localToken: this.token,
 			mode: this.#mode,
-			selectedProjectId,
-			projects,
-			registerableSandboxFolders: await this.#registerableFolders(),
-			sandboxLabel: "Controlled local scaffold sandbox",
-			securityNote:
-				"Segment-array paths, bounded trees, blocked symlinks, no-clobber creates, and one-use delete challenges protect this sandbox. Production project access still needs handle-relative native/WSL helpers to close external TOCTOU races.",
+			openProjectId: open?.project.id ?? null,
+			workspace: open === null ? null : this.#workspaceDto(open),
+			recent: await this.#recentDtos(),
+			homePath: this.#state.homePath,
+			stateDirNote:
+				`Workbench keeps only its recent-project list under ${this.#state.stateDir}; Clio's own state and settings are never read or written by Workbench.`,
+			securityNote: SECURITY_NOTE,
 		};
 	}
 
-	async workspace(projectId: string): Promise<WireProjectWorkspace> {
-		const project = this.#store.getProject(projectId);
-		const tree = await this.#store.getTree({ projectId, maxDepth: 5, maxNodes: 200 });
-		const hasHistory = project.id === "project-atlas-0001";
+	async #recentDtos(): Promise<WireProjectSummary[]> {
+		const recent = this.#state.recent();
+		return await Promise.all(recent.map(async (project) => await this.#recentDto(project)));
+	}
+
+	async #recentDto(project: RecentProject): Promise<WireProjectSummary> {
+		const available = this.#open?.project.id === project.id ? true : await this.#state.available(project.canonicalPath);
 		return {
-			project: {
-				id: project.id,
-				displayName: project.displayName,
-				identity: projectIdentityToWire(project),
-				lastOpenedAt: project.lastOpenedAt,
-			},
-			tree: (tree.root.children ?? []).map(treeNodeToWire),
-			treeTruncated: tree.truncated,
-			sessions: hasHistory
-				? [
-					{
-						id: "session-atlas-baseline",
-						label: "Convergence baseline",
-						preview: "Presentation fixture — no persisted Clio transcript",
-						updatedAt: project.lastOpenedAt,
-						status: "complete",
-					},
-				]
-				: [],
-			selectedSessionId: hasHistory ? "session-atlas-baseline" : null,
-			timeline: initialTimeline(project.id),
-			engine: this.#engine.snapshot(project.id),
-			pendingPermission: null,
-			deleteChallenge: null,
-			agents: [],
-			changes: [],
-			evidence: [],
-			engineGeneration: null,
-			activeTurnId: null,
+			id: project.id,
+			displayName: project.displayName,
+			rootPath: project.canonicalPath,
+			lastOpenedAt: project.lastOpenedAt,
+			available,
+		};
+	}
+
+	#projectSummary(open: OpenProject): WireProjectSummary {
+		const recent = this.#state.recentById(open.project.id);
+		return {
+			id: open.project.id,
+			displayName: open.project.displayName,
+			rootPath: open.project.identity.canonicalPath,
+			lastOpenedAt: recent?.lastOpenedAt ?? open.project.lastOpenedAt,
+			available: true,
+		};
+	}
+
+	#workspaceDto(open: OpenProject): WireProjectWorkspace {
+		const sessions = open.host.sessions;
+		return {
+			project: this.#projectSummary(open),
+			tree: open.tree,
+			treeTruncated: open.treeTruncated,
+			sessions: sessions.sessions,
+			sessionsTruncated: sessions.truncated,
+			clio: open.host.snapshot(),
+			timeline: open.projection.timeline,
+			timelineTruncated: open.projection.timelineTruncated,
+			activeTurn: open.projection.activeTurn,
+			pendingPermission: open.projection.pendingPermission,
+			deleteChallenge: open.deleteChallenge,
+			settings: open.host.settings,
+			targets: open.host.targets,
+			targetsTruncated: open.host.targetsTruncated,
+			processGeneration: open.host.generation,
 			lastSequence: 0,
 		};
 	}
+
+	// ---------------------------------------------------------------- http
 
 	async handleRequest(request: Request): Promise<Response> {
 		if (!this.#origin || new URL(request.url).origin !== this.#origin) {
@@ -368,12 +354,7 @@ class WorkbenchRuntime {
 		const url = new URL(request.url);
 		if (url.pathname === "/api/bootstrap") {
 			if (request.method !== "GET") return textResponse("Method not allowed", 405);
-			try {
-				return jsonResponse(await this.bootstrap());
-			} catch (error) {
-				if (error instanceof BootstrapBusyError) return jsonResponse({ error: "engine-busy" }, 409);
-				throw error;
-			}
+			return jsonResponse(await this.bootstrap());
 		}
 		if (url.pathname === "/api/events") return this.#upgrade(request, url);
 		if (url.pathname.startsWith("/api/")) return jsonResponse({ error: "not-found" }, 404);
@@ -383,133 +364,262 @@ class WorkbenchRuntime {
 	async close(): Promise<void> {
 		if (this.#closed) return;
 		this.#closed = true;
+		this.#clearGrace();
 		await this.#commandQueue.catch(() => undefined);
-		await this.#engine.close();
+		const open = this.#open;
+		this.#open = null;
+		if (open !== null) {
+			try {
+				await open.host.close();
+			} catch (error) {
+				if (!this.#quiet) console.error("Workbench could not close the Clio host cleanly", error);
+			}
+			this.#store.unregister(open.project.id);
+		}
 		for (const session of this.#sockets) session.close(1001, "Workbench is shutting down");
 		this.#sockets.clear();
 	}
+
+	// ---------------------------------------------------------------- HostSink
+
+	emit(event: HostEvent): void {
+		const open = this.#open;
+		if (open === null) return;
+		switch (event.type) {
+			case "clio.state":
+				if (event.projectId !== open.project.id) return;
+				this.#broadcast("clio.state", { projectId: event.projectId }, { snapshot: event.snapshot });
+				return;
+			case "session.list":
+				if (event.projectId !== open.project.id) return;
+				this.#broadcast("session.list", { projectId: event.projectId }, {
+					sessions: event.sessions,
+					truncated: event.truncated,
+				});
+				return;
+			case "settings.state":
+				if (event.projectId !== open.project.id) return;
+				this.#broadcast("settings.state", { projectId: event.projectId }, { settings: event.settings });
+				return;
+			case "targets.state":
+				if (event.projectId !== open.project.id) return;
+				this.#broadcast("targets.state", { projectId: event.projectId }, {
+					targets: event.targets,
+					truncated: event.truncated,
+				});
+				return;
+			case "targets.probed":
+				if (event.projectId !== open.project.id) return;
+				this.#broadcast("targets.probed", { projectId: event.projectId }, {
+					targetId: event.targetId,
+					health: event.health,
+				});
+				return;
+			default: {
+				if (event.context.projectId !== open.project.id) return;
+				const context: EventContext = {
+					projectId: event.context.projectId,
+					processGeneration: event.context.generation,
+					sessionId: event.context.sessionId,
+					turnId: event.context.turnId,
+				};
+				const input = { kind: event.type, turnId: event.context.turnId, payload: event.payload } as TurnEventInput;
+				open.projection = applyTurnEvent(open.projection, input, new Date().toISOString());
+				this.#broadcast(event.type, context, event.payload as ServerEventPayloadByKind[typeof event.type]);
+			}
+		}
+	}
+
+	async refreshProject(projectId: string): Promise<void> {
+		const open = this.#open;
+		if (open === null || open.project.id !== projectId) return;
+		await this.#refreshTree(open, "project.snapshot");
+	}
+
+	// ---------------------------------------------------------------- commands
 
 	handleCommand(session: SocketSession, command: ClientCommand): Promise<void> {
 		return this.#serialize(() => this.#dispatchCommand(session, command));
 	}
 
 	#serialize<T>(operation: () => Promise<T>): Promise<T> {
-		const queued = this.#commandQueue.then(operation);
+		const queued = this.#commandQueue.then(operation, operation);
 		this.#commandQueue = queued.then(() => undefined, () => undefined);
 		return queued;
 	}
 
+	#requireOpen(projectId: string): OpenProject {
+		const open = this.#open;
+		if (open === null || open.project.id !== projectId) {
+			throw new HostError("not-found", "That project is not open.");
+		}
+		return open;
+	}
+
 	async #dispatchCommand(session: SocketSession, command: ClientCommand): Promise<void> {
 		try {
-			if (this.#closed || session.closed) throw new EngineError("not-ready", "The local client is closed.");
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
 			switch (command.kind) {
-				case "project.create": {
-					const project = await this.#store.createProject(command.payload);
-					session.send("project.created", { projectId: project.id }, { workspace: await this.workspace(project.id) });
+				case "project.browse": {
+					const listing = await this.#state.browse(command.payload.path);
+					session.send("project.browse.listing", {}, listing);
 					break;
 				}
-				case "project.register": {
-					const project = await this.#store.registerProject(command.payload);
-					session.send("project.registered", { projectId: project.id }, {
-						workspace: await this.workspace(project.id),
-					});
+				case "project.open":
+					await this.#openPath(command.payload.path, null);
 					break;
-				}
-				case "project.select":
-					this.#store.getProject(command.payload.projectId);
-					if (this.#activeTurn !== null) {
-						throw new EngineError("conflict", "Cancel the active turn before switching projects.");
+				case "project.select": {
+					const recent = this.#state.recentById(command.payload.projectId);
+					if (recent === null) throw new HostError("not-found", "That project is not in the recent list.");
+					if (this.#open?.project.id === recent.id) {
+						this.#broadcast("project.opened", { projectId: recent.id }, { workspace: this.#workspaceDto(this.#open) });
+						break;
 					}
-					session.send("project.selected", { projectId: command.payload.projectId }, {});
+					await this.#openPath(recent.canonicalPath, recent);
 					break;
-				case "fs.refresh":
-					await this.#sendTree(session, command.payload.projectId, "project.snapshot");
+				}
+				case "project.forget": {
+					const projectId = command.payload.projectId;
+					if (this.#open?.project.id === projectId) {
+						if (this.#open.host.hasActivePrompt) {
+							throw new HostError(
+								"conflict",
+								"Clio is still working in this project. Cancel the turn before forgetting it.",
+							);
+						}
+						await this.#closeOpen();
+					}
+					if (!(await this.#state.forget(projectId))) {
+						throw new HostError("not-found", "That project is not in the recent list.");
+					}
+					this.#broadcast("project.forgotten", { projectId }, {});
 					break;
-				case "fs.create-file":
+				}
+				case "fs.refresh": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await this.#refreshTree(open, "project.snapshot");
+					break;
+				}
+				case "fs.create-file": {
+					const open = this.#requireOpen(command.payload.projectId);
 					await this.#store.createFile(command.payload);
-					await this.#sendTree(session, command.payload.projectId, "fs.changed");
+					await this.#refreshTree(open, "fs.changed");
 					break;
-				case "fs.create-folder":
+				}
+				case "fs.create-folder": {
+					const open = this.#requireOpen(command.payload.projectId);
 					await this.#store.createFolder(command.payload);
-					await this.#sendTree(session, command.payload.projectId, "fs.changed");
+					await this.#refreshTree(open, "fs.changed");
 					break;
-				case "fs.move":
+				}
+				case "fs.move": {
+					const open = this.#requireOpen(command.payload.projectId);
 					await this.#store.moveEntry(command.payload);
-					await this.#sendTree(session, command.payload.projectId, "fs.changed");
+					await this.#refreshTree(open, "fs.changed");
 					break;
+				}
 				case "fs.delete.prepare": {
+					const open = this.#requireOpen(command.payload.projectId);
 					const challenge = await this.#store.prepareDelete(command.payload);
-					session.send(
-						"fs.delete.challenge",
-						{ projectId: challenge.projectId },
-						{
-							confirmationId: challenge.confirmationId,
-							target: { segments: challenge.target },
-							displayPath: challenge.displayPath,
-							targetKind: challenge.targetKind,
-							expiresAt: challenge.expiresAt,
-						},
-					);
+					const wire: WireDeleteChallenge = {
+						confirmationId: challenge.confirmationId,
+						target: { segments: challenge.target },
+						displayPath: challenge.displayPath,
+						targetKind: challenge.targetKind,
+						expiresAt: challenge.expiresAt,
+					};
+					open.deleteChallenge = wire;
+					this.#broadcast("fs.delete.challenge", { projectId: open.project.id }, wire);
 					break;
 				}
-				case "fs.delete.confirm":
+				case "fs.delete.confirm": {
+					const open = this.#requireOpen(command.payload.projectId);
 					await this.#store.confirmDelete(command.payload);
-					await this.#sendTree(session, command.payload.projectId, "fs.changed");
-					break;
-				case "engine.select": {
-					const project = await this.#engineProject(command.payload.projectId);
-					if (session.closed) throw new EngineError("not-ready", "The local client is closed.");
-					this.#engine.select(session, project, command.payload.kind);
+					open.deleteChallenge = null;
+					await this.#refreshTree(open, "fs.changed");
 					break;
 				}
-				case "engine.probe": {
-					const project = await this.#engineProject(command.payload.projectId);
-					if (session.closed) throw new EngineError("not-ready", "The local client is closed.");
-					await this.#engine.probe(session, project);
+				case "session.new": {
+					const open = this.#requireOpen(command.payload.projectId);
+					this.#resetProjection(open);
+					await open.host.newSession();
+					break;
+				}
+				case "session.load": {
+					const open = this.#requireOpen(command.payload.projectId);
+					this.#resetProjection(open);
+					await open.host.loadSession(command.payload.sessionId);
+					break;
+				}
+				case "session.close": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.closeSession();
+					this.#resetProjection(open);
+					break;
+				}
+				case "session.list": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.listSessions();
+					break;
+				}
+				case "session.label": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.labelSession(command.payload.sessionId, command.payload.label);
+					break;
+				}
+				case "session.delete": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.deleteSession(command.payload.sessionId);
 					break;
 				}
 				case "turn.start": {
-					const project = await this.#engineProject(command.payload.projectId);
-					if (session.closed) throw new EngineError("not-ready", "The local client is closed.");
-					const snapshot = this.#engine.snapshot(project.projectId);
-					if (snapshot.kind === "clio-acp" && command.payload.fakeScenario !== undefined) {
-						throw new EngineError("invalid", "A fake scenario is valid only for the fake engine.");
+					const open = this.#requireOpen(command.payload.projectId);
+					if (open.host.boundSessionPublicId === null && !open.host.hasActivePrompt) {
+						this.#resetProjection(open);
+						await open.host.newSession();
 					}
-					const context = await this.#engine.start({
-						owner: session,
-						project,
-						prompt: command.payload.prompt,
-						...(command.payload.fakeScenario === undefined ? {} : { fakeScenario: command.payload.fakeScenario }),
-					});
-					if (session.closed) {
-						await this.#engine.disconnect(session);
-						break;
-					}
-					if (BOOTSTRAP_BLOCKING_PHASES.has(this.#engine.snapshot(context.projectId).phase)) {
-						this.#activeTurn ??= {
-							owner: session,
-							projectId: context.projectId,
-							turnId: context.turnId,
-						};
-					}
+					await open.host.startTurn(command.payload.prompt);
 					break;
 				}
-				case "turn.cancel":
-					await this.#engine.cancel({
-						owner: session,
-						projectId: command.payload.projectId,
-						turnId: command.payload.turnId,
-					});
+				case "turn.cancel": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.cancelTurn(command.payload.turnId, "operator");
 					break;
-				case "permission.resolve":
-					await this.#engine.resolvePermission({
-						owner: session,
-						projectId: command.payload.projectId,
-						turnId: command.payload.turnId,
-						permissionId: command.payload.permissionId,
-						decision: command.payload.decision === "allow-once" ? "allow_once" : "reject_once",
-					});
+				}
+				case "permission.resolve": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.resolvePermission(
+						command.payload.turnId,
+						command.payload.permissionId,
+						command.payload.decision === "allow-once" ? "allow_once" : "reject_once",
+					);
 					break;
+				}
+				case "settings.get": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.getSettings();
+					break;
+				}
+				case "settings.patch": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.patchSettings(command.payload.patch);
+					break;
+				}
+				case "targets.list": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.listTargets();
+					break;
+				}
+				case "targets.probe": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.probeTarget(command.payload.targetId);
+					break;
+				}
+				case "autonomy.set": {
+					const open = this.#requireOpen(command.payload.projectId);
+					await open.host.setAutonomy(command.payload.level);
+					break;
+				}
 			}
 		} catch (error) {
 			const projectId = "projectId" in command.payload && typeof command.payload.projectId === "string"
@@ -524,132 +634,127 @@ class WorkbenchRuntime {
 		}
 	}
 
-	onSocketClosed(session: SocketSession): void {
-		this.#sockets.delete(session);
-		if (this.#closed) return;
-		void this.#serialize(() => this.#engine.disconnect(session)).catch((error) => {
-			if (!this.#quiet) console.error("Workbench engine disconnect cleanup failed", error);
-		});
+	#resetProjection(open: OpenProject): void {
+		open.projection = emptyTurnProjection;
 	}
 
-	emitEngineEvent(session: SocketSession, event: EngineEvent): void {
-		if (event.type === "engine.state") {
-			session.send("engine.state", { projectId: event.projectId }, { snapshot: event.snapshot });
+	/** Opens a real directory as the one open project, replacing whatever was open. */
+	async #openPath(typedPath: string, recent: RecentProject | null): Promise<void> {
+		if (this.#open?.host.hasActivePrompt) {
+			throw new HostError(
+				"conflict",
+				"Clio is still working in the open project. Cancel the turn or wait before opening another project.",
+			);
+		}
+		const resolved = await this.#state.resolveOpenable(typedPath);
+		if (this.#open !== null && this.#open.project.identity.canonicalPath === resolved.canonicalPath) {
+			this.#broadcast("project.opened", { projectId: this.#open.project.id }, {
+				workspace: this.#workspaceDto(this.#open),
+			});
 			return;
 		}
-		const context = {
-			projectId: event.context.projectId,
-			engineGeneration: event.context.generation,
-			sessionId: event.context.sessionId,
-			turnId: event.context.turnId,
+		await this.#closeOpen();
+		const known = recent ?? this.#state.recentByPath(resolved.canonicalPath);
+		const project = await this.#store.registerRoot({
+			canonicalPath: resolved.canonicalPath,
+			displayName: resolved.displayName,
+			id: known?.id ?? `project-${crypto.randomUUID()}`,
+		});
+		await this.#state.remember({
+			id: project.id,
+			canonicalPath: resolved.canonicalPath,
+			displayName: resolved.displayName,
+		});
+		const host = new ClioProjectHost({
+			launcher: this.#launcher,
+			project: { projectId: project.id, trustedRoot: resolved.canonicalPath, displayName: resolved.displayName },
+			sink: this,
+			...this.#hostOptions,
+		});
+		const open: OpenProject = {
+			project,
+			host,
+			projection: emptyTurnProjection,
+			tree: [],
+			treeTruncated: false,
+			deleteChallenge: null,
 		};
-		switch (event.type) {
-			case "turn.started":
-				this.#activeTurn = { owner: session, projectId: event.context.projectId, turnId: event.context.turnId };
-				session.send("turn.started", context, {
-					promptSummary: event.promptSummary,
-					...(event.scenario === undefined ? {} : { fakeScenario: event.scenario }),
-					source: event.source,
-				});
-				break;
-			case "turn.text":
-			case "turn.thought":
-				session.send(event.type, context, { text: event.text, source: event.source });
-				break;
-			case "turn.agent":
-				session.send("turn.agent", context, {
-					agentId: event.agentId,
-					name: event.name,
-					task: event.task,
-					status: event.status,
-					summary: event.summary,
-					source: event.source,
-				});
-				break;
-			case "turn.tool":
-				session.send("turn.tool", context, {
-					toolCallId: event.toolCallId,
-					title: event.title,
-					kind: event.kind,
-					status: event.status,
-					summary: event.summary,
-					locations: event.locations.map((segments) => ({ segments })),
-					source: event.source,
-				});
-				break;
-			case "turn.change":
-				session.send("turn.change", context, {
-					path: { segments: event.path },
-					summary: event.summary,
-					source: event.source,
-				});
-				break;
-			case "turn.permission.requested":
-				session.send("turn.permission.requested", context, {
-					permissionId: event.permissionId,
-					toolCallId: event.toolCallId,
-					title: event.title,
-					kind: event.kind,
-					locations: event.locations.map((segments) => ({ segments })),
-					expiresAt: event.expiresAt,
-					source: event.source,
-				});
-				break;
-			case "turn.permission.resolved":
-				session.send("turn.permission.resolved", context, {
-					permissionId: event.permissionId,
-					decision: event.decision === "allow_once"
-						? "allow-once"
-						: event.decision === "reject_once"
-						? "reject"
-						: event.decision,
-					source: event.source,
-				});
-				break;
-			case "turn.evidence":
-				session.send("turn.evidence", context, {
-					label: event.label,
-					detail: event.detail,
-					status: event.status,
-					source: event.source,
-				});
-				break;
-			case "turn.terminal":
-				session.send("turn.terminal", context, {
-					outcome: event.outcome,
-					code: event.code,
-					summary: event.summary,
-					...(event.stopReason === undefined ? {} : { stopReason: event.stopReason }),
-					...(event.usage === undefined ? {} : { usage: event.usage }),
-					source: event.source,
-				});
-				if (
-					this.#activeTurn?.owner === session && this.#activeTurn.projectId === event.context.projectId &&
-					this.#activeTurn.turnId === event.context.turnId
-				) this.#activeTurn = null;
-				break;
+		this.#open = open;
+		try {
+			const tree = await this.#store.getTree({ projectId: project.id, maxDepth: TREE_DEPTH, maxNodes: TREE_NODES });
+			open.tree = (tree.root.children ?? []).map(treeNodeToWire);
+			open.treeTruncated = tree.truncated;
+		} catch {
+			// The tree is presentation only; a later refresh may succeed.
+		}
+		try {
+			await host.open();
+			await host.primeSettings();
+		} catch {
+			// The host records the failure in its snapshot; the project is open regardless.
+		}
+		if (this.#open !== open) return;
+		this.#broadcast("project.opened", { projectId: project.id }, { workspace: this.#workspaceDto(open) });
+	}
+
+	async #closeOpen(): Promise<void> {
+		const open = this.#open;
+		if (open === null) return;
+		this.#open = null;
+		this.#clearGrace();
+		try {
+			await open.host.close();
+		} finally {
+			this.#store.unregister(open.project.id);
 		}
 	}
 
-	async refreshProject(session: SocketSession, projectId: string): Promise<void> {
-		if (!session.closed) await this.#sendTree(session, projectId, "project.snapshot");
+	async #refreshTree(open: OpenProject, kind: "project.snapshot" | "fs.changed"): Promise<void> {
+		const tree = await this.#store.getTree({ projectId: open.project.id, maxDepth: TREE_DEPTH, maxNodes: TREE_NODES });
+		if (this.#open !== open) return;
+		open.tree = (tree.root.children ?? []).map(treeNodeToWire);
+		open.treeTruncated = tree.truncated;
+		if (kind === "fs.changed") open.deleteChallenge = null;
+		this.#broadcast(kind, { projectId: open.project.id }, { tree: open.tree, treeTruncated: open.treeTruncated });
 	}
 
-	async #engineProject(projectId: string): Promise<EngineProject> {
-		const project = this.#store.getProject(projectId);
-		const trustedRoot = await this.#store.resolveTrustedRoot(projectId);
-		return { projectId: project.id, trustedRoot, displayName: project.displayName };
+	#broadcast<K extends ServerEventKind>(kind: K, context: EventContext, payload: ServerEventPayloadByKind[K]): void {
+		for (const socket of this.#sockets) socket.send(kind, context, payload);
 	}
 
-	#registerableFolders(): string[] {
-		const registered = new Set(
-			this.#store.listProjects().flatMap((project) =>
-				project.identity.kind === "local-sandbox" && project.identity.relativeRoot.length === 1
-					? [project.identity.relativeRoot[0] as string]
-					: []
-			),
-		);
-		return ["cryosphere-notes"].filter((folder) => !registered.has(folder));
+	// ---------------------------------------------------------------- sockets
+
+	socketOpened(session: SocketSession): void {
+		this.#clearGrace();
+		session.send("connection.ready", {}, {});
+		const open = this.#open;
+		if (open !== null) {
+			// The bootstrap the browser fetched may predate events on this socket; a
+			// full snapshot on the same ordered stream closes that gap.
+			session.send("project.opened", { projectId: open.project.id }, { workspace: this.#workspaceDto(open) });
+		}
+	}
+
+	onSocketClosed(session: SocketSession): void {
+		this.#sockets.delete(session);
+		if (this.#closed || this.#sockets.size > 0) return;
+		const open = this.#open;
+		if (open === null || !open.host.hasActivePrompt) return;
+		this.#clearGrace();
+		this.#graceTimer = setTimeout(() => {
+			this.#graceTimer = null;
+			if (this.#closed || this.#sockets.size > 0 || this.#open !== open) return;
+			void open.host.abandon().catch((error) => {
+				if (!this.#quiet) console.error("Workbench could not stop the abandoned turn", error);
+			});
+		}, this.#disconnectGraceMs);
+	}
+
+	#clearGrace(): void {
+		if (this.#graceTimer !== null) {
+			clearTimeout(this.#graceTimer);
+			this.#graceTimer = null;
+		}
 	}
 
 	#upgrade(request: Request, url: URL): Response {
@@ -665,7 +770,7 @@ class WorkbenchRuntime {
 		const { socket, response } = Deno.upgradeWebSocket(request, { idleTimeout: 30 });
 		const session = new SocketSession(this, socket);
 		this.#sockets.add(session);
-		socket.addEventListener("open", () => session.send("connection.ready", {}, {}));
+		socket.addEventListener("open", () => void this.#serialize(() => Promise.resolve(this.socketOpened(session))));
 		return response;
 	}
 
@@ -705,33 +810,25 @@ class WorkbenchRuntime {
 		return new Response(request.method === "HEAD" ? null : Uint8Array.from(bytes).buffer, { headers });
 	}
 
-	async #sendTree(session: SocketSession, projectId: string, kind: "project.snapshot" | "fs.changed"): Promise<void> {
-		const tree = await this.#store.getTree({ projectId, maxDepth: 5, maxNodes: 200 });
-		session.send(
-			kind,
-			{ projectId },
-			{ tree: (tree.root.children ?? []).map(treeNodeToWire), treeTruncated: tree.truncated },
-		);
-	}
-
-	#commandError(
-		error: unknown,
-	): { code: "invalid" | "conflict" | "not-found" | "not-ready" | "internal"; message: string } {
+	#commandError(error: unknown): { code: CommandErrorCode; message: string } {
 		if (error instanceof ProjectStoreError) {
-			const code = error.code === "already_exists" || error.code === "project_overlap"
+			const code: CommandErrorCode = error.code === "already_exists"
 				? "conflict"
 				: error.code === "not_found" || error.code === "project_not_found"
 				? "not-found"
+				: error.code === "root_changed" || error.code === "permission_denied"
+				? "refused"
 				: "invalid";
 			return { code, message: error.message };
 		}
-		if (error instanceof EngineError) return { code: error.code, message: error.message };
+		if (error instanceof WorkbenchStateError) return { code: error.code, message: error.message };
+		if (error instanceof HostError) return { code: error.code, message: error.message };
 		if (!this.#quiet) console.error("Workbench command failed", error);
 		return { code: "internal", message: "The local command could not be completed." };
 	}
 }
 
-class SocketSession implements EngineSink {
+class SocketSession {
 	readonly #runtime: WorkbenchRuntime;
 	readonly #socket: WebSocket;
 	#sequence = 0;
@@ -750,32 +847,28 @@ class SocketSession implements EngineSink {
 		return this.#closed;
 	}
 
-	emit(event: EngineEvent): void {
-		this.#runtime.emitEngineEvent(this, event);
-	}
-
-	async refreshProject(projectId: string): Promise<void> {
-		await this.#runtime.refreshProject(this, projectId);
-	}
-
-	send<K extends ServerEventKind>(
-		kind: K,
-		context: { projectId?: string; engineGeneration?: string; sessionId?: string; turnId?: string },
-		payload: ServerEventPayloadByKind[K],
-	): void {
+	send<K extends ServerEventKind>(kind: K, context: EventContext, payload: ServerEventPayloadByKind[K]): void {
 		if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) return;
 		const sequence = this.#sequence + 1;
 		const terminal = kind === "turn.terminal" || kind === "protocol.error";
-		const event = validateServerEvent({
-			protocolVersion: PROTOCOL_VERSION,
-			workspaceInstanceId: this.#runtime.workspaceInstanceId,
-			sequence,
-			eventId: `event-${String(sequence).padStart(6, "0")}`,
-			kind,
-			...context,
-			terminal,
-			payload,
-		}) as ServerEvent;
+		let event: ServerEvent;
+		try {
+			event = validateServerEvent({
+				protocolVersion: PROTOCOL_VERSION,
+				workspaceInstanceId: this.#runtime.workspaceInstanceId,
+				sequence,
+				eventId: `event-${String(sequence).padStart(6, "0")}`,
+				kind,
+				...context,
+				terminal,
+				payload,
+			}) as ServerEvent;
+		} catch (error) {
+			// A DTO the host cannot validate never reaches the renderer; the socket
+			// stays open and the failure is loud on stderr.
+			console.error(`Workbench refused to send an invalid ${kind} event`, error);
+			return;
+		}
 		const frame = encodeServerEvent(event);
 		if (wouldExceedWebSocketHighWaterMark(this.#socket.bufferedAmount, encoder.encode(frame).byteLength)) {
 			this.close(1008, SLOW_CLIENT_CLOSE_REASON);
@@ -834,69 +927,28 @@ class SocketSession implements EngineSink {
 	}
 }
 
-async function ensureSeedEntry(operation: () => Promise<unknown>): Promise<void> {
-	try {
-		await operation();
-	} catch (error) {
-		if (!(error instanceof ProjectStoreError && error.code === "already_exists")) throw error;
-	}
-}
-
-async function createProjectStore(dataDir: string): Promise<ProjectStore> {
-	const sandboxRoot = join(dataDir, "projects");
-	const store = await ProjectStore.open({
-		sandboxRoot,
-		sandboxId: "scaffold-v1",
-		seeds: [
-			{
-				id: "project-atlas-0001",
-				displayName: "Atlas Field Study",
-				relativeRoot: ["atlas-field-study"],
-				createIfMissing: true,
-			},
-			{
-				id: "project-spectra-0002",
-				displayName: "Spectra Lab",
-				relativeRoot: ["spectra-lab"],
-				createIfMissing: true,
-			},
-		],
-	});
-
-	await ensureSeedEntry(() => store.createFile({ projectId: "project-atlas-0001", parent: [], name: "README.md" }));
-	await ensureSeedEntry(() => store.createFolder({ projectId: "project-atlas-0001", parent: [], name: "analysis" }));
-	await ensureSeedEntry(() =>
-		store.createFile({ projectId: "project-atlas-0001", parent: ["analysis"], name: "convergence-notes.md" })
-	);
-	await ensureSeedEntry(() => store.createFolder({ projectId: "project-atlas-0001", parent: [], name: "data" }));
-	await ensureSeedEntry(() =>
-		store.createFile({ projectId: "project-atlas-0001", parent: ["data"], name: "mesh-study.csv" })
-	);
-	await ensureSeedEntry(() =>
-		store.createFile({ projectId: "project-spectra-0002", parent: [], name: "experiment.toml" })
-	);
-	await ensureSeedEntry(() => store.createFolder({ projectId: "project-spectra-0002", parent: [], name: "notebooks" }));
-	await ensureSeedEntry(() =>
-		store.createFile({ projectId: "project-spectra-0002", parent: ["notebooks"], name: "line-fit.md" })
-	);
-	await Deno.mkdir(join(sandboxRoot, "cryosphere-notes"), { recursive: true });
-	return store;
-}
-
-export async function startWorkbenchServer(options: WorkbenchServerOptions): Promise<RunningWorkbenchServer> {
+export async function startWorkbenchServer(options: WorkbenchServerOptions = {}): Promise<RunningWorkbenchServer> {
 	const hostname = options.hostname ?? DEFAULT_HOSTNAME;
 	if (hostname !== DEFAULT_HOSTNAME) throw new Error("Workbench may bind only to 127.0.0.1.");
 	const port = options.port ?? DEFAULT_PORT;
 	const desktopAddress = options.mode === undefined ? Deno.env.get("DENO_SERVE_ADDRESS") : undefined;
 	const mode = options.mode ?? (desktopAddress ? "desktop" : "browser");
-	const store = await createProjectStore(options.dataDir);
-	const runtime = new WorkbenchRuntime(store, {
-		eventDelayMs: options.eventDelayMs ?? DEFAULT_EVENT_DELAY_MS,
+	const state = await WorkbenchState.open({
+		...(options.stateDir === undefined ? {} : { stateDir: options.stateDir }),
+		...(options.homePath === undefined ? {} : { homePath: options.homePath }),
+		...(options.quiet ? { log: () => undefined } : {}),
+	});
+	const store = new ProjectStore();
+	const runtime = new WorkbenchRuntime(store, state, {
 		quiet: options.quiet ?? false,
 		mode,
 		distRoot: options.distRoot ?? new URL("./dist/", import.meta.url),
+		disconnectGraceMs: options.disconnectGraceMs ?? DEFAULT_DISCONNECT_GRACE_MS,
 		...(options.clioLauncher === undefined ? {} : { clioLauncher: options.clioLauncher }),
-		...(options.engineCoordinator === undefined ? {} : { engineCoordinator: options.engineCoordinator }),
+		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
+		...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
+		...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }),
+		...(options.acpTiming === undefined ? {} : { acpTiming: options.acpTiming }),
 	});
 
 	let origin = "";
@@ -926,7 +978,7 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions): Pro
 		token: runtime.token,
 		mode,
 		workspaceInstanceId: runtime.workspaceInstanceId,
-		store,
+		stateDir: runtime.stateDir,
 		async close() {
 			if (closed) return;
 			closed = true;
@@ -938,7 +990,7 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions): Pro
 
 async function runMain(): Promise<void> {
 	const options = parseCliOptions(Deno.args);
-	const running = await startWorkbenchServer({ dataDir: options.dataDir, port: options.port });
+	const running = await startWorkbenchServer({ port: options.port });
 	if (options.smokeMs !== undefined) {
 		setTimeout(async () => {
 			await running.close();

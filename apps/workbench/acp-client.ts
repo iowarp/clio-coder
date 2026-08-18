@@ -12,7 +12,8 @@ const ACP_MAX_TITLE_BYTES = 512;
 const ACP_MAX_PATH_BYTES = 4 * 1024;
 const ACP_MAX_DELTA_BYTES = 16 * 1024;
 const ACP_MAX_ERROR_MESSAGE_BYTES = 256;
-const ACP_MAX_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
+/** Ceiling for any one outbound request timer. A prompt may legitimately outlive a parked approval, so this is hours, not minutes. */
+export const ACP_MAX_REQUEST_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const encoder = new TextEncoder();
 const fatalDecoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -38,10 +39,46 @@ const TOOL_STATUS_RANK: Readonly<Record<AcpToolStatus, number>> = {
 const OUTBOUND_REQUEST_METHODS = new Set([
 	"initialize",
 	"session/new",
+	"session/load",
 	"session/prompt",
 	"session/cancel",
 	"session/close",
+	"clio-coder/session/list",
+	"clio-coder/session/label",
+	"clio-coder/session/delete",
+	"clio-coder/session/autonomy",
+	"clio-coder/settings/get_safe",
+	"clio-coder/settings/patch_safe",
+	"clio-coder/targets/list",
+	"clio-coder/targets/probe",
 ]);
+/** Tool aliases are per turn on the wire, so lifecycle tracking is scoped to one prompt or one load replay. */
+const MAX_TOOLS_PER_PROMPT = 128;
+const MAX_TOOLS_PER_REPLAY = 8_192;
+export const ACP_MAX_PERMISSION_TIMEOUT_MS = 1_800_000;
+const EXTENSION_EVENT_KINDS = ["safety.loopBlocked"] as const;
+const LOOP_DISPOSITIONS = ["block", "lockout", "stop"] as const;
+export const ACP_REMOTE_ERROR_CODES = [
+	"not_initialized",
+	"already_initialized",
+	"protocol_version_unsupported",
+	"invalid_params",
+	"session_cwd_mismatch",
+	"session_limit",
+	"session_unknown",
+	"session_open",
+	"prompt_active",
+	"prompt_not_admitted",
+	"permission_expired",
+	"turn_failed",
+	"parse_error",
+	"invalid_request",
+	"input_line_too_large",
+	"invalid_request_id",
+	"method_not_found",
+	"internal_error",
+] as const;
+export type AcpRemoteErrorCode = (typeof ACP_REMOTE_ERROR_CODES)[number];
 
 export type AcpToolKind = (typeof TOOL_KINDS)[number];
 export type AcpToolStatus = (typeof TOOL_STATUSES)[number];
@@ -60,16 +97,20 @@ export interface AcpLaunchSpec {
 
 export interface AcpRemoteErrorMeta {
 	readonly version: 1;
-	readonly code: string;
+	readonly code: AcpRemoteErrorCode;
 	readonly reason?: string;
 	readonly supported?: readonly number[];
 }
 
+/** Present only on frames replayed by `session/load`; the 1-based user turn on the replayed branch. */
+export type AcpReplayMeta = Readonly<{ turn: number }>;
+
 export type ValidatedAcpUpdate =
 	| Readonly<{
-		type: "message" | "thought";
+		type: "message" | "thought" | "user";
 		sessionId: string;
 		text: string;
+		replay: AcpReplayMeta | null;
 	}>
 	| Readonly<{
 		type: "tool";
@@ -80,13 +121,15 @@ export type ValidatedAcpUpdate =
 		kind: AcpToolKind;
 		status: AcpToolStatus;
 		locations: readonly string[];
+		replay: AcpReplayMeta | null;
 	}>;
 
 type ParsedAcpUpdate =
 	| Readonly<{
-		type: "message" | "thought";
+		type: "message" | "thought" | "user";
 		sessionId: string;
 		text: string;
+		replay: AcpReplayMeta | null;
 	}>
 	| Readonly<{
 		type: "tool";
@@ -98,7 +141,30 @@ type ParsedAcpUpdate =
 		status: AcpToolStatus;
 		locations?: readonly string[];
 		rawInputSignature?: string;
+		replay: AcpReplayMeta | null;
 	}>;
+
+export type AcpExtensionEventKind = (typeof EXTENSION_EVENT_KINDS)[number];
+
+/** The `clio-coder/event` envelope, sent only after the client opted in at `initialize`. */
+export interface AcpExtensionEvent {
+	readonly kind: AcpExtensionEventKind;
+	readonly workspaceInstanceId: string;
+	readonly sessionId: string;
+	readonly turnId: string | null;
+	readonly sequence: number;
+	readonly terminal: false;
+	readonly payload: Readonly<{
+		toolCallId: null;
+		tool: string;
+		repeatCount: number;
+		blocksThisTurn: number;
+		budget: number;
+		disposition: (typeof LOOP_DISPOSITIONS)[number];
+		interrupted: boolean;
+		shape: null;
+	}>;
+}
 
 export type AcpPermissionDecision = "allow_once" | "reject_once" | "cancelled";
 
@@ -128,6 +194,7 @@ export interface AcpFailure {
 export interface AcpClientHooks {
 	onUpdate?(generation: string, update: ValidatedAcpUpdate): void;
 	onPermission?(generation: string, request: AcpPermissionRequest): void;
+	onExtensionEvent?(generation: string, event: AcpExtensionEvent): void;
 	onFailure?(generation: string, failure: AcpFailure): void;
 }
 
@@ -282,7 +349,11 @@ function validateDuration(value: number, label: string, maximum = ACP_MAX_REQUES
 
 function resolvedTiming(input: AcpClientTiming): ResolvedTiming {
 	return {
-		permissionTimeoutMs: validateDuration(input.permissionTimeoutMs ?? 120_000, "permissionTimeoutMs", 300_000),
+		permissionTimeoutMs: validateDuration(
+			input.permissionTimeoutMs ?? ACP_MAX_PERMISSION_TIMEOUT_MS,
+			"permissionTimeoutMs",
+			ACP_MAX_PERMISSION_TIMEOUT_MS,
+		),
 		writeTimeoutMs: validateDuration(input.writeTimeoutMs ?? 3_000, "writeTimeoutMs", 30_000),
 		cancelGraceMs: validateDuration(input.cancelGraceMs ?? 5_000, "cancelGraceMs", 30_000),
 		closeTimeoutMs: validateDuration(input.closeTimeoutMs ?? 3_000, "closeTimeoutMs", 30_000),
@@ -317,7 +388,7 @@ function validateExecutable(value: string, label: string): string {
 }
 
 function validatePermissionTimeout(value: number): number {
-	return validateDuration(value, "permissionTimeoutMs", 300_000);
+	return validateDuration(value, "permissionTimeoutMs", ACP_MAX_PERMISSION_TIMEOUT_MS);
 }
 
 export function localAcpLaunch(
@@ -498,21 +569,40 @@ function validateRawInputValue(value: unknown, depth: number): void {
 	protocolFailure("ACP tool rawInput contained an unsupported value.");
 }
 
+function validateReplayMeta(paramsValue: Record<string, unknown>): AcpReplayMeta | null {
+	if (paramsValue._meta === undefined) return null;
+	if (!isPlainRecord(paramsValue._meta)) return protocolFailure("session/update _meta was invalid.");
+	const replay = paramsValue._meta["clio-coder/replay"];
+	if (replay === undefined) return null;
+	if (!isPlainRecord(replay) || !Number.isSafeInteger(replay.turn) || (replay.turn as number) < 1) {
+		return protocolFailure("session/update replay metadata was invalid.");
+	}
+	return { turn: replay.turn as number };
+}
+
 function validateUpdate(paramsValue: unknown): ParsedAcpUpdate {
 	if (!isPlainRecord(paramsValue) || !isPlainRecord(paramsValue.update)) {
 		return protocolFailure("session/update params were invalid.");
 	}
 	const sessionId = boundedString(paramsValue.sessionId, "session/update sessionId", ACP_MAX_ID_BYTES);
+	const replay = validateReplayMeta(paramsValue);
 	const update = paramsValue.update;
 	const updateKind = boundedString(update.sessionUpdate, "sessionUpdate", 64);
-	if (updateKind === "agent_message_chunk" || updateKind === "agent_thought_chunk") {
+	if (
+		updateKind === "agent_message_chunk" || updateKind === "agent_thought_chunk" || updateKind === "user_message_chunk"
+	) {
 		if (!isPlainRecord(update.content) || update.content.type !== "text") {
 			return protocolFailure("An ACP text update had invalid content.");
 		}
 		return {
-			type: updateKind === "agent_message_chunk" ? "message" : "thought",
+			type: updateKind === "agent_message_chunk"
+				? "message"
+				: updateKind === "agent_thought_chunk"
+				? "thought"
+				: "user",
 			sessionId,
 			text: boundedString(update.content.text, "ACP text delta", ACP_MAX_DELTA_BYTES, true),
+			replay,
 		};
 	}
 	if (updateKind !== "tool_call" && updateKind !== "tool_call_update") {
@@ -535,7 +625,75 @@ function validateUpdate(paramsValue: unknown): ParsedAcpUpdate {
 		status: exactEnum(update.status, TOOL_STATUSES, "ACP tool status"),
 		...(update.locations === undefined ? {} : { locations: validateLocations(update.locations) }),
 		...(update.rawInput === undefined ? {} : { rawInputSignature: rawInputSignature(update.rawInput) }),
+		replay,
 	};
+}
+
+function validateExtensionEvent(paramsValue: unknown): AcpExtensionEvent {
+	if (!isPlainRecord(paramsValue) || paramsValue.version !== 1) {
+		return protocolFailure("clio-coder/event params were invalid.");
+	}
+	const kind = exactEnum(paramsValue.kind, EXTENSION_EVENT_KINDS, "clio-coder/event kind");
+	if (!Number.isSafeInteger(paramsValue.sequence) || (paramsValue.sequence as number) < 1) {
+		return protocolFailure("clio-coder/event sequence was invalid.");
+	}
+	if (paramsValue.terminal !== false) return protocolFailure("clio-coder/event terminal was invalid.");
+	const turnId = paramsValue.turnId === null
+		? null
+		: boundedString(paramsValue.turnId, "clio-coder/event turnId", ACP_MAX_ID_BYTES);
+	const payload = paramsValue.payload;
+	if (!isPlainRecord(payload)) return protocolFailure("clio-coder/event payload was invalid.");
+	const count = (value: unknown, label: string): number => {
+		if (!Number.isSafeInteger(value) || (value as number) < 1) return protocolFailure(`${label} was invalid.`);
+		return value as number;
+	};
+	if (typeof payload.interrupted !== "boolean") return protocolFailure("clio-coder/event interrupted was invalid.");
+	if (payload.toolCallId !== null || payload.shape !== null) {
+		return protocolFailure("clio-coder/event tool identity was invalid.");
+	}
+	const disposition = exactEnum(payload.disposition, LOOP_DISPOSITIONS, "clio-coder/event disposition");
+	if (payload.interrupted !== (disposition === "stop")) {
+		return protocolFailure("clio-coder/event interruption state was invalid.");
+	}
+	return {
+		kind,
+		workspaceInstanceId: boundedString(paramsValue.workspaceInstanceId, "clio-coder/event workspace", ACP_MAX_ID_BYTES),
+		sessionId: boundedString(paramsValue.sessionId, "clio-coder/event sessionId", ACP_MAX_ID_BYTES),
+		turnId,
+		sequence: paramsValue.sequence as number,
+		terminal: false,
+		payload: {
+			toolCallId: null,
+			tool: boundedString(payload.tool, "clio-coder/event tool", 64),
+			repeatCount: count(payload.repeatCount, "clio-coder/event repeatCount"),
+			blocksThisTurn: count(payload.blocksThisTurn, "clio-coder/event blocksThisTurn"),
+			budget: count(payload.budget, "clio-coder/event budget"),
+			disposition,
+			interrupted: payload.interrupted,
+			shape: null,
+		},
+	};
+}
+
+function extensionEventsOptedIn(params: unknown): boolean {
+	if (!isPlainRecord(params) || !isPlainRecord(params.clientCapabilities)) return false;
+	const meta = params.clientCapabilities._meta;
+	if (!isPlainRecord(meta)) return false;
+	const events = meta["clio-coder/events"];
+	return isPlainRecord(events) && events.version === 1 && Array.isArray(events.kinds) &&
+		events.kinds.includes("safety.loopBlocked");
+}
+
+function advertisedEventWorkspace(value: unknown): string | null {
+	if (!isPlainRecord(value) || !isPlainRecord(value.agentCapabilities)) return null;
+	const meta = value.agentCapabilities._meta;
+	if (!isPlainRecord(meta)) return null;
+	const events = meta["clio-coder/events"];
+	if (
+		!isPlainRecord(events) || events.version !== 1 || events.notification !== "clio-coder/event" ||
+		!Array.isArray(events.kinds) || !events.kinds.includes("safety.loopBlocked")
+	) return null;
+	return boundedString(events.workspaceInstanceId, "clio-coder/events workspace", ACP_MAX_ID_BYTES);
 }
 
 function toolKey(sessionId: string, toolCallId: string): string {
@@ -575,7 +733,9 @@ function validateRemoteMeta(errorValue: Record<string, unknown>): AcpRemoteError
 	const value = data._meta["clio-coder/error"];
 	if (!isPlainRecord(value) || value.version !== 1) return null;
 	const code = boundedString(value.code, "Clio error code", 64);
-	if (!/^[a-z0-9_]+$/.test(code)) return protocolFailure("Clio error code was invalid.");
+	if (!(ACP_REMOTE_ERROR_CODES as readonly string[]).includes(code)) {
+		return protocolFailure("Clio error code was outside the frozen set.");
+	}
 	let reason: string | undefined;
 	if (value.reason !== undefined) {
 		reason = boundedString(value.reason, "Clio error reason", 64);
@@ -591,7 +751,7 @@ function validateRemoteMeta(errorValue: Record<string, unknown>): AcpRemoteError
 	}
 	return {
 		version: 1,
-		code,
+		code: code as AcpRemoteErrorCode,
 		...(reason === undefined ? {} : { reason }),
 		...(supported === undefined ? {} : { supported }),
 	};
@@ -646,6 +806,7 @@ export class AcpClient {
 	readonly #stderrPromise: Promise<void>;
 	readonly #lifecyclePromise: Promise<void>;
 	#nextRequestId = 1;
+	#toolBudget = MAX_TOOLS_PER_PROMPT;
 	#writeTail: Promise<void> = Promise.resolve();
 	#stderr: Uint8Array = new Uint8Array(0);
 	#failed = false;
@@ -656,6 +817,11 @@ export class AcpClient {
 	#exitStatus: Deno.CommandStatus | null = null;
 	#promptPromise: Promise<unknown> | null = null;
 	#promptMayBeActiveRemotely = false;
+	#extensionEventsOptedIn = false;
+	#eventWorkspaceInstanceId: string | null = null;
+	#lastEventSequence = 0;
+	#activePromptSessionId: string | null = null;
+	#activeEventTurnId: string | null | undefined;
 	#activePermission: ActivePermission | null = null;
 	#cleanupPromise: Promise<AcpRetireResult> | null = null;
 
@@ -732,6 +898,7 @@ export class AcpClient {
 			throw new AcpClientError("unsupported-method", `Unsupported ACP request method: ${method}`);
 		}
 		validateDuration(timeoutMs, `${method} timeout`);
+		if (method === "initialize") this.#extensionEventsOptedIn = extensionEventsOptedIn(params);
 		if (!internal && (this.#frozen || this.#failed)) {
 			throw new AcpClientError("client-closed", "The ACP child is closing.");
 		}
@@ -767,11 +934,25 @@ export class AcpClient {
 			this.#fatal("write-failure");
 		});
 		const tracked = response.finally(() => {
-			if (method === "session/prompt" && this.#promptPromise === tracked) this.#promptPromise = null;
+			if (method === "session/prompt" && this.#promptPromise === tracked) {
+				this.#promptPromise = null;
+				this.#activePromptSessionId = null;
+				this.#activeEventTurnId = undefined;
+			}
 		});
 		if (method === "session/prompt") {
+			// Wire tool aliases restart per turn; a fresh prompt is a fresh lifecycle scope.
+			this.#tools.clear();
+			this.#toolBudget = MAX_TOOLS_PER_PROMPT;
 			this.#promptMayBeActiveRemotely = true;
+			this.#activePromptSessionId = isPlainRecord(params)
+				? boundedString(params.sessionId, "ACP prompt sessionId", ACP_MAX_ID_BYTES)
+				: protocolFailure("ACP prompt params were invalid.");
+			this.#activeEventTurnId = undefined;
 			this.#promptPromise = tracked;
+		} else if (method === "session/load") {
+			this.#tools.clear();
+			this.#toolBudget = MAX_TOOLS_PER_REPLAY;
 		}
 		return await tracked;
 	}
@@ -877,6 +1058,7 @@ export class AcpClient {
 			this.#pending.delete(id);
 			clearTimeout(pending.timer);
 			if (pending.method === "session/prompt") this.#promptMayBeActiveRemotely = false;
+			if (pending.method === "initialize") this.#eventWorkspaceInstanceId = advertisedEventWorkspace(parsed.result);
 			pending.resolve(parsed.result);
 			return;
 		}
@@ -892,6 +1074,32 @@ export class AcpClient {
 	}
 
 	#consumeNotification(method: string, params: unknown): void {
+		if (method === "clio-coder/event") {
+			if (!this.#extensionEventsOptedIn) {
+				return protocolFailure("The ACP peer sent an extension event without client opt in.");
+			}
+			const event = validateExtensionEvent(params);
+			if (this.#eventWorkspaceInstanceId === null || event.workspaceInstanceId !== this.#eventWorkspaceInstanceId) {
+				return protocolFailure("The ACP extension event named an unexpected workspace.");
+			}
+			if (event.sequence <= this.#lastEventSequence) {
+				return protocolFailure("The ACP extension event sequence was not process monotonic.");
+			}
+			if (this.#activePromptSessionId === null || event.sessionId !== this.#activePromptSessionId) {
+				return protocolFailure("The ACP extension event crossed its active session.");
+			}
+			if (this.#activeEventTurnId === undefined) this.#activeEventTurnId = event.turnId;
+			else if (event.turnId !== this.#activeEventTurnId) {
+				return protocolFailure("The ACP extension event crossed its active turn.");
+			}
+			this.#lastEventSequence = event.sequence;
+			try {
+				this.#hooks.onExtensionEvent?.(this.generation, event);
+			} catch {
+				protocolFailure("The ACP extension event callback failed closed.");
+			}
+			return;
+		}
 		if (method !== "session/update") return protocolFailure("The ACP peer sent an unsupported notification.");
 		const update = this.#validateToolLifecycle(validateUpdate(params));
 		try {
@@ -907,7 +1115,7 @@ export class AcpClient {
 		const observed = this.#tools.get(key);
 		if (update.variant === "start") {
 			if (
-				observed !== undefined || this.#tools.size >= 128 || update.status === "completed" ||
+				observed !== undefined || this.#tools.size >= this.#toolBudget || update.status === "completed" ||
 				update.status === "failed"
 			) return protocolFailure("The ACP peer emitted an invalid tool start lifecycle.");
 			if (update.title === undefined || update.kind === undefined) {
@@ -932,6 +1140,7 @@ export class AcpClient {
 				kind: update.kind,
 				status: update.status,
 				locations,
+				replay: update.replay,
 			};
 		}
 		if (
@@ -951,6 +1160,7 @@ export class AcpClient {
 			kind: observed.kind,
 			status: update.status,
 			locations: observed.locations,
+			replay: update.replay,
 		};
 	}
 
