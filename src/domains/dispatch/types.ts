@@ -713,6 +713,20 @@ export interface RunReceipt {
 	personaOverride?: RunPersonaOverride;
 	/** Effective project-context tier for this run; absent on receipts written before this field landed. */
 	projectContext?: RunProjectContextProvenance;
+	/**
+	 * Repo-relative `.clio-coder/rules/**` ids selected into this run's worker
+	 * prompt, in load order; `[]` when the run had none. Always present on
+	 * receipts written after this field landed (#104); absent on older
+	 * receipts, which readers must treat as unknown, never as "no rules".
+	 */
+	rulesApplied?: string[];
+	/**
+	 * Whether the operator profile rendered non-empty content into this run's
+	 * worker prompt. Always present on receipts written after this field
+	 * landed (#104); absent on older receipts, which readers must treat as
+	 * unknown, never as false.
+	 */
+	operatorProfileApplied?: boolean;
 	exitCode: number;
 	failureMessage?: string;
 	tokenCount: number;

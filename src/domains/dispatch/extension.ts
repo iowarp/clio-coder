@@ -1271,6 +1271,10 @@ interface DispatchLifecycleStage {
 	briefing: RunBriefingProvenance | null;
 	personaOverride: RunPersonaOverride | null;
 	projectContext: RunProjectContextProvenance;
+	/** Rule ids the worker prompt compiler selected into this run's system prompt; [] when none matched. */
+	rulesApplied: string[];
+	/** Whether the operator profile rendered non-empty content into this run's system prompt. */
+	operatorProfileApplied: boolean;
 	/** Read-only recipe admitted against a mutating task; null when the pairing was sound. */
 	capabilityMismatch: CapabilityMismatch | null;
 	effectiveAutonomy: AutonomyLevel;
@@ -1297,6 +1301,10 @@ interface AcpDelegationLifecycleStage {
 	briefing: RunBriefingProvenance | null;
 	personaOverride: RunPersonaOverride | null;
 	projectContext: RunProjectContextProvenance;
+	/** ACP delegation bypasses the worker prompt compiler entirely, so this is always []. */
+	rulesApplied: string[];
+	/** ACP delegation bypasses the worker prompt compiler entirely, so this is always false. */
+	operatorProfileApplied: boolean;
 	sessionAutonomy: AutonomyLevel;
 	autonomy: AutonomyLevel;
 }
@@ -3278,6 +3286,8 @@ export function createDispatchBundle(
 			briefing: briefingProvenanceFor(req),
 			personaOverride,
 			projectContext: projectContextProvenance,
+			rulesApplied: compiledWorkerPrompt.rulesApplied ?? [],
+			operatorProfileApplied: compiledWorkerPrompt.operatorProfileApplied ?? false,
 			capabilityMismatch,
 			effectiveAutonomy,
 			budget,
@@ -3367,6 +3377,8 @@ export function createDispatchBundle(
 			briefing: briefingProvenanceFor(req),
 			personaOverride,
 			projectContext: projectContextProvenance,
+			rulesApplied: [],
+			operatorProfileApplied: false,
 			sessionAutonomy,
 			autonomy,
 		};
@@ -3762,6 +3774,8 @@ export function createDispatchBundle(
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
+				rulesApplied: lifecycle.rulesApplied,
+				operatorProfileApplied: lifecycle.operatorProfileApplied,
 				startedAt,
 				endedAt,
 				exitCode:
@@ -4819,6 +4833,8 @@ export function createDispatchBundle(
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
+				rulesApplied: lifecycle.rulesApplied,
+				operatorProfileApplied: lifecycle.operatorProfileApplied,
 				...(validationGrounding !== null ? { validationGrounding } : {}),
 				...(ledgerContribution !== null ? { ledgerContribution } : {}),
 				...(lifecycle.capabilityMismatch !== null

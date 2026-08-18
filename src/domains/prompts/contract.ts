@@ -33,7 +33,12 @@ export interface PromptsContract {
 	 */
 	compileSessionPrompt(input: CompileSessionPromptInput): Promise<CompiledSessionPrompt>;
 
-	/** Compile the canonical stable harness for one mediated fleet worker. */
+	/**
+	 * Compile the canonical stable harness for one mediated fleet worker. The
+	 * result's `rulesApplied` and `operatorProfileApplied` are the receipt
+	 * provenance for this run's customization layer: dispatch reads them
+	 * straight off this return rather than re-deriving them.
+	 */
 	compileWorkerPrompt(input: CompileWorkerPromptInput): Promise<CompiledSessionPrompt>;
 
 	/** Reload fragment table (triggered by config.hotReload). */

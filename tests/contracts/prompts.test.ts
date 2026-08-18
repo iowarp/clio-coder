@@ -1,4 +1,4 @@
-import { notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1468,6 +1468,11 @@ describe("contracts/prompts", () => {
 				withWorkingPath.systemPrompt.indexOf("Prefer explicit exports for fixture modules.") >
 					withWorkingPath.systemPrompt.indexOf(workerPersona().body),
 			);
+			// #104: the receipt provenance dispatch reads is this same return
+			// value, not a re-derivation, so it must name the always-on rule and
+			// stay silent on the one that never matched.
+			deepStrictEqual(withoutWorkingPath.rulesApplied, ["always.md"]);
+			deepStrictEqual(withWorkingPath.rulesApplied, ["always.md", "typescript.md"]);
 		});
 
 		it("the operator profile reaches a worker unconditionally: it is small, capped, and governs how the worker should do the task (validation preference, commit style, local-only paths), not just how the orchestrator talks to the operator", async () => {
@@ -1484,6 +1489,7 @@ describe("contracts/prompts", () => {
 			ok(compiled.systemPrompt.includes("Validation preference: tests-first."));
 			ok(compiled.systemPrompt.includes("Keep local-only (do not push or share): secrets/."));
 			ok(compiled.fragmentManifest.some((f) => f.id === "context.operator-profile"));
+			strictEqual(compiled.operatorProfileApplied, true);
 		});
 
 		it("a worker with no active rule and no operator profile carries neither section (no byte cost when nothing fires)", async () => {
@@ -1495,6 +1501,11 @@ describe("contracts/prompts", () => {
 				compiled.fragmentManifest.some((f) => f.id === "context.project-rules" || f.id === "context.operator-profile"),
 				false,
 			);
+			// #104: no rules and no profile means the provenance is explicit
+			// emptiness, not an absent field a receipt reader could mistake for
+			// "unknown".
+			deepStrictEqual(compiled.rulesApplied, []);
+			strictEqual(compiled.operatorProfileApplied, false);
 		});
 
 		it("context is not described as automatic; the snapshot is an explicit call", () => {

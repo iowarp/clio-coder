@@ -245,6 +245,9 @@ describe("ACP gate role authority", () => {
 				const builder = runReceipts.find((receipt) => receipt.gate?.role === "builder");
 				const reviewer = runReceipts.find((receipt) => receipt.gate?.role === "reviewer");
 				ok(builder && reviewer);
+				// #104: ACP delegation never runs the worker prompt compiler, so its
+				// receipts state explicitly that no rules and no profile reached it.
+				deepStrictEqual([builder.rulesApplied, builder.operatorProfileApplied], [[], false]);
 				deepStrictEqual(reviewer?.gate?.subjects, [{ runId: builder?.runId, digest: builder?.integrity.digest }]);
 				deepStrictEqual(reviewer?.autonomyEnforcement, {
 					grade: "mediated",

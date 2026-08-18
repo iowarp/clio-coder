@@ -2218,6 +2218,128 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("records a matched path-scoped rule's id in receipt.rulesApplied (#104)", async () => {
+		// The battle-test that motivated #104 could only prove "workers run on
+		// the operator's rules" (#96) behaviourally, by inspecting the compiled
+		// prompt. This is the receipt-side proof: the rule id that reached the
+		// worker's system prompt is now sealed onto the receipt itself.
+		const scratch = mkdtempSync(join(tmpdir(), "clio-dispatch-rules-"));
+		try {
+			mkdirSync(join(scratch, ".clio-coder", "rules"), { recursive: true });
+			writeFileSync(
+				join(scratch, ".clio-coder", "rules", "typescript.md"),
+				"---\npaths:\n  - 'src/**/*.ts'\n---\n# TypeScript\nPrefer explicit exports.\n",
+				"utf8",
+			);
+			const context = stubContext();
+			const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+			const bundle = makeDispatchBundle(context, {
+				spawnWorker: () => ({
+					pid: 8001,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				}),
+			});
+			await bundle.extension.start();
+			try {
+				const handle = await bundle.contract.dispatch({
+					agentId: "coder",
+					executionRole: "builder",
+					task: "update src/index.ts to add the missing export",
+					cwd: scratch,
+				});
+				exit.resolve({ exitCode: 0, signal: null });
+				const receipt = await handle.finalPromise;
+				deepStrictEqual(receipt.rulesApplied, ["typescript.md"]);
+			} finally {
+				await bundle.extension.stop?.();
+			}
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("writes an empty rulesApplied array, never a missing field, when a run has no project rules (#104)", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-dispatch-no-rules-"));
+		try {
+			const context = stubContext();
+			const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+			const bundle = makeDispatchBundle(context, {
+				spawnWorker: () => ({
+					pid: 8002,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				}),
+			});
+			await bundle.extension.start();
+			try {
+				const handle = await bundle.contract.dispatch({
+					agentId: "coder",
+					executionRole: "builder",
+					task: "update src/index.ts with no rules in scope",
+					cwd: scratch,
+				});
+				exit.resolve({ exitCode: 0, signal: null });
+				const receipt = await handle.finalPromise;
+				ok("rulesApplied" in receipt, "rulesApplied must be present, not omitted, on a new receipt");
+				deepStrictEqual(receipt.rulesApplied, []);
+			} finally {
+				await bundle.extension.stop?.();
+			}
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("flags operatorProfileApplied true when the profile renders non-empty and false when it renders nothing (#104)", async () => {
+		const withProfile = mkdtempSync(join(tmpdir(), "clio-dispatch-profile-"));
+		const withoutProfile = mkdtempSync(join(tmpdir(), "clio-dispatch-no-profile-"));
+		try {
+			mkdirSync(join(withProfile, ".clio-coder"), { recursive: true });
+			writeFileSync(join(withProfile, ".clio-coder", "profile.yaml"), "validationPreference: tests-first\n", "utf8");
+
+			const dispatchOnce = async (cwd: string, pid: number) => {
+				const context = stubContext();
+				const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+				const bundle = makeDispatchBundle(context, {
+					spawnWorker: () => ({
+						pid,
+						promise: exit.promise,
+						events: emptyEvents(),
+						abort: () => {},
+						heartbeatAt: { current: Date.now() },
+					}),
+				});
+				await bundle.extension.start();
+				try {
+					const handle = await bundle.contract.dispatch({
+						agentId: "coder",
+						executionRole: "builder",
+						task: "operator profile provenance check",
+						cwd,
+					});
+					exit.resolve({ exitCode: 0, signal: null });
+					return await handle.finalPromise;
+				} finally {
+					await bundle.extension.stop?.();
+				}
+			};
+
+			const receiptWithProfile = await dispatchOnce(withProfile, 8003);
+			strictEqual(receiptWithProfile.operatorProfileApplied, true);
+
+			const receiptWithoutProfile = await dispatchOnce(withoutProfile, 8004);
+			strictEqual(receiptWithoutProfile.operatorProfileApplied, false);
+		} finally {
+			rmSync(withProfile, { recursive: true, force: true });
+			rmSync(withoutProfile, { recursive: true, force: true });
+		}
+	});
+
 	it("seals exact briefing provenance without copying briefing prose into the receipt task", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
