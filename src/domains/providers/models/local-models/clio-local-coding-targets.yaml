@@ -17,13 +17,12 @@
 #
 # Thinking semantics for these local families: the chain-of-thought is emitted
 # by the model's chat template (Qwen-style <think> blocks, Gemma 4 thinking
-# template, Nemotron reasoning template). LM Studio's SDK and llama.cpp's
-# OpenAI-compatible surface do not expose a reliable "no thinking" flag, so
-# Clio cannot disable template-driven reasoning at the API layer. With
-# `--thinking off` Clio simply does not request reasoning; if the model emits
-# it anyway, the chain-of-thought is captured into a ThinkingContent block,
-# counted as reasoning tokens (separate from output tokens) on the receipt
-# and TUI footer, and surfaced to the user truthfully rather than hidden.
+# template, Nemotron reasoning template). LM Studio's OpenAI-compatible HTTP
+# surface uses reasoning_effort as its sole thinking control; llama.cpp support
+# depends on the active template and reasoning parser. If a model emits thought
+# despite the requested level, Clio captures it in a ThinkingContent block,
+# counts it separately on receipts and the TUI footer, and surfaces it rather
+# than hiding what the server returned.
 - family: openai-gpt-oss
   matchPatterns:
     - openai/gpt-oss
@@ -164,8 +163,8 @@
       "24gb": "Use a 4-bit quant with reduced load context for evaluation. Prefer the 32GB tier for sustained Clio writes."
       "32gb": "Primary strong local model for multimodal main-agent work. Keep openai-compat available for tool-call fallback."
     runtimePreference:
-      lmstudioNative: "Use only when the target's server lifecycle is Clio-managed or the model is already loaded at the requested context."
-      openaiCompat: "Preferred fallback for LM Studio gateway tool-call extraction."
+      lmstudio: "Use LM Studio per-model load settings unless this target carries explicit lmstudio.load overrides."
+      openaiCompat: "Use for a generic gateway that fronts the same OpenAI-compatible chat surface."
       llamaCpp: "OpenAI-compatible chat completions with --jinja."
     llamaCpp:
       ctxSize: 819200
@@ -184,7 +183,7 @@
         Reasoning is template-driven; thinking blocks emit through the qwen
         chat template. Preserve thinking across coding-task turns when the
         chain matters; otherwise let the budget cap output growth.
-    serving: "Use qwen3_coder tool parsing when served through OpenAI-compatible HTTP. LM Studio native uses SDK rawTools, but openai-compat remains the fallback for template-specific tool extraction issues."
+    serving: "Use qwen3_coder tool parsing when served through OpenAI-compatible HTTP. LM Studio uses the same OpenAI-compatible tool surface."
 
 - family: qwen3.6-35b-a3b
   matchPatterns:
@@ -224,7 +223,7 @@
     gpuTiers:
       "32gb": "Main-agent candidate on 32GB targets when Nemotron Omni is unavailable or tool behavior is better for text-only work."
     runtimePreference:
-      lmstudioNative: "Usable for text and vision when loaded in LM Studio. Keep openai-compat available for tool fallback."
+      lmstudio: "Usable for text and vision through LM Studio's OpenAI-compatible chat surface."
       openaiCompat: "Preferred local gateway path for tool-call stress tests."
       llamaCpp: "OpenAI-compatible chat completions with --jinja. Local llama.cpp profile emits reasoning_content without a separate --reasoning flag."
     llamaCpp:
@@ -346,7 +345,7 @@
     gpuTiers:
       "32gb": "Fits at f16 KV with parallel=1 and ctx=262144 (Q4_K_XL weights ~19.5 GB plus ~32 GB KV)."
     runtimePreference:
-      lmstudioNative: "Primary path; standard <think> tagging works correctly with the SDK classifier."
+      lmstudio: "Primary LM Studio path through OpenAI-compatible chat and native REST model management."
       openaiCompat: "Verified parity for tool calls; reasoning_content surfaces and completion_tokens_details.reasoning_tokens is reported."
     thinking:
       mechanism: budget-tokens
@@ -404,25 +403,23 @@
     leakageNote: |
       LM Studio's gemma4 chat template emits chain-of-thought as plain text
       bracketed by literal '<|channel>thought\n' and '<channel|>' markers
-      rather than reasoningType=reasoning fragments. Clio's lmstudio-native
-      adapter buffers and re-classifies these regions into ThinkingContent
-      so the markers do not leak into the visible TUI text and reasoning
-      tokens are accounted via the chars/4 estimator.
+      rather than structured reasoning fragments. The OpenAI-compatible path
+      currently exposes those markers as the server streams them; filtering
+      this family remains a follow-up.
     gpuTiers:
       "48gb": "Fits at f16 KV when parallel=1 and ctx=122880; drop to q8_0 KV at parallel=4."
       "80gb": "Comfortable at f16 KV with parallel=1 and ctx=122880."
     runtimePreference:
-      lmstudioNative: "Verified path. Pin parallel=1 in the LM Studio per-model preset to give a single agent the full 122880 context."
-      openaiCompat: "Fallback path; the openai-compat surface does not expose the channel-marker classifier so visible text shows the raw markers."
+      lmstudio: "Pin parallel=1 in the LM Studio per-model preset to give a single agent the full 122880 context."
+      openaiCompat: "LM Studio chat uses this surface; visible text may contain the raw channel markers."
     thinking:
       mechanism: on-off
       guidance: |
         Gemma 4 chat template exposes thinking only as on or off; intermediate
         levels coerce to on. NVFP4 quantization can corrupt JSON tool-call
         output under aggressive sampling, so the instruct profile pins
-        temperature at 0.7. The lmstudio-native adapter re-classifies the
-        channel-marker thought region into ThinkingContent so markers do not
-        leak into visible text.
+        temperature at 0.7. LM Studio's OpenAI-compatible stream currently
+        exposes channel markers when the server does not classify them.
     serving: "LilaRest publishes no per-model sampler; values inherit the gemma family default per the official Google Gemma 4 31B card. KV cache budget at f16, ctx=122880 is roughly 57 GB on top of ~21 GB of NVFP4 weights."
 
 # The qat/UD-Q4_K_XL/MTP build is the long-context llama.cpp gemma profile and is a
@@ -547,15 +544,15 @@
       "48gb": "Fits at f16 KV with parallel=1; q8_0 KV recommended at parallel=4."
       "80gb": "Comfortable at f16 KV with parallel=1 and ctx=122880."
     runtimePreference:
-      lmstudioNative: "Verified path. Channel-marker handler in clio's adapter recovers reasoning tokens that the SDK classifier drops."
+      lmstudio: "LM Studio's OpenAI-compatible stream may expose this family's channel markers as visible text."
       openaiCompat: "Fallback; reasoning_content is absent from the openai-compat reasoning probe for this family."
     thinking:
       mechanism: always-on
       guidance: |
         Distilled traces emit unconditionally. The thinking level setting is
         ignored at the API surface; chain-of-thought arrives whether or not
-        Clio asks for it. Reasoning tokens are accounted via the channel-marker
-        re-classifier in lmstudio-native.
+        Clio asks for it. Channel-marker filtering remains a follow-up for the
+        OpenAI-compatible LM Studio path.
     serving: "Distilled from Claude 4.6 Opus reasoning traces onto Google Gemma 4 31B; sampler matches the gemopus card values."
 
 - family: qwopus3.6-27b-v1-preview
@@ -598,7 +595,7 @@
     gpuTiers:
       "32gb": "Fits at f16 KV with parallel=1 and ctx=262144 thanks to the Q4_K_M weights (~16.5 GB)."
     runtimePreference:
-      lmstudioNative: "Primary path; thinking is emitted via standard <think> tags so the SDK classifier accounts reasoning correctly."
+      lmstudio: "Primary LM Studio path; thinking is read from the OpenAI-compatible reasoning stream."
       openaiCompat: "Verified for tool-call extraction parity; reasoning_content surfaces."
     thinking:
       mechanism: budget-tokens
@@ -730,7 +727,7 @@
         maxTokens: 32768
     runtimePreference:
       llamaCpp: "A local llama.cpp router serves it with --jinja and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
-      lmstudioNative: "Dense 27B Coder-MTP; the creator's template ships thinking-off, and no per-request field re-enables it."
+      lmstudio: "Dense 27B Coder-MTP; configure MTP in LM Studio's per-model load settings."
     thinking:
       mechanism: none
       guidance: |
@@ -812,8 +809,8 @@
     gpuTiers:
       "32gb": "Main-agent candidate for 32 GB and larger local systems when Gemma behavior is preferred."
     runtimePreference:
-      lmstudioNative: "Use for already-loaded LM Studio sessions and multimodal checks."
-      openaiCompat: "Preferred fallback when SDK rawTools do not match the template."
+      lmstudio: "Use for already-loaded LM Studio sessions and multimodal checks."
+      openaiCompat: "LM Studio chat uses this OpenAI-compatible surface."
       llamaCpp: "OpenAI-compatible chat completions with --jinja, --reasoning on, and the matching mmproj."
     llamaCpp:
       ctxSize: 262144
@@ -862,8 +859,8 @@
     gpuTiers:
       "32gb": "Preferred local worker model when a text-only worker is enough."
     runtimePreference:
-      lmstudioNative: "Use when LM Studio SDK tool extraction is verified for the loaded template."
-      openaiCompat: "Preferred fallback for LM Studio gateway tool calls."
+      lmstudio: "Use when LM Studio's OpenAI-compatible tool extraction is verified for the loaded template."
+      openaiCompat: "Use for a generic gateway that fronts the same OpenAI-compatible chat surface."
       anthropicCompat: "Do not select for the current llama.cpp target profile; /v1/messages returned 404 while /v1/models and OpenAI-compatible chat worked."
       llamaCpp: "OpenAI-compatible chat completions with --jinja. Recommended local profile disables thinking in chat_template_kwargs."
     llamaCpp:
@@ -922,8 +919,8 @@
     gpuTiers:
       "32gb": "Distilled Opus-style reasoning at Qwen3.5 35B A3B scale. Use as a strong local main agent when GPU room is available."
     runtimePreference:
-      lmstudioNative: "Verified usable on LM Studio when loaded with the Qwen-style preset."
-      openaiCompat: "Preferred fallback when SDK rawTools yield empty arguments for the distilled template."
+      lmstudio: "Verified usable on LM Studio when loaded with the Qwen-style preset."
+      openaiCompat: "LM Studio chat uses this OpenAI-compatible surface."
       llamaCpp: "OpenAI-compatible chat completions with --jinja. Match qwen3 reasoning parser flags upstream."
     thinking:
       mechanism: budget-tokens
@@ -973,8 +970,8 @@
     gpuTiers:
       "16gb": "Use this as the local 16GB emulation target. It keeps the output cap below the 32GB-class MoE defaults."
     runtimePreference:
-      lmstudioNative: "Primary local laptop path. Verified through LM Studio /api/v1/models with 262144 loaded context, flash attention, GPU KV offload, and trained_for_tool_use."
-      openaiCompat: "Verified through the LM Studio gateway for read and artifact tool calls; use when the native SDK produces thinking-only length stops or malformed tools."
+      lmstudio: "Primary local laptop path. Verified through LM Studio /api/v1/models with 262144 loaded context, flash attention, GPU KV offload, and trained_for_tool_use."
+      openaiCompat: "LM Studio chat uses this surface for reasoning and tool calls."
       anthropicCompat: "LM Studio's Anthropic Messages surface streams simple text with the server root URL as baseUrl; keep as a protocol fallback until tool and reasoning behavior are proven."
     thinking:
       # Measured 2026-08-11 against LM Studio on this exact model: baseline 56
@@ -990,4 +987,4 @@
         Clio shows the level as forced. Output cap is tighter than the
         32GB-class MoE families because this is the 16GB emulation target;
         budget for a reasoning preamble ahead of every answer.
-    serving: "LM Studio reports trained_for_tool_use for the local qwopus3.5-9b-v3 target. Native model override successfully switched residency to granite-4.0-h-350m through the SDK."
+    serving: "LM Studio reports trained_for_tool_use for the local qwopus3.5-9b-v3 target. Configure residency through LM Studio or explicit lmstudio.load settings."
