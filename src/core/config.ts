@@ -433,6 +433,75 @@ function validatePricing(
 	return out;
 }
 
+function validateLmStudioSettings(
+	issues: Issues,
+	path: string,
+	value: unknown,
+): ClioSettings["targets"][number]["lmstudio"] | undefined {
+	if (!isPlainObject(value)) {
+		issues.add(path, `expected a map, got ${describe(value)}`);
+		return undefined;
+	}
+	issues.unknownKeys(path, value, ["load", "request"]);
+	const out: NonNullable<ClioSettings["targets"][number]["lmstudio"]> = {};
+	if ("load" in value) {
+		if (!isPlainObject(value.load)) {
+			issues.add(`${path}.load`, `expected a map, got ${describe(value.load)}`);
+		} else {
+			issues.unknownKeys(`${path}.load`, value.load, [
+				"contextLength",
+				"flashAttention",
+				"evalBatchSize",
+				"numExperts",
+				"offloadKvCacheToGpu",
+			]);
+			const load: NonNullable<typeof out.load> = {};
+			for (const key of ["contextLength", "evalBatchSize", "numExperts"] as const) {
+				if (key in value.load) {
+					const parsed = expectInteger(issues, `${path}.load.${key}`, value.load[key], { min: 1 });
+					if (parsed !== undefined) load[key] = parsed;
+				}
+			}
+			for (const key of ["flashAttention", "offloadKvCacheToGpu"] as const) {
+				if (key in value.load) {
+					const parsed = expectBoolean(issues, `${path}.load.${key}`, value.load[key]);
+					if (parsed !== undefined) load[key] = parsed;
+				}
+			}
+			if (Object.keys(load).length > 0) out.load = load;
+		}
+	}
+	if ("request" in value) {
+		if (!isPlainObject(value.request)) {
+			issues.add(`${path}.request`, `expected a map, got ${describe(value.request)}`);
+		} else {
+			issues.unknownKeys(`${path}.request`, value.request, ["ttlSeconds", "draftModel", "reasoning"]);
+			const request: NonNullable<typeof out.request> = {};
+			if ("ttlSeconds" in value.request) {
+				const parsed = expectInteger(issues, `${path}.request.ttlSeconds`, value.request.ttlSeconds, { min: 1 });
+				if (parsed !== undefined) request.ttlSeconds = parsed;
+			}
+			if ("draftModel" in value.request) {
+				const parsed = expectString(issues, `${path}.request.draftModel`, value.request.draftModel);
+				if (parsed !== undefined) request.draftModel = parsed;
+			}
+			if ("reasoning" in value.request) {
+				const parsed = expectEnum(issues, `${path}.request.reasoning`, value.request.reasoning, [
+					"auto",
+					"off",
+					"on",
+					"low",
+					"medium",
+					"high",
+				] as const);
+				if (parsed !== undefined) request.reasoning = parsed;
+			}
+			if (Object.keys(request).length > 0) out.request = request;
+		}
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function validateTarget(issues: Issues, path: string, value: unknown): ClioSettings["targets"][number] | null {
 	if (!isPlainObject(value)) {
 		issues.add(path, `expected a map, got ${describe(value)}`);
@@ -449,6 +518,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		"lifecycle",
 		"gateway",
 		"pricing",
+		"lmstudio",
 	]);
 	const id = "id" in value ? expectString(issues, `${path}.id`, value.id) : undefined;
 	const runtime = "runtime" in value ? expectString(issues, `${path}.runtime`, value.runtime) : undefined;
@@ -489,6 +559,10 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 	if ("pricing" in value) {
 		const v = validatePricing(issues, `${path}.pricing`, value.pricing);
 		if (v !== undefined) target.pricing = v;
+	}
+	if ("lmstudio" in value) {
+		const v = validateLmStudioSettings(issues, `${path}.lmstudio`, value.lmstudio);
+		if (v !== undefined) target.lmstudio = v;
 	}
 	return target;
 }
