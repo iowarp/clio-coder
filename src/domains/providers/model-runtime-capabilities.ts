@@ -325,6 +325,9 @@ export function effectiveThinkingLevel(
 	const fallback = available[0] ?? "off";
 	if (!configured) return fallback;
 	if (available.includes(configured)) return configured;
+	// Catalog effort maps intentionally stop at xhigh; `max` must clamp to that
+	// supported ceiling instead of falling through to the generic low fallback.
+	if (configured === "max" && available.includes("xhigh")) return "xhigh";
 	if ((configured === "high" || configured === "xhigh") && available.includes("high")) return "high";
 	if (configured === "medium" && available.includes("medium")) return "medium";
 	if (configured !== "off" && available.includes("low")) return "low";
@@ -498,6 +501,9 @@ function resolveRequestCapability(
 	const request: ResolvedRequestCapability = { budgetEnforcement: thinking.budgetEnforcement };
 	if (thinking.mechanism === "effort-levels" && thinking.effort) {
 		request.reasoningEffort = thinking.effort;
+	}
+	if (thinking.mechanism === "effort-levels" && !thinking.thinkingActive) {
+		request.chatTemplateKwargs = { ...(request.chatTemplateKwargs ?? {}), enable_thinking: false };
 	}
 	if (thinking.mechanism === "budget-tokens" && thinking.budgetTokens !== undefined) {
 		request.budgetTokens = thinking.budgetTokens;

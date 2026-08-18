@@ -318,7 +318,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		return out;
 	}
 
-	async function probeTargetInternal(target: TargetDescriptor, live: boolean): Promise<TargetStatus> {
+	async function probeTargetInternal(
+		target: TargetDescriptor,
+		live: boolean,
+		options?: { reasoning?: boolean },
+	): Promise<TargetStatus> {
 		const previous = statuses.get(target.id);
 		const desc = registry.get(target.runtime);
 		if (!desc) {
@@ -347,7 +351,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				// model discovery is best-effort; keep probe as-is.
 			}
 		}
-		if (probeResult.ok && typeof desc.probeReasoning === "function") {
+		if (probeResult.ok && options?.reasoning !== false && typeof desc.probeReasoning === "function") {
 			const settings = readConfig();
 			const orchestratorTarget = settings.orchestrator.target === target.id ? settings.orchestrator.model : null;
 			const candidateModelId = orchestratorTarget ?? target.defaultModel ?? null;
@@ -460,11 +464,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		},
 		probeAll,
 		probeAllLive,
-		async probeTarget(id) {
+		async probeTarget(id, options) {
 			const settings = readConfig();
 			const target = settings.targets.find((ep) => ep.id === id);
 			if (!target) return null;
-			return probeTargetInternal(target, true);
+			return probeTargetInternal(target, true, options);
 		},
 		disconnectTarget(id) {
 			const settings = readConfig();

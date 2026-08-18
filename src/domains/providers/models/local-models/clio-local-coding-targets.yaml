@@ -1,6 +1,7 @@
 # Sources:
 # https://huggingface.co/Qwen/Qwen3.6-35B-A3B
 # https://huggingface.co/Qwen/Qwen3.6-27B
+# https://huggingface.co/Qwen/Qwen3.8-27B
 # https://huggingface.co/google/gemma-4-26B-A4B
 # https://huggingface.co/LilaRest/gemma-4-31B-it-NVFP4-turbo
 # https://huggingface.co/Jackrong/Gemopus-4-31B-it-GGUF
@@ -359,6 +360,91 @@
         Coding sampler is the precise variant. Preserve thinking blocks across
         turns when the workflow is iterative; the budget caps runaway chains.
     serving: "Official Qwen card recommends max output 32768 tokens for standard queries (81920 only for math/code competitions). Coding sampler is the precise variant; preserve thinking blocks across turns for iterative workflows."
+
+- family: qwen3.8-27b
+  matchPatterns:
+    - qwen3.8-27b
+    - qwen3_8-27b
+    - qwen3-8-27b
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: true
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 131072
+  quirks:
+    kvCache:
+      kQuant: q8_0
+      vQuant: q8_0
+    sampling:
+      thinking:
+        temperature: 1.0
+        topP: 0.95
+        topK: 20
+        minP: 0.0
+        presencePenalty: 0.0
+        repetitionPenalty: 1.0
+        maxTokens: 32768
+      instruct:
+        temperature: 0.7
+        topP: 0.80
+        topK: 20
+        minP: 0.0
+        presencePenalty: 1.5
+        repetitionPenalty: 1.0
+        maxTokens: 32768
+    gpuTiers:
+      "24gb-rocm": "mini profile, live and verified: IQ4_NL 17.3 GB or UD-Q4_K_XL ~19.5 GB, ctx=131072, q8_0/q8_0 KV, parallel=2, draft-mtp speculative decoding, server default reasoning on at medium."
+      "32gb-cuda": "dynamo profile, live and verified: Q6_K 23.8 GB, ctx=131072 (not the full 262144 the quant supports; VRAM-bound), parallel=4, MTP draft acceptance 100% on short prompts, prefill ~1900 tok/s."
+      "128gb-unified-vulkan": "zbook profile, live and verified: IQ4_NL 17.3 GB, ctx=262144 fits, parallel=4 configured. Vulkan backend prefill measured at only ~108 tok/s (17.6k-token probe took 164s TTFT); a ~100k-token probe did not return a first token within 590s. Fine for short agentic turns (9-17s wall per short tool-call turn); do not route long-context work here without first trying the ROCm runtime LM Studio also has installed on this box (`lms runtime select`), which is untested but is the likely fix given mini's ROCm build does not show this bottleneck."
+    runtimePreference:
+      llamaCpp: "Primary path on mini, verified. OpenAI-compatible chat completions with --jinja, --reasoning on, --reasoning-effort medium as server defaults; reasoning_content and tool_calls both confirmed to parse correctly. A request can override to off with chat_template_kwargs.enable_thinking:false, or to a different active level with reasoning_effort in {low, medium, xhigh} (never minimal/high/max on the wire; the stock template raises a fatal jinja exception on those and Clio's landed capability resolver already clamps to this set)."
+      lmstudioOpenaiCompat: "Verified on dynamo and zbook. reasoning_effort is the only field that actually toggles thinking over LM Studio's OpenAI-compatible HTTP port; chat_template_kwargs.enable_thinking is silently ignored (confirmed both to true and false, no behavior change either way). With no override at all, LM Studio defaults this model to thinking off, unlike raw llama.cpp's template default of thinking on/xhigh. reasoning_effort:'none' explicitly disables it."
+      lmstudioNative: "Untested for this family; existing code comment at src/engine/apis/lmstudio-native.ts:661-671 records the native SDK ignoring all thinking fields for every model tried as of SDK 1.5.0, which is why Clio routes this family over the HTTP port instead."
+    llamaCpp:
+      ctxSize: 131072
+      cacheTypeK: q8_0
+      cacheTypeV: q8_0
+      flashAttn: true
+      nGpuLayers: 99
+      parallel: 2
+      batchSize: 1024
+      ubatchSize: 256
+      mmproj: true
+      reasoning: "on"
+      reasoningEffort: medium
+      specType: draft-mtp
+      specDraftNMax: 1
+    thinking:
+      mechanism: effort-levels
+      effortByLevel:
+        low: low
+        medium: medium
+        high: xhigh
+        xhigh: xhigh
+      guidance: |
+        Official Qwen3.8-27B chat template (chat_template.jinja) validates
+        reasoning_effort against exactly {xhigh, medium, low} and raises a
+        fatal jinja exception (hard 500, not a graceful fallback) on anything
+        else, including minimal/high/max. The 27B card gives no /think or
+        /no_think soft switch for this model; unlike Qwen3, that idiom has no
+        effect here. Off must go through chat_template_kwargs.enable_thinking:
+        false, never through reasoning_effort. preserve_thinking should stay
+        on for an agentic harness (the template's own recommendation for
+        agent scenarios; improves KV cache reuse). llama.cpp's own
+        reasoning_effort:"none" also disables reasoning at the server layer
+        and is a separate mechanism from the template's enable_thinking flag;
+        both were verified independently on mini and on LM Studio's HTTP
+        port.
+    serving: "Qwen3.8-27B (unsloth/Qwen3.8-27B-GGUF), hybrid qwen3_5 architecture: 3 linear-attention (Gated DeltaNet) layers per 1 full-attention layer, so only 16 of 64 layers hold a conventional KV cache. Native ctx 262144, extensible to 1M via YaRN (out of scope for all three homelab nodes; leave rope at default). Tool calls use an XML <tool_call><function=...> form in the stock template; llama.cpp's qwen3_coder parser converts this to standard tool_calls JSON, verified live on mini, dynamo, and zbook. Only messages[0] may be a system message and only system/user/assistant/tool roles are accepted; a second system message or a developer role raises a template error."
 
 - family: gemma-4-31b-it-nvfp4-turbo
   matchPatterns:

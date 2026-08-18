@@ -107,7 +107,9 @@ function checkExportHygiene(): void {
 			}
 			if (hits === 1) dead.push(symbol);
 		}
-		if (dead.length > 0) fail("export-hygiene", `unnecessary export keyword in ${area}: ${dead.sort().join(", ")}`);
+		if (dead.length > 0) {
+			fail("export-hygiene", `unnecessary export keyword in ${area}: ${dead.sort().join(", ")}`);
+		}
 	}
 }
 
@@ -130,7 +132,9 @@ function checkBoundaries(): void {
 	const fixtureDirs: string[] = [];
 	try {
 		const real = runBoundaryCheck(root);
-		if (real.violations.length > 0) fail("boundaries", `violations across src/:\n  ${real.violations.join("\n  ")}`);
+		if (real.violations.length > 0) {
+			fail("boundaries", `violations across src/:\n  ${real.violations.join("\n  ")}`);
+		}
 
 		const cases: ReadonlyArray<{ name: string; files: Record<string, string>; expectRule: string | null }> = [
 			{
@@ -229,12 +233,16 @@ function checkBoundaries(): void {
 			} else if (!result.violations.some((v) => v.includes(testCase.expectRule as string))) {
 				fail(
 					"boundaries",
-					`fixture "${testCase.name}" expected a ${testCase.expectRule} violation, got:\n  ${result.violations.join("\n  ")}`,
+					`fixture "${testCase.name}" expected a ${testCase.expectRule} violation, got:\n  ${result.violations.join(
+						"\n  ",
+					)}`,
 				);
 			}
 		}
 	} finally {
-		for (const dir of fixtureDirs) rmSync(dir, { recursive: true, force: true });
+		for (const dir of fixtureDirs) {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	}
 }
 
@@ -256,7 +264,11 @@ interface WorkflowJob {
 }
 
 function packageScripts(): Record<string, string> {
-	return (JSON.parse(readRoot("package.json")) as { scripts: Record<string, string> }).scripts;
+	return (
+		JSON.parse(readRoot("package.json")) as {
+			scripts: Record<string, string>;
+		}
+	).scripts;
 }
 
 function workflow(relPath: string): Record<string, unknown> {
@@ -282,14 +294,18 @@ function matrixValues(relPath: string, jobId: string, key: string): unknown[] {
 function checkCiScripts(): void {
 	// Both runtime identity fragments must be exact package resources the
 	// release gate requires.
-	const manifestFiles = (JSON.parse(readRoot("scripts/release-manifest.json")) as { requiredFiles: string[] })
-		.requiredFiles;
+	const manifestFiles = (
+		JSON.parse(readRoot("scripts/release-manifest.json")) as {
+			requiredFiles: string[];
+		}
+	).requiredFiles;
 	for (const fragment of [
 		"src/domains/prompts/fragments/identity/clio.md",
 		"src/domains/prompts/fragments/identity/clio-worker.md",
 	]) {
-		if (!manifestFiles.includes(fragment))
+		if (!manifestFiles.includes(fragment)) {
 			fail("ci-scripts", `scripts/release-manifest.json requiredFiles must include ${fragment}`);
+		}
 	}
 
 	// The release gate's own recipe frontmatter allowlist must not drift from
@@ -324,8 +340,9 @@ function checkCiScripts(): void {
 	// release-relevant checks.
 	const scripts = packageScripts();
 	const expectScript = (name: string, expected: string) => {
-		if (scripts[name] !== expected)
+		if (scripts[name] !== expected) {
 			fail("ci-scripts", `package.json scripts.${name} must be "${expected}", got "${scripts[name]}"`);
+		}
 	};
 	expectScript(
 		"ci",
@@ -335,10 +352,12 @@ function checkCiScripts(): void {
 	expectScript("ci:release", "npm run ci && node scripts/check-release.mjs");
 	expectScript("test:live", "node scripts/live-smoke.mjs");
 	expectScript("test:repeat", "node tests/harness/repeat-tests.mjs");
-	if (!scripts["test:coverage"]?.includes("--experimental-test-coverage"))
+	if (!scripts["test:coverage"]?.includes("--experimental-test-coverage")) {
 		fail("ci-scripts", "scripts.test:coverage must set --experimental-test-coverage");
-	if (!scripts["test:coverage"]?.includes("--test-coverage-include='src/**/*.ts'"))
+	}
+	if (!scripts["test:coverage"]?.includes("--test-coverage-include='src/**/*.ts'")) {
 		fail("ci-scripts", "scripts.test:coverage must scope coverage to src/**/*.ts");
+	}
 	expectScript("prepublishOnly", "npm run ci:release");
 
 	// Hosted CI is one job. The node-version matrix applies to the same work
@@ -348,12 +367,15 @@ function checkCiScripts(): void {
 	const ciSteps = workflowJob(".github/workflows/ci.yml", "ci").steps;
 	const setupNode = ciSteps.find((step) => step.uses === "actions/setup-node@v6");
 	const nodeVersions = matrixValues(".github/workflows/ci.yml", "ci", "node-version");
-	if (JSON.stringify(nodeVersions) !== JSON.stringify([22, 24]))
+	if (JSON.stringify(nodeVersions) !== JSON.stringify([22, 24])) {
 		fail("ci-scripts", `ci.yml matrix node-version must be [22, 24], got ${JSON.stringify(nodeVersions)}`);
-	if (setupNode?.with?.["node-version"] !== "$" + "{{ matrix.node-version }}")
+	}
+	if (setupNode?.with?.["node-version"] !== "$" + "{{ matrix.node-version }}") {
 		fail("ci-scripts", "ci.yml setup-node must read node-version from the matrix");
-	if (ciCommands.includes("npm run test:live"))
+	}
+	if (ciCommands.includes("npm run test:live")) {
 		fail("ci-scripts", "ordinary CI must not run live/model-dependent smoke tests");
+	}
 	// A check runs on every node lane, because runtime behavior can differ
 	// between versions and a check pinned to one lane leaves the other
 	// unverified. A report describes the suite rather than a runtime, so
@@ -362,28 +384,38 @@ function checkCiScripts(): void {
 	// that adding a second pinned step is a deliberate edit to this list.
 	const REPORT_STEPS = new Set(["Tests with coverage summary"]);
 	const gatedSteps = ciSteps.filter((step) => typeof step.if === "string" && !REPORT_STEPS.has(step.name ?? ""));
-	if (gatedSteps.length > 0)
+	if (gatedSteps.length > 0) {
 		fail(
 			"ci-scripts",
 			`no ci.yml check may gate on matrix.node-version: ${gatedSteps.map((step) => step.name ?? step.run).join(", ")}`,
 		);
+	}
 	const gateStep = ciSteps.find((step) => step.run === "npm run ci:release");
-	if (!gateStep) fail("ci-scripts", "ci.yml must run the full release gate on every lane");
+	if (!gateStep) {
+		fail("ci-scripts", "ci.yml must run the full release gate on every lane");
+	}
 	const coverageStep = ciSteps.find((step) => step.run?.includes("npm run test:coverage"));
-	if (!coverageStep) fail("ci-scripts", "ci.yml must run the coverage-instrumented suite");
-	if (!coverageStep?.run?.includes("set -o pipefail"))
+	if (!coverageStep) {
+		fail("ci-scripts", "ci.yml must run the coverage-instrumented suite");
+	}
+	if (!coverageStep?.run?.includes("set -o pipefail")) {
 		fail("ci-scripts", "the coverage run must set -o pipefail so tee cannot mask a failing suite");
+	}
 	const repeatStep = ciSteps.find((step) => step.run === "npm run test:repeat");
-	if (!repeatStep) fail("ci-scripts", "ci.yml must run the shuffled repeat lane on every lane");
-	if (ciCommands.includes("npm run test") || ciCommands.includes("npm run build"))
+	if (!repeatStep) {
+		fail("ci-scripts", "ci.yml must run the shuffled repeat lane on every lane");
+	}
+	if (ciCommands.includes("npm run test") || ciCommands.includes("npm run build")) {
 		fail("ci-scripts", "no ci.yml step may run the plain suite or build outside npm run ci:release");
+	}
 
 	// Release triggers from version tags and refuses a tag that disagrees with
 	// package.json.
 	const release = workflow(".github/workflows/release.yml");
 	const trigger = release.on as { push?: { tags?: unknown } };
-	if (JSON.stringify(trigger.push?.tags) !== JSON.stringify(["v*"]))
+	if (JSON.stringify(trigger.push?.tags) !== JSON.stringify(["v*"])) {
 		fail("ci-scripts", "release.yml must trigger on v* tags only");
+	}
 	const releaseCommands = runCommands(".github/workflows/release.yml", "release");
 	if (!releaseCommands.some((command) => command.includes("does not match tag"))) {
 		fail("ci-scripts", "release.yml must refuse a tag that disagrees with package.json's version");
@@ -397,21 +429,30 @@ function checkCiScripts(): void {
 		...Object.keys(releaseJob.permissions ?? {}),
 	];
 	for (const step of releaseJob.steps) {
-		if ((step.run ?? "").includes("npm publish")) fail("ci-scripts", `no release step may publish: ${step.run}`);
-		if ((step.uses ?? "").includes("npm publish")) fail("ci-scripts", `no release action may publish: ${step.uses}`);
-		if ("registry-url" in (step.with ?? {}))
+		if ((step.run ?? "").includes("npm publish")) {
+			fail("ci-scripts", `no release step may publish: ${step.run}`);
+		}
+		if ((step.uses ?? "").includes("npm publish")) {
+			fail("ci-scripts", `no release action may publish: ${step.uses}`);
+		}
+		if ("registry-url" in (step.with ?? {})) {
 			fail("ci-scripts", `no release step may point setup-node at a registry: ${step.uses}`);
+		}
 	}
-	if (permissions.includes("id-token"))
+	if (permissions.includes("id-token")) {
 		fail("ci-scripts", `release.yml must not request an OIDC token, has: ${permissions.join(", ")}`);
+	}
 
 	// Live smoke stays local/operator-run, never in hosted CI or release.
-	if (existsSync(join(root, ".github/workflows/live-smoke.yml")))
+	if (existsSync(join(root, ".github/workflows/live-smoke.yml"))) {
 		fail("ci-scripts", "live smoke must stay local/operator-run, no .github/workflows/live-smoke.yml");
-	if (ciCommands.some((command) => command.includes("test:live")))
+	}
+	if (ciCommands.some((command) => command.includes("test:live"))) {
 		fail("ci-scripts", "ordinary CI must not run live smoke");
-	if (releaseCommands.some((command) => command.includes("test:live")))
+	}
+	if (releaseCommands.some((command) => command.includes("test:live"))) {
 		fail("ci-scripts", "release CI must not run live smoke");
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -455,7 +496,9 @@ const OPAQUE_SETTINGS_PATHS = new Set([
 
 function leafPaths(value: unknown, prefix = ""): string[] {
 	if (prefix.length > 0 && OPAQUE_SETTINGS_PATHS.has(prefix)) return [prefix];
-	if (value === null || typeof value !== "object" || Array.isArray(value)) return prefix.length > 0 ? [prefix] : [];
+	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+		return prefix.length > 0 ? [prefix] : [];
+	}
 	const entries = Object.entries(value as Record<string, unknown>);
 	if (entries.length === 0) return prefix.length > 0 ? [prefix] : [];
 	return entries.flatMap(([key, child]) => leafPaths(child, prefix ? `${prefix}.${key}` : key));
@@ -464,7 +507,9 @@ function leafPaths(value: unknown, prefix = ""): string[] {
 function settingsInventorySection(): string {
 	const doc = readRoot("docs/configuration-and-targets.md");
 	const start = doc.indexOf("## Settings inventory");
-	if (start < 0) throw new Error("docs/configuration-and-targets.md has no ## Settings inventory section");
+	if (start < 0) {
+		throw new Error("docs/configuration-and-targets.md has no ## Settings inventory section");
+	}
 	const end = doc.indexOf("\n## ", start + 1);
 	return doc.slice(start, end === -1 ? undefined : end);
 }
@@ -473,8 +518,9 @@ function checkSettingsInventory(): void {
 	const section = settingsInventorySection();
 
 	const missing = leafPaths(DEFAULT_SETTINGS).filter((path) => !section.includes(`| \`${path}\` |`));
-	if (missing.length > 0)
+	if (missing.length > 0) {
 		fail("settings-inventory", `docs/configuration-and-targets.md has no inventory row for:\n  ${missing.join("\n  ")}`);
+	}
 
 	// Spot-checked across the value shapes a row can carry, including the one
 	// that had diverged from its policy fallback and the two that read as a
@@ -498,17 +544,21 @@ function checkSettingsInventory(): void {
 			fail("settings-inventory", `no inventory row for ${path}`);
 			continue;
 		}
-		if (!row.includes(expected))
+		if (!row.includes(expected)) {
 			fail("settings-inventory", `${path} should document its default as ${expected}, row reads: ${row}`);
+		}
 	}
 
 	// Scoped to the inventory section; the page carries other tables whose
 	// first column is also a backticked lowercase word.
 	const rows = section.split("\n").filter((line) => /^\| `[a-z]/.test(line));
-	if (rows.length < 40)
+	if (rows.length < 40) {
 		fail("settings-inventory", `expected the inventory to have at least 40 rows, found ${rows.length}`);
+	}
 	const vague = rows.filter((row) => !/(immediately|next turn|next session|next dispatch|restart)/.test(row));
-	if (vague.length > 0) fail("settings-inventory", `inventory rows with no effect timing:\n  ${vague.join("\n  ")}`);
+	if (vague.length > 0) {
+		fail("settings-inventory", `inventory rows with no effect timing:\n  ${vague.join("\n  ")}`);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -569,8 +619,9 @@ function checkEnvironmentVariableInventory(): void {
 
 	// Both were read as on/off toggles because they sit beside seven that are.
 	// Setting either to `1` writes a file called `1` in the working directory.
-	if (!doc.includes("These two take a path, not `1`"))
+	if (!doc.includes("These two take a path, not `1`")) {
 		fail("environment-variable-inventory", "the path-not-toggle exception must be stated");
+	}
 	if (!doc.includes("CLIO_CODER_RENDER_TRACE") || !doc.includes("CLIO_CODER_MEMORY_TRACE")) {
 		fail(
 			"environment-variable-inventory",
@@ -579,8 +630,9 @@ function checkEnvironmentVariableInventory(): void {
 	}
 
 	const memoryTraceRow = doc.split("\n").find((line) => line.includes("`CLIO_CODER_MEMORY_TRACE`"));
-	if (memoryTraceRow === undefined) fail("environment-variable-inventory", "CLIO_CODER_MEMORY_TRACE has no row");
-	else if (!memoryTraceRow.includes("content-bearing")) {
+	if (memoryTraceRow === undefined) {
+		fail("environment-variable-inventory", "CLIO_CODER_MEMORY_TRACE has no row");
+	} else if (!memoryTraceRow.includes("content-bearing")) {
 		fail(
 			"environment-variable-inventory",
 			`the CLIO_CODER_MEMORY_TRACE row must state it carries conversation text: ${memoryTraceRow}`,
@@ -615,24 +667,30 @@ function checkThemeDiscipline(): void {
 	const interactiveRoot = join(root, "src/interactive");
 	const sources = collectInteractiveSources(interactiveRoot)
 		.sort()
-		.map((path) => ({ path: relative(interactiveRoot, path), text: readFileSync(path, "utf8") }));
+		.map((path) => ({
+			path: relative(interactiveRoot, path),
+			text: readFileSync(path, "utf8"),
+		}));
 
 	if (sources.length === 0) {
 		fail("theme-discipline", "expected to find interactive source files to scan");
 		return;
 	}
 	const sgrOffenders = sources.filter((file) => SGR_ESCAPE.test(file.text)).map((file) => file.path);
-	if (sgrOffenders.length > 0)
+	if (sgrOffenders.length > 0) {
 		fail("theme-discipline", `raw SGR escape sequences found outside theme/ in: ${sgrOffenders.join(", ")}`);
+	}
 	const fragmentOffenders = sources.filter((file) => SGR_COLOR_FRAGMENT.test(file.text)).map((file) => file.path);
-	if (fragmentOffenders.length > 0)
+	if (fragmentOffenders.length > 0) {
 		fail(
 			"theme-discipline",
 			`SGR color fragments (38;2;/48;2;/38;5;/48;5;) found outside theme/ in: ${fragmentOffenders.join(", ")}`,
 		);
+	}
 	const hexOffenders = sources.filter((file) => HEX_COLOR.test(file.text)).map((file) => file.path);
-	if (hexOffenders.length > 0)
+	if (hexOffenders.length > 0) {
 		fail("theme-discipline", `hex colors found outside theme/ in: ${hexOffenders.join(", ")}`);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -643,14 +701,17 @@ function checkThemeDiscipline(): void {
 function installerBinDir(): string {
 	const script = readRoot("scripts/install-local.sh");
 	const binDir = script.match(/^bin_dir=.*\$\{CLIO_CODER_BIN_DIR:-(?<fallback>[^}]+)\}/mu)?.groups?.fallback;
-	if (!binDir) throw new Error("scripts/install-local.sh no longer has a default bin dir");
+	if (!binDir) {
+		throw new Error("scripts/install-local.sh no longer has a default bin dir");
+	}
 	return binDir;
 }
 
 function installerExportLine(): string {
 	const script = readRoot("scripts/install-local.sh");
-	if (!/export PATH="%s:\$PATH"/.test(script))
+	if (!/export PATH="%s:\$PATH"/.test(script)) {
 		throw new Error("scripts/install-local.sh no longer prints an export PATH line");
+	}
 	return `export PATH="${installerBinDir()}:$PATH"`;
 }
 
@@ -659,12 +720,17 @@ function readmeBashBlockAfter(marker: string): string[] {
 	const heading = readme.indexOf("## Install");
 	if (heading < 0) throw new Error("README.md has no ## Install section");
 	const anchor = readme.findIndex((line, index) => index > heading && line.startsWith(marker));
-	if (anchor <= heading)
+	if (anchor <= heading) {
 		throw new Error(`the Install section no longer introduces its steps with ${JSON.stringify(marker)}`);
+	}
 	const open = readme.indexOf("```bash", anchor);
-	if (open <= anchor) throw new Error(`${JSON.stringify(marker)} does not open a shell block`);
+	if (open <= anchor) {
+		throw new Error(`${JSON.stringify(marker)} does not open a shell block`);
+	}
 	const close = readme.indexOf("```", open + 1);
-	if (close <= open) throw new Error(`the shell block after ${JSON.stringify(marker)} is never closed`);
+	if (close <= open) {
+		throw new Error(`the shell block after ${JSON.stringify(marker)} is never closed`);
+	}
 	return readme.slice(open + 1, close);
 }
 
@@ -676,7 +742,9 @@ function readmeNpmBlock(): string[] {
 	const readme = readRoot("README.md").split(/\r?\n/);
 	for (let open = readme.indexOf("```bash"); open >= 0; open = readme.indexOf("```bash", open + 1)) {
 		const close = readme.indexOf("```", open + 1);
-		if (close <= open) throw new Error("README.md has a shell block that is never closed");
+		if (close <= open) {
+			throw new Error("README.md has a shell block that is never closed");
+		}
 		const block = readme.slice(open + 1, close);
 		if (block.some((line) => line.startsWith("npm install -g"))) return block;
 	}
@@ -689,7 +757,10 @@ function runProcess(
 	env: Record<string, string>,
 ): Promise<{ status: number | null; output: string }> {
 	return new Promise((resolvePromise) => {
-		const child = spawn(command, args, { cwd: root, env: { ...process.env, ...env } });
+		const child = spawn(command, args, {
+			cwd: root,
+			env: { ...process.env, ...env },
+		});
 		let output = "";
 		child.stdout.on("data", (chunk) => (output += chunk));
 		child.stderr.on("data", (chunk) => (output += chunk));
@@ -698,12 +769,17 @@ function runProcess(
 }
 
 async function checkReadmeInstallBlock(): Promise<void> {
-	const pkg = JSON.parse(readRoot("package.json")) as { name: string; version: string };
+	const pkg = JSON.parse(readRoot("package.json")) as {
+		name: string;
+		version: string;
+	};
 
 	const npmInstall = readmeNpmBlock().find((line) => line.includes("npm install"));
-	if (!npmInstall) fail("readme-install-block", "the npm block no longer installs the package");
-	else if (!npmInstall.includes(pkg.name))
+	if (!npmInstall) {
+		fail("readme-install-block", "the npm block no longer installs the package");
+	} else if (!npmInstall.includes(pkg.name)) {
 		fail("readme-install-block", `the npm block must install ${pkg.name}: ${npmInstall}`);
+	}
 
 	const block = readmeInstallBlock();
 	const expectedExport = installerExportLine();
@@ -716,16 +792,19 @@ async function checkReadmeInstallBlock(): Promise<void> {
 
 	const exportedAt = block.findIndex((line) => line.startsWith("export PATH="));
 	const versionAt = block.findIndex((line) => line.includes("--version"));
-	if (versionAt < 0) fail("readme-install-block", "the block no longer verifies the install");
-	else if (!(exportedAt < versionAt))
+	if (versionAt < 0) {
+		fail("readme-install-block", "the block no longer verifies the install");
+	} else if (!(exportedAt < versionAt)) {
 		fail("readme-install-block", "the export has to come before the command that resolves through PATH");
+	}
 
 	// The block cloned the default branch and never left it, so a stranger
 	// following the README installed whatever was on main that day rather than
 	// the release the rest of the page documents.
 	const clone = block.find((line) => line.includes("git clone"));
-	if (!clone) fail("readme-install-block", "the block no longer clones the repository");
-	else if (!clone.includes(`--branch v${pkg.version}`)) {
+	if (!clone) {
+		fail("readme-install-block", "the block no longer clones the repository");
+	} else if (!clone.includes(`--branch v${pkg.version}`)) {
 		fail("readme-install-block", `the clone must pin v${pkg.version}, the version package.json declares: ${clone}`);
 	}
 
@@ -733,14 +812,16 @@ async function checkReadmeInstallBlock(): Promise<void> {
 	// install earlier on it. The installer warns about exactly that shadowing;
 	// the README's own verification step must not walk into it.
 	const verify = block.find((line) => line.includes("--version"));
-	if (!verify) fail("readme-install-block", "the block no longer verifies the install");
-	else {
+	if (!verify) {
+		fail("readme-install-block", "the block no longer verifies the install");
+	} else {
 		if (!(verify.includes("/clio") && !/^clio-coder --version/u.test(verify.trim()))) {
 			fail("readme-install-block", `verification must name the installed launcher by path: ${verify}`);
 		}
 		const binDir = installerBinDir();
-		if (!verify.includes(binDir))
+		if (!verify.includes(binDir)) {
 			fail("readme-install-block", `verification must be the path the installer links (${binDir}): ${verify}`);
+		}
 	}
 
 	// The README must ask which file the bare name reaches rather than compare
@@ -748,8 +829,9 @@ async function checkReadmeInstallBlock(): Promise<void> {
 	// just installed.
 	const readme = readRoot("README.md");
 	const section = readme.slice(readme.indexOf("## Install"), readme.indexOf("To remove it"));
-	if (!section.includes("command -v clio-coder"))
+	if (!section.includes("command -v clio-coder")) {
 		fail("readme-install-block", "the README no longer asks which file the bare name reaches");
+	}
 	if (/`clio-coder --version` and\s+`[^`]*\/clio" --version` agree/u.test(section)) {
 		fail(
 			"readme-install-block",
@@ -782,15 +864,25 @@ async function checkReadmeInstallBlock(): Promise<void> {
 
 		const dryRunArgs = ["scripts/install-local.sh", "--dry-run", "--skip-deps", "--no-build"];
 		const [run, sameInstall] = await Promise.all([
-			runProcess("bash", dryRunArgs, { PATH: `${shadowDir}:${process.env.PATH ?? ""}`, CLIO_CODER_BIN_DIR: binDir }),
-			runProcess("bash", dryRunArgs, { PATH: `${linked}:${process.env.PATH ?? ""}`, CLIO_CODER_BIN_DIR: binDir }),
+			runProcess("bash", dryRunArgs, {
+				PATH: `${shadowDir}:${process.env.PATH ?? ""}`,
+				CLIO_CODER_BIN_DIR: binDir,
+			}),
+			runProcess("bash", dryRunArgs, {
+				PATH: `${linked}:${process.env.PATH ?? ""}`,
+				CLIO_CODER_BIN_DIR: binDir,
+			}),
 		]);
 
-		if (run.status !== 0) fail("readme-install-block", `install-local.sh --dry-run should succeed: ${run.output}`);
-		if (!run.output.includes(`another clio-coder is on your PATH at ${shadow}`))
+		if (run.status !== 0) {
+			fail("readme-install-block", `install-local.sh --dry-run should succeed: ${run.output}`);
+		}
+		if (!run.output.includes(`another clio-coder is on your PATH at ${shadow}`)) {
 			fail("readme-install-block", `installer must name the shadowing clio-coder: ${run.output}`);
-		if (!run.output.includes(`check it with: ${shadow} --version`))
+		}
+		if (!run.output.includes(`check it with: ${shadow} --version`)) {
 			fail("readme-install-block", `installer must say how to identify the shadowing clio-coder: ${run.output}`);
+		}
 
 		if (sameInstall.output.includes("another clio-coder is on your PATH")) {
 			fail(
@@ -817,7 +909,9 @@ function shippedBy(packageFiles: string[], path: string): boolean {
 	for (const pattern of packageFiles) {
 		if (pattern.startsWith("!")) continue;
 		if (pattern === path) return true;
-		if (pattern.endsWith("/**") && path.startsWith(pattern.slice(0, -2))) return true;
+		if (pattern.endsWith("/**") && path.startsWith(pattern.slice(0, -2))) {
+			return true;
+		}
 		if (!pattern.includes("*") && path.startsWith(`${pattern}/`)) return true;
 		const star = pattern.indexOf("*");
 		if (star !== -1 && !pattern.includes("**")) {
@@ -853,15 +947,18 @@ function typescriptSources(dir: string): string[] {
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
 		const abs = join(dir, entry.name);
 		if (entry.isDirectory()) out.push(...typescriptSources(abs));
-		else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) out.push(abs);
+		else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
+			out.push(abs);
+		}
 	}
 	return out;
 }
 
 function isPathJoiner(expression: ts.Expression): boolean {
 	if (ts.isIdentifier(expression)) return PATH_JOINERS.has(expression.text);
-	if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.name))
+	if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.name)) {
 		return PATH_JOINERS.has(expression.name.text);
+	}
 	return false;
 }
 
@@ -924,9 +1021,9 @@ function packageRootUses(absolute: string): { joined: PackageRootUse[]; rootOnly
 			const segments: string[] = [];
 			for (const argument of node.arguments.slice(1)) {
 				if (ts.isStringLiteral(argument)) segments.push(argument.text);
-				else if (ts.isIdentifier(argument) && stringConstants.has(argument.text))
+				else if (ts.isIdentifier(argument) && stringConstants.has(argument.text)) {
 					segments.push(stringConstants.get(argument.text) as string);
-				else break;
+				} else break;
 			}
 			joined.push({
 				file,
@@ -960,15 +1057,17 @@ function checkPackaging(): void {
 	const packageFiles = (JSON.parse(readRoot("package.json")) as { files: string[] }).files;
 
 	const missingFiles = manifest.requiredFiles.filter((file) => !shippedBy(packageFiles, file));
-	if (missingFiles.length > 0)
+	if (missingFiles.length > 0) {
 		fail("packaging", `release gate requires files the package.json allowlist does not ship: ${missingFiles.join(", ")}`);
+	}
 
 	const missingPrefixes = manifest.requiredPrefixes.filter((prefix) => !shippedBy(packageFiles, `${prefix}probe`));
-	if (missingPrefixes.length > 0)
+	if (missingPrefixes.length > 0) {
 		fail(
 			"packaging",
 			`release gate requires trees the package.json allowlist does not ship: ${missingPrefixes.join(", ")}`,
 		);
+	}
 
 	// A gitignored path is generated runtime state: npm packs from the working
 	// tree, so shipping one publishes whatever the release machine happened to
@@ -976,12 +1075,16 @@ function checkPackaging(): void {
 	const candidates = [...new Set([...manifest.requiredFiles, ...packageFiles.filter((f) => !f.startsWith("!"))])];
 	const ignored = gitIgnored(candidates.filter((path) => !path.includes("*")));
 	const offenders = [...ignored].filter((path) => path !== "dist" && !path.startsWith("dist/"));
-	if (offenders.length > 0) fail("packaging", `gitignored generated state on the publish path: ${offenders.join(", ")}`);
+	if (offenders.length > 0) {
+		fail("packaging", `gitignored generated state on the publish path: ${offenders.join(", ")}`);
+	}
 
 	const absent = manifest.requiredFiles
 		.filter((file) => !file.startsWith("dist/"))
 		.filter((file) => !existsSync(join(root, file)));
-	if (absent.length > 0) fail("packaging", `release gate requires files absent from the checkout: ${absent.join(", ")}`);
+	if (absent.length > 0) {
+		fail("packaging", `release gate requires files absent from the checkout: ${absent.join(", ")}`);
+	}
 
 	// `resolvePackageRoot()` returns the installed package root, so every path
 	// built on it is a claim that the tarball carries that path. Read the
@@ -1000,18 +1103,23 @@ function checkPackaging(): void {
 			if (NPM_IMPLICIT_FILES.has(use.path)) continue;
 			const looksLikeFile = /\.[A-Za-z0-9]+$/.test(use.path);
 			const shipped = looksLikeFile ? shippedBy(packageFiles, use.path) : shipsUnder(packageFiles, use.path);
-			if (!shipped) unshipped.push(`${use.file}:${use.line} resolves ${use.path}`);
+			if (!shipped) {
+				unshipped.push(`${use.file}:${use.line} resolves ${use.path}`);
+			}
 		}
 	}
-	if (unshipped.length > 0)
+	if (unshipped.length > 0) {
 		fail(
 			"packaging",
 			`src/ resolves paths from the package root that the package.json allowlist does not ship: ${unshipped.join("; ")}`,
 		);
+	}
 	if (unclassified.length > 0) {
 		fail(
 			"packaging",
-			`resolvePackageRoot() used as a bare directory outside ROOT_ONLY_RESOLVERS; resolve a literal path or record why the root itself is the resource: ${unclassified.join(", ")}`,
+			`resolvePackageRoot() used as a bare directory outside ROOT_ONLY_RESOLVERS; resolve a literal path or record why the root itself is the resource: ${unclassified.join(
+				", ",
+			)}`,
 		);
 	}
 
@@ -1019,12 +1127,15 @@ function checkPackaging(): void {
 	const scannedFiles = typescriptSources(join(root, "src")).filter((absolute) =>
 		readFileSync(absolute, "utf8").includes("resolvePackageRoot("),
 	);
-	if (scannedFiles.length < 10)
+	if (scannedFiles.length < 10) {
 		fail("packaging", `expected the package-root scanner to reach the known call sites, saw ${scannedFiles.length}`);
+	}
 	const resolved = scannedFiles.flatMap((absolute) =>
 		packageRootUses(absolute).joined.filter((use) => use.path !== null),
 	);
-	if (resolved.length < 10) fail("packaging", `expected literal package-root paths to resolve, saw ${resolved.length}`);
+	if (resolved.length < 10) {
+		fail("packaging", `expected literal package-root paths to resolve, saw ${resolved.length}`);
+	}
 
 	if (!readRoot("scripts/check-release.mjs").includes("release-manifest.json")) {
 		fail("packaging", "scripts/check-release.mjs must read the shared release-manifest.json rather than its own copy");
@@ -1191,11 +1302,14 @@ function checkPromptsDocLinks(): void {
 	}
 	const named = [...selfAwareness.body.matchAll(/docs\/[a-zA-Z0-9_-]+\.md/g)].map((m) => m[0]);
 	for (const docRel of named) {
-		if (!existsSync(join(root, docRel)))
+		if (!existsSync(join(root, docRel))) {
 			fail("prompts", `${docRel}, named in identity.self-awareness, must exist in the checkout`);
+		}
 	}
 	const pkg = JSON.parse(readRoot("package.json")) as { files: string[] };
-	if (!pkg.files.includes("docs/*.md")) fail("prompts", "package.json files must include docs/*.md");
+	if (!pkg.files.includes("docs/*.md")) {
+		fail("prompts", "package.json files must include docs/*.md");
+	}
 
 	// Corpus coverage: the directive promises every bundled doc is one call away.
 	const onDisk = readdirSync(join(root, "docs"))
@@ -1209,7 +1323,9 @@ function checkPromptsDocLinks(): void {
 	}
 	const listed = new Set((corpus.payload as { corpus: { files: string[] } }).corpus.files);
 	for (const docRel of onDisk) {
-		if (!listed.has(docRel)) fail("prompts", `${docRel} is in the checkout but not in the context(scope="docs") corpus`);
+		if (!listed.has(docRel)) {
+			fail("prompts", `${docRel} is in the checkout but not in the context(scope="docs") corpus`);
+		}
 	}
 }
 
@@ -1238,7 +1354,9 @@ for (const [name, check] of checks) {
 	} catch (error) {
 		fail(name, error instanceof Error ? error.message : String(error));
 	}
-	if (process.env.CHECK_HYGIENE_PROFILE) console.error(`${name}: ${(performance.now() - t0).toFixed(0)}ms`);
+	if (process.env.CHECK_HYGIENE_PROFILE) {
+		console.error(`${name}: ${(performance.now() - t0).toFixed(0)}ms`);
+	}
 }
 const elapsedMs = performance.now() - startedAt;
 

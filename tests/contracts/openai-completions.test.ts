@@ -1,9 +1,10 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "../../src/domains/providers/types/capability-flags.js";
 import { resetLlamaCppResidencyState } from "../../src/engine/apis/llamacpp-residency.js";
 import {
 	applyOpenAICompatReasoningEstimate,
@@ -340,6 +341,108 @@ describe("openai-completions thinking preservation", () => {
 		ok(captured, "onPayload should have captured the body");
 		strictEqual(captured.reasoning_effort, "medium");
 		strictEqual(Object.hasOwn(captured, "chat_template_kwargs"), false);
+	});
+
+	it("maps every Clio thinking level to Qwen3.8-safe wire fields and sampling", async () => {
+		const model = {
+			id: "Qwen3.8-27B",
+			name: "Qwen3.8-27B",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: "http://127.0.0.1:1/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 262144,
+			maxTokens: 32768,
+			compat: {
+				supportsStore: false,
+				supportsDeveloperRole: false,
+				supportsReasoningEffort: false,
+				supportsUsageInStreaming: true,
+				maxTokensField: "max_tokens",
+				supportsStrictMode: false,
+				thinkingFormat: "qwen-chat-template",
+			},
+			clio: {
+				targetId: "mini",
+				runtimeId: "llamacpp",
+				lifecycle: "user-managed",
+				quirks: {
+					thinking: {
+						mechanism: "effort-levels",
+						effortByLevel: { low: "low", medium: "medium", high: "xhigh", xhigh: "xhigh" },
+					},
+					sampling: {
+						thinking: {
+							temperature: 1,
+							topP: 0.95,
+							topK: 20,
+							minP: 0,
+							presencePenalty: 0,
+							repeatPenalty: 1,
+						},
+						instruct: {
+							temperature: 0.7,
+							topP: 0.8,
+							topK: 20,
+							minP: 0,
+							presencePenalty: 1.5,
+							repeatPenalty: 1,
+						},
+					},
+				},
+			},
+		} as unknown as Model<"openai-completions">;
+		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+		const cases: ReadonlyArray<{ level: ThinkingLevel; effort?: "low" | "medium" | "xhigh" }> = [
+			{ level: "off" },
+			{ level: "minimal", effort: "low" },
+			{ level: "low", effort: "low" },
+			{ level: "medium", effort: "medium" },
+			{ level: "high", effort: "xhigh" },
+			{ level: "xhigh", effort: "xhigh" },
+			{ level: "max", effort: "xhigh" },
+		];
+
+		for (const expected of cases) {
+			const controller = new AbortController();
+			let captured: Record<string, unknown> | undefined;
+			const stream = openAICompletionsApiProvider.streamSimple(model, context, {
+				apiKey: "fake-key",
+				...(expected.level === "off" ? {} : { reasoning: expected.level }),
+				signal: controller.signal,
+				onPayload: (payload) => {
+					captured = payload as Record<string, unknown>;
+					controller.abort();
+					return undefined;
+				},
+			});
+			try {
+				for await (const _event of stream) {
+					// Drain; the request aborts after the fully composed payload is captured.
+				}
+			} catch {
+				// An aborted request may surface as an error/throw assertion.
+			}
+
+			ok(captured, `${expected.level} should reach onPayload`);
+			strictEqual(captured.reasoning_effort, expected.effort, `${expected.level} reasoning_effort`);
+			deepStrictEqual(
+				captured.chat_template_kwargs,
+				expected.level === "off"
+					? { enable_thinking: false, preserve_thinking: true }
+					: { enable_thinking: true, preserve_thinking: true },
+				`${expected.level} chat_template_kwargs`,
+			);
+			const thinkingActive = expected.level !== "off";
+			strictEqual(captured.temperature, thinkingActive ? 1 : 0.7, `${expected.level} temperature`);
+			strictEqual(captured.top_p, thinkingActive ? 0.95 : 0.8, `${expected.level} top_p`);
+			strictEqual(captured.top_k, 20, `${expected.level} top_k`);
+			strictEqual(captured.min_p, 0, `${expected.level} min_p`);
+			strictEqual(captured.presence_penalty, thinkingActive ? 0 : 1.5, `${expected.level} presence_penalty`);
+			strictEqual(captured.repeat_penalty, 1, `${expected.level} repeat_penalty`);
+		}
 	});
 
 	it("awaits llama.cpp router residency before constructing the chat payload", async () => {

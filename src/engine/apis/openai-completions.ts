@@ -156,7 +156,9 @@ function withStrippedPartial<TEvent extends AssistantMessageEvent>(event: TEvent
  * Apply thinking-mechanism payload mutations to an openai-compat request body
  * after the catalog sampler is in place. Each mechanism owns the wire fields
  * it touches:
- *   - `effort-levels` writes `reasoning_effort` when the family resolved one.
+ *   - `effort-levels` writes `reasoning_effort` when the family resolved one;
+ *     off also carries `chat_template_kwargs.enable_thinking=false` for strict
+ *     templates whose effort vocabulary has no off value.
  *   - `budget-tokens` writes a vendor-specific budget object when the family
  *     declares a `thinkingFormat` of `anthropic-extended`; otherwise the
  *     budget remains informational and surfaces through the prompt only.

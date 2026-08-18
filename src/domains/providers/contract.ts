@@ -85,8 +85,12 @@ export interface ProvidersContract {
 	/** Live liveness + probeModels sweep. */
 	probeAllLive(): Promise<void>;
 
-	/** Probe a single target live. Null when the id is not in settings.targets. */
-	probeTarget(id: string): Promise<TargetStatus | null>;
+	/**
+	 * Probe a single target live. Null when the id is not in settings.targets.
+	 * `reasoning: false` skips an inference-based reasoning-capability probe while
+	 * retaining the target's liveness and model-catalog checks.
+	 */
+	probeTarget(id: string, options?: { reasoning?: boolean }): Promise<TargetStatus | null>;
 
 	/** Clear in-memory live connection state for a configured target. */
 	disconnectTarget(id: string): TargetStatus | null;

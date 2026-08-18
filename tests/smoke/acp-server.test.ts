@@ -395,12 +395,31 @@ describe("clio-coder acp real-server smoke", { concurrency: false }, () => {
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
 			const client = launch(testEnv());
-			const init = await client.request<{ protocolVersion: number; agentInfo: { name: string } }>("initialize", {
+			const init = await client.request<{
+				protocolVersion: number;
+				agentInfo: { name: string };
+				agentCapabilities: { loadSession: boolean; _meta: Record<string, unknown> };
+			}>("initialize", {
 				protocolVersion: 1,
 				clientInfo: { name: "acp-e2e", version: "1" },
 			});
 			strictEqual(init.protocolVersion, 1);
 			strictEqual(init.agentInfo.name, "clio-coder");
+			strictEqual(init.agentCapabilities.loadSession, true);
+			deepStrictEqual(init.agentCapabilities._meta["clio-coder/session"], {
+				close: true,
+				list: true,
+				label: true,
+				delete: true,
+				autonomy: true,
+			});
+			deepStrictEqual(init.agentCapabilities._meta["clio-coder/settings"], {
+				get_safe: true,
+				patch_safe: true,
+			});
+			deepStrictEqual(init.agentCapabilities._meta["clio-coder/targets"], { list: true, probe: true });
+			ok(isRecord(init.agentCapabilities._meta["clio-coder/events"]));
+			strictEqual(init.agentCapabilities._meta["clio-coder/tools"], "mediated");
 			const session = await client.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] });
 			ok(session.sessionId.length > 0 && session.sessionId.length <= 128, `sessionId=${session.sessionId}`);
 			const prompt = await client.request<{ stopReason: string; _meta?: Record<string, unknown> }>("session/prompt", {

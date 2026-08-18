@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { isSkillActivation } from "../../src/core/skill-activation.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import { isSessionEntry, isSessionHeader, type SkillActivationEntry } from "../../src/domains/session/entries.js";
+import {
+	isSessionEntry,
+	isSessionHeader,
+	type SessionInfoEntry,
+	type SkillActivationEntry,
+} from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import {
 	appendPromptCompileRecord,
@@ -472,6 +477,27 @@ describe("contracts/persistence", () => {
 		);
 	});
 
+	it("persists session names as session-wide metadata for current and off-current sessions", async () => {
+		const contract = createSessionBundle(stubContext()).contract;
+		const first = contract.create({ cwd: scratch });
+		contract.setName("First session");
+		const second = contract.create({ cwd: scratch });
+
+		contract.setName("Renamed first session", first.id);
+		contract.setName("Second session", second.id);
+
+		const namesFor = (sessionId: string): string[] =>
+			openSession(sessionId)
+				.turns()
+				.filter((entry): entry is SessionInfoEntry => isSessionEntry(entry) && entry.kind === "sessionInfo")
+				.map((entry) => entry.name ?? "");
+		deepStrictEqual(namesFor(first.id), ["First session", "Renamed first session"]);
+		deepStrictEqual(namesFor(second.id), ["Second session"]);
+		strictEqual(contract.history().find((meta) => meta.id === first.id)?.name, "Renamed first session");
+		strictEqual(contract.history().find((meta) => meta.id === second.id)?.name, "Second session");
+		await contract.close();
+	});
+
 	it("reopens the append fd after replaceEntries so later appends land in the new file", () => {
 		const { meta, writer } = createSession({ cwd: scratch });
 		const turn = (id: string, text: string): ClioTurnRecord => ({
@@ -596,5 +622,22 @@ describe("contracts/persistence", () => {
 		const u3 = contract.append({ parentId, kind: "user", payload: { text: "alternate branch" } });
 		strictEqual(u3.parentId, a1.id);
 		strictEqual(contract.tree().leafId, u3.id);
+	});
+
+	it("reports a closed session's persisted branch pin instead of its abandoned newest leaf", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+
+		const meta = contract.create({ cwd: scratch });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "first question" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "first reply" } });
+		const abandoned = contract.append({ parentId: a1.id, kind: "user", payload: { text: "abandoned branch" } });
+		strictEqual(contract.tree().leafId, abandoned.id);
+
+		contract.switchTurn(a1.id);
+		await contract.close();
+
+		strictEqual(contract.current(), null);
+		strictEqual(contract.tree(meta.id).leafId, a1.id);
 	});
 });

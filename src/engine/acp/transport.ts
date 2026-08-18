@@ -171,7 +171,8 @@ function jsonRpcError(id: string | number | null, code: number, message: string,
  */
 function handlerErrorFrame(id: string | number, err: unknown, diagnostics?: (line: string) => void): AcpJsonRpcFailure {
 	if (err instanceof AcpRequestError) {
-		return jsonRpcError(id, err.rpcCode, acpErrorMessage(err.message), acpErrorData(err.detail));
+		const message = err.detail.code === "internal_error" ? ACP_INTERNAL_ERROR_MESSAGE : acpErrorMessage(err.message);
+		return jsonRpcError(id, err.rpcCode, message, acpErrorData(err.detail));
 	}
 	diagnostics?.(`internal error: ${acpErrorMessage(err)}`);
 	return jsonRpcError(id, -32000, ACP_INTERNAL_ERROR_MESSAGE, acpErrorData({ code: "internal_error" }));

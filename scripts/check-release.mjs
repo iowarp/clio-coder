@@ -32,10 +32,22 @@ const MAX_TARBALL_BYTES = 15_000_000;
 const MAX_UNPACKED_BYTES = 40_000_000;
 
 const FORBIDDEN = [
-	{ test: (f) => f.includes("__pycache__") || f.endsWith(".pyc"), reason: "python bytecode cache" },
-	{ test: (f) => f.endsWith(".map"), reason: "source map (excluded by release policy)" },
-	{ test: (f) => f.startsWith("benchmarks/"), reason: "benchmarks are not part of the package" },
-	{ test: (f) => f.startsWith("scripts/"), reason: "repo scripts operate on a source checkout only" },
+	{
+		test: (f) => f.includes("__pycache__") || f.endsWith(".pyc"),
+		reason: "python bytecode cache",
+	},
+	{
+		test: (f) => f.endsWith(".map"),
+		reason: "source map (excluded by release policy)",
+	},
+	{
+		test: (f) => f.startsWith("benchmarks/"),
+		reason: "benchmarks are not part of the package",
+	},
+	{
+		test: (f) => f.startsWith("scripts/"),
+		reason: "repo scripts operate on a source checkout only",
+	},
 	{ test: (f) => f.endsWith(".tsbuildinfo"), reason: "typescript build cache" },
 	{ test: (f) => /(^|\/)\.env(\.|$)/.test(f), reason: "environment file" },
 	{ test: (f) => f.includes("node_modules/"), reason: "vendored node_modules" },
@@ -66,12 +78,17 @@ for (const rel of ENTRIES) {
 }
 
 const entrySet = new Set(ENTRIES);
-for (const dirent of readdirSync(join(root, "dist"), { recursive: true, withFileTypes: true })) {
+for (const dirent of readdirSync(join(root, "dist"), {
+	recursive: true,
+	withFileTypes: true,
+})) {
 	if (!dirent.isFile() || !dirent.name.endsWith(".js")) continue;
 	const abs = join(dirent.parentPath, dirent.name);
 	const rel = abs.slice(root.length).replaceAll("\\", "/");
 	if (entrySet.has(rel)) continue;
-	if (firstLine(abs) === SHEBANG) errors.push(`unexpected shebang on non-entry chunk: ${rel}`);
+	if (firstLine(abs) === SHEBANG) {
+		errors.push(`unexpected shebang on non-entry chunk: ${rel}`);
+	}
 }
 
 let report;
@@ -95,7 +112,9 @@ const fileSet = new Set(files);
 
 for (const file of files) {
 	for (const rule of FORBIDDEN) {
-		if (rule.test(file)) errors.push(`forbidden file in package: ${file} (${rule.reason})`);
+		if (rule.test(file)) {
+			errors.push(`forbidden file in package: ${file} (${rule.reason})`);
+		}
 	}
 }
 
@@ -104,7 +123,9 @@ for (const required of REQUIRED_FILES) {
 }
 
 for (const prefix of REQUIRED_PREFIXES) {
-	if (!files.some((f) => f.startsWith(prefix))) errors.push(`no files under required tree: ${prefix}`);
+	if (!files.some((f) => f.startsWith(prefix))) {
+		errors.push(`no files under required tree: ${prefix}`);
+	}
 }
 
 const requiredRecipeKeys = new Set([
@@ -172,6 +193,8 @@ if (errors.length > 0) {
 }
 
 process.stdout.write(
-	`check-release: ok (${report.entryCount} files, tarball ${(report.size / 1e6).toFixed(2)} MB, unpacked ${(report.unpackedSize / 1e6).toFixed(2)} MB)\n`,
+	`check-release: ok (${report.entryCount} files, tarball ${(report.size / 1e6).toFixed(
+		2,
+	)} MB, unpacked ${(report.unpackedSize / 1e6).toFixed(2)} MB)\n`,
 );
 process.exit(0);

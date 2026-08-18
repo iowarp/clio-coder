@@ -1,10 +1,11 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { buildCustomizationGraph } from "../../src/cli/config-inspect.js";
-import { readLayeredSettings, settingsSourceFor } from "../../src/core/settings-layers.js";
+import { SettingsValidationError, settingsPath } from "../../src/core/config.js";
+import { readLayeredSettings, settingsSourceFor, updateLayeredSettings } from "../../src/core/settings-layers.js";
 import { loadOperatorProfile, renderOperatorProfile } from "../../src/domains/context/operator-profile.js";
 import { loadProjectRules, selectActiveRules } from "../../src/domains/context/project-rules.js";
 
@@ -82,6 +83,68 @@ describe("contracts/customization", () => {
 			write(join(cwd, ".clio-coder", "settings.yaml"), "targets:\n  - id: 7\n    runtime: ollama\n");
 			const result = readLayeredSettings(cwd, { userPath });
 			ok(result.issues.some((issue) => issue.origin === "project" && issue.path === "targets[0].id"));
+		});
+
+		it("persists a route to a project-only target without copying the target into user settings", () => {
+			const { cwd } = scratch();
+			const userFile = settingsPath();
+			mkdirSync(dirname(userFile), { recursive: true });
+			writeFileSync(userFile, "autonomy: auto-edit\n", "utf8");
+			write(
+				join(cwd, ".clio-coder", "settings.yaml"),
+				"targets:\n  - id: project-target\n    runtime: openai-compat\n    url: http://127.0.0.1:1234/v1\n    defaultModel: project-model\n",
+			);
+			try {
+				const updated = updateLayeredSettings(cwd, (settings) => {
+					settings.orchestrator.target = "project-target";
+					settings.orchestrator.model = "project-model";
+				});
+				strictEqual(updated.orchestrator.target, "project-target");
+				strictEqual(updated.orchestrator.model, "project-model");
+				const saved = readFileSync(userFile, "utf8");
+				ok(saved.includes("target: project-target"));
+				ok(!saved.includes("127.0.0.1"), "the project target descriptor must not be copied into the user layer");
+				strictEqual(readLayeredSettings(cwd).settings.orchestrator.target, "project-target");
+
+				write(
+					join(cwd, ".clio-coder", "settings.local.yaml"),
+					"orchestrator:\n  target: project-target\n  model: project-model\n",
+				);
+				const beforeRefusal = readFileSync(userFile, "utf8");
+				throws(
+					() =>
+						updateLayeredSettings(cwd, (settings) => {
+							settings.orchestrator.target = null;
+							settings.orchestrator.model = null;
+						}),
+					/higher-precedence project setting/u,
+				);
+				strictEqual(readFileSync(userFile, "utf8"), beforeRefusal, "a refused layered patch must write nothing");
+			} finally {
+				rmSync(userFile, { force: true });
+				rmSync(`${userFile}.lock`, { recursive: true, force: true });
+			}
+		});
+
+		it("refuses to replace a malformed user document during a layered update", () => {
+			const { cwd } = scratch();
+			const userFile = settingsPath();
+			mkdirSync(dirname(userFile), { recursive: true });
+			const malformed = ":\n  - [broken yaml";
+			writeFileSync(userFile, malformed, "utf8");
+			try {
+				throws(
+					() =>
+						updateLayeredSettings(cwd, (settings) => {
+							settings.autonomy = "read-only";
+						}),
+					SettingsValidationError,
+				);
+				strictEqual(readFileSync(userFile, "utf8"), malformed);
+			} finally {
+				rmSync(userFile, { force: true });
+				rmSync(`${userFile}.lock`, { recursive: true, force: true });
+			}
 		});
 	});
 

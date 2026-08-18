@@ -139,6 +139,13 @@ export interface SessionContract {
 	 */
 	editLabel(turnId: string, label: string, sessionId?: string): void;
 	/**
+	 * Persist the session's display name as a session-wide SessionInfoEntry.
+	 * Empty or whitespace-only names clear the name when history is rebuilt.
+	 * If the target session is current, writes flow through the live writer;
+	 * otherwise the entry is durably appended directly to its transcript.
+	 */
+	setName(name: string, sessionId?: string): void;
+	/**
 	 * Remove the given session. By default, wipes the session directory.
 	 * `opts.keepFiles` preserves the transcript and only tombstones meta.json.
 	 * Refuses to delete a session that is currently open; call `close()` first

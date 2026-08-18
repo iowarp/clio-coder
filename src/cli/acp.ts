@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
+import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
 import { runClioCommand } from "./clio.js";
 import { restoreStdout, takeOverStdout, writeRawStdout } from "./output-guard.js";
 import { printError } from "./shared.js";
@@ -10,7 +11,7 @@ Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
 
   --cwd PATH               Workspace root the server boots in and opens sessions at.
   --permission-timeout MS  How long a mediated permission request may wait for the
-                           client before it is denied. Defaults to the configured
+                           client before the prompt expires. Defaults to the configured
                            delegation.defaults.permissionTimeoutMs.
 
 This command is intended for ACP frontends to spawn. Interactive delegation remains
@@ -36,7 +37,9 @@ function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
 		}
 		if (arg === "--permission-timeout") {
 			const ms = value === undefined ? Number.NaN : Number(value);
-			if (!Number.isInteger(ms) || ms <= 0) return "--permission-timeout needs a positive whole number of milliseconds";
+			if (!Number.isInteger(ms) || ms <= 0 || ms > MAX_TIMER_DELAY_MS) {
+				return `--permission-timeout needs a whole number from 1 to ${MAX_TIMER_DELAY_MS} milliseconds`;
+			}
 			flags.permissionTimeoutMs = ms;
 			index += 1;
 			continue;

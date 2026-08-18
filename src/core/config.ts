@@ -1413,7 +1413,7 @@ function readSavedDocument(): unknown {
  * (or stay absent), so materialized defaults such as `workers.profiles: {}`
  * never leak into a file that never had them.
  */
-function applySettingsDelta(saved: unknown, before: unknown, after: unknown): unknown {
+export function applySettingsDelta(saved: unknown, before: unknown, after: unknown): unknown {
 	if (!isPlainObject(before) || !isPlainObject(after)) return cloneValue(after);
 	const out: Record<string, unknown> = isPlainObject(saved) ? { ...saved } : {};
 	for (const [key, next] of Object.entries(after)) {
@@ -1450,6 +1450,27 @@ export type SettingsMutator = (settings: ClioSettings) => ClioSettings | undefin
 export interface SettingsUpdateOptions {
 	/** Total time to wait for the lock before giving up. Default 10s. */
 	timeoutMs?: number;
+}
+
+/**
+ * Replace the raw user settings document under the same cross-process lock as
+ * `updateSettings`. Workspace-aware layering owns the only current caller: it
+ * computes and validates the candidate against the project layers before this
+ * helper commits the raw user-layer delta.
+ */
+export function updateSavedSettingsDocument(
+	mutate: (saved: unknown) => unknown,
+	options: SettingsUpdateOptions = {},
+): void {
+	withSettingsLock(() => {
+		// Keep the strict gate updateSettings has always used. readSavedDocument
+		// deliberately degrades parse/read failures to `{}` for recovery callers;
+		// writing through that degraded value would erase a malformed, null, or
+		// transiently unreadable operator document.
+		readSettings();
+		const saved = readSavedDocument();
+		persistSettings(mutate(cloneValue(saved)));
+	}, options);
 }
 
 export function settingsLockPath(): string {

@@ -140,7 +140,11 @@ function snapshot(root) {
 		try {
 			names = readdirSync(dir).sort();
 		} catch (error) {
-			entries.push({ path: relative(root, dir) || ".", type: "unreadable", detail: String(error.code ?? error) });
+			entries.push({
+				path: relative(root, dir) || ".",
+				type: "unreadable",
+				detail: String(error.code ?? error),
+			});
 			return;
 		}
 		for (const name of names) {
@@ -161,7 +165,13 @@ function snapshot(root) {
 				} catch {
 					// A dangling link still has a name worth recording.
 				}
-				entries.push({ path: rel, type: "symlink", mode, target, dangling: !existsSync(full) });
+				entries.push({
+					path: rel,
+					type: "symlink",
+					mode,
+					target,
+					dangling: !existsSync(full),
+				});
 				continue;
 			}
 			if (stat.isDirectory()) {
@@ -173,7 +183,12 @@ function snapshot(root) {
 		}
 	};
 	walk(root);
-	return { root, exists: true, entries, truncated: entries.length >= SNAPSHOT_LIMIT };
+	return {
+		root,
+		exists: true,
+		entries,
+		truncated: entries.length >= SNAPSHOT_LIMIT,
+	};
 }
 
 function paths(snap) {
@@ -272,7 +287,10 @@ testCase(1, "package creation and inspection", () => {
 	PACK.tarball = join(out, name);
 	// Read outside `run`, whose output clip would truncate a 198-file listing
 	// to 118 lines and fail five contents checks on a complete package.
-	const listing = spawnSync("tar", ["-tzf", PACK.tarball], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+	const listing = spawnSync("tar", ["-tzf", PACK.tarball], {
+		encoding: "utf8",
+		maxBuffer: 16 * 1024 * 1024,
+	});
 	PACK.files = (listing.stdout ?? "")
 		.split("\n")
 		.map((line) => line.replace(/^package\//, "").trim())
@@ -807,7 +825,9 @@ testCase(15, "uninstall including an owned launcher symlink", () => {
 	symlinkSync(join(PREFIX(), "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js"), link);
 	run(launcher, ["doctor", "--fix"], { env });
 	const before = snapshot(binDir);
-	const result = run(launcher, ["uninstall", "--remove-binary", "--force"], { env });
+	const result = run(launcher, ["uninstall", "--remove-binary", "--force"], {
+		env,
+	});
 	const after = snapshot(binDir);
 	return {
 		...result,
@@ -1061,7 +1081,11 @@ testCase(20, "docs and help commands executed exactly as written", () => {
 		const args = command.split(/\s+/).slice(1);
 		if (args.length === 0) continue;
 		const result = run(launcher, args, { env, timeoutMs: 60_000 });
-		results.push({ command, exitCode: result.exitCode, stderr: clip(result.stderr).slice(0, 400) });
+		results.push({
+			command,
+			exitCode: result.exitCode,
+			stderr: clip(result.stderr).slice(0, 400),
+		});
 	}
 	// A documented example may name a target the reader was told to create
 	// first. That cannot exit 0 here, and requiring it to would only push the
@@ -1111,7 +1135,9 @@ async function main() {
 
 	for (const entry of cases) {
 		// Cases 1 and 2 build the artifact and the prefix every other case uses.
-		if (ONLY && !ONLY.has(entry.id) && entry.id !== "1" && entry.id !== "2") continue;
+		if (ONLY && !ONLY.has(entry.id) && entry.id !== "1" && entry.id !== "2") {
+			continue;
+		}
 		const startedAt = performance.now();
 		let record;
 		try {
@@ -1128,7 +1154,10 @@ async function main() {
 							checks: [],
 						}
 					: await entry.body();
-			const checks = (result.checks ?? []).map(([name, passed]) => ({ name, passed: passed === true }));
+			const checks = (result.checks ?? []).map(([name, passed]) => ({
+				name,
+				passed: passed === true,
+			}));
 			const failed = checks.filter((check) => !check.passed);
 			record = {
 				id: entry.id,
@@ -1195,24 +1224,37 @@ function renderMarkdown(records) {
 		lines.push(`## ${record.id}. ${record.title}`, "");
 		lines.push(`- status: **${record.status}**`);
 		if (record.command) lines.push(`- command: \`${record.command}\``);
-		if (record.exitCode !== undefined) lines.push(`- exit: \`${record.exitCode}\``);
+		if (record.exitCode !== undefined) {
+			lines.push(`- exit: \`${record.exitCode}\``);
+		}
 		if (record.notes) lines.push(`- notes: ${record.notes}`);
-		if (record.before)
+		if (record.before) {
 			lines.push(`- filesystem before: ${record.before.entries.length} entries under \`${record.before.root}\``);
-		if (record.after)
+		}
+		if (record.after) {
 			lines.push(`- filesystem after: ${record.after.entries.length} entries under \`${record.after.root}\``);
+		}
 		if (record.before && record.after) {
 			const removed = [...paths(record.before)].filter((path) => !paths(record.after).has(path));
 			const added = [...paths(record.after)].filter((path) => !paths(record.before).has(path));
-			if (removed.length > 0)
+			if (removed.length > 0) {
 				lines.push(`- removed: ${removed.slice(0, 12).join(", ")}${removed.length > 12 ? " …" : ""}`);
-			if (added.length > 0) lines.push(`- added: ${added.slice(0, 12).join(", ")}${added.length > 12 ? " …" : ""}`);
+			}
+			if (added.length > 0) {
+				lines.push(`- added: ${added.slice(0, 12).join(", ")}${added.length > 12 ? " …" : ""}`);
+			}
 		}
 		lines.push("");
-		for (const check of record.checks) lines.push(`  - ${check.passed ? "pass" : "FAIL"}: ${check.name}`);
+		for (const check of record.checks) {
+			lines.push(`  - ${check.passed ? "pass" : "FAIL"}: ${check.name}`);
+		}
 		if (record.error) lines.push("", "```", record.error, "```");
-		if (record.stdout) lines.push("", "stdout:", "", "```", record.stdout, "```");
-		if (record.stderr) lines.push("", "stderr:", "", "```", record.stderr, "```");
+		if (record.stdout) {
+			lines.push("", "stdout:", "", "```", record.stdout, "```");
+		}
+		if (record.stderr) {
+			lines.push("", "stderr:", "", "```", record.stderr, "```");
+		}
 		lines.push("");
 	}
 	return `${lines.join("\n")}\n`;
