@@ -566,7 +566,7 @@
                 <label for="cliRuntime">Runtime Descriptor</label>
                 <select id="cliRuntime" onchange="onCliRuntimeChange()">
                   <option value="ollama-native">ollama-native</option>
-                  <option value="lmstudio-native">lmstudio-native</option>
+                  <option value="lmstudio">lmstudio</option>
                   <option value="llamacpp">llamacpp</option>
                   <option value="vllm">vllm</option>
                   <option value="openai-compat">openai-compat</option>
@@ -923,7 +923,7 @@ orchestrator:
           }
 
           if (key === 'runtime') {
-            const validRuntimes = ['ollama-native', 'lmstudio-native', 'llamacpp', 'vllm', 'sglang', 'openai-compat', 'anthropic-compat', 'google', 'openai', 'anthropic', 'bedrock', 'mistral', 'openrouter', 'lemonade'];
+            const validRuntimes = ['ollama-native', 'lmstudio', 'llamacpp', 'vllm', 'sglang', 'openai-compat', 'anthropic-compat', 'google', 'openai', 'anthropic', 'bedrock', 'mistral', 'openrouter', 'lemonade'];
             if (!validRuntimes.includes(cleanVal)) {
               errors.push(`[Line ${idx+1}] Unknown runtime "${cleanVal}". Valid options include: ollama-native, llamacpp, openai-compat, etc.`);
             }
@@ -961,7 +961,7 @@ orchestrator:
     // Command Generator and Resolver logic
     const runtimeSpecs = {
       'ollama-native': { port: '11434', cLimit: 32768, tLimit: 2048, r: true, badges: ['chat', 'tools', 'reasoning'] },
-      'lmstudio-native': { port: '1234', cLimit: 16384, tLimit: 1024, r: true, badges: ['chat', 'tools', 'reasoning'] },
+      'lmstudio': { port: '1234', cLimit: 16384, tLimit: 1024, r: true, badges: ['chat', 'tools', 'reasoning'] },
       'llamacpp': { port: '8080', cLimit: 131072, tLimit: 4096, r: false, badges: ['chat', 'tools'] },
       'vllm': { port: '8000', cLimit: 65536, tLimit: 2048, r: false, badges: ['chat', 'tools'] },
       'openai-compat': { port: '5000', cLimit: 8192, tLimit: 1024, r: false, badges: ['chat'] },

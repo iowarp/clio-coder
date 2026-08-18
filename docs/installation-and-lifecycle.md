@@ -136,7 +136,7 @@ First-run target setup after install:
 **Option A: Local Model / API Key Target**
 ```bash
 clio-coder configure --list
-clio-coder configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model --set-orchestrator --set-fleet-default
+clio-coder configure --id local-lmstudio --runtime lmstudio --url http://localhost:1234 --model your-model --set-orchestrator --set-fleet-default
 clio-coder targets use local-lmstudio
 clio-coder targets --probe
 clio-coder
@@ -200,15 +200,16 @@ The 0.3.0 binary prints its header (`install npm`, `channel latest`,
 `current 0.3.0`), runs `npm install -g @iowarp/clio-coder@latest`, and then
 hands over to the binary that install just put on `PATH` with
 `clio-coder upgrade --post-install`. That newer binary runs the migration
-check (the registry is empty for 0.3.1, so `state/migrations.json` is written
-as `{"applied": []}` and nothing else moves), runs `clio-coder doctor --fix`,
+check, records `2026-08-18-lmstudio-runtime-id` in `state/migrations.json`, and
+normalizes any legacy LM Studio target id, websocket URL, and stored credential
+name. It then runs `clio-coder doctor --fix`,
 which refreshes `install.json`, and reports the transition as
-`ok: 0.3.0 -> 0.3.1 (migrations: 0)`. The outer 0.3.0 process closes with
+`ok: 0.3.0 -> 0.3.1 (migrations: 1)`. The outer 0.3.0 process closes with
 `ok: 0.3.0 -> post-install checks complete`. Under nvm or a custom npm prefix
 this works because `npm install -g` and the bare `clio-coder` resolve through
 the same prefix; the doctor rows the child prints are the proof of which binary
 answered. `clio-coder upgrade --dry-run` first names the exact command it would
-run, says that no migrations are registered, and prints
+run, names the pending LM Studio migration, and prints
 `would refresh state metadata 0.3.0 -> 0.3.1` without touching the record.
 
 If you instead ran `npm install -g @iowarp/clio-coder` yourself, or launched

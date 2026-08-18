@@ -56,7 +56,7 @@ clio-coder configure --list
 ```
 
 Start one local runtime and register exactly one target first. Clio integrates with popular local inference engines:
-- **[LM Studio](https://lmstudio.ai):** A desktop application to run LLMs locally. Target runtime ID: `lmstudio-native`.
+- **[LM Studio](https://lmstudio.ai):** A desktop application to run LLMs locally. Target runtime ID: `lmstudio`.
 - **[Ollama](https://ollama.com):** A lightweight, extensible framework for building and running LLMs locally. Target runtime ID: `ollama-native`.
 - **[llama.cpp](https://github.com/ggerganov/llama.cpp):** A minimal C/C++ implementation for local LLM inference. Target runtime ID: `llamacpp`.
 - **[vLLM](https://github.com/vllm-project/vllm):** A high-throughput and memory-efficient LLM serving engine. Target runtime ID: `vllm`.
@@ -66,7 +66,7 @@ Common local runtime IDs and default URLs are:
 
 | Runtime | Target runtime id | Example local URL |
 | --- | --- | --- |
-| LM Studio | `lmstudio-native` | `http://127.0.0.1:1234` |
+| LM Studio | `lmstudio` | `http://127.0.0.1:1234` |
 | Ollama | `ollama-native` | `http://127.0.0.1:11434` |
 | llama.cpp server | `llamacpp` | `http://127.0.0.1:8080` |
 | vLLM | `vllm` | `http://127.0.0.1:8000` |
@@ -78,7 +78,7 @@ Example registration:
 ```bash
 clio-coder configure \
   --id local-lmstudio \
-  --runtime lmstudio-native \
+  --runtime lmstudio \
   --url http://127.0.0.1:1234 \
   --model your-model-id \
   --set-orchestrator \
@@ -129,11 +129,23 @@ autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto (enfor
 
 targets:
   - id: local-lmstudio
-    runtime: lmstudio-native
+    runtime: lmstudio
     url: http://127.0.0.1:1234
     defaultModel: your-model-id
     capabilities:
       reasoning: true       # optional; only if your model/runtime supports it
+    lmstudio:
+      # Omit load entirely to use LM Studio's just-in-time load defaults.
+      load:
+        contextLength: 131072
+        flashAttention: true
+        evalBatchSize: 512
+        numExperts: 8
+        offloadKvCacheToGpu: true
+      request:
+        ttlSeconds: 600
+        draftModel: your-draft-model-id
+        reasoning: auto      # auto | off | on | low | medium | high
 
 runtimePlugins: []
 
@@ -225,6 +237,64 @@ guardrails:
 ```
 
 Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reasoning`, `thinkingFormat`, `structuredOutputs`, `vision`, `audio`, `embeddings`, `rerank`, `fim`, `contextWindow`, and `maxTokens`.
+
+### LM Studio transport and settings
+
+The canonical runtime id is `lmstudio`. The former `lmstudio-native` id remains an accepted alias,
+and `clio-coder upgrade` rewrites persisted targets to the canonical id. It also converts `ws:` URLs
+to `http:` and `wss:` URLs to `https:` because this adapter is entirely HTTP. Chat uses LM Studio's
+OpenAI-compatible `POST /v1/chat/completions` endpoint
+(<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>). Model discovery and residency
+use the native REST API, with `GET /api/v1/models` as the preferred catalog
+(<https://lmstudio.ai/docs/developer/rest/list>), `GET /api/v0/models` for older servers, and
+`GET /v1/models` as the final listing fallback.
+
+Leave `lmstudio.load` absent to preserve LM Studio's just-in-time loading behavior. Clio then observes
+residency but sends no explicit load request. When `lmstudio.load` is present and the selected model
+is unloaded, Clio calls `POST /api/v1/models/load` with `echo_load_config: true`; LM Studio documents
+the load operation at <https://lmstudio.ai/docs/developer/rest/load>. Clio sends only fields that the
+target explicitly configured:
+
+| Settings key | REST load field |
+| --- | --- |
+| `contextLength` | `context_length` |
+| `flashAttention` | `flash_attention` |
+| `evalBatchSize` | `eval_batch_size` |
+| `numExperts` | `num_experts` |
+| `offloadKvCacheToGpu` | `offload_kv_cache_to_gpu` |
+
+Loaded instances are addressed by their instance ids when Clio calls
+`POST /api/v1/models/unload` (<https://lmstudio.ai/docs/developer/rest/unload>). Model selection remains
+permissive: `defaultModel` and `wireModels` may name either the model key or one of its loaded instance
+ids. The probe reports both forms and exposes each instance's echoed load configuration from the
+native model listing (<https://lmstudio.ai/docs/developer/rest/list>).
+
+The request settings map as follows:
+
+| Settings key | Chat request behavior |
+| --- | --- |
+| `ttlSeconds` | Sends `ttl`, using LM Studio's auto-eviction TTL (<https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict>). |
+| `draftModel` | Sends `draft_model` on the OpenAI-compatible chat request (<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>). |
+| `reasoning` | `off` sends `reasoning_effort: none`; `on` sends `low`; a literal `low`, `medium`, or `high` is sent unchanged; `auto` maps the active Clio thinking level. |
+
+The Clio thinking-level mapping is `off` to `none`, `minimal` or `low` to `low`, `medium` to
+`medium`, and `high`, `xhigh`, or `max` to `high`. A model reporting only `[off,on]` clamps every
+non-off level to `low`. Clio uses only `reasoning_effort` on LM Studio's documented chat surface
+(<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>) and never sends
+`chat_template_kwargs` to LM Studio.
+
+LM Studio can require bearer authentication for its HTTP APIs
+(<https://lmstudio.ai/docs/developer/core/authentication>). Clio sends the resolved target API key as
+`Authorization: Bearer ...` on chat, listing, load, and unload calls. Configure validates the exact
+`/lmstudio-greeting` response before saving a direct `lmstudio` target.
+
+Prompt-template overrides, system prompts, GPU-offload ratios, KV-cache quantization, parallel slots,
+context checkpoints, and speculative-decoding variants are not writable through this Clio settings
+block. Set them in LM Studio's My Models load settings or with `lms load`; the CLI is documented at
+<https://lmstudio.ai/docs/cli>, and the broader load-config vocabulary is documented at
+<https://lmstudio.ai/docs/typescript/api-reference/llm-load-model-config>. Clio reads back the load
+configuration that `GET /api/v1/models` exposes instead of pretending it applied settings the REST
+load endpoint did not accept (<https://lmstudio.ai/docs/developer/rest/list>).
 
 `defaults.maxTokens` is a global output budget requested for every turn (default `32768`). At request time it is always clamped down to the model's known max-output cap and the remaining context window, so a model that supports less automatically gets less and no per-model tuning is required. A per-target `capabilities.maxTokens` override still records the model's true cap; the request never exceeds it. Set `defaults.maxTokens: 0` to disable the global default and fall back to per-model caps only.
 
@@ -824,7 +894,7 @@ Representative built-in runtime IDs:
 | Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
 | Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter` |
 | Subscription and worker harnesses | `openai-codex` for ChatGPT OAuth, `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers, and `antigravity-code` for `agy --print` subprocess workers |
-| Local native | `llamacpp`, `lmstudio-native`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
+| Local native | `llamacpp`, `lmstudio`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
 
 Some hidden aliases exist for backward compatibility or special surfaces; use `clio-coder configure --list --all` to see them.
 
