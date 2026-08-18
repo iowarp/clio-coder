@@ -2,8 +2,36 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
-import { AcpProcessError, AcpProtocolError, AcpTimeoutError } from "./errors.js";
+import {
+	ACP_INTERNAL_ERROR_MESSAGE,
+	ACP_METHOD_NOT_FOUND_MESSAGE,
+	AcpProcessError,
+	AcpProtocolError,
+	AcpRequestError,
+	AcpTimeoutError,
+	acpErrorData,
+	acpErrorMessage,
+} from "./errors.js";
 import type { AcpJsonRpcFailure, AcpJsonRpcMessage, AcpJsonRpcSuccess } from "./types.js";
+
+/**
+ * Largest single stdin line this process will buffer, in UTF-8 bytes. A
+ * newline-delimited protocol has no other backstop: without a bound, a peer
+ * that never sends a newline grows the pending buffer until the process dies.
+ * Past the bound the line is discarded up to the next newline, one error frame
+ * is emitted, and the channel stays open and parseable.
+ */
+export const ACP_MAX_INPUT_LINE_BYTES = 1024 * 1024;
+
+/**
+ * Cheap guard before the O(n) byte measurement. UTF-8 never spends more than
+ * three bytes on one UTF-16 code unit (a surrogate pair is two units and four
+ * bytes), so anything at or under a third of the bound cannot exceed it.
+ */
+function exceedsInputLineBytes(value: string): boolean {
+	if (value.length <= ACP_MAX_INPUT_LINE_BYTES / 3) return false;
+	return Buffer.byteLength(value, "utf8") > ACP_MAX_INPUT_LINE_BYTES;
+}
 
 type NotificationHandler = (params: unknown) => void;
 type RequestHandler = (params: unknown) => Promise<unknown> | unknown;
@@ -76,6 +104,12 @@ export interface StdioServerTransportOptions {
 	input?: Readable;
 	output?: Writable;
 	write?: (chunk: string) => void;
+	/**
+	 * Where the original text of an unclassified handler failure goes. Stdout is
+	 * JSON-RPC only, so the detail behind an `internal_error` frame lands on the
+	 * unstructured stderr tail (CONTRACT C001 §6). Defaults to dropping it.
+	 */
+	diagnostics?: (line: string) => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,6 +156,25 @@ function jsonRpcError(id: string | number | null, code: number, message: string,
 		id,
 		error: data === undefined ? { code, message } : { code, message, data },
 	};
+}
+
+/**
+ * The one serialization for a request handler that threw. A thrower that knows
+ * its failure raises {@link AcpRequestError} and owns the JSON-RPC code, the
+ * host-authored message, and the machine-readable detail; anything else is an
+ * internal error the client cannot act on beyond retrying, and its message is
+ * text no part of this process authored. Bounding that text was not enough:
+ * whatever threw can name an absolute path, a URL with credentials, or a token,
+ * and a bounded copy of a secret is still the secret. The frame carries fixed
+ * host text plus the `internal_error` code, the original goes to `diagnostics`,
+ * and neither form ever carries a stack, an echoed frame, or unbounded data.
+ */
+function handlerErrorFrame(id: string | number, err: unknown, diagnostics?: (line: string) => void): AcpJsonRpcFailure {
+	if (err instanceof AcpRequestError) {
+		return jsonRpcError(id, err.rpcCode, acpErrorMessage(err.message), acpErrorData(err.detail));
+	}
+	diagnostics?.(`internal error: ${acpErrorMessage(err)}`);
+	return jsonRpcError(id, -32000, ACP_INTERNAL_ERROR_MESSAGE, acpErrorData({ code: "internal_error" }));
 }
 
 class StdioJsonRpcTransport implements AcpJsonRpcTransport {
@@ -349,11 +402,7 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 			const result = await handler(params);
 			this.write({ jsonrpc: "2.0", id, result });
 		} catch (err) {
-			this.write({
-				jsonrpc: "2.0",
-				id,
-				error: { code: -32000, message: errorMessage(err), data: err instanceof Error ? err.stack : undefined },
-			});
+			this.write(handlerErrorFrame(id, err));
 		}
 	}
 
@@ -472,6 +521,8 @@ export function createStdioTransport(
 class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 	private nextId = 1;
 	private buffer = "";
+	/** True while the bytes of an oversized line are being dropped up to its terminating newline. */
+	private discardingLine = false;
 	private isClosed = false;
 	private readonly pending = new Map<string | number, PendingRequest>();
 	private readonly notificationHandlers = new Map<string, Set<NotificationHandler>>();
@@ -480,13 +531,18 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 	private readonly input: Readable;
 	private readonly output: Writable;
 	private readonly writeOverride?: (chunk: string) => void;
+	private readonly diagnostics?: (line: string) => void;
 
 	constructor(options: StdioServerTransportOptions = {}) {
 		this.input = options.input ?? process.stdin;
 		this.output = options.output ?? process.stdout;
 		if (options.write !== undefined) this.writeOverride = options.write;
+		if (options.diagnostics !== undefined) this.diagnostics = options.diagnostics;
 		this.input.setEncoding("utf8");
 		this.input.on("data", (chunk: string) => this.consume(chunk));
+		// EOF with a nonblank partial frame drops that frame silently. A partial
+		// frame has no id, so there is no request to answer, and the channel it
+		// would be answered on is the one that just ended.
 		this.input.on("end", () => this.markClosed(new AcpProcessError("ACP input closed")));
 		this.input.on("error", (err) => this.markClosed(new AcpProcessError(`ACP input error: ${errorMessage(err)}`)));
 		this.output.on?.("error", (err) => this.markClosed(new AcpProcessError(`ACP output error: ${errorMessage(err)}`)));
@@ -560,6 +616,10 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 			this.writeOverride(line);
 			return;
 		}
+		// A `false` return means the stream buffered rather than flushed. Honoring
+		// it means pausing frame production, which changes turn timing, so the
+		// decision to keep writing is deferred rather than forgotten (CONTRACT
+		// C001 §6 leaves stdout backpressure out of this profile).
 		this.output.write(line);
 	}
 
@@ -570,21 +630,53 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 			if (idx === -1) break;
 			const line = this.buffer.slice(0, idx).trimEnd();
 			this.buffer = this.buffer.slice(idx + 1);
+			// The tail of a line already reported as oversized. Its newline ends the
+			// discard; the bytes before it are dropped without a second report.
+			if (this.discardingLine) {
+				this.discardingLine = false;
+				continue;
+			}
 			if (line.length === 0) continue;
+			// A complete but oversized line, which arrives when the whole line and
+			// its newline land in one chunk and the pending-buffer check below never
+			// saw it.
+			if (exceedsInputLineBytes(line)) {
+				this.reportOversizedLine();
+				continue;
+			}
 			this.handleLine(line);
 		}
+		if (this.discardingLine) {
+			this.buffer = "";
+			return;
+		}
+		// No newline yet: bound what is held for a line still being received.
+		if (exceedsInputLineBytes(this.buffer)) {
+			this.buffer = "";
+			this.discardingLine = true;
+			this.reportOversizedLine();
+		}
+	}
+
+	/** One error frame per oversized line. The transport stays open and parseable. */
+	private reportOversizedLine(): void {
+		this.write(
+			jsonRpcError(null, -32600, "input line exceeds the maximum size", acpErrorData({ code: "input_line_too_large" })),
+		);
 	}
 
 	private handleLine(line: string): void {
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(line);
-		} catch (err) {
-			this.write(jsonRpcError(null, -32700, `parse error: ${errorMessage(err)}`));
+		} catch {
+			// The parser's own message quotes the input it choked on, so the frame
+			// says only that parsing failed. The client already has the line.
+			this.write(jsonRpcError(null, -32700, "parse error", acpErrorData({ code: "parse_error" })));
 			return;
 		}
 		if (!isRecord(parsed) || parsed.jsonrpc !== "2.0") {
-			this.write(jsonRpcError(null, -32600, "invalid JSON-RPC message", parsed));
+			this.write(jsonRpcError(null, -32600, "invalid JSON-RPC message", acpErrorData({ code: "invalid_request" })));
 			return;
 		}
 		if (isSuccess(parsed) || isFailure(parsed)) {
@@ -594,7 +686,11 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 		const method = typeof parsed.method === "string" ? parsed.method : "";
 		const id = "id" in parsed ? (parsed.id as string | number | null) : undefined;
 		if (!method) {
-			if (id !== undefined) this.write(jsonRpcError(id, -32600, "request/notification missing method", parsed));
+			if (id !== undefined) {
+				this.write(
+					jsonRpcError(id, -32600, "request/notification missing method", acpErrorData({ code: "invalid_request" })),
+				);
+			}
 			return;
 		}
 		if (id !== undefined) {
@@ -619,17 +715,27 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 	}
 
 	private async handleRequest(id: string | number | null, method: string, params: unknown): Promise<void> {
-		if (id === null) return;
+		// A null id is a request nothing can answer, since a response correlates by
+		// id. Saying so beats the silent drop that left the caller waiting out its
+		// own timeout with no evidence of what happened.
+		if (id === null) {
+			this.write(jsonRpcError(null, -32600, "request id must not be null", acpErrorData({ code: "invalid_request_id" })));
+			return;
+		}
 		const handler = this.requestHandlers.get(method);
 		if (!handler) {
-			this.write(jsonRpcError(id, -32601, `method not found: ${method}`));
+			// The method name never goes back out. Bounding it was not enough: it is
+			// peer-controlled text on a channel where every message is authored by this
+			// process, and the client already knows which method it called. The frame
+			// carries fixed host text plus the `method_not_found` code.
+			this.write(jsonRpcError(id, -32601, ACP_METHOD_NOT_FOUND_MESSAGE, acpErrorData({ code: "method_not_found" })));
 			return;
 		}
 		try {
 			const result = await handler(params);
 			this.write({ jsonrpc: "2.0", id, result });
 		} catch (err) {
-			this.write(jsonRpcError(id, -32000, errorMessage(err), err instanceof Error ? err.stack : undefined));
+			this.write(handlerErrorFrame(id, err, this.diagnostics));
 		}
 	}
 

@@ -1620,11 +1620,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				},
 				cwd: process.cwd(),
 				version: getVersionInfo().clio,
+				// Stdout belongs to JSON-RPC. Text this process did not author, such
+				// as a provider's failure body, is kept off the wire and written to
+				// the unstructured stderr tail instead.
+				diagnostics: (line) => {
+					process.stderr.write(`[clio:acp] ${line}\n`);
+				},
 				permissionTimeoutMs:
 					options.acp.permissionTimeoutMs ??
 					config?.get().delegation.defaults.permissionTimeoutMs ??
 					DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 			});
+			// Same ordering the termination drain hook relies on: an aborted turn's
+			// tool results still land and persist through the run's subscribers,
+			// and the session writer stops in result.stop() below. Awaiting
+			// settlement here makes a session append after session stop impossible
+			// by ordering rather than by timing.
+			await chat.whenSettled();
 			chat.dispose();
 			await dispatch.drain();
 			await result.stop();

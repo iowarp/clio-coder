@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -10,7 +10,7 @@ import {
 	type PermissionRequestedPayload,
 	type PermissionResolvedPayload,
 } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createSafeEventBus, type SafeEventBus } from "../../src/core/event-bus.js";
 import { canonicalizeExistingPath } from "../../src/core/path-canonical.js";
 import { MAX_TIMER_DELAY_MS } from "../../src/core/timers.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
@@ -27,14 +27,89 @@ import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tool
 
 interface RpcClient {
 	request<T>(method: string, params?: unknown): Promise<T>;
+	notify(method: string, params?: unknown): void;
 	onRequest(method: string, handler: (params: unknown) => unknown | Promise<unknown>): () => void;
 	notifications: unknown[];
+	/** Every frame the server wrote, responses included, in arrival order. */
+	frames: Array<Record<string, unknown>>;
 	waitForNotification(predicate: (value: unknown) => boolean): Promise<unknown>;
 	close(): void;
 }
 
+/** A JSON-RPC failure with the whole error object, not just its message. */
+class RpcError extends Error {
+	constructor(
+		readonly code: number,
+		message: string,
+		readonly data: unknown,
+	) {
+		super(message);
+		this.name = "RpcError";
+	}
+}
+
+/** The `clio-coder/error` detail an error frame is required to carry (C001 §0). */
+function errorDetail(err: unknown): Record<string, unknown> {
+	ok(err instanceof RpcError, `expected a JSON-RPC failure, got ${String(err)}`);
+	const data = err.data;
+	ok(isRecord(data), "error.data must be present");
+	const keys = Object.keys(data);
+	deepStrictEqual(keys, ["_meta"], "error.data carries exactly one _meta object");
+	const meta = data._meta;
+	ok(isRecord(meta), "error.data._meta must be an object");
+	const detail = meta["clio-coder/error"];
+	ok(isRecord(detail), "error.data._meta['clio-coder/error'] must be an object");
+	strictEqual(detail.version, 1);
+	return detail;
+}
+
+async function rejection(promise: Promise<unknown>): Promise<RpcError> {
+	try {
+		await promise;
+	} catch (err) {
+		ok(err instanceof RpcError, `expected an RpcError, got ${String(err)}`);
+		return err;
+	}
+	throw new Error("expected the request to fail");
+}
+
+/**
+ * No frame this server writes may carry a stack frame or the repository's own
+ * absolute path. Both used to ride along in `-32000` `data` on every ordinary
+ * error, disclosing the installation's directory layout to any client.
+ */
+function assertNoDisclosure(frames: ReadonlyArray<Record<string, unknown>>): void {
+	for (const frame of frames) {
+		if (!isRecord(frame.error)) continue;
+		const serialized = JSON.stringify(frame);
+		ok(!serialized.includes("    at "), `frame carries a stack: ${serialized.slice(0, 200)}`);
+		ok(!serialized.includes(process.cwd()), `frame carries the repository path: ${serialized.slice(0, 200)}`);
+	}
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function utf8Bytes(value: string): number {
+	return Buffer.byteLength(value, "utf8");
+}
+
+/**
+ * True when a cut left half of a surrogate pair behind. That half has no UTF-8
+ * encoding, so the peer receives a replacement character and the two chunks can
+ * never be reassembled into the character the model produced.
+ */
+function hasLoneSurrogate(value: string): boolean {
+	for (let index = 0; index < value.length; index += 1) {
+		const unit = value.charCodeAt(index);
+		if (unit >= 0xdc00 && unit <= 0xdfff) return true;
+		if (unit < 0xd800 || unit > 0xdbff) continue;
+		const next = value.charCodeAt(index + 1);
+		if (Number.isNaN(next) || next < 0xdc00 || next > 0xdfff) return true;
+		index += 1;
+	}
+	return false;
 }
 
 function pidIsAlive(pid: number | null): boolean {
@@ -130,6 +205,7 @@ function createRpcClient(input: PassThrough, output: PassThrough): RpcClient {
 	const pending = new Map<number, { resolve(value: unknown): void; reject(reason: unknown): void }>();
 	const requestHandlers = new Map<string, (params: unknown) => unknown | Promise<unknown>>();
 	const notifications: unknown[] = [];
+	const frames: Array<Record<string, unknown>> = [];
 	const waiters: Array<{ predicate(value: unknown): boolean; resolve(value: unknown): void }> = [];
 	output.setEncoding("utf8");
 	output.on("data", (chunk: string) => {
@@ -141,13 +217,17 @@ function createRpcClient(input: PassThrough, output: PassThrough): RpcClient {
 			buffer = buffer.slice(idx + 1);
 			if (line.trim().length === 0) continue;
 			const message = JSON.parse(line) as Record<string, unknown>;
+			frames.push(message);
 			if ("id" in message && ("result" in message || "error" in message)) {
 				const id = Number(message.id);
 				const entry = pending.get(id);
 				if (!entry) continue;
 				pending.delete(id);
-				if (isRecord(message.error)) entry.reject(new Error(String(message.error.message ?? "RPC error")));
-				else entry.resolve(message.result);
+				if (isRecord(message.error)) {
+					entry.reject(
+						new RpcError(Number(message.error.code), String(message.error.message ?? "RPC error"), message.error.data),
+					);
+				} else entry.resolve(message.result);
 				continue;
 			}
 			if ("id" in message && typeof message.method === "string") {
@@ -183,12 +263,21 @@ function createRpcClient(input: PassThrough, output: PassThrough): RpcClient {
 	});
 	return {
 		notifications,
+		frames,
+		notify(method: string, params?: unknown): void {
+			input.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+		},
 		request<T>(method: string, params?: unknown): Promise<T> {
 			const id = nextId++;
-			input.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-			return new Promise<T>((resolve, reject) => {
+			// The pending entry is registered before the write: a PassThrough pair
+			// delivers synchronously, and a handler that throws without reaching an
+			// await answers inside this very write call. Writing first dropped that
+			// answer on the floor and the caller waited forever.
+			const answer = new Promise<T>((resolve, reject) => {
 				pending.set(id, { resolve: (value) => resolve(value as T), reject });
 			});
+			input.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+			return answer;
 		},
 		onRequest(method, handler) {
 			requestHandlers.set(method, handler);
@@ -340,7 +429,9 @@ function createToolUseMockChat(): AcpServerChat {
 }
 
 // A turn that fails (pi-ai stopReason "error", which has no ACP StopReason).
-function createErroringMockChat(): AcpServerChat {
+// The failure text is a parameter because it is the thing the wire contract
+// bounds: a caller can hand it a provider body full of paths and credentials.
+function createErroringMockChat(errorMessage = "provider exploded"): AcpServerChat {
 	const listeners = new Set<(event: Record<string, unknown>) => void>();
 	let streaming = false;
 	const emit = (event: Record<string, unknown>): void => {
@@ -352,9 +443,9 @@ function createErroringMockChat(): AcpServerChat {
 			emit({ type: "agent_start" });
 			const message = {
 				role: "assistant",
-				content: [{ type: "text", text: "provider exploded" }],
+				content: [{ type: "text", text: "" }],
 				stopReason: "error",
-				errorMessage: "provider exploded",
+				errorMessage,
 			};
 			emit({ type: "message_end", message });
 			emit({ type: "agent_end", messages: [message] });
@@ -394,6 +485,36 @@ async function runChat(
 			await server;
 		},
 	};
+}
+
+interface AcpServerHarness {
+	client: RpcClient;
+	server: Promise<number>;
+}
+
+/** One in-process server plus a client wired to it over a PassThrough pair. */
+function startAcpServer(input: {
+	chat: AcpServerChat;
+	cwd?: string;
+	toolRegistry?: ToolRegistry;
+	bus?: SafeEventBus;
+	permissionTimeoutMs?: number;
+	autonomy?: () => AutonomyLevel;
+	onActiveSessionAutonomyChange?: (level: AutonomyLevel | null) => void;
+	diagnostics?: (line: string) => void;
+}): AcpServerHarness {
+	const clientToServer = new PassThrough();
+	const serverToClient = new PassThrough();
+	const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
+	const server = serveClioAcpAgent({ cwd: process.cwd(), version: "test", ...input, transport });
+	return { client: createRpcClient(clientToServer, serverToClient), server };
+}
+
+/** Initializes and opens the one session this server hosts. */
+async function openSession(client: RpcClient, cwd: string = process.cwd()): Promise<string> {
+	await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "mock-client", version: "1" } });
+	const session = await client.request<{ sessionId: string }>("session/new", { cwd });
+	return session.sessionId;
 }
 
 interface ServerPromptRun {
@@ -521,7 +642,18 @@ function createPermissionChat(registry: ToolRegistry): AcpServerChat {
 	return {
 		async submit(): Promise<void> {
 			streaming = true;
-			const verdict = await registry.invoke({ tool: ToolNames.Bash, args: { command: "sudo true" } });
+			// The engine announces a call before it runs, so the permission bridge
+			// always has a tool_call the client already rendered to bind to.
+			const args = { command: "sudo true" };
+			emit({ type: "tool_execution_start", toolCallId: "bash-1", toolName: "bash", args });
+			const verdict = await registry.invoke({ tool: ToolNames.Bash, args }, { toolCallId: "bash-1" });
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "bash-1",
+				toolName: "bash",
+				result: verdict.kind,
+				isError: verdict.kind !== "ok",
+			});
 			const message = {
 				role: "assistant",
 				content: [{ type: "text", text: verdict.kind === "ok" ? "allowed" : "denied" }],
@@ -553,8 +685,12 @@ function createQueuedPermissionChat(registry: ToolRegistry): AcpServerChat {
 	return {
 		async submit(): Promise<void> {
 			streaming = true;
-			const first = registry.invoke({ tool: ToolNames.Bash, args: { command: "sudo true one" } });
-			const second = registry.invoke({ tool: ToolNames.Bash, args: { command: "sudo true two" } });
+			const firstArgs = { command: "sudo true one" };
+			const secondArgs = { command: "sudo true two" };
+			emit({ type: "tool_execution_start", toolCallId: "bash-1", toolName: "bash", args: firstArgs });
+			emit({ type: "tool_execution_start", toolCallId: "bash-2", toolName: "bash", args: secondArgs });
+			const first = registry.invoke({ tool: ToolNames.Bash, args: firstArgs }, { toolCallId: "bash-1" });
+			const second = registry.invoke({ tool: ToolNames.Bash, args: secondArgs }, { toolCallId: "bash-2" });
 			const verdicts = await Promise.all([first, second]);
 			const message = {
 				role: "assistant",
@@ -562,6 +698,127 @@ function createQueuedPermissionChat(registry: ToolRegistry): AcpServerChat {
 				stopReason: "stop",
 				usage: { input: 1, output: 1 },
 			};
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
+/**
+ * Opens `openCalls` tool calls, then asks for permission through a call the
+ * engine gave no id for. That is the shape the bridge has to bind by itself.
+ */
+function createUnidentifiedPermissionChat(registry: ToolRegistry, openCalls: number): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			for (let index = 1; index <= openCalls; index += 1) {
+				emit({
+					type: "tool_execution_start",
+					toolCallId: `engine-${index}`,
+					toolName: "bash",
+					args: { command: `sudo true ${index}` },
+				});
+			}
+			const verdict = await registry.invoke({ tool: ToolNames.Bash, args: { command: "sudo true" } });
+			const message = {
+				role: "assistant",
+				content: [{ type: "text", text: verdict.kind }],
+				stopReason: "stop",
+			};
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
+/**
+ * Opens one tool call and then asks for permission under an engine id no
+ * `tool_call` was ever emitted for. Binding that id would put an approval on a
+ * call the client has no way to show.
+ */
+function createMistargetedPermissionChat(registry: ToolRegistry): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			emit({ type: "tool_execution_start", toolCallId: "engine-1", toolName: "bash", args: { command: "sudo true" } });
+			const verdict = await registry.invoke(
+				{ tool: ToolNames.Bash, args: { command: "sudo true" } },
+				{ toolCallId: "never-started" },
+			);
+			const message = { role: "assistant", content: [{ type: "text", text: verdict.kind }], stopReason: "stop" };
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
+/**
+ * Starts two calls under one engine id, optionally ends both, then asks for
+ * permission under that id. An engine that numbers its calls per request
+ * legitimately repeats an id, so the bridge has to pick which of the two the
+ * operator is being asked about.
+ */
+function createReusedIdPermissionChat(registry: ToolRegistry, options: { endBoth: boolean }): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			emit({ type: "tool_execution_start", toolCallId: "dup", toolName: "bash", args: { command: "sudo true one" } });
+			emit({ type: "tool_execution_start", toolCallId: "dup", toolName: "bash", args: { command: "sudo true two" } });
+			if (options.endBoth) {
+				emit({ type: "tool_execution_end", toolCallId: "dup", toolName: "bash", result: "ok" });
+				emit({ type: "tool_execution_end", toolCallId: "dup", toolName: "bash", result: "ok" });
+			}
+			const verdict = await registry.invoke(
+				{ tool: ToolNames.Bash, args: { command: "sudo true three" } },
+				{ toolCallId: "dup" },
+			);
+			const message = { role: "assistant", content: [{ type: "text", text: verdict.kind }], stopReason: "stop" };
 			emit({ type: "message_end", message });
 			emit({ type: "agent_end", messages: [message] });
 			streaming = false;
@@ -587,10 +844,9 @@ function createWriteChat(registry: ToolRegistry): AcpServerChat {
 	return {
 		async submit(): Promise<void> {
 			streaming = true;
-			const verdict = await registry.invoke({
-				tool: ToolNames.Write,
-				args: { file_path: "notes/acp-autonomy.txt", content: "x" },
-			});
+			const args = { file_path: "notes/acp-autonomy.txt", content: "x" };
+			emit({ type: "tool_execution_start", toolCallId: "write-1", toolName: "write", args });
+			const verdict = await registry.invoke({ tool: ToolNames.Write, args }, { toolCallId: "write-1" });
 			const message = {
 				role: "assistant",
 				content: [{ type: "text", text: verdict.kind }],
@@ -613,9 +869,279 @@ function createWriteChat(registry: ToolRegistry): AcpServerChat {
 	};
 }
 
+/** A chat that only reports a notice and returns, the way an unadmitted turn does. */
+function createNoticeChat(notice: Record<string, unknown>, options: { endTurn: boolean }): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			emit({ type: "notice", ...notice });
+			if (options.endTurn) {
+				const message = { role: "assistant", content: [{ type: "text", text: "" }], stopReason: "stop" };
+				emit({ type: "message_end", message });
+				emit({ type: "agent_end", messages: [message] });
+			}
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
+/** A chat that replays a fixed event script and ends the turn. */
+function createScriptedChat(events: ReadonlyArray<Record<string, unknown>>): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			for (const event of events) emit(event);
+			const message = { role: "assistant", content: [{ type: "text", text: "" }], stopReason: "stop" };
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
+/** Starts a tool call and never ends it, so cancel has an open call to settle. */
+function createOpenToolChat(): AcpServerChat & { started: Promise<void> } {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	let resolveSubmit: (() => void) | null = null;
+	let resolveStarted: (() => void) | null = null;
+	const started = new Promise<void>((resolve) => {
+		resolveStarted = resolve;
+	});
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		started,
+		async submit(): Promise<void> {
+			streaming = true;
+			emit({ type: "tool_execution_start", toolCallId: "engine-call-1", toolName: "bash", args: { command: "sleep 9" } });
+			resolveStarted?.();
+			await new Promise<void>((resolve) => {
+				resolveSubmit = resolve;
+			});
+		},
+		cancel(): void {
+			streaming = false;
+			resolveSubmit?.();
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
+/**
+ * Turn one opens a tool call and blocks until it is cancelled. Turn two replays
+ * the `tool_execution_end` that call never received, which is where a real
+ * engine's late tool result lands once the cancelled turn has already been
+ * swept and its listener detached.
+ */
+function createLateEndChat(): AcpServerChat & { started: Promise<void> } {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	let turns = 0;
+	let resolveSubmit: (() => void) | null = null;
+	let resolveStarted: (() => void) | null = null;
+	const started = new Promise<void>((resolve) => {
+		resolveStarted = resolve;
+	});
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		started,
+		async submit(): Promise<void> {
+			streaming = true;
+			turns += 1;
+			if (turns === 1) {
+				emit({
+					type: "tool_execution_start",
+					toolCallId: "engine-call-1",
+					toolName: "bash",
+					args: { command: "sleep 9" },
+				});
+				resolveStarted?.();
+				await new Promise<void>((resolve) => {
+					resolveSubmit = resolve;
+				});
+				return;
+			}
+			emit({ type: "tool_execution_end", toolCallId: "engine-call-1", toolName: "bash", result: "late" });
+			const message = { role: "assistant", content: [{ type: "text", text: "" }], stopReason: "stop" };
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+			resolveSubmit?.();
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
+/**
+ * Announces a tool call to the client and then parks it on the permission
+ * bridge under the same engine id, which is what makes the request's identity
+ * bindable to the `tool_call` the client already rendered.
+ */
+function createIdentifiedPermissionChat(registry: ToolRegistry): AcpServerChat & { parked: Promise<void> } {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	let resolveParked: (() => void) | null = null;
+	const parked = new Promise<void>((resolve) => {
+		resolveParked = resolve;
+	});
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		parked,
+		async submit(): Promise<void> {
+			streaming = true;
+			emit({
+				type: "tool_execution_start",
+				toolCallId: "engine-call-1",
+				toolName: "bash",
+				args: { command: "sudo true" },
+			});
+			const verdict = await registry.invoke(
+				{ tool: ToolNames.Bash, args: { command: "sudo true" } },
+				{ toolCallId: "engine-call-1", onParked: () => resolveParked?.() },
+			);
+			emit({ type: "tool_execution_end", toolCallId: "engine-call-1", toolName: "bash", result: verdict.kind });
+			const message = { role: "assistant", content: [{ type: "text", text: verdict.kind }], stopReason: "stop" };
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
+/** A safety net that parks every call and records the arguments it evaluated. */
+function recordingAskSafety(evaluated: EvaluatedSafetyCall[]): SafetyContract {
+	return {
+		...askSafety,
+		evaluate(call) {
+			evaluated.push({ tool: call.tool, args: { ...(call.args ?? {}) } });
+			return {
+				kind: "ask",
+				classification: { actionClass: "write", reasons: ["test"] },
+				rejection: { short: "approval required", detail: "approval required", hints: [] },
+			};
+		},
+	};
+}
+
+/**
+ * A registry whose one tool replaces its arguments during admission, the way
+ * `prepareAdmissionArguments` does for every approval-sensitive tool: the path
+ * becomes absolute and a prepared field appears. Everything downstream of
+ * admission, the permission listener included, sees the replacement, so this is
+ * the fixture where the ask's arguments and the rendered call's arguments can
+ * legitimately disagree.
+ */
+function createNormalizingPermissionRegistry(safety: SafetyContract): ToolRegistry {
+	const registry = createRegistry({ safety });
+	registry.register({
+		name: ToolNames.Write,
+		description: "ACP permission snapshot test tool",
+		parameters: Type.Object({}),
+		baseActionClass: "write",
+		prepareAdmissionArguments: (args) => ({
+			...args,
+			path: resolve(realpathSync(process.cwd()), String(args.path ?? "")),
+			prepared: true,
+		}),
+		run: async () => ({ kind: "ok", output: "ran" }),
+	});
+	return registry;
+}
+
+/**
+ * Announces a path-bearing call with the engine's own relative arguments, then
+ * parks it under the same engine id. The registry normalizes on the way in, so
+ * the arguments the bridge is handed are not the arguments the client rendered.
+ */
+function createNormalizedArgsPermissionChat(registry: ToolRegistry): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			const args = { path: "notes/acp-snapshot.txt", content: "x" };
+			emit({ type: "tool_execution_start", toolCallId: "engine-call-1", toolName: "write", args });
+			const verdict = await registry.invoke({ tool: ToolNames.Write, args }, { toolCallId: "engine-call-1" });
+			emit({ type: "tool_execution_end", toolCallId: "engine-call-1", toolName: "write", result: verdict.kind });
+			const message = { role: "assistant", content: [{ type: "text", text: verdict.kind }], stopReason: "stop" };
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
 async function runAcpPermissionBridge(
-	outcome: "allow" | "reject" | "timeout",
-): Promise<{ requests: PermissionRequestedPayload[]; resolutions: PermissionResolvedPayload[] }> {
+	outcome: "allow" | "reject" | "timeout" | "allow-always",
+): Promise<{ requests: PermissionRequestedPayload[]; resolutions: PermissionResolvedPayload[]; answer: string }> {
 	const clientToServer = new PassThrough();
 	const serverToClient = new PassThrough();
 	const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
@@ -650,24 +1176,26 @@ async function runAcpPermissionBridge(
 		permissionTimeoutMs: outcome === "timeout" ? 20 : 1000,
 	});
 	const client = createRpcClient(clientToServer, serverToClient);
+	const optionIdFor: Record<string, string> = {
+		allow: "allow-once",
+		reject: "reject-once",
+		"allow-always": "allow-always",
+	};
 	if (outcome !== "timeout") {
 		client.onRequest("session/request_permission", () => ({
-			outcome: {
-				outcome: "selected",
-				optionId: outcome === "allow" ? "allow-once" : "reject-once",
-			},
+			outcome: { outcome: "selected", optionId: optionIdFor[outcome] },
 		}));
 	}
-	await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "mock-client", version: "1" } });
-	const session = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
-	await client.request("session/prompt", {
-		sessionId: session.sessionId,
-		prompt: [{ type: "text", text: "need permission" }],
-	});
-	await client.request("session/close", { sessionId: session.sessionId });
+	const sessionId = await openSession(client);
+	await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "need permission" }] });
+	await client.request("session/close", { sessionId });
 	client.close();
 	await server;
-	return { requests, resolutions };
+	const answer = sessionUpdates(client.notifications)
+		.filter((update) => update.sessionUpdate === "agent_message_chunk")
+		.map((update) => (isRecord(update.content) ? String(update.content.text) : ""))
+		.join("");
+	return { requests, resolutions, answer };
 }
 
 async function runAcpQueuedPermissionBridge(): Promise<{
@@ -1452,54 +1980,43 @@ setInterval(() => {}, 1000);
 		}
 	});
 
-	it("ACP server pins autonomy at session/new until the next session", async () => {
-		let liveAutonomy: AutonomyLevel = "suggest";
-		let activeSnapshot: AutonomyLevel | null = null;
-		let permissionRequests = 0;
-		const registry = createRegistry({
-			safety: allowWriteSafety,
-			autonomy: () => activeSnapshot ?? liveAutonomy,
-		});
-		registry.register(permissionSpec(ToolNames.Write, "write"));
-		const clientToServer = new PassThrough();
-		const serverToClient = new PassThrough();
-		const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
-		const server = serveClioAcpAgent({
-			transport,
-			chat: createWriteChat(registry),
-			toolRegistry: registry,
-			cwd: process.cwd(),
-			version: "test",
-			autonomy: () => liveAutonomy,
-			onActiveSessionAutonomyChange: (level) => {
-				activeSnapshot = level;
-			},
-		});
-		const client = createRpcClient(clientToServer, serverToClient);
-		client.onRequest("session/request_permission", () => {
-			permissionRequests += 1;
-			return { outcome: { outcome: "selected", optionId: "allow-once" } };
-		});
+	// One session per process (C001 §2) means the "next session" half of this
+	// guarantee is a second process, not a second session/new on the same one.
+	// The pinning claim is unchanged: the level a prompt runs under is the one
+	// snapshotted at its own session/new, not the level live when it submits.
+	it("ACP server pins autonomy at session/new for the life of the process", async () => {
+		const runWrite = async (autonomyAtSessionNew: AutonomyLevel, autonomyAtPrompt: AutonomyLevel): Promise<number> => {
+			let liveAutonomy: AutonomyLevel = autonomyAtSessionNew;
+			let activeSnapshot: AutonomyLevel | null = null;
+			let permissionRequests = 0;
+			const registry = createRegistry({
+				safety: allowWriteSafety,
+				autonomy: () => activeSnapshot ?? liveAutonomy,
+			});
+			registry.register(permissionSpec(ToolNames.Write, "write"));
+			const { client, server } = startAcpServer({
+				chat: createWriteChat(registry),
+				toolRegistry: registry,
+				autonomy: () => liveAutonomy,
+				onActiveSessionAutonomyChange: (level) => {
+					activeSnapshot = level;
+				},
+			});
+			client.onRequest("session/request_permission", () => {
+				permissionRequests += 1;
+				return { outcome: { outcome: "selected", optionId: "allow-once" } };
+			});
+			const sessionId = await openSession(client);
+			liveAutonomy = autonomyAtPrompt;
+			await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "write once" }] });
+			await client.request("session/close", { sessionId });
+			client.close();
+			strictEqual(await server, 0);
+			return permissionRequests;
+		};
 
-		await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "mock-client", version: "1" } });
-		const first = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
-		liveAutonomy = "full-auto";
-		await client.request("session/prompt", {
-			sessionId: first.sessionId,
-			prompt: [{ type: "text", text: "write once" }],
-		});
-		strictEqual(permissionRequests, 1, "first session keeps the suggest snapshot");
-		await client.request("session/close", { sessionId: first.sessionId });
-
-		const second = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
-		await client.request("session/prompt", {
-			sessionId: second.sessionId,
-			prompt: [{ type: "text", text: "write again" }],
-		});
-		strictEqual(permissionRequests, 1, "next session uses the updated full-auto level");
-		await client.request("session/close", { sessionId: second.sessionId });
-		client.close();
-		strictEqual(await server, 0);
+		strictEqual(await runWrite("suggest", "full-auto"), 1, "the session keeps the suggest snapshot it opened with");
+		strictEqual(await runWrite("full-auto", "suggest"), 0, "a session opened at full-auto never asks");
 	});
 
 	it("only emits ACP v1 session/update variants and conformant tool calls", async () => {
@@ -1544,15 +2061,60 @@ setInterval(() => {}, 1000);
 
 	it("fails the prompt turn with a JSON-RPC error when the run errors", async () => {
 		const run = await runChat(createErroringMockChat());
-		let rejected: Error | null = null;
-		try {
-			await run.prompt;
-		} catch (err) {
-			rejected = err as Error;
-		}
-		ok(rejected, "session/prompt must reject when the turn errors");
-		ok(/provider exploded/.test(rejected?.message ?? ""), `unexpected error: ${rejected?.message}`);
+		const rejected = await rejection(run.prompt);
+		strictEqual(rejected.code, -32000);
+		// The client branches on the code. The message is host-authored, so the
+		// provider's own prose ("provider exploded") never reaches the wire.
+		strictEqual(rejected.message, "the prompt turn failed");
+		deepStrictEqual(errorDetail(rejected), { version: 1, code: "turn_failed" });
 		await run.close();
+	});
+
+	it("keeps a failing turn's paths, URLs, and tokens off the wire", async () => {
+		const secretPath = "/home/operator/.clio-coder/config/settings.json";
+		const secretUrl = "https://user:pw@example.com/x";
+		const secretToken = "sk-live-4f9a2c7b1e8d";
+		// The shape a provider client actually fails with: the request it made, the
+		// file the credential came from, and the credential itself.
+		const providerProse = `POST ${secretUrl} failed (key ${secretToken} from ${secretPath})`;
+		const diagnostics: string[] = [];
+		const clientToServer = new PassThrough();
+		const serverToClient = new PassThrough();
+		const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
+		const server = serveClioAcpAgent({
+			transport,
+			chat: createErroringMockChat(providerProse),
+			cwd: process.cwd(),
+			version: "test",
+			diagnostics: (line) => diagnostics.push(line),
+		});
+		const client = createRpcClient(clientToServer, serverToClient);
+		const sessionId = await openSession(client);
+
+		const rejected = await rejection(
+			client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] }),
+		);
+		strictEqual(rejected.code, -32000);
+		strictEqual(rejected.message, "the prompt turn failed");
+		deepStrictEqual(errorDetail(rejected), { version: 1, code: "turn_failed" });
+
+		// Not just the error frame: no frame of the whole turn may carry any of it.
+		const serialized = JSON.stringify(client.frames);
+		for (const secret of [secretPath, secretUrl, secretToken, "POST"]) {
+			strictEqual(serialized.includes(secret), false, `a frame discloses ${secret}`);
+		}
+		assertNoDisclosure(client.frames);
+
+		// The operator still gets the detail, bounded to one line, on stderr.
+		strictEqual(diagnostics.length, 1, "one diagnostics line per failed turn");
+		const diagnostic = diagnostics[0] ?? "";
+		strictEqual(diagnostic.includes("\n"), false, "a diagnostics line is single-line");
+		for (const secret of [secretPath, secretUrl, secretToken]) {
+			ok(diagnostic.includes(secret), `diagnostics lost ${secret}: ${diagnostic}`);
+		}
+
+		client.close();
+		strictEqual(await server, 0);
 	});
 
 	it("cancels an active ACP prompt through the chat loop abort path", async () => {
@@ -1583,6 +2145,936 @@ setInterval(() => {}, 1000);
 		}
 
 		await client.request("session/close", { sessionId: session.sessionId });
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	// --- CONTRACT C001 initial safe profile ---------------------------------
+
+	it("refuses an ACP protocol version this server does not speak", async () => {
+		const { client, server } = startAcpServer({ chat: createMockChat() });
+		const wrongVersion = await rejection(client.request("initialize", { protocolVersion: 2 }));
+		strictEqual(wrongVersion.code, -32602);
+		deepStrictEqual(errorDetail(wrongVersion), {
+			version: 1,
+			code: "protocol_version_unsupported",
+			supported: [1],
+		});
+		const missingVersion = await rejection(client.request("initialize", {}));
+		strictEqual(missingVersion.code, -32602);
+		strictEqual(errorDetail(missingVersion).code, "protocol_version_unsupported");
+		assertNoDisclosure(client.frames);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("refuses a second initialize on the same connection", async () => {
+		const { client, server } = startAcpServer({ chat: createMockChat() });
+		await client.request("initialize", { protocolVersion: 1 });
+		const duplicate = await rejection(client.request("initialize", { protocolVersion: 1 }));
+		strictEqual(duplicate.code, -32000);
+		strictEqual(errorDetail(duplicate).code, "already_initialized");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("requires initialize before every session method", async () => {
+		const { client, server } = startAcpServer({ chat: createMockChat() });
+		for (const [method, params] of [
+			["session/new", { cwd: process.cwd() }],
+			["session/prompt", { sessionId: "nope", prompt: [{ type: "text", text: "go" }] }],
+			["session/cancel", { sessionId: "nope" }],
+			["session/close", { sessionId: "nope" }],
+		] as const) {
+			const failure = await rejection(client.request(method, params));
+			strictEqual(failure.code, -32000, method);
+			strictEqual(errorDetail(failure).code, "not_initialized", method);
+		}
+		// The notification form has no reply channel, so an ordering error has
+		// nowhere to go and must not become an error frame.
+		client.notify("session/cancel", { sessionId: "nope" });
+		await client.request("initialize", { protocolVersion: 1 });
+		assertNoDisclosure(client.frames);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("pins the session cwd to the canonical launch workspace", async () => {
+		const canonicalCwd = realpathSync(process.cwd());
+		const scratch = mkdtempSync(join(tmpdir(), "acp-cwd-"));
+		const link = join(scratch, "workspace-link");
+		symlinkSync(canonicalCwd, link, "dir");
+		try {
+			const symlinked = startAcpServer({ chat: createMockChat() });
+			await symlinked.client.request("initialize", { protocolVersion: 1 });
+			const session = await symlinked.client.request<{ sessionId: string }>("session/new", { cwd: link });
+			strictEqual(typeof session.sessionId, "string", "a symlink to the launch cwd is the same workspace");
+			symlinked.client.close();
+			strictEqual(await symlinked.server, 0);
+
+			for (const params of [{ cwd: scratch }, {}]) {
+				const { client, server } = startAcpServer({ chat: createMockChat() });
+				await client.request("initialize", { protocolVersion: 1 });
+				const failure = await rejection(client.request("session/new", params));
+				strictEqual(failure.code, -32000);
+				strictEqual(errorDetail(failure).code, "session_cwd_mismatch");
+				ok(!failure.message.includes(scratch), "the mismatch message names no path");
+				strictEqual(realpathSync(process.cwd()), canonicalCwd, "session/new must never chdir the process");
+				assertNoDisclosure(client.frames);
+				client.close();
+				strictEqual(await server, 0);
+			}
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("hosts exactly one session per process, before and after close", async () => {
+		const { client, server } = startAcpServer({ chat: createMockChat() });
+		const sessionId = await openSession(client);
+		const second = await rejection(client.request("session/new", { cwd: process.cwd() }));
+		strictEqual(second.code, -32000);
+		strictEqual(errorDetail(second).code, "session_limit");
+		await client.request("session/close", { sessionId });
+		const afterClose = await rejection(client.request("session/new", { cwd: process.cwd() }));
+		strictEqual(errorDetail(afterClose).code, "session_limit");
+		assertNoDisclosure(client.frames);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("fails an unadmitted prompt with its reason instead of an empty success", async () => {
+		const noticeText = "[Clio Coder] orchestrator not configured. Set one up with: /home/nobody/settings.json";
+		const { client, server } = startAcpServer({
+			chat: createNoticeChat(
+				{
+					level: "error",
+					surface: "transcript",
+					text: noticeText,
+					admission: { reason: "orchestrator-not-configured" },
+				},
+				{ endTurn: false },
+			),
+		});
+		const sessionId = await openSession(client);
+		const failure = await rejection(
+			client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] }),
+		);
+		strictEqual(failure.code, -32000);
+		deepStrictEqual(errorDetail(failure), {
+			version: 1,
+			code: "prompt_not_admitted",
+			reason: "orchestrator-not-configured",
+		});
+		ok(!failure.message.includes(noticeText), "the settings path must not travel in the message");
+		ok(failure.message.includes("orchestrator-not-configured"));
+		strictEqual(sessionUpdates(client.notifications).length, 0, "an unadmitted prompt emits no updates");
+		assertNoDisclosure(client.frames);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("keeps advisory notices out of the turn outcome", async () => {
+		const { client, server } = startAcpServer({
+			chat: createNoticeChat(
+				{ level: "warning", surface: "transcript", text: "context is getting full" },
+				{ endTurn: true },
+			),
+		});
+		const sessionId = await openSession(client);
+		const prompt = await client.request<{ stopReason: string }>("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "go" }],
+		});
+		strictEqual(prompt.stopReason, "end_turn");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("splits an oversized assistant delta into bounded chunks without dropping text", async () => {
+		const delta = "z".repeat(40000);
+		const { client, server } = startAcpServer({ chat: createScriptedChat([{ type: "text_delta", delta }]) });
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const chunks = sessionUpdates(client.notifications)
+			.filter((update) => update.sessionUpdate === "agent_message_chunk")
+			.map((update) => (isRecord(update.content) ? String(update.content.text) : ""));
+		strictEqual(chunks.length, 3);
+		ok(
+			chunks.every((chunk) => utf8Bytes(chunk) <= 16384),
+			"every chunk stays inside the 16 KiB bound",
+		);
+		strictEqual(chunks.join(""), delta);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	// The bound is UTF-8 bytes, which is what the peer's read buffer spends.
+	// Measuring with String.length let one "16 KiB" chunk of CJK text put 48 KiB
+	// on the wire, and a naive byte cut splits a surrogate pair into replacement
+	// characters the client can never reassemble.
+	it("chunks multibyte text by UTF-8 bytes without splitting a code point", async () => {
+		// 16,384 three-byte characters (48 KiB) followed by four-byte emoji, which
+		// are surrogate pairs in UTF-16 and the case a byte cut gets wrong.
+		const delta = `${"世".repeat(16384)}${"😀".repeat(8192)}`;
+		const { client, server } = startAcpServer({ chat: createScriptedChat([{ type: "text_delta", delta }]) });
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const chunks = sessionUpdates(client.notifications)
+			.filter((update) => update.sessionUpdate === "agent_message_chunk")
+			.map((update) => (isRecord(update.content) ? String(update.content.text) : ""));
+
+		ok(chunks.length > 1, "an oversized delta is split");
+		for (const chunk of chunks) {
+			ok(utf8Bytes(chunk) <= 16384, `chunk is ${utf8Bytes(chunk)} bytes`);
+			ok(!hasLoneSurrogate(chunk), "no chunk ends mid code point");
+		}
+		strictEqual(chunks.join(""), delta, "nothing is dropped and nothing is mangled");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("bounds rawInput strings and elides a raw record that is still oversized", async () => {
+		const command = "c".repeat(10240);
+		// 4,100 two-byte characters: 8,200 bytes, but only 4,100 UTF-16 units, so
+		// a length-based bound would have passed it through untouched.
+		const note = "é".repeat(4100);
+		// Ten two-byte strings, each small enough that per-string bounding leaves it
+		// alone. The serialized record is ~20 K UTF-16 units and ~41 K bytes, so it
+		// is over the record cap only when the cap is measured in bytes.
+		const wide = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`k${index}`, "é".repeat(2040)]));
+		// Twelve strings each five times the per-string cap: per-string bounding
+		// shrinks the record by an order of magnitude and it is still over the record
+		// cap. The size the client is told is the size the engine produced, so the
+		// elision must report the original serialization, not the shortened copy.
+		const huge = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`k${index}`, "é".repeat(10240)]));
+		const { client, server } = startAcpServer({
+			chat: createScriptedChat([
+				{ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command, note } },
+				{ type: "tool_execution_start", toolCallId: "t2", toolName: "bash", args: wide },
+				{ type: "tool_execution_start", toolCallId: "t3", toolName: "bash", args: huge },
+			]),
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const calls = sessionUpdates(client.notifications).filter((update) => update.sessionUpdate === "tool_call");
+
+		const first = calls[0]?.rawInput;
+		ok(isRecord(first));
+		// The marker is reserved inside the cap, so the whole value fits the bound.
+		ok(utf8Bytes(String(first.command)) <= 4096, `command is ${utf8Bytes(String(first.command))} bytes`);
+		ok(String(first.command).endsWith("…[truncated]"));
+		ok(utf8Bytes(String(first.note)) <= 4096, `note is ${utf8Bytes(String(first.note))} bytes`);
+		ok(String(first.note).endsWith("…[truncated]"));
+		ok(!hasLoneSurrogate(String(first.note)), "a bounded string never ends mid code point");
+
+		const second = calls[1]?.rawInput;
+		ok(isRecord(second));
+		strictEqual(JSON.stringify(wide).length < 32768, true, "the record is under the cap in UTF-16 units");
+		strictEqual(second.truncated, true, "and over it in UTF-8 bytes, which is what counts");
+		ok(typeof second.bytes === "number" && second.bytes > 32768, `unexpected bytes: ${String(second.bytes)}`);
+		strictEqual(second.bytes, utf8Bytes(JSON.stringify(wide)), "bytes is the original record's serialized size");
+
+		const third = calls[2]?.rawInput;
+		ok(isRecord(third));
+		strictEqual(third.truncated, true);
+		// Per-string bounding cut this record from ~245 KiB to ~49 KiB. Reporting the
+		// bounded size would understate what the engine produced by five times.
+		const originalBytes = utf8Bytes(JSON.stringify(huge));
+		strictEqual(third.bytes, originalBytes, "the reported size is the pre-bounding serialization");
+		ok(originalBytes > 200_000, `unexpected original size: ${originalBytes}`);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("emits absolute locations for path-bearing tools and omits them otherwise", async () => {
+		const { client, server } = startAcpServer({
+			chat: createScriptedChat([
+				{ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "src/x.ts" } },
+				{ type: "tool_execution_start", toolCallId: "t2", toolName: "bash", args: { command: "ls" } },
+			]),
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const calls = sessionUpdates(client.notifications).filter((update) => update.sessionUpdate === "tool_call");
+		deepStrictEqual(calls[0]?.locations, [{ path: resolve(realpathSync(process.cwd()), "src/x.ts") }]);
+		ok(!("locations" in (calls[1] ?? {})), "a tool with no path field carries no locations at all");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("asks for permission under the same tool call id the client already rendered", async () => {
+		const registry = createPermissionRegistry();
+		const chat = createIdentifiedPermissionChat(registry);
+		const { client, server } = startAcpServer({ chat, toolRegistry: registry, permissionTimeoutMs: 2000 });
+		const asks: Array<Record<string, unknown>> = [];
+		client.onRequest("session/request_permission", (params) => {
+			if (isRecord(params) && isRecord(params.toolCall)) asks.push(params.toolCall);
+			return { outcome: { outcome: "selected", optionId: "allow-once" } };
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const toolCall = sessionUpdates(client.notifications).find((update) => update.sessionUpdate === "tool_call");
+		strictEqual(toolCall?.toolCallId, "engine-call-1");
+		strictEqual(asks.length, 1);
+		strictEqual(asks[0]?.toolCallId, "engine-call-1", "the ask names the call the client is showing");
+		// Same id, same arguments. A client diffing the ask against the call it
+		// rendered must find nothing to diff.
+		deepStrictEqual(asks[0]?.rawInput, toolCall?.rawInput);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("asks with the tool_call's own arguments when the registry normalized them", async () => {
+		const evaluated: EvaluatedSafetyCall[] = [];
+		const registry = createNormalizingPermissionRegistry(recordingAskSafety(evaluated));
+		const { client, server } = startAcpServer({
+			chat: createNormalizedArgsPermissionChat(registry),
+			toolRegistry: registry,
+			permissionTimeoutMs: 2000,
+		});
+		const asks: Array<Record<string, unknown>> = [];
+		client.onRequest("session/request_permission", (params) => {
+			if (isRecord(params) && isRecord(params.toolCall)) asks.push(params.toolCall);
+			return { outcome: { outcome: "selected", optionId: "allow-once" } };
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+
+		// The premise: admission really did replace the arguments, so the registry's
+		// copy of this call is not the copy the client was shown.
+		const admitted = evaluated[0]?.args ?? {};
+		strictEqual(admitted.prepared, true, "the admission normalizer ran");
+		strictEqual(admitted.path, resolve(realpathSync(process.cwd()), "notes/acp-snapshot.txt"));
+
+		const toolCall = sessionUpdates(client.notifications).find((update) => update.sessionUpdate === "tool_call");
+		strictEqual(asks.length, 1);
+		strictEqual(asks[0]?.toolCallId, toolCall?.toolCallId);
+		// The ask is the stored snapshot of that tool_call, not a rebuild: same
+		// object, so a client diffing the two finds nothing, key order included.
+		deepStrictEqual(asks[0]?.rawInput, toolCall?.rawInput);
+		strictEqual(JSON.stringify(asks[0]?.rawInput), JSON.stringify(toolCall?.rawInput), "byte for byte, keys in order");
+		deepStrictEqual(asks[0]?.rawInput, { path: "notes/acp-snapshot.txt", content: "x" });
+		deepStrictEqual(asks[0]?.locations, toolCall?.locations);
+		deepStrictEqual(asks[0]?.locations, [{ path: resolve(realpathSync(process.cwd()), "notes/acp-snapshot.txt") }]);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("settles a parked permission when the prompt is cancelled and ignores the late answer", async () => {
+		const registry = createPermissionRegistry();
+		const bus = createSafeEventBus();
+		const resolutions: PermissionResolvedPayload[] = [];
+		bus.on(BusChannels.PermissionResolved, (payload) => {
+			resolutions.push(payload);
+		});
+		const chat = createIdentifiedPermissionChat(registry);
+		const { client, server } = startAcpServer({ chat, toolRegistry: registry, bus, permissionTimeoutMs: 30_000 });
+		let answerLate: () => void = () => {};
+		let noteArrival: () => void = () => {};
+		const asked = new Promise<void>((resolve) => {
+			noteArrival = resolve;
+		});
+		client.onRequest("session/request_permission", () => {
+			noteArrival();
+			return new Promise((resolvePermission) => {
+				answerLate = () => resolvePermission({ outcome: { outcome: "selected", optionId: "allow-once" } });
+			});
+		});
+		const started = Date.now();
+		const sessionId = await openSession(client);
+		const prompt = client.request<{ stopReason: string }>("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "go" }],
+		});
+		await asked;
+		await client.request("session/cancel", { sessionId });
+		strictEqual((await prompt).stopReason, "cancelled");
+		ok(Date.now() - started < 2000, "cancel must settle the parked permission inside the bound");
+		strictEqual(resolutions.length, 1);
+		strictEqual(resolutions[0]?.status, "denied");
+		strictEqual(resolutions[0]?.decidedBy, "cancelled");
+		// The abandoned JSON-RPC id has no waiter left; answering it late is inert.
+		answerLate();
+		await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+		strictEqual(resolutions.length, 1, "a late answer grants nothing");
+		assertNoDisclosure(client.frames);
+		await client.request("session/close", { sessionId });
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("refuses session/close under an active prompt and answers a repeat close", async () => {
+		const chat = createCancellableMockChat();
+		const { client, server } = startAcpServer({ chat });
+		const sessionId = await openSession(client);
+		const prompt = client.request<{ stopReason: string }>("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "wait" }],
+		});
+		await chat.started;
+		const busy = await rejection(client.request("session/close", { sessionId }));
+		strictEqual(busy.code, -32000);
+		strictEqual(errorDetail(busy).code, "prompt_active");
+		await client.request("session/cancel", { sessionId });
+		strictEqual((await prompt).stopReason, "cancelled");
+		deepStrictEqual(await client.request("session/close", { sessionId }), {});
+		deepStrictEqual(await client.request("session/close", { sessionId }), {}, "close is idempotent");
+		assertNoDisclosure(client.frames);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("fails every tool call left open when a prompt is cancelled", async () => {
+		const chat = createOpenToolChat();
+		const { client, server } = startAcpServer({ chat });
+		const sessionId = await openSession(client);
+		const prompt = client.request<{ stopReason: string }>("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "wait" }],
+		});
+		await chat.started;
+		await client.request("session/cancel", { sessionId });
+		strictEqual((await prompt).stopReason, "cancelled");
+		const updates = sessionUpdates(client.notifications);
+		const terminal = updates.find((update) => update.sessionUpdate === "tool_call_update");
+		strictEqual(terminal?.toolCallId, "engine-call-1");
+		strictEqual(terminal?.status, "failed");
+		deepStrictEqual(terminal?.content, [{ type: "content", content: { type: "text", text: "cancelled" } }]);
+		// The synthesized update has to land before the prompt settles, or a
+		// client that stops rendering on the response never sees it.
+		const terminalIndex = client.frames.findIndex(
+			(frame) =>
+				frame.method === "session/update" &&
+				isRecord(frame.params) &&
+				isRecord(frame.params.update) &&
+				frame.params.update.status === "failed",
+		);
+		const responseIndex = client.frames.findIndex(
+			(frame) => "result" in frame && isRecord(frame.result) && "stopReason" in frame.result,
+		);
+		ok(terminalIndex >= 0 && terminalIndex < responseIndex, "the failed update precedes the prompt response");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("treats every option but the exact allow-once as a denial", async () => {
+		const { resolutions, answer } = await runAcpPermissionBridge("allow-always");
+		strictEqual(resolutions.length, 1);
+		strictEqual(resolutions[0]?.status, "denied");
+		strictEqual(resolutions[0]?.decidedBy, "acp-client");
+		strictEqual(answer, "denied", "an option this server never offered cannot grant the call");
+	});
+
+	it("never puts a stack or the installation's paths in an error frame", async () => {
+		const { client, server } = startAcpServer({ chat: createMockChat() });
+		await rejection(client.request("session/new", { cwd: process.cwd() }));
+		await client.request("initialize", { protocolVersion: 1 });
+		await rejection(client.request("initialize", { protocolVersion: 1 }));
+		await rejection(client.request("session/new", { cwd: join(process.cwd(), "nope") }));
+		const { sessionId } = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
+		await rejection(client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "  " }] }));
+		await rejection(client.request("session/prompt", { sessionId: "unknown-id", prompt: [{ type: "text", text: "x" }] }));
+		await rejection(client.request("session/prompt", {}));
+		await rejection(client.request("session/unknown", {}));
+		assertNoDisclosure(client.frames);
+		ok(
+			client.frames.some((frame) => isRecord(frame.error)),
+			"the run must actually have produced error frames",
+		);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("never hands two tool calls the same wire id", async () => {
+		// An engine id past the 128-byte bound is aliased, and the engine's next
+		// call is literally named after the alias that was just minted. Reusing it
+		// would merge two calls into one on the client.
+		const { client, server } = startAcpServer({
+			chat: createScriptedChat([
+				{ type: "tool_execution_start", toolCallId: "e".repeat(200), toolName: "bash", args: { command: "one" } },
+				{ type: "tool_execution_start", toolCallId: "clio-tool-1", toolName: "bash", args: { command: "two" } },
+			]),
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const ids = sessionUpdates(client.notifications)
+			.filter((update) => update.sessionUpdate === "tool_call")
+			.map((update) => String(update.toolCallId));
+
+		strictEqual(ids.length, 2);
+		strictEqual(ids[0], "clio-tool-1", "an oversized engine id is aliased");
+		strictEqual(ids[1], "clio-tool-2", "and the alias is not handed out a second time");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("sends one terminal update per tool call however many ends the engine repeats", async () => {
+		const diagnostics: string[] = [];
+		const { client, server } = startAcpServer({
+			chat: createScriptedChat([
+				{ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "ls" } },
+				{ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: "ok" },
+				{ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: "ok, again" },
+			]),
+			diagnostics: (line) => diagnostics.push(line),
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const updates = sessionUpdates(client.notifications).filter((update) => update.sessionUpdate === "tool_call_update");
+
+		strictEqual(updates.length, 1, "a terminal wire id never receives a second update");
+		strictEqual(updates[0]?.toolCallId, "t1");
+		deepStrictEqual(updates[0]?.content, [{ type: "content", content: { type: "text", text: "ok" } }]);
+		deepStrictEqual(diagnostics, ["dropped duplicate terminal update for t1"]);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("drops an unidentified end once the call it could have named is already terminal", async () => {
+		const diagnostics: string[] = [];
+		const { client, server } = startAcpServer({
+			chat: createScriptedChat([
+				{ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "ls" } },
+				{ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: "ok" },
+				{ type: "tool_execution_end", toolName: "bash", result: "orphan" },
+			]),
+			diagnostics: (line) => diagnostics.push(line),
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const updates = sessionUpdates(client.notifications);
+		const callIds = new Set(
+			updates.filter((update) => update.sessionUpdate === "tool_call").map((update) => String(update.toolCallId)),
+		);
+		const updateIds = updates
+			.filter((update) => update.sessionUpdate === "tool_call_update")
+			.map((update) => String(update.toolCallId));
+
+		deepStrictEqual(updateIds, ["t1"], "the end binds to the last emitted call, which is already terminal");
+		for (const id of updateIds) ok(callIds.has(id), `${id} was updated without ever being announced`);
+		deepStrictEqual(diagnostics, ["dropped duplicate terminal update for t1"]);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("drops an unidentified end when the turn emitted no tool call at all", async () => {
+		const diagnostics: string[] = [];
+		const { client, server } = startAcpServer({
+			chat: createScriptedChat([{ type: "tool_execution_end", toolName: "bash", result: "orphan" }]),
+			diagnostics: (line) => diagnostics.push(line),
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const updates = sessionUpdates(client.notifications);
+
+		strictEqual(
+			updates.some((update) => update.sessionUpdate === "tool_call_update"),
+			false,
+			"an update names a call the client was never shown",
+		);
+		strictEqual(
+			updates.some((update) => update.sessionUpdate === "tool_call"),
+			false,
+			"and nothing is invented to name it either",
+		);
+		deepStrictEqual(diagnostics, ["dropped tool_execution_end with no tool call to update"]);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("drops an end that arrives after the cancel sweep already failed its call", async () => {
+		const diagnostics: string[] = [];
+		const chat = createLateEndChat();
+		const { client, server } = startAcpServer({ chat, diagnostics: (line) => diagnostics.push(line) });
+		const sessionId = await openSession(client);
+		const cancelled = client.request<{ stopReason: string }>("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "wait" }],
+		});
+		await chat.started;
+		await client.request("session/cancel", { sessionId });
+		strictEqual((await cancelled).stopReason, "cancelled");
+		// The sweep marks every id it fails terminal, so the engine's late result
+		// cannot reopen the call on the next turn or on this one.
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "again" }] });
+		const updates = sessionUpdates(client.notifications).filter((update) => update.sessionUpdate === "tool_call_update");
+
+		strictEqual(updates.length, 1, "only the sweep's own failed update reaches the client");
+		strictEqual(updates[0]?.status, "failed");
+		strictEqual(updates[0]?.toolCallId, "engine-call-1");
+		deepStrictEqual(diagnostics, ["dropped tool_execution_end with no tool call to update"]);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("binds an unidentified permission request to the turn's one open tool call", async () => {
+		const registry = createPermissionRegistry();
+		const bus = createSafeEventBus();
+		const resolutions: PermissionResolvedPayload[] = [];
+		bus.on(BusChannels.PermissionResolved, (payload) => {
+			resolutions.push(payload);
+		});
+		const { client, server } = startAcpServer({
+			chat: createUnidentifiedPermissionChat(registry, 1),
+			toolRegistry: registry,
+			bus,
+			permissionTimeoutMs: 2000,
+		});
+		const asks: Array<Record<string, unknown>> = [];
+		client.onRequest("session/request_permission", (params) => {
+			if (isRecord(params) && isRecord(params.toolCall)) asks.push(params.toolCall);
+			return { outcome: { outcome: "selected", optionId: "allow-once" } };
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+
+		strictEqual(asks.length, 1);
+		strictEqual(asks[0]?.toolCallId, "engine-1", "the ask names the call the client is showing");
+		strictEqual(resolutions[0]?.status, "granted");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("denies an unidentified permission request it cannot bind to one call", async () => {
+		const registry = createPermissionRegistry();
+		const bus = createSafeEventBus();
+		const resolutions: PermissionResolvedPayload[] = [];
+		bus.on(BusChannels.PermissionResolved, (payload) => {
+			resolutions.push(payload);
+		});
+		const { client, server } = startAcpServer({
+			chat: createUnidentifiedPermissionChat(registry, 2),
+			toolRegistry: registry,
+			bus,
+			permissionTimeoutMs: 2000,
+		});
+		let asked = 0;
+		client.onRequest("session/request_permission", () => {
+			asked += 1;
+			return { outcome: { outcome: "selected", optionId: "allow-once" } };
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+
+		// Two calls are open and the request names neither, so there is no call the
+		// operator could be shown. Asking anyway would put an approval on a call
+		// nobody can identify, so the request fails closed instead.
+		strictEqual(asked, 0, "the client is never asked about a call it cannot identify");
+		strictEqual(
+			client.frames.some((frame) => frame.method === "session/request_permission"),
+			false,
+			"no permission frame is written at all",
+		);
+		strictEqual(resolutions[0]?.status, "denied");
+		strictEqual(resolutions[0]?.decidedBy, "error");
+		strictEqual(resolutions[0]?.reason, "permission request has no bindable tool call");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("denies a permission request whose engine id names no open tool call", async () => {
+		const registry = createPermissionRegistry();
+		const bus = createSafeEventBus();
+		const resolutions: PermissionResolvedPayload[] = [];
+		bus.on(BusChannels.PermissionResolved, (payload) => {
+			resolutions.push(payload);
+		});
+		const { client, server } = startAcpServer({
+			chat: createMistargetedPermissionChat(registry),
+			toolRegistry: registry,
+			bus,
+			permissionTimeoutMs: 2000,
+		});
+		let asked = 0;
+		client.onRequest("session/request_permission", () => {
+			asked += 1;
+			return { outcome: { outcome: "selected", optionId: "allow-once" } };
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+
+		// One call is open, but the request names a different id. Binding it to the
+		// open call would approve a call the operator was never shown, and minting
+		// an id for it would ask about a call the client never received.
+		strictEqual(asked, 0, "the client is never asked about a call it cannot identify");
+		strictEqual(
+			client.frames.some((frame) => frame.method === "session/request_permission"),
+			false,
+			"no permission frame is written at all",
+		);
+		const calls = sessionUpdates(client.notifications).filter((update) => update.sessionUpdate === "tool_call");
+		deepStrictEqual(
+			calls.map((update) => String(update.toolCallId)),
+			["engine-1"],
+			"the lookup mints nothing, so no second tool_call appears",
+		);
+		strictEqual(resolutions[0]?.status, "denied");
+		strictEqual(resolutions[0]?.decidedBy, "error");
+		strictEqual(resolutions[0]?.reason, "permission request has no bindable tool call");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("gives a reused engine tool call id a fresh wire id", async () => {
+		const { client, server } = startAcpServer({
+			chat: createScriptedChat([
+				{ type: "tool_execution_start", toolCallId: "dup", toolName: "bash", args: { command: "one" } },
+				{ type: "tool_execution_start", toolCallId: "dup", toolName: "bash", args: { command: "two" } },
+			]),
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const calls = sessionUpdates(client.notifications).filter((update) => update.sessionUpdate === "tool_call");
+
+		deepStrictEqual(
+			calls.map((update) => String(update.toolCallId)),
+			["dup", "clio-tool-1"],
+			"a repeated engine id is two calls, not one call announced twice",
+		);
+		deepStrictEqual(calls[0]?.rawInput, { command: "one" });
+		deepStrictEqual(calls[1]?.rawInput, { command: "two" });
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("closes calls sharing one engine id newest first", async () => {
+		const { client, server } = startAcpServer({
+			chat: createScriptedChat([
+				{ type: "tool_execution_start", toolCallId: "dup", toolName: "bash", args: { command: "one" } },
+				{ type: "tool_execution_start", toolCallId: "dup", toolName: "bash", args: { command: "two" } },
+				{ type: "tool_execution_end", toolCallId: "dup", toolName: "bash", result: "two done" },
+				{ type: "tool_execution_end", toolCallId: "dup", toolName: "bash", result: "one done" },
+			]),
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const updates = sessionUpdates(client.notifications).filter((update) => update.sessionUpdate === "tool_call_update");
+
+		deepStrictEqual(
+			updates.map((update) => String(update.toolCallId)),
+			["clio-tool-1", "dup"],
+			"each end closes the id's most recently opened call, so neither stays open",
+		);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("drops an end for an engine id this turn never started rather than closing another call", async () => {
+		const diagnostics: string[] = [];
+		const { client, server } = startAcpServer({
+			chat: createScriptedChat([
+				{ type: "tool_execution_start", toolCallId: "open-y", toolName: "bash", args: { command: "sleep 9" } },
+				{ type: "tool_execution_end", toolCallId: "unknown-x", toolName: "read", result: "not mine" },
+			]),
+			diagnostics: (line) => diagnostics.push(line),
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const updates = sessionUpdates(client.notifications);
+		const calls = updates.filter((update) => update.sessionUpdate === "tool_call");
+
+		// Binding the end to `open-y` would report the wrong tool's result under a
+		// call that is still running, and minting an id for `unknown-x` would update
+		// a call the client never received.
+		deepStrictEqual(
+			calls.map((update) => String(update.toolCallId)),
+			["open-y"],
+			"nothing is minted for the unknown id",
+		);
+		strictEqual(
+			updates.some((update) => update.sessionUpdate === "tool_call_update"),
+			false,
+			"no terminal update goes out, so the open call stays open",
+		);
+		deepStrictEqual(diagnostics, ["dropped tool_execution_end with no tool call to update"]);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("binds an unidentified end to the outer call once the nested one has already ended", async () => {
+		const diagnostics: string[] = [];
+		const { client, server } = startAcpServer({
+			chat: createScriptedChat([
+				{ type: "tool_execution_start", toolCallId: "outer-a", toolName: "bash", args: { command: "outer" } },
+				{ type: "tool_execution_start", toolCallId: "inner-b", toolName: "read", args: { path: "x" } },
+				{ type: "tool_execution_end", toolCallId: "inner-b", toolName: "read", result: "inner done" },
+				{ type: "tool_execution_end", toolName: "bash", result: "outer boom", isError: true },
+			]),
+			diagnostics: (line) => diagnostics.push(line),
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+		const updates = sessionUpdates(client.notifications).filter((update) => update.sessionUpdate === "tool_call_update");
+
+		// The nested call ended first, so the unidentified end belongs to the outer
+		// call that is still running, not to the newest call the client saw start.
+		deepStrictEqual(
+			updates.map((update) => String(update.toolCallId)),
+			["inner-b", "outer-a"],
+			"an unidentified end closes the newest call still open",
+		);
+		strictEqual(updates[0]?.status, "completed");
+		strictEqual(updates[1]?.status, "failed", "the status comes from the end event, not from the call it binds to");
+		deepStrictEqual(updates[1]?.content, [{ type: "content", content: { type: "text", text: "outer boom" } }]);
+		deepStrictEqual(diagnostics, [], "nothing was dropped");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("binds a permission for a reused engine id to its most recently opened call", async () => {
+		const registry = createPermissionRegistry();
+		const bus = createSafeEventBus();
+		const resolutions: PermissionResolvedPayload[] = [];
+		bus.on(BusChannels.PermissionResolved, (payload) => {
+			resolutions.push(payload);
+		});
+		const { client, server } = startAcpServer({
+			chat: createReusedIdPermissionChat(registry, { endBoth: false }),
+			toolRegistry: registry,
+			bus,
+			permissionTimeoutMs: 2000,
+		});
+		const asks: Array<Record<string, unknown>> = [];
+		client.onRequest("session/request_permission", (params) => {
+			if (isRecord(params) && isRecord(params.toolCall)) asks.push(params.toolCall);
+			return { outcome: { outcome: "selected", optionId: "allow-once" } };
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+
+		strictEqual(asks.length, 1);
+		strictEqual(asks[0]?.toolCallId, "clio-tool-1", "the newest open call under that engine id is the one asked about");
+		strictEqual(resolutions[0]?.status, "granted");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("denies a permission for a reused engine id once every one of its calls has finished", async () => {
+		const registry = createPermissionRegistry();
+		const bus = createSafeEventBus();
+		const resolutions: PermissionResolvedPayload[] = [];
+		bus.on(BusChannels.PermissionResolved, (payload) => {
+			resolutions.push(payload);
+		});
+		const { client, server } = startAcpServer({
+			chat: createReusedIdPermissionChat(registry, { endBoth: true }),
+			toolRegistry: registry,
+			bus,
+			permissionTimeoutMs: 2000,
+		});
+		let asked = 0;
+		client.onRequest("session/request_permission", () => {
+			asked += 1;
+			return { outcome: { outcome: "selected", optionId: "allow-once" } };
+		});
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+
+		strictEqual(asked, 0, "a call the client already saw finish cannot carry an approval");
+		strictEqual(resolutions[0]?.status, "denied");
+		strictEqual(resolutions[0]?.decidedBy, "error");
+		strictEqual(resolutions[0]?.reason, "permission request has no bindable tool call");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("refuses a session cwd that is not an absolute path", async () => {
+		const { client, server } = startAcpServer({ chat: createMockChat() });
+		await client.request("initialize", { protocolVersion: 1 });
+
+		// Each of these resolves to the workspace against this process's cwd, which
+		// is exactly why they are refused: the client would believe it had pinned a
+		// path it never sent.
+		for (const cwd of [".", " ", "", "sub", "./"]) {
+			const failure = await rejection(client.request("session/new", { cwd }));
+			strictEqual(failure.code, -32000, `cwd ${JSON.stringify(cwd)} must be refused`);
+			strictEqual(errorDetail(failure).code, "session_cwd_mismatch");
+		}
+		// The absolute form of the same workspace still works.
+		const session = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
+		ok(session.sessionId.length > 0);
+		assertNoDisclosure(client.frames);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("reports an admission reason outside the profile as the catch-all", async () => {
+		const { client, server } = startAcpServer({
+			chat: createNoticeChat(
+				{
+					level: "info",
+					surface: "transcript",
+					text: "[Clio Coder] runtime cannot be driven",
+					admission: { reason: "runtime-use-unsupported" },
+				},
+				{ endTurn: false },
+			),
+		});
+		const sessionId = await openSession(client);
+		const failure = await rejection(
+			client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] }),
+		);
+
+		// The engine's diagnostic vocabulary is larger than the profile's, and a
+		// client cannot branch on a code the profile never promised.
+		deepStrictEqual(errorDetail(failure), { version: 1, code: "prompt_not_admitted", reason: "admission-failed" });
+		strictEqual(failure.message.includes("runtime-use-unsupported"), false, "the engine code stays off the wire");
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("passes a profile admission reason through unchanged", async () => {
+		const { client, server } = startAcpServer({
+			chat: createNoticeChat(
+				{
+					level: "info",
+					surface: "transcript",
+					text: "[Clio Coder] no model configured",
+					admission: { reason: "model-not-configured" },
+				},
+				{ endTurn: false },
+			),
+		});
+		const sessionId = await openSession(client);
+		const failure = await rejection(
+			client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] }),
+		);
+
+		deepStrictEqual(errorDetail(failure), { version: 1, code: "prompt_not_admitted", reason: "model-not-configured" });
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("reads prompt text only from the ACP v1 prompt block array", async () => {
+		const chat = createMockChat();
+		const { client, server } = startAcpServer({ chat });
+		const sessionId = await openSession(client);
+
+		// Non-text blocks have no textual reading and are ignored rather than
+		// coerced into prose the model would then answer.
+		await client.request("session/prompt", {
+			sessionId,
+			prompt: [
+				{ type: "image", data: "AAAA", mimeType: "image/png" },
+				{ type: "text", text: "hi" },
+			],
+		});
+		deepStrictEqual(chat.submitted, ["hi"]);
+
+		// The shapes this server used to tolerate. No ACP client sends them, and
+		// accepting them made a client's framing bug look like a working prompt.
+		for (const params of [
+			{ sessionId, content: [{ type: "text", text: "x" }] },
+			{ sessionId, message: [{ type: "text", text: "x" }] },
+			{ sessionId, prompt: "x" },
+			{ sessionId, prompt: [{ type: "image", data: "AAAA", mimeType: "image/png" }] },
+		]) {
+			const failure = await rejection(client.request("session/prompt", params));
+			strictEqual(failure.code, -32602, `unexpected acceptance of ${JSON.stringify(params)}`);
+			strictEqual(errorDetail(failure).code, "invalid_params");
+		}
+		deepStrictEqual(chat.submitted, ["hi"], "no rejected shape ever reached the chat loop");
 		client.close();
 		strictEqual(await server, 0);
 	});

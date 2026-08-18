@@ -8,6 +8,32 @@ import type { AgentMessage } from "../types.js";
 export const ACP_USAGE_META_KEY = "clio-coder/usage";
 export const ACP_SESSION_META_KEY = "clio-coder/session";
 
+/**
+ * Wire bounds for one prompt turn (CONTRACT C001 §3). A client renders every
+ * frame it receives, so an unbounded one is a denial-of-service on the client
+ * and a disclosure surface on the server: `rawInput` for a `write` carries the
+ * whole file body and for `bash` the whole command line.
+ *
+ * Every cap is UTF-8 bytes, which is what the peer's read buffer and any
+ * intermediary actually spend. `String.length` counts UTF-16 code units, so
+ * measuring with it let a chunk of CJK text reach three times its stated bound
+ * and a chunk of emoji twice.
+ */
+export const ACP_MAX_STRING_BYTES = 4096;
+export const ACP_MAX_RAW_RECORD_BYTES = 32768;
+export const ACP_MAX_CHUNK_BYTES = 16384;
+
+/**
+ * Upper bound on a `toolCallId` this server puts on the wire, in UTF-8 bytes
+ * (CONTRACT C001 §3). Identity is one call per id in both directions: an engine
+ * id over this bound, missing, or already claimed by another call this turn
+ * travels under a `clio-tool-<n>` alias, and an engine id starting a second call
+ * mints a fresh alias rather than reusing the first call's wire id. A permission
+ * request binds only to an id the client already received a `tool_call` for and
+ * has not yet seen finish; nothing is minted on that path.
+ */
+export const ACP_MAX_TOOL_CALL_ID_BYTES = 128;
+
 /** ACP v1 `ToolKind` closed enum (schema 0.4.5). */
 export type AcpToolKind =
 	| "read"

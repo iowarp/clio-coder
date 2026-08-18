@@ -65,7 +65,7 @@ import {
 	type SteeringMode,
 } from "./turn-queues.js";
 import { createTurnRecovery, type RetryStatusEvent, reclassifyStallAbort } from "./turn-recovery.js";
-import { type AssistantDeltaEvent, createTurnRuntime } from "./turn-runtime.js";
+import { type AssistantDeltaEvent, createTurnRuntime, TurnAdmissionError } from "./turn-runtime.js";
 import { type AgentRuntime, type ChatLoopRunSnapshot, createTurnState } from "./turn-state.js";
 import { isWorkerShareNote } from "./worker-share.js";
 
@@ -107,6 +107,13 @@ export interface ChatNoticeEvent {
 	surface: "footer" | "transcript";
 	text: string;
 	key?: string;
+	/**
+	 * Present only on a notice that reports a turn Clio refused to start. The
+	 * `reason` is a closed-set code, not prose: protocol surfaces (the ACP
+	 * server) fail the turn with it instead of returning an empty success, and
+	 * every other surface renders the notice exactly as before.
+	 */
+	admission?: { reason: string };
 }
 
 /**
@@ -380,6 +387,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emit({ type: "notice", level, surface: "transcript", text, ...(key === undefined ? {} : { key }) });
 	};
 
+	/**
+	 * The same transcript notice every admission exit already emitted, carrying
+	 * the reason the turn never started. Text, level, and surface are unchanged,
+	 * so the TUI and headless paths render exactly what they rendered before.
+	 */
+	const emitAdmissionNotice = (text: string, reason: string): void => {
+		emit({ type: "notice", level: "info", surface: "transcript", text, admission: { reason } });
+	};
+
+	/**
+	 * Which of the two settings is actually missing when the runtime resolves to
+	 * null. Both halves produce the same operator-facing notice, but a machine
+	 * consumer of the reason (the ACP server reports it as `data.reason`) needs
+	 * to tell "no orchestrator at all" from "a target that names no model", and
+	 * collapsing them sent a client with a configured target to the wrong fix.
+	 */
+	const nullRuntimeAdmissionReason = (): string => {
+		const orchestrator = deps.getSettings().orchestrator;
+		const target = orchestrator.target?.trim() ?? "";
+		const model = orchestrator.model?.trim() ?? "";
+		return target.length > 0 && model.length === 0 ? "model-not-configured" : "orchestrator-not-configured";
+	};
+
 	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().retry);
 
 	const currentToolInvokeOptions = (): Partial<ToolInvokeOptions> => {
@@ -575,11 +605,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
 				agentRuntime = turnRuntime.ensureRuntime();
 			} catch (err) {
-				emitNotice(err instanceof Error ? err.message : String(err));
+				emitAdmissionNotice(
+					err instanceof Error ? err.message : String(err),
+					err instanceof TurnAdmissionError ? err.reason : "admission-failed",
+				);
 				return;
 			}
 			if (!agentRuntime) {
-				emitNotice(notConfiguredNotice());
+				emitAdmissionNotice(notConfiguredNotice(), nullRuntimeAdmissionReason());
 				return;
 			}
 
