@@ -80,6 +80,8 @@ export interface InteractivePresentationDeps {
 	getContextState?: (cwd?: string) => ContextState;
 	/** Whether the Ctrl+G leader is armed and waiting for its next key. */
 	getLeaderArmed?: () => boolean;
+	/** Whether a Ctrl+C armed the double tap and its window is still open. */
+	getShutdownArmed?: () => boolean;
 	getCwd?: () => string;
 	scheduleInterval?: (callback: () => void, intervalMs: number) => PresentationTickerHandle;
 	clearScheduledInterval?: (handle: PresentationTickerHandle) => void;
@@ -265,6 +267,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		getContextActivity: () => contextActivityStore.current(),
 		...(deps.getLeaderArmed ? { getLeaderArmed: deps.getLeaderArmed } : {}),
+		...(deps.getShutdownArmed ? { getShutdownArmed: deps.getShutdownArmed } : {}),
 		getToolCounts: () => ({
 			tools: Object.fromEntries(footerToolCounts),
 			errors: footerToolErrors,

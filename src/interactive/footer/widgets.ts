@@ -72,6 +72,13 @@ export interface SessionFacts {
 	 * it against.
 	 */
 	leaderArmed?: boolean;
+	/**
+	 * A Ctrl+C landed on an idle empty prompt and the 500ms window that quits is
+	 * open. Shown for the same reason as the leader above: the arming press left
+	 * the frame identical to the idle frame, so the operator had no way to learn
+	 * that a second press quits, and no way to tell the first press registered.
+	 */
+	shutdownArmed?: boolean;
 	/** Proactive-memory status; kept as one atomic fact row in the expanded dashboard. */
 	memoryIntervention?: {
 		enabled: boolean;
@@ -373,6 +380,7 @@ export function compactSecondaryLine(
 	sessionCost: CostAggregate | null = null,
 	outputVerbosity?: OutputVerbosity | null,
 	leaderArmed = false,
+	shutdownArmed = false,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
 	const barCells = compactContextBarWidth(safeWidth);
@@ -402,6 +410,7 @@ export function compactSecondaryLine(
 		compactMetricChipLimit(safeWidth),
 		outputVerbosity,
 		leaderArmed,
+		shutdownArmed,
 	);
 	// At the smallest widths the context meter consumes the entire secondary
 	// row, so keep a compact mode marker on the left instead of silently hiding
@@ -1106,6 +1115,7 @@ export function buildHarnessStatePill(
  * detail used to spend all of it, so a session holding 9.7k measured tokens
  * showed none of them.
  */
+const CHIP_RANK_SHUTDOWN = -2;
 const CHIP_RANK_LEADER = -1;
 const CHIP_RANK_TOTALS = 0;
 const CHIP_RANK_DETAIL = 1;
@@ -1155,12 +1165,13 @@ export function buildMetricStrip(
 	maxChipsCount = 6,
 	outputVerbosity?: OutputVerbosity | null,
 	leaderArmed = false,
+	shutdownArmed = false,
 ): string {
 	const safeMaxWidth = Math.max(0, Math.floor(maxWidth));
 	if (safeMaxWidth <= 0) return "";
 	const isStreaming = status.phase !== "idle" && status.phase !== "ended";
 	const meaningfulVerbosity = outputVerbosity && outputVerbosity !== "default" ? outputVerbosity : null;
-	if (!isStreaming && !lastTurn && !meaningfulVerbosity && !leaderArmed) return "";
+	if (!isStreaming && !lastTurn && !meaningfulVerbosity && !leaderArmed && !shutdownArmed) return "";
 
 	const candidates: Array<string | null> = [];
 	/** Per-turn detail that ranks below the session totals when the strip is cut. */
@@ -1236,7 +1247,14 @@ export function buildMetricStrip(
 	const chipLimit = Math.max(0, Math.floor(maxChipsCount));
 	const chips: RankedChip[] = [];
 	// Ranked above every measurement: the strip is cut by dropping the
-	// lowest-ranked chip, and this one is the answer to "did that key register".
+	// lowest-ranked chip, and these two are the answer to "did that key
+	// register". The quit hint outranks the leader because its window is
+	// 500ms wide and the leader's is open until the next keystroke.
+	// Two rungs rather than one: the strip drops a chip it cannot fit whole, and
+	// a terminal narrow enough to lose the sentence is exactly the one where the
+	// operator most needs to be told the press registered.
+	const shutdownHint = safeMaxWidth >= 20 ? "Ctrl+C again to quit" : "Ctrl+C again";
+	pushChip(chips, shutdownArmed ? theme.fg("warning", shutdownHint) : null, CHIP_RANK_SHUTDOWN);
 	pushChip(chips, leaderArmed ? theme.fg("accent", "leader armed") : null, CHIP_RANK_LEADER);
 	for (const chip of candidates) pushChip(chips, chip, CHIP_RANK_DETAIL);
 	pushChip(chips, totalChip, CHIP_RANK_TOTALS);

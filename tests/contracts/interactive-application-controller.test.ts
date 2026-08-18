@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioKeybinding } from "../../src/domains/config/keybindings.js";
 import {
+	APPLICATION_DOUBLE_TAP_MS,
 	type ApplicationControllerDeps,
 	type ApplicationIntervalHandle,
 	createApplicationController,
@@ -23,6 +24,8 @@ interface Harness {
 	setBashCancels(value: boolean): void;
 	setMatchedAction(value: ClioKeybinding | null): void;
 	emitSigint(): void;
+	/** Run the double-tap window's expiry callback, as the event loop would. */
+	fireArmedTimer(): boolean;
 }
 
 function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harness {
@@ -39,6 +42,11 @@ function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harn
 	let matchedAction: ClioKeybinding | null = null;
 	let sigintListener: (() => void) | undefined;
 	const keepAlive = { unref: () => {} };
+	// The controller schedules the armed hint's expiry through the same
+	// coordinator, so the harness keeps the two handles apart and holds the
+	// expiry callback rather than running it on a real clock.
+	const armedTimer = { unref: () => {} };
+	let armedTimerCallback: (() => void) | null = null;
 	const leaderKeys: LeaderKeyController = {
 		isPending: () => leaderPending,
 		route: () => {
@@ -65,11 +73,22 @@ function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harn
 			off: () => events.push("signal:off"),
 		},
 		intervals: {
-			setInterval: (_callback, delay) => {
+			setInterval: (callback, delay) => {
 				events.push(`interval:set:${delay}`);
-				return keepAlive;
+				if (delay !== APPLICATION_DOUBLE_TAP_MS) return keepAlive;
+				armedTimerCallback = callback;
+				return armedTimer;
 			},
-			clearInterval: (handle) => events.push(handle === keepAlive ? "interval:clear:keepalive" : "interval:clear:owned"),
+			clearInterval: (handle) => {
+				if (handle === armedTimer) armedTimerCallback = null;
+				events.push(
+					handle === keepAlive
+						? "interval:clear:keepalive"
+						: handle === armedTimer
+							? "interval:clear:armed"
+							: "interval:clear:owned",
+				);
+			},
 		},
 		intervalsToClear: [],
 		leaderKeys,
@@ -95,6 +114,7 @@ function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harn
 			editorText = "";
 		},
 		requestRender: () => events.push("render"),
+		onShutdownArmedChange: (armed) => events.push(`armed:${armed}`),
 		closeOverlay: () => {
 			events.push("overlay:close");
 			overlay = "closed";
@@ -161,6 +181,11 @@ function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harn
 			matchedAction = value;
 		},
 		emitSigint: () => sigintListener?.(),
+		fireArmedTimer: () => {
+			if (!armedTimerCallback) return false;
+			armedTimerCallback();
+			return true;
+		},
 	};
 }
 
@@ -272,7 +297,9 @@ describe("contracts/interactive application controller", () => {
 		harness.events.length = 0;
 		harness.setNow(22_000);
 		controller.handleCtrlC();
-		deepStrictEqual(harness.events, []);
+		deepStrictEqual(harness.events, [`interval:set:${APPLICATION_DOUBLE_TAP_MS}`, "armed:true", "render"]);
+
+		harness.events.length = 0;
 		harness.setNow(22_500);
 		controller.handleCtrlC();
 		await controller.run;
@@ -280,10 +307,102 @@ describe("contracts/interactive application controller", () => {
 			"signal:off",
 			"signal:restore",
 			"interval:clear:keepalive",
+			"interval:clear:armed",
 			"ui:stop",
 			"parked:Clio Coder shutting down",
 			"app:shutdown",
 		]);
+	});
+
+	// Issue #108. Every other Ctrl+C outcome changed something on screen; arming
+	// changed nothing, so a first press was indistinguishable from a key the
+	// application never received, and the 500ms window that quits could not be
+	// discovered by trying.
+	it("shows the armed double tap and still quits on a second press inside the window", async () => {
+		const harness = createHarness();
+		const controller = createApplicationController(harness.deps);
+		harness.events.length = 0;
+
+		harness.setNow(40_000);
+		controller.handleCtrlC();
+		deepStrictEqual(
+			harness.events,
+			[`interval:set:${APPLICATION_DOUBLE_TAP_MS}`, "armed:true", "render"],
+			"the arming press raises the hint and asks for the frame that shows it",
+		);
+
+		harness.events.length = 0;
+		harness.setNow(40_499);
+		controller.handleCtrlC();
+		strictEqual(await controller.run, 0);
+		strictEqual(harness.events.at(-1), "app:shutdown", "the second press inside the window still quits");
+		strictEqual(
+			harness.events.includes("interval:clear:armed"),
+			true,
+			"and the hint's expiry timer is released rather than left scheduled",
+		);
+	});
+
+	it("drops the armed hint when the window lapses instead of promising a quit that will not happen", () => {
+		const harness = createHarness();
+		const controller = createApplicationController(harness.deps);
+		harness.events.length = 0;
+
+		harness.setNow(50_000);
+		controller.handleCtrlC();
+		harness.events.length = 0;
+
+		strictEqual(harness.fireArmedTimer(), true, "arming scheduled its own expiry");
+		deepStrictEqual(harness.events, ["interval:clear:armed", "armed:false", "render"]);
+
+		// Nothing repaints an idle prompt on its own, so the lapse has to clear the
+		// hint itself: a press this late re-arms rather than quitting, and a hint
+		// still standing would have said otherwise.
+		harness.events.length = 0;
+		harness.setNow(51_000);
+		controller.handleCtrlC();
+		deepStrictEqual(harness.events, [`interval:set:${APPLICATION_DOUBLE_TAP_MS}`, "armed:true", "render"]);
+		strictEqual(harness.events.includes("app:shutdown"), false, "a press outside the window re-arms, it does not quit");
+	});
+
+	it("restarts the expiry when a press re-arms before the previous timer has fired", () => {
+		const harness = createHarness();
+		const controller = createApplicationController(harness.deps);
+		harness.events.length = 0;
+
+		harness.setNow(70_000);
+		controller.handleCtrlC();
+		harness.events.length = 0;
+
+		// By the clock this press is outside the window, so it re-arms rather than
+		// quits; the first timer is still pending (a late event loop). It must be
+		// replaced, not left to clear the hint in the middle of the new window.
+		harness.setNow(70_501);
+		controller.handleCtrlC();
+		deepStrictEqual(harness.events, ["interval:clear:armed", `interval:set:${APPLICATION_DOUBLE_TAP_MS}`, "render"]);
+
+		// Only the second timer exists now; the hint stays up until it fires.
+		harness.events.length = 0;
+		strictEqual(harness.fireArmedTimer(), true, "the re-arm scheduled its own expiry");
+		deepStrictEqual(harness.events, ["interval:clear:armed", "armed:false", "render"]);
+		strictEqual(harness.fireArmedTimer(), false, "nothing is left scheduled after the window lapses");
+	});
+
+	it("drops the armed hint with the press it spends on an overlay", () => {
+		const harness = createHarness();
+		const controller = createApplicationController(harness.deps);
+		harness.events.length = 0;
+
+		harness.setNow(60_000);
+		controller.handleCtrlC();
+		harness.events.length = 0;
+
+		// An overlay opened between the two presses takes the second one, and that
+		// press disarms the clock. The hint has to go with it.
+		harness.setOverlay("agents");
+		harness.setNow(60_100);
+		controller.handleCtrlC();
+		deepStrictEqual(harness.events, ["interval:clear:armed", "armed:false", "render", "overlay:close"]);
 	});
 
 	it("does not quit when a second Ctrl+C lands inside the window during a stream", async () => {
@@ -308,7 +427,11 @@ describe("contracts/interactive application controller", () => {
 		harness.setStreaming(false);
 		harness.setNow(30_200);
 		controller.handleCtrlC();
-		deepStrictEqual(harness.events, [], "the first press after the cancel only arms");
+		deepStrictEqual(
+			harness.events,
+			[`interval:set:${APPLICATION_DOUBLE_TAP_MS}`, "armed:true", "render"],
+			"the first press after the cancel only arms, and says so",
+		);
 		harness.setNow(30_400);
 		controller.handleCtrlC();
 		await controller.run;
@@ -460,8 +583,9 @@ describe("contracts/interactive application controller", () => {
 
 		deliver();
 		deepStrictEqual(journal, []);
-		deepStrictEqual(harness.events, []);
+		deepStrictEqual(harness.events, [`interval:set:${APPLICATION_DOUBLE_TAP_MS}`, "armed:true", "render"]);
 
+		harness.events.length = 0;
 		deliver();
 		strictEqual(await controller.run, 0);
 		deepStrictEqual(journal, []);
