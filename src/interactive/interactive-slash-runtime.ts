@@ -17,7 +17,7 @@ import {
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
-import type { SessionEntry } from "../domains/session/index.js";
+import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
@@ -95,6 +95,12 @@ export interface InteractiveSlashRuntimeDeps {
 	dismissContextBootstrapNotices: () => void;
 	recordSubmittedTurn: () => void;
 	readStructuredEntries: (sessionId: string) => ReadonlyArray<SessionEntry>;
+	/**
+	 * Leaf lookup for `/export`, so the export follows the branch the session
+	 * is actually on. current.jsonl still holds the abandoned turns after a
+	 * `/tree` pin, and an unscoped rehydrate reproduced them (issue #109).
+	 */
+	session?: Pick<SessionContract, "tree">;
 	expandSubmit: (text: string) => Promise<InteractiveSlashSubmitExpansion>;
 	openAskUser: AskUserHandler;
 	openSkillsHub: () => void;
@@ -339,7 +345,16 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				// live view, export renders full tool bodies (no middle-elision or
 				// char truncation) so the transcript reproduces the complete output.
 				const exportPanel = createChatPanel({ unboundedToolBodies: true });
-				rehydrateChatPanelFromTurns(exportPanel, turns, { unboundedToolBodies: true });
+				// Scoped to the leaf the session is on, the same way /resume replays
+				// (issue #107): with a /tree pin persisted and not yet extended, the
+				// file still holds the abandoned branch after the pin, and an unscoped
+				// rehydrate exported it as ordinary history (issue #109). No session
+				// contract means no pin can exist for this reader, so the file replays whole.
+				const leafTurnId = deps.session?.tree(sessionId).leafId ?? null;
+				rehydrateChatPanelFromTurns(exportPanel, turns, {
+					unboundedToolBodies: true,
+					...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
+				});
 				exportPanel.toggleAllToolsExpanded();
 				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripAnsiForExport);
 				// The operator names this file by the day they ran the export, so the

@@ -11,6 +11,7 @@ import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import type { SessionEntry } from "../../src/domains/session/index.js";
 import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
@@ -90,6 +91,50 @@ function createHarness() {
 }
 
 describe("contracts/interactive slash runtime", () => {
+	// Issue #109: current.jsonl is append-only, so a session pinned by /tree and
+	// not yet extended still holds the abandoned turns after the pin. /export
+	// rehydrated the file unscoped and reproduced them, the same root cause as
+	// #107 on a different surface. It now follows the leaf the session is on.
+	it("exports only the pinned branch, leaving the abandoned turns out of the file", () => {
+		const messageEntry = (
+			turnId: string,
+			parentTurnId: string | null,
+			role: "user" | "assistant",
+			text: string,
+		): SessionEntry =>
+			({
+				kind: "message",
+				turnId,
+				parentTurnId,
+				timestamp: "2026-08-09T00:00:00.000Z",
+				role,
+				payload: { text },
+			}) as SessionEntry;
+		const harness = createHarness();
+		harness.deps.chat.getSessionId = () => "session-pinned";
+		harness.deps.readStructuredEntries = () => [
+			messageEntry("turn-u1", null, "user", "PROMPT-ONE"),
+			messageEntry("turn-a1", "turn-u1", "assistant", "ANSWER-ONE"),
+			messageEntry("turn-u2", "turn-a1", "user", "PROMPT-TWO"),
+			messageEntry("turn-a2", "turn-u2", "assistant", "ANSWER-TWO"),
+		];
+		harness.deps.session = { tree: () => ({ leafId: "turn-a1" }) } as never;
+		harness.deps.now = () => new Date("2026-08-15T12:00:00.000Z");
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+		const scratch = mkdtempSync(join(tmpdir(), "clio-export-pin-"));
+		const target = join(scratch, "pinned.md");
+		try {
+			runtime.dispatchCommand(`/export ${target}`);
+			const body = readFileSync(target, "utf8");
+			ok(body.includes("PROMPT-ONE"), body);
+			ok(body.includes("ANSWER-ONE"), body);
+			ok(!body.includes("PROMPT-TWO"), `u2 is past the pin, got:\n${body}`);
+			ok(!body.includes("ANSWER-TWO"), `a2 is past the pin, got:\n${body}`);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
 	// The export is named for the day the operator ran it. At 21:30 in Chicago
 	// the UTC date is already tomorrow, so the old naming sent an operator
 	// looking for a file dated today that was never written.
