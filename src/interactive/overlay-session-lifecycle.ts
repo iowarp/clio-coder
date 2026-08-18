@@ -136,10 +136,27 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 				}
 				try {
 					const turns = deps.readStructuredEntries(sessionId);
-					deps.resetTranscript();
-					rehydrateChatPanelFromTurns(deps.chatPanel, turns);
-					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
+					// The leaf is read before the transcript is rebuilt because it is
+					// what the rebuild has to follow. resolveLeafOnOpen prefers a
+					// persisted `/tree` pin over the newest turn, so a session resumed
+					// on a pin extends from the pinned turn while the file still holds
+					// the abandoned branch after it. Replaying the file unfiltered
+					// rendered those abandoned turns as ordinary history above the
+					// prompt, disagreeing with the branch the next message parents onto
+					// and with the tip `/tree` marks (issue #107). The `/tree` switch
+					// path below has always scoped its replay to the selected turn;
+					// this is the same active-path filter, rooted at the leaf resume
+					// actually landed on.
 					const leafTurnId = session.tree(sessionId).leafId;
+					// activeLeafTurnId, not uptoTurnId: this is a live branch about to
+					// be extended, so sidecars anchored to a path turn but written
+					// after it (a compaction summary covering the leaf, above all)
+					// still belong on screen. uptoTurnId is the historical-truncation
+					// variant `/tree` uses.
+					const replayOptions = leafTurnId ? { activeLeafTurnId: leafTurnId } : {};
+					deps.resetTranscript();
+					rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
+					const replayMessages = buildReplayAgentMessagesFromTurns(turns, replayOptions);
 					deps.chat.resetForSession(leafTurnId, replayMessages);
 					rescopeToBranch(session, turns, leafTurnId);
 				} catch (error) {

@@ -1557,7 +1557,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				);
 			}
 			try {
-				chat.resetForSession(leafTurnId, buildReplayAgentMessagesFromTurns(readCurrentSessionEntries()));
+				// Scoped to the leaf resume landed on for the same reason the /resume
+				// overlay is (issue #107): with a /tree pin persisted, the file still
+				// holds the abandoned branch after the pinned turn, and replaying it
+				// unfiltered seeds the provider with turns the next append does not
+				// parent onto.
+				chat.resetForSession(
+					leafTurnId,
+					buildReplayAgentMessagesFromTurns(readCurrentSessionEntries(), leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
+				);
 			} catch (err) {
 				chat.resetForSession(leafTurnId);
 				process.stderr.write(

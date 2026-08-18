@@ -450,6 +450,86 @@ describe("contracts/session-tree-continuity", () => {
 		await second.contract.close();
 	});
 
+	// issue #107: the pin surviving quit was only half the fix. Resume replayed
+	// the file unfiltered, so the abandoned turns after the pin rendered as
+	// ordinary history above the prompt while the engine extended from the pin.
+	// The transcript and the branch the next message parents onto disagreed, and
+	// the disagreement was silent.
+	it("resume renders the pinned branch only, and the next append extends it", async () => {
+		const first = createSessionBundle(stubContext());
+		const contract = first.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "u1" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "a1" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "u2" } });
+		contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "a2" } });
+		contract.switchTurn(a1.id);
+		await contract.close();
+
+		const second = createSessionBundle(stubContext());
+		const resumed = second.contract;
+		resumed.resume(meta.id);
+		const leafTurnId = resumed.tree(meta.id).leafId;
+		strictEqual(leafTurnId, a1.id, "resolveLeafOnOpen honors the persisted pin");
+
+		const entries = sessionEntries(meta.id);
+		deepStrictEqual(
+			textBlocks(buildReplayAgentMessagesFromTurns(entries)),
+			["u1", "a1", "u2", "a2"],
+			"the file still holds the abandoned turns; only the leaf tells them apart",
+		);
+		deepStrictEqual(
+			textBlocks(buildReplayAgentMessagesFromTurns(entries, { activeLeafTurnId: leafTurnId ?? undefined })),
+			["u1", "a1"],
+			"the rendered transcript stops at the pin",
+		);
+
+		// session.append refuses any parent that is not the session's current leaf,
+		// so this both appends and asserts what the pin made the next append point.
+		const u3 = resumed.append({ parentId: a1.id, kind: "user", payload: { text: "u3" } });
+		strictEqual(u3.parentId, a1.id);
+		deepStrictEqual(
+			textBlocks(buildReplayAgentMessagesFromTurns(sessionEntries(meta.id))),
+			["u1", "a1", "u3"],
+			"the append made the pin authoritative for every later reader too",
+		);
+
+		await resumed.close();
+	});
+
+	// The pin names a turn, not an exchange: /tree rows are turns, so pinning the
+	// user turn resumes with that prompt alone and parents the next message onto
+	// it. That is what the live capture on issue #107 recorded.
+	it("resume on a pinned user turn renders that turn alone and parents onto it", async () => {
+		const first = createSessionBundle(stubContext());
+		const contract = first.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "u1" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "a1" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "u2" } });
+		contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "a2" } });
+		contract.switchTurn(u1.id);
+		await contract.close();
+
+		const second = createSessionBundle(stubContext());
+		const resumed = second.contract;
+		resumed.resume(meta.id);
+		const leafTurnId = resumed.tree(meta.id).leafId;
+		strictEqual(leafTurnId, u1.id);
+
+		deepStrictEqual(
+			textBlocks(
+				buildReplayAgentMessagesFromTurns(sessionEntries(meta.id), { activeLeafTurnId: leafTurnId ?? undefined }),
+			),
+			["u1"],
+			"a1 is the pinned turn's child, not its ancestor, so it is not on the path",
+		);
+		const next = resumed.append({ parentId: u1.id, kind: "user", payload: { text: "u3" } });
+		strictEqual(next.parentId, u1.id);
+
+		await resumed.close();
+	});
+
 	// issue #94: fork's positional cut for unanchored sidecars (task board,
 	// routing notices, leafless workerRun) is now the rule active-path replay
 	// follows too, so /tree switch and /fork of the same turn agree on what the
