@@ -201,7 +201,7 @@ describe("contracts/tool-choice lockout payload patch", () => {
 		// generic branch, not just openai-completions.
 		const dispatchFunction = { type: "function", function: { name: "dispatch" } };
 		const readFunction = { type: "function", function: { name: "read" } };
-		for (const api of ["openai-completions", "lmstudio-native", "ollama-native"] as const) {
+		for (const api of ["openai-completions", "ollama-native"] as const) {
 			const model = { api } as Parameters<typeof patchToolChoiceNamedPayload>[1];
 			const patched = patchToolChoiceNamedPayload(
 				{ model: "qwen3.8-27b", tools: [readFunction, dispatchFunction] },

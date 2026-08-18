@@ -18,6 +18,27 @@ export interface TargetPricing {
 // unrenamed by rebrand decision so existing `lifecycle:` lines keep working.
 export type TargetLifecycle = "user-managed" | "clio-managed";
 
+export interface LmStudioLoadSettings {
+	contextLength?: number;
+	flashAttention?: boolean;
+	evalBatchSize?: number;
+	numExperts?: number;
+	offloadKvCacheToGpu?: boolean;
+}
+
+export type LmStudioReasoningSetting = "auto" | "off" | "on" | "low" | "medium" | "high";
+
+export interface LmStudioRequestSettings {
+	ttlSeconds?: number;
+	draftModel?: string;
+	reasoning?: LmStudioReasoningSetting;
+}
+
+export interface LmStudioTargetSettings {
+	load?: LmStudioLoadSettings;
+	request?: LmStudioRequestSettings;
+}
+
 /**
  * Persisted target specification from settings.yaml (`targets:`). It binds a
  * user-facing target id to a RuntimeDescriptor id, target URL/auth metadata,
@@ -35,4 +56,5 @@ export interface TargetDescriptor {
 	lifecycle?: TargetLifecycle;
 	gateway?: boolean;
 	pricing?: TargetPricing;
+	lmstudio?: LmStudioTargetSettings;
 }

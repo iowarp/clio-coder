@@ -147,12 +147,12 @@ describe("contracts/providers", () => {
 	it("uses live probe capabilities for the selected LM Studio model, not only the target default", () => {
 		const target: TargetDescriptor = {
 			id: "zbook",
-			runtime: "lmstudio-native",
+			runtime: "lmstudio",
 			defaultModel: "qwopus3.5-9b-coder",
 		};
-		const runtime = fakeDescriptor("lmstudio-native", {
+		const runtime = fakeDescriptor("lmstudio", {
 			tier: "local-native",
-			apiFamily: "lmstudio-native",
+			apiFamily: "openai-completions",
 			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 8192, maxTokens: 4096 },
 		});
 		const status: TargetStatus = {
@@ -903,7 +903,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 	 * assertion, and the payload patcher, which checked only the id and omitted
 	 * the transport clause the other four carried. One predicate now owns it.
 	 *
-	 * It stays a name check on purpose. lmstudio-native declares
+	 * It stays a name check on purpose. lmstudio declares
 	 * `structuredOutputs: "json-schema"` truthfully and is still refused, because
 	 * the constraint ships as llama-server's `response_format: {type:
 	 * "json_object", schema}` spelling rather than the openai-completions
@@ -914,7 +914,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 	it("gates response schemas on the llama.cpp wire dialect, not on a declared capability", () => {
 		ok(runtimeSpeaksResponseSchemaDialect({ id: "llamacpp", kind: "http", apiFamily: "openai-completions" }));
 		strictEqual(
-			runtimeSpeaksResponseSchemaDialect({ id: "lmstudio-native", kind: "http", apiFamily: "lmstudio-native" }),
+			runtimeSpeaksResponseSchemaDialect({ id: "lmstudio", kind: "http", apiFamily: "openai-completions" }),
 			false,
 		);
 		strictEqual(runtimeSpeaksResponseSchemaDialect({ id: "vllm", kind: "http", apiFamily: "openai-completions" }), false);
@@ -923,20 +923,20 @@ describe("contracts/providers/runtime-cleanup", () => {
 			false,
 		);
 
-		// The spec validator refuses lmstudio-native even with the capability set.
+		// The spec validator refuses lmstudio even with the capability set.
 		throws(
 			() =>
 				parseWorkerSpec(
 					minimalWorkerSpec({
-						target: { id: "studio", runtime: "lmstudio-native" },
+						target: { id: "studio", runtime: "lmstudio" },
 						runtime: {
 							version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
-							id: "lmstudio-native",
+							id: "lmstudio",
 							kind: "http",
-							apiFamily: "lmstudio-native",
+							apiFamily: "openai-completions",
 							auth: "none",
 						},
-						runtimeId: "lmstudio-native",
+						runtimeId: "lmstudio",
 						modelCapabilities: { structuredOutputs: "json-schema" },
 						responseSchema: { type: "object", properties: { summary: { type: "string" } } },
 					}),

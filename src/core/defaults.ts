@@ -391,7 +391,7 @@ autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto
 # directory next to this file).
 targets: []
 # Local runtime examples (uncomment/adapt one; replace your-model-id):
-#   clio-coder configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio-coder configure --id local-lmstudio --runtime lmstudio --url http://localhost:1234 --model your-model-id --set-orchestrator --set-fleet-default
 #   clio-coder configure --id local-ollama --runtime ollama-native --url http://localhost:11434 --model your-model-id --set-orchestrator --set-fleet-default
 #   clio-coder configure --id local-llamacpp --runtime llamacpp --url http://127.0.0.1:8080 --model your-model-id --set-orchestrator --set-fleet-default
 #   clio-coder configure --id local-vllm --runtime vllm --url http://localhost:8000 --model your-model-id --set-orchestrator --set-fleet-default
@@ -402,7 +402,7 @@ targets: []
 # Example target block equivalent to one configured local runtime:
 # targets:
 #   - id: local-lmstudio
-#     runtime: lmstudio-native
+#     runtime: lmstudio
 #     url: http://localhost:1234
 #     defaultModel: your-model-id
 #     capabilities:

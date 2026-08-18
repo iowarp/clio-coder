@@ -371,6 +371,23 @@ export class AuthStorage {
 		delete this.data[providerId];
 	}
 
+	renameProvider(fromProviderId: string, toProviderId: string, options: { keepSource?: boolean } = {}): void {
+		this.backend.withLock((current) => {
+			const read = readStorageData(current);
+			if (read.damage !== null) throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
+			const source = read.data[fromProviderId];
+			if (!source) {
+				this.data = read.data;
+				return { result: undefined };
+			}
+			if (!read.data[toProviderId]) read.data[toProviderId] = source;
+			if (options.keepSource !== true) delete read.data[fromProviderId];
+			this.data = read.data;
+			this.damage = null;
+			return { result: undefined, next: serializeStorageData(read.data) };
+		});
+	}
+
 	listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }> {
 		return Object.entries(this.data)
 			.map(([providerId, credential]) => ({

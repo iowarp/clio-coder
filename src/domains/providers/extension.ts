@@ -157,6 +157,7 @@ export interface ProbeMerge {
 	probeModelCapabilities: NonNullable<TargetStatus["probeModelCapabilities"]> | null;
 	probeModelId: NonNullable<TargetStatus["probeModelId"]> | null;
 	probeNotes?: ReadonlyArray<string>;
+	probeSurfaces?: NonNullable<TargetStatus["probeSurfaces"]>;
 }
 
 /**
@@ -185,6 +186,7 @@ export function mergeProbeResult(
 			: ((preservePrevious ? previous.probeModelId : null) ?? null);
 	const probeNotes =
 		probe?.notes && probe.notes.length > 0 ? probe.notes : preservePrevious ? previous.probeNotes : undefined;
+	const probeSurfaces = probe?.surfaces ?? (preservePrevious ? previous.probeSurfaces : undefined);
 	const discoveredModels = uniqueModels(
 		probe?.models ?? (preservePrevious ? previous.discoveredModels : undefined) ?? desc.knownModels ?? [],
 	);
@@ -198,6 +200,7 @@ export function mergeProbeResult(
 		probeModelId,
 	};
 	if (probeNotes && probeNotes.length > 0) merge.probeNotes = probeNotes;
+	if (probeSurfaces && Object.keys(probeSurfaces).length > 0) merge.probeSurfaces = probeSurfaces;
 	return merge;
 }
 
@@ -282,6 +285,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				discoveredModelStates: previous?.discoveredModelStates ?? null,
 			};
 			if (previous?.probeNotes && previous.probeNotes.length > 0) out.probeNotes = previous.probeNotes;
+			if (previous?.probeSurfaces) out.probeSurfaces = previous.probeSurfaces;
 			return out;
 		}
 		const availability = availabilityFor(desc, target, authStatusFor);
@@ -315,6 +319,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			discoveredModelStates: merge.discoveredModelStates,
 		};
 		if (merge.probeNotes && merge.probeNotes.length > 0) out.probeNotes = merge.probeNotes;
+		if (merge.probeSurfaces) out.probeSurfaces = merge.probeSurfaces;
 		return out;
 	}
 

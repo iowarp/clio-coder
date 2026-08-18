@@ -14,12 +14,14 @@ const SRC_ROOT = path.join(REPO_ROOT, "src");
 
 /**
  * Files still allowed to spell the list out. The two roots hold the canonical
- * copy and pin each other in the first test below; the tools substrate carries
+ * copy and pin each other in the first test below; ACP deliberately freezes
+ * the seven-level safe-settings wire contract, and the tools substrate carries
  * its own copies that a later change removes.
  */
 const LITERAL_COPY_ALLOWLIST = new Set([
 	path.join("src", "core", "defaults.ts"),
 	path.join("src", "domains", "providers", "types", "capability-flags.ts"),
+	path.join("src", "engine", "acp", "server.ts"),
 	path.join("src", "tools", "dispatch.ts"),
 	path.join("src", "tools", "dispatch-arguments.ts"),
 ]);
