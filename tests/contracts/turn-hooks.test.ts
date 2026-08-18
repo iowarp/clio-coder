@@ -1153,7 +1153,7 @@ describe("contracts/turn-hooks finish-contract registration", () => {
 				text: `Done. Implemented the parser and updated the tests. ${"I will call the read tool now. ".repeat(8)}${"padding ".repeat(180)}`,
 				metadata: {
 					stopReason: "stop",
-					runtimeId: "lmstudio-native",
+					runtimeId: "lmstudio",
 					runtimeTier: "local-native",
 					activeToolNames: "read",
 				},
@@ -1282,7 +1282,7 @@ describe("contracts/turn-hooks tool-prose registration", () => {
 	});
 
 	/**
-	 * The gate used to be a two-name set, llamacpp and lmstudio-native. Prose
+	 * The gate used to be a two-name set, llamacpp and LM Studio. Prose
 	 * narration is a property of open-weight models served locally, not of the
 	 * two servers that were tested first, so the same model narrating through
 	 * Ollama, vLLM, or SGLang ran with no cutoff at all.

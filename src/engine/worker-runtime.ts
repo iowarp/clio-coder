@@ -377,7 +377,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// pi-ai is process-local. The orchestrator registers Clio API providers in
 	// providers/extension.ts, but the worker subprocess starts a fresh process,
 	// so it must register them here before any agent.prompt() touches a local
-	// runtime (lmstudio-native, ollama-native).
+	// runtime (lmstudio, ollama-native).
 	registerClioApiProviders();
 	// The worker is a fresh process; mirror the orchestrator's global output
 	// budget so dispatched runs honor settings.defaults.maxTokens too. Use the

@@ -18,20 +18,26 @@ export interface RuntimeRegistry {
 
 export function createRuntimeRegistry(): RuntimeRegistry {
 	const byId = new Map<string, RuntimeDescriptor>();
+	const canonical = new Set<string>();
 
 	const register = (desc: RuntimeDescriptor): void => {
-		if (byId.has(desc.id)) {
-			throw new Error(`runtime id '${desc.id}' already registered`);
+		const ids = [desc.id, ...(desc.aliases ?? [])];
+		const conflict = ids.find((id) => byId.has(id));
+		if (conflict) {
+			throw new Error(`runtime id '${conflict}' already registered`);
 		}
-		byId.set(desc.id, desc);
+		for (const id of ids) byId.set(id, desc);
+		canonical.add(desc.id);
 	};
 
 	const get = (id: string): RuntimeDescriptor | null => byId.get(id) ?? null;
 
-	const list = (): ReadonlyArray<RuntimeDescriptor> => Array.from(byId.values());
+	const list = (): ReadonlyArray<RuntimeDescriptor> =>
+		Array.from(canonical, (id) => byId.get(id)).filter((entry): entry is RuntimeDescriptor => entry !== undefined);
 
 	const clear = (): void => {
 		byId.clear();
+		canonical.clear();
 	};
 
 	const loadFromDir = async (dir: string): Promise<ReadonlyArray<string>> => {
@@ -129,6 +135,12 @@ function validateRuntimeDescriptor(value: unknown): RuntimeDescriptorValidation 
 	const v = value as Record<string, unknown>;
 	if (typeof v.id !== "string" || v.id.trim().length === 0) {
 		return { ok: false, reason: "id must be a non-empty string" };
+	}
+	if (
+		v.aliases !== undefined &&
+		(!Array.isArray(v.aliases) || v.aliases.some((alias) => typeof alias !== "string" || alias.trim().length === 0))
+	) {
+		return { ok: false, reason: "aliases must be non-empty strings when present" };
 	}
 	if (typeof v.displayName !== "string" || v.displayName.trim().length === 0) {
 		return { ok: false, reason: "displayName must be a non-empty string" };

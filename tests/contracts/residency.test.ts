@@ -221,7 +221,7 @@ describe("contracts/model residency decision", () => {
 	it("jit strategy evicts nothing up front and ranks fallback candidates unprotected-first", () => {
 		const plan = decideResidency({
 			targetId: "dynamo",
-			runtimeId: "lmstudio-native",
+			runtimeId: "lmstudio",
 			keepModelId: "worker-model",
 			managed: true,
 			strategy: "jit",
@@ -264,7 +264,7 @@ describe("contracts/model residency decision", () => {
 	it("observe-only opt-out never evicts and still reports", () => {
 		const plan = decideResidency({
 			targetId: "local",
-			runtimeId: "lmstudio-native",
+			runtimeId: "lmstudio",
 			keepModelId: "new-model",
 			managed: false,
 			strategy: "jit",
@@ -359,8 +359,8 @@ describe("contracts/model residency reconciler", () => {
 		// coder looks foreign; config protection must still spare it.
 		const plan = await reconcileResidency(
 			baseAdapter({
-				targetKey: "lmstudio-native|ws://dynamo:1234",
-				runtimeId: "lmstudio-native",
+				targetKey: "lmstudio|http://dynamo:1234",
+				runtimeId: "lmstudio",
 				strategy: "jit",
 				keepModelId: "worker-model",
 				listResident: async () => [{ modelId: "orchestrator-coder" }, { modelId: "operator-model" }],
@@ -476,7 +476,7 @@ describe("contracts/residency-protection settings extraction", () => {
 			...DEFAULT_SETTINGS,
 			targets: [
 				{ id: "mini", runtime: "llamacpp", defaultModel: "Qwopus3.6-35B" },
-				{ id: "dynamo", runtime: "lmstudio-native" },
+				{ id: "dynamo", runtime: "lmstudio" },
 			],
 			orchestrator: { ...DEFAULT_SETTINGS.orchestrator, target: "mini", model: "Qwopus3.6-35B" },
 			background: { ...DEFAULT_SETTINGS.background, target: "dynamo", model: "memory-small" },
@@ -501,7 +501,7 @@ describe("contracts/residency-protection settings extraction", () => {
 	it("tags each configured id with the plane that references it", () => {
 		const settings = {
 			...DEFAULT_SETTINGS,
-			targets: [{ id: "dynamo", runtime: "lmstudio-native", defaultModel: "target-default-model" }],
+			targets: [{ id: "dynamo", runtime: "lmstudio", defaultModel: "target-default-model" }],
 			orchestrator: { ...DEFAULT_SETTINGS.orchestrator, target: "dynamo", model: "chat-model" },
 			background: { ...DEFAULT_SETTINGS.background, target: "dynamo", model: "memory-model" },
 			workers: {

@@ -1,5 +1,5 @@
 export interface NativeRuntimeFingerprint {
-	runtimeId: "lmstudio-native" | "ollama-native";
+	runtimeId: "lmstudio" | "ollama-native";
 	displayName: string;
 }
 
@@ -23,11 +23,31 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
  * resident-model lifecycle.
  */
 export async function fingerprintNativeRuntime(baseUrl: string): Promise<NativeRuntimeFingerprint | null> {
-	const trimmed = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
-	const lmStudioV1 = await fetchWithTimeout(`${trimmed}/api/v1/models`, 750);
-	if (lmStudioV1?.ok) return { runtimeId: "lmstudio-native", displayName: "LM Studio" };
+	const normalized = baseUrl.replace(/^ws:/u, "http:").replace(/^wss:/u, "https:");
+	const trimmed = normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+	const greeting = await fetchWithTimeout(`${trimmed}/lmstudio-greeting`, 750);
+	if (greeting?.ok) {
+		try {
+			const data = (await greeting.json()) as { lmstudio?: unknown };
+			if (data.lmstudio === true) return { runtimeId: "lmstudio", displayName: "LM Studio" };
+		} catch {
+			// The exact JSON body is the fingerprint.
+		}
+	}
 	const lmStudioV0 = await fetchWithTimeout(`${trimmed}/api/v0/models`, 750);
-	if (lmStudioV0?.ok) return { runtimeId: "lmstudio-native", displayName: "LM Studio" };
+	if (lmStudioV0?.ok) {
+		try {
+			const data = (await lmStudioV0.json()) as { data?: unknown };
+			if (
+				Array.isArray(data.data) &&
+				data.data.some((entry) => typeof entry === "object" && entry !== null && "compatibility_type" in entry)
+			) {
+				return { runtimeId: "lmstudio", displayName: "LM Studio" };
+			}
+		} catch {
+			// A malformed v0 body is not an LM Studio fingerprint.
+		}
+	}
 	const ollama = await fetchWithTimeout(`${trimmed}/api/version`, 750);
 	if (ollama?.ok) {
 		try {

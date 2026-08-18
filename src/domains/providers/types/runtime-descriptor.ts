@@ -17,7 +17,6 @@ export type RuntimeApiFamily =
 	| "bedrock-converse-stream"
 	| "google-generative-ai"
 	| "google-vertex"
-	| "lmstudio-native"
 	| "mistral-conversations"
 	| "ollama-native"
 	| "rerank-http"
@@ -53,6 +52,8 @@ export interface ProbeSurfaceMap {
 	rerank?: string;
 	completion?: string;
 	infill?: string;
+	nativeV1?: string;
+	nativeV0?: string;
 }
 
 export type ProbeModelLoadState = "loaded" | "loading" | "unloaded" | "failed" | "unknown";
@@ -76,6 +77,14 @@ export interface ProbeModelStatus {
 	 */
 	sizeVramBytes?: number;
 	sizeBytes?: number;
+	/** Downloaded model key that owns this configured id or loaded instance. */
+	key?: string;
+	/** Loaded instance id selected for this model, when one exists. */
+	instanceId?: string;
+	/** Load configuration echoed by LM Studio for the selected instance. */
+	loadConfig?: Readonly<Record<string, unknown>>;
+	/** Reasoning levels accepted by this model after LM Studio option clamping. */
+	reasoningLevels?: ReadonlyArray<"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max">;
 }
 
 export interface ProbeResult {
@@ -115,6 +124,8 @@ export interface ReasoningProbeResult {
 
 export interface RuntimeDescriptor {
 	id: string;
+	/** Deprecated or compatibility ids that resolve to this descriptor object. */
+	aliases?: ReadonlyArray<string>;
 	displayName: string;
 	kind: RuntimeKind;
 	tier?: RuntimeTier;

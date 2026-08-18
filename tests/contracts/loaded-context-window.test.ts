@@ -2,7 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
-import { probeResultFromV1Models } from "../../src/domains/providers/runtimes/local-native/lmstudio-native.js";
+import { probeResultFromV1Models } from "../../src/domains/providers/runtimes/local-native/lmstudio.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -20,11 +20,11 @@ const MAX_WINDOW = 262_144;
 
 function runtime(): RuntimeDescriptor {
 	return {
-		id: "lmstudio-native",
+		id: "lmstudio",
 		displayName: "LM Studio",
 		kind: "http",
 		tier: "local-native",
-		apiFamily: "lmstudio-native",
+		apiFamily: "openai-completions",
 		auth: "api-key",
 		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, maxTokens: 4096 },
 		synthesizeModel: () => ({ id: MODEL, provider: "lmstudio" }) as never,
@@ -32,7 +32,7 @@ function runtime(): RuntimeDescriptor {
 }
 
 function target(): TargetDescriptor {
-	return { id: "dynamo", runtime: "lmstudio-native", url: "http://dynamo:1234", defaultModel: MODEL };
+	return { id: "dynamo", runtime: "lmstudio", url: "http://dynamo:1234", defaultModel: MODEL };
 }
 
 function status(overrides: Partial<TargetStatus> = {}): TargetStatus {
@@ -57,7 +57,7 @@ function providersFor(targetStatus: TargetStatus): ProvidersContract {
 	return {
 		list: () => [targetStatus],
 		getTarget: (id: string) => (id === targetStatus.target.id ? targetStatus.target : null),
-		getRuntime: (id: string) => (id === "lmstudio-native" ? targetStatus.runtime : null),
+		getRuntime: (id: string) => (id === "lmstudio" ? targetStatus.runtime : null),
 		getDetectedReasoning: () => null,
 		knowledgeBase: null,
 	} as never;

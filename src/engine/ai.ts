@@ -21,8 +21,6 @@ import {
 	cleanupSessionResources as piCleanupSessionResources,
 	getSupportedThinkingLevels as piGetSupportedThinkingLevels,
 	isContextOverflow as piIsContextOverflow,
-	parseJsonWithRepair as piParseJsonWithRepair,
-	parseStreamingJson as piParseStreamingJson,
 	validateToolArguments as piValidateToolArguments,
 	type Tool,
 	type ToolCall,
@@ -158,14 +156,6 @@ export function validateEngineToolArguments(tool: Tool, toolCall: ToolCall): unk
 
 export function calculateEngineCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"] {
 	return piCalculateCost(model, usage);
-}
-
-export function parseEngineJsonWithRepair<T>(json: string): T {
-	return piParseJsonWithRepair<T>(json);
-}
-
-export function parseEngineStreamingJson<T = Record<string, unknown>>(partialJson: string | undefined): T {
-	return piParseStreamingJson<T>(partialJson);
 }
 
 /**

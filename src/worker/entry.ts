@@ -23,7 +23,6 @@ process.title = "clio-coder-worker";
 // the worker's own environment.
 process.env.CLIO_CODER_WORKER_RUN = "1";
 
-import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { setProtectedModelsProvider, setResidencyNoticeSink } from "../engine/apis/residency.js";
 import { startWorkerRun, type WorkerRunInput, workerProviderSupportsTools } from "../engine/worker-runtime.js";
 import { attestedToolSignature } from "../engine/worker-tools.js";
@@ -248,7 +247,6 @@ async function main(): Promise<number> {
 		// Best-effort dispose of any LMStudioClient instances cached by the
 		// engine so we close their WebSocket sessions cleanly before the worker
 		// process exits.
-		await disposeLmStudioClients();
 	}
 }
 

@@ -7,10 +7,8 @@
  *
  * Field naming follows the Hugging Face / model-card terminology so the YAML
  * can be authored against the source-of-truth card. Engine adapters translate
- * these into the SDK-specific names at consumption sites:
- *   - LM Studio SDK uses `topPSampling`, `topKSampling`, `minPSampling`,
- *     `repeatPenalty`, `llamaKCacheQuantizationType`.
- *   - LM Studio's OpenAI-compat surface accepts `top_p`, `top_k`, `min_p`,
+ * these into runtime-specific names at consumption sites:
+ *   - OpenAI-compatible surfaces accept `top_p`, `top_k`, `min_p`,
  *     `repeat_penalty`.
  */
 
@@ -81,7 +79,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-export function asKvCacheQuant(value: unknown): KvCacheQuant | false | undefined {
+function asKvCacheQuant(value: unknown): KvCacheQuant | false | undefined {
 	if (value === false) return false;
 	if (typeof value !== "string") return undefined;
 	return (KV_CACHE_QUANTS as ReadonlyArray<string>).includes(value) ? (value as KvCacheQuant) : undefined;
@@ -122,9 +120,9 @@ function extractSamplingProfile(raw: unknown): SamplingProfile | undefined {
 	if (topK !== undefined) out.topK = topK;
 	const minP = asPositive(raw.minP);
 	if (minP !== undefined) out.minP = minP;
-	// Catalog YAML may use either `repeatPenalty` (LM Studio SDK term) or
-	// `repetitionPenalty` (HF model-card term); accept both, prefer the SDK
-	// spelling when both are present.
+	// Catalog YAML may use either `repeatPenalty` (engine field name) or
+	// `repetitionPenalty` (HF model-card term); accept both, preferring the
+	// engine spelling when both are present.
 	const rp = asPenalty(raw.repeatPenalty) ?? asPenalty(raw.repetitionPenalty);
 	if (rp !== undefined) out.repeatPenalty = rp;
 	const pp = asPenalty(raw.presencePenalty);

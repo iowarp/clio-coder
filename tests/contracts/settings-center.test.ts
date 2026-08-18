@@ -428,7 +428,7 @@ describe("contracts/settings center", () => {
 		ok(targetA);
 		ok(targetB);
 		settings.targets[0] = { ...targetA, runtime: "llamacpp" };
-		settings.targets[1] = { ...targetB, runtime: "lmstudio-native" };
+		settings.targets[1] = { ...targetB, runtime: "lmstudio" };
 		const center = new SettingsCenter(
 			buildSettingItems(settings, {
 				providers: providersWithHealth({ "target-a": "healthy", "target-b": "healthy" }, settings),
@@ -450,7 +450,7 @@ describe("contracts/settings center", () => {
 		const roomierHeader = roomier.split("\n").find((line) => line.includes("HEALTH") && line.includes("TARGET"));
 		ok(roomierHeader?.includes("RUNTIME"), roomierHeader);
 		ok(roomier.includes("llamacpp"), roomier);
-		ok(roomier.includes("lmstudio-native"), roomier);
+		ok(roomier.includes("lmstudio"), roomier);
 		ok(!roomier.includes("RUNTI…"), roomier);
 	});
 
