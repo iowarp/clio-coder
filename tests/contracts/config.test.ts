@@ -112,6 +112,64 @@ describe("contracts/config", () => {
 		strictEqual(settings.skills.trustProjectCompatRoots, false);
 	});
 
+	it("validates every LM Studio load and request setting strictly", () => {
+		const valid = validateSettings({
+			targets: [
+				{
+					id: "studio",
+					runtime: "lmstudio",
+					lmstudio: {
+						load: {
+							contextLength: 131_072,
+							flashAttention: true,
+							evalBatchSize: 512,
+							numExperts: 8,
+							offloadKvCacheToGpu: false,
+						},
+						request: { ttlSeconds: 600, draftModel: "draft", reasoning: "high" },
+					},
+				},
+			],
+		});
+		deepStrictEqual(valid.issues, []);
+		deepStrictEqual(valid.settings.targets[0]?.lmstudio, {
+			load: {
+				contextLength: 131_072,
+				flashAttention: true,
+				evalBatchSize: 512,
+				numExperts: 8,
+				offloadKvCacheToGpu: false,
+			},
+			request: { ttlSeconds: 600, draftModel: "draft", reasoning: "high" },
+		});
+
+		const invalid = validateSettings({
+			targets: [
+				{
+					id: "studio",
+					runtime: "lmstudio",
+					lmstudio: {
+						load: { contextLength: 0, flashAttention: "yes", unknown: true },
+						request: { ttlSeconds: -1, draftModel: 3, reasoning: "max" },
+					},
+				},
+			],
+		});
+		for (const path of [
+			"targets[0].lmstudio.load.unknown",
+			"targets[0].lmstudio.load.contextLength",
+			"targets[0].lmstudio.load.flashAttention",
+			"targets[0].lmstudio.request.ttlSeconds",
+			"targets[0].lmstudio.request.draftModel",
+			"targets[0].lmstudio.request.reasoning",
+		]) {
+			ok(
+				invalid.issues.some((issue) => issue.path === path),
+				`missing validation issue for ${path}`,
+			);
+		}
+	});
+
 	it("validates proactive-memory trigger settings and classifies them for the next turn", () => {
 		const result = validateSettings({
 			memory: {

@@ -25,6 +25,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import lmStudioRuntimeId from "./2026-08-18-lmstudio-runtime-id.js";
+
 export interface Migration {
 	id: string;
 	up(stateDir: string): Promise<void>;
@@ -43,7 +45,7 @@ export interface MigrationRunResult {
 	available: string[];
 }
 
-const REGISTRY: ReadonlyArray<Migration> = Object.freeze([]);
+const REGISTRY: ReadonlyArray<Migration> = Object.freeze([lmStudioRuntimeId]);
 
 export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;
