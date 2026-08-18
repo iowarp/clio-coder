@@ -264,10 +264,13 @@ target explicitly configured:
 | `offloadKvCacheToGpu` | `offload_kv_cache_to_gpu` |
 
 Loaded instances are addressed by their instance ids when Clio calls
-`POST /api/v1/models/unload` (<https://lmstudio.ai/docs/developer/rest/unload>). Model selection remains
-permissive: `defaultModel` and `wireModels` may name either the model key or one of its loaded instance
-ids. The probe reports both forms and exposes each instance's echoed load configuration from the
-native model listing (<https://lmstudio.ai/docs/developer/rest/list>).
+`POST /api/v1/models/unload` (<https://lmstudio.ai/docs/developer/rest/unload>). Clio records the
+instance id returned by each successful load in this process and refuses to unload every other
+instance. Models that were already resident and instances reported through LM Link remain
+observe-only. Model selection remains permissive: `defaultModel` and `wireModels` may name either
+the model key or one of its loaded instance ids. The probe reports both forms and exposes each
+instance's echoed load configuration from the native model listing
+(<https://lmstudio.ai/docs/developer/rest/list>).
 
 The request settings map as follows:
 
@@ -354,16 +357,21 @@ at CPU speed instead of failing.
   warning naming the co-resident models. Raise or disable the ceiling with
   `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT`. A target serving one model alone is
   never clamped.
-- **One instance per model.** A load config is never sent for a model that is
+- **Reuse an existing instance.** A load config is never sent for a model that is
   already resident, because LM Studio answers that with a second instance
   holding another copy of the weights and KV cache. A resident model is reused
   as loaded, and the output budget follows the window the server actually has
-  open. Duplicate instances found at load time are released.
-- **Roles are never evicted blind.** Every model the configuration references
-  carries the plane it serves (chat, memory, worker, target default). Clio
-  evicts an unprotected resident first, and an eviction that has to touch a
-  configured model names its role in the warning, so unloading the model serving
-  proactive memory can never read as freeing a spare.
+  open. Same-key instances reported by separate LM Link nodes are independent,
+  not duplicates, and remain untouched.
+- **Unload only process-owned instances.** Clio may release an instance only
+  when this adapter process loaded it and recorded the exact returned instance
+  id. Every pre-existing local instance and every LM Link instance is
+  observe-only. A fallback swap can therefore release an earlier Clio load but
+  cannot disturb the operator's resident models.
+- **Roles remain visible.** Every model the configuration references carries
+  the plane it serves (chat, memory, worker, target default). Notices name that
+  role and describe co-residency without claiming that an operator-owned model
+  can be evicted.
 
 A turn whose token rate collapses below 2 tokens per second for 30 seconds
 surfaces a `degraded` notice listing what is resident on the target. That is
