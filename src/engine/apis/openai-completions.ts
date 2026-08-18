@@ -19,11 +19,14 @@ import {
 	reasoningClassForMechanism,
 	resolveModelRuntimeCapabilitiesForModel,
 } from "../../domains/providers/model-runtime-capabilities.js";
+import { lmStudioReasoningEffort } from "../../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
+import type { LmStudioTargetSettings } from "../../domains/providers/types/target-descriptor.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
 import { ensureLlamaCppResidency } from "./llamacpp-residency.js";
+import { ensureLmStudioResidency } from "./lmstudio.js";
 import { LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS, remainingContextMaxTokens } from "./output-budget.js";
 import { residencyManagedFor } from "./residency.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
@@ -47,6 +50,8 @@ interface ClioRuntimeMetadata {
 		gateway?: boolean;
 		quirks?: LocalModelQuirks;
 		chatTemplateKwargsUnsupported?: boolean;
+		lmstudio?: LmStudioTargetSettings;
+		lmstudioReasoningOptions?: ReadonlyArray<string>;
 	};
 }
 
@@ -203,6 +208,35 @@ function applyThinkingPayload(
 	return next;
 }
 
+function isLmStudioModel(model: Model<Api>): boolean {
+	const metadata = runtimeMetadata(model);
+	return model.provider === "lmstudio" && metadata?.runtimeId === "lmstudio";
+}
+
+function applyLmStudioPayload(
+	payload: Record<string, unknown>,
+	model: Model<Api>,
+	level: ThinkingLevel,
+): Record<string, unknown> {
+	if (!isLmStudioModel(model)) return payload;
+	const request = runtimeMetadata(model)?.lmstudio?.request;
+	const next: Record<string, unknown> = { ...payload };
+	delete next.chat_template_kwargs;
+	if (request?.ttlSeconds !== undefined) next.ttl = request.ttlSeconds;
+	if (request?.draftModel !== undefined) next.draft_model = request.draftModel;
+	const configured = request?.reasoning ?? "auto";
+	const requestedLevel: ThinkingLevel =
+		configured === "off"
+			? "off"
+			: configured === "on"
+				? "low"
+				: configured === "low" || configured === "medium" || configured === "high"
+					? configured
+					: level;
+	next.reasoning_effort = lmStudioReasoningEffort(requestedLevel, runtimeMetadata(model)?.lmstudioReasoningOptions);
+	return next;
+}
+
 function applyLlamaCppPromptCachePayload(payload: Record<string, unknown>, model: Model<Api>): Record<string, unknown> {
 	const metadata = runtimeMetadata(model);
 	if (model.provider !== "llamacpp" || metadata?.runtimeId !== "llamacpp") return payload;
@@ -224,6 +258,7 @@ function shouldApplyLlamaCppPromptCache(model: Model<"openai-completions">): boo
 function composeSamplingOnPayload(
 	profile: SamplingProfile,
 	resolved: ResolvedModelRuntimeCapabilities | undefined,
+	level: ThinkingLevel,
 	base: AnyOnPayload | undefined,
 ): AnyOnPayload {
 	return async (payload, model) => {
@@ -232,6 +267,7 @@ function composeSamplingOnPayload(
 		}
 		let next = applyLlamaCppPromptCachePayload(applyOpenAISamplingProfile(payload, profile), model);
 		if (resolved) next = applyThinkingPayload(next, resolved.thinking, resolved, model);
+		next = applyLmStudioPayload(next, model, level);
 		if (base) {
 			const fromBase = await base(next, model);
 			if (fromBase !== undefined) return fromBase;
@@ -246,17 +282,17 @@ function composeSamplingOnPayload(
  */
 function composeThinkingOnPayload(
 	resolved: ResolvedModelRuntimeCapabilities,
+	level: ThinkingLevel,
 	base: AnyOnPayload | undefined,
 ): AnyOnPayload {
 	return async (payload, model) => {
 		if (!isPlainRecord(payload)) {
 			return base ? await base(payload, model) : undefined;
 		}
-		const next = applyThinkingPayload(
-			applyLlamaCppPromptCachePayload(payload, model),
-			resolved.thinking,
-			resolved,
+		const next = applyLmStudioPayload(
+			applyThinkingPayload(applyLlamaCppPromptCachePayload(payload, model), resolved.thinking, resolved, model),
 			model,
+			level,
 		);
 		if (base) {
 			const fromBase = await base(next, model);
@@ -274,8 +310,10 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	const applied = resolved.thinking;
 	const profile = pickSamplingProfile(clioQuirks(model), applied.thinkingActive);
 	const promptCache = shouldApplyLlamaCppPromptCache(model);
+	const lmstudio = isLmStudioModel(model);
 	if (
 		!promptCache &&
+		!lmstudio &&
 		!profile &&
 		applied.mechanism !== "effort-levels" &&
 		applied.mechanism !== "budget-tokens" &&
@@ -287,9 +325,9 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	const merged: Record<string, unknown> = { ...(options ?? {}) };
 	if (profile?.temperature !== undefined && merged.temperature === undefined) merged.temperature = profile.temperature;
 	if (profile) {
-		merged.onPayload = composeSamplingOnPayload(profile, resolved, options?.onPayload);
+		merged.onPayload = composeSamplingOnPayload(profile, resolved, applied.configuredLevel, options?.onPayload);
 	} else {
-		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload);
+		merged.onPayload = composeThinkingOnPayload(resolved, applied.configuredLevel, options?.onPayload);
 	}
 	return merged as TOptions;
 }
@@ -401,7 +439,7 @@ function malformedToolArgsMessage(
 	const workaround =
 		model.provider === "llamacpp" || runtime === "llamacpp"
 			? "For llama.cpp, verify --jinja, the model chat template, reasoning flags, and tool parser support for this model."
-			: "For LM Studio, use the verified openai-compat gateway fallback when native SDK tool extraction is unreliable.";
+			: "For LM Studio, verify the model's tool-use capability and active chat template in LM Studio.";
 	return `OpenAI-compatible runtime returned empty tool-call arguments for target '${target}' model '${model.id}' tool '${toolName}'.${required} ${workaround}`;
 }
 
@@ -640,15 +678,27 @@ async function ensureResidencyForModel(model: Model<"openai-completions">): Prom
 	});
 }
 
-function withLlamaCppResidency(
+async function ensureLocalResidency(
 	model: Model<"openai-completions">,
+	options: { apiKey?: string; signal?: AbortSignal },
+): Promise<void> {
+	if (isLmStudioModel(model)) {
+		await ensureLmStudioResidency(model, options);
+		return;
+	}
+	await ensureResidencyForModel(model);
+}
+
+function withLocalResidency(
+	model: Model<"openai-completions">,
+	options: { apiKey?: string; signal?: AbortSignal },
 	sourceFactory: () => ReturnType<typeof streamOpenAICompletions>,
 ): ReturnType<typeof streamOpenAICompletions> {
-	if (!isManagedLlamaCppModel(model)) return sourceFactory();
+	if (!isManagedLlamaCppModel(model) && !isLmStudioModel(model)) return sourceFactory();
 	const stream = createAssistantMessageEventStream();
 	(async () => {
 		try {
-			await ensureResidencyForModel(model);
+			await ensureLocalResidency(model, options);
 			for await (const event of sourceFactory()) {
 				stream.push(event as AssistantMessageEvent);
 			}
@@ -667,20 +717,28 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 	api: "openai-completions",
 	stream: (model, context, options) => {
 		// Bare `stream` callers don't communicate thinking state; fall back to
-		// the model's reasoning capability so the catalog still applies.
-		const resolved = resolvedCapabilitiesForModel(model, model.reasoning === true ? "medium" : "off");
+		// the model's reasoning capability so the catalog still applies. LM Studio
+		// is the exception because its HTTP server defaults to thinking off.
+		const defaultLevel = isLmStudioModel(model) ? "off" : model.reasoning === true ? "medium" : "off";
+		const resolved = resolvedCapabilitiesForModel(model, defaultLevel);
 		const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
 		const withSamplers = withSamplingOverrides(model, options, resolved);
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
-						withLlamaCppResidency(model, () =>
-							streamOpenAICompletions(
-								model,
-								effectiveContext,
-								withRemainingContextBudget(model, effectiveContext, withSamplers),
-							),
+						withLocalResidency(
+							model,
+							{
+								...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+								...(options?.signal !== undefined ? { signal: options.signal } : {}),
+							},
+							() =>
+								streamOpenAICompletions(
+									model,
+									effectiveContext,
+									withRemainingContextBudget(model, effectiveContext, withSamplers),
+								),
 						),
 						resolved,
 					),
@@ -699,12 +757,18 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
-						withLlamaCppResidency(model, () =>
-							streamSimpleOpenAICompletions(
-								model,
-								effectiveContext,
-								withRemainingContextBudget(model, effectiveContext, withSamplers),
-							),
+						withLocalResidency(
+							model,
+							{
+								...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+								...(options?.signal !== undefined ? { signal: options.signal } : {}),
+							},
+							() =>
+								streamSimpleOpenAICompletions(
+									model,
+									effectiveContext,
+									withRemainingContextBudget(model, effectiveContext, withSamplers),
+								),
 						),
 						resolved,
 					),

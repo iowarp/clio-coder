@@ -486,7 +486,7 @@ function resolveThinkingCapability(
  * while llama.cpp did the reverse. Sending the wrong spelling reads as "no
  * preference" to the server, so the model keeps reasoning at every dial.
  */
-const REASONING_EFFORT_ON_OFF_RUNTIMES: ReadonlySet<string> = new Set(["lmstudio-native", "lmstudio"]);
+const REASONING_EFFORT_ON_OFF_RUNTIMES: ReadonlySet<string> = new Set(["lmstudio"]);
 
 /** `none` is LM Studio's documented off value; on-off models have no finer dial than `low`. */
 function onOffReasoningEffort(thinkingActive: boolean): string {

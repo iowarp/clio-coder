@@ -456,8 +456,8 @@ export function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 
 /**
  * Per-runtime hooks the reconciler drives. Each manageable runtime builds an
- * adapter that closes over its own client (the LM Studio SDK socket, the
- * Ollama HTTP client, the llama.cpp router's HTTP surface) so the reconciler
+ * adapter that closes over its own transport (LM Studio REST, the Ollama HTTP
+ * client, the llama.cpp router's HTTP surface) so the reconciler
  * itself stays runtime-agnostic.
  */
 export interface ResidencyAdapter {

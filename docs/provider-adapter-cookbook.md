@@ -92,6 +92,23 @@ Clio caches this result under the session's provider cache, preventing redundant
 ### 2.3 Exact-ID Capability Selection (`probeCapabilitiesForModel`)
 `probeCapabilitiesForModel` is the one exact-id selector during capability resolution. When a router target serves several models, `probeCapabilitiesForModel` matches `probeModelCapabilities` keyed strictly to the requested wire model ID. A router serving multiple models thus answers only from the `/v1/models` row keyed to its own wire model, preventing capability flags or token limits from bleeding across different models on the same target.
 
+### 2.4 LM Studio as a reference adapter
+
+The built-in `lmstudio` adapter is an example of one canonical descriptor with a compatibility
+alias. Its descriptor declares `aliases: ["lmstudio-native"]`, while registry listing and persisted
+configuration use only `lmstudio`. The probe first requires the exact `/lmstudio-greeting` body for
+a directly configured target. It lists keys, loaded instance ids, capabilities, and echoed load
+configuration through `GET /api/v1/models` (<https://lmstudio.ai/docs/developer/rest/list>), falls
+back to `/api/v0/models` for older servers, and uses `/v1/models` only when neither native model
+shape is available.
+
+Chat synthesis stays on the ordinary `openai-completions` family and joins the target URL to
+`/v1/chat/completions` (<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>). Native
+REST is reserved for model management through the documented load and unload operations
+(<https://lmstudio.ai/docs/developer/rest/load> and
+<https://lmstudio.ai/docs/developer/rest/unload>). This split avoids a second streaming parser while
+still exposing runtime-specific residency and capability data.
+
 ---
 
 ## 3. Model Synthesis
@@ -121,7 +138,7 @@ Clio supports diverse thinking mechanisms. If your model family uses a custom fo
 | --- | --- |
 | `none` | **Reasoning-Never:** Clio strips thinking request fields (e.g., effort levels), avoids replaying thinking blocks in history, emits no TUI thinking events, and records no reasoning token usage metrics. |
 | `ollama-native` | Standard Ollama native thinking streams. |
-| `lmstudio-native` | Assistant thinking is prepended to output payloads wrapped in `<think>` and `</think>` tags. |
+| `lmstudio` | Uses OpenAI-compatible chat and consumes streamed `reasoning`; thinking control uses only `reasoning_effort`. |
 | `openai-completions` | Replays thinking blocks via `reasoning_content` message parameters. |
 | `anthropic-max` | Anthropic extended thinking block protocol. |
 

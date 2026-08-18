@@ -31,7 +31,7 @@ Every runtime-tunable value needs both halves; the pair is one knob, not two. Th
 | `CLIO_CODER_MAX_TOOL_CALLS` | 50 | `src/engine/loop-guard.ts` → `src/engine/worker-runtime.ts` | Worker lifetime tool-call cap for a dispatched run. Different axis than the orchestrator budget despite the near-identical name. |
 | `CLIO_CODER_MAX_RUNS` | 1000 | `src/domains/dispatch/state.ts` | Dispatch run-ledger retention cap. |
 | `CLIO_CODER_MAX_CONTEXT_TOKENS` | unset | `src/domains/providers/runtime-resolution.ts` | Context-window override for local runtimes. Also set internally by `clio-coder run --max-context-tokens` (see §6). |
-| `CLIO_CODER_KV_CACHE_MODE` | unset | `src/engine/apis/lmstudio-native.ts` | KV-cache quantization mode. Also set internally by `clio-coder run --kv-cache-mode`. |
+| `CLIO_CODER_KV_CACHE_MODE` | unset | retired | KV-cache quantization mode. Also set internally by the former `clio-coder run --kv-cache-mode` path. |
 | `CLIO_CODER_SAMPLING_OVERRIDES` | unset | `src/engine/apis/sampling-overrides.ts` | JSON sampling-parameter override. Set internally by print-mode sampling flags. |
 | `CLIO_CODER_READ_MAX_BYTES` | 51200 (50 KB) | `src/tools/read.ts` | Per-call byte cap for the read tool. |
 | `CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES` | 196608 (192 KB) | `src/tools/observation.ts` | Shared per-turn byte pool across all observation tools. |
@@ -70,8 +70,6 @@ All default off; all enabled with `1`.
 | `CLIO_CODER_TRACE_BOOT` | `src/core/boot-trace.ts` | Boot-phase timing trace. |
 | `CLIO_CODER_TIMING` | `src/entry/orchestrator.ts` | Startup timing report to stdout. |
 | `CLIO_CODER_DEBUG_SHUTDOWN` | `src/core/domain-loader.ts`, `src/core/termination.ts` | Shutdown-path diagnostics. |
-| `CLIO_CODER_DEBUG_LMSTUDIO` | `src/domains/providers/runtimes/common/lmstudio-logger.ts` | LM Studio wire logging. |
-| `CLIO_CODER_RUNTIME_VERBOSE` | `src/engine/apis/lmstudio-native.ts` | Verbose runtime logging. |
 | `CLIO_CODER_HOOK_BUDGET_DEBUG` | `src/domains/middleware/runtime.ts` | Per-overrun hook-budget diagnostics. |
 
 ## 4. Internal plumbing (Pre-consolidated State)

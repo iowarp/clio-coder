@@ -1101,6 +1101,7 @@ interface SerializedStatus {
 	probeCapabilities?: TargetStatus["probeCapabilities"];
 	probeModelId?: TargetStatus["probeModelId"];
 	probeNotes?: TargetStatus["probeNotes"];
+	probeSurfaces?: TargetStatus["probeSurfaces"];
 	discoveredModels: TargetStatus["discoveredModels"];
 	discoveredModelsSource?: TargetStatus["discoveredModelsSource"];
 	discoveredModelStates?: TargetStatus["discoveredModelStates"];
@@ -1145,6 +1146,9 @@ function serializeStatus(
 	}
 	if (status.probeNotes !== undefined) {
 		out.probeNotes = status.probeNotes;
+	}
+	if (status.probeSurfaces !== undefined) {
+		out.probeSurfaces = status.probeSurfaces;
 	}
 	return out;
 }

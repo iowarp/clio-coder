@@ -1337,7 +1337,7 @@
             <label for="replay-provider">Target Provider / Runtime</label>
             <select id="replay-provider" class="form-control" onchange="updateReplayInspector()">
               <option value="ollama-native">Ollama Native (ollama-native)</option>
-              <option value="lmstudio-native">LM Studio Native (lmstudio-native)</option>
+              <option value="lmstudio">LM Studio (lmstudio)</option>
               <option value="openai-completions">OpenAI Completions (openai-completions)</option>
               <option value="anthropic-max">Anthropic OAuth / API (anthropic-max)</option>
             </select>
@@ -2252,7 +2252,7 @@
             <div style="font-weight: 500; margin-top: 0.25rem;">${answer}</div>
           </div>
         `;
-      } else if (provider === "lmstudio-native") {
+      } else if (provider === "lmstudio") {
         badgeText = "LM Studio Prepend <think>";
         badge.style.color = "var(--color-purple)";
         badge.style.borderColor = "var(--color-purple)";

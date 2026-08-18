@@ -1360,16 +1360,6 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 			"Claude CLI subprocess executes Claude Code tools; Clio constrains permission mode and forbids dangerous bypass unless explicitly gated",
 		];
 	}
-	if (runtimeId === "lmstudio-native") {
-		// The SDK owns model management only. Predictions go over the same
-		// server's OpenAI-compatible port, which is the surface that carries a
-		// thinking control, so the resolved level does reach the wire. What the
-		// SDK still cannot do is unload a model another client loaded outside
-		// Clio's residency plan, which is the one dispatch-visible limit left.
-		return [
-			"LM Studio residency is reconciled through the native SDK; models loaded outside Clio are observed rather than evicted",
-		];
-	}
 	// HTTP/native runtimes run through pi-agent-core, which Clio observes and
 	// controls directly, so there are no runtime-imposed dispatch limitations.
 	return [];
@@ -1433,7 +1423,6 @@ const TOOL_CARRYING_API_FAMILIES: ReadonlySet<RuntimeApiFamily> = new Set([
 	"bedrock-converse-stream",
 	"google-generative-ai",
 	"google-vertex",
-	"lmstudio-native",
 	"mistral-conversations",
 	"ollama-native",
 	"claude-agent-sdk",

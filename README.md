@@ -170,7 +170,7 @@ cd /path/to/your/repo
 
 clio-coder configure \
   --id local-lmstudio \
-  --runtime lmstudio-native \
+  --runtime lmstudio \
   --url http://localhost:1234 \
   --model your-model-id \
   --set-orchestrator \
@@ -205,7 +205,7 @@ fleet dispatch through different targets independently.
 | Runtime id | Server |
 | --- | --- |
 | `llamacpp`, `llamacpp-anthropic`, `llamacpp-completion` | llama.cpp and llama-swap routers |
-| `lmstudio-native` | LM Studio |
+| `lmstudio` | LM Studio |
 | `ollama-native` | Ollama |
 | `vllm`, `sglang` | vLLM and SGLang |
 | `lemonade`, `lemonade-anthropic` | Lemonade |
@@ -264,7 +264,7 @@ muscle, or the reverse.
 ```bash
 clio-coder configure --id chatgpt-orch --runtime openai-codex --model gpt-5.4 --set-orchestrator
 clio-coder configure --id claude-worker --runtime claude-sdk --model sonnet
-clio-coder configure --id local-fleet --runtime lmstudio-native --url http://localhost:1234 \
+clio-coder configure --id local-fleet --runtime lmstudio --url http://localhost:1234 \
   --model qwen-7b --set-fleet-default
 
 clio-coder targets profile claude-sdk claude-worker --model sonnet
