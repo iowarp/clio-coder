@@ -2,7 +2,7 @@ import type { OAuthLoginCallbacks } from "../../engine/oauth.js";
 import type { AuthCredential, AuthResolution, AuthStatus } from "./auth/index.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
-import type { ProbeModelStatus, RuntimeDescriptor } from "./types/runtime-descriptor.js";
+import type { ProbeModelStatus, ProbeSurfaceMap, RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 /**
@@ -54,6 +54,8 @@ export interface TargetStatus {
 	probeModelId?: string | null;
 	/** Diagnostic notes from the last probe (e.g. wire-model mismatch warnings). */
 	probeNotes?: ReadonlyArray<string>;
+	/** Inference and management surfaces selected by the last successful probe. */
+	probeSurfaces?: Readonly<ProbeSurfaceMap>;
 	/** Ids returned by the last successful probeModels() call. */
 	discoveredModels: ReadonlyArray<string>;
 	/**

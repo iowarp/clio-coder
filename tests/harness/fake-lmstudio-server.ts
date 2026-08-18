@@ -14,6 +14,7 @@ export interface FakeLmStudioFixture {
 	url: string;
 	requests: FakeLmStudioRequest[];
 	requestsFor(path: string): FakeLmStudioRequest[];
+	failNextLoads(count?: number): void;
 	close(): Promise<void>;
 }
 
@@ -63,18 +64,27 @@ export async function startFakeLmStudioServer(
 			type: "llm",
 			max_context_length: 262_144,
 			capabilities: {
-				vision: false,
+				vision: true,
 				trained_for_tool_use: true,
-				reasoning: { allowed_options: ["off", "low", "medium", "high"] },
+				reasoning: { allowed_options: ["off", "on"], default: "on" },
 			},
 			loaded_instances: [
 				{
 					id: "qwen3.8-27b-zbook",
 					config: {
-						context_length: 131_072,
+						context_length: 262_144,
+						eval_batch_size: 2048,
+						physical_batch_size: 512,
 						flash_attention: true,
 						parallel: 4,
+						context_checkpoints: 32,
+						reasoning_budget_message: "",
 						speculative_draft_mtp: true,
+						speculative_draft_simple: false,
+						speculative_draft_model: "",
+						speculative_draft_max_tokens: 2,
+						speculative_draft_min_tokens: 0,
+						speculative_draft_min_continue_probability: 0.75,
 						offload_kv_cache_to_gpu: true,
 					},
 				},
@@ -85,14 +95,28 @@ export async function startFakeLmStudioServer(
 			type: "llm",
 			max_context_length: 262_144,
 			capabilities: {
-				vision: false,
+				vision: true,
 				trained_for_tool_use: true,
-				reasoning: { allowed_options: ["off", "low", "medium", "high"] },
 			},
 			loaded_instances: [
 				{
 					id: "qwen3.8-27b-dynamo",
-					config: { context_length: 65_536, flash_attention: true, parallel: 4 },
+					config: {
+						context_length: 131_072,
+						eval_batch_size: 2048,
+						physical_batch_size: 512,
+						parallel: 4,
+						flash_attention: true,
+						context_checkpoints: 32,
+						reasoning_budget_message: "",
+						speculative_draft_mtp: true,
+						speculative_draft_simple: false,
+						speculative_draft_model: "",
+						speculative_draft_max_tokens: 2,
+						speculative_draft_min_tokens: 0,
+						speculative_draft_min_continue_probability: 0.75,
+						offload_kv_cache_to_gpu: true,
+					},
 				},
 			],
 		},
@@ -232,6 +256,9 @@ export async function startFakeLmStudioServer(
 		requests,
 		requestsFor(path: string) {
 			return requests.filter((entry) => entry.path === path);
+		},
+		failNextLoads(count = 1) {
+			remainingLoadFailures += count;
 		},
 		close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
 	};

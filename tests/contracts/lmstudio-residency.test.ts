@@ -7,7 +7,6 @@ import {
 import {
 	CO_RESIDENT_CONTEXT_CEILING,
 	coResidentContextCeiling,
-	duplicateInstances,
 	fitLoadContextLength,
 } from "../../src/engine/apis/lmstudio-residency.js";
 
@@ -71,29 +70,6 @@ describe("contracts/lmstudio context fit", () => {
 			ceiling: undefined,
 		});
 		strictEqual(fit.contextLength, 262_144);
-	});
-});
-
-describe("contracts/lmstudio duplicate instances", () => {
-	it("reports every instance of the requested model past the first", () => {
-		const extras = duplicateInstances(
-			[
-				{ modelKey: "gemma", identifier: "gemma" },
-				{ modelKey: "gemma", identifier: "gemma:2" },
-				{ modelKey: "gemma", identifier: "gemma:3" },
-				{ modelKey: "coder", identifier: "coder" },
-			],
-			"gemma",
-		);
-		deepStrictEqual(
-			extras.map((entry) => entry.identifier),
-			["gemma:2", "gemma:3"],
-		);
-	});
-
-	it("reports nothing for a single instance or an absent model", () => {
-		deepStrictEqual(duplicateInstances([{ modelKey: "gemma" }, { modelKey: "coder" }], "gemma"), []);
-		deepStrictEqual(duplicateInstances([{ modelKey: "coder" }], "gemma"), []);
 	});
 });
 
