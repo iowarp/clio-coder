@@ -9,7 +9,7 @@ import {
 	requestLmStudioJson,
 } from "../../domains/providers/runtimes/common/lmstudio-http.js";
 import type { TargetDescriptor } from "../../domains/providers/types/target-descriptor.js";
-import { coResidentContextCeiling, duplicateInstances, fitLoadContextLength } from "./lmstudio-residency.js";
+import { coResidentContextCeiling, fitLoadContextLength } from "./lmstudio-residency.js";
 import { emitResidencyNotice, reconcileResidency, residencyManagedFor } from "./residency.js";
 import { withResidencyLock } from "./residency-lock.js";
 
@@ -20,6 +20,23 @@ interface LmStudioModelMetadata {
 		lifecycle?: "user-managed" | "clio-managed";
 		lmstudio?: TargetDescriptor["lmstudio"];
 	};
+}
+
+const ownedInstancesByTarget = new Map<string, Set<string>>();
+
+function ownedInstances(targetKey: string): Set<string> {
+	let owned = ownedInstancesByTarget.get(targetKey);
+	if (!owned) {
+		owned = new Set<string>();
+		ownedInstancesByTarget.set(targetKey, owned);
+	}
+	return owned;
+}
+
+function responseInstanceId(data: unknown): string | undefined {
+	if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+	const id = (data as { instance_id?: unknown }).instance_id;
+	return typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
 }
 
 function metadata(model: Model<Api>): NonNullable<LmStudioModelMetadata["clio"]> | undefined {
@@ -71,7 +88,7 @@ async function post(
 	body: Record<string, unknown>,
 	apiKey: string | undefined,
 	signal: AbortSignal | undefined,
-): Promise<void> {
+): Promise<unknown> {
 	const headers: Record<string, string> = { "content-type": "application/json", ...(target.auth?.headers ?? {}) };
 	if (apiKey?.trim()) headers.authorization = `Bearer ${apiKey.trim()}`;
 	const response = await requestLmStudioJson(
@@ -81,15 +98,33 @@ async function post(
 		signal,
 	);
 	if (!response.ok) throw new Error(response.error ?? `LM Studio ${path} returned HTTP ${response.status}`);
+	return response.data;
 }
 
-async function unloadInstance(
+async function unloadOwnedInstance(
 	target: TargetDescriptor,
+	targetKey: string,
 	instanceId: string,
 	apiKey: string | undefined,
 	signal: AbortSignal | undefined,
-): Promise<void> {
+): Promise<boolean> {
+	const owned = ownedInstances(targetKey);
+	if (!owned.has(instanceId)) return false;
 	await post(target, "/api/v1/models/unload", { instance_id: instanceId }, apiKey, signal);
+	owned.delete(instanceId);
+	return true;
+}
+
+async function loadOwnedInstance(
+	target: TargetDescriptor,
+	targetKey: string,
+	body: Record<string, unknown>,
+	apiKey: string | undefined,
+	signal: AbortSignal | undefined,
+): Promise<void> {
+	const data = await post(target, "/api/v1/models/load", body, apiKey, signal);
+	const instanceId = responseInstanceId(data);
+	if (instanceId) ownedInstances(targetKey).add(instanceId);
 }
 
 export async function ensureLmStudioResidency(
@@ -100,6 +135,8 @@ export async function ensureLmStudioResidency(
 	if (!target) return;
 	const info = metadata(model);
 	if (!info) return;
+	const load = target.lmstudio?.load;
+	if (!load || Object.keys(load).length === 0) return;
 	const ctx = {
 		credentialsPresent: new Set<string>(),
 		httpTimeoutMs: 5_000,
@@ -110,6 +147,7 @@ export async function ensureLmStudioResidency(
 	if (!catalog.ok) throw new Error(catalog.error ?? "LM Studio model listing failed");
 	if (catalog.tier !== "0.4+") return;
 	const selected = resolveModel(catalog, model.id);
+	if (selected?.instance) return;
 	const modelKey = selected?.model.key ?? model.id;
 	let instances = catalog.models.flatMap((entry) =>
 		entry.loadedInstances.map((instance) => ({ modelKey: entry.key, identifier: instance.id, instance })),
@@ -128,25 +166,15 @@ export async function ensureLmStudioResidency(
 		...(model.contextWindow > 0 ? { modelMaxContext: model.contextWindow } : {}),
 		listResident: async () => [...new Set(instances.map((entry) => entry.modelKey))].map((modelId) => ({ modelId })),
 		unload: async (id) => {
+			const released = new Set<string>();
 			for (const entry of instances.filter((resident) => resident.modelKey === id)) {
-				await unloadInstance(target, entry.identifier, options.apiKey, options.signal);
+				if (await unloadOwnedInstance(target, targetKey, entry.identifier, options.apiKey, options.signal)) {
+					released.add(entry.identifier);
+				}
 			}
-			instances = instances.filter((resident) => resident.modelKey !== id);
+			instances = instances.filter((resident) => !released.has(resident.identifier));
 		},
 	});
-	if (plan.decision !== "observe") {
-		const duplicates = duplicateInstances(instances, modelKey);
-		if (duplicates.length > 0) {
-			await withResidencyLock(targetKey, async () => {
-				for (const duplicate of duplicates) {
-					if (duplicate.identifier) await unloadInstance(target, duplicate.identifier, options.apiKey, options.signal);
-				}
-			});
-			instances = instances.filter((entry) => !duplicates.includes(entry));
-		}
-	}
-	const load = target.lmstudio?.load;
-	if (!load || Object.keys(load).length === 0 || selected?.instance) return;
 	let body = lmStudioLoadBody(modelKey, load);
 	if (load.contextLength !== undefined) {
 		const fit = fitLoadContextLength({
@@ -169,16 +197,16 @@ export async function ensureLmStudioResidency(
 		}
 	}
 	try {
-		await post(target, "/api/v1/models/load", body, options.apiKey, options.signal);
+		await loadOwnedInstance(target, targetKey, body, options.apiKey, options.signal);
 	} catch (error) {
 		if (plan.decision === "observe" || plan.fallbackEvict.length === 0) throw error;
 		await withResidencyLock(targetKey, async () => {
 			for (const candidate of plan.fallbackEvict) {
 				for (const entry of instances.filter((resident) => resident.modelKey === candidate.modelId)) {
-					await unloadInstance(target, entry.identifier, options.apiKey, options.signal);
+					await unloadOwnedInstance(target, targetKey, entry.identifier, options.apiKey, options.signal);
 				}
 			}
-			await post(target, "/api/v1/models/load", body, options.apiKey, options.signal);
+			await loadOwnedInstance(target, targetKey, body, options.apiKey, options.signal);
 		});
 	}
 }

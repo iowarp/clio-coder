@@ -74,19 +74,3 @@ export function fitLoadContextLength(input: ContextFitInput): ContextFitResult {
 	}
 	return { contextLength: ceiling, clampedFrom: input.requested, neighbours };
 }
-
-/**
- * Instances of `keepModelId` beyond the one Clio will use. LM Studio's load path
- * happily creates a second instance of an already-resident model key (observed:
- * `google/gemma-4-26b-a4b-qat:2`), and each instance holds a full weight copy
- * and KV cache. The extras are the same model, so releasing them never takes a
- * role's model away: whatever pointed at that key is still served by the
- * survivor.
- */
-export function duplicateInstances<T extends LmStudioResidentInstance>(
-	resident: ReadonlyArray<T>,
-	keepModelId: string,
-): T[] {
-	const instances = resident.filter((entry) => entry.modelKey === keepModelId);
-	return instances.slice(1);
-}

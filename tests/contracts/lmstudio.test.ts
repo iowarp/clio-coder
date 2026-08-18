@@ -74,13 +74,19 @@ describe("contracts/lmstudio REST probe", () => {
 		ok(result.models?.includes("qwen3.8-27b-dynamo"));
 		strictEqual(result.modelStates?.["qwen3.8-27b-zbook"]?.key, "qwen3.8-27b");
 		strictEqual(result.modelStates?.["qwen3.8-27b-zbook"]?.instanceId, "qwen3.8-27b-zbook");
-		strictEqual(result.modelStates?.["qwen3.8-27b-zbook"]?.contextLength, 131_072);
-		strictEqual(result.modelStates?.["qwen3.8-27b-dynamo"]?.contextLength, 65_536);
+		strictEqual(result.modelStates?.["qwen3.8-27b-zbook"]?.contextLength, 262_144);
+		strictEqual(result.modelStates?.["qwen3.8-27b-dynamo"]?.contextLength, 131_072);
 		strictEqual(result.modelStates?.["qwen3.8-27b-zbook"]?.loadConfig?.speculative_draft_mtp, true);
+		deepStrictEqual(result.modelStates?.["qwen3.8-27b-zbook"]?.reasoningLevels, ["off", "low"]);
 		deepStrictEqual(result.modelStates?.["coder-unloaded"]?.reasoningLevels, ["off", "low"]);
 		strictEqual(result.capabilityModelId, "qwen3.8-27b-zbook");
-		strictEqual(result.discoveredCapabilities?.contextWindow, 131_072);
+		strictEqual(result.discoveredCapabilities?.contextWindow, 262_144);
+		deepStrictEqual(result.surfaces, {
+			openaiChat: "/v1/chat/completions",
+			nativeV1: "/api/v1/models",
+		});
 		deepStrictEqual(await lmstudioRuntime.probeModels?.(target(server), probeContext), result.models);
+		strictEqual(server.requestsFor("/api/v1/models/unload").length, 0);
 	});
 
 	it("falls back to the v0 body when the missing v1 route returns HTTP 200 with an error", async () => {
@@ -144,6 +150,7 @@ describe("contracts/lmstudio reasoning and chat wire", () => {
 		const request = server.requestsFor("/v1/chat/completions").at(-1);
 		strictEqual(request?.body?.reasoning_effort, "none");
 		strictEqual("chat_template_kwargs" in (request?.body ?? {}), false);
+		strictEqual(server.requestsFor("/api/v1/models/unload").length, 0);
 
 		const ignored = await fetch(`${server.url}/v1/chat/completions`, {
 			method: "POST",
@@ -254,17 +261,18 @@ describe("contracts/lmstudio REST residency", () => {
 		strictEqual(load[0]?.headers.authorization, "Bearer secret");
 	});
 
-	it("unloads duplicate instances by instance id", async () => {
+	it("treats local and LM Link same-key instances as observe-only during reconcile", async () => {
 		const server = await fake({ authToken: "secret" });
-		const descriptor = target(server, { defaultModel: "qwen3.8-27b" });
+		const descriptor = target(server, {
+			defaultModel: "qwen3.8-27b-zbook",
+			lmstudio: { load: { contextLength: 262_144 } },
+		});
 		await ensureLmStudioResidency(model(descriptor), { apiKey: "secret" });
-		const unload = server.requestsFor("/api/v1/models/unload");
-		strictEqual(unload.length, 1);
-		deepStrictEqual(unload[0]?.body, { instance_id: "qwen3.8-27b-dynamo" });
-		strictEqual(unload[0]?.headers.authorization, "Bearer secret");
+		strictEqual(server.requestsFor("/api/v1/models/load").length, 0);
+		strictEqual(server.requestsFor("/api/v1/models/unload").length, 0);
 	});
 
-	it("evicts loaded instances and retries one failed explicit load", async () => {
+	it("retries a failed explicit load without releasing pre-existing instances", async () => {
 		const server = await fake({ failLoads: 1 });
 		const descriptor = target(server, {
 			defaultModel: "coder-unloaded",
@@ -272,9 +280,25 @@ describe("contracts/lmstudio REST residency", () => {
 		});
 		await ensureLmStudioResidency(model(descriptor));
 		strictEqual(server.requestsFor("/api/v1/models/load").length, 2);
+		strictEqual(server.requestsFor("/api/v1/models/unload").length, 0);
+	});
+
+	it("releases only an instance loaded by this adapter process", async () => {
+		const server = await fake();
+		const first = target(server, {
+			defaultModel: "coder-unloaded",
+			lmstudio: { load: { contextLength: 32_768 } },
+		});
+		await ensureLmStudioResidency(model(first));
+		server.failNextLoads();
+		const second = target(server, {
+			defaultModel: "embedding-model",
+			lmstudio: { load: { contextLength: 4096 } },
+		});
+		await ensureLmStudioResidency(model(second));
 		deepStrictEqual(
 			server.requestsFor("/api/v1/models/unload").map((request) => request.body?.instance_id),
-			["qwen3.8-27b-zbook", "qwen3.8-27b-dynamo"],
+			["coder-unloaded:clio"],
 		);
 	});
 

@@ -185,6 +185,7 @@ function probeFromCatalog(catalog: LmStudioCatalog, target: TargetDescriptor): P
 	);
 	result.notes = [
 		`LM Studio surface tier ${catalog.tier ?? "unknown"}`,
+		`Surfaces: ${Object.values(result.surfaces ?? {}).join(", ")}`,
 		...(loaded.length > 0 ? [`Loaded instances: ${loaded.join(", ")}`] : []),
 	];
 	return result;
