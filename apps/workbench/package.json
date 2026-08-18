@@ -1,0 +1,25 @@
+{
+	"name": "@iowarp/clio-workbench",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"license": "Apache-2.0",
+	"scripts": {
+		"build": "vite build"
+	},
+	"dependencies": {
+		"@fontsource-variable/atkinson-hyperlegible-next": "5.3.0",
+		"@fontsource-variable/newsreader": "5.3.0",
+		"@fontsource/commit-mono": "5.3.0",
+		"react": "19.2.8",
+		"react-dom": "19.2.8"
+	},
+	"devDependencies": {
+		"@axe-core/playwright": "4.13.0",
+		"@types/react": "19.2.18",
+		"@types/react-dom": "19.2.4",
+		"@vitejs/plugin-react": "6.0.5",
+		"playwright-core": "1.62.1",
+		"vite": "8.2.1"
+	}
+}

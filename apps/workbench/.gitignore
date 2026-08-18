@@ -1,0 +1,6 @@
+.workbench-data/
+.artifacts/
+.desktop/
+dist/
+node_modules/
+*.log

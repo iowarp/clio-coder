@@ -43,6 +43,7 @@
 			"!**/node_modules",
 			"!**/*.log",
 			"!**/.superpowers",
+			"!apps/workbench",
 			"!benchmarks/community/*/runs",
 			"!**/*.html",
 			"!tmp"
