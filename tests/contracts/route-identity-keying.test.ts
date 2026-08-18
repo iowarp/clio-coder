@@ -84,7 +84,7 @@ describe("contracts/route identity keying", () => {
 		strictEqual(history.recordsFor(route({ modelId: "other-model" })).length, 0);
 		strictEqual(history.recordsFor(route({ targetId: "dynamo" })).length, 0);
 		strictEqual(history.recordsFor(route({ nodeId: "blade" })).length, 0);
-		strictEqual(history.recordsFor(route({ runtimeId: "lmstudio-native" })).length, 0);
+		strictEqual(history.recordsFor(route({ runtimeId: "lmstudio" })).length, 0);
 		strictEqual(history.recordsFor(route({ specFingerprint: hash("spec-next") })).length, 0);
 		strictEqual(history.recordsFor(route({ executionRole: "verifier" })).length, 0);
 		strictEqual(history.recordsFor(route({ thinkingLevel: "high" })).length, 0);

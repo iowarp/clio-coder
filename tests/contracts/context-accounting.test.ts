@@ -19,13 +19,13 @@ function groupTokens(ledger: ReturnType<typeof buildContextLedger>, category: st
 	return ledger.groups.find((group) => group.category === category)?.tokens ?? 0;
 }
 
-function testRuntime(id: "ollama-native" | "lmstudio-native"): RuntimeDescriptor {
+function testRuntime(id: "ollama-native" | "lmstudio"): RuntimeDescriptor {
 	return {
 		id,
 		displayName: id,
 		kind: "http",
 		tier: "local-native",
-		apiFamily: id,
+		apiFamily: id === "lmstudio" ? "openai-completions" : id,
 		auth: "none",
 		defaultCapabilities: { ...EMPTY_CAPABILITIES, contextWindow: CLIO_MIN_CONTEXT_WINDOW },
 		synthesizeModel() {
@@ -283,10 +283,10 @@ describe("contracts/context-accounting", () => {
 	it("keeps a probed window that is below the floor and warns about it", () => {
 		const target: TargetDescriptor = {
 			id: "local-target",
-			runtime: "lmstudio-native",
+			runtime: "lmstudio",
 			capabilities: {},
 		};
-		const runtime = testRuntime("lmstudio-native");
+		const runtime = testRuntime("lmstudio");
 
 		const details = resolveContextWindowDetails(target, runtime, "model", null, 32000);
 		strictEqual(details.desiredContextWindow, CLIO_MIN_CONTEXT_WINDOW);

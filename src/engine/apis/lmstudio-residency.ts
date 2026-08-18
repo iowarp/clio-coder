@@ -1,15 +1,15 @@
 /**
  * LM Studio-specific residency arithmetic, kept pure so the fit and duplicate
- * rules are testable without a server or an SDK socket.
+ * rules are testable without a server connection.
  *
- * LM Studio exposes no VRAM telemetry: neither the SDK nor `/api/v1/models`
- * reports total or free GPU memory, and `gpuStrictVramCap` caps GPU offload
+ * LM Studio's `/api/v1/models` response exposes no total or free GPU memory,
+ * and a GPU offload cap does not prove that a load fits
  * rather than failing an oversized load, so a request that does not fit is
  * served from CPU at a fraction of the speed instead of erroring. Fit therefore
  * cannot be computed from memory arithmetic; it is bounded by evidence.
  *
- * The evidence rule: while another model is resident on the same server, a
- * just-in-time load is capped at {@link CO_RESIDENT_CONTEXT_CEILING} tokens.
+ * The evidence rule: while another model is resident on the same server, an
+ * explicit load is capped at {@link CO_RESIDENT_CONTEXT_CEILING} tokens.
  * The KV cache of a long context is what actually overflows the card (measured
  * on an RTX 5090: a 27B Q4 model loaded at its 262,144-token default beside a
  * resident 26B model produced 25 tokens in 2m18s, and the same model at 131,072

@@ -195,7 +195,6 @@ const RUNTIME_API_FAMILIES = [
 	"bedrock-converse-stream",
 	"google-generative-ai",
 	"google-vertex",
-	"lmstudio-native",
 	"mistral-conversations",
 	"ollama-native",
 	"rerank-http",

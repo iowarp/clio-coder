@@ -10,7 +10,7 @@ export const RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES = 64 * 1024;
  * OpenAI-compatible gateway accepts that request, ignores the unrecognized
  * `schema` key, and returns HTTP 200 with unconstrained JSON, so widening this
  * to the api family would convert a clean refusal into a silent
- * non-enforcement. lmstudio-native declares `structuredOutputs: "json-schema"`
+ * non-enforcement. lmstudio declares `structuredOutputs: "json-schema"`
  * truthfully and is still excluded here, because Clio has no dialect for its
  * transport. Widen this only together with a dialect for the runtime added.
  */
