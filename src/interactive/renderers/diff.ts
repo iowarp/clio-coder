@@ -1,126 +1,137 @@
 /**
- * Pure unified-diff renderer for tool-execution result blocks (Slice B of the
- * pi-coding-agent parity work). The edit tool emits an `old_string` /
- * `new_string` pair on `args`; rather than printing the raw confirmation
- * string, the chat surfaces should show a colored unified diff so the human
- * supervisor can see exactly what bytes the tool changed.
+ * Word-level diff rendering adapted from pi-coding-agent 0.84.0's
+ * `dist/modes/interactive/components/diff.js`.
  *
- * This module is intentionally I/O-free and free of pi-* value imports.
- * `tool-execution.ts` (the chat-panel renderer) calls `renderUnifiedDiff`
- * with the chat-pane width; the function returns ANSI-styled, width-wrapped
- * lines ready to splice into the transcript.
+ * Clio's edit-diff producer already emits compact numbered rows, so this
+ * component styles that durable result instead of recomputing a patch from
+ * tool arguments. The plain mode is used for replay and export.
  */
-import { structuredPatch } from "diff";
-import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { clioTheme } from "../theme/index.js";
+import * as Diff from "diff";
+import { wrapTextWithAnsi } from "../../engine/tui.js";
+import { type ClioTheme, clioTheme } from "../theme/index.js";
 
-export interface DiffRenderInput {
-	oldText: string;
-	newText: string;
-	filename?: string;
-	/** Lines of context around each hunk. Defaults to 3. */
-	context?: number;
+export interface DiffRenderOptions {
+	color?: boolean;
+	theme?: ClioTheme;
 }
 
-const theme = clioTheme();
-const dim = (text: string): string => theme.fg("dim", text);
-const red = (text: string): string => theme.fg("error", text);
-const green = (text: string): string => theme.fg("success", text);
-const cyan = (text: string): string => theme.fg("accent", text);
-
-const DEFAULT_FILENAME = "file";
-const DEFAULT_CONTEXT = 3;
-const NO_CHANGES_LINE = "  (no changes)";
-
-function wrap(line: string, width: number): string[] {
-	return wrapTextWithAnsi(line, width);
+interface ParsedDiffLine {
+	prefix: "+" | "-" | " ";
+	lineNum: string;
+	content: string;
 }
 
-function wrapWithPrefix(prefix: string, content: string, width: number, style: (text: string) => string): string[] {
-	const prefixWidth = visibleWidth(prefix);
-	const contentWidth = Math.max(1, width - prefixWidth);
-	const continuation = " ".repeat(prefixWidth);
-	const wrapped = wrapTextWithAnsi(style(content), contentWidth);
-	if (wrapped.length === 0) return [style(prefix)];
-	const out: string[] = [];
-	for (let i = 0; i < wrapped.length; i += 1) {
-		out.push(`${style(i === 0 ? prefix : continuation)}${wrapped[i] ?? ""}`);
-	}
-	return out;
+const ESC = String.fromCharCode(27);
+const SGR_INVERSE = `${ESC}[7m`;
+const SGR_INVERSE_OFF = `${ESC}[27m`;
+
+function parseDiffLine(line: string): ParsedDiffLine | null {
+	const match = /^([+\-\s])(\s*\d*)\s(.*)$/u.exec(line);
+	if (!match?.[1] || match[2] === undefined || match[3] === undefined) return null;
+	if (match[1] !== "+" && match[1] !== "-" && match[1] !== " ") return null;
+	return { prefix: match[1], lineNum: match[2], content: match[3] };
 }
 
-function renderNumberedDiffLine(
-	oldLine: number | null,
-	newLine: number | null,
-	marker: " " | "+" | "-",
-	content: string,
-	lineNumberWidth: number,
-	width: number,
-): string[] {
-	const oldCell = oldLine === null ? " ".repeat(lineNumberWidth) : String(oldLine).padStart(lineNumberWidth);
-	const newCell = newLine === null ? " ".repeat(lineNumberWidth) : String(newLine).padStart(lineNumberWidth);
-	const prefix = `${oldCell} ${newCell} ${marker}`;
-	if (marker === "-") return wrapWithPrefix(prefix, content, width, red);
-	if (marker === "+") return wrapWithPrefix(prefix, content, width, green);
-	return wrapWithPrefix(prefix, content, width, dim);
+function replaceTabs(text: string): string {
+	return text.replace(/\t/gu, "   ");
 }
 
-/**
- * Render a unified diff between `oldText` and `newText` as ANSI-styled,
- * width-wrapped lines. Pure: no I/O, no module-level state.
- *
- * Output shape:
- *   --- a/<filename>
- *   +++ b/<filename>
- *   @@ -<oldStart>,<oldLines> +<newStart>,<newLines> @@
- *   ` context line`
- *   `-removed line`
- *   `+added line`
- *
- * When the two texts are byte-identical, returns a single `(no changes)`
- * marker (no headers) so the caller renders a tight one-line block instead
- * of an empty diff.
- */
-export function renderUnifiedDiff(input: DiffRenderInput, width: number): string[] {
-	const safeWidth = Math.max(1, width);
-	if (input.oldText === input.newText) {
-		return wrap(NO_CHANGES_LINE, safeWidth);
-	}
+function inverse(text: string, enabled: boolean): string {
+	return enabled && text.length > 0 ? `${SGR_INVERSE}${text}${SGR_INVERSE_OFF}` : text;
+}
 
-	const filename = input.filename ?? DEFAULT_FILENAME;
-	const context = input.context ?? DEFAULT_CONTEXT;
-
-	const patch = structuredPatch(filename, filename, input.oldText, input.newText, undefined, undefined, { context });
-
-	const out: string[] = [];
-	out.push(...wrap(dim(`--- a/${filename}`), safeWidth));
-	out.push(...wrap(dim(`+++ b/${filename}`), safeWidth));
-
-	for (const hunk of patch.hunks) {
-		const header = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
-		out.push(...wrap(cyan(header), safeWidth));
-		let oldLine = hunk.oldStart;
-		let newLine = hunk.newStart;
-		const maxOld = hunk.oldStart + Math.max(0, hunk.oldLines - 1);
-		const maxNew = hunk.newStart + Math.max(0, hunk.newLines - 1);
-		const lineNumberWidth = Math.max(1, String(Math.max(maxOld, maxNew)).length);
-		for (const raw of hunk.lines) {
-			const marker = raw.charAt(0);
-			if (marker === "-") {
-				out.push(...renderNumberedDiffLine(oldLine, null, "-", raw.slice(1), lineNumberWidth, safeWidth));
-				oldLine += 1;
-			} else if (marker === "+") {
-				out.push(...renderNumberedDiffLine(null, newLine, "+", raw.slice(1), lineNumberWidth, safeWidth));
-				newLine += 1;
-			} else if (marker === " ") {
-				out.push(...renderNumberedDiffLine(oldLine, newLine, " ", raw.slice(1), lineNumberWidth, safeWidth));
-				oldLine += 1;
-				newLine += 1;
-			} else {
-				out.push(...wrap(dim(raw), safeWidth));
+/** Changed words use inverse video inside the line's add/remove theme color. */
+function renderIntraLineDiff(
+	oldContent: string,
+	newContent: string,
+	color: boolean,
+): { removedLine: string; addedLine: string } {
+	const wordDiff = Diff.diffWords(oldContent, newContent);
+	let removedLine = "";
+	let addedLine = "";
+	let firstRemoved = true;
+	let firstAdded = true;
+	for (const part of wordDiff) {
+		if (part.removed) {
+			let value = part.value;
+			if (firstRemoved) {
+				const leading = /^(\s*)/u.exec(value)?.[1] ?? "";
+				removedLine += leading;
+				value = value.slice(leading.length);
+				firstRemoved = false;
 			}
+			removedLine += inverse(value, color);
+		} else if (part.added) {
+			let value = part.value;
+			if (firstAdded) {
+				const leading = /^(\s*)/u.exec(value)?.[1] ?? "";
+				addedLine += leading;
+				value = value.slice(leading.length);
+				firstAdded = false;
+			}
+			addedLine += inverse(value, color);
+		} else {
+			removedLine += part.value;
+			addedLine += part.value;
 		}
 	}
+	return { removedLine, addedLine };
+}
 
-	return out;
+function styleLine(line: string, prefix: ParsedDiffLine["prefix"] | null, color: boolean, theme: ClioTheme): string {
+	if (!color) return line;
+	if (prefix === "-") return theme.fg("error", line);
+	if (prefix === "+") return theme.fg("success", line);
+	return theme.fg("dim", line);
+}
+
+/** Render Clio's numbered diff string as width-bounded transcript rows. */
+export function renderDiffLines(diffText: string, width: number, options: DiffRenderOptions = {}): string[] {
+	const color = options.color ?? true;
+	const theme = options.theme ?? clioTheme();
+	const rendered: Array<{ text: string; prefix: ParsedDiffLine["prefix"] | null }> = [];
+	const lines = diffText.split("\n");
+	let index = 0;
+	while (index < lines.length) {
+		const line = lines[index] ?? "";
+		const parsed = parseDiffLine(line);
+		if (!parsed) {
+			rendered.push({ text: line, prefix: null });
+			index += 1;
+			continue;
+		}
+		if (parsed.prefix !== "-") {
+			rendered.push({
+				text: `${parsed.prefix}${parsed.lineNum} ${replaceTabs(parsed.content)}`,
+				prefix: parsed.prefix,
+			});
+			index += 1;
+			continue;
+		}
+
+		const removed: Array<Pick<ParsedDiffLine, "lineNum" | "content">> = [];
+		while (index < lines.length) {
+			const candidate = parseDiffLine(lines[index] ?? "");
+			if (candidate?.prefix !== "-") break;
+			removed.push(candidate);
+			index += 1;
+		}
+		const added: Array<Pick<ParsedDiffLine, "lineNum" | "content">> = [];
+		while (index < lines.length) {
+			const candidate = parseDiffLine(lines[index] ?? "");
+			if (candidate?.prefix !== "+") break;
+			added.push(candidate);
+			index += 1;
+		}
+		if (removed.length === 1 && added.length === 1 && removed[0] && added[0]) {
+			const intra = renderIntraLineDiff(replaceTabs(removed[0].content), replaceTabs(added[0].content), color);
+			rendered.push({ text: `-${removed[0].lineNum} ${intra.removedLine}`, prefix: "-" });
+			rendered.push({ text: `+${added[0].lineNum} ${intra.addedLine}`, prefix: "+" });
+			continue;
+		}
+		for (const row of removed) rendered.push({ text: `-${row.lineNum} ${replaceTabs(row.content)}`, prefix: "-" });
+		for (const row of added) rendered.push({ text: `+${row.lineNum} ${replaceTabs(row.content)}`, prefix: "+" });
+	}
+
+	return rendered.flatMap((row) => wrapTextWithAnsi(styleLine(row.text, row.prefix, color, theme), Math.max(1, width)));
 }

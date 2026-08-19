@@ -913,6 +913,7 @@ export function rehydrateChatPanelFromTurns(
 						toolName: call.name,
 						args: call.args,
 					});
+					chatPanel.markToolReplayed?.(call.id);
 					break;
 				}
 				if (entry.role === "tool_result") {

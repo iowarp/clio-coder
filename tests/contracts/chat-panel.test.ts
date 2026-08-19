@@ -1014,26 +1014,28 @@ describe("chat-panel tool ledger subline", () => {
 });
 
 describe("chat-panel edit diff block", () => {
-	it("suppresses the \\ No newline at end of file marker rows", () => {
+	it("renders the canonical result diff for the current multi-edit argument shape", () => {
 		const panel = createChatPanel({ now: frozen.now });
-		// A fresh (non-streaming) turn expands the edit tool to its diff block.
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "e1",
 			toolName: "edit",
-			args: { path: "a.txt", old_string: "line one\nline two", new_string: "line one\nline TWO" },
+			args: { path: "a.txt", edits: [{ oldText: "line two", newText: "line TWO" }] },
 		} as ChatLoopEvent);
 		panel.applyEvent({
 			type: "tool_execution_end",
 			toolCallId: "e1",
 			toolName: "edit",
-			result: "ok",
+			result: {
+				content: [{ type: "text", text: "edited a.txt" }],
+				details: { diff: " 1 line one\n-2 line two\n+2 line TWO" },
+			},
 			isError: false,
 		} as ChatLoopEvent);
 		const rendered = strip(panel.render(80).join("\n"));
 		ok(rendered.includes("line TWO"), "the diff still renders the actual change");
-		ok(rendered.includes("@@"), "the diff still renders its hunk header");
-		ok(!rendered.includes("No newline at end of file"), "the no-newline sentinel rows are filtered out");
+		ok(rendered.includes("line two"), "the diff keeps the removed text");
+		ok(!rendered.includes("edited a.txt"), "the confirmation does not replace the review surface");
 	});
 });
 

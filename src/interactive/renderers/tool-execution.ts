@@ -16,7 +16,7 @@ import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { formatSize } from "../../engine/truncate.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
-import { type DiffRenderInput, renderUnifiedDiff } from "./diff.js";
+import { renderDiffLines } from "./diff.js";
 import { tryRenderJson, tryRenderXml } from "./structured.js";
 
 const theme = clioTheme();
@@ -89,6 +89,8 @@ export interface ToolBodyRenderOptions {
 	 * the complete tool output the model actually received.
 	 */
 	unbounded?: boolean;
+	/** Live rows color mutation diffs; replay and export deliberately use plain text. */
+	diffStyle?: "color" | "plain";
 }
 
 /** Row cap for a tool body: unbounded lifts both the row and char limits. */
@@ -909,50 +911,14 @@ function highlightBashCommand(command: string): string {
 		.join("");
 }
 
-interface EditDiffArgs {
-	path?: string;
-	old_string: string;
-	new_string: string;
+function resultDiff(result: unknown): string | null {
+	const value = detailsOf(result)?.diff;
+	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-/**
- * Defensive shape check: edit-tool args must carry both `old_string` and
- * `new_string` strings before we can render a diff. `path` is optional; the
- * diff renderer falls back to `"file"` when absent. Anything else falls
- * through to the standard result block so the dispatch is opportunistic and
- * never throws.
- */
-function asEditDiffArgs(args: unknown): EditDiffArgs | null {
-	if (!isPlainObject(args)) return null;
-	const oldString = args.old_string;
-	const newString = args.new_string;
-	if (typeof oldString !== "string" || typeof newString !== "string") return null;
-	const out: EditDiffArgs = { old_string: oldString, new_string: newString };
-	if (typeof args.path === "string") out.path = args.path;
-	return out;
-}
-
-// The `diff` library appends a `\ No newline at end of file` sentinel row when a
-// side of the comparison lacks a trailing newline. It is transcript noise, so
-// the edit diff block drops it. The marker text carries no ANSI, so a substring
-// check against the styled row is reliable and keeps this module free of raw
-// escape literals.
-const NO_NEWLINE_MARKER = "\\ No newline at end of file";
-
-function isNoNewlineMarkerRow(row: string): boolean {
-	return row.includes(NO_NEWLINE_MARKER);
-}
-
-function renderEditDiffBlock(args: EditDiffArgs, width: number): string[] {
+function renderMutationDiffBlock(diff: string, width: number, color: boolean): string[] {
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
-	const input: DiffRenderInput = { oldText: args.old_string, newText: args.new_string };
-	if (args.path !== undefined) input.filename = args.path;
-	const out: string[] = [];
-	for (const line of renderUnifiedDiff(input, bodyWidth)) {
-		if (isNoNewlineMarkerRow(line)) continue;
-		out.push(`${RAIL_DIM}${line}`);
-	}
-	return out;
+	return renderDiffLines(diff, bodyWidth, { color }).map((line) => `${RAIL_DIM}${line}`);
 }
 
 interface BashArgs {
@@ -1177,16 +1143,15 @@ export function renderToolExecution(
 	const out: string[] = [];
 	out.push(...wrap(headerLine(finished.toolName, finished.args, status, statusMeta), width));
 
-	// Edit-tool dispatch: when the tool succeeded and `args` carries the
-	// expected `{ old_string, new_string }` strings, swap the args body and
-	// result block for a unified diff. The header still renders so the user
-	// sees `▸ edit(<path>)`, and the args body is suppressed because echoing
-	// both strings would just duplicate what the diff already shows.
-	if (finished.toolName === "edit" && finished.isError === false) {
-		const editArgs = asEditDiffArgs(redactToolArgs(finished.args));
-		if (editArgs !== null) {
+	// Edit and write tools produce one bounded numbered diff on result.details.
+	// It is the authority because canonical edit args can contain multiple
+	// replacements and fuzzy matching can change the actual base text. Live rows
+	// receive Pi's word-level styling; replay and export request plain rows.
+	if ((finished.toolName === "edit" || finished.toolName === "write") && finished.isError === false) {
+		const diff = resultDiff(finished.result);
+		if (diff !== null) {
 			out.push(...renderOutputMeta(finished, width, false, "change"));
-			out.push(...renderEditDiffBlock(editArgs, width));
+			out.push(...renderMutationDiffBlock(diff, width, opts.diffStyle !== "plain"));
 			out.push(...renderOutputFooter(finished, width, false));
 			return out;
 		}

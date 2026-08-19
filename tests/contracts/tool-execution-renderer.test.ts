@@ -1,11 +1,23 @@
 import { ok } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { renderDiffLines } from "../../src/interactive/renderers/diff.js";
 import { renderBashTranscriptExecution, renderToolExecution } from "../../src/interactive/renderers/tool-execution.js";
+import { createClioTheme } from "../../src/interactive/theme/index.js";
 
 const plain = (lines: string[]): string => stripTerminalSequences(lines.join("\n"));
 
 describe("contracts/tool execution transcript", () => {
+	it("uses the theme's add/remove colors and Pi word-level emphasis for live diffs", () => {
+		const theme = createClioTheme({ color: true, truecolor: true });
+		const rendered = renderDiffLines("-1 const old = one;\n+1 const new = two;", 100, { theme }).join("\n");
+
+		ok(rendered.includes(theme.fgSequence("error")), rendered);
+		ok(rendered.includes(theme.fgSequence("success")), rendered);
+		ok(rendered.includes(`${String.fromCharCode(27)}[7mold`), rendered);
+		ok(rendered.includes(`${String.fromCharCode(27)}[7mnew`), rendered);
+	});
+
 	it("presents a call signature, typed secondary arguments, and structured result facts", () => {
 		const rendered = plain(
 			renderToolExecution(

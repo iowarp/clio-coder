@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
+import { generateDiffString } from "./edit-diff.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
@@ -25,16 +26,20 @@ export const writeTool: ToolSpec = {
 		const filePath = resolveToCwd(pathArg);
 		try {
 			let previousEndedWithNewline = false;
+			let previousContent = "";
 			await withFileMutationQueue(filePath, async () => {
 				try {
-					previousEndedWithNewline = readFileSync(filePath, "utf8").endsWith("\n");
+					previousContent = readFileSync(filePath, "utf8");
+					previousEndedWithNewline = previousContent.endsWith("\n");
 				} catch {
+					previousContent = "";
 					previousEndedWithNewline = false;
 				}
 				mkdirSync(dirname(filePath), { recursive: true });
 				writeFileSync(filePath, content, "utf8");
 			});
 			const bytes = Buffer.byteLength(content, "utf8");
+			const diff = generateDiffString(previousContent, content).diff;
 			let output = `wrote ${bytes}B to ${pathArg}`;
 			if (previousEndedWithNewline && !content.endsWith("\n")) {
 				output += `\nnote: ${pathArg} no longer ends with a newline; the previous content did`;
@@ -43,7 +48,7 @@ export const writeTool: ToolSpec = {
 			// before it falls back to the length of the returned text. A write's
 			// text is a confirmation sentence, so without this the ledger printed
 			// the sentence's length as the file size.
-			return { kind: "ok", output, details: { paths: [filePath], observation: { shownBytes: bytes } } };
+			return { kind: "ok", output, details: { diff, paths: [filePath], observation: { shownBytes: bytes } } };
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `write: ${msg}` };
