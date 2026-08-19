@@ -29,10 +29,10 @@ Every subcommand in Clio Coder adheres to the strict `--help` convention:
 
 ### Global vs Subcommand Flag Positioning
 
-Global options (such as `--cwd`, `--config-dir`, `--state-dir`, `--profile`, and `--debug`) must precede the subcommand. If a global flag is placed after the subcommand name, Clio prints a remediation guide to `stderr` and exits with code `2`:
+Global options (such as `--api-key`, `--no-context-files`, and `-nc`) must precede the subcommand. Directory redirection is configured via the `CLIO_CODER_*_DIR` environment variables (see [docs/environment-variables.md](environment-variables.md)). If a global flag is placed after the subcommand name, Clio prints a remediation guide to `stderr` and exits with code `2`:
 
 ```text
---config-dir is a global option and must come before the subcommand: clio-coder --config-dir <path> <command> ...
+--api-key is a global option and must come before the subcommand: clio-coder --api-key <key> <command> ...
 ```
 
 ---
@@ -59,8 +59,8 @@ Many Clio CLI subcommands provide structured JSON output for integration with sc
 
 | Subcommand | Flag | Output Structure |
 | :--- | :--- | :--- |
-| `clio-coder run` | `--json` | Stream of incremental NDJSON event frames (`message`, `tool_call`, `tool_result`, `terminal`). |
-| `clio-coder run` | `--json-events terminal` | Filters event stream to emit only the final terminal run receipt. |
+| `clio-coder run` | `--json` | Stream of incremental NDJSON event frames (`session`, `agent_start`, `turn_start`, `message_start`, `message_end`, `thinking_delta`, `text_delta`, `tool_execution_start`, `tool_execution_end`, `turn_end`, `agent_end`). |
+| `clio-coder run` | `--json-events terminal` | Filters event stream to emit only `{agent_end, turn_end, notice}`. |
 | `clio-coder agents` | `--json` | JSON array of registered agent recipe metadata objects. |
 | `clio-coder targets` | `--json` | JSON object containing the configured `targets` array. |
 | `clio-coder models` | `--json` | JSON array of catalog models with capability flags. |
@@ -68,6 +68,8 @@ Many Clio CLI subcommands provide structured JSON output for integration with sc
 | `clio-coder trace runs` | `--json` | JSON array of trace run records. |
 | `clio-coder trace sql` | Positional query | JSON array of rows returned by the read-only SQLite `SELECT` query. |
 | `clio-coder paths` | `--json` | JSON object mapping platform directory names to absolute paths. |
+
+Under issue #122, `clio-coder run --json-events full` strips content from `message_end`, leaving the content accumulation to the preceding `text_delta` and `thinking_delta` events.
 
 ### Incremental Streaming Invariant
 
