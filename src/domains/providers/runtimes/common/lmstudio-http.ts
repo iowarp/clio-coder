@@ -33,6 +33,23 @@ export interface LmStudioCatalog {
 	authRequired?: boolean;
 }
 
+export interface LmStudioInstanceResolution {
+	requestedId: string;
+	wireModelId: string;
+	model?: LmStudioModelInfo;
+	instance?: LmStudioLoadedInstance;
+	peerTargets: string[];
+	state: "instance" | "jit" | "unknown";
+}
+
+interface LmStudioHostCatalog {
+	targetId: string;
+	rootUrl: string;
+	models: LmStudioModelInfo[];
+}
+
+const catalogsByHost = new Map<string, LmStudioHostCatalog>();
+
 export interface LmStudioJsonResponse {
 	ok: boolean;
 	status: number;
@@ -184,6 +201,94 @@ export function parseLmStudioV1Models(data: unknown): LmStudioModelInfo[] | null
 	return models;
 }
 
+export function foldLmStudioModels(models: ReadonlyArray<LmStudioModelInfo>): LmStudioModelInfo[] {
+	const byKey = new Map<string, LmStudioModelInfo>();
+	for (const model of models) {
+		const previous = byKey.get(model.key);
+		if (!previous) {
+			byKey.set(model.key, { ...model, loadedInstances: [...model.loadedInstances] });
+			continue;
+		}
+		const knownIds = new Set(previous.loadedInstances.map((instance) => instance.id));
+		for (const instance of model.loadedInstances) {
+			if (!knownIds.has(instance.id)) previous.loadedInstances.push(instance);
+		}
+		if (previous.maxContextLength === undefined && model.maxContextLength !== undefined) {
+			previous.maxContextLength = model.maxContextLength;
+		}
+		if (previous.vision === undefined && model.vision !== undefined) previous.vision = model.vision;
+		if (previous.tools === undefined && model.tools !== undefined) previous.tools = model.tools;
+		if (previous.reasoningOptions === undefined && model.reasoningOptions !== undefined) {
+			previous.reasoningOptions = model.reasoningOptions;
+		}
+		if (previous.reasoning === undefined && model.reasoning !== undefined) previous.reasoning = model.reasoning;
+	}
+	return [...byKey.values()];
+}
+
+function rememberHostCatalog(target: TargetDescriptor, models: ReadonlyArray<LmStudioModelInfo>): void {
+	const rootUrl = lmStudioRootUrl(target.url ?? "");
+	if (!rootUrl) return;
+	catalogsByHost.set(rootUrl, { targetId: target.id, rootUrl, models: foldLmStudioModels(models) });
+}
+
+function peerTargetsFor(target: TargetDescriptor, instanceId: string): string[] {
+	const rootUrl = lmStudioRootUrl(target.url ?? "");
+	const peers: string[] = [];
+	for (const catalog of catalogsByHost.values()) {
+		if (catalog.rootUrl === rootUrl) continue;
+		if (catalog.models.some((model) => model.loadedInstances.some((instance) => instance.id === instanceId))) {
+			peers.push(catalog.targetId);
+		}
+	}
+	return [...new Set(peers)];
+}
+
+export function resolveLmStudioInstance(
+	target: TargetDescriptor,
+	models: ReadonlyArray<LmStudioModelInfo>,
+	requestedId: string,
+	configuredDefault?: string,
+): LmStudioInstanceResolution {
+	const folded = foldLmStudioModels(models);
+	for (const model of folded) {
+		const explicit = model.loadedInstances.find((instance) => instance.id === requestedId);
+		if (explicit) {
+			return {
+				requestedId,
+				wireModelId: explicit.id,
+				model,
+				instance: explicit,
+				peerTargets: peerTargetsFor(target, explicit.id),
+				state: "instance",
+			};
+		}
+		if (model.key !== requestedId) continue;
+		if (model.loadedInstances.length === 0) {
+			return { requestedId, wireModelId: requestedId, model, peerTargets: [], state: "jit" };
+		}
+		const preferred = configuredDefault
+			? model.loadedInstances.find((instance) => instance.id === configuredDefault)
+			: undefined;
+		const local = model.loadedInstances.find((instance) => peerTargetsFor(target, instance.id).length === 0);
+		const instance = preferred ?? local ?? model.loadedInstances[0];
+		if (!instance) return { requestedId, wireModelId: requestedId, model, peerTargets: [], state: "jit" };
+		return {
+			requestedId,
+			wireModelId: instance.id,
+			model,
+			instance,
+			peerTargets: peerTargetsFor(target, instance.id),
+			state: "instance",
+		};
+	}
+	return { requestedId, wireModelId: requestedId, peerTargets: [], state: "unknown" };
+}
+
+export function resetLmStudioHostCatalogs(): void {
+	catalogsByHost.clear();
+}
+
 export function lmStudioReasoningLevels(options: ReadonlyArray<string> | undefined): ThinkingLevel[] {
 	if (!options || options.length === 0) return [...THINKING_LEVELS];
 	if (options.includes("on") && !options.includes("low") && !options.includes("medium") && !options.includes("high")) {
@@ -266,19 +371,26 @@ export async function listLmStudioModels(target: TargetDescriptor, ctx: ProbeCon
 	const v1Auth = authFailure(v1);
 	if (v1Auth) return v1Auth;
 	const parsedV1 = parseLmStudioV1Models(v1.data);
-	if (v1.ok && parsedV1) return { ok: true, models: parsedV1, tier: "0.4+", latencyMs: v1.latencyMs };
+	if (v1.ok && parsedV1) {
+		rememberHostCatalog(target, parsedV1);
+		return { ok: true, models: parsedV1, tier: "0.4+", latencyMs: v1.latencyMs };
+	}
 
 	const v0 = await requestLmStudioJson(`${root}/api/v0/models`, init, ctx.httpTimeoutMs, ctx.signal);
 	const v0Auth = authFailure(v0);
 	if (v0Auth) return v0Auth;
 	const parsedV0 = v0Models(v0.data);
-	if (v0.ok && parsedV0) return { ok: true, models: parsedV0, tier: "0.3.x", latencyMs: v0.latencyMs };
+	if (v0.ok && parsedV0) {
+		rememberHostCatalog(target, parsedV0);
+		return { ok: true, models: parsedV0, tier: "0.3.x", latencyMs: v0.latencyMs };
+	}
 
 	const openAI = await requestLmStudioJson(`${root}/v1/models`, init, ctx.httpTimeoutMs, ctx.signal);
 	const openAIAuth = authFailure(openAI);
 	if (openAIAuth) return openAIAuth;
 	const parsedOpenAI = openAIModels(openAI.data);
 	if (openAI.ok && parsedOpenAI) {
+		rememberHostCatalog(target, parsedOpenAI);
 		return { ok: true, models: parsedOpenAI, tier: "openai-compat", latencyMs: openAI.latencyMs };
 	}
 	return {

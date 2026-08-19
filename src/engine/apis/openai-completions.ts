@@ -52,6 +52,7 @@ interface ClioRuntimeMetadata {
 		chatTemplateKwargsUnsupported?: boolean;
 		lmstudio?: LmStudioTargetSettings;
 		lmstudioReasoningOptions?: ReadonlyArray<string>;
+		lmstudioDefaultModel?: string;
 	};
 }
 
@@ -681,25 +682,26 @@ async function ensureResidencyForModel(model: Model<"openai-completions">): Prom
 async function ensureLocalResidency(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal },
-): Promise<void> {
+): Promise<Model<"openai-completions">> {
 	if (isLmStudioModel(model)) {
-		await ensureLmStudioResidency(model, options);
-		return;
+		const wireModelId = await ensureLmStudioResidency(model, options);
+		return wireModelId === model.id ? model : { ...model, id: wireModelId };
 	}
 	await ensureResidencyForModel(model);
+	return model;
 }
 
 function withLocalResidency(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal },
-	sourceFactory: () => ReturnType<typeof streamOpenAICompletions>,
+	sourceFactory: (requestModel: Model<"openai-completions">) => ReturnType<typeof streamOpenAICompletions>,
 ): ReturnType<typeof streamOpenAICompletions> {
-	if (!isManagedLlamaCppModel(model) && !isLmStudioModel(model)) return sourceFactory();
+	if (!isManagedLlamaCppModel(model) && !isLmStudioModel(model)) return sourceFactory(model);
 	const stream = createAssistantMessageEventStream();
 	(async () => {
 		try {
-			await ensureLocalResidency(model, options);
-			for await (const event of sourceFactory()) {
+			const requestModel = await ensureLocalResidency(model, options);
+			for await (const event of sourceFactory(requestModel)) {
 				stream.push(event as AssistantMessageEvent);
 			}
 			stream.end();
@@ -733,9 +735,9 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 								...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
 								...(options?.signal !== undefined ? { signal: options.signal } : {}),
 							},
-							() =>
+							(requestModel) =>
 								streamOpenAICompletions(
-									model,
+									requestModel,
 									effectiveContext,
 									withRemainingContextBudget(model, effectiveContext, withSamplers),
 								),
@@ -763,9 +765,9 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 								...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
 								...(options?.signal !== undefined ? { signal: options.signal } : {}),
 							},
-							() =>
+							(requestModel) =>
 								streamSimpleOpenAICompletions(
-									model,
+									requestModel,
 									effectiveContext,
 									withRemainingContextBudget(model, effectiveContext, withSamplers),
 								),

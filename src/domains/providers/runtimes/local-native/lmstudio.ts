@@ -5,6 +5,7 @@ import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeModelStatus, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import {
+	foldLmStudioModels,
 	greetLmStudio,
 	type LmStudioCatalog,
 	type LmStudioLoadedInstance,
@@ -13,6 +14,7 @@ import {
 	lmStudioReasoningLevels,
 	loadedContextLength,
 	parseLmStudioV1Models,
+	resolveLmStudioInstance,
 } from "../common/lmstudio-http.js";
 import { synthLocalModel, withV1 } from "../common/local-synth.js";
 
@@ -104,31 +106,6 @@ function statusFor(
 	return status;
 }
 
-function foldModels(models: ReadonlyArray<LmStudioModelInfo>): LmStudioModelInfo[] {
-	const byKey = new Map<string, LmStudioModelInfo>();
-	for (const model of models) {
-		const previous = byKey.get(model.key);
-		if (!previous) {
-			byKey.set(model.key, { ...model, loadedInstances: [...model.loadedInstances] });
-			continue;
-		}
-		const knownIds = new Set(previous.loadedInstances.map((instance) => instance.id));
-		for (const instance of model.loadedInstances) {
-			if (!knownIds.has(instance.id)) previous.loadedInstances.push(instance);
-		}
-		if (previous.maxContextLength === undefined && model.maxContextLength !== undefined) {
-			previous.maxContextLength = model.maxContextLength;
-		}
-		if (previous.vision === undefined && model.vision !== undefined) previous.vision = model.vision;
-		if (previous.tools === undefined && model.tools !== undefined) previous.tools = model.tools;
-		if (previous.reasoningOptions === undefined && model.reasoningOptions !== undefined) {
-			previous.reasoningOptions = model.reasoningOptions;
-		}
-		if (previous.reasoning === undefined && model.reasoning !== undefined) previous.reasoning = model.reasoning;
-	}
-	return [...byKey.values()];
-}
-
 function probeFromCatalog(catalog: LmStudioCatalog, target: TargetDescriptor): ProbeResult {
 	if (!catalog.ok) {
 		return {
@@ -137,21 +114,31 @@ function probeFromCatalog(catalog: LmStudioCatalog, target: TargetDescriptor): P
 			error: catalog.error ?? "LM Studio model listing failed",
 		};
 	}
-	const models = foldModels(catalog.models);
+	const models = foldLmStudioModels(catalog.models);
 	rememberReasoningOptions(target, models);
 	const ids: string[] = [];
 	const modelCapabilities: Record<string, Partial<CapabilityFlags>> = {};
 	const modelStates: Record<string, ProbeModelStatus> = {};
 	for (const model of models) {
 		const levels = lmStudioReasoningLevels(model.reasoningOptions);
-		ids.push(model.key);
 		const keyInstance = model.loadedInstances[0];
 		modelCapabilities[model.key] = capabilities(model, keyInstance);
 		modelStates[model.key] = statusFor(model, keyInstance, levels);
 		for (const instance of model.loadedInstances) {
 			if (!ids.includes(instance.id)) ids.push(instance.id);
 			modelCapabilities[instance.id] = capabilities(model, instance);
-			modelStates[instance.id] = statusFor(model, instance, levels);
+			const instanceStatus = statusFor(model, instance, levels);
+			modelStates[instance.id] = instanceStatus;
+			const resolution = resolveLmStudioInstance(target, models, instance.id, configuredModel(target));
+			instanceStatus.detail =
+				resolution.peerTargets.length > 0
+					? `loaded on ${target.id}; also loaded on ${resolution.peerTargets.join(", ")}`
+					: `loaded on ${target.id}`;
+		}
+		if (model.loadedInstances.length === 0) {
+			ids.push(model.key);
+			const keyStatus = modelStates[model.key];
+			if (keyStatus) keyStatus.detail = "not loaded (LM Studio will load it on first use)";
 		}
 	}
 	const selected = resolveModel(models, configuredModel(target));
@@ -234,11 +221,16 @@ const lmstudioRuntime: RuntimeDescriptor = {
 		});
 		const metadata = (
 			model as Model<Api> & {
-				clio?: { chatTemplateKwargsUnsupported?: boolean; lmstudioReasoningOptions?: ReadonlyArray<string> };
+				clio?: {
+					chatTemplateKwargsUnsupported?: boolean;
+					lmstudioReasoningOptions?: ReadonlyArray<string>;
+					lmstudioDefaultModel?: string;
+				};
 			}
 		).clio;
 		if (metadata) {
 			metadata.chatTemplateKwargsUnsupported = true;
+			if (target.defaultModel) metadata.lmstudioDefaultModel = target.defaultModel;
 			const options = reasoningOptionsByTargetModel.get(reasoningOptionsKey(canonicalTarget, wireModelId));
 			if (options) metadata.lmstudioReasoningOptions = options;
 		}

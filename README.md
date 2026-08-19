@@ -211,6 +211,29 @@ fleet dispatch through different targets independently.
 | `lemonade`, `lemonade-anthropic` | Lemonade |
 | `openai-compat`, `anthropic-compat` | Any OpenAI- or Anthropic-shaped endpoint |
 
+### Recommended local model
+
+If you have one GPU with 24 GB or more, serve **Qwen3.8-27B** (the
+`unsloth/Qwen3.8-27B-GGUF` quantizations) and point both the chat and fleet
+targets at it. It is the model the 0.3.2 cut was hardened against on llama.cpp
+(ROCm) and LM Studio (CUDA and Vulkan), and its catalog entry
+(`src/domains/providers/models/local-models/clio-local-coding-targets.yaml`,
+family `qwen3.8-27b`) carries the verified wire shape:
+
+- IQ4_NL or UD-Q4_K_XL at 131072 context fits in 24 GB with q8_0 KV cache;
+  Q6_K fits in 32 GB at 131072. The full 262144 context is a unified-memory
+  or multi-GPU configuration.
+- Tool calls and `reasoning_content` parse correctly on the OpenAI-compatible
+  endpoint of both runtimes. Start llama.cpp with `--jinja --reasoning on
+  --reasoning-effort medium`; LM Studio needs nothing beyond loading the model.
+- Thinking is driven per request by Clio's `thinkingLevel`. `off` disables
+  reasoning on the wire; `minimal` and `low` send low effort, `medium` sends
+  medium, and `high`, `xhigh`, and `max` all send the template's top effort
+  (`xhigh` on llama.cpp, `high` on LM Studio). No level produces a request the
+  model's chat template rejects.
+- Vulkan backends process long prompts far more slowly than ROCm or CUDA on this
+  family. Prefer the ROCm runtime where the hardware offers both.
+
 ### Cloud APIs
 
 `openai`, `anthropic`, `google`, `groq`, `mistral`, `deepseek`, `openrouter`,
