@@ -551,6 +551,8 @@ Every one of these has an environment override for a single process; see [enviro
 
 `retry.streamStallMs` covers the failure a request error never reports: the backend answers `/health` while the slot behind the stream is dead. A run whose stream produces nothing for that long is aborted and handed to the same retry ladder as any transient error, so a headless run or a fleet worker recovers without a human pressing Esc. Time inside a tool call and inside the post-tool compaction guard does not count against it, so a long build is never mistaken for a wedged stream. Set it to `0` to keep the old behavior, where a stalled stream waits forever.
 
+Generic provider and transport errors are classified by Pi 0.84's `isRetryableAssistantError`, including DNS and WebSocket failures while excluding quota, usage-limit, and billing exhaustion even when the message also contains `429` or `500`. Clio adds only its local-runtime policy: model-loading errors receive a longer bounded delay, the TUI shows a cancellable countdown, and recovery resumes through the existing agent loop.
+
 ### Proactive memory
 
 | Key | Default | Validation | When it applies |

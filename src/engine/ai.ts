@@ -21,6 +21,7 @@ import {
 	cleanupSessionResources as piCleanupSessionResources,
 	getSupportedThinkingLevels as piGetSupportedThinkingLevels,
 	isContextOverflow as piIsContextOverflow,
+	isRetryableAssistantError as piIsRetryableAssistantError,
 	validateToolArguments as piValidateToolArguments,
 	type Tool,
 	type ToolCall,
@@ -148,6 +149,22 @@ export function isEngineContextOverflow(errorMessage: string, contextWindow?: nu
 		timestamp: Date.now(),
 	};
 	return piIsContextOverflow(message, contextWindow);
+}
+
+/** Classify one provider error through pi-ai without leaking its message shape across the engine boundary. */
+export function isEngineRetryableAssistantError(errorMessage: string): boolean {
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [],
+		api: "clio",
+		provider: "clio",
+		model: "unknown",
+		usage: emptyUsage(),
+		stopReason: "error",
+		errorMessage,
+		timestamp: Date.now(),
+	};
+	return piIsRetryableAssistantError(message);
 }
 
 export function validateEngineToolArguments(tool: Tool, toolCall: ToolCall): unknown {

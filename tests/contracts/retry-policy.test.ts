@@ -14,10 +14,18 @@ describe("contracts/retry-policy", () => {
 			"429 rate limited",
 			"503 Service Unavailable",
 			"fetch failed",
+			"getaddrinfo ENOTFOUND inference.example",
+			"websocket closed before a terminal response event",
 			"socket hang up",
 		]) {
 			ok(isRetryableErrorMessage(message), `${message} must retry`);
 			strictEqual(isModelLoadingErrorMessage(message), false, `${message} is not a model load`);
+		}
+	});
+
+	it("uses pi-ai's account-limit exclusions before matching an HTTP status", () => {
+		for (const message of ["429 insufficient_quota", "429 Monthly usage limit reached", "500 billing account disabled"]) {
+			strictEqual(isRetryableErrorMessage(message), false, `${message} must fail fast`);
 		}
 	});
 
