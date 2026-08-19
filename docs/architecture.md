@@ -106,6 +106,10 @@ Source: `src/core/workspace-files.ts`, `src/core/c-header-language.ts`.
 
 `npm run lint` executes the boundary checker (`tests/boundaries/check-boundaries.ts`, imported by `scripts/check-hygiene.ts`). Treat these checks as executable specifications.
 
+The enforced import rules below are complemented by the maintained
+[Pi SDK boundary table](pi-boundary.md), which records the semantic owner of
+each overlapping helper and the Clio deltas that must survive an SDK upgrade.
+
 These five enforced boundary rules constrain dependency **direction**, never import **form** (whether static vs dynamic, default vs named):
 
 ### Rule 1: `@earendil-works/*` imports stay in `src/engine/**`
