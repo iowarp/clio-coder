@@ -11,11 +11,11 @@
  */
 
 import type {
-	AuthInteraction,
 	OAuthAuth,
 	OAuthCredentials,
 	OAuthLoginCallbacks,
 	OAuthSelectPrompt,
+	ProviderAuthInteraction,
 } from "@earendil-works/pi-ai";
 import { findEnvKeys as piFindEnvKeys, getEnvApiKey as piGetEnvApiKey } from "@earendil-works/pi-ai/compat";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
@@ -35,13 +35,14 @@ export interface EngineOAuthProvider {
 	name: string;
 	usesCallbackServer: boolean;
 	login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials>;
-	refreshToken(credentials: OAuthCredentials): Promise<OAuthCredentials>;
+	refreshToken(credentials: OAuthCredentials, signal: AbortSignal): Promise<OAuthCredentials>;
 	getApiKey(credentials: OAuthCredentials): Promise<string>;
 }
 
 /** Adapt Clio's legacy login callbacks to pi's AuthInteraction. */
-function interactionFromLoginCallbacks(callbacks: OAuthLoginCallbacks): AuthInteraction {
-	const interaction: AuthInteraction = {
+function interactionFromLoginCallbacks(callbacks: OAuthLoginCallbacks): ProviderAuthInteraction {
+	const interaction: ProviderAuthInteraction = {
+		signal: callbacks.signal ?? new AbortController().signal,
 		notify(event) {
 			switch (event.type) {
 				case "auth_url":
@@ -88,7 +89,6 @@ function interactionFromLoginCallbacks(callbacks: OAuthLoginCallbacks): AuthInte
 			}
 		},
 	};
-	if (callbacks.signal) interaction.signal = callbacks.signal;
 	return interaction;
 }
 
@@ -101,8 +101,8 @@ function fromOAuthAuth(id: string, auth: OAuthAuth | undefined, usesCallbackServ
 		async login(callbacks) {
 			return auth.login(interactionFromLoginCallbacks(callbacks));
 		},
-		async refreshToken(credentials) {
-			return auth.refresh({ ...credentials, type: "oauth" });
+		async refreshToken(credentials, signal) {
+			return auth.refresh({ ...credentials, type: "oauth" }, signal);
 		},
 		async getApiKey(credentials) {
 			const resolved = await auth.toAuth({ ...credentials, type: "oauth" });
@@ -179,10 +179,11 @@ export async function loginWithEngineOAuthProvider(
 export async function refreshEngineOAuthCredentials(
 	providerId: string,
 	credentials: OAuthCredentials,
+	signal: AbortSignal,
 ): Promise<OAuthCredentials> {
 	const provider = registry().get(providerId);
 	if (!provider) throw new Error(`unknown OAuth provider: ${providerId}`);
-	return provider.refreshToken(credentials);
+	return provider.refreshToken(credentials, signal);
 }
 
 export async function getEngineOAuthApiKey(providerId: string, credentials: OAuthCredentials): Promise<string> {
