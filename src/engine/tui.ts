@@ -93,6 +93,7 @@ export {
 	ProcessTerminal,
 	ScrollView,
 	setKeybindings,
+	stripTerminalSequences,
 	Text,
 	TUI_KEYBINDINGS,
 	TuiAltScreen,

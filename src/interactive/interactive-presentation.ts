@@ -353,8 +353,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			footer: footer.view,
 		},
 		{
-			mode: settings.terminal.tuiMode,
-			fullscreenScrollbar: settings.terminal.fullscreenScrollbar,
+			mode: settings.terminal?.tuiMode ?? "regular",
+			fullscreenScrollbar: settings.terminal?.fullscreenScrollbar ?? "auto",
 		},
 	);
 	deps.mount(root, editor);
