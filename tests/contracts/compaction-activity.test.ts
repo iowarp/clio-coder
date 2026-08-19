@@ -767,6 +767,58 @@ describe("contracts/production compaction failure wiring", () => {
 			isolated.restore();
 		}
 	});
+
+	it("persists a tokensAfter that dropped the summarized history", async () => {
+		// /tree renders the persisted pair, and it read "~16276 -> ~16276 tokens"
+		// beside a footer that said 16276 -> 11008 for that same compaction. The
+		// after figure was estimated from the rebuilt message list, whose retained
+		// assistant message still carries its pre-compaction usage; anchoring on
+		// that reported back the exact number compaction had just removed.
+		const isolated = await isolateClioEnv("clio-compaction-tokens-after-");
+		const bus = createSafeEventBus();
+		const faux = registerFauxProvider({
+			provider: "production-compaction-tokens-after",
+			models: [{ id: "model" }],
+			tokensPerSecond: 0,
+		});
+		const session = persistentSession(bus);
+
+		try {
+			session.create({ cwd: isolated.dir, model: "model", target: "test-target" });
+			seedPersistentCompactionHistory(session);
+			faux.setResponses([fauxAssistantMessage("## Goal\nA short summary standing in for long history.")]);
+			const model = faux.getModel("model") as EngineModel;
+			const productionProviders = providers(model);
+			const currentSettings = settings();
+			const loop = createChatLoop({
+				getSettings: () => currentSettings,
+				providers: productionProviders,
+				knownTargets: () => new Set(["test-target"]),
+				session,
+				readSessionEntries: () => persistedEntries(session),
+				autoCompact: createProductionAutoCompact(session, () => currentSettings, productionProviders),
+				bus,
+				createAgent: createFakeAgentFactory(async () => {}),
+			} as never);
+
+			await loop.compact();
+
+			const summary = persistedEntries(session).find(
+				(entry): entry is Extract<SessionEntry, { kind: "compactionSummary" }> => entry.kind === "compactionSummary",
+			);
+			ok(summary, "the compaction persisted a summary entry");
+			ok(summary.tokensAfter !== undefined, "the entry carries an after figure for /tree to render");
+			ok(
+				summary.tokensAfter < summary.tokensBefore,
+				`compaction must report a smaller context, got ${summary.tokensBefore} -> ${summary.tokensAfter}`,
+			);
+			ok(summary.tokensAfter > 0, `the after figure stays positive, got ${summary.tokensAfter}`);
+		} finally {
+			await session.close();
+			faux.unregister();
+			isolated.restore();
+		}
+	});
 });
 
 /**

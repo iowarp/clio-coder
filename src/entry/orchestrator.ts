@@ -128,7 +128,8 @@ import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
-import { ceilChars, estimateAgentContextTokens } from "../domains/session/context-accounting.js";
+import { estimateTokens } from "../domains/session/compaction/tokens.js";
+import { ceilChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
@@ -684,22 +685,30 @@ function estimateTokensFromSummary(summary: string): number {
 	return Math.max(1, ceilChars(summary.length));
 }
 
+/**
+ * The post-compaction size, on the same scale as `tokensBefore`.
+ *
+ * `tokensBefore` is a whole-prompt figure: `calculateContextTokens` anchors it
+ * on the last assistant call's measured usage, so it carries the system prompt
+ * and tool schemas that compaction never touches. The after figure has to stay
+ * on that scale to be comparable, and the persistence layer has no model handle
+ * to re-measure with, so it is arithmetic on that same scale: drop what stops
+ * being replayed and add the summary that replaces it.
+ *
+ * Estimating it from the rebuilt message list instead reported `tokensBefore`
+ * back unchanged, which is what made /tree render "~16276 -> ~16276 tokens"
+ * beside a footer that said 16276 -> 11008 for the same compaction. That
+ * estimator anchors on the newest assistant usage, and the retained suffix
+ * still holds the assistant message whose usage describes the pre-compaction
+ * prompt. Anchoring on it reports precisely the number compaction removed.
+ */
 function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, result: CompactResult): number {
-	const synthetic: CompactionSummaryEntry = {
-		kind: "compactionSummary",
-		turnId: "__pending_compaction__",
-		parentTurnId: result.firstKeptTurnId ?? null,
-		timestamp: new Date(0).toISOString(),
-		summary: result.summary,
-		tokensBefore: result.tokensBefore,
-		firstKeptTurnId: result.firstKeptTurnId ?? "",
-		messagesSummarized: result.messagesSummarized,
-		isSplitTurn: result.isSplitTurn,
-		tokensAfter: estimateTokensFromSummary(result.summary),
-	};
-	const messages = buildReplayAgentMessagesFromTurns([...entries, synthetic]);
-	const tokens = estimateAgentContextTokens({ messages });
-	return tokens > 0 ? tokens : estimateTokensFromSummary(result.summary);
+	let droppedTokens = 0;
+	for (const entry of entries.slice(0, result.firstKeptEntryIndex)) droppedTokens += estimateTokens(entry);
+	const summaryTokens = estimateTokensFromSummary(result.summary);
+	// The summary alone is the floor: a session whose dropped estimate exceeds
+	// the measured anchor must not report a negative or sub-summary context.
+	return Math.max(summaryTokens, result.tokensBefore - droppedTokens + summaryTokens);
 }
 
 /**
