@@ -1330,6 +1330,48 @@ function checkPromptsDocLinks(): void {
 }
 
 // ---------------------------------------------------------------------------
+// pi-surface: a normal lint run does not pay to build the full Pi declaration
+// graph. A dependency version mismatch activates scripts/pi-surface-diff.ts,
+// which fails when a symbol imported by Clio changed or disappeared and reports
+// new exports as review input.
+// ---------------------------------------------------------------------------
+function checkPiSurface(): void {
+	const snapshotPath = join(root, "docs", "pi-surface.json");
+	if (!existsSync(snapshotPath)) {
+		fail("pi-surface", "docs/pi-surface.json must exist");
+		return;
+	}
+	const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8")) as {
+		packages?: Record<string, { version?: string }>;
+	};
+	const packageNames = ["@earendil-works/pi-ai", "@earendil-works/pi-agent-core", "@earendil-works/pi-tui"];
+	const changed = packageNames.filter((packageName) => {
+		const installed = JSON.parse(
+			readFileSync(join(root, "node_modules", ...packageName.split("/"), "package.json"), "utf8"),
+		) as { version: string };
+		return snapshot.packages?.[packageName]?.version !== installed.version;
+	});
+	if (changed.length === 0) return;
+	try {
+		const output = execFileSync(process.execPath, ["--import", "tsx", join(root, "scripts", "pi-surface-diff.ts")], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		if (output.trim().length > 0) process.stdout.write(output);
+	} catch (error) {
+		const result = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
+		const output = `${result.stdout?.toString() ?? ""}${result.stderr?.toString() ?? ""}`.trim();
+		fail(
+			"pi-surface",
+			output.length > 0
+				? output.replaceAll("\n", "\n  ")
+				: (result.message ?? `surface check failed for ${changed.join(", ")}`),
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
 
 const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["export-hygiene", checkExportHygiene],
@@ -1344,6 +1386,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["packaging", checkPackaging],
 	["gitignored-reference", checkGitignoredReference],
 	["prompts", checkPromptsDocLinks],
+	["pi-surface", checkPiSurface],
 ];
 
 const startedAt = performance.now();

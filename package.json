@@ -72,6 +72,8 @@
 		"typecheck": "tsc -p tsconfig.tests.json",
 		"format": "biome format --write .",
 		"lint": "biome check . && node --import tsx scripts/check-hygiene.ts",
+		"pi:surface-diff": "node --import tsx scripts/pi-surface-diff.ts",
+		"pi:surface-snapshot": "node --import tsx scripts/pi-surface-diff.ts --write",
 		"test:file": "node --import tsx --import ./tests/harness/tmp-root.ts --test",
 		"pretest": "test -f dist/assets/codewiki.json && [ -z \"$(find src -newer dist/assets/codewiki.json -type f -print -quit)\" ] || npm run build",
 		"test": "node scripts/shard-tests.mjs",
