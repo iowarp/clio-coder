@@ -1,7 +1,7 @@
 # Clio Coder Safety Model
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.3.2).
 
 Clio Coder's safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the [IOWarp](https://iowarp.ai) ecosystem developed by the [Gnosis Research Center](https://grc.iit.edu) at Illinois Tech under NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318), Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.
 
@@ -13,7 +13,7 @@ Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bo
 
 The `autonomy` setting (`read-only` | `suggest` | `auto-edit` | `full-auto`) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level. When a `[safety-net]` notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.
 
-In Clio Coder v0.3.1, effective autonomy resolution is strictly centralized in `src/entry/orchestrator.ts` through `resolveEffectiveAutonomy` and `resolveBaselineAutonomy`. Every admission surface (tool registry admission, dispatch plan provenance, and ACP session snapshots) delegates to this pair of functions so that fallback paths cannot diverge across execution contexts. `resolveBaselineAutonomy` evaluates dispatch settings overrides, headless CLI options, and configuration settings before applying the default `auto-edit` level. `resolveEffectiveAutonomy` combines any active ACP session autonomy level with the baseline resolution.
+In Clio Coder v0.3.2, effective autonomy resolution is strictly centralized in `src/entry/orchestrator.ts` through `resolveEffectiveAutonomy` and `resolveBaselineAutonomy`. Every admission surface (tool registry admission, dispatch plan provenance, and ACP session snapshots) delegates to this pair of functions so that fallback paths cannot diverge across execution contexts. `resolveBaselineAutonomy` evaluates dispatch settings overrides, headless CLI options, and configuration settings before applying the default `auto-edit` level. `resolveEffectiveAutonomy` combines any active ACP session autonomy level with the baseline resolution.
 
 ### Autonomy levels
 
