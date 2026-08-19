@@ -19,6 +19,7 @@ import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
+import { stripTerminalSequences } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ChatLoop } from "./chat-loop.js";
@@ -41,12 +42,6 @@ import { verifyReceiptFile } from "./view/artifacts.js";
 import type { WorkerEntryState } from "./worker-stream.js";
 
 const EXPORT_RENDER_WIDTH = 100;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: the ESC control character is the ANSI escape introducer this pattern exists to strip
-const ANSI_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
-
-function stripAnsiForExport(line: string): string {
-	return line.replace(ANSI_PATTERN, "");
-}
 
 export interface InteractiveSlashSubmitExpansion {
 	text: string;
@@ -356,7 +351,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
 				});
 				exportPanel.toggleAllToolsExpanded();
-				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripAnsiForExport);
+				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripTerminalSequences);
 				// The operator names this file by the day they ran the export, so the
 				// date in it is their calendar date. The header below keeps the ISO
 				// instant, which is the machine-readable half of the same fact.

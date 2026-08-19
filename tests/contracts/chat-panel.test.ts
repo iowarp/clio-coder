@@ -1,14 +1,14 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { SKILL_SUGGESTION_ANCHOR, SKILL_SUGGESTION_PREFIX } from "../../src/core/skill-activation.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { redactToolArgs, renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
 import { fgSequence, GLYPH, SGR_DIM } from "../../src/interactive/theme/index.js";
 import { createTestClock } from "../harness/clock.js";
 
-const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
-const strip = (s: string): string => s.replace(ANSI, "");
+const strip = stripTerminalSequences;
 
 /**
  * Every panel in this file is built on the harness clock. A panel that reads
@@ -89,6 +89,18 @@ describe("chat-panel live thinking streaming", () => {
 });
 
 describe("chat-panel queued user turn injection", () => {
+	it("marks every user turn for Pi fullscreen prompt navigation", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.appendUser("first prompt");
+		panel.appendUser("second prompt");
+		const rendered = panel.render(80);
+		strictEqual(
+			rendered.filter((line) => line.startsWith("\x1b]133;A\x07")).length,
+			2,
+			"each semantic user turn begins with Pi's OSC 133 prompt marker",
+		);
+	});
+
 	it("renders an injected steer as a user turn between assistant entries", () => {
 		const panel = createChatPanel({ now: frozen.now });
 		panel.appendUser("start a long task");

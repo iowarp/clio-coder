@@ -78,7 +78,7 @@ For example, a session in `repo/src/parser/` loads `repo/src/CLIO-CODER.override
 
 An unreadable or malformed override fails closed. Clio warns about that file but does not reactivate the inherited or same-directory handbook it replaced. `clio-coder config inspect` lists every effective handbook and its layer number.
 
-Handbook resolution is read-only. `/context init` and its CLI form continue to author only the exact `CLIO-CODER.md` in the current directory, and `/context refresh` may curate only that exact standard file. They never rewrite an inherited file or an override. A same-directory override therefore continues to shadow a standard handbook created or updated by those maintenance commands until the operator removes the override. Normal reset preserves both handbook names; `context reset --all` may remove the local standard `CLIO-CODER.md` after its second confirmation but always preserves `CLIO-CODER.override.md` as operator-authored context.
+Handbook resolution is read-only. `/context init` and its CLI form are the only commands that author or update the exact `CLIO-CODER.md` in the current directory; `/context refresh` touches neither standard nor override handbooks. Neither command rewrites an inherited file or an override. A same-directory override therefore continues to shadow a standard handbook created or updated by init until the operator removes the override. Normal reset preserves both handbook names; `context reset --all` may remove the local standard `CLIO-CODER.md` after its second confirmation but always preserves `CLIO-CODER.override.md` as operator-authored context.
 
 ## Project-context preload class
 

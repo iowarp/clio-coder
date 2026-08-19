@@ -126,6 +126,7 @@ describe("contracts/interactive slash runtime", () => {
 		try {
 			runtime.dispatchCommand(`/export ${target}`);
 			const body = readFileSync(target, "utf8");
+			ok(!body.includes("\x1b"), "Pi terminal control sequences never cross into the transcript export");
 			ok(body.includes("PROMPT-ONE"), body);
 			ok(body.includes("ANSWER-ONE"), body);
 			ok(!body.includes("PROMPT-TWO"), `u2 is past the pin, got:\n${body}`);

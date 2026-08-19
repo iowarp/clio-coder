@@ -325,6 +325,14 @@ describe("interactive presentation ownership", () => {
 		deepStrictEqual(test.getLayoutOptions(), { mode: "fullscreen", fullscreenScrollbar: "always" });
 	});
 
+	it("keeps the optional settings path on regular-screen defaults", () => {
+		const test = harness();
+		delete test.deps.getSettings;
+		const presentation = createInteractivePresentation(test.deps);
+		deepStrictEqual(test.getLayoutOptions(), { mode: "regular", fullscreenScrollbar: "auto" });
+		presentation.dispose();
+	});
+
 	it("wires live streaming state and resolved editor bindings into composer chrome", () => {
 		const test = harness();
 		createInteractivePresentation(test.deps);

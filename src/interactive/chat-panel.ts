@@ -38,6 +38,9 @@ const CHAT_MARKDOWN_OPTIONS = {
 	transform: createMermaidMarkdownTransform(clioTheme()),
 	renderLatex: true,
 } as const;
+// TuiAltScreen uses Pi's OSC 133 prompt-start marker for semantic prompt
+// navigation. The sequence is zero-width and stripped before terminal output.
+const OSC133_PROMPT_START = "\x1b]133;A\x07";
 
 // Prefix and rail SGR constants, previously re-exported by the deleted
 // palette.ts. Composing them from fgSequence/GLYPH here yields byte-identical
@@ -785,7 +788,9 @@ function renderEntryLines(
 		const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 		const lines: string[] = [];
 		for (const sourceLine of entry.text.split("\n")) lines.push(...wrapTextWithAnsi(sourceLine, contentWidth));
-		return hangProseLines(lines, USER_PREFIX);
+		const rendered = hangProseLines(lines, USER_PREFIX);
+		if (rendered[0] !== undefined) rendered[0] = `${OSC133_PROMPT_START}${rendered[0]}`;
+		return rendered;
 	}
 	if (entry.role === "retryStatus") {
 		return wrapTextWithAnsi(formatRetryStatus(entry.status), width);
