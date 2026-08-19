@@ -2,9 +2,9 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
+import { StringEnum } from "../engine/ai.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
-import { stringEnum } from "./string-enum.js";
 
 type CredentialPresenceSource = "auto" | "environment" | "file";
 type CredentialPresenceResultSource = "environment" | "file" | "both" | "none";
@@ -91,10 +91,10 @@ export const credentialPresentTool: ToolSpec = {
 	parameters: Type.Object({
 		name: Type.String({ description: "Credential key name, e.g. OPENAI_API_KEY." }),
 		source: Type.Optional(
-			stringEnum(
-				["auto", "environment", "env", "file"],
-				"auto checks the environment and the file when file is supplied; environment/env checks only the process environment; file checks only the file.",
-			),
+			StringEnum(["auto", "environment", "env", "file"], {
+				description:
+					"auto checks the environment and the file when file is supplied; environment/env checks only the process environment; file checks only the file.",
+			}),
 		),
 		file: Type.Optional(Type.String({ description: "Env-style file to check for NAME=, e.g. .env." })),
 	}),

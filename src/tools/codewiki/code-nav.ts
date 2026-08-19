@@ -6,6 +6,7 @@ import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/conte
 import { listWikiPages } from "../../domains/context/wiki/layout.js";
 import { readWikiMeta } from "../../domains/context/wiki/meta.js";
 import { wikiCompletenessFromMeta, wikiStaleness } from "../../domains/context/wiki/staleness.js";
+import { StringEnum } from "../../engine/ai.js";
 import { compileGlobRegex } from "../ignore-policy.js";
 import {
 	finalizeObservation,
@@ -14,7 +15,6 @@ import {
 	reserveObservation,
 } from "../observation.js";
 import type { ToolResult, ToolSpec } from "../registry.js";
-import { stringEnum } from "../string-enum.js";
 import { loadCodewikiForTool, renderJson } from "./shared.js";
 
 const REGEX_SYNTAX_HINTS = /\.\*|\.\+|\^|\$|\\[dDwWsSbB]|\(\?:|\(\?=|\(\?!/;
@@ -489,7 +489,9 @@ export const codeNavTool: ToolSpec = {
 	description:
 		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, and dependents lists importers. mode=wiki without query lists generated Markdown wiki pages; with query it resolves a page id/title and returns its summary plus a path to open with read. For Clio's bundled product docs use context scope=docs.",
 	parameters: Type.Object({
-		mode: stringEnum(["symbol", "path", "entries", "outline", "deps", "dependents", "wiki"], "Lookup mode."),
+		mode: StringEnum(["symbol", "path", "entries", "outline", "deps", "dependents", "wiki"], {
+			description: "Lookup mode.",
+		}),
 		query: Type.Optional(
 			Type.String({ description: "Symbol name, indexed path/pattern/substring, or wiki page id/title." }),
 		),

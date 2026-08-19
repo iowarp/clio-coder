@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import { type AutonomyExposure, DEFAULT_AUTONOMY_EXPOSURE } from "../domains/safety/autonomy.js";
+import { StringEnum } from "../engine/ai.js";
 import type {
 	AskUserToolPolicy,
 	AskUserTranscriptAnswer,
@@ -14,7 +15,6 @@ import type {
 	ToolResult,
 	ToolSpec,
 } from "./registry.js";
-import { stringEnum } from "./string-enum.js";
 
 export const ASK_USER_OTHER_LABEL = "Other (type your answer)";
 
@@ -75,16 +75,15 @@ export interface AskUserToolDeps {
 
 export const askUserParameters = Type.Object({
 	action: Type.Optional(
-		stringEnum(
-			["ask", "complete"],
-			"ask presents a round of questions; complete (exactly once) records decisions before final prose.",
-		),
+		StringEnum(["ask", "complete"], {
+			description: "ask presents a round of questions; complete (exactly once) records decisions before final prose.",
+		}),
 	),
 	mode: Type.Optional(
-		stringEnum(
-			["round", "single_question"],
-			"Caps how many questions this call may carry. single_question accepts exactly 1 and rejects the call otherwise (interviews); round accepts 1 to 4 tightly related confirmations. Default is round.",
-		),
+		StringEnum(["round", "single_question"], {
+			description:
+				"Caps how many questions this call may carry. single_question accepts exactly 1 and rejects the call otherwise (interviews); round accepts 1 to 4 tightly related confirmations. Default is round.",
+		}),
 	),
 	questions: Type.Optional(
 		Type.Array(
@@ -118,10 +117,10 @@ export const askUserParameters = Type.Object({
 	),
 	summary: Type.Optional(Type.String({ description: "Short closeout summary for action=complete." })),
 	exposure: Type.Optional(
-		stringEnum(
-			["local", "outward"],
-			"Blast radius of this gate. local (default) stays inside the workspace. outward means answering it publishes or sends something the operator cannot take back (filing an issue or PR, posting a comment, pushing, releasing); at autonomy auto-edit an outward gate parks for the operator instead of being answered automatically.",
-		),
+		StringEnum(["local", "outward"], {
+			description:
+				"Blast radius of this gate. local (default) stays inside the workspace. outward means answering it publishes or sends something the operator cannot take back (filing an issue or PR, posting a comment, pushing, releasing); at autonomy auto-edit an outward gate parks for the operator instead of being answered automatically.",
+		}),
 	),
 });
 

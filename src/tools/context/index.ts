@@ -13,6 +13,7 @@ import {
 	type Skill,
 } from "../../domains/resources/index.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
+import { StringEnum } from "../../engine/ai.js";
 import {
 	finalizeObservation,
 	OBSERVE_SELF_CAPS,
@@ -21,7 +22,6 @@ import {
 	reserveObservation,
 } from "../observation.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
-import { stringEnum } from "../string-enum.js";
 import { truncateHead } from "../truncate.js";
 import { listDocsCorpus, searchDocs } from "./docs-engine.js";
 
@@ -489,7 +489,7 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 		description:
 			"Environment context: scope=workspace returns the git/project snapshot, scope=docs searches Clio's bundled documentation (omit query to list the corpus), scope=skills lists installed and marketplace skills or loads an installed one by name. For repository code and the repo's generated wiki use code_nav (mode=wiki).",
 		parameters: Type.Object({
-			scope: stringEnum(["workspace", "docs", "skills"], "Context source."),
+			scope: StringEnum(["workspace", "docs", "skills"], { description: "Context source." }),
 			query: Type.Optional(Type.String({ description: "scope=docs: question or terms; omit to list the corpus." })),
 			name: Type.Optional(Type.String({ description: "scope=skills: skill name to load; omit to list." })),
 			limit: Type.Optional(Type.Number({ description: "scope=docs: max sections (default 5, max 12)." })),
