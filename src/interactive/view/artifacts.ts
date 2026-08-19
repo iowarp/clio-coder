@@ -815,6 +815,8 @@ function renderTaskLedgerGoals(lines: string[], heading: string, goals: Readonly
 	for (const goal of goals) {
 		const parent = goal.parentGoalId ? ` parent ${goal.parentGoalId}` : "";
 		lines.push(`- [${goal.status}] ${goal.id} ${goal.title}${parent}`);
+		if (goal.origin) lines.push(`  - origin: ${goal.origin}`);
+		if (goal.userTaskId) lines.push(`  - operator task: ${goal.userTaskId}`);
 		if (goal.description) lines.push(`  - description: ${goal.description}`);
 	}
 }
@@ -842,6 +844,7 @@ function renderTaskLedgerMarkdown(entry: TaskLedgerEntry): string[] {
 		`- timestamp: ${entry.timestamp}`,
 		`- status: ${taskLedgerStatusSummary(entry)}`,
 	];
+	if (entry.boardId) lines.push(`- board id: ${entry.boardId}`);
 	renderTaskLedgerGoals(lines, "## Board Goals", entry.goals);
 	renderTaskLedgerGoals(lines, "## Subgoals", entry.subgoals);
 	lines.push("", "## Active Runs");
@@ -873,9 +876,24 @@ export class TaskLedgerArtifactProvider implements ArtifactProvider {
 				...(path ? { path } : {}),
 				searchText: [
 					entry.turnId,
+					entry.boardId ?? "",
 					...entry.activeRunIds,
-					...entry.goals.flatMap((goal) => [goal.id, goal.title, goal.description ?? "", goal.parentGoalId ?? ""]),
-					...entry.subgoals.flatMap((goal) => [goal.id, goal.title, goal.description ?? "", goal.parentGoalId ?? ""]),
+					...entry.goals.flatMap((goal) => [
+						goal.id,
+						goal.title,
+						goal.description ?? "",
+						goal.parentGoalId ?? "",
+						goal.origin ?? "agent",
+						goal.userTaskId ?? "",
+					]),
+					...entry.subgoals.flatMap((goal) => [
+						goal.id,
+						goal.title,
+						goal.description ?? "",
+						goal.parentGoalId ?? "",
+						goal.origin ?? "agent",
+						goal.userTaskId ?? "",
+					]),
 					...entry.requiredValidationEvidence.flatMap((item) => [
 						item.id,
 						item.description,

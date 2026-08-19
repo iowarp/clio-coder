@@ -332,6 +332,68 @@ describe("contracts/evidence-build", () => {
 		});
 	});
 
+	it("renders bounded task-ledger rows with board, operator provenance, reasons, and evidence", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const sessions = createSessionBundle(stubContext());
+			const meta = sessions.contract.create({ cwd: scratch });
+			const user = sessions.contract.append({ parentId: null, kind: "user", payload: { text: "ship this task" } });
+			sessions.contract.append({
+				parentId: user.id,
+				kind: "assistant",
+				payload: { text: "tracking the task" },
+			});
+			sessions.contract.appendEntry({
+				kind: "taskLedger",
+				parentTurnId: user.id,
+				boardId: "board-evidence-1",
+				goals: [{ id: "board", title: "Release", status: "active" }],
+				subgoals: [
+					{
+						id: "t1",
+						title: "Operator release review",
+						status: "completed",
+						origin: "user",
+						userTaskId: "u7",
+						description: "requested before release",
+					},
+					{
+						id: "t2",
+						title: "Agent follow-up",
+						status: "pending",
+						origin: "agent",
+					},
+				],
+				activeRunIds: [],
+				requiredValidationEvidence: [{ id: "t1.evidence", description: "focused contracts passed", status: "passed" }],
+			});
+			await sessions.contract.close();
+
+			const { receiptPath } = await sealRun(undefined, {}, meta.id);
+			const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as { sessionId: string | null };
+			strictEqual(receipt.sessionId, meta.id);
+			const result = await buildEvidence({
+				dataDir: join(scratch, "data"),
+				stateDir: join(scratch, "state"),
+				sessionId: meta.id,
+			});
+			const transcript = readFileSync(join(result.directory, "transcript.md"), "utf8");
+			ok(transcript.includes("taskLedger goals=1 subgoals=2 activeRuns=0 evidence=1 board=board-evidence-1"), transcript);
+			ok(transcript.includes("userLinks=t1:u7"), transcript);
+			ok(
+				transcript.includes(
+					"task board=board-evidence-1 id=t1 title=Operator release review status=completed origin=user userTaskId=u7 reason=requested before release evidence=focused contracts passed",
+				),
+				transcript,
+			);
+			ok(
+				transcript.includes(
+					"task board=board-evidence-1 id=t2 title=Agent follow-up status=pending origin=agent userTaskId=none reason=none evidence=none",
+				),
+				transcript,
+			);
+		});
+	});
+
 	it("reports a receipt sealed under a retired integrity version as an integrity failure", async () => {
 		await withIsolatedClioHome(async () => {
 			const { runId, receiptPath } = await sealRun();

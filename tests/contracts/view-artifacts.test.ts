@@ -676,9 +676,17 @@ describe("contracts/view-artifacts", () => {
 				turnId: "ledger-1",
 				parentTurnId: null,
 				timestamp: "2026-06-11T12:05:00.000Z",
+				boardId: "board-release-1",
 				goals: [{ id: "G1", title: "Ship proof catalog", status: "active" }],
 				subgoals: [
-					{ id: "T1", title: "Add evidence provider", status: "completed", parentGoalId: "G1" },
+					{
+						id: "T1",
+						title: "Add evidence provider",
+						status: "completed",
+						parentGoalId: "G1",
+						origin: "user",
+						userTaskId: "u7",
+					},
 					{ id: "T2", title: "Add audit provider", status: "active", parentGoalId: "G1" },
 				],
 				activeRunIds: ["run-view-1"],
@@ -709,13 +717,19 @@ describe("contracts/view-artifacts", () => {
 		ok(artifacts[0]?.title.includes("1/3 done"));
 		ok(artifacts[0]?.searchText?.includes("run-view-1"));
 		ok(artifacts[0]?.searchText?.includes("G1"));
+		ok(artifacts[0]?.searchText?.includes("board-release-1"));
+		ok(artifacts[0]?.searchText?.includes("user"));
+		ok(artifacts[0]?.searchText?.includes("u7"));
 		ok(artifacts[0]?.path?.endsWith("current.jsonl"));
 
 		const loaded = await artifacts[0]?.load();
 		const text = loaded?.lines.join("\n") ?? "";
 		strictEqual(loaded?.format, "markdown");
 		ok(text.includes("## Board Goals"), text);
+		ok(text.includes("- board id: board-release-1"), text);
 		ok(text.includes("- [active] G1 Ship proof catalog"), text);
+		ok(text.includes("- origin: user"), text);
+		ok(text.includes("- operator task: u7"), text);
 		ok(text.includes("- run-view-1"), text);
 		ok(text.includes("npm test -- tests/contracts/view-artifacts.test.ts"), text);
 		ok(text.includes("- observed: 2026-06-11T12:06:00.000Z"), text);

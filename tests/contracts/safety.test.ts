@@ -38,6 +38,7 @@ describe("contracts/safety", () => {
 		// Read tools
 		strictEqual(classify({ tool: "read", args: { path: "/x" } }).actionClass, "read");
 		strictEqual(classify({ tool: "grep", args: {} }).actionClass, "read");
+		strictEqual(classify({ tool: ToolNames.Tasks, args: { action: "pick", id: "u1" } }).actionClass, "read");
 
 		// Write tools
 		const cwdPath = `${process.cwd()}/scratch.txt`;

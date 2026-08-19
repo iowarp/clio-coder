@@ -22,6 +22,8 @@ export interface TaskBoardTask {
 	id: string;
 	title: string;
 	status: TaskLedgerStatus;
+	origin?: "agent" | "user";
+	userTaskId?: string;
 	/** Block or drop reason; empty for pending/active/completed tasks. */
 	reason?: string;
 	/** Evidence note recorded when the task was completed. */
@@ -57,6 +59,7 @@ export interface TaskBoardCounts {
 export type TaskBoardMutation =
 	| { op: "plan"; title: string; tasks: ReadonlyArray<string> }
 	| { op: "add"; tasks: ReadonlyArray<string> }
+	| { op: "pick"; title: string; userTaskId: string }
 	| { op: "start"; id: string }
 	| { op: "done"; id: string; evidence: string }
 	| { op: "block"; id: string; reason: string }
@@ -127,6 +130,10 @@ export interface TaskBoardStore {
 	invalidate(): void;
 }
 
+function isOpenUserTask(task: TaskBoardTask): boolean {
+	return task.origin === "user" && (task.status === "pending" || task.status === "active");
+}
+
 export function taskBoardCounts(board: Pick<TaskBoardSnapshot, "tasks">): TaskBoardCounts {
 	const counts: TaskBoardCounts = {
 		total: board.tasks.length,
@@ -175,6 +182,8 @@ export function toTaskLedgerEntryFields(board: TaskBoardSnapshot, now: Date): Ta
 			status: task.status,
 			parentGoalId: TASK_BOARD_GOAL_ID,
 		};
+		if (task.origin) goal.origin = task.origin;
+		if (task.userTaskId) goal.userTaskId = task.userTaskId;
 		if (task.reason) goal.description = task.reason;
 		return goal;
 	});
@@ -283,7 +292,13 @@ function toEntryView(entry: {
 		boardId: entry.boardId ?? LEGACY_TASK_BOARD_ID,
 		title: boardGoal.title,
 		tasks: entry.subgoals.map((goal) => {
-			const task: TaskBoardTask = { id: goal.id, title: goal.title, status: goal.status };
+			const task: TaskBoardTask = {
+				id: goal.id,
+				title: goal.title,
+				status: goal.status,
+				origin: goal.origin ?? "agent",
+			};
+			if (goal.userTaskId) task.userTaskId = goal.userTaskId;
 			if (goal.description) task.reason = goal.description;
 			const evidence = evidenceByTask.get(goal.id);
 			if (evidence) task.evidence = evidence;
@@ -317,15 +332,27 @@ function applyMutation(
 		const titles = normalizeTitles(mutation.tasks);
 		if (mutation.title.trim().length === 0) return { error: "plan requires a non-empty title" };
 		if (titles.length === 0) return { error: "plan requires at least one task" };
+		const retained = board?.tasks.filter(isOpenUserTask) ?? [];
 		const notes: string[] = [];
-		if (board && taskBoardCounts(board).open > 0) {
-			notes.push(`replaced board "${board.title}" with ${taskBoardCounts(board).open} task(s) still open`);
+		const replacedOpen = board ? taskBoardCounts(board).open - retained.length : 0;
+		if (board && replacedOpen > 0) {
+			notes.push(`replaced board "${board.title}" with ${replacedOpen} agent task(s) still open`);
 		}
+		if (retained.length > 0) notes.push(`preserved ${retained.length} open operator task(s)`);
+		const start = nextTaskId(retained);
 		return {
 			board: {
 				boardId: "",
 				title: mutation.title.trim(),
-				tasks: titles.map((title, index) => ({ id: `t${index + 1}`, title, status: "pending" as const })),
+				tasks: [
+					...retained,
+					...titles.map((title, index) => ({
+						id: `t${start + index}`,
+						title,
+						status: "pending" as const,
+						origin: "agent" as const,
+					})),
+				],
 				// Runs in flight outlive a board swap: they belong to the session,
 				// so the fresh board inherits the linkage until the runs finish.
 				activeRunIds: board?.activeRunIds ?? [],
@@ -333,12 +360,48 @@ function applyMutation(
 			notes,
 		};
 	}
+	if (mutation.op === "pick") {
+		const title = mutation.title.trim();
+		if (title.length === 0) return { error: "pick requires a non-empty operator task title" };
+		if (!/^u[1-9]\d*$/.test(mutation.userTaskId)) return { error: "pick requires an operator task id like u3" };
+		if (
+			board?.tasks.some(
+				(task) =>
+					task.userTaskId === mutation.userTaskId &&
+					(task.status === "pending" || task.status === "active" || task.status === "completed"),
+			)
+		) {
+			return { error: `operator task ${mutation.userTaskId} is already linked to durable board work` };
+		}
+		const tasks = board?.tasks ?? [];
+		const picked: TaskBoardTask = {
+			id: `t${nextTaskId(tasks)}`,
+			title,
+			status: "pending",
+			origin: "user",
+			userTaskId: mutation.userTaskId,
+		};
+		return {
+			board: {
+				boardId: board?.boardId ?? "",
+				title: board?.title ?? "Operator tasks",
+				tasks: [...tasks, picked],
+				activeRunIds: board?.activeRunIds ?? [],
+			},
+			notes: [],
+		};
+	}
 	if (board === null) return { error: 'no task board yet; declare one with action="plan" first' };
 	if (mutation.op === "add") {
 		const titles = normalizeTitles(mutation.tasks);
 		if (titles.length === 0) return { error: "add requires at least one task" };
 		const start = nextTaskId(board.tasks);
-		const added = titles.map((title, index) => ({ id: `t${start + index}`, title, status: "pending" as const }));
+		const added = titles.map((title, index) => ({
+			id: `t${start + index}`,
+			title,
+			status: "pending" as const,
+			origin: "agent" as const,
+		}));
 		return { board: { ...board, tasks: [...board.tasks, ...added] }, notes: [] };
 	}
 	const target = board.tasks.find((task) => task.id === mutation.id);
@@ -430,6 +493,13 @@ export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardSt
 		}
 	};
 
+	const mutationRequiresAcknowledgement = (current: TaskBoardSnapshot | null, mutation: TaskBoardMutation): boolean => {
+		if (mutation.op === "pick") return true;
+		if (mutation.op === "plan") return current?.tasks.some(isOpenUserTask) ?? false;
+		if (mutation.op !== "done") return false;
+		return current?.tasks.some((task) => task.id === mutation.id && task.origin === "user") ?? false;
+	};
+
 	return {
 		snapshot(): TaskBoardSnapshot | null {
 			syncToSession();
@@ -447,8 +517,21 @@ export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardSt
 			syncToSession();
 			const result = applyMutation(board, mutation);
 			if ("error" in result) return { ok: false, message: result.error };
-			const nextBoard =
-				mutation.op === "plan" ? { ...result.board, boardId: deps.createBoardId?.() ?? randomUUID() } : result.board;
+			const needsBoardId = mutation.op === "plan" || result.board.boardId.length === 0;
+			const nextBoard = needsBoardId ? { ...result.board, boardId: deps.createBoardId?.() ?? randomUUID() } : result.board;
+			if (mutationRequiresAcknowledgement(board, mutation)) {
+				if (!deps.appendEntry) {
+					return { ok: false, message: "durable task-ledger persistence is unavailable for operator-linked work" };
+				}
+				try {
+					deps.appendEntry(toTaskLedgerEntryFields(nextBoard, deps.now?.() ?? new Date()));
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					return { ok: false, message: `could not persist operator-linked task board: ${message}` };
+				}
+				board = nextBoard;
+				return { ok: true, board: nextBoard, notes: result.notes };
+			}
 			board = nextBoard;
 			persist(nextBoard);
 			return { ok: true, board: nextBoard, notes: result.notes };

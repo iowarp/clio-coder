@@ -95,8 +95,10 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Monitor:
 		case ToolNames.AskUser:
 		case ToolNames.CredentialPresent:
-		// tasks mutates only the session's task ledger, never the workspace,
-		// so it stays read class and is never gated behind a confirmation.
+		// tasks pick mutates only Clio-owned session-ledger and project-local
+		// .clio-coder runtime state, never source-workspace files. By intentional
+		// policy it stays read class and ungated; the tool itself still requires
+		// a durable operator task id before it can mutate either store.
 		case ToolNames.Tasks:
 		// ledger posts a typed contribution to a coordination board and reads a
 		// local mirror. Neither touches the workspace, so it is never gated
