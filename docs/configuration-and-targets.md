@@ -436,56 +436,80 @@ For restart-required settings (`budget.concurrency`, `runtimePlugins`, `terminal
 
 The Settings Center organizes all configuration under four non-selectable group headers:
 
-| Group | Section | Purpose & Content |
+| Group | Section | Rows, in order |
 | --- | --- | --- |
-| **CORE** | Autonomy & Safety (`safety`) | Autonomy level (`autonomy`), Worker permission asks (`workers.onPermission`), Delegation governance (`delegation.defaults.toolGovernance`), and Safety net status (read-only fact). |
-| **CORE** | Orchestrator (`orchestrator`) | Active chat target (`orchestrator.target`), model (`orchestrator.model`), and thinking level (`orchestrator.thinkingLevel`). Changing target rebases model and thinking choices. |
-| **ROUTING** | Fleet (`fleet`) | Entity workbench with group headers for `Defaults` (target, model, thinking level), `Profiles` (one-row summaries with `◆ Edit` drill-down and destructive removal preflight), `Agent routes`, and `Placement` (node status). |
-| **ROUTING** | Targets (`targets`) | Operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with in-place action/detail drawer for URL, default model, last probe, and failure reason. Actions include `Use`, `Connect`, `Probe`, and `Remove`. |
-| **ROUTING** | Models (`models`) | Provider-backed scoped model checklist with target-level and target/model entries, `Space` toggle, capability inspector, and preserved `Unavailable` group. Deep link `/scoped-models`. |
-| **RUNTIME** | Budget (`budget`) | Session ceiling USD (`budget.sessionCeilingUsd`), max output tokens (`budget.maxOutputTokens`), and worker concurrency (`budget.concurrency`, restart-required). |
-| **RUNTIME** | Compaction (`compaction`) | Auto-compact toggle (`compaction.auto`), protected recent turns (`compaction.excludeLastTurns`), and compaction threshold (`compaction.threshold`). |
-| **RUNTIME** | Retry (`retry`) | Transient error recovery toggle (`retry.enabled`), max retries (`retry.maxRetries`), base delay (`retry.baseDelayMs`), and max delay (`retry.maxDelayMs`). |
-| **EXPERIENCE** | Terminal (`terminal`) | Terminal progress badges (`terminal.showTerminalProgress`), transcript output detail (`terminal.outputVerbosity`: `minimal`, `default`, `verbose`), renderer mode (`terminal.tuiMode`: `regular`, `fullscreen`), and fullscreen scrollbar visibility (`terminal.fullscreenScrollbar`: `hidden`, `auto`, `always`). |
-| **EXPERIENCE** | Advanced (`advanced`) | Notification dismiss defaults, memory intervention toggles, and runtime extension settings. |
+| **CORE** | Autonomy & Safety (`safety`) | `autonomy`, `workers.onPermission`, `delegation.defaults.toolGovernance`, `skills.trustProjectCompatRoots`, and the read-only safety-net fact. |
+| **CORE** | Orchestrator (`orchestrator`) | `orchestrator.thinkingLevel`, `orchestrator.target`, `orchestrator.model`, the memory plane (`background.target`, `background.model`, `background.thinkingLevel`), and the proactive-memory knobs (`memory.intervention.enabled`, `.everyNTools`, `.windowSteps`, `.maxTokens`, `.timeoutMs`). Changing target rebases model and thinking choices. |
+| **ROUTING** | Fleet (`fleet`) | `workers.default.target`, `workers.default.model`, `workers.default.thinkingLevel`, `workers.maxRetries`, `workers.profiles`, and `workers.agentBindings`, rendered under the group headers `Defaults`, `Profiles`, `Agent routes`, and `Placement`. Profile rows carry a `◆ Edit` drill-down and a destructive removal preflight; placement rows are read-only node status. |
+| **ROUTING** | Targets (`targets`) | The `targets` console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action and detail drawer for URL, default model, last probe, and failure reason. Actions include `Use`, `Connect`, `Probe`, and `Remove`. |
+| **ROUTING** | Models (`models`) | `scope`, `modelSelector.recentLimit`, and `modelSelector.favorites`, rendered as a provider-backed checklist with target-level and target/model entries, `Space` toggle, capability inspector, and a preserved `Unavailable` group. Deep link `/scoped-models`. |
+| **RUNTIME** | Budget (`budget`) | `budget.sessionCeilingUsd`, `defaults.maxTokens`, and `budget.concurrency` (restart required). |
+| **RUNTIME** | Compaction (`compaction`) | `compaction.auto`, `compaction.threshold`, and `compaction.excludeLastTurns`. |
+| **RUNTIME** | Retry (`retry`) | `retry.enabled`, `retry.maxRetries`, `retry.baseDelayMs`, and `retry.maxDelayMs`. |
+| **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), and `theme`. |
+| **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, and `delegation.agents`. |
+
+`retry.streamStallMs` has no Settings Center row; edit it in `settings.yaml`.
 
 Label to config path mapping:
 
 | Label | Config path |
 | --- | --- |
 | Autonomy level | `autonomy` |
-| Worker permission asks | `workers.onPermission` |
+| Fleet approvals routing | `workers.onPermission` |
 | Delegation governance | `delegation.defaults.toolGovernance` |
+| Trust project skill roots | `skills.trustProjectCompatRoots` |
+| Safety net | read-only fact, no config path |
 | Thinking level | `orchestrator.thinkingLevel` |
 | Target | `orchestrator.target` |
 | Model | `orchestrator.model` |
+| Memory target | `background.target` |
+| Memory model | `background.model` |
+| Memory thinking level | `background.thinkingLevel` |
+| Proactive memory | `memory.intervention.enabled` |
+| Memory cadence (tools) | `memory.intervention.everyNTools` |
+| Memory trajectory steps | `memory.intervention.windowSteps` |
+| Memory reminder tokens | `memory.intervention.maxTokens` |
+| Memory timeout (ms) | `memory.intervention.timeoutMs` |
 | Default target | `workers.default.target` |
 | Default model | `workers.default.model` |
 | Default thinking level | `workers.default.thinkingLevel` |
-| Dispatched worker profiles | `workers.profiles.*` |
-| Agent route bindings | `workers.agentBindings.*` |
-| Scoped model set | `scope` |
-| Model favorites | `modelSelector.favorites` |
+| Fleet retries | `workers.maxRetries` |
+| Add profile | `workers.profiles` |
+| Add agent route | `workers.agentBindings` |
+| Configured targets | `targets` |
+| Model cycle set | `scope` |
+| Recent models kept | `modelSelector.recentLimit` |
+| Pinned favorites | `modelSelector.favorites` |
 | Session ceiling (USD) | `budget.sessionCeilingUsd` |
-| Output token budget | `budget.maxOutputTokens` |
-| Worker concurrency | `budget.concurrency` (restart required) |
+| Output budget (tokens) | `defaults.maxTokens` |
+| Fleet concurrency | `budget.concurrency` (restart required) |
 | Auto-compact | `compaction.auto` |
-| Protected recent turns | `compaction.excludeLastTurns` |
 | Compaction threshold | `compaction.threshold` |
+| Protected recent turns | `compaction.excludeLastTurns` |
 | Retry transient errors | `retry.enabled` |
 | Max retries | `retry.maxRetries` |
 | Base delay (ms) | `retry.baseDelayMs` |
 | Max delay (ms) | `retry.maxDelayMs` |
 | Terminal progress badges | `terminal.showTerminalProgress` |
-| Transcript output detail | `terminal.outputVerbosity` (`minimal`, `default`, or `verbose`) |
+| Output detail | `terminal.outputVerbosity` (`minimal`, `default`, or `verbose`) |
 | TUI mode | `terminal.tuiMode` (`regular` or `fullscreen`, restart required) |
 | Fullscreen scrollbar | `terminal.fullscreenScrollbar` (`hidden`, `auto`, or `always`, restart required) |
+| Theme | `theme` |
+| Runtime plugins | `runtimePlugins` |
+| Compaction model | `compaction.model` |
+| Compaction prompt | `compaction.systemPrompt` |
+| Delegate connect (ms) | `delegation.defaults.connectTimeoutMs` |
+| Delegate turn (ms) | `delegation.defaults.turnTimeoutMs` |
+| Delegate permission (ms) | `delegation.defaults.permissionTimeoutMs` |
+| Keybinding overrides | `keybindings` |
+| Delegation agents | `delegation.agents` |
 
 ---
 
 ## Settings inventory
 
-Every key `settings.yaml` accepts, with its shipped default, what validation admits, and when a change takes effect. `DEFAULT_SETTINGS` in `src/core/defaults.ts` is the one place a default is written; validation lives in `src/core/config.ts`. A key absent from this table is an unknown-key error, not a silently ignored typo.
+Every key `settings.yaml` accepts, with its shipped default, what validation admits, and when a change takes effect. `DEFAULT_SETTINGS` in `src/core/defaults.ts` is the one place a default is written; validation lives in `src/core/config.ts`. A key absent from this table is an unknown-key error, not a silently ignored typo. The one exception is `identity`, which pre-0.3.1 files carry: it is accepted and ignored so those files keep loading.
 
 "When it applies" has four values. **Immediately** means a running session picks the change up from the config watcher. **Next turn** means the running turn finishes on the old value. **Next session** means `settings.yaml` is a saved default that a launched session copies and then owns, so writing it never redirects a session already running. **Restart** means the process reads it once at boot.
 
@@ -511,7 +535,7 @@ These are saved defaults, not a live control surface. See [Live routing vs saved
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
 | `autonomy` | `auto-edit` | `read-only`, `suggest`, `auto-edit`, `full-auto` | immediately |
-| `workers.onPermission` | `deny` | `deny`, `escalate` | next dispatch |
+| `workers.onPermission` | `deny` | `deny`, `fail`, `escalate` | next dispatch |
 | `workers.escalation.timeoutMs` | `120000` | integer ≥ 1 | next dispatch |
 | `workers.escalation.fallback` | `deny` | `deny`, `fail` | next dispatch |
 | `workers.maxRetries` | `2` | integer ≥ 0 | next dispatch |
@@ -571,7 +595,7 @@ Generic provider and transport errors are classified by transient retry rules, i
 | `delegation.defaults.connectTimeoutMs` | `30000` | integer ≥ 1 | next dispatch |
 | `delegation.defaults.turnTimeoutMs` | `300000` | integer ≥ 1 | next dispatch |
 | `delegation.defaults.permissionTimeoutMs` | `120000` | integer ≥ 1 | next dispatch |
-| `delegation.defaults.toolGovernance` | `clio-policy` | `clio-policy`, `runtime-native` | next dispatch |
+| `delegation.defaults.toolGovernance` | `clio-policy` | `clio-policy`, `agent-managed`, `deny-all` | next dispatch |
 
 `delegation.agents` is the one settings key Clio itself appends to, and only after an explicit answer in `clio-coder configure --interop` or `/interop`. Everything else here is operator-authored.
 
