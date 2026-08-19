@@ -53,10 +53,11 @@ async function drainChat(
 	descriptor: TargetDescriptor,
 	options: Record<string, unknown> = {},
 	context: Record<string, unknown> = { messages: [{ role: "user", content: "hello", timestamp: 0 }] },
+	chatModel: Model<"openai-completions"> = model(descriptor),
 ): Promise<Array<Record<string, unknown>>> {
 	const events: Array<Record<string, unknown>> = [];
 	const stream = openAICompletionsApiProvider.streamSimple(
-		model(descriptor),
+		chatModel,
 		context as unknown as Parameters<typeof openAICompletionsApiProvider.streamSimple>[1],
 		{ apiKey: "lm-studio", ...options } as Parameters<typeof openAICompletionsApiProvider.streamSimple>[2],
 	);
@@ -181,7 +182,7 @@ describe("contracts/lmstudio reasoning and chat wire", () => {
 		const request = server.requestsFor("/v1/chat/completions").at(-1);
 		strictEqual(request?.body?.ttl, 600);
 		strictEqual(request?.body?.draft_model, "draft-model");
-		strictEqual(request?.body?.reasoning_effort, "high");
+		strictEqual(request?.body?.reasoning_effort, "low");
 		strictEqual("chat_template_kwargs" in (request?.body ?? {}), false);
 	});
 
@@ -196,6 +197,37 @@ describe("contracts/lmstudio reasoning and chat wire", () => {
 		await drainChat(descriptor, { reasoning: "xhigh" });
 		const request = server.requestsFor("/v1/chat/completions").at(-1);
 		strictEqual(request?.body?.reasoning_effort, "low");
+	});
+
+	it("keeps the resolver effort map authoritative for LM Studio payloads", async () => {
+		const server = await fake();
+		const descriptor = target(server);
+		const configured = model(descriptor) as Model<"openai-completions"> & {
+			clio?: { quirks?: { thinking: Record<string, unknown> } };
+		};
+		if (configured.clio) {
+			configured.clio.quirks = {
+				thinking: {
+					mechanism: "effort-levels",
+					effortByLevel: { low: "low", medium: "medium", high: "xhigh", xhigh: "xhigh" },
+				},
+			};
+		}
+		await drainChat(descriptor, { reasoning: "high" }, undefined, configured);
+		strictEqual(server.requestsFor("/v1/chat/completions").at(-1)?.body?.reasoning_effort, "xhigh");
+	});
+
+	it("does not add an LM Studio effort for none or always-on mechanisms", async () => {
+		for (const mechanism of ["none", "always-on"] as const) {
+			const server = await fake();
+			const descriptor = target(server);
+			const configured = model(descriptor) as Model<"openai-completions"> & {
+				clio?: { quirks?: { thinking: Record<string, unknown> } };
+			};
+			if (configured.clio) configured.clio.quirks = { thinking: { mechanism } };
+			await drainChat(descriptor, mechanism === "none" ? { reasoning: "high" } : {}, undefined, configured);
+			strictEqual("reasoning_effort" in (server.requestsFor("/v1/chat/completions").at(-1)?.body ?? {}), false);
+		}
 	});
 
 	it("assembles a split tool call from the scripted SSE response", async () => {

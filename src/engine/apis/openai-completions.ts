@@ -218,7 +218,7 @@ function isLmStudioModel(model: Model<Api>): boolean {
 function applyLmStudioPayload(
 	payload: Record<string, unknown>,
 	model: Model<Api>,
-	level: ThinkingLevel,
+	resolved: ResolvedModelRuntimeCapabilities,
 ): Record<string, unknown> {
 	if (!isLmStudioModel(model)) return payload;
 	const request = runtimeMetadata(model)?.lmstudio?.request;
@@ -226,16 +226,10 @@ function applyLmStudioPayload(
 	delete next.chat_template_kwargs;
 	if (request?.ttlSeconds !== undefined) next.ttl = request.ttlSeconds;
 	if (request?.draftModel !== undefined) next.draft_model = request.draftModel;
-	const configured = request?.reasoning ?? "auto";
-	const requestedLevel: ThinkingLevel =
-		configured === "off"
-			? "off"
-			: configured === "on"
-				? "low"
-				: configured === "low" || configured === "medium" || configured === "high"
-					? configured
-					: level;
-	next.reasoning_effort = lmStudioReasoningEffort(requestedLevel, runtimeMetadata(model)?.lmstudioReasoningOptions);
+	if (resolved.thinking.mechanism === "none" || resolved.thinking.mechanism === "always-on") return next;
+	next.reasoning_effort =
+		resolved.request.reasoningEffort ??
+		lmStudioReasoningEffort(resolved.thinking.effectiveLevel, runtimeMetadata(model)?.lmstudioReasoningOptions);
 	return next;
 }
 
@@ -260,7 +254,6 @@ function shouldApplyLlamaCppPromptCache(model: Model<"openai-completions">): boo
 function composeSamplingOnPayload(
 	profile: SamplingProfile,
 	resolved: ResolvedModelRuntimeCapabilities | undefined,
-	level: ThinkingLevel,
 	base: AnyOnPayload | undefined,
 ): AnyOnPayload {
 	return async (payload, model) => {
@@ -269,7 +262,7 @@ function composeSamplingOnPayload(
 		}
 		let next = applyLlamaCppPromptCachePayload(applyOpenAISamplingProfile(payload, profile), model);
 		if (resolved) next = applyThinkingPayload(next, resolved.thinking, resolved, model);
-		next = applyLmStudioPayload(next, model, level);
+		if (resolved) next = applyLmStudioPayload(next, model, resolved);
 		if (base) {
 			const fromBase = await base(next, model);
 			if (fromBase !== undefined) return fromBase;
@@ -284,7 +277,6 @@ function composeSamplingOnPayload(
  */
 function composeThinkingOnPayload(
 	resolved: ResolvedModelRuntimeCapabilities,
-	level: ThinkingLevel,
 	base: AnyOnPayload | undefined,
 ): AnyOnPayload {
 	return async (payload, model) => {
@@ -294,7 +286,7 @@ function composeThinkingOnPayload(
 		const next = applyLmStudioPayload(
 			applyThinkingPayload(applyLlamaCppPromptCachePayload(payload, model), resolved.thinking, resolved, model),
 			model,
-			level,
+			resolved,
 		);
 		if (base) {
 			const fromBase = await base(next, model);
@@ -327,9 +319,9 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	const merged: Record<string, unknown> = { ...(options ?? {}) };
 	if (profile?.temperature !== undefined && merged.temperature === undefined) merged.temperature = profile.temperature;
 	if (profile) {
-		merged.onPayload = composeSamplingOnPayload(profile, resolved, applied.configuredLevel, options?.onPayload);
+		merged.onPayload = composeSamplingOnPayload(profile, resolved, options?.onPayload);
 	} else {
-		merged.onPayload = composeThinkingOnPayload(resolved, applied.configuredLevel, options?.onPayload);
+		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload);
 	}
 	return merged as TOptions;
 }
