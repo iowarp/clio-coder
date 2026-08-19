@@ -42,7 +42,12 @@ function component(): Component {
 function settings(): ClioSettings {
 	return {
 		keybindings: {},
-		terminal: { outputVerbosity: "default" },
+		terminal: {
+			showTerminalProgress: false,
+			outputVerbosity: "default",
+			tuiMode: "fullscreen",
+			fullscreenScrollbar: "always",
+		},
 		orchestrator: { target: "local", model: "org/model", thinkingLevel: "off" },
 	} as ClioSettings;
 }
@@ -65,6 +70,7 @@ function harness() {
 	let chatInvalidations = 0;
 	let workspaceRefreshes = 0;
 	let editorChrome: EditorChrome | null = null;
+	let layoutOptions: Parameters<InteractivePresentationFactories["buildLayout"]>[1] | undefined;
 	let dispatchRuns: Array<{ runId: string; agentId: string }> = [];
 
 	const keybindings = {
@@ -195,8 +201,9 @@ function harness() {
 			log.push("io");
 			return io;
 		},
-		buildLayout: () => {
+		buildLayout: (_parts, options) => {
 			log.push("layout");
+			layoutOptions = options;
 			return root as ReturnType<InteractivePresentationFactories["buildLayout"]>;
 		},
 	};
@@ -261,6 +268,7 @@ function harness() {
 		footer,
 		getFooterDeps: () => footerDeps,
 		getEditorChrome: () => editorChrome,
+		getLayoutOptions: () => layoutOptions,
 		emitObservability: (next: ObservabilitySnapshot) => observabilityListener?.(next),
 		setStreaming: (next: boolean) => {
 			streaming = next;
@@ -314,6 +322,7 @@ describe("interactive presentation ownership", () => {
 			[120, 1_000, 5_000],
 		);
 		strictEqual(presentation.notifications.list().length, 0);
+		deepStrictEqual(test.getLayoutOptions(), { mode: "fullscreen", fullscreenScrollbar: "always" });
 	});
 
 	it("wires live streaming state and resolved editor bindings into composer chrome", () => {

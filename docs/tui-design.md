@@ -148,7 +148,9 @@ All TUI overlays and cards support compact widths down to 40 columns:
 
 ## 5. Screen Surfaces & State Choreography
 
-The Clio screen maintains a responsive, four-zone structure: the launchpad / session header, transcript, composer, and footer.
+The Clio screen maintains a responsive, four-zone structure: the launchpad / session header, transcript, composer, and footer. `terminal.tuiMode` chooses the renderer at startup. The default `regular` mode uses terminal scrollback. Opt-in `fullscreen` mode uses pi-tui's alternate screen: the launchpad/header and transcript occupy an independently scrollable viewport while the follow-up queue, composer, and footer remain docked at the bottom.
+
+In fullscreen mode, `PageUp` and `PageDown` scroll one viewport, `Home` and `End` jump to its bounds, `Ctrl+Shift+Up` and `Ctrl+Shift+Down` jump between semantic prompts, and the mouse wheel scrolls the transcript. Dragging the scrollbar thumb moves the viewport directly. `terminal.fullscreenScrollbar` is `hidden`, `auto` (visible during interaction), or `always`. Manual scrolling suspends follow-end so new output does not steal the operator's position; returning to the bottom resumes it. Both fullscreen settings are restart-scoped because Clio constructs its terminal renderer and component graph once at startup.
 
 ### 5.1 Welcome Launchpad & Session Header
 

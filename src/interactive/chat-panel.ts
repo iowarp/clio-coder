@@ -926,14 +926,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const entryCacheCapacity = (): number =>
 		Math.max(MIN_ENTRY_RENDER_CACHE, Math.min(MAX_ENTRY_RENDER_CACHE, transcript.length));
 	/**
-	 * Windowed-tail build (F19 on pi-tui 0.83 terms): the lines of every settled
+	 * Regular-screen windowed-tail build: the lines of every settled
 	 * leading entry are baked into one frozen prefix, so a dirty frame re-renders
-	 * only the live tail and re-emits the prefix by reference. pi-tui still
-	 * receives the full line array, deliberately: the 0.83 renderer keeps every
+	 * only the live tail and re-emits the prefix by reference. TuiMainScreen still
+	 * receives the full line array, deliberately: the renderer keeps every
 	 * line in `previousLines` and full-redraws (clearing scrollback) when the
-	 * head shrinks, so a real shrinking window needs the 0.84 ScrollView
-	 * architecture. The freeze is dropped whenever a frozen entry is invalidated
-	 * or the render key changes.
+	 * head shrinks. Fullscreen mode instead gives the transcript its own pi-tui
+	 * ScrollView. The freeze is dropped whenever a frozen entry is invalidated or
+	 * the render key changes.
 	 */
 	let frozen: { lines: string[]; through: number; key: string } | null = null;
 	let thinkingExpanded = false;

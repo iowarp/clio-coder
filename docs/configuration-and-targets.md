@@ -205,6 +205,8 @@ theme: default
 terminal:
   showTerminalProgress: false
   outputVerbosity: default
+  tuiMode: regular              # regular terminal scrollback or fullscreen sticky layout
+  fullscreenScrollbar: auto    # hidden, auto, or always in fullscreen mode
 skills:
   trustProjectCompatRoots: false
 delegation:
@@ -430,7 +432,7 @@ Every value change in Settings is transactional: selecting an editable row and p
 - `Apply and save globally`
 - `Cancel` (or `Esc`)
 
-For restart-required settings (`budget.concurrency`, `runtimePlugins`), the session-only option is suppressed and global saving announces `Saved to settings.yaml · restart Clio to apply`. For destructive actions (removing a target or fleet profile), the confirmation preflight details affected chat, fleet, and memory routes before execution.
+For restart-required settings (`budget.concurrency`, `runtimePlugins`, `terminal.tuiMode`, `terminal.fullscreenScrollbar`), the session-only option is suppressed and global saving announces `Saved to settings.yaml · restart Clio to apply`. For destructive actions (removing a target or fleet profile), the confirmation preflight details affected chat, fleet, and memory routes before execution.
 
 The Settings Center organizes all configuration under four non-selectable group headers:
 
@@ -444,7 +446,7 @@ The Settings Center organizes all configuration under four non-selectable group 
 | **RUNTIME** | Budget (`budget`) | Session ceiling USD (`budget.sessionCeilingUsd`), max output tokens (`budget.maxOutputTokens`), and worker concurrency (`budget.concurrency`, restart-required). |
 | **RUNTIME** | Compaction (`compaction`) | Auto-compact toggle (`compaction.auto`), protected recent turns (`compaction.excludeLastTurns`), and compaction threshold (`compaction.threshold`). |
 | **RUNTIME** | Retry (`retry`) | Transient error recovery toggle (`retry.enabled`), max retries (`retry.maxRetries`), base delay (`retry.baseDelayMs`), and max delay (`retry.maxDelayMs`). |
-| **EXPERIENCE** | Terminal (`terminal`) | Terminal progress badges (`terminal.showTerminalProgress`), transcript output detail (`terminal.outputVerbosity`: `minimal`, `default`, `verbose`), and inline status lines (`terminal.showInlineStatus`). |
+| **EXPERIENCE** | Terminal (`terminal`) | Terminal progress badges (`terminal.showTerminalProgress`), transcript output detail (`terminal.outputVerbosity`: `minimal`, `default`, `verbose`), renderer mode (`terminal.tuiMode`: `regular`, `fullscreen`), and fullscreen scrollbar visibility (`terminal.fullscreenScrollbar`: `hidden`, `auto`, `always`). |
 | **EXPERIENCE** | Advanced (`advanced`) | Notification dismiss defaults, memory intervention toggles, and runtime extension settings. |
 
 Label to config path mapping:
@@ -476,6 +478,8 @@ Label to config path mapping:
 | Max delay (ms) | `retry.maxDelayMs` |
 | Terminal progress badges | `terminal.showTerminalProgress` |
 | Transcript output detail | `terminal.outputVerbosity` (`minimal`, `default`, or `verbose`) |
+| TUI mode | `terminal.tuiMode` (`regular` or `fullscreen`, restart required) |
+| Fullscreen scrollbar | `terminal.fullscreenScrollbar` (`hidden`, `auto`, or `always`, restart required) |
 
 ---
 
@@ -576,6 +580,8 @@ Every one of these has an environment override for a single process; see [enviro
 | `theme` | `default` | string naming a registered theme | immediately |
 | `terminal.showTerminalProgress` | `false` | boolean | immediately |
 | `terminal.outputVerbosity` | `default` | `minimal`, `default`, `verbose` | immediately |
+| `terminal.tuiMode` | `regular` | `regular`, `fullscreen` | restart |
+| `terminal.fullscreenScrollbar` | `auto` | `hidden`, `auto`, `always` | restart |
 | `modelSelector.favorites` | `[]` | list of strings | immediately |
 | `modelSelector.recentLimit` | `12` | integer ≥ 1 | immediately |
 | `keybindings` | `{}` | map of binding id to a key string or list of them | restart |

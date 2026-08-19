@@ -559,6 +559,7 @@ describe("contracts/slash-spec", () => {
 			["/thinking off extra", { kind: "usage-error", command: "thinking", reason: "Unexpected argument: extra" }],
 			["/scoped-models query", { kind: "usage-error", command: "scoped-models", reason: "Unexpected argument: query" }],
 			["/settings fleet", { kind: "settings", section: "fleet" }],
+			["/settings terminal", { kind: "settings", section: "terminal" }],
 			["/config retry", { kind: "settings", section: "retry" }],
 			[
 				"/settings query",

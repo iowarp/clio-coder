@@ -52,7 +52,12 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"retry",
 ]);
 
-const RESTART_REQUIRED_FIELDS = new Set<string>(["budget.concurrency", "runtimePlugins"]);
+const RESTART_REQUIRED_FIELDS = new Set<string>([
+	"budget.concurrency",
+	"runtimePlugins",
+	"terminal.tuiMode",
+	"terminal.fullscreenScrollbar",
+]);
 
 function matchesPrefix(path: string, fields: Set<string>): boolean {
 	if (fields.has(path)) return true;
@@ -67,8 +72,8 @@ export function diffSettings(prev: ClioSettings, next: ClioSettings): ConfigDiff
 	const diff: ConfigDiff = { hotReload: [], nextTurn: [], restartRequired: [] };
 	for (const p of changed) {
 		if (matchesPrefix(p, HOT_RELOAD_FIELDS)) diff.hotReload.push(p);
-		else if (matchesPrefix(p, NEXT_TURN_FIELDS)) diff.nextTurn.push(p);
 		else if (matchesPrefix(p, RESTART_REQUIRED_FIELDS)) diff.restartRequired.push(p);
+		else if (matchesPrefix(p, NEXT_TURN_FIELDS)) diff.nextTurn.push(p);
 		else {
 			// Unknown field falls back to restartRequired to fail closed.
 			diff.restartRequired.push(p);

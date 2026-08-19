@@ -1310,7 +1310,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.terminal)) {
 			issues.add("terminal", `expected a map, got ${describe(raw.terminal)}`);
 		} else {
-			issues.unknownKeys("terminal", raw.terminal, ["showTerminalProgress", "outputVerbosity"]);
+			issues.unknownKeys("terminal", raw.terminal, [
+				"showTerminalProgress",
+				"outputVerbosity",
+				"tuiMode",
+				"fullscreenScrollbar",
+			]);
 			if ("showTerminalProgress" in raw.terminal) {
 				const v = expectBoolean(issues, "terminal.showTerminalProgress", raw.terminal.showTerminalProgress);
 				if (v !== undefined) settings.terminal.showTerminalProgress = v;
@@ -1319,6 +1324,16 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				const v = expectString(issues, "terminal.outputVerbosity", raw.terminal.outputVerbosity);
 				if (v === "minimal" || v === "default" || v === "verbose") settings.terminal.outputVerbosity = v;
 				else if (v !== undefined) issues.add("terminal.outputVerbosity", "expected minimal, default, or verbose");
+			}
+			if ("tuiMode" in raw.terminal) {
+				const v = expectString(issues, "terminal.tuiMode", raw.terminal.tuiMode);
+				if (v === "regular" || v === "fullscreen") settings.terminal.tuiMode = v;
+				else if (v !== undefined) issues.add("terminal.tuiMode", "expected regular or fullscreen");
+			}
+			if ("fullscreenScrollbar" in raw.terminal) {
+				const v = expectString(issues, "terminal.fullscreenScrollbar", raw.terminal.fullscreenScrollbar);
+				if (v === "hidden" || v === "auto" || v === "always") settings.terminal.fullscreenScrollbar = v;
+				else if (v !== undefined) issues.add("terminal.fullscreenScrollbar", "expected hidden, auto, or always");
 			}
 		}
 	}
