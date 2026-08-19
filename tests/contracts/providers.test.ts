@@ -482,6 +482,7 @@ describe("contracts/providers", () => {
 		strictEqual(model.cost.input, 0.15);
 		strictEqual(model.cost.output, 0.6);
 		ok(model.compat);
+		strictEqual((model.compat as { supportsFinishReason?: boolean }).supportsFinishReason, false);
 		strictEqual((model.compat as { supportsThinkingTokenBudget?: boolean }).supportsThinkingTokenBudget, false);
 
 		const vllm = synthesizeOpenAICompatModel({
