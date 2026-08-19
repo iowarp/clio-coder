@@ -154,6 +154,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/cost` | `/cost` | Show session token and cost totals |
 | `/context` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
 | `/fleet` | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
+| `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |
 | `/tasks` | `/tasks add <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
 | `/memory` | `/memory seed` | Inspect task memory or seed it from the newest handoff |
 | `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
@@ -335,6 +336,7 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Alt+L` | Open the model and targets selector. |
 | `Alt+J` / `Alt+K` | Cycle forward / backward through the scoped model set (when empty, displays a notice directing the operator to `/scoped-models`). |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). |
+| `Alt+D` | Open the settled interview decision board (`/decisions`). |
 | `Alt+S` / `Ctrl+Alt+B` | Convert an active attached dispatch to a detached background batch. |
 | `Alt+O` | Toggle the newest tool call or worker block between collapsed subline and full body. |
 | `Ctrl+Alt+O` / `Alt+Shift+O` | Toggle all tool calls and worker blocks between collapsed sublines and full bodies. |

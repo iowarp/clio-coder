@@ -1822,6 +1822,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		getTaskBoard: () => taskBoard.snapshot(),
+		getDecisionBoard: () => decisionBoard.snapshot(),
+		supersedeDecision: (interviewId, key, correction) => decisionBoard.supersede(interviewId, key, correction),
 		userTasks,
 		getTaskMemoryStatus: () => {
 			ensureTaskMemorySession();

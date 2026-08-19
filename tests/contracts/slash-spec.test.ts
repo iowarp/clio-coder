@@ -82,6 +82,7 @@ describe("contracts/slash-spec", () => {
 			openCost: () => opened.push("cost"),
 			openContextView: () => opened.push("context"),
 			openTasks: () => opened.push("tasks"),
+			openDecisions: () => opened.push("decisions"),
 			openMemory: () => opened.push("memory"),
 			seedTaskMemory: () => ({ status: "seeded", seeded: 2, skipped: 1, source: "handoff-latest.md" }),
 			openView: (filter) => opened.push(filter ? `view:${filter}` : "view"),
@@ -116,6 +117,7 @@ describe("contracts/slash-spec", () => {
 			"/output",
 			"/model",
 			"/memory",
+			"/decisions",
 			"/view run-123",
 		]) {
 			dispatchSlashCommand(parseSlashCommand(input), ctx);
@@ -135,6 +137,7 @@ describe("contracts/slash-spec", () => {
 			"settings:terminal:terminal.outputVerbosity",
 			"model",
 			"memory",
+			"decisions",
 			"view:run-123",
 		]);
 		deepStrictEqual(submitted, ["/not/a/command"]);
@@ -582,6 +585,8 @@ describe("contracts/slash-spec", () => {
 			["/fleet query", { kind: "usage-error", command: "fleet", reason: "Unexpected argument: query" }],
 			["/tasks query", { kind: "usage-error", command: "tasks", reason: "Unexpected argument: query" }],
 			["/tasks", { kind: "tasks" }],
+			["/decisions", { kind: "decisions" }],
+			["/decisions extra", { kind: "usage-error", command: "decisions", reason: "Unexpected argument: extra" }],
 			["/tasks add write release notes", { kind: "tasks-add", text: "write release notes" }],
 			["/tasks hand u3", { kind: "tasks-hand", id: "u3" }],
 			["/tasks done u3", { kind: "tasks-done", id: "u3" }],
@@ -691,6 +696,7 @@ describe("contracts/slash-spec", () => {
 			"cost",
 			"context",
 			"fleet",
+			"decisions",
 			"tasks",
 			"memory",
 			"view",

@@ -1,12 +1,13 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { TUI } from "../../src/engine/tui.js";
+import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
 import {
 	createOverlayLifecycle,
 	type OverlayLifecycleApplicationDeps,
 	type OverlayLifecycleRuntimeDeps,
 } from "../../src/interactive/overlay-lifecycle.js";
 import type { AskUserOverlaySession } from "../../src/interactive/overlays/ask-user.js";
+import type { OpenDecisionsOverlayOptions } from "../../src/interactive/overlays/decisions.js";
 import type { AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
 
 type AskUserCharacterizationDeps = OverlayLifecycleRuntimeDeps & {
@@ -54,7 +55,10 @@ function makeSession(events: string[], result: Deferred<AskUserResult>): AskUser
 	} as unknown as AskUserOverlaySession;
 }
 
-function makeLifecycle(results: Deferred<AskUserResult>[]): {
+function makeLifecycle(
+	results: Deferred<AskUserResult>[],
+	decisionProbe?: (options: OpenDecisionsOverlayOptions) => void,
+): {
 	lifecycle: ReturnType<typeof createOverlayLifecycle>;
 	events: string[];
 } {
@@ -62,6 +66,23 @@ function makeLifecycle(results: Deferred<AskUserResult>[]): {
 	let openIndex = 0;
 	const app = {
 		bus: { on: () => () => {}, emit: () => {} },
+		getDecisionBoard: () => [],
+		supersedeDecision: (interviewId: string, key: string, correction?: string) =>
+			events.push(`decision:${interviewId}:${key}:${correction ?? ""}`),
+		...(decisionProbe
+			? {
+					toolRegistry: {
+						onPermissionRequired: () => () => {},
+						onAutonomyDenied: () => () => {},
+						cancelParkedCall: () => events.push("permission:cancel-one"),
+						cancelParkedCalls: () => events.push("permission:cancel-all"),
+						resumeParkedCalls: () => events.push("permission:resume"),
+						hasParkedCalls: () => true,
+						parkedCount: () => 1,
+						renotifyHead: () => events.push("permission:renotify"),
+					},
+				}
+			: {}),
 		registerAskUserHandler: () => {
 			events.push("register");
 			return () => events.push("unregister");
@@ -87,7 +108,10 @@ function makeLifecycle(results: Deferred<AskUserResult>[]): {
 		announceTaskMemorySeedOffer: () => {},
 		keybindings: {},
 		editor: { getText: () => "", setText: () => {} },
-		getSlashContext: () => ({}),
+		getSlashContext: () => ({
+			notice: () => {},
+			submitChat: (text: string) => events.push(`submit:${text}`),
+		}),
 		openAskUserOverlay: () => {
 			events.push(`open:${openIndex}`);
 			const result = results[openIndex];
@@ -95,11 +119,64 @@ function makeLifecycle(results: Deferred<AskUserResult>[]): {
 			if (!result) throw new Error("unexpected ask-user session");
 			return makeSession(events, result);
 		},
+		...(decisionProbe
+			? {
+					openDecisionsOverlay: (_tui: TUI, _getInterviews: unknown, options: OpenDecisionsOverlayOptions) => {
+						events.push("decisions:open");
+						decisionProbe(options);
+						return { hide: () => events.push("decisions:hide") } as unknown as OverlayHandle;
+					},
+				}
+			: {}),
 	} as unknown as AskUserCharacterizationDeps;
 	return { lifecycle: createOverlayLifecycle(runtime), events };
 }
 
 describe("contracts/interactive ask-user overlay lifecycle", () => {
+	it("cannot displace or cancel a live tool-backed interview", async () => {
+		const result = deferred<AskUserResult>();
+		const { lifecycle, events } = makeLifecycle([result], () => {});
+
+		const pending = lifecycle.openAskUserOverlayState(questions, { turnId: "turn-live", toolCallId: "tool-live" });
+		lifecycle.openDecisionsOverlayState();
+
+		strictEqual(lifecycle.getState(), "ask-user");
+		strictEqual(events.includes("decisions:open"), false);
+		strictEqual(events.includes("cancel"), false);
+		result.resolve(answered);
+		deepStrictEqual(await pending, answered);
+		strictEqual(lifecycle.getState(), "ask-user");
+		lifecycle.dispose();
+	});
+
+	it("preserves the interview cancellation latch and parked approvals while correcting a settled decision", async () => {
+		const first = deferred<AskUserResult>();
+		let decisionOptions: OpenDecisionsOverlayOptions | undefined;
+		const { lifecycle, events } = makeLifecycle([first], (options) => {
+			decisionOptions = options;
+		});
+
+		const pending = lifecycle.openAskUserOverlayState(questions, { turnId: "turn-latched", toolCallId: "tool-1" });
+		lifecycle.cancelAskUser();
+		deepStrictEqual(await pending, cancelled);
+		lifecycle.openDecisionsOverlayState();
+		decisionOptions?.onCorrection(
+			{ interviewId: "interview-1", key: "scope", label: "Scope", value: "CLI only" },
+			"Include the TUI",
+		);
+
+		deepStrictEqual(await lifecycle.openAskUserOverlayState(questions, { turnId: "turn-latched" }), cancelled);
+		strictEqual(events.filter((event) => event.startsWith("open:")).length, 1, "the cancellation latch remains set");
+		strictEqual(events.filter((event) => event.startsWith("decision:")).length, 1);
+		strictEqual(events.filter((event) => event.startsWith("submit:")).length, 1);
+		strictEqual(
+			events.some((event) => event.startsWith("permission:")),
+			false,
+			"decision correction neither approves, denies, cancels, resumes, nor consumes a parked outward gate",
+		);
+		lifecycle.dispose();
+	});
+
 	it("closes a non-tool interview after a successful answer", async () => {
 		const result = deferred<AskUserResult>();
 		const { lifecycle, events } = makeLifecycle([result]);
