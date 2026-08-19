@@ -302,10 +302,12 @@ function describeArmPolicyOutcome(allowNetwork: boolean): string {
 type EvalArm = "baseline" | "treatment" | "judge";
 
 /**
- * The argv for one arm's child `clio-coder run`. Every arm streams terminal JSON
- * events (a turn that ends on a terminating tool carries its content there,
- * not in text mode) and runs with discovery off so only the explicit --skill
- * of the treatment arm loads.
+ * The argv for one arm's child `clio-coder run`. Every arm streams the full JSON
+ * event sequence because the evaluator scores assistant messages and tool
+ * evidence, while terminal mode is intentionally receipt-only. A turn that ends
+ * on a terminating tool carries its content in the full event stream rather
+ * than text mode. Discovery stays off so only the treatment arm's explicit
+ * skill loads.
  *
  * @internal Exported for contract tests.
  */
@@ -314,7 +316,7 @@ export function armRunArgs(
 	prompt: string,
 	options: { target?: string | undefined; skillBaseDir?: string | undefined } = {},
 ): string[] {
-	const args = ["run", "--json", "--json-events", "terminal", "--no-skills"];
+	const args = ["run", "--json", "--json-events", "full", "--no-skills"];
 	if (arm !== "judge") args.push("--autonomy", ARM_AUTONOMY);
 	if (options.skillBaseDir !== undefined) args.push("--skill", options.skillBaseDir);
 	if (options.target !== undefined) args.push("--target", options.target);
@@ -817,6 +819,7 @@ export function parseRunStdout(stdout: string): { sessionId: string | null; tran
 	const lines: string[] = [];
 	let finalText = "";
 	let sawJson = false;
+	const streamedText = new Map<number, string>();
 	// Tool calls whose result is the skill's own SKILL.md. Correlated by
 	// toolCallId, which both the start and end events carry.
 	const skillBodyCallIds = new Set<string>();
@@ -832,6 +835,11 @@ export function parseRunStdout(stdout: string): { sessionId: string | null; tran
 		sawJson = true;
 		if (event.type === "session" && typeof event.id === "string") {
 			sessionId = event.id;
+			continue;
+		}
+		if (event.type === "text_delta" && typeof event.delta === "string") {
+			const contentIndex = typeof event.contentIndex === "number" ? event.contentIndex : 0;
+			streamedText.set(contentIndex, `${streamedText.get(contentIndex) ?? ""}${event.delta}`);
 			continue;
 		}
 		if (event.type === "tool_execution_start") {
@@ -865,13 +873,20 @@ export function parseRunStdout(stdout: string): { sessionId: string | null; tran
 		}
 		if (event.type === "message_end" && isRecord(event.message) && event.message.role === "assistant") {
 			const content = Array.isArray(event.message.content) ? event.message.content : [];
-			const text = content
+			const completedText = content
 				.filter((item): item is { type: "text"; text: string } => {
 					return isRecord(item) && item.type === "text" && typeof item.text === "string";
 				})
 				.map((item) => item.text)
 				.join("")
 				.trim();
+			const streamed = [...streamedText.entries()]
+				.sort(([left], [right]) => left - right)
+				.map(([, text]) => text)
+				.join("")
+				.trim();
+			streamedText.clear();
+			const text = completedText.length > 0 ? completedText : streamed;
 			if (text.length > 0) {
 				lines.push(`ASSISTANT: ${text}`);
 				finalText = text;
