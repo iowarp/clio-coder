@@ -482,6 +482,16 @@ describe("contracts/providers", () => {
 		strictEqual(model.cost.input, 0.15);
 		strictEqual(model.cost.output, 0.6);
 		ok(model.compat);
+		strictEqual((model.compat as { supportsThinkingTokenBudget?: boolean }).supportsThinkingTokenBudget, false);
+
+		const vllm = synthesizeOpenAICompatModel({
+			target: { id: "gpu", runtime: "vllm", url: "http://localhost:8000/v1" },
+			wireModelId: "agentic-qwen",
+			kb: null,
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, reasoning: true },
+			provider: "vllm",
+		}) as typeof model;
+		strictEqual((vllm.compat as { supportsThinkingTokenBudget?: boolean }).supportsThinkingTokenBudget, true);
 	});
 
 	it("keeps configured and default model candidates until a live catalog exists", () => {

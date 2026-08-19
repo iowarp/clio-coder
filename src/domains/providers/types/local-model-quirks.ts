@@ -6,8 +6,8 @@
  * into a typed shape that flows through `model.clio.quirks` at synth time.
  *
  * Field naming follows the Hugging Face / model-card terminology so the YAML
- * can be authored against the source-of-truth card. Engine adapters translate
- * these into runtime-specific names at consumption sites:
+ * can be authored against the source-of-truth card. The OpenAI adapter
+ * translates these into pi-ai sampling parameters at consumption:
  *   - OpenAI-compatible surfaces accept `top_p`, `top_k`, `min_p`,
  *     `repeat_penalty`.
  */

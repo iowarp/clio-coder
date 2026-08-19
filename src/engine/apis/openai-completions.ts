@@ -8,6 +8,7 @@ import {
 	type OpenAICompletionsOptions,
 	type SimpleStreamOptions,
 	type StreamOptions,
+	type ThinkingBudgets,
 	type ThinkingContent,
 	type Tool,
 	type Usage,
@@ -78,33 +79,30 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/**
- * Install catalog sampling quirks on the OpenAI-compat request body. Standard
- * OpenAI fields (`temperature`, `top_p`, `presence_penalty`,
- * `frequency_penalty`) and LM Studio's extra fields (`top_k`, `min_p`,
- * `repeat_penalty`) are added only when the request body does not already
- * carry them. This keeps explicit StreamOptions and any user-supplied
- * `onPayload` overrides authoritative.
- */
-function applyOpenAISamplingProfile(
-	payload: Record<string, unknown>,
-	profile: SamplingProfile,
-): Record<string, unknown> {
-	const next: Record<string, unknown> = { ...payload };
-	if (profile.temperature !== undefined && next.temperature === undefined) next.temperature = profile.temperature;
-	if (profile.topP !== undefined && next.top_p === undefined) next.top_p = profile.topP;
-	if (profile.topK !== undefined && next.top_k === undefined) next.top_k = profile.topK;
-	if (profile.minP !== undefined && next.min_p === undefined) next.min_p = profile.minP;
-	if (profile.repeatPenalty !== undefined && next.repeat_penalty === undefined)
-		next.repeat_penalty = profile.repeatPenalty;
-	if (profile.presencePenalty !== undefined && next.presence_penalty === undefined)
-		next.presence_penalty = profile.presencePenalty;
-	if (profile.frequencyPenalty !== undefined && next.frequency_penalty === undefined)
-		next.frequency_penalty = profile.frequencyPenalty;
-	return next;
+function samplingParamsFromProfile(profile: SamplingProfile): Record<string, unknown> {
+	return {
+		...(profile.topP !== undefined ? { top_p: profile.topP } : {}),
+		...(profile.topK !== undefined ? { top_k: profile.topK } : {}),
+		...(profile.minP !== undefined ? { min_p: profile.minP } : {}),
+		...(profile.repeatPenalty !== undefined ? { repeat_penalty: profile.repeatPenalty } : {}),
+		...(profile.presencePenalty !== undefined ? { presence_penalty: profile.presencePenalty } : {}),
+		...(profile.frequencyPenalty !== undefined ? { frequency_penalty: profile.frequencyPenalty } : {}),
+	};
+}
+
+function piThinkingBudgets(quirks: LocalModelQuirks | undefined): ThinkingBudgets | undefined {
+	const budgets = quirks?.thinking?.budgetByLevel;
+	if (!budgets) return undefined;
+	return {
+		...(budgets.minimal !== undefined ? { minimal: budgets.minimal } : {}),
+		...(budgets.low !== undefined ? { low: budgets.low } : {}),
+		...(budgets.medium !== undefined ? { medium: budgets.medium } : {}),
+		...(budgets.high !== undefined ? { high: budgets.high } : {}),
+	};
 }
 
 type AnyOnPayload = (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
+type StreamOptionsWithThinkingBudgets = StreamOptions & { thinkingBudgets?: ThinkingBudgets };
 
 const THINKING_CHAT_TEMPLATE_KWARGS = new Set([
 	"enable_thinking",
@@ -198,7 +196,8 @@ function applyThinkingPayload(
 		applied.mechanism === "budget-tokens" &&
 		resolved.request.budgetTokens !== undefined &&
 		next.thinking === undefined &&
-		resolved.request.budgetEnforcement === "enforced"
+		resolved.request.budgetEnforcement === "enforced" &&
+		resolved.runtimeId !== "vllm"
 	) {
 		// Only vendors whose openai-compat surface advertises a structured
 		// thinking budget (e.g. anthropic-extended on routed providers) get
@@ -260,36 +259,7 @@ function shouldApplyLlamaCppPromptCache(model: Model<"openai-completions">): boo
 	return model.provider === "llamacpp" && metadata?.runtimeId === "llamacpp";
 }
 
-/**
- * Compose an `onPayload` hook over any caller-supplied one. Catalog overrides
- * apply first so the caller's hook sees the mutated body and can override or
- * inspect it. The result is returned only when the body actually changed
- * (pi-ai treats `undefined` as "use the original").
- */
-function composeSamplingOnPayload(
-	profile: SamplingProfile,
-	resolved: ResolvedModelRuntimeCapabilities | undefined,
-	base: AnyOnPayload | undefined,
-): AnyOnPayload {
-	return async (payload, model) => {
-		if (!isPlainRecord(payload)) {
-			return base ? await base(payload, model) : undefined;
-		}
-		let next = applyLlamaCppPromptCachePayload(applyOpenAISamplingProfile(payload, profile), model);
-		if (resolved) next = applyThinkingPayload(next, resolved.thinking, resolved, model);
-		if (resolved) next = applyLmStudioPayload(next, model, resolved);
-		if (base) {
-			const fromBase = await base(next, model);
-			if (fromBase !== undefined) return fromBase;
-		}
-		return next;
-	};
-}
-
-/**
- * Variant of `composeSamplingOnPayload` for cases where there is no catalog
- * sampler but we still need to inject thinking-mechanism fields.
- */
+/** Compose Clio-only payload deltas over the caller hook after pi applies sampling. */
 function composeThinkingOnPayload(
 	resolved: ResolvedModelRuntimeCapabilities,
 	base: AnyOnPayload | undefined,
@@ -317,13 +287,16 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	resolved: ResolvedModelRuntimeCapabilities,
 ): TOptions | undefined {
 	const applied = resolved.thinking;
-	const profile = pickSamplingProfile(clioQuirks(model), applied.thinkingActive);
+	const quirks = clioQuirks(model);
+	const profile = pickSamplingProfile(quirks, applied.thinkingActive);
 	const promptCache = shouldApplyLlamaCppPromptCache(model);
 	const lmstudio = isLmStudioModel(model);
+	const vllmThinkingBudgets = resolved.runtimeId === "vllm" ? piThinkingBudgets(quirks) : undefined;
 	if (
 		!promptCache &&
 		!lmstudio &&
 		!profile &&
+		!vllmThinkingBudgets &&
 		applied.mechanism !== "effort-levels" &&
 		applied.mechanism !== "budget-tokens" &&
 		applied.mechanism !== "on-off" &&
@@ -334,8 +307,25 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	const merged: Record<string, unknown> = { ...(options ?? {}) };
 	if (profile?.temperature !== undefined && merged.temperature === undefined) merged.temperature = profile.temperature;
 	if (profile) {
-		merged.onPayload = composeSamplingOnPayload(profile, resolved, options?.onPayload);
-	} else {
+		merged.samplingParams = {
+			...samplingParamsFromProfile(profile),
+			...options?.samplingParams,
+		};
+	}
+	if (vllmThinkingBudgets) {
+		merged.thinkingBudgets = {
+			...vllmThinkingBudgets,
+			...(options as StreamOptionsWithThinkingBudgets | undefined)?.thinkingBudgets,
+		};
+	}
+	if (
+		promptCache ||
+		lmstudio ||
+		applied.mechanism === "effort-levels" ||
+		applied.mechanism === "budget-tokens" ||
+		applied.mechanism === "on-off" ||
+		applied.mechanism === "none"
+	) {
 		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload);
 	}
 	return merged as TOptions;

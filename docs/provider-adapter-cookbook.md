@@ -133,6 +133,23 @@ The `synthesizeModel` method acts as the factory that creates the `pi-ai` compat
 
 When a model family requires response parsing or sentinel stripping before the payload reaches the core logic, Clio applies runtime-agnostic stream filters during model synthesis. For example, if the resolved model family is `gemma-4`, a dedicated `createGemmaChannelFilter` is applied to intercept and reclassify `<|channel>thought` markers directly from the `text_delta` stream into `thinking_delta` events, dropping orphan channel closers and own-thought labels seamlessly.
 
+### 3.2 OpenAI-compatible sampling and vLLM budgets
+
+Catalog entries keep Clio's family knowledge in `quirks.sampling`, using the typed names
+`temperature`, `topP`, `topK`, `minP`, `presencePenalty`, `frequencyPenalty`, and
+`repeatPenalty`. The OpenAI-completions engine adapter translates those names once and passes the
+result through Pi's `StreamOptions.samplingParams`; it does not patch sampler fields into the final
+JSON body. Request-level `samplingParams` win per key, matching Pi's merge contract, while an
+explicit request temperature still wins over the catalog temperature.
+
+For a `vllm` target, model synthesis opts into Pi's
+`OpenAICompletionsCompat.supportsThinkingTokenBudget`. Clio supplies the selected family's
+`quirks.thinking.budgetByLevel` as Pi `thinkingBudgets`, and Pi emits the top-level
+`thinking_token_budget` while retaining at least 1,024 tokens beneath `max_tokens` for the final
+answer. llama.cpp and LM Studio do not receive that vLLM-only field. Their remaining payload hooks
+are limited to runtime deltas such as `chat_template_kwargs`, prompt-cache flags, LM Studio TTL and
+draft-model settings, and the exact reasoning-effort spelling their servers accept.
+
 
 ---
 

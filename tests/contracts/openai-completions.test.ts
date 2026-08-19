@@ -421,6 +421,7 @@ describe("openai-completions thinking preservation", () => {
 			const stream = openAICompletionsApiProvider.streamSimple(model, context, {
 				apiKey: "fake-key",
 				...(expected.level === "off" ? {} : { reasoning: expected.level }),
+				samplingParams: { seed: 17 },
 				signal: controller.signal,
 				onPayload: (payload) => {
 					captured = payload as Record<string, unknown>;
@@ -452,6 +453,77 @@ describe("openai-completions thinking preservation", () => {
 			strictEqual(captured.min_p, 0, `${expected.level} min_p`);
 			strictEqual(captured.presence_penalty, thinkingActive ? 0 : 1.5, `${expected.level} presence_penalty`);
 			strictEqual(captured.repeat_penalty, 1, `${expected.level} repeat_penalty`);
+			strictEqual(captured.seed, 17, `${expected.level} arbitrary pi sampling parameter`);
+		}
+	});
+
+	it("uses pi's vLLM thinking budget while preserving room for the answer", async () => {
+		const model = {
+			id: "AgenticQwen-14B",
+			name: "AgenticQwen-14B",
+			api: "openai-completions",
+			provider: "vllm",
+			baseUrl: "http://127.0.0.1:1/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 262144,
+			maxTokens: 32768,
+			compat: {
+				supportsStore: false,
+				supportsDeveloperRole: false,
+				supportsReasoningEffort: false,
+				supportsUsageInStreaming: true,
+				supportsThinkingTokenBudget: true,
+				maxTokensField: "max_tokens",
+				supportsStrictMode: false,
+				thinkingFormat: "qwen-chat-template",
+			},
+			clio: {
+				targetId: "gpu",
+				runtimeId: "vllm",
+				quirks: {
+					thinking: {
+						mechanism: "budget-tokens",
+						budgetByLevel: { low: 1024, medium: 4096, high: 16384 },
+					},
+				},
+			},
+		} as unknown as Model<"openai-completions">;
+		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+		const cases = [
+			{ reasoning: "low", expectedBudget: 1024 },
+			{ reasoning: "medium", expectedBudget: 4096 },
+			{ reasoning: "high", expectedBudget: 16384 },
+			{ reasoning: "xhigh", expectedBudget: 16384 },
+		] as const;
+
+		for (const expected of cases) {
+			const controller = new AbortController();
+			let captured: Record<string, unknown> | undefined;
+			const stream = openAICompletionsApiProvider.streamSimple(model, context, {
+				apiKey: "fake-key",
+				maxTokens: 32768,
+				reasoning: expected.reasoning,
+				signal: controller.signal,
+				onPayload: (payload) => {
+					captured = payload as Record<string, unknown>;
+					controller.abort();
+					return undefined;
+				},
+			});
+			try {
+				for await (const _event of stream) {
+					// Drain; the request aborts after pi has built the payload.
+				}
+			} catch {
+				// An aborted request may surface as an error/throw assertion.
+			}
+
+			ok(captured, `${expected.reasoning} should reach onPayload`);
+			strictEqual(captured.thinking_token_budget, expected.expectedBudget);
+			strictEqual(captured.thinking, undefined, "vLLM uses pi's top-level budget instead of a vendor object");
+			strictEqual(captured.max_tokens, 32768, "the shared ceiling retains answer headroom beyond the budget");
 		}
 	});
 
