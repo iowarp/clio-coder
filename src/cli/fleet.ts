@@ -162,7 +162,13 @@ function listingLine(entry: FleetContractListing, state: string, detail: string)
 	return `${entry.name}  ${entry.source}  ${state.padEnd(7)}  ${detail}\n`;
 }
 
-function runList(): number {
+function runList(args: ReadonlyArray<string>): number {
+	// `list` took no arguments and silently ignored whatever followed it, so
+	// `fleet list --bogus` exited 0 with the normal table and `fleet list --json`
+	// printed the human one. Its siblings status, drain, and resume all reject an
+	// unrecognised flag, and so do `agents` and `models`.
+	const unknown = args[0];
+	if (unknown !== undefined) return fail(`list: unknown flag: ${unknown}`);
 	const listings = listFleetContracts(process.cwd());
 	if (listings.length === 0) {
 		process.stdout.write("no fleet contracts found (.clio-coder/fleets/*.md)\n");
@@ -810,7 +816,7 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 	}
 	switch (sub) {
 		case "list":
-			return runList();
+			return runList(args.slice(1));
 		case "run":
 			return runFleet(args.slice(1));
 		case "status":

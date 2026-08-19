@@ -92,7 +92,9 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 		parsed = parseMemoryArgs(args);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		process.stdout.write(HELP);
+		// Usage that accompanies an error goes to stderr with it; see the same
+		// note in evidence.ts.
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (parsed.help) {

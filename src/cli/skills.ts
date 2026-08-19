@@ -257,9 +257,16 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 		process.stderr.write(HELP);
 		return 2;
 	}
-	if (parsed.help || !parsed.command) {
+	if (parsed.help) {
 		process.stdout.write(HELP);
 		return 0;
+	}
+	// A bare `clio-coder skills` is a missing required argument, which the
+	// exit-code contract puts at 2 with the usage on stderr. See the same note in
+	// extensions.ts.
+	if (!parsed.command) {
+		process.stderr.write(HELP);
+		return 2;
 	}
 	switch (parsed.command) {
 		case "list": {
