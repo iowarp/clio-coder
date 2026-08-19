@@ -9,10 +9,10 @@ const HELP = `Usage:
 Clear accumulated project context owned by the context engine:
 .clio-coder/codewiki.json, .clio-coder/state.json, .clio-coder/handoffs/, and .clio-coder/proposals/.
 
-Preserves by default: CLIO-CODER.md, .clio-coder/agents/, .clio-coder/skills/, and .clio-coder/wiki/.
+Preserves by default: CLIO-CODER.md, CLIO-CODER.override.md, .clio-coder/agents/, .clio-coder/skills/, and .clio-coder/wiki/.
 
 Options:
-  --all       also remove CLIO-CODER.md after a second confirmation
+  --all       also remove the local CLIO-CODER.md after a second confirmation; overrides stay human-owned
   --yes, -y   answer every confirmation, required when stdin is not a terminal
 `;
 

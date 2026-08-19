@@ -39,7 +39,7 @@ export {
 	runBootstrap,
 } from "./bootstrap.js";
 export { type RunContextClearInput, type RunContextClearResult, runContextClear } from "./clear.js";
-export { parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
+export { loadProjectClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
 export { type CooperativeSlicer, createSlicer, INDEX_SLICE_MS } from "./codewiki/cooperative.js";
 export { renderCodewikiDigest } from "./codewiki/digest.js";
 export {

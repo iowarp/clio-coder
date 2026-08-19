@@ -305,7 +305,7 @@ function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTo
 	if (context.clioMd) {
 		lines.push(`Project: ${context.clioMd.projectName}`);
 		lines.push(
-			"CLIO-CODER.md: available; compact synopsis only because the handbook is too large for automatic preload.",
+			"Project handbook: available; compact synopsis only because the effective layers are too large for automatic preload.",
 		);
 	}
 	if (hasCodewiki(context.text)) lines.push("Codewiki: available via code_nav.");
@@ -320,7 +320,7 @@ function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTo
 }
 
 /**
- * Project context is selected once per session compile: the full CLIO-CODER.md
+ * Project context is selected once per session compile: the full effective-handbook
  * preload when it is small enough, a compact synopsis otherwise. No per-turn
  * selection — the session prompt is stable for the session's lifetime. The
  * cliff itself lives in prompts/preload.ts so reporting surfaces classify

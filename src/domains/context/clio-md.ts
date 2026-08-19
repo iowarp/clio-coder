@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 
 export interface ClioMdFingerprintFooter {
 	initAt: string;
@@ -24,6 +24,25 @@ export interface ParsedClioMd {
 	fingerprint: ClioMdFingerprintFooter | null;
 	firstInit: boolean;
 	warnings: string[];
+}
+
+export interface LoadedClioMdFile {
+	path: string;
+	value: ParsedClioMd;
+}
+
+export interface ClioMdLoadError {
+	path: string;
+	error: string;
+}
+
+export interface LoadedProjectClioMd {
+	/** Effective files in ancestor-to-descendant order. */
+	files: LoadedClioMdFile[];
+	/** Selected files that could not be read or parsed. */
+	errors: ClioMdLoadError[];
+	/** The layered effective handbook, or null when no selected file parsed. */
+	value: ParsedClioMd | null;
 }
 
 export type ClioMdParseResult = { ok: true; value: ParsedClioMd } | { ok: false; errors: string[]; warnings: string[] };
@@ -294,7 +313,11 @@ export function renderProjectTypeFragment(projectType: string): string {
 	return `<project-type>${projectType}</project-type>`;
 }
 
-export function renderProjectContextFragment(parsed: ParsedClioMd): string {
+function escapeXmlAttribute(value: string): string {
+	return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+export function renderProjectContextFragment(parsed: ParsedClioMd, sourcePath?: string): string {
 	const sections: string[] = [`# ${parsed.projectName}`, parsed.identity];
 	if (parsed.conventions.length > 0) {
 		sections.push("## Conventions", ...parsed.conventions.map((item) => `- ${item}`));
@@ -308,20 +331,99 @@ export function renderProjectContextFragment(parsed: ParsedClioMd): string {
 	if (parsed.importedAgentContext) {
 		sections.push("## Imported agent context", parsed.importedAgentContext);
 	}
-	return `<project-context>\n${sections.join("\n\n")}\n</project-context>`;
+	const source = sourcePath ? ` path="${escapeXmlAttribute(sourcePath)}"` : "";
+	return `<project-context${source}>\n${sections.join("\n\n")}\n</project-context>`;
+}
+
+const PROJECT_CONTEXT_CANDIDATES = ["CLIO-CODER.override.md", "CLIO-CODER.md"] as const;
+
+function selectedClioMdPath(directory: string): string | null {
+	for (const filename of PROJECT_CONTEXT_CANDIDATES) {
+		const filePath = join(directory, filename);
+		if (!existsSync(filePath)) continue;
+		try {
+			if (statSync(filePath).isFile()) return filePath;
+		} catch {
+			// Preserve candidate precedence and let the read below own the
+			// actionable error instead of silently falling back to the base file.
+			return filePath;
+		}
+	}
+	return null;
+}
+
+function readClioMdPath(filePath: string): { ok: true; value: ParsedClioMd } | { ok: false; error: string } {
+	let content: string;
+	try {
+		content = readFileSync(filePath, "utf8");
+	} catch (err) {
+		return { ok: false, error: err instanceof Error ? err.message : String(err) };
+	}
+	const parsed = parseClioMd(content);
+	if (!parsed.ok) return { ok: false, error: parsed.errors.join("; ") };
+	return { ok: true, value: parsed.value };
+}
+
+function mergeClioMdFiles(files: ReadonlyArray<LoadedClioMdFile>): ParsedClioMd | null {
+	const nearest = files.at(-1)?.value;
+	if (!nearest) return null;
+	return {
+		projectName: nearest.projectName,
+		identity: files.map((file) => file.value.identity).join("\n\n"),
+		conventions: files.flatMap((file) => file.value.conventions),
+		invariants: files.flatMap((file) => file.value.invariants),
+		sections: files.flatMap((file) => file.value.sections),
+		importedAgentContext:
+			files
+				.map((file) => file.value.importedAgentContext)
+				.filter((value): value is string => value !== null)
+				.join("\n\n") || null,
+		fingerprint: nearest.fingerprint,
+		firstInit: nearest.firstInit,
+		warnings: files.flatMap((file) => file.value.warnings),
+	};
+}
+
+/**
+ * Load effective project handbooks from filesystem root through `cwd`.
+ * Candidate selection follows pi-coding-agent 0.84's
+ * `loadProjectContextFiles`: an override wins over the base file in the same
+ * directory. Clio's structured override additionally resets the inherited
+ * handbook chain for that subtree, as required by the project-context
+ * contract. Handbooks below the override may add new layers.
+ */
+export function loadProjectClioMd(cwd: string): LoadedProjectClioMd {
+	const directories: string[] = [];
+	let directory = resolve(cwd);
+	while (true) {
+		directories.unshift(directory);
+		const parent = dirname(directory);
+		if (parent === directory) break;
+		directory = parent;
+	}
+
+	const selectedPaths: string[] = [];
+	for (const current of directories) {
+		const selected = selectedClioMdPath(current);
+		if (!selected) continue;
+		if (basename(selected) === "CLIO-CODER.override.md") {
+			selectedPaths.length = 0;
+		}
+		selectedPaths.push(selected);
+	}
+
+	const files: LoadedClioMdFile[] = [];
+	const errors: ClioMdLoadError[] = [];
+	for (const filePath of selectedPaths) {
+		const read = readClioMdPath(filePath);
+		if (read.ok) files.push({ path: filePath, value: read.value });
+		else errors.push({ path: filePath, error: read.error });
+	}
+	return { files, errors, value: mergeClioMdFiles(files) };
 }
 
 export function tryReadClioMd(cwd: string): { ok: true; value: ParsedClioMd } | { ok: false; error: string } | null {
 	const filePath = join(cwd, "CLIO-CODER.md");
 	if (!existsSync(filePath)) return null;
-	let content: string;
-	try {
-		content = readFileSync(filePath, "utf8");
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		return { ok: false, error: message };
-	}
-	const parsed = parseClioMd(content);
-	if (!parsed.ok) return { ok: false, error: parsed.errors.join("; ") };
-	return { ok: true, value: parsed.value };
+	return readClioMdPath(filePath);
 }
