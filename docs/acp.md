@@ -1,6 +1,6 @@
 # Agent Client Protocol (ACP) Server
 
-This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in `v0.3.1`.
+This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in `v0.3.2`.
 
 Source implementations: `src/engine/acp/` and `src/cli/acp.ts`.
 
@@ -11,6 +11,7 @@ Source implementations: `src/engine/acp/` and `src/cli/acp.ts`.
 Clio Coder provides a native ACP server via the `clio-coder acp` command. The server implements the open Agent Client Protocol specification (ACP v1 / schema 0.4.5) over standard I/O JSON-RPC 2.0 transport (`src/engine/acp/transport.ts`).
 
 The ACP server allows external IDEs, editors (such as Zed), and automated orchestration engines to drive Clio Coder sessions over a structured protocol.
+An example localhost client lives in `apps/workbench` and is unreleased.
 
 ```mermaid
 graph LR
@@ -66,7 +67,7 @@ These are every method the server answers (`src/engine/acp/server.ts`). Anything
 
 ## 4. Initial Safe Profile
 
-This section states what the server guarantees on the wire. It is the source-side contract Workbench and any other strict client can hold Clio to.
+This section states what the server guarantees on the wire. It is the source-side contract any strict client can hold Clio to.
 
 ### Error envelope
 
@@ -124,7 +125,7 @@ Every replay notification precedes the `session/load` response and carries `para
 
 ### Session list, label, delete, and autonomy
 
-`clio-coder/session/list` accepts `{limit?:1..200}` (default 50) and returns `{sessions,truncated}` newest first. Each item is `{sessionId,label,preview,createdAt,updatedAt,turns,target,model,state,hosted}`. Label is null or at most 256 UTF-8 bytes; preview is a single line of at most 512 bytes; target/model use the attribution bounds. State is deliberately only `open` (hosted by this process), `closed` (`endedAt` is non-null), or `unknown` (unended but not hosted here). `hosted` is true only for this process. The complete result is capped to a 240 KiB stable prefix of whole newest-first session rows so the JSON-RPC response fits the Workbench's 256 KiB line ceiling. When this byte budget drops a row, `truncated` is true and result `_meta["clio-coder/truncated"]` is also true; that `_meta` key is absent when only the requested `limit` shortened the history. The method is legal before an opener and during a prompt.
+`clio-coder/session/list` accepts `{limit?:1..200}` (default 50) and returns `{sessions,truncated}` newest first. Each item is `{sessionId,label,preview,createdAt,updatedAt,turns,target,model,state,hosted}`. Label is null or at most 256 UTF-8 bytes; preview is a single line of at most 512 bytes; target/model use the attribution bounds. State is deliberately only `open` (hosted by this process), `closed` (`endedAt` is non-null), or `unknown` (unended but not hosted here). `hosted` is true only for this process. The complete result is capped to a 240 KiB stable prefix of whole newest-first session rows so the JSON-RPC response fits a strict 256 KiB line ceiling. When this byte budget drops a row, `truncated` is true and result `_meta["clio-coder/truncated"]` is also true; that `_meta` key is absent when only the requested `limit` shortened the history. The method is legal before an opener and during a prompt.
 
 `clio-coder/session/label` accepts `{sessionId,label}` where label is 0–256 UTF-8 bytes and C0/DEL-free. Empty clears. It writes the existing session-wide `sessionInfo.name` vocabulary, including for an off-current closed session, and list is the readback. It is legal before an opener and during a prompt.
 
@@ -145,7 +146,7 @@ The values above are illustrative. Thinking is one of `off`, `minimal`, `low`, `
 
 `clio-coder/settings/patch_safe` accepts `{patch}` where patch is a flat object keyed only by the four strings in `editable`. It validates the entire candidate before one locked settings mutation, persists routing as the future default, and updates this process's next-turn routing. The locked writer applies the effective-view delta to the user document and revalidates it with the workspace's project layers before writing, so a project-only target can be selected without copying its URL or descriptor into user settings; a higher-precedence project leaf that would silently undo the patch causes the write to fail with no partial document. Unknown keys or values are `invalid_params`; an unknown non-null target adds `reason:"target-unknown"`. Target/model identifiers use the 128/256-byte bounds and peer-controlled strings reject C0/DEL. A non-null model requires a non-null resulting target. A pre-existing selected route outside those bounds makes `get_safe` fail `internal_error` rather than falsely returning null. Patch is legal before an opener but fails `prompt_active` while a turn runs.
 
-`clio-coder/targets/list` accepts `{}` and returns `{targets:[{id,runtime,models,isOrchestrator}]}`. It reads only configured and cached state, never probes. At most 64 targets are returned. Target ids are at most 128 bytes, runtime ids 64, and the stable union of configured default/wire and discovered model ids is at most 64 models per target, each at most 256 bytes. The complete result is also capped to a 240 KiB stable prefix of whole target/model entries so it fits the Workbench reader's 256 KiB JSON-RPC frame ceiling after the response envelope is added. If that byte budget drops a model or target, the result additionally carries `_meta["clio-coder/truncated"]:true`; the key is absent when the byte-budget result is complete. Unsafe stored identifiers are omitted rather than truncated into collisions. URL, auth state, credential provenance, raw runtime descriptors, health errors, and provider prose are never projected.
+`clio-coder/targets/list` accepts `{}` and returns `{targets:[{id,runtime,models,isOrchestrator}]}`. It reads only configured and cached state, never probes. At most 64 targets are returned. Target ids are at most 128 bytes, runtime ids 64, and the stable union of configured default/wire and discovered model ids is at most 64 models per target, each at most 256 bytes. The complete result is also capped to a 240 KiB stable prefix of whole target/model entries so it fits a strict 256 KiB JSON-RPC frame ceiling after the response envelope is added. If that byte budget drops a model or target, the result additionally carries `_meta["clio-coder/truncated"]:true`; the key is absent when the byte-budget result is complete. Unsafe stored identifiers are omitted rather than truncated into collisions. URL, auth state, credential provenance, raw runtime descriptors, health errors, and provider prose are never projected.
 
 `clio-coder/targets/probe` accepts exactly `{targetId}` for an already-configured target and performs the provider domain's existing bounded live probe. It returns `{targetId,healthy,latencyMs,reason}` where latency is a non-negative integer or null and reason is exactly `not-configured`, `unreachable`, `unsupported`, `probe-failed`, or null. Provider text is mapped, never copied. The call starts no Clio turn and spends no orchestrator model tokens. Both target methods are legal before an opener and during a prompt.
 
