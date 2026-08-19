@@ -339,7 +339,7 @@ slower even though the target still responds.
 For llama.cpp router targets, Clio observes `/v1/models` and `/props`. It can
 tell which models are loaded and whether the resident count is within the
 router's `max_instances`, so an allowed two-model setup is reported as an
-informational co-residency notice. The router response does not expose free
+informational co-residency notice. A model reporting a `sleeping` state counts as resident, because the router wakes it on the next inference request. Clio's residency manager never evicts a resident model when the requested replacement model is not in the router's catalog. The router response does not expose free
 VRAM or per-model loaded footprint, so Clio cannot prove the loaded set fits.
 Use host tools such as `nvidia-smi`, `rocm-smi`, Vulkan memory telemetry, or
 the runtime's own dashboard to confirm headroom after loading the main coding
