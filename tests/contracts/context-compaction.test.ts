@@ -1,4 +1,4 @@
-import { ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
@@ -59,7 +59,13 @@ function toolCall(id: string, callId: string, parentTurnId: string | null): Mess
 	};
 }
 
-function toolResult(id: string, callId: string, text: string, parentTurnId: string | null): MessageEntry {
+function toolResult(
+	id: string,
+	callId: string,
+	text: string,
+	parentTurnId: string | null,
+	details?: Record<string, unknown>,
+): MessageEntry {
 	return {
 		kind: "message",
 		...entryBase(id, parentTurnId),
@@ -67,7 +73,7 @@ function toolResult(id: string, callId: string, text: string, parentTurnId: stri
 		payload: {
 			toolCallId: callId,
 			toolName: "read",
-			result: { content: [{ type: "text", text }] },
+			result: { content: [{ type: "text", text }], ...(details ? { details } : {}) },
 			isError: false,
 			resultSummary: { bytes: text.length, truncated: false },
 		},
@@ -367,7 +373,7 @@ describe("contracts/context compaction mask_observations", () => {
 			user("01", "read the large file"),
 			assistant("02", [{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "src/huge.ts" } }], "01"),
 			toolCall("03", "call-1", "02"),
-			toolResult("04", "call-1", huge, "03"),
+			toolResult("04", "call-1", huge, "03", { paths: ["REPORT.md"], kind: "report" }),
 			user("05", "recent protected turn", "04"),
 			assistant("06", [{ type: "text", text: "recent answer" }], "05", 10),
 		];
@@ -376,11 +382,20 @@ describe("contracts/context compaction mask_observations", () => {
 		strictEqual(result.changed, true);
 		strictEqual(result.maskedObservations, 1);
 		const masked = result.entries[3] as MessageEntry;
-		const payload = masked.payload as { toolCallId?: string; result?: { content?: Array<{ text?: string }> } };
+		const payload = masked.payload as {
+			toolCallId?: string;
+			result?: {
+				content?: Array<{ text?: string }>;
+				details?: { paths?: unknown; kind?: unknown; contextCompaction?: { stage?: string } };
+			};
+		};
 		strictEqual(payload.toolCallId, "call-1");
 		const text = payload.result?.content?.[0]?.text ?? "";
 		ok(text.includes("Observation masked"));
 		ok(!text.includes("final secret body"));
+		deepStrictEqual(payload.result?.details?.paths, ["REPORT.md"]);
+		strictEqual(payload.result?.details?.kind, "report");
+		strictEqual(payload.result?.details?.contextCompaction?.stage, "mask_observations");
 
 		const replayMessages = buildReplayAgentMessagesFromTurns(result.entries);
 		const estimated = estimateAgentContextTokens({ messages: replayMessages });
