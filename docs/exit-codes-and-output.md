@@ -60,14 +60,14 @@ Many Clio CLI subcommands provide structured JSON output for integration with sc
 | Subcommand | Flag | Output Structure |
 | :--- | :--- | :--- |
 | `clio-coder run` | `--json` | Stream of incremental NDJSON event frames (`session`, `agent_start`, `turn_start`, `message_start`, `message_end`, `thinking_delta`, `text_delta`, `tool_execution_start`, `tool_execution_end`, `turn_end`, `agent_end`). |
-| `clio-coder run` | `--json-events terminal` | Filters event stream to emit only `{session, turn_start, agent_end, turn_end, notice}` plus the synthesized terminal receipt frame (`startedAt`, `endedAt`, `exitCode`, `usage`). Excludes multi-kilobyte intermediate message bodies (#122). |
+| `clio-coder run` | `--json-events terminal` | Emits the `session` header, a synthesized `turn_start` (`startedAt`), the `agent_end` and `notice` events that pass the filter, and a synthesized `turn_end` carrying `startedAt`, `endedAt`, `exitCode`, and `error` when the turn failed. Per-segment token usage rides `agent_end`. Excludes multi-kilobyte intermediate message bodies (#122). |
 | `clio-coder run` | `--json-events full` | Emits complete event stream with projected assistant messages (`streamed: true`, `textLength`, `thinkingLength`) to eliminate duplicate wire tokens (#122). |
 | `clio-coder agents` | `--json` | JSON array of registered agent recipe metadata objects. |
 | `clio-coder targets` | `--json` | JSON object containing the configured `targets` array. |
 | `clio-coder models` | `--json` | JSON array of catalog models with capability flags. |
-| `clio-coder fleet status` | `--json` | JSON snapshot of cluster nodes, active leases, and drain status. |
+| `clio-coder fleet status` | `--json` | JSON snapshot object with `generatedAt`, `admission` (`open` or `draining`), `running`, `retrying`, and `totals`. Each run row carries its `node`, defaulting to `local`. |
 | `clio-coder trace runs` | `--json` | JSON array of trace run records. |
-| `clio-coder trace sql` | Positional query | JSON array of rows returned by the read-only SQLite `SELECT` query. Refuses mutating statements with exit code 2. |
+| `clio-coder trace sql` | Positional query | JSON array of rows returned by the read-only SQLite query. A single `SELECT` or read-only `WITH` statement is accepted; multiple statements and mutating keywords are refused with exit code 2. |
 | `clio-coder paths` | `--json` | JSON object mapping platform directory names to absolute paths. |
 
 ### Incremental Streaming & Deduplication Invariant (#122, #123)

@@ -173,7 +173,7 @@ clio-coder run --api-key &lt;key&gt; "..."</code></pre>
               <tr>
                 <td><code>clio-coder run</code></td>
                 <td><code>--json-events terminal</code></td>
-                <td>Receipt-focused stream: emits only <code>session</code>, <code>turn_start</code>, <code>agent_end</code>, <code>turn_end</code>, and <code>notice</code>, plus the synthesized terminal receipt frame (carrying <code>startedAt</code>, <code>endedAt</code>, <code>exitCode</code>, <code>usage</code>). Excludes bulky message bodies (#122).</td>
+                <td>Receipt-focused stream: the <code>session</code> header, a synthesized <code>turn_start</code> carrying <code>startedAt</code>, the <code>agent_end</code> and <code>notice</code> events that pass the filter, and a synthesized <code>turn_end</code> carrying <code>startedAt</code>, <code>endedAt</code>, <code>exitCode</code>, and <code>error</code> when the turn failed. Per-segment token usage rides <code>agent_end</code>. Excludes bulky message bodies (#122).</td>
               </tr>
               <tr>
                 <td><code>clio-coder run</code></td>
@@ -304,14 +304,14 @@ clio-coder run --api-key &lt;key&gt; "..."</code></pre>
         badge.style.background = 'rgba(87,227,137,0.2)';
         badge.style.color = 'var(--color-emerald)';
         badge.innerText = 'Exit Code: 0 (Success)';
-        stdout.innerText = 'Usage: clio-coder trace <subcommand> [options]\n\nSubcommands:\n  runs     List recorded execution runs\n  phases   Inspect execution phases for a run\n  tail     Stream live trace entries\n  procs    List child processes\n  sql      Execute read-only SQL query';
+        stdout.innerText = 'Usage:\n  clio-coder trace runs [--db PATH] [--limit N] [--json]\n  clio-coder trace phases <runId> [--db PATH]\n  clio-coder trace tail <runId> [--follow] [--db PATH]\n  clio-coder trace procs <runId> [--db PATH]\n  clio-coder trace sql <SELECT query> [--db PATH]\n  clio-coder trace ui [--db PATH] [--port N]        source checkout only';
         stderr.innerText = '';
       } else if (choice === 'trace-unknown') {
         badge.style.background = 'rgba(255,180,84,0.2)';
         badge.style.color = 'var(--color-amber)';
         badge.innerText = 'Exit Code: 2 (Usage Error)';
         stdout.innerText = '';
-        stderr.innerText = 'clio-coder: unknown trace command: bogus\nRun "clio-coder trace --help" for usage.';
+        stderr.innerText = 'unknown trace command: bogus\n(followed by the trace usage block on stderr)';
       } else if (choice === 'trace-sql-select') {
         badge.style.background = 'rgba(87,227,137,0.2)';
         badge.style.color = 'var(--color-emerald)';
@@ -323,19 +323,19 @@ clio-coder run --api-key &lt;key&gt; "..."</code></pre>
         badge.style.color = 'var(--color-amber)';
         badge.innerText = 'Exit Code: 2 (Usage Error)';
         stdout.innerText = '';
-        stderr.innerText = 'clio-coder: trace sql requires a SELECT query; mutations are refused';
+        stderr.innerText = 'trace sql accepts SELECT or read-only WITH queries only';
       } else if (choice === 'run-terminal') {
         badge.style.background = 'rgba(87,227,137,0.2)';
         badge.style.color = 'var(--color-emerald)';
         badge.innerText = 'Exit Code: 0 (Success)';
-        stdout.innerText = '{"type":"session","id":"01912a34-..."}\n{"type":"turn_start","turnId":"01912a34-..."}\n{"type":"turn_end","startedAt":1787141932000,"endedAt":1787141932400,"exitCode":0,"usage":{"totalTokens":142}}\n{"type":"agent_end"}';
+        stdout.innerText = '{"type":"session","id":"01912a34-...","timestamp":"2026-01-05T09:12:11.000Z","cwd":"/repo"}\n{"type":"turn_start","startedAt":"2026-01-05T09:12:11.000Z"}\n{"type":"agent_end","messageCount":2,"usage":{"input":118,"output":24,"totalTokens":142,"measured":true}}\n{"type":"turn_end","startedAt":"2026-01-05T09:12:11.000Z","endedAt":"2026-01-05T09:12:11.400Z","exitCode":0}';
         stderr.innerText = '';
       } else if (choice === 'flag-misplaced') {
         badge.style.background = 'rgba(255,180,84,0.2)';
         badge.style.color = 'var(--color-amber)';
         badge.innerText = 'Exit Code: 2 (Usage Error)';
         stdout.innerText = '';
-        stderr.innerText = 'clio-coder: --api-key is a global option and must come before the subcommand:\nclio-coder --api-key <key> run "Hello"';
+        stderr.innerText = 'error: --api-key is a global option and must come before the subcommand: clio-coder --api-key <key> run ...';
       }
     }
 
