@@ -403,6 +403,35 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		ok(rendered.includes("streamed tail line"), `the streamed body still renders after the split, got: ${rendered}`);
 	});
 
+	it("re-renders a live replay block until it declares itself settled", () => {
+		let clock = 1_000;
+		const panel = createChatPanel({ now: () => clock });
+		// Mirrors the operator's `!` bash row: the closure reads state the command
+		// keeps mutating, so the panel must not treat the first frame as final.
+		const command = { output: "", running: true };
+		panel.appendReplayBlock(
+			() => [`local bash ${command.running ? "running" : "done"}: ${command.output || "(no output yet)"}`],
+			() => command.running,
+		);
+		const first = strip(panel.render(100).join("\n"));
+		ok(first.includes("(no output yet)"), `the first frame shows the empty live row, got: ${first}`);
+
+		command.output = "src/tools";
+		clock = 1_100;
+		const streaming = strip(panel.render(100).join("\n"));
+		ok(streaming.includes("running: src/tools"), `streamed output reaches a later frame, got: ${streaming}`);
+
+		command.output = "src/tools";
+		command.running = false;
+		clock = 1_200;
+		const settled = strip(panel.render(100).join("\n"));
+		ok(settled.includes("done: src/tools"), `the row settles when the command finishes, got: ${settled}`);
+
+		// Once settled the block is frozen again, so a later clock renders identically.
+		clock = 3_601_000;
+		strictEqual(strip(panel.render(100).join("\n")), settled, "a settled replay block renders time-invariant");
+	});
+
 	it("keeps one Pi tool row from streamed arguments through live output and settlement", () => {
 		let clock = 1_000;
 		const panel = createChatPanel({ now: () => clock });
