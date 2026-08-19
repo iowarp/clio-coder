@@ -152,7 +152,12 @@ describe("dispatch run ledger under concurrent processes", () => {
 		try {
 			const a = openLedger({ maxRuns: 20 });
 			const evicted = createRun(a);
-			a.update(evicted.id, { status: "completed", endedAt: "2026-07-10T12:00:01.000Z", exitCode: 0 });
+			a.update(evicted.id, {
+				status: "completed",
+				startedAt: "2026-07-10T12:00:00.000Z",
+				endedAt: "2026-07-10T12:00:01.000Z",
+				exitCode: 0,
+			});
 			await a.persist();
 
 			// B reads the row, then A drops it by capping the ring at a smaller size.
@@ -160,7 +165,12 @@ describe("dispatch run ledger under concurrent processes", () => {
 			strictEqual(b.get(evicted.id)?.status, "completed");
 			const capped = openLedger({ maxRuns: 1 });
 			const newer = createRun(capped);
-			capped.update(newer.id, { status: "completed", endedAt: "2026-07-10T12:00:02.000Z", exitCode: 0 });
+			capped.update(newer.id, {
+				status: "completed",
+				startedAt: "2026-07-10T12:00:01.000Z",
+				endedAt: "2026-07-10T12:00:02.000Z",
+				exitCode: 0,
+			});
 			await capped.persist();
 			strictEqual(openLedger({ maxRuns: 20 }).get(evicted.id), null);
 
