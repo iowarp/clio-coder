@@ -116,6 +116,8 @@ export interface EditorSubmitController {
 	cancelActiveEditorBash(): boolean;
 }
 
+type EditorSteerSubmission = "unhandled" | "accepted" | "rejected";
+
 /** Owns editor submission and the one local bash process attached to it. */
 export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubmitController {
 	let activeEditorBash: AbortController | null = null;
@@ -209,14 +211,14 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		deps.ui.requestRender(true);
 	};
 
-	const handleEditorSteerMention = (mention: { target: string; text: string }): boolean => {
+	const submitEditorSteerMention = (mention: { target: string; text: string }): EditorSteerSubmission => {
 		let running: RunningDispatchRef[] = [];
 		try {
 			running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
 		} catch {
 			running = [];
 		}
-		if (running.length === 0) return false;
+		if (running.length === 0) return "unhandled";
 		const resolution = resolveSteerTarget(mention.target, running);
 		if (resolution.kind === "match") {
 			try {
@@ -226,11 +228,12 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					`steer queued for ${resolution.run.agentId} (${resolution.run.runId}); awaiting worker acknowledgement`,
 					`steer:${resolution.run.runId}`,
 				);
+				return "accepted";
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				deps.notify("error", `steer to @${mention.target} failed: ${msg}`, `steer:${mention.target}`);
+				return "rejected";
 			}
-			return true;
 		}
 		if (resolution.kind === "ambiguous") {
 			deps.notify(
@@ -238,15 +241,18 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				`@${mention.target} matches ${resolution.candidates.length} runs: ${formatSteerCandidates(resolution.candidates)}; use a runId prefix`,
 				`steer:${mention.target}`,
 			);
-			return true;
+			return "rejected";
 		}
 		deps.notify(
 			"warning",
 			`no running dispatch matches @${mention.target}; running: ${formatSteerCandidates(running)}`,
 			`steer:${mention.target}`,
 		);
-		return true;
+		return "rejected";
 	};
+
+	const handleEditorSteerMention = (mention: { target: string; text: string }): boolean =>
+		submitEditorSteerMention(mention) !== "unhandled";
 
 	const submitEditorText = (text: string): void => {
 		const trimmed = text.trim();
@@ -256,16 +262,30 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			if (!deps.chat.isStreaming() && !activeEditorBash) {
 				deps.editor.addToHistory(text);
 				deps.editor.setText("");
+			} else {
+				// Pi Editor clears the buffer before invoking onSubmit. A command
+				// refused by either admission guard is still a draft, so put it back
+				// for the operator instead of silently discarding it.
+				deps.editor.setText(text);
 			}
 			if (runEditorBash(text)) deps.ui.requestRender();
 			return;
 		}
 		const steerMention = parseEditorSteerMention(trimmed);
-		if (steerMention && handleEditorSteerMention(steerMention)) {
-			deps.editor.addToHistory(text);
-			deps.editor.setText("");
-			deps.ui.requestRender();
-			return;
+		if (steerMention) {
+			const submission = submitEditorSteerMention(steerMention);
+			if (submission !== "unhandled") {
+				if (submission === "accepted") {
+					deps.editor.addToHistory(text);
+					deps.editor.setText("");
+				} else {
+					// Resolution and dispatch failures are correctable rejections. Pi
+					// has already cleared the editor, so explicitly restore the draft.
+					deps.editor.setText(text);
+				}
+				deps.ui.requestRender();
+				return;
+			}
 		}
 		const command = parseSlashCommand(trimmed);
 		if (isRejectedCommand(command)) {
