@@ -60,17 +60,21 @@ Many Clio CLI subcommands provide structured JSON output for integration with sc
 | Subcommand | Flag | Output Structure |
 | :--- | :--- | :--- |
 | `clio-coder run` | `--json` | Stream of incremental NDJSON event frames (`session`, `agent_start`, `turn_start`, `message_start`, `message_end`, `thinking_delta`, `text_delta`, `tool_execution_start`, `tool_execution_end`, `turn_end`, `agent_end`). |
-| `clio-coder run` | `--json-events terminal` | Filters event stream to emit only `{agent_end, turn_end, notice}`. |
+| `clio-coder run` | `--json-events terminal` | Filters event stream to emit only `{session, turn_start, agent_end, turn_end, notice}` plus the synthesized terminal receipt frame (`startedAt`, `endedAt`, `exitCode`, `usage`). Excludes multi-kilobyte intermediate message bodies (#122). |
+| `clio-coder run` | `--json-events full` | Emits complete event stream with projected assistant messages (`streamed: true`, `textLength`, `thinkingLength`) to eliminate duplicate wire tokens (#122). |
 | `clio-coder agents` | `--json` | JSON array of registered agent recipe metadata objects. |
 | `clio-coder targets` | `--json` | JSON object containing the configured `targets` array. |
 | `clio-coder models` | `--json` | JSON array of catalog models with capability flags. |
 | `clio-coder fleet status` | `--json` | JSON snapshot of cluster nodes, active leases, and drain status. |
 | `clio-coder trace runs` | `--json` | JSON array of trace run records. |
-| `clio-coder trace sql` | Positional query | JSON array of rows returned by the read-only SQLite `SELECT` query. |
+| `clio-coder trace sql` | Positional query | JSON array of rows returned by the read-only SQLite `SELECT` query. Refuses mutating statements with exit code 2. |
 | `clio-coder paths` | `--json` | JSON object mapping platform directory names to absolute paths. |
 
-Under issue #122, `clio-coder run --json-events full` strips content from `message_end`, leaving the content accumulation to the preceding `text_delta` and `thinking_delta` events.
+### Incremental Streaming & Deduplication Invariant (#122, #123)
 
-### Incremental Streaming Invariant
-
-The `--json` stream from `clio-coder run` emits **deltas and increments**, never repeated whole-message snapshots. This guarantees that consumers receive stream tokens linearly without duplicating memory or bandwidth.
+The `--json` stream from `clio-coder run` emits **deltas and increments**, never repeated whole-message snapshots:
+1. `text_delta` and `thinking_delta` stream incremental content tokens.
+2. `message_end` and `turn_end` frames project assistant content blocks to metadata descriptors (`{ streamed: true, textLength }` and `{ streamed: true, thinkingLength, thinkingSignature }`), stripping raw text/thinking bodies so content is never transmitted across the wire twice.
+3. Tool calls and results are preserved intact since they carry execution payloads not present in text deltas.
+4. Terminal accounting and token usage remain fully populated for auditability.
+5. Exit code validation strictly precedes database inspection: unknown flags, missing required positionals, or mutating SQL queries consistently exit `2` with usage syntax printed to `stderr` (#123).
