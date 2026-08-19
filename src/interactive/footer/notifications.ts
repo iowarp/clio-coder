@@ -266,7 +266,7 @@ export function formatNotificationPanel(
 	const lines: string[] = [rule(theme, width, { left: "notices" })];
 	for (const entry of entries.slice(0, maxRows)) {
 		const glyph = theme.fg(notificationToken(entry.level), notificationGlyph(entry.level));
-		lines.push(fitFooterText(`${glyph} ${theme.fg("muted", entry.text)}`, width));
+		lines.push(fitFooterText(`${glyph} ${theme.fg("muted", entry.text)}`, width, GLYPH.ellipsis));
 	}
 	const overflow = entries.length - maxRows;
 	const hint = overflow > 0 ? `+${overflow} more · ${dismiss} dismiss` : `${dismiss} dismiss`;
