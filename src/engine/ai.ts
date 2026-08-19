@@ -23,6 +23,7 @@ import {
 	isContextOverflow as piIsContextOverflow,
 	isRetryableAssistantError as piIsRetryableAssistantError,
 	validateToolArguments as piValidateToolArguments,
+	StringEnum,
 	type Tool,
 	type ToolCall,
 	type Usage,
@@ -38,7 +39,7 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import type { EngineModel } from "./types.js";
 
-export { fauxAssistantMessage, fauxToolCall, registerFauxProvider };
+export { fauxAssistantMessage, fauxToolCall, registerFauxProvider, StringEnum };
 
 export const stream = piStream;
 
