@@ -221,22 +221,25 @@ next `clio-coder` launch refreshes it. `install.json` then reads
 `upgradedFrom: "0.3.0"`; doctor's row becomes
 `0.3.1 (installed ..., upgraded ... from 0.3.0)`.
 
-The first interactive launch after the version changed shows one notice,
-`clio: upgraded 0.3.0 → 0.3.1. What changed at the keyboard: ...`, naming the
-commands that moved into `/settings` (`/targets`, `/fleet`, `/scoped-models`),
-the retired git skills (`commit-crafting`, `create-pr`, `investigate-issue`,
-`review-changes`, replaced by `file-ticket`, `fix-issue`, `ship`), the artifact
-tool's new default location under `.clio-coder/artifacts/`, and the CHANGELOG
-section for the rest. It is shown once per version, recorded as
-`noticedVersion` in `install.json`, and never to a headless `run` or an ACP
-server.
+#### Upgrading to 0.3.2
 
-Settings written by 0.3.0 keep working unchanged. `identity:` is accepted and
-ignored, since nothing ever read it; the next settings write drops the line. A
-fleet node's `clioEntry` is read as `clioCoderEntry` and left spelled as it
-was. `CLIO_CODER_MAX_RUNS` still reads as the older spelling of
-`CLIO_CODER_MAX_DISPATCH_RUNS`. No credentials, sessions, receipts, or memory
-records are touched.
+Upgrading from 0.3.1 to 0.3.2 is automated:
+
+```bash
+clio-coder upgrade
+```
+
+Key lifecycle and operational updates in v0.3.2:
+- Upgraded the underlying engine SDK libraries to 0.84.0 with signal-aware OAuth cancellation.
+- Hardened migration resilience: damaged `credentials.yaml` files no longer block upgrades when no renames are needed (#121); `--skip-migrations` is available as a recovery override.
+- Fullscreen TUI mode (`terminal.tuiMode`, `terminal.fullscreenScrollbar`) is available via Settings → Terminal (restart required).
+- Turn settlement is enforced on `/new`, `/resume`, `/tree`, and `/fork` to cleanly commit in-flight streams before session writer replacement (#114).
+- Resumed and forked session entry replays standardize message prefixes through `src/engine/messages.ts`.
+- `AI_AGENT=clio-coder` is set on all child processes for system attribution.
+
+The first interactive launch after upgrading shows the version notice:
+`clio: upgraded 0.3.1 → 0.3.2. What changed at the keyboard: ...`
+Recorded once per version in `install.json` as `noticedVersion`.
 
 ### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:

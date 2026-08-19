@@ -603,6 +603,15 @@
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Doctor Repair Semantics</h3>
         <p><code>clio-coder doctor</code> is read-only. <code>clio-coder doctor --fix</code> creates missing structure and templates, repairs credential permissions, and refreshes install metadata. Settings are validated directly against the current schema; <code>--fix</code> never rewrites removed keys or migrates an older settings file.</p>
 
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Upgrading to Version 0.3.2</h3>
+        <p>Upgrades run via <code>clio-coder upgrade</code> or <code>npm install -g @iowarp/clio-coder@latest</code>. In v0.3.2:</p>
+        <ul>
+          <li><strong>Engine SDK 0.84.0:</strong> Upgrades provider integrations and adds signal-aware OAuth token cancellation.</li>
+          <li><strong>Migration Resilience (#121):</strong> Damaged <code>credentials.yaml</code> files do not fail upgrade when no provider renames are needed; <code>--skip-migrations</code> is supported.</li>
+          <li><strong>Turn Settlement (#114):</strong> Session switches (<code>/new</code>, <code>/resume</code>, <code>/tree</code>, <code>/fork</code>) cleanly settle and commit in-flight turns before writer handover.</li>
+          <li><strong>Fullscreen Mode:</strong> Settings → Terminal provides opt-in <code>terminal.tuiMode: "fullscreen"</code>.</li>
+        </ul>
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Durable symlink setup</h3>
         <pre><code># checkout repo
 git clone https://github.com/iowarp/clio-coder.git

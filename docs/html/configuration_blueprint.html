@@ -734,6 +734,40 @@ clio-coder</code></pre>
         <p>Routing properties (<code>orchestrator.*</code>, <code>workers.default.*</code>) in <code>settings.yaml</code> are <strong>defaults</strong> that seed a TUI session on launch. Once running, Alt+L or <code>/model</code> modifications only apply to the current active terminal session and are serialized back for next-session setups without affecting other concurrent running TUI instances.</p>
         <p>Writes from multiple processes are synchronized under an advisory lock file (<code>settings.yaml.lock</code>) and saved atomically.</p>
 
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Terminal Settings (`terminal.*`)</h3>
+        <table class="ref-table">
+          <thead>
+            <tr>
+              <th>Setting Key</th>
+              <th>Type / Options</th>
+              <th>Default</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>terminal.tuiMode</code></td>
+              <td><code>"regular" | "fullscreen"</code></td>
+              <td><code>"regular"</code></td>
+              <td>Enables fullscreen alternate-screen renderer with docked composer and footer (restart required).</td>
+            </tr>
+            <tr>
+              <td><code>terminal.fullscreenScrollbar</code></td>
+              <td><code>"hidden" | "auto" | "always"</code></td>
+              <td><code>"auto"</code></td>
+              <td>Controls visibility of the mouse-draggable scrollbar in fullscreen TUI mode.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Local Runtime Resolution &amp; Residency</h3>
+        <ul>
+          <li><strong>LM Studio Instance Resolution (#113):</strong> Model IDs resolve against loaded instances on the target host. Bare keys are never dispatched when resident instances exist, preventing duplicate GPU allocations. Dual-host models are flagged as LM Link peer projections.</li>
+          <li><strong>llama.cpp Residency (#127, #134):</strong> Router unloads are refused when the replacement model is not in the catalog. Idle models reported as <code>sleeping</code> are recognized as resident, eliminating <code>400 model is already running</code> errors.</li>
+          <li><strong>Probed Context Window Precedence (#129):</strong> Live server context window sizes dynamically override static catalog defaults (e.g. server serving 131,072 tokens overrides catalog 262,144 tokens), preventing context overrun and triggering timely auto-compaction.</li>
+          <li><strong>Thinking Token Budgeting (#128, #130):</strong> <code>--thinking max</code> maps monotonically across all 7 levels. vLLM uses <code>thinking_token_budget</code> to reserve space for final answer completion.</li>
+        </ul>
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Measured Dispatch Activation</h3>
         <p>The <code>routing</code> block is a separate fail-closed activation boundary. Joint route selection becomes active only when both the execution role and posture are explicitly listed; empty lists keep the resolver in shadow mode. Agent automation requires exact <code>{agentId, executionRole}</code> pairs under <code>routing.agentAutomation.activeAgentRoles</code>. Manual pins never drift, and hard constraints remove candidates before ranking.</p>
       </div>
