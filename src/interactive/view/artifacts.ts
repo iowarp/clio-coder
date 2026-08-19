@@ -31,6 +31,8 @@ import {
 	readPromptCompileManifest,
 	type SessionPromptCompileRecord,
 } from "../../domains/session/prompt-manifest.js";
+import { foldSessionArtifacts, resolveSessionArtifactPath } from "../../domains/session/session-artifacts.js";
+import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import { formatUsd } from "../footer/widgets.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { clockLocal } from "../format-time.js";
@@ -42,6 +44,7 @@ export type ViewArtifactCategory =
 	| "receipt"
 	| "dispatch"
 	| "task-ledger"
+	| "workspace"
 	| "tool-output"
 	| "protected-artifact"
 	| "compaction"
@@ -91,6 +94,7 @@ export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"receipt",
 	"dispatch",
 	"task-ledger",
+	"workspace",
 	"tool-output",
 	"protected-artifact",
 	"compaction",
@@ -910,6 +914,70 @@ export class TaskLedgerArtifactProvider implements ArtifactProvider {
 	}
 }
 
+function workspaceArtifactFormat(path: string): ViewArtifactFormat {
+	const lower = path.toLowerCase();
+	return lower.endsWith(".md") || lower.endsWith(".markdown") ? "markdown" : "text";
+}
+
+async function loadWorkspaceArtifact(path: string, recordedAt: string): Promise<ViewArtifactLoadResult> {
+	try {
+		const { lines } = await readTextFileLinesCapped(path);
+		return { lines, format: workspaceArtifactFormat(path) };
+	} catch (error) {
+		const err = error as NodeJS.ErrnoException;
+		if (err.code === "ENOENT") {
+			return { lines: [`file no longer on disk (recorded at ${recordedAt})`], format: "text" };
+		}
+		const message = error instanceof Error ? error.message : String(error);
+		return { lines: [`unable to read ${path}: ${message}`], format: "text" };
+	}
+}
+
+/** Files successfully produced by artifact/write/edit on the active session branch. */
+export class WorkspaceArtifactProvider implements ArtifactProvider {
+	readonly category = "workspace" as const;
+	private readonly entries: ReadonlyArray<SessionEntry>;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {
+		const entries = [...sessionEntries(deps)];
+		this.entries = filterEntriesToActivePath(entries, deps.sessionMeta?.pinnedLeafTurnId ?? undefined);
+	}
+
+	async list(): Promise<ViewArtifact[]> {
+		const workspace = this.deps.sessionMeta?.cwd;
+		if (!workspace) return [];
+		return foldSessionArtifacts(this.entries, { workspace }).flatMap((artifact) => {
+			const path = resolveSessionArtifactPath(artifact.path, workspace);
+			if (path === null) return [];
+			const kind = artifact.artifactKind ? ` · ${artifact.artifactKind}` : "";
+			const overwriteLabel = `${artifact.overwrites} overwrite${artifact.overwrites === 1 ? "" : "s"}`;
+			return [
+				{
+					id: `workspace:${path}`,
+					category: this.category,
+					title: safeTitle(`${artifact.path} · ${artifact.tool}${kind}`, artifact.path),
+					timestamp: parseTime(artifact.timestamp),
+					sizeBytes: maybeSizeBytes(path),
+					path,
+					description: `${artifact.tool}${kind} · ${overwriteLabel}`,
+					toolName: artifact.tool,
+					searchText: [
+						artifact.path,
+						path,
+						basename(path),
+						artifact.tool,
+						artifact.artifactKind ?? "",
+						overwriteLabel,
+						String(artifact.overwrites),
+						artifact.turnId,
+					].filter(isNonEmptyString),
+					load: () => loadWorkspaceArtifact(path, artifact.timestamp),
+				},
+			];
+		});
+	}
+}
+
 export class ToolOutputArtifactProvider implements ArtifactProvider {
 	readonly category = "tool-output" as const;
 
@@ -1328,6 +1396,7 @@ export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): Arti
 		new ReceiptArtifactProvider(deps),
 		new DispatchArtifactProvider(deps),
 		new TaskLedgerArtifactProvider(deps),
+		new WorkspaceArtifactProvider(deps),
 		new ToolOutputArtifactProvider(deps),
 		new ProtectedArtifactProvider(deps),
 		new CompactionArtifactProvider(deps),
