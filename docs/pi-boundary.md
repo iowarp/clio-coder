@@ -11,7 +11,7 @@ Clio-owned surface during a dependency bump.
 | Pi export or surface | Clio file or function | Action | Reason |
 | --- | --- | --- | --- |
 | pi-agent-core `truncateHead`, `truncateTail`, `truncateLine`, and `formatSize` | `src/tools/truncate.ts` | Route through Pi. | Pi owns UTF-8-safe truncation. Clio retains its 16 KiB default and `splitLinesForCounting`, which Pi does not export. |
-| pi-ai `StringEnum` | `src/engine/ai.ts` and the former `src/tools/string-enum.ts` | Route through Pi. | The copied TypeBox helper duplicated Pi's compact provider-safe schema. |
+| pi-ai `StringEnum` | `src/engine/ai.ts` and the `src/tools/string-enum.ts` adapter | Route through Pi. | The former TypeBox implementation duplicated Pi's compact provider-safe schema. |
 | pi-agent-core `COMPACTION_SUMMARY_PREFIX`, `COMPACTION_SUMMARY_SUFFIX`, `BRANCH_SUMMARY_PREFIX`, `BRANCH_SUMMARY_SUFFIX`, and `bashExecutionToText` | `src/interactive/chat-renderer.ts` through `src/engine/messages.ts` | Route through Pi. | Replay text must match Pi's `convertToLlm` wording while Clio keeps its `SessionEntry` mapping and replay bounds. |
 | pi-tui `stripTerminalSequences` | `src/domains/session/tree/preview.ts` | Keep the Clio sanitizer. | Pi removes SGR and OSC sequences but intentionally leaves private-mode CSI and character-set escapes that may occur in captured tool output. |
 | pi-ai `isRetryableAssistantError` | `src/domains/session/retry.ts` | Route generic classification through Pi and keep the Clio delta. | Clio additionally recognizes self-hosted model loading and enforces its separate 15-second floor. |
@@ -24,7 +24,7 @@ Clio-owned surface during a dependency bump.
 | pi-ai `clampMaxTokensToContext` | `src/engine/apis/output-budget.ts` | Keep the Clio outer budget. | Clio adds its default output budget, a llama.cpp tool-turn cap, and the loaded context window. Pi's conservative clamp still runs underneath. |
 | pi-ai Anthropic `streamSimple` request assembly | `src/engine/provider-payload.ts` Anthropic thinking patch | Delete the Clio rewrite and route through Pi. | Pi produces the same adaptive effort and token-budget fields from the active thinking level. |
 | pi-ai `OpenAIResponsesOptions.reasoningSummary` | `src/engine/provider-payload.ts` OpenAI reasoning-summary patch | Keep the Clio patch. | Pi's `Agent` path calls `streamSimple`, which fixes this field to `auto` and exposes no caller option. |
-| No Pi equivalent | `src/engine/apis/ollama-native.ts`, `src/engine/apis/lmstudio.ts`, and `src/domains/providers/runtimes/llamacpp-residency.ts` | Keep Clio ownership. | Pi's Ollama provider uses OpenAI completions and has no target residency manager. |
+| No Pi equivalent | `src/engine/apis/ollama-native.ts`, `src/engine/apis/lmstudio.ts`, and `src/engine/apis/llamacpp-residency.ts` | Keep Clio ownership. | Pi's Ollama provider uses OpenAI completions and has no target residency manager. |
 | pi-ai `CredentialStore` and `Models.getAuth` | `src/domains/providers/auth/storage.ts` | Keep Clio ownership. | Clio's locked YAML store, damage control, target-first registry, and runtime overrides are product boundaries. |
 | pi-ai `createModels`, `createProvider`, and `ModelsStore` | `src/domains/providers/**` | Keep Clio ownership. | Targets, nodes, probing, residency, ALCF, and fleet placement are Clio concepts rather than provider-keyed SDK state. |
 | pi-ai `Provider.auth.oauth` | `src/engine/oauth.ts` | Route built-in OAuth through Pi and keep ALCF. | Pi owns provider OAuth implementations. Clio adds the ALCF science-provider flow. |
@@ -64,7 +64,7 @@ Run these contracts first on a Pi bump, before the full gate:
 - `tests/contracts/lmstudio-instance-resolution.test.ts`
 - `tests/contracts/replay-pi-message-text.test.ts`
 - `tests/contracts/tool-string-enum.test.ts`
-- `tests/contracts/tui-width-matrix.test.ts`
+- `tests/smoke/tui-width-matrix.test.ts`
 - The headless JSON stream contracts under `tests/contracts/`.
 
 The complete upgrade procedure lives in

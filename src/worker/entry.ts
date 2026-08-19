@@ -14,6 +14,10 @@
 // id is appended once the spec is parsed.
 process.title = "clio-coder-worker";
 
+import { AI_AGENT_NAME } from "../core/agent-environment.js";
+
+process.env.AI_AGENT = AI_AGENT_NAME;
+
 // Marks this process, and every child a worker's own bash tool spawns, as
 // running inside a dispatched worker rather than the operator's interactive
 // session. `installSkillFromSource` reads this to stamp skill provenance with

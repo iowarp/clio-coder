@@ -215,6 +215,15 @@ describe("contracts/middleware-hooks", () => {
 			strictEqual(result.stdout.trim(), "literal;echo shell-ran");
 		});
 
+		it("marks production command hooks as running under Clio Coder", () => {
+			const result = spawnSyncCommandRunner()(
+				[process.execPath, "-e", "process.stdout.write(process.env.AI_AGENT ?? '')"],
+				{ cwd: scratch(), timeoutMs: 1_000 },
+			);
+			strictEqual(result.code, 0);
+			strictEqual(result.stdout, "clio-coder");
+		});
+
 		it("receipts a command timeout and emits no effect", () => {
 			const receipts: HookReceipt[] = [];
 			const timeoutRunner = (): UserHookCommandResult => ({ code: null, timedOut: true, stdout: "", stderr: "" });

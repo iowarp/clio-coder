@@ -364,7 +364,8 @@ describe("fleet code steps", () => {
 			{ id: "t", argv: ["node"], cwd: "", timeoutMs: 1000, env: ["EXTRA"], description: "" },
 			{ PATH: "/usr/bin", ANTHROPIC_API_KEY: "secret", EXTRA: "kept" },
 		);
-		deepStrictEqual(Object.keys(env).sort(), ["EXTRA", "PATH"]);
+		deepStrictEqual(Object.keys(env).sort(), ["AI_AGENT", "EXTRA", "PATH"]);
+		strictEqual(env.AI_AGENT, "clio-coder");
 	});
 
 	it("a code-report with a verdict that disagrees with its exit code is refused", () => {

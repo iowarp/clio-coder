@@ -41,7 +41,7 @@ replace Clio copies without crossing the product boundary:
 2. Run `npm run pi:surface-diff`. A changed or removed symbol that Clio imports
    is an error; a new export is review input.
 3. Run `npm run ci`, then explicitly run the wire-capture fixtures and
-   `tests/contracts/tui-width-matrix.test.ts` from the
+   `tests/smoke/tui-width-matrix.test.ts` from the
    [Pi regression net](pi-boundary.md#pi-regression-net).
 4. Walk Pi's fixed-issue list against the
    [Pi SDK boundary table](pi-boundary.md). For every fix in a surface Clio

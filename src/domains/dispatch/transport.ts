@@ -22,6 +22,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { AI_AGENT_NAME } from "../../core/agent-environment.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { RunNodeIdentity } from "./types.js";
@@ -122,7 +123,7 @@ function remoteEnvAssignments(node: SshNodeEndpoint): string {
 	// is the group an abort must signal.
 	const labels = (node.labels ?? []).map((label) => label.trim()).filter((label) => label.length > 0);
 	const labelAssignment = labels.length > 0 ? ` CLIO_CODER_WORKER_LABELS=${shellQuote(labels.join(","))}` : "";
-	return `CLIO_CODER_RESIDENCY=${residency} CLIO_CODER_WORKER_PGID=$$${labelAssignment}`;
+	return `AI_AGENT=${AI_AGENT_NAME} CLIO_CODER_RESIDENCY=${residency} CLIO_CODER_WORKER_PGID=$$${labelAssignment}`;
 }
 
 export function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string): string {
