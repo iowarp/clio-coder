@@ -696,7 +696,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 				`the receipt must not restate the operator's prompt: ${result.stdout}`,
 			);
 			// The final frame is the settlement, and it is what carries the status.
-			const turnEnd = events.findLast((event) => event.type === "turn_end");
+			const turnEnd = events.filter((event) => event.type === "turn_end").pop();
 			strictEqual(turnEnd?.exitCode, 0);
 			ok(typeof turnEnd?.endedAt === "string", "the receipt frame carries the settle time");
 		} finally {
