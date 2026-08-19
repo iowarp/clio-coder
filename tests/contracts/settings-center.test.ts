@@ -262,6 +262,8 @@ describe("contracts/settings center", () => {
 		const byId = new Map(buildSettingItems(settingsWithTargets()).map((item) => [item.id, item]));
 		strictEqual(byId.get("budget.concurrency")?.scope, "restart");
 		strictEqual(byId.get("runtimePlugins")?.scope, "restart");
+		strictEqual(byId.get("terminal.tuiMode")?.scope, "restart");
+		strictEqual(byId.get("terminal.fullscreenScrollbar")?.scope, "restart");
 		strictEqual(byId.get("autonomy")?.scope, "live");
 		strictEqual(byId.get("retry.maxRetries")?.scope, "live");
 	});
@@ -815,6 +817,16 @@ describe("contracts/settings center", () => {
 				assert: (s) => strictEqual(s.terminal.outputVerbosity, "verbose"),
 			},
 			{
+				id: "terminal.tuiMode",
+				value: "fullscreen",
+				assert: (s) => strictEqual(s.terminal.tuiMode, "fullscreen"),
+			},
+			{
+				id: "terminal.fullscreenScrollbar",
+				value: "always",
+				assert: (s) => strictEqual(s.terminal.fullscreenScrollbar, "always"),
+			},
+			{
 				id: "runtimePlugins",
 				value: "@scope/a, @scope/b",
 				assert: (s) => deepStrictEqual(s.runtimePlugins, ["@scope/a", "@scope/b"]),
@@ -996,7 +1008,12 @@ describe("contracts/settings center", () => {
 		ok(!detail.includes("Autonomy level"), "the catalog must not render behind the detail page");
 
 		center.handleInput(ESC);
-		center.setSelection("terminal", 2); // theme, read-only
+		const terminalItems = buildSettingsSections(buildSettingItems(settingsWithTargets())).find(
+			(section) => section.id === "terminal",
+		)?.items;
+		const themeIndex = terminalItems?.findIndex((item) => item.id === "theme") ?? -1;
+		ok(themeIndex >= 0, "terminal section exposes the read-only theme row");
+		center.setSelection("terminal", themeIndex);
 		strictEqual(center.getSelection().rowId, "theme");
 		center.handleInput(ENTER);
 		strictEqual(center.getSelection().depth, "rows", "a read-only leaf opens nothing");

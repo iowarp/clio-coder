@@ -240,9 +240,17 @@ describe("contracts/config", () => {
 			budget: { concurrency: 0 },
 			targets: [{ runtime: "openai-compat" }],
 			retry: { maxRetries: 1.5 },
+			terminal: { tuiMode: "windowed", fullscreenScrollbar: "sometimes" },
 		});
 		const paths = result.issues.map((issue) => issue.path).sort();
-		deepStrictEqual(paths, ["autonomy", "budget.concurrency", "retry.maxRetries", "targets[0].id"]);
+		deepStrictEqual(paths, [
+			"autonomy",
+			"budget.concurrency",
+			"retry.maxRetries",
+			"targets[0].id",
+			"terminal.fullscreenScrollbar",
+			"terminal.tuiMode",
+		]);
 		// Invalid fields fall back to defaults on the built settings.
 		strictEqual(result.settings.autonomy, DEFAULT_SETTINGS.autonomy);
 		strictEqual(result.settings.budget.concurrency, "auto");
@@ -462,6 +470,19 @@ describe("contracts/config", () => {
 		const diff = diffSettings(prev, next);
 		deepStrictEqual(diff.hotReload, []);
 		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.threshold"]);
+	});
+
+	it("validates fullscreen terminal settings and applies them after restart", () => {
+		const result = validateSettings({
+			terminal: { tuiMode: "fullscreen", fullscreenScrollbar: "always" },
+		});
+		deepStrictEqual(result.issues, []);
+		strictEqual(result.settings.terminal.tuiMode, "fullscreen");
+		strictEqual(result.settings.terminal.fullscreenScrollbar, "always");
+		const diff = diffSettings(DEFAULT_SETTINGS, result.settings);
+		deepStrictEqual(diff.hotReload, []);
+		deepStrictEqual(diff.nextTurn, []);
+		deepStrictEqual(diff.restartRequired.sort(), ["terminal.fullscreenScrollbar", "terminal.tuiMode"]);
 	});
 
 	it("skips targets whose runtime is unregistered or non-http in scoped cycling", () => {

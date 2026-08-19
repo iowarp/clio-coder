@@ -1,9 +1,11 @@
-import type { Component, Terminal } from "../engine/tui.js";
-import { ProcessTerminal, type TUI, TuiMainScreen } from "../engine/tui.js";
+import type { Component, Terminal, TuiMode } from "../engine/tui.js";
+import { ProcessTerminal, type TUI, TuiAltScreen, TuiMainScreen } from "../engine/tui.js";
 import { createRenderTrace, type RenderTrace, renderTracePath, traceTerminalWrites } from "./render-trace.js";
 
 export interface InteractiveShellTui {
+	readonly mode?: TuiMode;
 	addChild(component: Component): void;
+	setLayoutRoot?(component: Component | undefined): void;
 	setFocus(component: Component): void;
 	start(): void;
 	stop(): void;
@@ -70,6 +72,7 @@ export function createInteractiveShell<TTerminal extends Terminal, TTui extends 
 			if (mounted) return;
 			mounted = true;
 			tui.addChild(root);
+			if (tui.mode === "fullscreen") tui.setLayoutRoot?.(root);
 			tui.setFocus(focus);
 			tui.start();
 		},
@@ -116,7 +119,9 @@ export function getActiveRenderTrace(): RenderTrace | null {
 }
 
 /** Production factories stay here so the composition root does not own them. */
-export function createProcessInteractiveShell(): InteractiveShell<ProcessTerminal, TUI> {
+export function createProcessInteractiveShell(
+	options: { tuiMode?: TuiMode } = {},
+): InteractiveShell<ProcessTerminal, TUI> {
 	const tracePath = renderTracePath();
 	if (tracePath) {
 		activeRenderTrace = createRenderTrace(tracePath);
@@ -129,6 +134,7 @@ export function createProcessInteractiveShell(): InteractiveShell<ProcessTermina
 			const terminal = new ProcessTerminal();
 			return trace ? traceTerminalWrites(terminal, trace) : terminal;
 		},
-		createTui: (terminal) => new TuiMainScreen(terminal),
+		createTui: (terminal) =>
+			options.tuiMode === "fullscreen" ? new TuiAltScreen(terminal) : new TuiMainScreen(terminal),
 	});
 }

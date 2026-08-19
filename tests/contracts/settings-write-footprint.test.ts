@@ -64,6 +64,32 @@ describe("contracts/settings-write-footprint", () => {
 		strictEqual(readSettings().terminal.outputVerbosity, "verbose");
 	});
 
+	it("persists fullscreen preferences without materializing terminal defaults", () => {
+		for (const testCase of [
+			{ leaf: "tuiMode", value: "fullscreen" },
+			{ leaf: "fullscreenScrollbar", value: "always" },
+		] as const) {
+			const before = seedMinimalFile();
+			updateSettings((settings) => {
+				if (testCase.leaf === "tuiMode") settings.terminal.tuiMode = testCase.value;
+				else settings.terminal.fullscreenScrollbar = testCase.value;
+			});
+
+			const after = readFileSync(settingsPath(), "utf8");
+			deepStrictEqual(addedLines(before, after), ["terminal:", `${testCase.leaf}: ${testCase.value}`]);
+			const terminal = (parseYaml(after) as { terminal: Record<string, unknown> }).terminal;
+			deepStrictEqual(terminal, { [testCase.leaf]: testCase.value });
+			const loaded = readSettings().terminal;
+			strictEqual(loaded[testCase.leaf], testCase.value);
+			strictEqual(loaded.showTerminalProgress, false);
+			strictEqual(loaded.outputVerbosity, "default");
+			strictEqual(
+				testCase.leaf === "tuiMode" ? loaded.fullscreenScrollbar : loaded.tuiMode,
+				testCase.leaf === "tuiMode" ? "auto" : "regular",
+			);
+		}
+	});
+
 	it("leaves untouched saved keys byte-identical across repeated saves", () => {
 		seedMinimalFile();
 		updateSettings((settings) => {

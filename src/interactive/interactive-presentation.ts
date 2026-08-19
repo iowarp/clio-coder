@@ -344,13 +344,19 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
 		requestRender,
 	});
-	const root = factories.buildLayout({
-		banner,
-		chat: chatPanel,
-		pending: followUpQueuePanel,
-		editor,
-		footer: footer.view,
-	});
+	const root = factories.buildLayout(
+		{
+			banner,
+			chat: chatPanel,
+			pending: followUpQueuePanel,
+			editor,
+			footer: footer.view,
+		},
+		{
+			mode: settings.terminal.tuiMode,
+			fullscreenScrollbar: settings.terminal.fullscreenScrollbar,
+		},
+	);
 	deps.mount(root, editor);
 
 	const scheduleInterval = deps.scheduleInterval ?? ((callback, intervalMs) => setInterval(callback, intervalMs));

@@ -384,7 +384,7 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 }
 
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
-	const shell = createProcessInteractiveShell();
+	const shell = createProcessInteractiveShell({ tuiMode: deps.getSettings?.().terminal.tuiMode ?? "regular" });
 	const { terminal, tui } = shell;
 	let applicationController: ApplicationController;
 	const workspaceFacts = createWorkspaceFacts({

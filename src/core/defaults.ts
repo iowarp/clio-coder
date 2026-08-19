@@ -113,11 +113,17 @@ export interface RetrySettings {
 }
 
 export type OutputVerbosity = "minimal" | "default" | "verbose";
+export type TuiMode = "regular" | "fullscreen";
+export type FullscreenScrollbar = "hidden" | "auto" | "always";
 
 export interface TerminalSettings {
 	showTerminalProgress: boolean;
 	/** Transcript detail: collapsed, balanced, or fully transparent. */
 	outputVerbosity: OutputVerbosity;
+	/** Regular scrollback-preserving renderer or alternate-screen sticky layout. */
+	tuiMode: TuiMode;
+	/** Fullscreen transcript scrollbar visibility. */
+	fullscreenScrollbar: FullscreenScrollbar;
 }
 
 export interface ModelSelectorSettings {
@@ -314,6 +320,8 @@ export const DEFAULT_SETTINGS = {
 	terminal: {
 		showTerminalProgress: false,
 		outputVerbosity: "default",
+		tuiMode: "regular",
+		fullscreenScrollbar: "auto",
 	} as TerminalSettings,
 	skills: {
 		trustProjectCompatRoots: false,
@@ -525,6 +533,11 @@ terminal:
   showTerminalProgress: false
   # Transcript detail: minimal, default, or verbose. Also changeable with /output.
   outputVerbosity: default
+  # regular preserves terminal scrollback; fullscreen keeps the editor/footer
+  # sticky above an independently scrollable alternate-screen transcript.
+  tuiMode: regular
+  # hidden, auto (visible while scrolling), or always in fullscreen mode.
+  fullscreenScrollbar: auto
 
 # Skills are local prompt resources. Project-local compatibility roots such as
 # .agents/skills, .claude/skills, .codex/skills, .github/skills, and

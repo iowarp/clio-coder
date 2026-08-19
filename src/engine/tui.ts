@@ -21,6 +21,7 @@ export type {
 	MarkdownTheme,
 	OverlayHandle,
 	OverlayOptions,
+	ScrollViewScrollbar,
 	SelectItem,
 	SelectListLayoutOptions,
 	SettingItem,
@@ -29,6 +30,7 @@ export type {
 	Terminal,
 	Tokens,
 	TUI,
+	TuiMode,
 } from "@earendil-works/pi-tui";
 
 /**
@@ -89,11 +91,14 @@ export {
 	Marked,
 	matchesKey,
 	ProcessTerminal,
+	ScrollView,
 	setKeybindings,
 	Text,
 	TUI_KEYBINDINGS,
+	TuiAltScreen,
 	TuiMainScreen,
 	truncateToWidth,
+	VStack,
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
