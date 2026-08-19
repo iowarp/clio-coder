@@ -1,12 +1,13 @@
 import { ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { DEFAULT_COMPACTION_THRESHOLD, shouldCompact } from "../../src/domains/session/compaction/auto.js";
 import { compact, textFromAssistant } from "../../src/domains/session/compaction/compact.js";
 import { maskStaleObservations } from "../../src/domains/session/compaction/mask-observations.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
-import { fauxAssistantMessage, registerFauxProvider } from "../../src/engine/ai.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { buildReplayAgentMessagesFromTurns, selectReplayEntries } from "../../src/interactive/chat-renderer.js";
 import { renderCompactionSummaryLine } from "../../src/interactive/renderers/compaction-summary.js";

@@ -9,14 +9,10 @@
 export type {
 	AgentEvent,
 	AgentMessage,
-	AgentOptions,
-	AgentState,
 	AgentTool,
 	AgentToolResult,
 	AgentToolUpdateCallback,
-	StreamFn,
 } from "@earendil-works/pi-agent-core";
-export { Agent } from "@earendil-works/pi-agent-core";
 
 import type { AgentState as PiAgentState } from "@earendil-works/pi-agent-core";
 
@@ -55,7 +51,6 @@ import type { Api as PiApi, Model as PiModel } from "@earendil-works/pi-ai";
  */
 export type EngineModel = PiModel<PiApi>;
 export type {
-	EditorOptions,
 	EditorTheme,
 	SelectItem,
 	SelectListLayoutOptions,

@@ -1,5 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { BusChannels, type ContextActivityPayload } from "../../src/core/bus-events.js";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -14,7 +16,6 @@ import { collectSessionEntries } from "../../src/domains/session/compaction/sess
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
-import { fauxAssistantMessage, registerFauxProvider } from "../../src/engine/ai.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "../../src/engine/types.js";
 import { createProductionAutoCompact, resolveApiKeyForTarget } from "../../src/entry/orchestrator.js";
