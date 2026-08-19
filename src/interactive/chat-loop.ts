@@ -738,6 +738,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const promptHash = compiledPrompt?.systemPromptHash ?? null;
 			state.lastRunSnapshot = {
 				targetId: agentRuntime.targetId,
+				targetUrl: agentRuntime.runtimeResolution.target.url ?? null,
 				runtimeId: agentRuntime.runtimeId,
 				runtimeKind: agentRuntime.runtimeResolution.runtimeKind,
 				wireModelId: agentRuntime.wireModelId,

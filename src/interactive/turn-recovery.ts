@@ -79,9 +79,10 @@ export interface TurnRecovery {
  * that landed in the same window wins: `activeInterruptReason` is set only by
  * `ChatLoop.cancel`, so the stall reason is dropped rather than retried.
  *
- * The failure's assistant message is rewritten in place because it is the same
- * object the ledger persists and the transcript renders; without it the turn
- * would read "[aborted] Request was aborted." instead of naming the stall.
+ * The failure gets a new assistant message because the provider's message-end
+ * event may already have persisted another object before the run settles. A
+ * distinct corrected message is therefore eligible for durable persistence and
+ * becomes the final transcript event consumed by headless accounting.
  */
 export function reclassifyStallAbort(
 	state: ChatTurnState,
@@ -90,12 +91,10 @@ export function reclassifyStallAbort(
 	const reason = state.streamStallReason;
 	state.streamStallReason = null;
 	if (reason === null || failure.stopReason !== "aborted" || state.activeInterruptReason !== null) return failure;
-	if (failure.message) {
-		const message = failure.message as { stopReason?: unknown; errorMessage?: unknown };
-		message.stopReason = "error";
-		message.errorMessage = reason;
-	}
-	return { ...failure, stopReason: "error", errorMessage: reason };
+	const message = failure.message
+		? ({ ...failure.message, stopReason: "error", errorMessage: reason } as AgentMessage)
+		: undefined;
+	return { ...failure, stopReason: "error", errorMessage: reason, ...(message ? { message } : {}) };
 }
 
 export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {

@@ -211,6 +211,13 @@ function countToolStats(stats: Map<string, ToolCallStat>): number {
 	return count;
 }
 
+function prefixHeadlessFailure(chat: ChatLoop, message: string): string {
+	const snapshot = chat.lastRunSnapshot?.();
+	if (!snapshot) return message;
+	const url = snapshot.targetUrl ?? "endpoint unavailable";
+	return `target '${snapshot.targetId}' (${snapshot.runtimeId} ${url}): ${message}`;
+}
+
 /**
  * The events `--json-events terminal` lets through, alongside the `turn_start`
  * and `turn_end` frames this mode synthesizes itself.
@@ -550,7 +557,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage = result.abortReason;
 	} else if (result.error) {
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage: result.error };
-		stderrMessage = result.error;
+		stderrMessage = prefixHeadlessFailure(chat, result.error);
 	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
 		const failureMessage =
 			result.lastNotice !== null
