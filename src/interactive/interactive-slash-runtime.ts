@@ -105,6 +105,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openCost: () => void;
 	openContextView: () => void;
 	openTasks: () => void;
+	openDecisions: () => void;
 	openMemory: () => void;
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	openView: (filter?: string) => void;
@@ -256,6 +257,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openCost: deps.openCost,
 		openContextView: deps.openContextView,
 		openTasks: deps.openTasks,
+		openDecisions: deps.openDecisions,
 		...(userTasks
 			? {
 					userTasks: {

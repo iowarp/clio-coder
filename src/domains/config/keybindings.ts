@@ -23,6 +23,7 @@ export interface ClioAppKeybindings {
 	"clio.status.toggle": true;
 	"clio.session.tree": true;
 	"clio.dispatchBoard.toggle": true;
+	"clio.decisions.open": true;
 	"clio.dispatch.background": true;
 	"clio.model.select": true;
 	"clio.model.cycleForward": true;
@@ -60,10 +61,10 @@ declare module "@earendil-works/pi-tui" {
  * `ctrl+d`, and the portable `ctrl+g` leader retained because every terminal
  * already transmits them). `Alt + <letter>` decodes from the legacy
  * `ESC <letter>` sequence on meta-capable terminals. The chosen letters avoid
- * pi-tui's editor reserves (`alt+b/f/d/y`, and the `ESC n`/`ESC p` aliases for
- * `alt+down`/`alt+up`) and the readline/terminal line-editing reserves the
- * router relies on for editor behavior. The CSI-u/reserved-key detector in
- * `keybinding-manager.ts` stays as a safety net for user rebinds.
+ * pi-tui's editor reserves except for `Alt+D`, which intentionally opens the
+ * decision board at the application-input boundary before the editor sees it.
+ * The CSI-u/reserved-key detector in `keybinding-manager.ts` stays as a safety
+ * net for user rebinds.
  */
 export const CLIO_APP_KEYBINDINGS = {
 	"clio.thinking.cycle": {
@@ -85,6 +86,10 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.dispatchBoard.toggle": {
 		defaultKeys: "alt+w",
 		description: "Toggle the dispatch (workers) board overlay",
+	},
+	"clio.decisions.open": {
+		defaultKeys: "alt+d",
+		description: "Open the settled interview decision board",
 	},
 	"clio.dispatch.background": {
 		// Ctrl+B alone is pi-tui's editor cursor-left, so the Claude Code chord

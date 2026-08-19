@@ -148,7 +148,7 @@ function applicationDeps(overrides: Partial<ApplicationControllerDeps>): Applica
 describe("modal precedence", () => {
 	it("keeps every open overlay ahead of the editor and active run", () => {
 		strictEqual(overlayOwnsInput("closed"), false);
-		for (const state of ["tasks", "agents", "settings", "ask-user"] satisfies ReadonlyArray<OverlayState>) {
+		for (const state of ["tasks", "decisions", "agents", "settings", "ask-user"] satisfies ReadonlyArray<OverlayState>) {
 			strictEqual(overlayOwnsInput(state), true, state);
 		}
 	});
@@ -211,6 +211,25 @@ describe("modal precedence", () => {
 			strictEqual(dispatchInteractiveAction(id, deps), true, id);
 			strictEqual(calls.at(-1), label, id);
 		}
+	});
+
+	it("binds Alt+D to the decision board and leaves its component in control of modal input", () => {
+		strictEqual(CLIO_APP_KEYBINDINGS["clio.decisions.open"].defaultKeys, "alt+d");
+		const manager = createKeybindingManagerForTesting();
+		strictEqual(manager.matches("\x1bd", "clio.decisions.open"), true);
+		let opens = 0;
+		strictEqual(
+			dispatchInteractiveAction("clio.decisions.open", {
+				openDecisions: () => {
+					opens += 1;
+				},
+			} as KeyBindingDeps),
+			true,
+		);
+		strictEqual(opens, 1);
+		const { deps } = makeDeps();
+		strictEqual(routeOverlayKey("c", "decisions", deps, neverMatches), false);
+		strictEqual(routeOverlayKey(ESC, "decisions", deps, neverMatches), false);
 	});
 });
 

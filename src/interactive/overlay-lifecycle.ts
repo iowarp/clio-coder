@@ -33,6 +33,7 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "getSessionId"
 	| "getSettings"
 	| "getTaskBoard"
+	| "getDecisionBoard"
 	| "getTaskMemoryStatus"
 	| "interop"
 	| "observability"
@@ -46,6 +47,7 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "resources"
 	| "session"
 	| "stateDir"
+	| "supersedeDecision"
 	| "toolRegistry"
 	| "writeSettings"
 >;
@@ -94,6 +96,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	openContextOverlay?: typeof import("./context-overlay.js").openContextOverlay;
 	openContextResetOverlay?: typeof import("./overlays/context-reset.js").openContextResetOverlay;
 	openTasksOverlay?: typeof import("./tasks-overlay.js").openTasksOverlay;
+	openDecisionsOverlay?: typeof import("./overlays/decisions.js").openDecisionsOverlay;
 	openMemoryOverlay?: typeof import("./memory-overlay.js").openMemoryOverlay;
 	openViewOverlay?: typeof import("./view/view-overlay.js").openViewOverlay;
 	openHelpOverlay?: typeof import("./overlays/help-reference.js").openHelpOverlay;
@@ -118,6 +121,7 @@ export interface OverlayLifecycleController {
 	openContextResetOverlayState(): void;
 	toggleFooterDashboardState(): void;
 	openTasksOverlayState(): void;
+	openDecisionsOverlayState(): void;
 	openMemoryOverlayState(): void;
 	openViewOverlayState(initialFilter?: string): void;
 	openModelOverlayState(): void;
@@ -169,6 +173,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openContextOverlay: openContextOverlayFactory,
 		openContextResetOverlay: openContextResetOverlayFactory,
 		openTasksOverlay: openTasksOverlayFactory,
+		openDecisionsOverlay: openDecisionsOverlayFactory,
 		openMemoryOverlay: openMemoryOverlayFactory,
 		openViewOverlay: openViewOverlayFactory,
 		openHelpOverlay: openHelpOverlayFactory,
@@ -334,6 +339,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
 		requestRender: () => tui.requestRender(),
 		...(deps.app.getTaskBoard ? { getTaskBoard: deps.app.getTaskBoard } : {}),
+		...(deps.app.getDecisionBoard ? { getDecisionBoard: deps.app.getDecisionBoard } : {}),
+		...(deps.app.supersedeDecision ? { supersedeDecision: deps.app.supersedeDecision } : {}),
+		submitChat: (text) => deps.getSlashContext().submitChat(text),
 		...(deps.app.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.app.getTaskMemoryStatus } : {}),
 		dataDir: deps.app.dataDir,
 		notify,
@@ -350,6 +358,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openContextOverlayFactory ? { openContextOverlay: openContextOverlayFactory } : {}),
 		...(openContextResetOverlayFactory ? { openContextResetOverlay: openContextResetOverlayFactory } : {}),
 		...(openTasksOverlayFactory ? { openTasksOverlay: openTasksOverlayFactory } : {}),
+		...(openDecisionsOverlayFactory ? { openDecisionsOverlay: openDecisionsOverlayFactory } : {}),
 		...(openMemoryOverlayFactory ? { openMemoryOverlay: openMemoryOverlayFactory } : {}),
 		...(openViewOverlayFactory ? { openViewOverlay: openViewOverlayFactory } : {}),
 	});
@@ -362,6 +371,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openContextResetOverlayState = overlayGeneralOpeners.openContextReset;
 	const toggleFooterDashboardState = overlayGeneralOpeners.toggleFooter;
 	const openTasksOverlayState = overlayGeneralOpeners.openTasks;
+	const openDecisionsOverlayState = overlayGeneralOpeners.openDecisions;
 	const openMemoryOverlayState = overlayGeneralOpeners.openMemory;
 	const openViewOverlayState = overlayGeneralOpeners.openView;
 	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
@@ -380,6 +390,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openContextResetOverlayState,
 		toggleFooterDashboardState,
 		openTasksOverlayState,
+		openDecisionsOverlayState,
 		openMemoryOverlayState,
 		openViewOverlayState,
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,

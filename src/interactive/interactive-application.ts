@@ -14,6 +14,7 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
+import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
@@ -126,6 +127,10 @@ export interface InteractiveDeps {
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
 	/** Live session task board for the footer tasks row and the /tasks overlay. */
 	getTaskBoard?: () => TaskBoardSnapshot | null;
+	/** Settled interview snapshots folded from the active session branch. */
+	getDecisionBoard?: () => ReadonlyArray<DecisionLedgerEntry>;
+	/** Append an acknowledged operator-authored decision revision. */
+	supersedeDecision?: (interviewId: string, key: string, correction?: string) => unknown;
 	/** Project-scoped operator task inbox used by `/tasks` subcommands. */
 	userTasks?: UserTasksStore;
 	/** Live, read-only task-memory state for status surfaces and the /memory overlay. */
@@ -260,6 +265,7 @@ export interface KeyBindingDeps {
 	requestShutdown: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
+	openDecisions: () => void;
 	backgroundDispatch: () => void;
 	openModelSelector: () => void;
 	openTree: () => void;
@@ -343,6 +349,9 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 		case "clio.dispatchBoard.toggle":
 			deps.toggleDispatchBoard();
 			return true;
+		case "clio.decisions.open":
+			deps.openDecisions();
+			return true;
 		case "clio.dispatch.background":
 			deps.backgroundDispatch();
 			return true;
@@ -371,6 +380,7 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 		"clio.thinking.cycle",
 		"clio.session.tree",
 		"clio.dispatchBoard.toggle",
+		"clio.decisions.open",
 		"clio.dispatch.background",
 		"clio.model.select",
 		// Match cycleBackward before cycleForward so a user rebind where one key
@@ -532,6 +542,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openCost: () => openCostOverlayState(),
 		openContextView: () => openContextViewOverlayState(),
 		openTasks: () => openTasksOverlayState(),
+		openDecisions: () => openDecisionsOverlayState(),
 		openMemory: () => openMemoryOverlayState(),
 		...(deps.seedTaskMemory ? { seedTaskMemory: deps.seedTaskMemory } : {}),
 		openView: (filter) => openViewOverlayState(filter),
@@ -615,6 +626,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openContextViewOverlayState,
 		openContextResetOverlayState,
 		openTasksOverlayState,
+		openDecisionsOverlayState,
 		openMemoryOverlayState,
 		openViewOverlayState,
 		openModelOverlayState,

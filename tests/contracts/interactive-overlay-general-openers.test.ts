@@ -8,12 +8,14 @@ import {
 	type OverlayLifecycleRuntimeDeps,
 } from "../../src/interactive/overlay-lifecycle.js";
 import type { OpenContextResetOverlayDeps } from "../../src/interactive/overlays/context-reset.js";
+import type { OpenDecisionsOverlayOptions } from "../../src/interactive/overlays/decisions.js";
 
 type GeneralOpenerSeams = {
 	openCostOverlay?: typeof import("../../src/interactive/cost-overlay.js").openCostOverlay;
 	openContextOverlay?: typeof import("../../src/interactive/context-overlay.js").openContextOverlay;
 	openContextResetOverlay?: typeof import("../../src/interactive/overlays/context-reset.js").openContextResetOverlay;
 	openTasksOverlay?: typeof import("../../src/interactive/tasks-overlay.js").openTasksOverlay;
+	openDecisionsOverlay?: typeof import("../../src/interactive/overlays/decisions.js").openDecisionsOverlay;
 	openMemoryOverlay?: typeof import("../../src/interactive/memory-overlay.js").openMemoryOverlay;
 	openViewOverlay?: typeof import("../../src/interactive/view/view-overlay.js").openViewOverlay;
 };
@@ -88,6 +90,7 @@ describe("contracts/interactive general overlay openers", () => {
 				openCostOverlay: () => observe("cost"),
 				openContextOverlay: () => observe("context"),
 				openTasksOverlay: () => observe("tasks"),
+				openDecisionsOverlay: () => observe("decisions"),
 				openMemoryOverlay: () => observe("memory"),
 				openViewOverlay: (_tui, options) => {
 					strictEqual(options.initialFilter, "errors");
@@ -101,6 +104,7 @@ describe("contracts/interactive general overlay openers", () => {
 			() => lifecycle.openCostOverlayState(),
 			() => lifecycle.openContextViewOverlayState(),
 			() => lifecycle.openTasksOverlayState(),
+			() => lifecycle.openDecisionsOverlayState(),
 			() => lifecycle.openMemoryOverlayState(),
 			() => lifecycle.openViewOverlayState("errors"),
 		]) {
@@ -108,7 +112,109 @@ describe("contracts/interactive general overlay openers", () => {
 			lifecycle.closeOverlay();
 		}
 
-		deepStrictEqual(observed, ["cost:cost", "context:context-view", "tasks:tasks", "memory:memory", "view:view"]);
+		deepStrictEqual(observed, [
+			"cost:cost",
+			"context:context-view",
+			"tasks:tasks",
+			"decisions:decisions",
+			"memory:memory",
+			"view:view",
+		]);
+		lifecycle.dispose();
+	});
+
+	it("persists a correction, closes the board, and submits exactly one ordinary operator turn", () => {
+		const events: string[] = [];
+		let options: OpenDecisionsOverlayOptions | undefined;
+		const handle = { hide: () => events.push("hide") } as unknown as OverlayHandle;
+		const runtime = makeRuntime({
+			events,
+			app: {
+				getDecisionBoard: () => [],
+				supersedeDecision: (interviewId, key, correction) => {
+					events.push(`supersede:${interviewId}:${key}:${correction ?? ""}`);
+				},
+			},
+			runtime: {
+				getSlashContext: () =>
+					({
+						submitChat: (text: string) => events.push(`submit:${text}`),
+					}) as never,
+				openDecisionsOverlay: (_tui, getInterviews, overlayOptions) => {
+					deepStrictEqual(getInterviews(), []);
+					options = overlayOptions;
+					return handle;
+				},
+			},
+		});
+		const lifecycle = createOverlayLifecycle(runtime);
+		lifecycle.openDecisionsOverlayState();
+
+		options?.onCorrection(
+			{ interviewId: "interview-1", key: "scope", label: "Scope", value: "CLI only" },
+			"Include the TUI",
+		);
+
+		strictEqual(lifecycle.getState(), "closed");
+		strictEqual(events.filter((event) => event.startsWith("supersede:")).length, 1);
+		deepStrictEqual(
+			events.filter((event) => event.startsWith("submit:")),
+			[
+				'submit:Decision "Scope" (previously: CLI only) is superseded by the operator. New direction: Include the TUI. Acknowledge and adjust the plan.',
+			],
+		);
+		strictEqual(
+			events.findIndex((event) => event.startsWith("supersede:")) < events.indexOf("hide"),
+			true,
+			"the acknowledged snapshot precedes closing and submission",
+		);
+		strictEqual(
+			events.indexOf("hide") < events.findIndex((event) => event.startsWith("submit:")),
+			true,
+			"the single-overlay guard is released before the ordinary user turn",
+		);
+		lifecycle.dispose();
+	});
+
+	it("keeps the decision board open and submits nothing when the revision append fails", () => {
+		const events: string[] = [];
+		let options: OpenDecisionsOverlayOptions | undefined;
+		const runtime = makeRuntime({
+			events,
+			app: {
+				getDecisionBoard: () => [],
+				supersedeDecision: () => {
+					throw new Error("ledger unavailable");
+				},
+			},
+			runtime: {
+				getSlashContext: () => ({ submitChat: (text: string) => events.push(`submit:${text}`) }) as never,
+				openDecisionsOverlay: (_tui, _getInterviews, overlayOptions) => {
+					options = overlayOptions;
+					return { hide: () => events.push("hide") } as unknown as OverlayHandle;
+				},
+			},
+		});
+		const lifecycle = createOverlayLifecycle(runtime);
+		lifecycle.openDecisionsOverlayState();
+
+		let message = "";
+		try {
+			options?.onCorrection(
+				{ interviewId: "interview-1", key: "scope", label: "Scope", value: "CLI only" },
+				"Include the TUI",
+			);
+		} catch (error) {
+			message = error instanceof Error ? error.message : String(error);
+		}
+
+		strictEqual(message, "ledger unavailable");
+		strictEqual(lifecycle.getState(), "decisions");
+		strictEqual(events.includes("hide"), false);
+		strictEqual(
+			events.some((event) => event.startsWith("submit:")),
+			false,
+		);
 		lifecycle.dispose();
 	});
 

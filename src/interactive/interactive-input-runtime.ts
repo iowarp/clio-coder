@@ -20,6 +20,7 @@ export interface InteractiveInputKeyActionDeps {
 	requestShutdown: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
+	openDecisions: () => void;
 	backgroundDispatch: () => void;
 	openModelSelector: () => void;
 	openTree: () => void;
@@ -62,6 +63,7 @@ export interface InteractiveInputRuntimeDeps {
 		toggleDispatchBoardOverlay(): void;
 		openModelOverlayState(): void;
 		openTreeOverlayState(): void;
+		openDecisionsOverlayState(): void;
 	};
 	refreshFooter: () => void;
 	/** Armed/disarmed transitions of the Ctrl+G leader, for the footer indicator. */
@@ -137,6 +139,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		requestShutdown: () => void controller.shutdown(),
 		toggleStatus: deps.overlay.toggleFooterDashboardState,
 		toggleDispatchBoard: deps.overlay.toggleDispatchBoardOverlay,
+		openDecisions: deps.overlay.openDecisionsOverlayState,
 		backgroundDispatch: deps.actions.backgroundActiveDispatch,
 		openModelSelector: deps.overlay.openModelOverlayState,
 		openTree: deps.overlay.openTreeOverlayState,

@@ -17,6 +17,7 @@ import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
 } from "../../src/interactive/interactive-slash-runtime.js";
+import { formatDecisionCorrectionTurn } from "../../src/interactive/overlays/decisions.js";
 import { withTimeZone } from "../harness/clock.js";
 
 const flushAsync = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
@@ -68,6 +69,7 @@ function createHarness() {
 		openCost: () => events.push("cost"),
 		openContextView: () => events.push("context"),
 		openTasks: () => events.push("tasks"),
+		openDecisions: () => events.push("decisions"),
 		openMemory: () => events.push("memory"),
 		openView: () => events.push("view"),
 		openModel: () => events.push("model"),
@@ -92,6 +94,34 @@ function createHarness() {
 }
 
 describe("contracts/interactive slash runtime", () => {
+	it("submits one attributed decision correction through the ordinary user-turn path while idle or streaming", async () => {
+		for (const streaming of [false, true]) {
+			const harness = createHarness();
+			harness.deps.chat.isStreaming = () => streaming;
+			const runtime = createInteractiveSlashRuntime(harness.deps);
+			const correction = formatDecisionCorrectionTurn(
+				{ interviewId: "interview-1", key: "scope", label: "Scope", value: "CLI only" },
+				"Include the TUI",
+			);
+
+			runtime.context.submitChat(correction);
+			await flushAsync();
+			deepStrictEqual(
+				harness.events.filter((event) => event.startsWith("submit:")),
+				[
+					'submit:expanded:Decision "Scope" (previously: CLI only) is superseded by the operator. New direction: Include the TUI. Acknowledge and adjust the plan.',
+				],
+			);
+			strictEqual(harness.events.filter((event) => event === "record-turn").length, 1);
+			strictEqual(
+				harness.events.filter((event) => event.startsWith("user:")).length,
+				streaming ? 0 : 1,
+				"a streaming correction is queued by chat.submit and is not painted before delivery",
+			);
+			harness.finishSubmit();
+		}
+	});
+
 	it("logs without submitting and hands exactly one operator turn while idle or streaming", async () => {
 		for (const streaming of [false, true]) {
 			const harness = createHarness();
@@ -291,8 +321,9 @@ describe("contracts/interactive slash runtime", () => {
 
 		runtime.dispatchCommand("/help model");
 		runtime.dispatchCommand("/tasks");
+		runtime.dispatchCommand("/decisions");
 
-		deepStrictEqual(harness.events, ["help:model", "tasks"]);
+		deepStrictEqual(harness.events, ["help:model", "tasks", "decisions"]);
 	});
 
 	it("derives interactive /run roles from the named agent recipe", async () => {

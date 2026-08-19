@@ -59,6 +59,7 @@ type SlashCommandVariant =
 	| { kind: "cost" }
 	| { kind: "context-view" }
 	| { kind: "tasks" }
+	| { kind: "decisions" }
 	| { kind: "tasks-add"; text: string }
 	| { kind: "tasks-hand"; id: string }
 	| { kind: "tasks-done"; id: string }
@@ -372,6 +373,8 @@ export interface SlashCommandContext {
 	openContextView: () => void;
 	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
 	openTasks: () => void;
+	/** Open the settled, branch-local interview decision board. */
+	openDecisions: () => void;
 	/** Project-scoped operator task inbox backing `/tasks` mutations. */
 	userTasks?: {
 		add(title: string): UserTask;
@@ -907,6 +910,19 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	settingsDeepLink("fleet", "fleet", "Open Settings → Fleet: defaults, profiles, agent bindings, nodes"),
+	{
+		name: "decisions",
+		description: "Show settled interview decisions and operator revisions",
+		group: "Inspect",
+		kinds: ["decisions"],
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "decisions", reason: parsed.error };
+			return { kind: "decisions" };
+		},
+		handle(_command, ctx) {
+			ctx.openDecisions();
+		},
+	},
 	{
 		name: "tasks",
 		description: "Show the session board or manage project operator tasks",
