@@ -93,7 +93,7 @@ function interactionFromLoginCallbacks(callbacks: OAuthLoginCallbacks): Provider
 }
 
 function fromOAuthAuth(id: string, auth: OAuthAuth | undefined, usesCallbackServer: boolean): EngineOAuthProvider {
-	if (!auth) throw new Error(`pi-ai provider "${id}" no longer exposes an OAuth flow`);
+	if (!auth) throw new Error(`provider "${id}" does not expose an OAuth flow`);
 	return {
 		id,
 		name: auth.name,
