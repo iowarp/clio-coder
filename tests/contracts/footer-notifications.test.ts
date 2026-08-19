@@ -1,7 +1,11 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { visibleWidth } from "../../src/engine/tui.js";
-import { formatNotificationBadge, type Notification } from "../../src/interactive/footer/notifications.js";
+import {
+	formatNotificationBadge,
+	formatNotificationPanel,
+	type Notification,
+} from "../../src/interactive/footer/notifications.js";
 import { createClioTheme } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
@@ -96,5 +100,19 @@ describe("contracts/footer notification widths", () => {
 
 		strictEqual(badge, "ℹ 1 notice · Reload required · [Alt+X] dismiss");
 		ok(!badge.includes(ESC));
+	});
+
+	it("marks truncated rows in the expanded panel with an ellipsis", () => {
+		const width = 36;
+		const panel = formatNotificationPanel(
+			[notice("Tool support is unavailable for this model; Clio drives every agent role through typed tools")],
+			width,
+			{ theme: createClioTheme({ color: false }) },
+		);
+		const row = panel[1];
+
+		ok(row);
+		strictEqual(visibleWidth(row), width);
+		ok(strip(row).endsWith("…"), row);
 	});
 });
