@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { BusChannels, type ContextActivityPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { clioDataDir } from "../../core/xdg.js";
@@ -9,7 +9,7 @@ import { detectProjectType } from "../session/workspace/project-type.js";
 import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
 import { runContextClear } from "./clear.js";
-import { tryReadClioMd } from "./clio-md.js";
+import { loadProjectClioMd } from "./clio-md.js";
 import { createSlicer } from "./codewiki/cooperative.js";
 import {
 	buildCodewiki,
@@ -115,11 +115,16 @@ function memoryCount(): number {
 }
 
 function resolveClioMdState(cwd: string): ContextState["clioMd"] {
-	const clio = tryReadClioMd(cwd);
-	if (!clio) return "none";
-	if (!clio.ok) return "malformed";
+	const clio = loadProjectClioMd(cwd);
+	if (clio.files.length === 0 && clio.errors.length === 0) return "none";
+	if (clio.errors.length > 0) return "malformed";
 	const state = readClioState(cwd);
-	if (state?.contextSources !== undefined && adoptionSourcesChanged(state.contextSources, { cwd })) {
+	const localStandardIsEffective = clio.files.some((file) => file.path === join(resolve(cwd), "CLIO-CODER.md"));
+	if (
+		localStandardIsEffective &&
+		state?.contextSources !== undefined &&
+		adoptionSourcesChanged(state.contextSources, { cwd })
+	) {
 		return "stale";
 	}
 	return "ok";
@@ -154,12 +159,17 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 	} catch {
 		projectType = "unknown";
 	}
-	const clio = tryReadClioMd(cwd);
-	if (!clio && projectType !== "unknown" && options.noContextFiles !== true) {
+	const clio = loadProjectClioMd(cwd);
+	if (
+		clio.files.length === 0 &&
+		clio.errors.length === 0 &&
+		projectType !== "unknown" &&
+		options.noContextFiles !== true
+	) {
 		hints.push("clio: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.");
 	}
-	if (clio && !clio.ok) {
-		hints.push(`clio: malformed CLIO-CODER.md ignored: ${clio.error}`);
+	for (const issue of clio.errors) {
+		hints.push(`clio: malformed ${issue.path} ignored: ${issue.error}`);
 	}
 	const state = readClioState(cwd);
 	if (!state) return hints;
@@ -368,20 +378,21 @@ export function createContextBundle(
 		},
 		renderPromptContext,
 		projectStructuredContext(cwd = process.cwd()) {
-			const clio = tryReadClioMd(cwd);
-			if (!clio?.ok) return null;
+			const clio = loadProjectClioMd(cwd).value;
+			if (!clio) return null;
 			// Exact-title allowlist: "Verification expectations" is the only
 			// custom section ever projected to workers (verification class only,
 			// enforced dispatch-side). Same case-insensitive comparison as
 			// clio-md's sectionBody().
-			const verification = clio.value.sections.find(
-				(section) => section.title.toLowerCase() === "verification expectations",
-			);
-			const verificationBody = verification?.body.trim() ?? "";
+			const verificationBody = clio.sections
+				.filter((section) => section.title.toLowerCase() === "verification expectations")
+				.map((section) => section.body.trim())
+				.filter((body) => body.length > 0)
+				.join("\n\n");
 			return {
-				projectName: clio.value.projectName,
-				conventions: [...clio.value.conventions],
-				invariants: [...clio.value.invariants],
+				projectName: clio.projectName,
+				conventions: [...clio.conventions],
+				invariants: [...clio.invariants],
 				...(verificationBody.length > 0 ? { verificationExpectations: verificationBody } : {}),
 			};
 		},

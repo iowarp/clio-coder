@@ -25,7 +25,7 @@ const ACCUMULATED_CONTEXT_PATHS = [
 ] as const;
 /**
  * Kept, and said to be kept. `.clio-coder/wiki` is Clio-written rather than
- * operator-authored, so it does not belong with the handbook and the overlay
+ * operator-authored, so it does not belong with the handbooks and the overlay
  * directories on merit; it is listed because the reset reports exactly two
  * categories and a reader takes anything absent from both to be gone. It is the
  * most expensive artifact in `.clio-coder` (one model dispatch per page), and leaving
@@ -33,6 +33,7 @@ const ACCUMULATED_CONTEXT_PATHS = [
  */
 const PRESERVED_CONTEXT_PATHS = [
 	"CLIO-CODER.md",
+	"CLIO-CODER.override.md",
 	".clio-coder/agents",
 	".clio-coder/skills",
 	".clio-coder/wiki",

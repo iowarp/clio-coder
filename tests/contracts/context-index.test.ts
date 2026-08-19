@@ -231,7 +231,7 @@ describe("contracts/context-index", () => {
 		strictEqual(largePrompt.projectPreload?.mode, "synopsis");
 		ok(
 			largePrompt.systemPrompt.includes(
-				"CLIO-CODER.md: available; compact synopsis only because the handbook is too large",
+				"Project handbook: available; compact synopsis only because the effective layers are too large",
 			),
 		);
 		ok(

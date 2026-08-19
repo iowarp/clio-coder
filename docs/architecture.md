@@ -31,7 +31,7 @@ Registered domain modules include:
 | agents | `src/domains/agents/**` | Built-in, user, and project agent recipes. |
 | components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
 | config | `src/domains/config/**`, `src/core/config.ts` | `settings.yaml`, keybindings, hot reload. |
-| context | `src/domains/context/**` | `CLIO-CODER.md`, codewiki indexer, repository context. |
+| context | `src/domains/context/**` | Layered `CLIO-CODER.md` and subtree `CLIO-CODER.override.md` guidance, codewiki indexer, repository context. |
 | dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, receipts, worker spawning, route policies. |
 | eval | `src/domains/eval/**` | Local evaluation harness, suites, JUnit/SWE-bench reports. |
 | evidence | `src/domains/evidence/**` | Forensic evidence bundles, failure attribution. |
