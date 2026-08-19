@@ -36,6 +36,7 @@ export type MutableAgentState = Omit<PiAgentState, "errorMessage"> & {
 export type {
 	AnthropicMessagesCompat,
 	Api,
+	AuthOperationOptions,
 	ImageContent,
 	KnownProvider,
 	Model,

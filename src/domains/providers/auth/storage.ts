@@ -1,7 +1,6 @@
-import type { AuthOperationOptions } from "@earendil-works/pi-ai";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
+import type { AuthOperationOptions } from "../../../engine/types.js";
 import type { RuntimeAuth, RuntimeDescriptor } from "../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../types/target-descriptor.js";
 

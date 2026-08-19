@@ -1,5 +1,5 @@
-import type { AuthOperationOptions } from "@earendil-works/pi-ai";
 import type { OAuthLoginCallbacks } from "../../engine/oauth.js";
+import type { AuthOperationOptions } from "../../engine/types.js";
 import type { AuthCredential, AuthResolution, AuthStatus } from "./auth/index.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";

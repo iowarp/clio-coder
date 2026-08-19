@@ -1,4 +1,4 @@
-import type { AuthOperationOptions } from "@earendil-works/pi-ai";
+import type { AuthOperationOptions } from "../../../engine/types.js";
 import type { AuthStorageBackend, LockResult } from "./storage.js";
 
 function abortReason(signal: AbortSignal): unknown {
