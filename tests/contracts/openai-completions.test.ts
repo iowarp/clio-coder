@@ -23,10 +23,10 @@ function usage(overrides: Record<string, unknown> = {}): AssistantMessage["usage
 	} as AssistantMessage["usage"];
 }
 
-function thinkingMessage(messageUsage: AssistantMessage["usage"]): AssistantMessage {
+function thinkingMessage(messageUsage: AssistantMessage["usage"], thinking = "abcdefgh"): AssistantMessage {
 	return {
 		role: "assistant",
-		content: [{ type: "thinking", thinking: "abcdefgh" }],
+		content: [{ type: "thinking", thinking }],
 		api: "openai-completions",
 		provider: "llamacpp",
 		model: "qwen3.6-27b",
@@ -77,6 +77,16 @@ describe("openai-completions thinking preservation", () => {
 
 			strictEqual((message.usage as { reasoningTokens?: number }).reasoningTokens, expectedReasoningTokens);
 		}
+	});
+
+	it("bounds fallback reasoning usage by the reported completion count", () => {
+		const message = thinkingMessage(usage({ output: 40 }), "x".repeat(900));
+		applyOpenAICompatReasoningEstimate(message);
+		strictEqual((message.usage as { reasoningTokens?: number }).reasoningTokens, 40);
+
+		const empty = thinkingMessage(usage({ output: 0 }), "reasoning without reported completion tokens");
+		applyOpenAICompatReasoningEstimate(empty);
+		strictEqual((empty.usage as { reasoningTokens?: number }).reasoningTokens, undefined);
 	});
 
 	it("replays a prior assistant thinking block as reasoning_content (no strip)", async () => {

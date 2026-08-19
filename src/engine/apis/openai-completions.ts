@@ -484,7 +484,12 @@ function hasReportedReasoningUsage(usage: Usage): boolean {
  */
 export function applyOpenAICompatReasoningEstimate(message: AssistantMessage): void {
 	if (hasReportedReasoningUsage(message.usage)) return;
-	const reasoningTokens = estimateReasoningTokens(message.content);
+	const estimated = estimateReasoningTokens(message.content);
+	const reportedOutput = message.usage.output;
+	const reasoningTokens =
+		typeof reportedOutput === "number" && Number.isFinite(reportedOutput)
+			? Math.min(estimated, Math.max(0, reportedOutput))
+			: estimated;
 	if (reasoningTokens > 0) {
 		(message.usage as UsageWithReasoningAliases).reasoningTokens = reasoningTokens;
 	}
