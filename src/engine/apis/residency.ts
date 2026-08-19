@@ -498,6 +498,19 @@ export interface ResidencyAdapter {
 	 * its message.
 	 */
 	load?(modelId: string): Promise<void>;
+	/**
+	 * Make a model the reconciler just evicted resident again, after the load
+	 * that eviction made room for was rejected. Distinct from
+	 * {@link ResidencyAdapter.load}, which serves the keep model and may consult
+	 * a listing snapshot taken before the eviction: that snapshot still shows
+	 * the evicted model as resident, so reusing it here would restore nothing.
+	 * Implementations must therefore force the load rather than short-circuit on
+	 * cached state.
+	 *
+	 * Adapters that omit the hook keep the previous behaviour, where a failed
+	 * load leaves the evicted model unloaded.
+	 */
+	reloadEvicted?(modelId: string): Promise<void>;
 	/** Cross-process mutation serializer; defaults to the state-dir lock file. */
 	withLock?<T>(targetKey: string, fn: () => Promise<T>): Promise<T>;
 	now?: () => number;
@@ -507,17 +520,70 @@ export interface ResidencyAdapter {
 export type ReconcileResult = ResidencyPlan;
 
 /**
- * Thrown by an adapter's {@link ResidencyAdapter.listResident} when the server
- * cannot make the keep model resident at all, most often because the model is
- * not in the server's catalog. It is a precondition failure, not a transport
- * failure: the reconciler must not evict anything for a load that is already
- * known to be impossible, because the eviction would succeed, the load would
- * fail, and the target would be left holding nothing (#127).
+ * Put back the models an eviction removed once the load it made room for has
+ * failed. Best-effort by construction: the load failure is the error the caller
+ * must see, so a restore that also fails is reported as a notice and never
+ * replaces it. Restores run in eviction order, and the freed slots are known to
+ * be available because the keep model did not take them.
+ */
+async function restoreEvictedModels(
+	adapter: ResidencyAdapter,
+	evicted: ReadonlyArray<ResidentModelInfo>,
+	loadError: unknown,
+): Promise<void> {
+	if (evicted.length === 0) return;
+	const reason = loadError instanceof Error ? loadError.message : String(loadError);
+	const restored: string[] = [];
+	const failed: string[] = [];
+	for (const entry of evicted) {
+		if (!adapter.reloadEvicted) {
+			failed.push(entry.modelId);
+			continue;
+		}
+		try {
+			await adapter.reloadEvicted(entry.modelId);
+			restored.push(entry.modelId);
+		} catch {
+			failed.push(entry.modelId);
+		}
+	}
+	if (restored.length > 0) {
+		emitResidencyNotice({
+			kind: "swap",
+			level: "warning",
+			targetId: adapter.targetId,
+			runtimeId: adapter.runtimeId,
+			model: adapter.keepModelId,
+			message: `loading '${adapter.keepModelId}' on '${adapter.targetId}' failed (${reason}); restored ${restored.map((id) => `'${id}'`).join(", ")} so the target keeps serving.`,
+			detail: { restored: restored.join(", ") },
+		});
+	}
+	if (failed.length > 0) {
+		emitResidencyNotice({
+			kind: "will-not-fit",
+			level: "error",
+			targetId: adapter.targetId,
+			runtimeId: adapter.runtimeId,
+			model: adapter.keepModelId,
+			message: `loading '${adapter.keepModelId}' on '${adapter.targetId}' failed (${reason}) and ${failed.map((id) => `'${id}'`).join(", ")} could not be restored; the target may now serve nothing. Reload it on the server.`,
+			detail: { unrestored: failed.join(", ") },
+		});
+	}
+}
+
+/**
+ * Thrown by an adapter's {@link ResidencyAdapter.assertLoadable} when the
+ * server cannot make the keep model resident at all, most often because the
+ * model is not in the server's catalog. It is a precondition failure, not a
+ * transport failure: the reconciler must not evict anything for a load that is
+ * already known to be impossible, because the eviction would succeed, the load
+ * would fail, and the target would be left holding nothing (#127).
  *
- * The reconciler answers it with an observe-only decision plus a
+ * The reconciler answers it by declining the reconcile and emitting a
  * `will-not-fit` notice, so the turn continues to the provider call and fails
  * with the server's own error for the unknown model instead of with a silent
- * outage on the node.
+ * outage on the node. It is the fast path in front of the restore that
+ * {@link reconcileResidency} performs when a load fails for any other reason.
  */
 export class ResidencyPreconditionError extends Error {
 	override readonly name = "ResidencyPreconditionError";
@@ -633,15 +699,31 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 
 	if (plan.decision === "reconcile") {
 		const mutate = async (): Promise<void> => {
+			const evicted: ResidentModelInfo[] = [];
 			for (const entry of plan.evict) {
 				try {
 					await adapter.unload(entry.modelId);
 					forgetClioLoaded(adapter.targetKey, entry.modelId);
+					evicted.push(entry);
 				} catch {
 					// Best-effort: a failed unload self-heals on the next reconcile.
 				}
 			}
-			if (adapter.load) await adapter.load(adapter.keepModelId);
+			if (!adapter.load) return;
+			try {
+				await adapter.load(adapter.keepModelId);
+			} catch (error) {
+				// The eviction bought nothing: the slot it freed is still empty and
+				// the target is now serving less than before the reconcile. Put back
+				// what was taken before surfacing the load's own failure, so a
+				// rejected load costs the node a request rather than its resident
+				// model (#127). The gate above catches the knowable case ahead of any
+				// mutation; this covers the rest, including an out-of-memory load, a
+				// 5xx, a load wait that times out, and a preset removed between the
+				// listing and the load.
+				await restoreEvictedModels(adapter, evicted, error);
+				throw error;
+			}
 		};
 		// Serialize actual mutations across processes; a keep model that is
 		// already fully resident needs no lock (the load hook is a no-op) and

@@ -279,6 +279,11 @@ export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Pr
 			await ensureModelLoaded(input, fetchImpl, modelId, state);
 			await restoreDisplacedPinned(input, fetchImpl, snapshot);
 		},
+		// `snapshot` predates the eviction and still calls this model resident, so
+		// the state is deliberately not read here: the reload has to be forced.
+		reloadEvicted: async (modelId) => {
+			await ensureModelLoaded(input, fetchImpl, modelId, undefined);
+		},
 	};
 	if (input.withLock) adapter.withLock = input.withLock;
 	if (input.now) adapter.now = input.now;
