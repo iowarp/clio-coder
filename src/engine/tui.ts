@@ -27,6 +27,7 @@ export type {
 	SettingsListTheme,
 	SlashCommand,
 	Terminal,
+	Tokens,
 	TUI,
 } from "@earendil-works/pi-tui";
 
@@ -85,6 +86,7 @@ export {
 	KeybindingsManager,
 	Loader,
 	Markdown,
+	Marked,
 	matchesKey,
 	ProcessTerminal,
 	setKeybindings,

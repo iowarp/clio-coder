@@ -101,6 +101,7 @@
 		"@earendil-works/pi-ai": "0.84.0",
 		"@earendil-works/pi-tui": "0.84.0",
 		"@silvia-odwyer/photon-node": "^0.3.4",
+		"grok-mermaid": "0.2.2",
 		"ollama": "0.6.3"
 	},
 	"overrides": {

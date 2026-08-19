@@ -8,6 +8,7 @@ import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
 import { codeInk } from "./renderers/code-ink.js";
+import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
 import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
@@ -33,6 +34,10 @@ import { type WorkerEntryState, workerAskedByModel } from "./worker-stream.js";
 // indentation, and width behavior stay pi-tui's and nothing post-processes
 // already-rendered output.
 const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), (code, lang) => codeInk(lang, code.split("\n")));
+const CHAT_MARKDOWN_OPTIONS = {
+	transform: createMermaidMarkdownTransform(clioTheme()),
+	renderLatex: true,
+} as const;
 
 // Prefix and rail SGR constants, previously re-exported by the deleted
 // palette.ts. Composing them from fgSequence/GLYPH here yields byte-identical
@@ -510,7 +515,7 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 		return wrapped;
 	}
 	if (!seg.md) {
-		seg.md = new Markdown(seg.text, 0, 0, CHAT_MARKDOWN_THEME);
+		seg.md = new Markdown(seg.text, 0, 0, CHAT_MARKDOWN_THEME, undefined, CHAT_MARKDOWN_OPTIONS);
 	}
 	// pi-tui Markdown right-pads lines to the render width. If a long streaming
 	// reply has already scrolled, flipping the finalized segment from unpadded

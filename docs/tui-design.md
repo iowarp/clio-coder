@@ -239,6 +239,20 @@ Syntax highlighting within code blocks is handled by [src/interactive/renderers/
 
 All other code elements (identifiers, types, function names, punctuation) remain plain. Diff blocks highlight added lines with `success` green and removed lines with `error` red.
 
+### 6.8 Mermaid and LaTeX
+
+Finalized assistant Markdown renders inline and display LaTeX as terminal-friendly Unicode through
+Pi 0.84's Markdown renderer. For example, `$x^2$` becomes `x²` without requiring an image-capable
+terminal.
+
+Top-level fenced `mermaid` blocks pass through Pi's width-aware Markdown `transform` hook and the
+same Unicode-diagram strategy used by pi-coding-agent 0.84. Supported flowcharts, state diagrams,
+class diagrams, entity-relationship diagrams, and sequence diagrams render with quiet `frame`
+borders, plain labels, and `accent` connectors. If a diagram is invalid, unsupported, or wider than
+the transcript content width, Clio leaves the original Mermaid fence visible instead of clipping or
+silently dropping it. Mermaid transformation runs only after an assistant text segment is finalized,
+so partial fences never flicker into incomplete diagrams while streaming.
+
 ---
 
 ## 7. Settings Center & Command Overlays
@@ -292,4 +306,3 @@ Two shapes, both ending at something the user can act on.
 ### 8.2 Memory Step Rows
 
 `/memory` activity rows read `<trigger> <decision> <reason>`, followed by `<N>w` when the step wrote to the bank and `<N> cited` when it cited entries, then the tier and latency. `describeTaskMemoryActivity` is the one place that builds this string.
-
