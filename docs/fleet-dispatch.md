@@ -82,7 +82,9 @@ Recipes may declare `budget: {toolCalls, readReserve, synthesis}`. `toolCalls` i
 ## Node setup
 
 Fleet nodes are declared under `fleet.nodes` in `settings.yaml`. The implicit
-`local` node always exists and is never declared.
+`local` node always exists and is never declared. A run's node is the host its
+worker process ran on, never the host serving the model, so a run against a
+remote target from this machine still records `node: local`.
 
 ```yaml
 fleet:
