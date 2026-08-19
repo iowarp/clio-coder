@@ -514,6 +514,7 @@ export class AuthStorage {
 
 	private async refreshOAuthCredentialWithLock(
 		providerId: string,
+		signal: AbortSignal,
 	): Promise<{ apiKey: string; credential: OAuthCredential } | null> {
 		return this.backend.withLockAsync(async (current) => {
 			const read = readStorageData(current);
@@ -531,7 +532,7 @@ export class AuthStorage {
 			if (Date.now() < stored.expires) {
 				return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored } };
 			}
-			const refreshed = await refreshOAuthCredentials(providerId, stored);
+			const refreshed = await refreshOAuthCredentials(providerId, stored, signal);
 			const next: OAuthCredential = {
 				type: "oauth",
 				...refreshed,
@@ -548,7 +549,7 @@ export class AuthStorage {
 
 	async resolveApiKey(
 		providerId: string,
-		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean },
+		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean; signal?: AbortSignal },
 	): Promise<AuthResolution> {
 		if (opts?.targetId) {
 			const override = this.runtimeOverrides.get(opts.targetId);
@@ -599,7 +600,10 @@ export class AuthStorage {
 				};
 			}
 			try {
-				const refreshed = await this.refreshOAuthCredentialWithLock(providerId);
+				const refreshed = await this.refreshOAuthCredentialWithLock(
+					providerId,
+					opts?.signal ?? new AbortController().signal,
+				);
 				if (refreshed) {
 					return {
 						providerId,
@@ -610,7 +614,8 @@ export class AuthStorage {
 						apiKey: refreshed.apiKey,
 					};
 				}
-			} catch {
+			} catch (error) {
+				if (opts?.signal?.aborted) throw opts.signal.reason ?? error;
 				// A refusal already recorded its reason on this.damage; a refresh that
 				// failed for any other reason is answered by re-reading the store below.
 				this.reload();
@@ -670,9 +675,18 @@ export class AuthStorage {
 		};
 	}
 
-	resolveForTarget(target: AuthTarget, opts?: { includeFallback?: boolean }): Promise<AuthResolution> {
-		const args: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean } = {};
+	resolveForTarget(
+		target: AuthTarget,
+		opts?: { includeFallback?: boolean; signal?: AbortSignal },
+	): Promise<AuthResolution> {
+		const args: {
+			targetId?: string;
+			explicitEnvVar?: string;
+			includeFallback?: boolean;
+			signal?: AbortSignal;
+		} = {};
 		if (opts?.includeFallback !== undefined) args.includeFallback = opts.includeFallback;
+		if (opts?.signal !== undefined) args.signal = opts.signal;
 		if (target.explicitEnvVar) args.explicitEnvVar = target.explicitEnvVar;
 		if (target.targetId) args.targetId = target.targetId;
 		return this.resolveApiKey(target.providerId, args);

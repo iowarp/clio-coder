@@ -21,6 +21,7 @@ interface CapturedRequest {
 	url: string;
 	body: URLSearchParams;
 	headers: Record<string, string>;
+	signal: AbortSignal | null;
 }
 
 function stubTokenEndpoint(payload: unknown, captured: CapturedRequest[]): void {
@@ -30,6 +31,7 @@ function stubTokenEndpoint(payload: unknown, captured: CapturedRequest[]): void 
 			url: String(url),
 			body: new URLSearchParams(String(init?.body ?? "")),
 			headers,
+			signal: init?.signal ?? null,
 		});
 		return new Response(JSON.stringify(payload), { status: 200 });
 	}) as typeof fetch;
@@ -204,14 +206,39 @@ describe("contracts/alcf-oauth", () => {
 			},
 			captured,
 		);
-		const creds = await alcfOAuthProvider.refreshToken({ access: "old", refresh: "OLD_REFRESH", expires: 0 });
+		const signal = new AbortController().signal;
+		const creds = await alcfOAuthProvider.refreshToken({ access: "old", refresh: "OLD_REFRESH", expires: 0 }, signal);
 		strictEqual(creds.access, "REFRESHED_ACCESS");
 		strictEqual(captured[0]?.body.get("grant_type"), "refresh_token");
 		strictEqual(captured[0]?.body.get("refresh_token"), "OLD_REFRESH");
+		ok(captured[0]?.signal, "refresh must forward a concrete abort signal");
 
 		strictEqual(alcfOAuthProvider.id, "alcf");
 		strictEqual(alcfOAuthProvider.usesCallbackServer, false);
 		strictEqual(await alcfOAuthProvider.getApiKey({ access: "BEARER", refresh: "r", expires: 1 }), "BEARER");
+	});
+
+	it("aborts an in-flight refresh when its caller cancels", async () => {
+		let requestSignal: AbortSignal | null = null;
+		const getRequestSignal = (): AbortSignal | null => requestSignal;
+		globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+			requestSignal = init?.signal ?? null;
+			return new Promise<Response>((_resolve, reject) => {
+				const abort = () => reject(requestSignal?.reason ?? new Error("refresh aborted"));
+				if (requestSignal?.aborted) abort();
+				else requestSignal?.addEventListener("abort", abort, { once: true });
+			});
+		}) as typeof fetch;
+
+		const controller = new AbortController();
+		const refresh = alcfOAuthProvider.refreshToken(
+			{ access: "old", refresh: "OLD_REFRESH", expires: 0 },
+			controller.signal,
+		);
+		controller.abort(new Error("operator cancelled refresh"));
+
+		await rejects(refresh, /operator cancelled refresh/);
+		strictEqual(getRequestSignal()?.aborted, true);
 	});
 
 	it("keeps the gateway client id and scope wired to clio-agent values", () => {

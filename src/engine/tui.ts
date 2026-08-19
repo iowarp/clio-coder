@@ -27,6 +27,7 @@ export type {
 	SettingsListTheme,
 	SlashCommand,
 	Terminal,
+	TUI,
 } from "@earendil-works/pi-tui";
 
 /**
@@ -88,8 +89,8 @@ export {
 	ProcessTerminal,
 	setKeybindings,
 	Text,
-	TUI,
 	TUI_KEYBINDINGS,
+	TuiMainScreen,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,

@@ -1,5 +1,5 @@
 import type { Component, Terminal } from "../engine/tui.js";
-import { ProcessTerminal, TUI } from "../engine/tui.js";
+import { ProcessTerminal, type TUI, TuiMainScreen } from "../engine/tui.js";
 import { createRenderTrace, type RenderTrace, renderTracePath, traceTerminalWrites } from "./render-trace.js";
 
 export interface InteractiveShellTui {
@@ -129,6 +129,6 @@ export function createProcessInteractiveShell(): InteractiveShell<ProcessTermina
 			const terminal = new ProcessTerminal();
 			return trace ? traceTerminalWrites(terminal, trace) : terminal;
 		},
-		createTui: (terminal) => new TUI(terminal),
+		createTui: (terminal) => new TuiMainScreen(terminal),
 	});
 }
