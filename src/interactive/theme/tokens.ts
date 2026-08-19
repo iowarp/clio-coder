@@ -116,6 +116,6 @@ export function createClioTheme(options: { truecolor?: boolean; color?: boolean 
 		fg: (token, text) => paint(text, { fg: token }),
 		bg: (token, text) => paint(text, { bg: token }),
 		style: (token, text, mods = {}) => paint(text, { ...mods, fg: token }),
-		fgSequence: (token) => (color ? fgSequence(token, truecolor) : ""),
+		fgSequence: (token) => (color ? `\u001b[${fgCode(TOKENS[token], truecolor)}m` : ""),
 	};
 }
