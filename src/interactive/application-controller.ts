@@ -81,6 +81,8 @@ export interface ApplicationControllerDeps {
 	leaderKeys: LeaderKeyController;
 	getOverlayState: () => OverlayState;
 	routeOverlayKey: (data: string) => boolean;
+	/** Let pi-tui's focused Editor own dedicated prompt-history actions before app bindings. */
+	matchesEditorHistory: (data: string) => boolean;
 	matchesAction: (data: string, id: ClioKeybinding) => boolean;
 	dispatchAction: (id: ClioKeybinding) => boolean;
 	cancelActiveEditorBash: () => boolean;
@@ -363,6 +365,10 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			deps.cancelActiveRun();
 			return { consume: true };
 		}
+		// pi-tui's dedicated history actions are editor actions even when an
+		// operator has rebound a Clio application action onto the same chord. Leave
+		// the input unconsumed so TuiBase delivers it to the focused Editor.
+		if (deps.getOverlayState() === "closed" && deps.matchesEditorHistory(data)) return undefined;
 
 		if (deps.getOverlayState() === "closed" && !isKeyRelease(data)) {
 			for (const id of CLOSED_ACTION_ORDER) {

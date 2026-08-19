@@ -307,6 +307,7 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | --- | --- |
 | `Enter` | Send draft prompt (when idle) or deliver it at the next slot of the active run (when streaming). |
 | `Shift+Enter` / `Ctrl+J` | Insert a newline into multiline editor input. |
+| `Ctrl+P` / `Ctrl+N` | Browse backward / forward through prompts accepted in this interactive process; returning past the newest entry restores the unfinished draft. |
 | `Alt+Enter` | End of turn: queue the current draft for delivery when the active run settles. |
 | `Alt+I` | Interrupt: cancel the active run and deliver the current draft now. Refused while an attached dispatch runs or a permission ask is parked; the draft then queues for the next slot. |
 | `Alt+Up` | Restore queued next-slot and end-of-turn messages to the editor. |

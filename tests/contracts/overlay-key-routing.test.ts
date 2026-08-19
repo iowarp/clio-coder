@@ -119,6 +119,7 @@ function applicationDeps(overrides: Partial<ApplicationControllerDeps>): Applica
 		leaderKeys: { isPending: () => false, route: () => false, reset: noop, dispose: noop },
 		getOverlayState: () => "closed",
 		routeOverlayKey: () => false,
+		matchesEditorHistory: () => false,
 		matchesAction: () => false,
 		dispatchAction: () => false,
 		cancelActiveEditorBash: () => false,

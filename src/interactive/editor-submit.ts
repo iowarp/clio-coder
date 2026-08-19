@@ -253,7 +253,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		if (trimmed.length === 0) return;
 		deps.collapseLaunchpadBeforeSubmit?.();
 		if (parseEditorBashCommand(text)) {
-			if (!deps.chat.isStreaming() && !activeEditorBash) deps.editor.setText("");
+			if (!deps.chat.isStreaming() && !activeEditorBash) {
+				deps.editor.addToHistory(text);
+				deps.editor.setText("");
+			}
 			if (runEditorBash(text)) deps.ui.requestRender();
 			return;
 		}
@@ -264,7 +267,13 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.ui.requestRender();
 			return;
 		}
-		deps.editor.setText(isRejectedCommand(parseSlashCommand(trimmed)) ? text : "");
+		const command = parseSlashCommand(trimmed);
+		if (isRejectedCommand(command)) {
+			deps.editor.setText(text);
+		} else {
+			deps.editor.addToHistory(text);
+			deps.editor.setText("");
+		}
 		deps.dispatchCommand(trimmed);
 		deps.ui.requestRender();
 	};
