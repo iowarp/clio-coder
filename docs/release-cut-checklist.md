@@ -25,12 +25,12 @@ or the npm registry.
 ## Part 1: verification (repeatable; step 10 passes only once step 11's version is set)
 
 1. `npm run typecheck`
-2. `npm run lint`
-3. `npm run check:boundaries`
+2. `npm run lint` (Biome plus the hygiene checks, which include the boundary invariants and the skills pin check)
+3. `npm run skills:check`
 4. `npm run build`
 5. `npm run test`
 6. `npm run test:trace-viewer`
-7. `npm run ci` (runs 1, 2, `skills:check`, 4, 5, 6)
+7. `npm run ci` (runs 1 through 6)
 8. `npm run ci` again under the other supported Node major. Both Node 22 and
    Node 24 must be green; the repo is developed against 22.22.3 and 24.9.0.
 9. `npm run test:lifecycle` for the twenty-case lifecycle matrix against a real

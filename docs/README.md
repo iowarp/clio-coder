@@ -56,10 +56,10 @@ current source, tests, and `CHANGELOG.md`.
 | Point-in-time inventory of legacy environment variables (Historical Appendix) | [config-knobs-audit.md](config-knobs-audit.md) ([Interactive Blueprint](html/config_knobs_audit_blueprint.html)) |
 | Clock and timestamp conventions: durations, instants, ordering, and formatting | [time-conventions.md](time-conventions.md) |
 
-Every project Clio works in gets its context from a checked-in `CLIO-CODER.md`,
-bootstrapped and maintained by `clio-coder context init`. The root
-[CLIO-CODER.md](../CLIO-CODER.md) of this repository is the maintained reference example
-of the format.
+Every project Clio works in gets its context from a local `CLIO-CODER.md`,
+bootstrapped and maintained by `clio-coder context init`. It is a gitignored
+runtime artifact rather than repository documentation; run
+`clio-coder context init` in this checkout to generate one for Clio's own source.
 
 ## Developer Quick Start
 

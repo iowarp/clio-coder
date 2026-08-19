@@ -123,4 +123,4 @@ affected import site for no behavioral gain. A boundary rule should protect an
 invariant. "Always import through the barrel" protects a preference.
 
 What is *not* permitted is anything the five direction rules forbid, and those
-stay enforced by `npm run check:boundaries`.
+stay enforced by the boundary checker that `npm run lint` runs.
