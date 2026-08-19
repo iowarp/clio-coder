@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Troubleshooting &amp; Diagnostics Blueprint (v0.3.2)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .error-item {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    .error-msg {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--color-rose);
+      margin-bottom: 0.5rem;
+      word-break: break-all;
+    }
+    .remedy-text {
+      color: var(--text-main);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Troubleshooting</title>
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Troubleshooting &amp; Diagnostics Guide</h1>
+          <p>Actionable remediation matrix, runtime recovery procedures, and doctor health inspections</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/troubleshooting.md</span>
+            <span class="chip chip-orange">clio-coder docs troubleshooting</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.3.2</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Back</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Auto-populated by shared.js -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="glass-card">
+          <h2>Overview Summary</h2>
+          <p>Quick lookup for runtime notices, permission denials, target connection issues, and local serving quirks in Clio Coder v0.3.2.</p>
+        </div>
+
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('remediation-matrix')">Remediation Matrix</button>
+          <button type="button" class="tab-btn" onclick="switchTab('diag-commands')">Diagnostic Commands</button>
+        </div>
+
+        <div id="remediation-matrix" class="tab-pane active">
+          <h2>Error Catalog &amp; Remediation</h2>
+          <div class="error-item">
+            <div class="error-msg">clio-coder run cannot confirm permission requests; rerun interactively to approve this action.</div>
+            <div class="remedy-text">A tool call required permission during headless execution. Run interactively in the TUI (<code>clio</code>), adjust <code>.clio-coder/safety.yaml</code>, or run with <code>--autonomy full-auto</code> if safe.</div>
+          </div>
+          <div class="error-item">
+            <div class="error-msg">&lt;arg&gt; is a global option and must come before the subcommand...</div>
+            <div class="remedy-text">Global flags like <code>--api-key</code> or <code>--no-context-files</code> must precede the subcommand (e.g. <code>clio-coder --api-key &lt;k&gt; run ...</code>). Directory overrides use environment variables (<code>CLIO_CODER_*_DIR</code>).</div>
+          </div>
+          <div class="error-item">
+            <div class="error-msg">LM Studio duplicate model load / peer projection</div>
+            <div class="remedy-text">Clio automatically resolves model IDs to resident host instances to prevent duplicate VRAM allocations. Verify loaded instances with <code>clio-coder targets --probe</code>.</div>
+          </div>
+          <div class="error-item">
+            <div class="error-msg">llama.cpp 400 model is already running</div>
+            <div class="remedy-text">Sleeping models are treated as resident by the reconciler. Verify router slots and catalog models before initiating eviction.</div>
+          </div>
+          <div class="error-item">
+            <div class="error-msg">OAuth token exchange cancelled</div>
+            <div class="remedy-text">An in-flight login was aborted. Lock waiters cancel immediately without corrupting credentials. Run <code>clio-coder auth login &lt;target&gt;</code> to restart cleanly.</div>
+          </div>
+        </div>
+
+        <div id="diag-commands" class="tab-pane">
+          <h2>Diagnostic Commands</h2>
+          <pre><code># Full system health verification and auto-repair
+clio-coder doctor --fix
+
+# Probe all configured targets for connectivity and loaded context
+clio-coder targets --probe
+
+# Inspect live event streams for a specific worker run
+clio-coder trace tail &lt;runId&gt;
+
+# Check cryptographic evidence and execution receipts
+clio-coder evidence inspect &lt;runId&gt;</code></pre>
+        </div>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Troubleshooting Spec &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+      event.target.classList.add('active');
+      const pane = document.getElementById(tabId);
+      if (pane) pane.classList.add('active');
+    }
+  </script>
+</body>
+</html>
