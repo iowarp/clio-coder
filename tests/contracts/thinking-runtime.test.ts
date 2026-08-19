@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import {
 	applyThinkingMechanism,
 	reasoningClassForMechanism,
@@ -9,7 +10,7 @@ import {
 import type { CapabilityFlags, ThinkingLevel } from "../../src/domains/providers/types/capability-flags.js";
 import { availableThinkingLevels, EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
-import { createEngineAi, streamEngineSimple } from "../../src/engine/ai.js";
+import { createEngineAi } from "../../src/engine/ai.js";
 import {
 	patchProviderThinkingPayload,
 	patchToolChoiceNamedPayload,
@@ -87,7 +88,7 @@ describe("contracts/thinking-runtime", () => {
 		const model = engineAi.getModel("anthropic", modelId);
 		ok(model, `pi-ai catalog should include ${modelId}`);
 		let captured: Record<string, unknown> | undefined;
-		const events = streamEngineSimple(
+		const events = streamSimple(
 			model,
 			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
 			{
