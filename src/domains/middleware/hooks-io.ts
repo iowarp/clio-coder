@@ -15,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { withClioAgentEnvironment } from "../../core/agent-environment.js";
 import {
 	type HookReceiptSink,
 	loadUserHooks,
@@ -162,6 +163,7 @@ export function spawnSyncCommandRunner(): UserHookCommandRunner {
 			maxBuffer: COMMAND_OUTPUT_MAX_BYTES,
 			encoding: "utf8",
 			shell: false,
+			env: withClioAgentEnvironment(process.env),
 		});
 		const timedOut = result.error !== undefined && (result.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
 		return {

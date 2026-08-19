@@ -179,6 +179,12 @@ describe("contracts/tool-hardening bash spawn env and shell freshness (W5)", () 
 		strictEqual(result.stdout, "unset");
 	});
 
+	it("marks every bash child as running under Clio Coder", async () => {
+		const result = await runBashCommand('printf %s "$AI_AGENT"');
+		strictEqual(result.exitCode, 0);
+		strictEqual(result.stdout, "clio-coder");
+	});
+
 	it("gives every call a fresh shell: no state bleed between commands", async () => {
 		const first = await runBashCommand("export CLIO_CODER_TEST_BLEED=leaked; cd /tmp; umask 077");
 		strictEqual(first.exitCode, 0);

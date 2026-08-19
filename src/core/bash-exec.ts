@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { AI_AGENT_NAME } from "./agent-environment.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
@@ -45,6 +46,7 @@ const BASH_UPDATE_THROTTLE_MS = 100;
 
 function buildToolEnv(): NodeJS.ProcessEnv {
 	const env = { ...process.env };
+	env.AI_AGENT = AI_AGENT_NAME;
 	for (const key of CLIO_CONTROL_ENV_KEYS) {
 		Reflect.deleteProperty(env, key);
 	}
@@ -115,6 +117,7 @@ async function bashSpawnPlan(): Promise<BashSpawnPlan> {
 	// the capture still flow through; the CLIO control keys are re-stripped
 	// last so they never reach the child from either source.
 	const env: NodeJS.ProcessEnv = { ...process.env, ...captured };
+	env.AI_AGENT = AI_AGENT_NAME;
 	for (const key of CLIO_CONTROL_ENV_KEYS) {
 		Reflect.deleteProperty(env, key);
 	}
