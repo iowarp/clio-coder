@@ -172,9 +172,12 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	// After `npm install -g` the two differ until the refresh below, and that
 	// difference is the upgrade this command reports.
 	const recorded = readStateInfo()?.version ?? null;
+	// Both the dry run and the real run print this, so it stays in the mood the
+	// call site sets with "would refresh" or "refreshed". The null branch used to
+	// bake in "would write it", which a real upgrade printed after writing it.
 	const describeRefresh = (): string =>
 		recorded === null
-			? "state metadata (none recorded; would write it)"
+			? "state metadata (none recorded)"
 			: recorded === before
 				? `state metadata (already ${before})`
 				: `state metadata ${recorded} -> ${before}`;

@@ -110,7 +110,10 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 		parsed = parseEvidenceArgs(args);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		process.stdout.write(HELP);
+		// Usage that accompanies an error goes to stderr with it. Splitting the
+		// two put the error on stderr and the usage on stdout, so a caller
+		// capturing stdout for evidence output collected a help screen instead.
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (parsed.help) {

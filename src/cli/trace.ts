@@ -14,7 +14,7 @@ import {
 } from "../domains/observability/trace-store.js";
 
 const HELP = `Usage:
-  clio-coder trace runs [--db PATH] [--limit N]
+  clio-coder trace runs [--db PATH] [--limit N] [--json]
   clio-coder trace phases <runId> [--db PATH]
   clio-coder trace tail <runId> [--follow] [--db PATH]
   clio-coder trace procs <runId> [--db PATH]
@@ -33,6 +33,7 @@ interface ParsedTraceArgs {
 	follow: boolean;
 	limit: number;
 	port: number;
+	json: boolean;
 }
 
 function parseTraceArgs(args: string[]): ParsedTraceArgs {
@@ -42,9 +43,11 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 	let follow = false;
 	let limit = 50;
 	let port = 0;
+	let json = false;
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === "--follow") follow = true;
+		else if (arg === "--json") json = true;
 		else if (arg === "--db" || arg === "--limit" || arg === "--port") {
 			const value = args[index + 1];
 			if (value === undefined) throw new Error(`${arg} requires a value`);
@@ -62,7 +65,33 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 		else if (arg?.startsWith("-")) throw new Error(`unknown trace flag: ${arg}`);
 		else if (arg !== undefined) positional.push(arg);
 	}
-	return { positional, db, dbExplicit, follow, limit, port };
+	return { positional, db, dbExplicit, follow, limit, port, json };
+}
+
+/** Every subcommand `trace` answers to. Anything else is a usage error. */
+const TRACE_COMMANDS = new Set(["runs", "phases", "tail", "procs", "sql", "ui"]);
+
+/** The subcommands whose first positional is a run id. */
+const TRACE_COMMANDS_NEEDING_RUN_ID = new Set(["phases", "tail", "procs"]);
+
+/**
+ * Reject a malformed invocation before the database is consulted.
+ *
+ * The no-database path below is a courtesy that exits 0, because a state tree
+ * nothing has written to is the empty state rather than a failure. Running it
+ * ahead of this check meant that on a fresh install every typed subcommand
+ * succeeded: `trace bogus`, `trace phases` with no run id, and `trace sql` with
+ * no query all exited 0 with the same "no trace database yet" line, so a CI step
+ * gated on one of them went on to the next line. The same invocations against a
+ * home that had a database exited 2, which is the documented behavior.
+ */
+function invocationError(command: string, runId: string | undefined): number | null {
+	if (!TRACE_COMMANDS.has(command)) {
+		process.stderr.write(`unknown trace command: ${command}\n${HELP}`);
+		return 2;
+	}
+	if (TRACE_COMMANDS_NEEDING_RUN_ID.has(command) && !runId) return missingRunId(command);
+	return null;
 }
 
 export async function runTraceCommand(args: string[]): Promise<number> {
@@ -86,6 +115,14 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 		process.stdout.write(HELP);
 		return command === "help" ? 0 : 2;
 	}
+	const sqlQuery = parsed.positional.slice(1).join(" ");
+	const usageError = invocationError(command, runId);
+	if (usageError !== null) return usageError;
+	if (command === "sql" && !sqlQuery) {
+		process.stderr.write("trace sql requires a SELECT query\n");
+		return 2;
+	}
+
 	if (command === "ui") return runTraceUi(parsed.db, parsed.port);
 
 	// A database that was never written is the empty state, not a failure. Handing
@@ -104,29 +141,40 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 		return 1;
 	}
 	try {
+		// Every case below is reachable only after `invocationError` accepted the
+		// command and its required positional, so the run id is present wherever
+		// this reads one.
 		switch (command) {
-			case "runs":
-				printRuns(reader.runs(parsed.limit));
+			case "runs": {
+				const rows = reader.runs(parsed.limit);
+				if (parsed.json) process.stdout.write(`${JSON.stringify(rows, jsonBigInt, 2)}\n`);
+				else printRuns(rows);
 				return 0;
+			}
 			case "phases":
-				if (!runId) return missingRunId(command);
-				printPhases(reader.phases(runId));
+				printPhases(reader.phases(runId ?? ""));
 				return 0;
 			case "tail":
-				if (!runId) return missingRunId(command);
-				await tail(reader, runId, parsed.follow);
+				await tail(reader, runId ?? "", parsed.follow);
 				return 0;
 			case "procs":
-				if (!runId) return missingRunId(command);
-				printProcesses(reader.processes(runId));
+				printProcesses(reader.processes(runId ?? ""));
 				return 0;
 			case "sql": {
-				const query = parsed.positional.slice(1).join(" ");
-				if (!query) {
-					process.stderr.write("trace sql requires a SELECT query\n");
+				// The database opened cleanly above, so anything the store objects to
+				// here is the query the operator typed: a mutating statement, more
+				// than one statement, or SQL that will not parse. All three are usage
+				// errors. Refusing `DELETE FROM runs` with exit 1 said "the command
+				// failed" when the truth is "that is not a query this accepts", and
+				// the exit-code contract puts a mutation keyword at 2.
+				let rows: unknown;
+				try {
+					rows = reader.select(sqlQuery);
+				} catch (error) {
+					process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
 					return 2;
 				}
-				process.stdout.write(`${JSON.stringify(reader.select(query), jsonBigInt, 2)}\n`);
+				process.stdout.write(`${JSON.stringify(rows, jsonBigInt, 2)}\n`);
 				return 0;
 			}
 			default:

@@ -203,9 +203,16 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		process.stderr.write(HELP);
 		return 2;
 	}
-	if (parsed.help || parsed.command === undefined) {
+	if (parsed.help) {
 		process.stdout.write(HELP);
-		return parsed.help ? 0 : 2;
+		return 0;
+	}
+	// A bare `clio-coder usage` already exited 2, but wrote its usage to stdout,
+	// which is where the report itself goes. Usage that stands in for output the
+	// caller asked for belongs on stderr.
+	if (parsed.command === undefined) {
+		process.stderr.write(HELP);
+		return 2;
 	}
 	if (parsed.command !== "report") {
 		printError(`unknown usage command: ${parsed.command}`);
