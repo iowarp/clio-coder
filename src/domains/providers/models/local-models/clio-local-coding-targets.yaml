@@ -405,7 +405,7 @@
       "32gb-cuda": "32 GB CUDA class: Q6_K uses about 23.8 GB. Serve ctx=131072 with parallel=4 because the full 262144-token context is VRAM-bound."
       "128gb-unified-vulkan": "128 GB unified-memory Vulkan class: IQ4_NL uses about 17.3 GB and fits ctx=262144 with parallel=4. Vulkan backends show much slower prefill than ROCm/CUDA on this family; prefer ROCm where available."
     runtimePreference:
-      llamaCpp: "Primary path on mini, verified. OpenAI-compatible chat completions with --jinja, --reasoning on, --reasoning-effort medium as server defaults; reasoning_content and tool_calls both confirmed to parse correctly. A request can override to off with chat_template_kwargs.enable_thinking:false, or to a different active level with reasoning_effort in {low, medium, xhigh} (never minimal/high/max on the wire; the stock template raises a fatal jinja exception on those and Clio's landed capability resolver already clamps to this set)."
+      llamaCpp: "Primary verified path. OpenAI-compatible chat completions with --jinja, --reasoning on, --reasoning-effort medium as server defaults; reasoning_content and tool_calls both confirmed to parse correctly. A request can override to off with chat_template_kwargs.enable_thinking:false, or to a different active level with reasoning_effort in {low, medium, xhigh} (never minimal/high/max on the wire; the stock template raises a fatal jinja exception on those and Clio's landed capability resolver already clamps to this set)."
       lmstudioOpenaiCompat: "Clio sends reasoning_effort over LM Studio's OpenAI-compatible HTTP port and omits chat_template_kwargs because LM Studio does not use that field for this model. With no override, LM Studio defaults this model to thinking off, unlike raw llama.cpp's template default of thinking on/xhigh. reasoning_effort:'none' explicitly disables it."
       lmstudioNative: "Clio's LM Studio runtime uses the OpenAI-compatible HTTP chat adapter with native REST model discovery and residency management."
     llamaCpp:
@@ -441,9 +441,9 @@
         agent scenarios; improves KV cache reuse). llama.cpp's own
         reasoning_effort:"none" also disables reasoning at the server layer
         and is a separate mechanism from the template's enable_thinking flag;
-        both were verified independently on mini and on LM Studio's HTTP
+        both were verified independently on llama.cpp and on LM Studio's HTTP
         port.
-    serving: "Qwen3.8-27B (unsloth/Qwen3.8-27B-GGUF), hybrid qwen3_5 architecture: 3 linear-attention (Gated DeltaNet) layers per 1 full-attention layer, so only 16 of 64 layers hold a conventional KV cache. Native ctx 262144, extensible to 1M via YaRN (out of scope for all three homelab nodes; leave rope at default). Tool calls use an XML <tool_call><function=...> form in the stock template; llama.cpp's qwen3_coder parser converts this to standard tool_calls JSON, verified live on mini, dynamo, and zbook. Only messages[0] may be a system message and only system/user/assistant/tool roles are accepted; a second system message or a developer role raises a template error."
+    serving: "Qwen3.8-27B (unsloth/Qwen3.8-27B-GGUF), hybrid qwen3_5 architecture: 3 linear-attention (Gated DeltaNet) layers per 1 full-attention layer, so only 16 of 64 layers hold a conventional KV cache. Native ctx 262144, extensible to 1M via YaRN (out of scope for the hardware classes above; leave rope at default). Tool calls use an XML <tool_call><function=...> form in the stock template; llama.cpp's qwen3_coder parser converts this to standard tool_calls JSON, verified live on ROCm, CUDA, and Vulkan backends. Only messages[0] may be a system message and only system/user/assistant/tool roles are accepted; a second system message or a developer role raises a template error."
 
 - family: gemma-4-31b-it-nvfp4-turbo
   matchPatterns:
