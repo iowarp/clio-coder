@@ -67,6 +67,16 @@ describe("contracts/headless-print", () => {
 		return { text: () => captured, restore: () => (process.stdout.write = original) };
 	}
 
+	function captureStderr(): { text: () => string; restore: () => void } {
+		const original = process.stderr.write;
+		let captured = "";
+		process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+			captured += String(chunk);
+			return true;
+		}) as typeof process.stderr.write;
+		return { text: () => captured, restore: () => (process.stderr.write = original) };
+	}
+
 	it("prints the terminating tool's result when the artifact is the whole answer", async () => {
 		// F4 of the 3b sweep: a headless turn that ended on a terminating artifact
 		// wrote PLAN.md, printed nothing at all, and exited 0. The tool's own
@@ -182,6 +192,47 @@ describe("contracts/headless-print", () => {
 		] as unknown as ChatLoopEvent[]);
 		const exitCode = await runHeadlessMainAgent(chat, { prompt: "read a file" });
 		strictEqual(exitCode, 1);
+	});
+
+	it("prefixes a provider failure with its target and records the corrected outcome detail", async () => {
+		const savedStateDir = process.env.CLIO_CODER_STATE_DIR;
+		process.env.CLIO_CODER_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-headless-failure-"));
+		resetXdgCache();
+		const stderr = captureStderr();
+		try {
+			const chat = buildFakeChatLoop([
+				{
+					type: "message_end",
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: "" }],
+						stopReason: "error",
+						errorMessage: "stream stalled: no output for 15s",
+					},
+				},
+			] as unknown as ChatLoopEvent[]);
+			(chat as unknown as { lastRunSnapshot: () => unknown }).lastRunSnapshot = () => runSnapshot();
+
+			const exitCode = await runHeadlessMainAgent(chat, { prompt: "wait for the model" });
+			strictEqual(exitCode, 1);
+			const expected = "target 'test-target' (llamacpp http://127.0.0.1:8080): stream stalled: no output for 15s";
+			ok(stderr.text().endsWith(`${expected}\n`), "the final stderr line carries the attributed failure");
+
+			const receiptsDir = join(process.env.CLIO_CODER_STATE_DIR ?? "", "receipts");
+			const files = readdirSync(receiptsDir).filter((name) => name.endsWith(".json"));
+			strictEqual(files.length, 1, "one failed receipt recorded");
+			const receipt = JSON.parse(readFileSync(join(receiptsDir, files[0] ?? ""), "utf8")) as {
+				outcomeDetail?: string;
+				failureMessage?: string;
+			};
+			strictEqual(receipt.outcomeDetail, "stream stalled: no output for 15s");
+			strictEqual(receipt.failureMessage, "stream stalled: no output for 15s");
+		} finally {
+			stderr.restore();
+			if (savedStateDir === undefined) delete process.env.CLIO_CODER_STATE_DIR;
+			else process.env.CLIO_CODER_STATE_DIR = savedStateDir;
+			resetXdgCache();
+		}
 	});
 
 	it("an interrupted turn exits nonzero with the abort reason, never a fabricated answer", async () => {
@@ -346,6 +397,7 @@ function runSnapshot(): unknown {
 	return {
 		runtimeKind: "http",
 		targetId: "test-target",
+		targetUrl: "http://127.0.0.1:8080",
 		wireModelId: "test-model",
 		runtimeId: "llamacpp",
 		autonomy: "read-only",

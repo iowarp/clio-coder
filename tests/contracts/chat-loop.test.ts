@@ -1354,6 +1354,7 @@ function createSilentStreamAgentFactory(
 			timestamp: Date.now(),
 		} as unknown as AgentMessage;
 		state.messages.push(failure);
+		await emit({ type: "message_end", message: failure } as never);
 		await emit({ type: "agent_end", messages: [failure] } as never);
 	};
 	const factory = (() => ({
@@ -1517,13 +1518,11 @@ describe("contracts/chat-loop stream stall escalation", () => {
 			exhausted?.errorMessage?.includes("stream stalled"),
 			`the stall reason survives into the typed failure, got: ${exhausted?.errorMessage}`,
 		);
+		const terminalAssistant = entries.filter(isAssistantMessageEntry).at(-1);
+		ok(terminalAssistant, "the exhausted run persists a terminal assistant row");
 		ok(
-			entries
-				.filter(isAssistantMessageEntry)
-				.some((entry) =>
-					String((entry.payload as { errorMessage?: unknown }).errorMessage ?? "").includes("stream stalled"),
-				),
-			"the transcript records the stall rather than a bare aborted turn",
+			String((terminalAssistant?.payload as { errorMessage?: unknown }).errorMessage ?? "").startsWith("stream stalled:"),
+			"the definitive persisted assistant names the stall rather than the provider's generic abort",
 		);
 	});
 
