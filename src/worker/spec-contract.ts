@@ -37,6 +37,8 @@ export interface SerializedWorkerRuntimeDescriptor {
 	kind: RuntimeKind;
 	apiFamily: RuntimeApiFamily;
 	auth: RuntimeAuth;
+	/** Legacy or alternate ids that resolve to this runtime; absent when it has none. */
+	aliases?: ReadonlyArray<string>;
 }
 
 /** Immutable, admission-time snapshot of the parent session's hard blocks. */
@@ -246,6 +248,10 @@ export function serializeWorkerRuntimeDescriptor(runtime: RuntimeDescriptor): Se
 		kind: runtime.kind,
 		apiFamily: runtime.apiFamily,
 		auth: runtime.auth,
+		// Carried so the target check can recognize a configured runtime id that
+		// resolves to this runtime through an alias. Without them the contract has
+		// no way to tell a legacy spelling from a genuinely wrong runtime.
+		...(runtime.aliases !== undefined && runtime.aliases.length > 0 ? { aliases: [...runtime.aliases] } : {}),
 	};
 }
 
@@ -334,12 +340,21 @@ function validateProtectedModels(value: unknown): void {
 	});
 }
 
-function validateTarget(value: unknown, runtimeId: string): void {
+/**
+ * The configured target names a runtime by whatever id the operator wrote, which
+ * may be an alias the registry resolves to the canonical id. Comparing the two
+ * spellings literally rejected every dispatch to a target whose settings still
+ * said `lmstudio-native`, because the settings migration that rewrites it runs
+ * only under `clio-coder upgrade`. An alias is the same runtime, so it passes.
+ */
+function validateTarget(value: unknown, runtimeId: string, runtimeAliases: ReadonlyArray<string>): void {
 	const target = readRecord(value, "WorkerSpec.target");
 	const targetId = readString(target.id, "WorkerSpec.target.id");
 	const targetRuntime = readString(target.runtime, "WorkerSpec.target.runtime");
-	if (targetRuntime !== runtimeId) {
-		throw new Error(`WorkerSpec target runtime mismatch: target.runtime=${targetRuntime} runtimeId=${runtimeId}`);
+	if (targetRuntime !== runtimeId && !runtimeAliases.includes(targetRuntime)) {
+		throw new Error(
+			`WorkerSpec target runtime mismatch: target.runtime=${targetRuntime} runtimeId=${runtimeId}. Set the target's runtime to '${runtimeId}' in settings.yaml, or run 'clio-coder upgrade' to migrate a legacy runtime id.`,
+		);
 	}
 	if (targetId.length === 0) throw new Error("WorkerSpec.target.id must be a non-empty string");
 	readOptionalString(target, "url", "WorkerSpec.target");
@@ -544,6 +559,8 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	if (runtimeId !== runtimeRefId) {
 		throw new Error(`WorkerSpec runtime id mismatch: runtimeId=${runtimeId} runtime.id=${runtimeRefId}`);
 	}
+	const runtimeAliases =
+		runtime.aliases === undefined ? [] : readStringArray(runtime.aliases, "WorkerSpec.runtime.aliases");
 	const runtimeKind = readEnum(runtime.kind, "WorkerSpec.runtime.kind", RUNTIME_KINDS);
 	const runtimeApiFamily = readEnum(runtime.apiFamily, "WorkerSpec.runtime.apiFamily", RUNTIME_API_FAMILIES);
 	readEnum(runtime.auth, "WorkerSpec.runtime.auth", RUNTIME_AUTHS);
@@ -554,7 +571,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalString(spec, "dynamicHash", "WorkerSpec");
 	readString(spec.agentId, "WorkerSpec.agentId");
 	readString(spec.task, "WorkerSpec.task");
-	validateTarget(spec.target, runtimeId);
+	validateTarget(spec.target, runtimeId, runtimeAliases);
 	readString(spec.wireModelId, "WorkerSpec.wireModelId");
 	readOptionalString(spec, "sessionId", "WorkerSpec");
 	readOptionalString(spec, "apiKey", "WorkerSpec");
