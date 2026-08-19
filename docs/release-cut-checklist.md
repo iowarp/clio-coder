@@ -38,7 +38,7 @@ or the npm registry.
    `CLIO_CODER_LIFECYCLE_URL` and `CLIO_CODER_LIFECYCLE_MODEL` naming a target whose model
    is already resident.
 10. `npm run ci:release`, which adds `scripts/check-release.mjs`: dist shebang
-    integrity, the forbidden-file list, the required runtime resources, and the
+    integrity, version coherence (verifying that `package.json` version matches the top heading in `CHANGELOG.md`), the forbidden-file list, the required runtime resources, and the
     tarball and unpacked size budgets.
 
 ## Part 2: version and notes (repeatable, NOT run)
