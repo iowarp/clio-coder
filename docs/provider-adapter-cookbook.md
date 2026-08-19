@@ -155,6 +155,14 @@ Local OpenAI-compatible model synthesis also declares
 of a complete stream when a local server omits `finish_reason`, instead of turning an otherwise
 valid answer into a provider error. Explicit finish reasons remain authoritative when supplied.
 
+Anthropic thinking is assembled by Pi, not by Clio. Pi's `streamSimple` maps the agent's thinking
+level onto `thinking.type: "adaptive"` plus `output_config.effort` (read from the model's
+`thinkingLevelMap` and `compat.forceAdaptiveThinking`) or onto a bounded `budget_tokens` for
+budget-based models. Clio's `onPayload` hook no longer rewrites those fields; it only sets the
+OpenAI Responses `reasoning.summary` verbosity, which the agent loop cannot express as an option.
+`tests/contracts/thinking-runtime.test.ts` captures the wire payload Pi builds and proves Clio
+leaves it untouched.
+
 
 ---
 

@@ -34,6 +34,7 @@ import {
 	completeSimple as piCompleteSimple,
 	getModel as piGetModel,
 	stream as piStream,
+	streamSimple as piStreamSimple,
 	registerBuiltInApiProviders,
 	registerFauxProvider,
 } from "@earendil-works/pi-ai/compat";
@@ -42,6 +43,8 @@ import type { EngineModel } from "./types.js";
 export { fauxAssistantMessage, fauxToolCall, registerFauxProvider, StringEnum };
 
 export const stream = piStream;
+/** pi-ai's level-aware stream: maps a thinking level onto each API's native thinking controls. */
+export const streamEngineSimple = piStreamSimple;
 
 export interface EngineTextCompletionInput {
 	model: EngineModel;
