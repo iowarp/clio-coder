@@ -169,6 +169,8 @@ type ToolSegment = {
 	 * was refused and leaves the operator no way to learn why.
 	 */
 	blockReason?: string | undefined;
+	/** View-only marker: historical calls render mutation diffs without live color. */
+	replayed?: true;
 };
 /**
  * A turn's terminal-error marker (`[error] ...`, `[aborted] ...`,
@@ -229,6 +231,8 @@ export interface ChatPanel extends Component {
 	appendUser(text: string): void;
 	appendReplayBlock(renderBlock: ReplayBlockRenderer): void;
 	applyEvent(event: ChatLoopEvent): void;
+	/** Mark a just-rehydrated tool segment so its mutation diff remains plain. */
+	markToolReplayed?(toolCallId: string): void;
 	/**
 	 * Place or refresh a worker's block. The first call for an assignment
 	 * inserts the entry (agent origin nests under the tool segment named by
@@ -763,7 +767,7 @@ function renderToolSegmentLines(
 			blockReason: seg.blockReason,
 		},
 		width,
-		{ unbounded: unboundedToolBodies },
+		{ unbounded: unboundedToolBodies, diffStyle: seg.replayed === true ? "plain" : "color" },
 	);
 }
 
@@ -1431,6 +1435,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			transcript.length = 0;
 			workerEntries.clear();
 			clearRenderCaches();
+			markDirty();
+		},
+		markToolReplayed(toolCallId: string): void {
+			const owner = findToolSegmentOwner(toolCallId);
+			if (!owner || owner.segment.finished) return;
+			invalidateEntryCache(owner.entry);
+			owner.segment.replayed = true;
 			markDirty();
 		},
 		applyEvent(event: ChatLoopEvent): void {

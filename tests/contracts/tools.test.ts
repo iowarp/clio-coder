@@ -384,6 +384,9 @@ describe("contracts/tools", () => {
 			strictEqual(r2.kind, "ok");
 
 			strictEqual(readFileSync(filePath, "utf8"), "two");
+			ok(r2.kind === "ok" && typeof r2.details?.diff === "string");
+			ok(r2.kind === "ok" && r2.details?.diff.includes("-1 one"));
+			ok(r2.kind === "ok" && r2.details?.diff.includes("+1 two"));
 		});
 
 		it("writeTool reports the written byte count as the ledger's shown size, not the confirmation length", async () => {
