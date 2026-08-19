@@ -487,6 +487,12 @@ function verificationSection(cwd: string): ClioMdSection | null {
 	if (hasScript("ci")) {
 		lines.push(`Use ${command("ci")} for the full local gate before committing broad or shared behavior changes.`);
 	}
+	// Go's commands are defined by the toolchain, not by each project, so
+	// naming them for any module carries the same confidence as a declared
+	// package script.
+	if (existsSync(join(cwd, "go.mod"))) {
+		lines.push("Run `go build ./...` and `go test ./...` before handoff.");
+	}
 	if (lines.length === 0) return null;
 	return { title: "Verification expectations", body: lines.join(" ") };
 }

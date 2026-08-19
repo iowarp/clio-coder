@@ -84,6 +84,24 @@ describe("contracts/bootstrap", () => {
 		strictEqual(verification.body.includes("`pnpm run format`"), false, verification.body);
 	});
 
+	/**
+	 * Go's commands are defined by the toolchain, not by each project, so a Go
+	 * module can be handed `go build ./...` and `go test ./...` with the same
+	 * confidence a declared package script carries. Before this, any repository
+	 * without a package.json got no verification section at all.
+	 */
+	it("names the Go toolchain commands for a Go module", async () => {
+		writeFileSync(join(scratch, "go.mod"), "module example.com/fixture\n\ngo 1.22\n", "utf8");
+		writeFileSync(join(scratch, "main.go"), "package main\n\nfunc main() {}\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		ok(verification, "a Go module must get a verification section");
+
+		ok(verification.body.includes("`go build ./...`"), verification.body);
+		ok(verification.body.includes("`go test ./...`"), verification.body);
+	});
+
 	it("measures the local import extension instead of reading it off the stack", async () => {
 		writeFileSync(
 			join(scratch, "package.json"),
