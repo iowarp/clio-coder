@@ -328,7 +328,9 @@ export function effectiveThinkingLevel(
 	// Catalog effort maps intentionally stop at xhigh; `max` must clamp to that
 	// supported ceiling instead of falling through to the generic low fallback.
 	if (configured === "max" && available.includes("xhigh")) return "xhigh";
-	if ((configured === "high" || configured === "xhigh") && available.includes("high")) return "high";
+	if ((configured === "high" || configured === "xhigh" || configured === "max") && available.includes("high")) {
+		return "high";
+	}
 	if (configured === "medium" && available.includes("medium")) return "medium";
 	if (configured !== "off" && available.includes("low")) return "low";
 	if (configured === "off" && !available.includes("off") && available.includes("low")) return "low";

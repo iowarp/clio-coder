@@ -12,7 +12,13 @@ import {
 	resolveProviderModelCatalogDirs,
 } from "../../src/domains/providers/knowledge-base-path.js";
 import { resolveModelCapabilities } from "../../src/domains/providers/model-capabilities.js";
-import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
+import { resolveModelRuntimeCapabilities } from "../../src/domains/providers/model-runtime-capabilities.js";
+import {
+	type CapabilityFlags,
+	EMPTY_CAPABILITIES,
+	type ThinkingLevel,
+	VALID_THINKING_LEVELS,
+} from "../../src/domains/providers/types/capability-flags.js";
 import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 
@@ -267,6 +273,37 @@ describe("contracts/model knowledge base", () => {
 		// Ornith is reasoning class "always": it cannot be silenced.
 		const ornithQuirks = kb.lookup("Ornith-1.0-35B-Q4_K_M-262K")?.entry.quirks as LocalModelQuirks | undefined;
 		strictEqual(ornithQuirks?.thinking?.mechanism, "always-on");
+	});
+
+	it("keeps the effective thinking dial monotonic for every catalog family", () => {
+		const bundled = join(dirname(fileURLToPath(import.meta.url)), "../../src/domains/providers/models");
+		const kb = new FileKnowledgeBase([{ dir: bundled, label: "bundled" }]);
+		const rank = new Map<ThinkingLevel, number>(VALID_THINKING_LEVELS.map((level, index) => [level, index]));
+
+		for (const entry of kb.entries()) {
+			const capabilities: CapabilityFlags = { ...LOCAL_BASE_CAPABILITIES, ...entry.capabilities };
+			const quirks = entry.quirks as LocalModelQuirks | undefined;
+			const effective = VALID_THINKING_LEVELS.map(
+				(configured) =>
+					resolveModelRuntimeCapabilities({
+						runtimeId: "llamacpp",
+						apiFamily: "openai-completions",
+						modelId: entry.family,
+						capabilities,
+						...(quirks ? { quirks } : {}),
+						configuredThinkingLevel: configured,
+					}).thinking.effectiveLevel,
+			);
+
+			for (let index = 1; index < effective.length; index += 1) {
+				const previous = effective[index - 1] ?? "off";
+				const current = effective[index] ?? "off";
+				ok(
+					(rank.get(current) ?? -1) >= (rank.get(previous) ?? -1),
+					`${entry.family}: ${VALID_THINKING_LEVELS[index - 1]} -> ${previous}, then ${VALID_THINKING_LEVELS[index]} -> ${current}`,
+				);
+			}
+		}
 	});
 
 	/**
