@@ -278,7 +278,7 @@ The request settings map as follows:
 | --- | --- |
 | `ttlSeconds` | Sends `ttl`, using LM Studio's auto-eviction TTL (<https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict>). |
 | `draftModel` | Sends `draft_model` on the OpenAI-compatible chat request (<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>). |
-| `reasoning` | `off` sends `reasoning_effort: none`; `on` sends `low`; a literal `low`, `medium`, or `high` is sent unchanged; `auto` maps the active Clio thinking level. |
+| `reasoning` | `off` sends `reasoning_effort: none`; `on` sends `low`; a literal `low`, `medium`, or `high` outranks the thinking dial but is still clamped to the efforts the model advertises (a model reporting only `[off, on]` receives `low`); `auto` maps the active Clio thinking level. |
 
 Clio maps the active thinking level through the model family's runtime resolver map. If the model family specifies an explicit effort map (such as mapping `max` to `xhigh`), Clio sends that exact effort; otherwise it falls back to the default `off` to `none`, `minimal`/`low` to `low`, `medium` to `medium`, and `high`/`xhigh`/`max` to `high`. For model families that declare a `none` or `always-on` reasoning mechanism, the `reasoning_effort` field is omitted. A model reporting only `[off,on]` clamps every
 non-off level to `low`. Clio uses only `reasoning_effort` on LM Studio's documented chat surface
