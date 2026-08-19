@@ -157,10 +157,13 @@ describe("contracts/session-switch-atomicity", () => {
 			transitions,
 			session: contract,
 			chat: {
+				cancel() {},
+				isStreaming: () => false,
 				resetForSession(leaf: string | null, msgs?: ReadonlyArray<AgentMessage>) {
 					chatResetCalls += 1;
 					events.push(`chat.resetForSession(${leaf}, ${msgs?.length ?? 0})`);
 				},
+				whenSettled: async () => {},
 			},
 			chatPanel: {
 				appendUser() {},

@@ -12,6 +12,7 @@ import { openMessagePickerOverlay } from "./overlays/message-picker.js";
 import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { lastTurnSummaryFromLedger } from "./session-last-turn.js";
+import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { reseedSessionUsageFromLedger, type SessionUsageSink } from "./session-usage-reseed.js";
 import type { SlashCommandContext } from "./slash-commands.js";
 import type { TurnSummary } from "./status/index.js";
@@ -20,7 +21,7 @@ export interface OverlaySessionLifecycleDeps {
 	tui: TUI;
 	transitions: OverlayTransitions;
 	session?: SessionContract;
-	chat: Pick<ChatLoop, "resetForSession">;
+	chat: Pick<ChatLoop, "cancel" | "isStreaming" | "resetForSession" | "whenSettled">;
 	chatPanel: ChatPanel;
 	/** The one transcript reset: the panel plus every view folded alongside it. */
 	resetTranscript(): void;
@@ -113,7 +114,9 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.transitions.state = "resume";
 		deps.transitions.handle = openResumeOverlay(deps.tui, {
 			session,
-			onResume: (sessionId) => {
+			onResume: async (sessionId) => {
+				const settlement = settleChatBeforeSessionSwitch(deps.chat);
+				if (settlement) await settlement;
 				deps.onResumeSession?.(sessionId);
 				// onResumeSession (wired to session.resume) catches and stderr-logs
 				// its own failure rather than throwing here, so this is the only
@@ -196,7 +199,9 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.transitions.state = "tree";
 		deps.transitions.handle = openTreeSelector(deps.tui, {
 			session,
-			onSwitchTurn: (turnId) => {
+			onSwitchTurn: async (turnId) => {
+				const settlement = settleChatBeforeSessionSwitch(deps.chat);
+				if (settlement) await settlement;
 				try {
 					session.switchTurn(turnId);
 					const sessionId = session.current()?.id ?? null;
@@ -244,7 +249,9 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.transitions.state = "message-picker";
 		deps.transitions.handle = openMessagePicker(deps.tui, {
 			session,
-			onFork: (parentTurnId) => {
+			onFork: async (parentTurnId) => {
+				const settlement = settleChatBeforeSessionSwitch(deps.chat);
+				if (settlement) await settlement;
 				try {
 					if (deps.onForkSession) deps.onForkSession(parentTurnId);
 					else session.fork(parentTurnId);
