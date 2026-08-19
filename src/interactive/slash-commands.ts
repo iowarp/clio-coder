@@ -436,6 +436,12 @@ export interface SlashCommandContext {
 	render: () => void;
 }
 
+/** The one operator-authored turn used by slash and overlay handoff paths. */
+export function formatUserTaskHandoff(task: Pick<UserTask, "id" | "title" | "note">): string {
+	const note = task.note ? ` ${task.note}.` : "";
+	return `Operator task ${task.id}: ${task.title}.${note} Pick it up with tasks action="pick" id="${task.id}" and work it when appropriate.`;
+}
+
 /** The verb a command performs, in the order /help lists the groups. */
 export const SLASH_COMMAND_GROUPS = ["Run", "Inspect", "Configure", "Sessions"] as const;
 export type SlashCommandGroup = (typeof SLASH_COMMAND_GROUPS)[number];
@@ -981,10 +987,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				}
 				if (command.kind === "tasks-hand") {
 					const task = ctx.userTasks.hand(command.id);
-					const note = task.note ? ` ${task.note}.` : "";
-					ctx.submitChat(
-						`Operator task ${task.id}: ${task.title}.${note} Pick it up with tasks action="pick" id="${task.id}" and work it when appropriate.`,
-					);
+					ctx.submitChat(formatUserTaskHandoff(task));
 					return;
 				}
 				if (command.kind === "tasks-done") {

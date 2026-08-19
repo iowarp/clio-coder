@@ -1,13 +1,21 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
 import type { OverlayHandle, OverlayOptions, TUI } from "../../src/engine/tui.js";
 import type { ContextActivitySnapshot } from "../../src/interactive/context-activity.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import {
 	createInteractiveTickers,
+	formatTaskBoardIslandLines,
 	type InteractiveTickerHandle,
 	type InteractiveTickersDeps,
 } from "../../src/interactive/interactive-tickers.js";
+
+const ESC = String.fromCharCode(27);
+
+function stripAnsi(value: string): string {
+	return value.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
+}
 
 const ROW: DispatchBoardRow = {
 	runId: "run-1",
@@ -55,6 +63,8 @@ function createHarness(): {
 	setActivity(activity: ContextActivitySnapshot | null): void;
 	setOverlay(state: string): void;
 	setFooterExpanded(expanded: boolean): void;
+	setBoard(board: TaskBoardSnapshot | null): void;
+	boardReads(): number;
 } {
 	const log: string[] = [];
 	const tickers: ScheduledTicker[] = [];
@@ -65,6 +75,8 @@ function createHarness(): {
 	let activity: ContextActivitySnapshot | null = null;
 	let overlayState = "closed";
 	let footerExpanded = false;
+	let board: TaskBoardSnapshot | null = null;
+	let boardReadCount = 0;
 	let nextTickerId = 1;
 
 	const makeHandle = (name: "task" | "context", hidden: boolean[]): OverlayHandle =>
@@ -112,6 +124,11 @@ function createHarness(): {
 			},
 			getOverlayState: () => overlayState,
 			isFooterExpanded: () => footerExpanded,
+			getTaskBoard: () => {
+				boardReadCount += 1;
+				log.push("board");
+				return board;
+			},
 			scheduleInterval: (callback, intervalMs) => {
 				const ticker: ScheduledTicker = {
 					id: nextTickerId,
@@ -146,6 +163,10 @@ function createHarness(): {
 		setFooterExpanded: (next) => {
 			footerExpanded = next;
 		},
+		setBoard: (next) => {
+			board = next;
+		},
+		boardReads: () => boardReadCount,
 	};
 }
 
@@ -238,5 +259,71 @@ describe("interactive ticker ownership", () => {
 		harness.log.length = 0;
 		tickers.dispose();
 		deepStrictEqual(harness.log, ["clear:2", "clear:1", "hide:context", "hide:task"]);
+	});
+
+	it("renders cached current-board work only when fleet rows are absent", () => {
+		const harness = createHarness();
+		const board: TaskBoardSnapshot = {
+			boardId: "board-island",
+			title: "Release work",
+			tasks: [
+				{ id: "t1", title: "finished", status: "completed", origin: "agent" },
+				{ id: "t2", title: "verify release", status: "active", origin: "user", userTaskId: "u1" },
+			],
+			activeRunIds: [],
+		};
+		harness.setBoard(board);
+		const tickers = createInteractiveTickers(harness.deps);
+		tickers.renderTaskIsland();
+		strictEqual(harness.taskHidden.at(-1), false);
+		strictEqual(harness.boardReads(), 1);
+		const rendered = formatTaskBoardIslandLines(board).join("\n");
+		const plain = stripAnsi(rendered);
+		strictEqual(plain.includes("Release work"), true);
+		strictEqual(plain.includes("1/2 done · 1 active"), true);
+		strictEqual(plain.includes("t2 verify release"), true);
+		harness.log.length = 0;
+		harness.tickers[0]?.callback();
+		strictEqual(harness.log.includes("render"), true, "the board fallback repaint rides the shared island ticker");
+		const fallbackReads = harness.boardReads();
+
+		harness.log.length = 0;
+		harness.setRows([ROW]);
+		tickers.renderTaskIsland();
+		strictEqual(harness.taskHidden.at(-1), false);
+		strictEqual(harness.boardReads(), fallbackReads, "dispatch priority must not even read the board fallback");
+		deepStrictEqual(harness.log.slice(0, 2), ["rows", "active"]);
+	});
+
+	it("keeps board fallback behind overlay, footer, context, and settled-work gates", () => {
+		const harness = createHarness();
+		const tickers = createInteractiveTickers(harness.deps);
+		const openBoard: TaskBoardSnapshot = {
+			boardId: "board-gates",
+			title: "Open",
+			tasks: [{ id: "t1", title: "work", status: "pending", origin: "agent" }],
+			activeRunIds: [],
+		};
+		harness.setBoard(openBoard);
+		tickers.renderTaskIsland();
+		strictEqual(harness.taskHidden.at(-1), false);
+		harness.setOverlay("tasks");
+		tickers.renderTaskIsland();
+		strictEqual(harness.taskHidden.at(-1), true);
+		harness.setOverlay("closed");
+		harness.setFooterExpanded(true);
+		tickers.renderTaskIsland();
+		strictEqual(harness.taskHidden.at(-1), true);
+		harness.setFooterExpanded(false);
+		harness.setActivity(ACTIVITY);
+		tickers.renderTaskIsland();
+		strictEqual(harness.taskHidden.at(-1), true);
+		harness.setActivity(null);
+		harness.setBoard({
+			...openBoard,
+			tasks: [{ id: "t1", title: "work", status: "completed", origin: "agent" }],
+		});
+		tickers.renderTaskIsland();
+		strictEqual(harness.taskHidden.at(-1), true);
 	});
 });

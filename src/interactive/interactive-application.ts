@@ -265,6 +265,7 @@ export interface KeyBindingDeps {
 	requestShutdown: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
+	openTasks: () => void;
 	openDecisions: () => void;
 	backgroundDispatch: () => void;
 	openModelSelector: () => void;
@@ -349,6 +350,9 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 		case "clio.dispatchBoard.toggle":
 			deps.toggleDispatchBoard();
 			return true;
+		case "clio.tasks.open":
+			deps.openTasks();
+			return true;
 		case "clio.decisions.open":
 			deps.openDecisions();
 			return true;
@@ -380,6 +384,7 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 		"clio.thinking.cycle",
 		"clio.session.tree",
 		"clio.dispatchBoard.toggle",
+		"clio.tasks.open",
 		"clio.decisions.open",
 		"clio.dispatch.background",
 		"clio.model.select",
@@ -587,6 +592,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		contextActivityStore,
 		getOverlayState: () => overlayLifecycle?.getState() ?? "closed",
 		isFooterExpanded: () => footer.isExpanded(),
+		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 	});
 	/**
 	 * The one transcript reset. The chat panel and the worker fold are two views

@@ -33,6 +33,7 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "getSessionId"
 	| "getSettings"
 	| "getTaskBoard"
+	| "userTasks"
 	| "getDecisionBoard"
 	| "getTaskMemoryStatus"
 	| "interop"
@@ -339,6 +340,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
 		requestRender: () => tui.requestRender(),
 		...(deps.app.getTaskBoard ? { getTaskBoard: deps.app.getTaskBoard } : {}),
+		...(deps.app.userTasks ? { userTasks: deps.app.userTasks } : {}),
 		...(deps.app.getDecisionBoard ? { getDecisionBoard: deps.app.getDecisionBoard } : {}),
 		...(deps.app.supersedeDecision ? { supersedeDecision: deps.app.supersedeDecision } : {}),
 		submitChat: (text) => deps.getSlashContext().submitChat(text),

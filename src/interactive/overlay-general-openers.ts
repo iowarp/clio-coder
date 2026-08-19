@@ -4,6 +4,9 @@ import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/inde
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
+import { foldSessionArtifacts } from "../domains/session/session-artifacts.js";
+import { foldSessionTaskHistory } from "../domains/session/task-board.js";
+import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { TUI } from "../engine/tui.js";
 import { type OpenContextOverlayOptions, openContextOverlay } from "./context-overlay.js";
 import { openCostOverlay } from "./cost-overlay.js";
@@ -21,7 +24,7 @@ import {
 	openContextResetOverlay,
 } from "./overlays/context-reset.js";
 import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/decisions.js";
-import type { ContextClearCommandOptions } from "./slash-commands.js";
+import { type ContextClearCommandOptions, formatUserTaskHandoff } from "./slash-commands.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
 import { type ArtifactProviderDeps, createDefaultArtifactProviders } from "./view/artifacts.js";
 import { openViewOverlay } from "./view/view-overlay.js";
@@ -41,6 +44,7 @@ export interface OverlayGeneralOpenersDeps {
 	renderTaskIsland: () => void;
 	requestRender: () => void;
 	getTaskBoard?: Parameters<typeof openTasksOverlay>[1];
+	userTasks?: UserTasksStore;
 	getDecisionBoard?: Parameters<typeof openDecisionsOverlay>[1];
 	supersedeDecision?: (interviewId: string, key: string, correction?: string) => unknown;
 	submitChat: (text: string) => void;
@@ -144,6 +148,30 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.state = "tasks";
 		deps.transitions.handle = openTasksOverlayFactory(deps.tui, () => deps.getTaskBoard?.() ?? null, {
 			onClose: deps.closeOverlay,
+			getSessionSnapshot: () => {
+				const entries = deps.readSessionEntries?.() ?? [];
+				const workspace = deps.getSessionMeta()?.cwd ?? process.cwd();
+				return {
+					history: foldSessionTaskHistory(entries),
+					artifacts: foldSessionArtifacts(entries, { workspace }),
+				};
+			},
+			...(deps.userTasks
+				? {
+						getUserTasks: () => deps.userTasks?.snapshot() ?? [],
+						onAddUserTask: (title: string) => void deps.userTasks?.add(title),
+						onHandUserTask: (id: string) => {
+							const task = deps.userTasks?.hand(id, deps.getSessionId?.() ?? undefined);
+							if (!task) throw new Error("operator task inbox is unavailable");
+							deps.submitChat(formatUserTaskHandoff(task));
+						},
+						onDoneUserTask: (id: string) => void deps.userTasks?.done(id),
+						onDropUserTask: (id: string) => void deps.userTasks?.drop(id),
+					}
+				: {}),
+			onOpenArtifact: (path: string) => openView(`workspace:${path}`),
+			requestRender: deps.requestRender,
+			workspace: deps.getSessionMeta()?.cwd ?? process.cwd(),
 		});
 		deps.requestRender();
 	};

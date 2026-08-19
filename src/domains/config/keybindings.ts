@@ -23,6 +23,7 @@ export interface ClioAppKeybindings {
 	"clio.status.toggle": true;
 	"clio.session.tree": true;
 	"clio.dispatchBoard.toggle": true;
+	"clio.tasks.open": true;
 	"clio.decisions.open": true;
 	"clio.dispatch.background": true;
 	"clio.model.select": true;
@@ -86,6 +87,10 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.dispatchBoard.toggle": {
 		defaultKeys: "alt+w",
 		description: "Toggle the dispatch (workers) board overlay",
+	},
+	"clio.tasks.open": {
+		defaultKeys: "alt+b",
+		description: "Open the composite session and operator task board",
 	},
 	"clio.decisions.open": {
 		defaultKeys: "alt+d",
