@@ -18,8 +18,9 @@
  *      and cancel a pending retry on `Esc` without coupling to a specific
  *      timer abstraction.
  *
- * No I/O, no pi-agent-core/pi-ai imports. The chat-loop wiring (which decides
- * whether an agent_end with stopReason "error" triggers a retry) lives in
+ * No I/O. The only engine dependency is the classifier re-exported by
+ * `src/engine/ai.ts`. The chat-loop wiring (which decides whether an
+ * agent_end with stopReason "error" triggers a retry) lives in
  * `src/interactive/chat-loop.ts` and consumes this module; keeping the two
  * split so the countdown can be exercised in unit tests without spinning up a
  * runtime.
@@ -52,7 +53,7 @@ export const DEFAULT_RETRY_SETTINGS: RetrySettings = {
  * llama-swap and Ollama phrase the same condition differently, so the pattern
  * covers the family rather than one vendor's wording.
  *
- * Deliberately not folded into {@link RETRYABLE_PATTERN}: this is transient in
+ * Deliberately kept outside pi's generic classifier: this is transient in
  * a different unit. A rate limit clears in a second or two; a 35B model loads
  * off disk in twenty to sixty, and retrying it on a rate limit's backoff burns
  * every attempt before the server is ready. `clio-coder run --target node-a --model
