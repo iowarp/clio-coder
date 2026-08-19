@@ -41,6 +41,8 @@ Marker format:
 
 Already-compacted entries are not masked again. Recent turns keep their full observations and thinking. If masking drops pressure below the threshold, Clio sends the request without an LLM summary. If pressure remains above the threshold, Clio runs the summary compaction path, appends a compaction summary entry, refreshes replay messages from the session, and continues.
 
+When the ledger is replayed to the model, compaction summaries, branch summaries, and bash executions become the user-role text that pi-agent-core's `convertToLlm` produces for its own messages of those kinds. Clio imports `COMPACTION_SUMMARY_PREFIX`, `BRANCH_SUMMARY_PREFIX`, their suffixes, and `bashExecutionToText` through `src/engine/messages.ts`; `src/interactive/chat-renderer.ts` only maps Clio's entry shapes onto them and applies its replay truncation. `tests/contracts/replay-pi-message-text.test.ts` holds the two in lockstep.
+
 Manual `/context compact`, `CLIO_CODER_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly. The overflow guard runs before the user turn is committed, so a blocked oversized request does not leave an unanswered user entry in the ledger.
 
 ## Cache-divergence honesty

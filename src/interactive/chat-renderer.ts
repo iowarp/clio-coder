@@ -26,6 +26,14 @@ import type {
 	WorkerRunEntry,
 } from "../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import {
+	type BashExecutionMessage,
+	BRANCH_SUMMARY_PREFIX,
+	BRANCH_SUMMARY_SUFFIX,
+	bashExecutionToText,
+	COMPACTION_SUMMARY_PREFIX,
+	COMPACTION_SUMMARY_SUFFIX,
+} from "../engine/messages.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
@@ -746,33 +754,26 @@ function dropLegacyToolResultAssistantDuplicates(entries: ReadonlyArray<SessionE
 }
 
 function compactionContextText(entry: CompactionSummaryEntry): string {
-	return [
-		"The conversation history before this point was compacted into the following summary:",
-		"",
-		"<summary>",
-		entry.summary,
-		"</summary>",
-	].join("\n");
+	return `${COMPACTION_SUMMARY_PREFIX}${entry.summary}${COMPACTION_SUMMARY_SUFFIX}`;
 }
 
 function branchContextText(entry: BranchSummaryEntry): string {
-	return [
-		"The following is a summary of a branch that this conversation came back from:",
-		"",
-		"<summary>",
-		entry.summary,
-		"</summary>",
-	].join("\n");
+	return `${BRANCH_SUMMARY_PREFIX}${entry.summary}${BRANCH_SUMMARY_SUFFIX}`;
 }
 
+/** Project Clio's ledger entry onto pi's bash message so pi owns the replay wording. */
 function bashContextText(entry: BashExecutionEntry): string {
-	let text = `Ran \`${entry.command}\`\n`;
-	const output = truncateReplayText(entry.output);
-	text += output.length > 0 ? `\`\`\`\n${output}\n\`\`\`` : "(no output)";
-	if (entry.cancelled) text += "\n\n(command cancelled)";
-	else if (entry.exitCode !== null && entry.exitCode !== 0) text += `\n\nCommand exited with code ${entry.exitCode}`;
-	if (entry.truncated && entry.fullOutputPath) text += `\n\n[Output truncated. Full output: ${entry.fullOutputPath}]`;
-	return text;
+	const message: BashExecutionMessage = {
+		role: "bashExecution",
+		command: entry.command,
+		output: truncateReplayText(entry.output),
+		exitCode: entry.exitCode ?? undefined,
+		cancelled: entry.cancelled,
+		truncated: entry.truncated,
+		...(entry.fullOutputPath !== undefined ? { fullOutputPath: entry.fullOutputPath } : {}),
+		timestamp: Date.parse(entry.timestamp) || 0,
+	};
+	return bashExecutionToText(message);
 }
 
 function appendContextMessage(out: AgentMessage[], role: "user" | "assistant", text: string, timestamp: string): void {
