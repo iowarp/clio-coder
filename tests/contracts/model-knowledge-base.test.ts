@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -61,6 +61,19 @@ function localStatus(modelId: string, probeCapabilities?: Partial<CapabilityFlag
 }
 
 describe("contracts/model knowledge base", () => {
+	it("does not cite missing source files in shipped catalog prose", () => {
+		const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
+		const catalog = readFileSync(
+			join(repoRoot, "src/domains/providers/models/local-models/clio-local-coding-targets.yaml"),
+			"utf8",
+		);
+		const references = catalog.match(/src\/[A-Za-z0-9_./-]+\.ts(?::\d+(?:-\d+)?)?/gu) ?? [];
+		for (const reference of references) {
+			const sourcePath = reference.replace(/:\d+(?:-\d+)?$/u, "");
+			strictEqual(existsSync(join(repoRoot, sourcePath)), true, `catalog cites missing source file ${sourcePath}`);
+		}
+	});
+
 	it("loads ordered catalog roots and lets overlays win equally specific matches", () => {
 		const root = scratchDir("clio-kb-");
 		try {
