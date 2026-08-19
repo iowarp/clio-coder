@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import {
+	getKeybindings,
 	Input,
 	matchesKey,
 	type OverlayHandle,
@@ -178,6 +179,14 @@ export function createSessionOverlayBox(
 		closeOverlay();
 	}
 
+	function moveSelectionByPage(direction: -1 | 1): void {
+		const selected = list.getSelectedItem();
+		const currentIndex = selected ? filtered.findIndex((session) => session.id === selected.value) : 0;
+		const targetIndex = currentIndex + direction * VISIBLE_ROWS;
+		list.setSelectedIndex(targetIndex);
+		box.invalidate();
+	}
+
 	function closeOverlay(): void {
 		clearPendingEscape();
 		onClose();
@@ -200,6 +209,15 @@ export function createSessionOverlayBox(
 	}
 
 	function dispatchResolvedInput(data: string): void {
+		const keybindings = getKeybindings();
+		if (keybindings.matches(data, "tui.select.pageUp")) {
+			moveSelectionByPage(-1);
+			return;
+		}
+		if (keybindings.matches(data, "tui.select.pageDown")) {
+			moveSelectionByPage(1);
+			return;
+		}
 		if (matchesKey(data, "up") || matchesKey(data, "down")) {
 			list.handleInput(data);
 			return;

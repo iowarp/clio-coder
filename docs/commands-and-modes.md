@@ -178,6 +178,8 @@ There are no slash-command aliases. `/context compact`, `/quit`, `/model`,
 spellings stay errors that name `/help` instead of guessing which operation the
 operator intended.
 
+The `/resume` picker accepts Page Up and Page Down to move by its 12 visible rows. Arrow keys continue to move one session at a time, and typing continues to filter the list.
+
 Only active commands run. Typing anything command-shaped that the registry does
 not own checks the loaded prompt templates across native and foreign prompt roots.
 Built-in command names are reserved across interactive and headless modes; a
