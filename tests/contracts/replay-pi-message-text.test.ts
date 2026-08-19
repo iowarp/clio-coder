@@ -44,7 +44,7 @@ describe("contracts/replay-pi-message-text", () => {
 				summary: "## Goal\nolder context",
 				tokensBefore: 1000,
 				firstKeptTurnId: "02",
-				trigger: "manual",
+				trigger: "force",
 			},
 			{ kind: "message", ...base("05", "04"), role: "user", payload: { text: "continue" } },
 		];
