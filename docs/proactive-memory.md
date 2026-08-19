@@ -159,7 +159,7 @@ records one telemetry row, not two.
 
 ## Background steps never hold a turn open
 
-The pi agent does not become idle until every `agent_end` listener settles, so a
+The agent loop does not become idle until every `agent_end` listener settles, so a
 memory step awaited at that boundary would add its full latency to the visible
 end of every triggered turn. Measured on the reference route below, step latency
 has a median of 18.6 seconds and ranges up to 220.8 seconds. This makes an awaited

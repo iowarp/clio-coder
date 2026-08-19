@@ -248,7 +248,7 @@ After step execution, the orchestrator compares the working checkout against the
 
 Fleet dispatch is admitted only when the requested worker scope is a subset of the orchestrator scope and requested actions fit the worker scope.
 
-Dispatch workers can run the same HTTP, native, or pi-ai-backed runtimes as the orchestrator, driven through the [pi SDK family](https://www.npmjs.com/package/@earendil-works/pi-agent-core) (including `@earendil-works/pi-agent-core` and its TUI and AI wrappers). Clio observes and governs those tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
+Dispatch workers can run the same HTTP or native runtimes as the orchestrator. Clio observes and governs those tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
 
 Three integration paths exist for driving Claude Code, ranging from fully enforced to advisory gating:
 

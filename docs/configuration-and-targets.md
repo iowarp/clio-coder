@@ -3,9 +3,9 @@
 > [!TIP]
 > **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.3.2).
 
-Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP/native/pi-ai-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.
+Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.
 
-Clio is built on top of pi-ai. Broad provider/model support comes from pi-ai-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every pi-ai provider.
+Clio's engine is built on the pi SDK (see [docs/pi-boundary.md](pi-boundary.md)). Broad provider/model support comes from engine-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every provider.
 
 Source of truth: `src/core/defaults.ts`, `src/core/config.ts`, `src/domains/providers/**`, `src/cli/configure.ts`, `src/cli/targets.ts`, `src/cli/models.ts`, and `src/cli/auth.ts`.
 
@@ -119,9 +119,9 @@ Terminology used in code and receipts:
 | `RuntimeDescriptor` | Executable adapter, transport, or protocol implementation, for example `openai-codex`, `anthropic`, `openai-compat`, `llamacpp`, `claude-sdk`, or `claude-code`. |
 | Target / `TargetDescriptor` | Persisted user-configured target plus runtime id, model defaults, auth metadata, and capability overrides. |
 | Resolved target | Target spec combined with the runtime descriptor, model catalog/probe data, wire model id, and effective capabilities. |
-| Orchestrator target | Main chat/print target. HTTP/native/pi-ai-backed. |
+| Orchestrator target | Main chat/print target. HTTP/native engine-backed. |
 | Background target | Optional proactive-memory model target. Unset means deterministic rules-only memory. |
-| Worker target | Fleet dispatch target. HTTP/native/pi-ai-backed, or one of the sanctioned subscription worker runtimes such as `claude-sdk`, `claude-code`, or `antigravity-code`. |
+| Worker target | Fleet dispatch target. HTTP/native engine-backed, or one of the sanctioned subscription worker runtimes such as `claude-sdk`, `claude-code`, or `antigravity-code`. |
 
 ```yaml
 version: 1
@@ -551,7 +551,7 @@ Every one of these has an environment override for a single process; see [enviro
 
 `retry.streamStallMs` covers the failure a request error never reports: the backend answers `/health` while the slot behind the stream is dead. A run whose stream produces nothing for that long is aborted and handed to the same retry ladder as any transient error, so a headless run or a fleet worker recovers without a human pressing Esc. Time inside a tool call and inside the post-tool compaction guard does not count against it, so a long build is never mistaken for a wedged stream. Set it to `0` to keep the old behavior, where a stalled stream waits forever.
 
-Generic provider and transport errors are classified by Pi 0.84's `isRetryableAssistantError`, including DNS and WebSocket failures while excluding quota, usage-limit, and billing exhaustion even when the message also contains `429` or `500`. Clio adds only its local-runtime policy: model-loading errors receive a longer bounded delay, the TUI shows a cancellable countdown, and recovery resumes through the existing agent loop.
+Generic provider and transport errors are classified by transient retry rules, including DNS and WebSocket failures while excluding quota, usage-limit, and billing exhaustion even when the message also contains `429` or `500`. Clio adds only its local-runtime policy: model-loading errors receive a longer bounded delay, the TUI shows a cancellable countdown, and recovery resumes through the existing agent loop.
 
 ### Proactive memory
 
@@ -619,7 +619,7 @@ clio-coder configure --list
 clio-coder configure --list --all
 ```
 
-`clio-coder configure --list` outputs every registered runtime across all categories (local, cloud, subscription, worker-only) along with its auth type and catalog status. For catalog-backed runtimes, it reports the catalog size (for example, `models=38 in pi-ai catalog`). It also includes a reference to `clio-coder auth list` for runtimes that require authentication.
+`clio-coder configure --list` outputs every registered runtime across all categories (local, cloud, subscription, worker-only) along with its auth type and catalog status. For catalog-backed runtimes, it reports the catalog size (for example, `models=38 in catalog`). It also includes a reference to `clio-coder auth list` for runtimes that require authentication.
 
 When configuring a catalog-backed runtime non-interactively, `clio-coder configure` requires the `--model` flag to specify an explicit model from the catalog; it will not silently seed a generic default model.
 
@@ -919,7 +919,7 @@ Representative built-in runtime IDs:
 Some hidden aliases exist for backward compatibility or special surfaces; use `clio-coder configure --list --all` to see them.
 
 > [!NOTE]
-> Chat and print targets are HTTP/native/pi-ai-backed adapters. Dispatch workers also admit the sanctioned subscription worker runtimes: `claude-sdk`, `claude-code`, and `antigravity-code`.
+> Chat and print targets are HTTP and native engine-backed adapters. Dispatch workers also admit the sanctioned subscription worker runtimes: `claude-sdk`, `claude-code`, and `antigravity-code`.
 
 ---
 
@@ -954,7 +954,7 @@ You have two ways to give Clio an API key:
 - **Environment variable** (`--api-key-env <VAR>`, or the env choice in `clio-coder configure`). Clio stores nothing and reads `$VAR` at call time. This is the recommended default. The wizard suggests it for new credentials and offers `keep` first when a stored credential already exists.
 - **Stored credential** (`--api-key <literal>`, or `clio-coder auth login`). The key is written to `credentials.yaml` (see directory locations) as **plaintext**, protected only by file mode `0600`. There is no encryption and no OS-keychain integration. Any process running as your user, plus backups and dotfile sync, can read it. Clio prints a warning whenever it writes a literal key for this reason.
 
-OAuth refresh follows Pi 0.84's signal-aware credential mutation contract. Clio serializes the read, token exchange, and atomic `credentials.yaml` write under one lock, forwards the active agent or background-request abort signal through `providers.auth`, and cancels a queued lock wait immediately. A cancelled refresh neither continues later nor publishes an uncommitted token into the process-local credential view.
+OAuth refresh follows signal-aware credential mutation. Clio serializes the read, token exchange, and atomic `credentials.yaml` write under one lock, forwards the active agent or background-request abort signal through `providers.auth`, and cancels a queued lock wait immediately. A cancelled refresh neither continues later nor publishes an uncommitted token into the process-local credential view.
 
 Prefer `--api-key-env` for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by `clio-coder auth status`, `clio-coder targets`, or `clio-coder configure`; only the source (env var name or `stored-api-key`) is shown.
 

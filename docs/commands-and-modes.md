@@ -330,7 +330,7 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Alt+X` | Dismiss footer notifications. |
 | `Ctrl+G`, then a letter | Portable leader fallback for Alt-letter actions. |
 | `Ctrl+C` | With no overlay: cancel stream, clear input, or press twice to exit. With an overlay open: close/cancel that overlay only. |
-| `Ctrl+D` | Exit when the editor is empty; otherwise delete the next character (pi-compatible). It never exits from inside an overlay. |
+| `Ctrl+D` | Exit when the editor is empty; otherwise delete the next character. It never exits from inside an overlay. |
 | `Esc` | With an overlay open: clear non-empty filter first, move up drill-down level, then close/cancel. With no overlay: cancel stream/operation or collapse dashboard. |
 
 When scripting Clio inside tmux, prefer `tmux send-keys C-m` for submit/confirm keys instead of the literal `Enter` token; some tmux/terminal combinations do not deliver `Enter` reliably.
@@ -423,7 +423,7 @@ after 9 or more manual read-only exploration calls in one turn.
 Agent recipes are the Markdown source files. The normalized agent spec is the
 catalog/runtime view: category, capability class, latency class, tags, mode, and
 tool set. This keeps Clio's product vocabulary stable while dispatch continues
-to execute through the existing Pi-backed worker path, the sanctioned Claude Code worker runtimes (`claude-sdk` and `claude-code`), or external ACP delegation agents.
+to execute through the existing engine worker path, the sanctioned Claude Code worker runtimes (`claude-sdk` and `claude-code`), or external ACP delegation agents.
 
 ## Verification Lanes
 
