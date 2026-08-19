@@ -20,18 +20,13 @@ const PACKAGE_JSON = JSON.parse(readFileSync(new URL("../../package.json", impor
 const VERSION_STDOUT = `Clio Coder ${PACKAGE_JSON.version}\n`;
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const CLI_ENTRY = join(REPO_ROOT, "dist", "cli", "index.js");
-const FORBIDDEN_TERMINAL_STREAM_TYPES = new Set([
-	"message_start",
-	"message_update",
-	"text_start",
-	"text_delta",
-	"text_end",
-	"thinking",
-	"thinking_start",
-	"thinking_delta",
-	"thinking_end",
-	"toolcall_delta",
-]);
+/**
+ * Every type `--json-events terminal` may emit: the `turn_start` and `turn_end`
+ * frames the mode synthesizes, the session header, the per-segment accounting,
+ * and operator-facing notices. Anything else is either a partial the mode exists
+ * to suppress or a transcript event that belongs to `--json-events full`.
+ */
+const TERMINAL_STREAM_TYPES = new Set(["session", "turn_start", "agent_end", "turn_end", "notice"]);
 
 interface JsonRpcProcessClient {
 	request<T>(method: string, params?: unknown): Promise<T>;
@@ -669,29 +664,41 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		}
 	});
 
-	it("streams only terminal events with main-agent --json-events terminal", async () => {
+	it("streams only the run receipt with main-agent --json-events terminal", async () => {
+		// The mode's contract is the receipt and nothing else. It used to admit
+		// `message_end`, the largest event on the stream, which carries the
+		// injected system reminders, the operator's prompt, and every thinking
+		// block: "Say OK." produced 39.8 KB. What is left is the two frames the
+		// mode synthesizes, the session header, per-segment accounting, and any
+		// notice the operator has to see.
 		await seedDoctorFix(scratch.dir);
 		const fixture = await startOpenAICompatFixture("terminal mock reply");
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
-			const result = await runCli(["--no-context-files", "run", "--json-events", "terminal", "hello"], {
+			const result = await runCli(["--no-context-files", "run", "--json-events", "terminal", "unrepeatable-prompt"], {
 				env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 				timeoutMs: 20_000,
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			const events = jsonLines(result.stdout);
 			const types = events.map((event) => event.type);
-			for (const expected of ["session", "turn_start", "agent_start", "message_end", "agent_end", "turn_end"]) {
+			for (const expected of ["session", "turn_start", "agent_end", "turn_end"]) {
 				ok(types.includes(expected), `missing ${expected}: ${result.stdout}`);
 			}
 			for (const type of types) {
 				ok(typeof type === "string");
-				ok(!FORBIDDEN_TERMINAL_STREAM_TYPES.has(type), `unexpected partial event ${type}: ${result.stdout}`);
+				ok(TERMINAL_STREAM_TYPES.has(type), `unexpected event ${type} on the receipt stream: ${result.stdout}`);
 			}
-			const messageEnd = events.find(
-				(event) => event.type === "message_end" && JSON.stringify(event).includes("assistant"),
+			// The two shapes that made the mode a transcript rather than a receipt.
+			ok(!types.includes("message_end"), `message_end leaked into the receipt: ${result.stdout}`);
+			ok(
+				!result.stdout.includes("unrepeatable-prompt"),
+				`the receipt must not restate the operator's prompt: ${result.stdout}`,
 			);
-			ok(JSON.stringify(messageEnd).includes("terminal mock reply"), `stdout=${result.stdout}`);
+			// The final frame is the settlement, and it is what carries the status.
+			const turnEnd = events.findLast((event) => event.type === "turn_end");
+			strictEqual(turnEnd?.exitCode, 0);
+			ok(typeof turnEnd?.endedAt === "string", "the receipt frame carries the settle time");
 		} finally {
 			await closeServer(fixture.server);
 		}
