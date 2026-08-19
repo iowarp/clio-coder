@@ -3,26 +3,44 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Troubleshooting &amp; Diagnostics Blueprint (v0.3.2)</title>
+  <title>Clio Coder - Troubleshooting &amp; Error Remediation Blueprint</title>
   <link rel="stylesheet" href="shared.css">
   <style>
-    .error-item {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
+    .error-search-box {
+      margin-bottom: 1.25rem;
+    }
+    .error-search-box input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--border-card);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      color: #fff;
+      font-family: var(--font-sans);
+      font-size: 0.95rem;
+    }
+    .error-search-box input:focus {
+      outline: none;
+      border-color: var(--color-cyan);
+    }
+    .error-row {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
       padding: 1rem;
-      margin-bottom: 0.75rem;
+      margin-bottom: 1rem;
     }
     .error-msg {
       font-family: var(--font-mono);
       font-size: 0.85rem;
       color: var(--color-rose);
       margin-bottom: 0.5rem;
-      word-break: break-all;
+      font-weight: 700;
     }
-    .remedy-text {
-      color: var(--text-main);
+    .error-remediation {
       font-size: 0.9rem;
+      color: var(--text-main);
+      line-height: 1.5;
     }
   </style>
 </head>
@@ -31,25 +49,21 @@
     <header>
       <div class="header-left">
         <div class="header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Troubleshooting</title>
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-amber);"><title>Troubleshoot Icon</title>
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
           </svg>
         </div>
         <div class="header-title-wrapper">
-          <h1>Troubleshooting &amp; Diagnostics Guide</h1>
-          <p>Actionable remediation matrix, runtime recovery procedures, and doctor health inspections</p>
-          <div class="meta-chips-row">
-            <span class="chip">Source: docs/troubleshooting.md</span>
-            <span class="chip chip-orange">clio-coder docs troubleshooting</span>
-          </div>
+          <h1>Troubleshooting &amp; Error Remediation</h1>
+          <p>Actionable remediation procedures, exact message lookups, and diagnostic toolchains</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.2</span>
+        <span class="version-badge">v0.3.2</span>
         <a href="index.html" class="back-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Back</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
         </a>
       </div>
@@ -60,65 +74,176 @@
         <div class="toc-container">
           <div class="toc-title">On This Page</div>
           <ul class="toc-list">
-            <!-- Auto-populated by shared.js -->
+            <!-- Populated dynamically by shared.js -->
           </ul>
         </div>
       </nav>
 
       <main>
-        <div class="glass-card">
-          <h2>Overview Summary</h2>
-          <p>Quick lookup for runtime notices, permission denials, target connection issues, and local serving quirks in Clio Coder v0.3.2.</p>
-        </div>
-
         <div class="tabs-nav">
-          <button type="button" class="tab-btn active" onclick="switchTab('remediation-matrix')">Remediation Matrix</button>
-          <button type="button" class="tab-btn" onclick="switchTab('diag-commands')">Diagnostic Commands</button>
+          <button type="button" class="tab-btn active" onclick="switchTab('error-matrix')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Matrix</title><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+            Error Catalog &amp; Search
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('diagnostics')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Diag</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            Diagnostic Playbooks
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('local-serving')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Local</title><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+            Local Serving Remediation
+          </button>
         </div>
 
-        <div id="remediation-matrix" class="tab-pane active">
-          <h2>Error Catalog &amp; Remediation</h2>
-          <div class="error-item">
-            <div class="error-msg">clio-coder run cannot confirm permission requests; rerun interactively to approve this action.</div>
-            <div class="remedy-text">A tool call required permission during headless execution. Run interactively in the TUI (<code>clio</code>), adjust <code>.clio-coder/safety.yaml</code>, or run with <code>--autonomy full-auto</code> if safe.</div>
-          </div>
-          <div class="error-item">
-            <div class="error-msg">&lt;arg&gt; is a global option and must come before the subcommand...</div>
-            <div class="remedy-text">Global flags like <code>--api-key</code> or <code>--no-context-files</code> must precede the subcommand (e.g. <code>clio-coder --api-key &lt;k&gt; run ...</code>). Directory overrides use environment variables (<code>CLIO_CODER_*_DIR</code>).</div>
-          </div>
-          <div class="error-item">
-            <div class="error-msg">LM Studio duplicate model load / peer projection</div>
-            <div class="remedy-text">Clio automatically resolves model IDs to resident host instances to prevent duplicate VRAM allocations. Verify loaded instances with <code>clio-coder targets --probe</code>.</div>
-          </div>
-          <div class="error-item">
-            <div class="error-msg">llama.cpp 400 model is already running</div>
-            <div class="remedy-text">Sleeping models are treated as resident by the reconciler. Verify router slots and catalog models before initiating eviction.</div>
-          </div>
-          <div class="error-item">
-            <div class="error-msg">OAuth token exchange cancelled</div>
-            <div class="remedy-text">An in-flight login was aborted. Lock waiters cancel immediately without corrupting credentials. Run <code>clio-coder auth login &lt;target&gt;</code> to restart cleanly.</div>
+        <!-- TAB 1: ERROR MATRIX -->
+        <div class="tab-pane active" id="pane-error-matrix">
+          <div class="glass-card">
+            <h2>Error Catalog &amp; Remediation Matrix</h2>
+            <p>Type any keyword or message fragment to filter actionable remedies:</p>
+            
+            <div class="error-search-box">
+              <input type="text" id="errorSearchInput" placeholder="Filter errors (e.g. permission, trace, global option, lmstudio, sleeping)..." oninput="filterErrors()">
+            </div>
+
+            <div id="errorList">
+              <div class="error-row" data-text="headless permission denied rerun interactively clio-coder run cannot confirm permission requests">
+                <div class="error-msg">clio-coder run cannot confirm permission requests; rerun interactively to approve this action.</div>
+                <div class="error-remediation"><strong>Cause:</strong> A mutating tool required manual permission approval during headless execution.<br><strong>Remedy:</strong> Rerun interactively in the TUI (<code>clio</code>) for one-shot approval, adjust workspace policy in <code>.clio-coder/safety.yaml</code>, or pass <code>--autonomy full-auto</code> if safe.</div>
+              </div>
+
+              <div class="error-row" data-text="global option position before subcommand --api-key -nc --no-context-files">
+                <div class="error-msg">&lt;arg&gt; is a global option and must come before the subcommand: clio-coder &lt;usage&gt; &lt;command&gt; ...</div>
+                <div class="error-remediation"><strong>Cause:</strong> A global CLI flag was placed after the subcommand name.<br><strong>Remedy:</strong> Place global options before the subcommand: <code>clio-coder --api-key &lt;key&gt; run "..."</code> instead of <code>clio-coder run --api-key &lt;key&gt; "..."</code>.</div>
+              </div>
+
+              <div class="error-row" data-text="trace database not found no trace database yet">
+                <div class="error-msg">no trace database yet at &lt;path&gt; / error: trace database not found: &lt;path&gt;</div>
+                <div class="error-remediation"><strong>Cause:</strong> No sessions or runs have executed, or an explicit <code>--db &lt;path&gt;</code> points to a nonexistent file.<br><strong>Remedy:</strong> Execute a command or turn to initialize the SQLite database, or omit <code>--db</code> to use the default state root (<code>~/.local/state/clio-coder/trace.sqlite</code>).</div>
+              </div>
+
+              <div class="error-row" data-text="target not registered settings.yaml targets add">
+                <div class="error-msg">target &lt;id&gt; is not registered</div>
+                <div class="error-remediation"><strong>Cause:</strong> The designated target ID does not exist in <code>settings.yaml</code>.<br><strong>Remedy:</strong> Run <code>clio-coder targets</code> to view active targets, or register a new target using <code>clio-coder targets add</code>.</div>
+              </div>
+
+              <div class="error-row" data-text="worker_final_output_missing receipt sealed output">
+                <div class="error-msg">worker_final_output_missing</div>
+                <div class="error-remediation"><strong>Cause:</strong> Worker subprocess exited 0 but emitted no final output before closing.<br><strong>Remedy:</strong> Inspect worker event log with <code>clio-coder trace tail &lt;runId&gt;</code> or inspect receipt with <code>monitor(run_id="&lt;id&gt;", mode="receipt")</code>.</div>
+              </div>
+
+              <div class="error-row" data-text="vram_capacity_fit_failure gpu memory schedule">
+                <div class="error-msg">vram_capacity_fit_failure</div>
+                <div class="error-remediation"><strong>Cause:</strong> Target node does not have sufficient GPU VRAM capacity for the model.<br><strong>Remedy:</strong> Select a smaller quantized model variant (e.g. Q4_K_M), reduce context window, or route to an alternate node.</div>
+              </div>
+
+              <div class="error-row" data-text="loop_guard_tools_disabled_exhausted repeated tool calls">
+                <div class="error-msg">loop_guard_tools_disabled_exhausted</div>
+                <div class="error-remediation"><strong>Cause:</strong> Loop detector identified repeated unproductive tool calls with identical arguments.<br><strong>Remedy:</strong> Provide clearer intermediate steering instructions to break recursive tool call cycles.</div>
+              </div>
+
+              <div class="error-row" data-text="cwd-fallback no-cwd missing not-a-directory workspace deleted">
+                <div class="error-msg">cwd-fallback: no-cwd / missing / not-a-directory</div>
+                <div class="error-remediation"><strong>Cause:</strong> Recorded session workspace directory has been moved, unmounted, or deleted.<br><strong>Remedy:</strong> Select an existing valid directory when prompted by the CWD fallback interactive dialog.</div>
+              </div>
+
+              <div class="error-row" data-text="lmstudio duplicate model load peer projection lm link">
+                <div class="error-msg">LM Studio duplicate model load / peer projection</div>
+                <div class="error-remediation"><strong>Cause:</strong> Sending bare model keys when resident instances exist, or requesting dual-host LM Link projections.<br><strong>Remedy:</strong> Clio resolves model IDs to resident instances (#113). Run <code>clio-coder targets --probe</code> to inspect loaded server instances.</div>
+              </div>
+
+              <div class="error-row" data-text="llamacpp 400 model is already running sleeping resident">
+                <div class="error-msg">llama.cpp 400 model is already running</div>
+                <div class="error-remediation"><strong>Cause:</strong> Requesting load for an idle or sleeping model in llama.cpp router.<br><strong>Remedy:</strong> Sleeping models are treated as resident (#127, #134). Verify router slots before requesting eviction.</div>
+              </div>
+
+              <div class="error-row" data-text="oauth token exchange cancelled aborted signal">
+                <div class="error-msg">OAuth token exchange cancelled</div>
+                <div class="error-remediation"><strong>Cause:</strong> In-flight OAuth login or refresh was cancelled before credential commitment.<br><strong>Remedy:</strong> Re-run <code>clio-coder auth login &lt;target&gt;</code> to restart flow. Uncommitted tokens are discarded cleanly.</div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div id="diag-commands" class="tab-pane">
-          <h2>Diagnostic Commands</h2>
-          <pre><code># Full system health verification and auto-repair
-clio-coder doctor --fix
-
-# Probe all configured targets for connectivity and loaded context
-clio-coder targets --probe
-
-# Inspect live event streams for a specific worker run
-clio-coder trace tail &lt;runId&gt;
-
-# Check cryptographic evidence and execution receipts
-clio-coder evidence inspect &lt;runId&gt;</code></pre>
+        <!-- TAB 2: DIAGNOSTICS -->
+        <div class="tab-pane" id="pane-diagnostics">
+          <h2>Standard Diagnostic Toolchain</h2>
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Command</th>
+                <th>Diagnostic Purpose</th>
+                <th>When to Use</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>clio-coder doctor</code></td>
+                <td>Inspects system dependencies, folder permissions, config schemas, and detected coding peers.</td>
+                <td>First step for any runtime or environment anomaly.</td>
+              </tr>
+              <tr>
+                <td><code>clio-coder doctor --fix</code></td>
+                <td>Repairs folder permissions (chmod 0o600 credentials), creates missing directories, and updates install metadata.</td>
+                <td>After upgrades or permissions warnings.</td>
+              </tr>
+              <tr>
+                <td><code>clio-coder targets --probe</code></td>
+                <td>Tests network connectivity, authentication tokens, and model listings for all configured providers.</td>
+                <td>When model calls timeout or return auth errors.</td>
+              </tr>
+              <tr>
+                <td><code>clio-coder trace tail &lt;runId&gt;</code></td>
+                <td>Streams granular NDJSON event logs and tool execution records from the SQLite trace store.</td>
+                <td>Investigating failed or stuck worker runs.</td>
+              </tr>
+              <tr>
+                <td><code>clio-coder reset --cache</code></td>
+                <td>Clears stale runtime caches without affecting configuration, credentials, or sessions.</td>
+                <td>Resolving cache corruption or schema drift.</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+
+        <!-- TAB 3: LOCAL SERVING -->
+        <div class="tab-pane" id="pane-local-serving">
+          <h2>Local Runtime &amp; Inference Server Quirks</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>LM Studio Instance Resolution (#113)</h3>
+              <ul>
+                <li>Bare model keys are resolved against resident instances on the target host.</li>
+                <li>Prevents server from loading a second 27B model copy in GPU memory.</li>
+                <li>LM Link peer projections across multiple hosts are flagged and never auto-selected.</li>
+              </ul>
+            </div>
+            <div class="glass-card">
+              <h3>llama.cpp Residency &amp; Sleep States (#127, #134)</h3>
+              <ul>
+                <li>Idle models in router <code>sleeping</code> state are recognized as resident.</li>
+                <li>Eliminates repeated <code>400 model is already running</code> turn failures.</li>
+                <li>Eviction is refused if the replacement model is not in the catalog.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="prompt_envelope_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">Prompt Envelope &amp; Tools</span>
+          </a>
+          <a href="glossary_blueprint.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">Glossary</span>
+          </a>
+        </nav>
       </main>
     </div>
 
     <footer>
-      <p>Clio Coder Troubleshooting Spec &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
+      <p>Clio Coder Troubleshooting Blueprint &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
@@ -127,9 +252,25 @@ clio-coder evidence inspect &lt;runId&gt;</code></pre>
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
       document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-      event.target.classList.add('active');
-      const pane = document.getElementById(tabId);
+      
+      const pane = document.getElementById(`pane-${tabId}`);
       if (pane) pane.classList.add('active');
+      
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
+        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
+      });
+      if (activeBtn) activeBtn.classList.add('active');
+      
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+
+    function filterErrors() {
+      const q = document.getElementById('errorSearchInput').value.toLowerCase().trim();
+      const rows = document.querySelectorAll('.error-row');
+      rows.forEach(row => {
+        const text = row.getAttribute('data-text').toLowerCase() + ' ' + row.innerText.toLowerCase();
+        row.style.display = text.includes(q) ? 'block' : 'none';
+      });
     }
   </script>
 </body>
