@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { SessionEntry, TaskLedgerGoal, TaskLedgerStatus, TaskLedgerValidationEvidence } from "./entries.js";
 
 /**
@@ -15,6 +16,7 @@ import type { SessionEntry, TaskLedgerGoal, TaskLedgerStatus, TaskLedgerValidati
  */
 
 const TASK_BOARD_GOAL_ID = "board";
+export const LEGACY_TASK_BOARD_ID = "legacy";
 
 export interface TaskBoardTask {
 	id: string;
@@ -27,6 +29,8 @@ export interface TaskBoardTask {
 }
 
 export interface TaskBoardSnapshot {
+	/** Stable identity for this plan generation; task display ids are reusable. */
+	boardId: string;
 	title: string;
 	tasks: ReadonlyArray<TaskBoardTask>;
 	/**
@@ -71,6 +75,7 @@ export type TaskBoardMutationResult =
 export interface TaskLedgerEntryFields {
 	kind: "taskLedger";
 	parentTurnId: null;
+	boardId: string;
 	goals: TaskLedgerGoal[];
 	subgoals: TaskLedgerGoal[];
 	activeRunIds: string[];
@@ -88,12 +93,23 @@ export interface TaskBoardStoreDeps {
 	readEntries?: () => ReadonlyArray<unknown>;
 	/** Persist one full-snapshot taskLedger entry. Absent means in-memory only. */
 	appendEntry?: (entry: TaskLedgerEntryFields) => void;
+	/** Stable board-id source; injectable for deterministic contract tests. */
+	createBoardId?: () => string;
 	now?: () => Date;
+}
+
+export interface SessionTaskHistoryBoard {
+	boardId: string;
+	title: string;
+	tasks: ReadonlyArray<TaskBoardTask>;
+	lastSnapshotAt: string;
 }
 
 export interface TaskBoardStore {
 	/** Current board, refolded from the session ledger after a session switch. */
 	snapshot(): TaskBoardSnapshot | null;
+	/** Durable board generations on the active session path, newest first. */
+	historySnapshot(): ReadonlyArray<SessionTaskHistoryBoard>;
 	/** Apply one mutation, persist the resulting snapshot, and return it. */
 	apply(mutation: TaskBoardMutation): TaskBoardMutationResult;
 	/** Link an in-flight dispatch run to the board; a no-op without a board. */
@@ -165,6 +181,7 @@ export function toTaskLedgerEntryFields(board: TaskBoardSnapshot, now: Date): Ta
 	return {
 		kind: "taskLedger",
 		parentTurnId: null,
+		boardId: board.boardId,
 		goals: [{ id: TASK_BOARD_GOAL_ID, title: board.title, status: boardStatus(board.tasks) }],
 		subgoals,
 		activeRunIds: [...board.activeRunIds],
@@ -174,6 +191,8 @@ export function toTaskLedgerEntryFields(board: TaskBoardSnapshot, now: Date): Ta
 
 function isTaskLedgerShaped(value: unknown): value is {
 	kind: "taskLedger";
+	boardId?: string;
+	timestamp?: string;
 	goals: TaskLedgerGoal[];
 	subgoals: TaskLedgerGoal[];
 	requiredValidationEvidence: TaskLedgerValidationEvidence[];
@@ -195,7 +214,60 @@ export function foldTaskBoard(entries: ReadonlyArray<unknown>): TaskBoardSnapsho
 	return last;
 }
 
+/**
+ * Fold every safely identifiable board generation in a session. New ledgers
+ * key generations by boardId; pre-boardId ledgers collapse to the newest
+ * legacy snapshot because reusable tN ids cannot safely distinguish their
+ * older plan generations.
+ */
+export function foldSessionTaskHistory(entries: ReadonlyArray<unknown>): SessionTaskHistoryBoard[] {
+	type MutableHistoryBoard = {
+		boardId: string;
+		title: string;
+		tasks: Map<string, TaskBoardTask>;
+		lastSnapshotAt: string;
+		lastIndex: number;
+	};
+	const boards = new Map<string, MutableHistoryBoard>();
+	for (const [index, raw] of entries.entries()) {
+		if (!isTaskLedgerShaped(raw)) continue;
+		const view = toEntryView(raw);
+		if (!view) continue;
+		const boardId = typeof raw.boardId === "string" && raw.boardId.length > 0 ? raw.boardId : LEGACY_TASK_BOARD_ID;
+		const timestamp = typeof raw.timestamp === "string" ? raw.timestamp : "";
+		if (boardId === LEGACY_TASK_BOARD_ID) {
+			boards.set(boardId, {
+				boardId,
+				title: view.title,
+				tasks: new Map(view.tasks.map((task) => [task.id, task])),
+				lastSnapshotAt: timestamp,
+				lastIndex: index,
+			});
+			continue;
+		}
+		const existing = boards.get(boardId);
+		if (!existing) {
+			boards.set(boardId, {
+				boardId,
+				title: view.title,
+				tasks: new Map(view.tasks.map((task) => [task.id, task])),
+				lastSnapshotAt: timestamp,
+				lastIndex: index,
+			});
+			continue;
+		}
+		existing.title = view.title;
+		for (const task of view.tasks) existing.tasks.set(task.id, task);
+		existing.lastSnapshotAt = timestamp;
+		existing.lastIndex = index;
+	}
+	return [...boards.values()]
+		.sort((left, right) => right.lastIndex - left.lastIndex)
+		.map(({ lastIndex: _lastIndex, tasks, ...board }) => ({ ...board, tasks: [...tasks.values()] }));
+}
+
 function toEntryView(entry: {
+	boardId?: string;
 	goals: TaskLedgerGoal[];
 	subgoals: TaskLedgerGoal[];
 	requiredValidationEvidence: TaskLedgerValidationEvidence[];
@@ -208,6 +280,7 @@ function toEntryView(entry: {
 		evidenceByTask.set(taskId, item.description);
 	}
 	return {
+		boardId: entry.boardId ?? LEGACY_TASK_BOARD_ID,
 		title: boardGoal.title,
 		tasks: entry.subgoals.map((goal) => {
 			const task: TaskBoardTask = { id: goal.id, title: goal.title, status: goal.status };
@@ -250,6 +323,7 @@ function applyMutation(
 		}
 		return {
 			board: {
+				boardId: "",
 				title: mutation.title.trim(),
 				tasks: titles.map((title, index) => ({ id: `t${index + 1}`, title, status: "pending" as const })),
 				// Runs in flight outlive a board swap: they belong to the session,
@@ -361,13 +435,23 @@ export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardSt
 			syncToSession();
 			return board;
 		},
+		historySnapshot(): ReadonlyArray<SessionTaskHistoryBoard> {
+			syncToSession();
+			try {
+				return deps.readEntries ? foldSessionTaskHistory(deps.readEntries()) : [];
+			} catch {
+				return [];
+			}
+		},
 		apply(mutation: TaskBoardMutation): TaskBoardMutationResult {
 			syncToSession();
 			const result = applyMutation(board, mutation);
 			if ("error" in result) return { ok: false, message: result.error };
-			board = result.board;
-			persist(result.board);
-			return { ok: true, board: result.board, notes: result.notes };
+			const nextBoard =
+				mutation.op === "plan" ? { ...result.board, boardId: deps.createBoardId?.() ?? randomUUID() } : result.board;
+			board = nextBoard;
+			persist(nextBoard);
+			return { ok: true, board: nextBoard, notes: result.notes };
 		},
 		attachRun(runId: string): void {
 			syncToSession();
