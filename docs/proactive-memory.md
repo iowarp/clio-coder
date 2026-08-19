@@ -290,7 +290,7 @@ tier usable anyway.
 Size `timeoutMs` off that tail rather than off the median. The shipped 180000
 captures roughly the whole distribution on this route. A 20000 setting looks
 generous against an 18.6-second median and in practice discarded about half of
-all steps, since the step still runs to completion and only its result is thrown
+all steps, since the request is aborted on timeout and its work is thrown
 away. A route whose steps mostly record `timeout` is a misconfigured deadline
 before it is a slow model.
 
