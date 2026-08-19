@@ -15,6 +15,7 @@ import { resolveModelReference } from "../domains/providers/index.js";
 import type { PromptTemplate, PromptTemplateExpansion, ResourceList } from "../domains/resources/index.js";
 import { parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
+import type { UserTask } from "../domains/user-tasks/store.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
 import type { NoticeLevel } from "./command-output.js";
 import { SETTINGS_SECTIONS, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
@@ -58,6 +59,10 @@ type SlashCommandVariant =
 	| { kind: "cost" }
 	| { kind: "context-view" }
 	| { kind: "tasks" }
+	| { kind: "tasks-add"; text: string }
+	| { kind: "tasks-hand"; id: string }
+	| { kind: "tasks-done"; id: string }
+	| { kind: "tasks-drop"; id: string }
 	| { kind: "memory" }
 	| { kind: "memory-seed" }
 	| { kind: "view"; filter?: string }
@@ -367,6 +372,13 @@ export interface SlashCommandContext {
 	openContextView: () => void;
 	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
 	openTasks: () => void;
+	/** Project-scoped operator task inbox backing `/tasks` mutations. */
+	userTasks?: {
+		add(title: string): UserTask;
+		hand(id: string): UserTask;
+		done(id: string): UserTask;
+		drop(id: string): UserTask;
+	};
 	/** Open the read-only `/memory` overlay: approved lessons and the live task bank. */
 	openMemory: () => void;
 	/** Opt-in import from the newest structured handoff; absent when the host has no task bank. */
@@ -897,13 +909,81 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	settingsDeepLink("fleet", "fleet", "Open Settings → Fleet: defaults, profiles, agent bindings, nodes"),
 	{
 		name: "tasks",
-		description: "Show the session task board the agent tracks with the tasks tool",
+		description: "Show the session board or manage project operator tasks",
 		group: "Inspect",
-		kinds: ["tasks"],
-		args: {},
-		fromArgs: fromArgsOrUsage("tasks", { kind: "tasks" }),
-		handle(_command, ctx) {
-			ctx.openTasks();
+		kinds: ["tasks", "tasks-add", "tasks-hand", "tasks-done", "tasks-drop"],
+		subcommandDescriptions: {
+			add: "Log a project task without notifying the agent",
+			hand: "Hand an operator task to the agent",
+			done: "Mark an operator task done",
+			drop: "Drop an operator task",
+		},
+		args: {
+			subcommands: {
+				add: { positionals: [{ name: "text", required: true, rest: true }] },
+				hand: { positionals: [{ name: "id", required: true }] },
+				done: { positionals: [{ name: "id", required: true }] },
+				drop: { positionals: [{ name: "id", required: true }] },
+			},
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "tasks", reason: parsed.error };
+			switch (parsed.subcommand) {
+				case "add":
+					return parsed.rest
+						? { kind: "tasks-add", text: parsed.rest }
+						: { kind: "usage-error", command: "tasks", reason: "add requires task text" };
+				case "hand":
+				case "done":
+				case "drop": {
+					const id = parsed.positionals[0];
+					if (!id || !/^u[1-9]\d*$/.test(id)) {
+						return { kind: "usage-error", command: "tasks", reason: `${parsed.subcommand} requires a uN id` };
+					}
+					if (parsed.subcommand === "hand") return { kind: "tasks-hand", id };
+					if (parsed.subcommand === "done") return { kind: "tasks-done", id };
+					return { kind: "tasks-drop", id };
+				}
+				default:
+					return { kind: "tasks" };
+			}
+		},
+		handle(command, ctx) {
+			if (command.kind === "tasks") {
+				ctx.openTasks();
+				return;
+			}
+			if (!ctx.userTasks) {
+				ctx.notice("error", "operator task inbox is not wired in this session");
+				return;
+			}
+			try {
+				if (command.kind === "tasks-add") {
+					const task = ctx.userTasks.add(command.text);
+					ctx.notice("success", `logged operator task ${task.id}: ${task.title}`);
+					return;
+				}
+				if (command.kind === "tasks-hand") {
+					const task = ctx.userTasks.hand(command.id);
+					const note = task.note ? ` ${task.note}.` : "";
+					ctx.submitChat(
+						`Operator task ${task.id}: ${task.title}.${note} Pick it up with tasks action="pick" id="${task.id}" and work it when appropriate.`,
+					);
+					return;
+				}
+				if (command.kind === "tasks-done") {
+					const task = ctx.userTasks.done(command.id);
+					ctx.notice("success", `marked operator task ${task.id} done`);
+					return;
+				}
+				if (command.kind === "tasks-drop") {
+					const task = ctx.userTasks.drop(command.id);
+					ctx.notice("success", `dropped operator task ${task.id}`);
+				}
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				ctx.notice("error", message);
+			}
 		},
 	},
 	{

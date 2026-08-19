@@ -19,6 +19,7 @@ import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
+import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { stripTerminalSequences } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
@@ -70,6 +71,7 @@ export interface InteractiveSlashRuntimeDeps {
 	interop?: SlashCommandContext["interop"];
 	agents?: SlashAgents;
 	share?: SlashShare;
+	userTasks?: UserTasksStore;
 	getSettings?: () => Readonly<ClioSettings>;
 	writeSettings?: (next: ClioSettings) => void;
 	/**
@@ -170,6 +172,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	let activeContextInit = false;
 	const cwd = (): string => deps.getCwd?.() ?? process.cwd();
 	const resources = deps.resources;
+	const userTasks = deps.userTasks;
 
 	const appendCommandNotice: SlashCommandContext["notice"] = (level, text) => {
 		appendNotice(level, text, {
@@ -253,6 +256,16 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openCost: deps.openCost,
 		openContextView: deps.openContextView,
 		openTasks: deps.openTasks,
+		...(userTasks
+			? {
+					userTasks: {
+						add: (title: string) => userTasks.add(title),
+						hand: (id: string) => userTasks.hand(id, deps.chat.getSessionId() ?? undefined),
+						done: (id: string) => userTasks.done(id),
+						drop: (id: string) => userTasks.drop(id),
+					},
+				}
+			: {}),
 		openMemory: deps.openMemory,
 		seedTaskMemory: () => {
 			const result = deps.seedTaskMemory?.() ?? { status: "not-found" as const };
