@@ -60,8 +60,11 @@ function createSessionHarness(options: {
 		dispatch: {},
 		bus: { on: () => () => {}, emit: () => {} },
 		chat: {
+			cancel: () => events.push("chat:cancel"),
+			isStreaming: () => false,
 			resetForSession: (turnId: string | null, messages?: ReadonlyArray<unknown>) =>
 				events.push(`chat:reset:${turnId}:${messages?.length ?? 0}`),
+			whenSettled: async () => {},
 		},
 		onResumeSession: (sessionId: string) => {
 			events.push(`app:resume:${sessionId}`);
