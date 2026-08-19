@@ -123,3 +123,24 @@ if (inherited !== undefined && isRemovableRoot(inherited)) {
 		}
 	});
 }
+
+const clioRootEnvKeys = [
+	"CLIO_CODER_HOME",
+	"CLIO_CODER_CONFIG_DIR",
+	"CLIO_CODER_DATA_DIR",
+	"CLIO_CODER_STATE_DIR",
+	"CLIO_CODER_CACHE_DIR",
+] as const;
+
+// A test that has not chosen its own Clio roots must never inherit the
+// operator's platform defaults. The preload runs before every test module, so
+// this catches settingsPath() and every XDG role resolver without requiring
+// each call site to remember an override. Tests of default XDG resolution set
+// an explicit environment in their own child process.
+if (clioRootEnvKeys.every((key) => !process.env[key]?.trim())) {
+	const runRoot = process.env[ROOT_ENV];
+	if (runRoot !== undefined) {
+		process.env.CLIO_CODER_HOME = join(runRoot, "home");
+		process.env.CLIO_CODER_REQUIRE_HOME_PREFIX = "1";
+	}
+}
