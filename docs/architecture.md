@@ -104,7 +104,7 @@ Source: `src/core/workspace-files.ts`, `src/core/c-header-language.ts`.
 
 ## Boundary invariants
 
-`npm run check:boundaries` executes the boundary check suite (`tests/boundaries/check-boundaries.ts`). Treat these checks as executable specifications.
+`npm run lint` executes the boundary checker (`tests/boundaries/check-boundaries.ts`, imported by `scripts/check-hygiene.ts`). Treat these checks as executable specifications.
 
 These five enforced boundary rules constrain dependency **direction**, never import **form** (whether static vs dynamic, default vs named):
 
@@ -184,7 +184,7 @@ Interactive slash commands in Clio Coder are governed by a unified declarative c
 ## Verification commands
 
 ```bash
-npm run check:boundaries
+npm run lint
 npm run typecheck
 npm run test
 npm run build

@@ -425,13 +425,12 @@ to execute through the existing Pi-backed worker path, the sanctioned Claude Cod
 
 | Command | Purpose |
 | --- | --- |
-| `npm run ci` | Local and GitHub PR gate: typecheck, Biome check, skills pin check, build, and deterministic tests. |
+| `npm run ci` | Local and GitHub PR gate: typecheck, lint, skills pin check, build, the deterministic test suite, and the trace-viewer suite. |
 | `npm run ci:release` | Maintainer release gate: `npm run ci`, then the `check-release` dist and packaging audit. |
 | `npm run test:live` | Local manual live-model smoke. Requires `CLIO_CODER_LIVE_SMOKE=1` and a configured real model target. Add `-- --delegation` for `opencode` and `copilot` ACP delegation checks. |
 | `npm run typecheck` | Strict TypeScript pass. |
-| `npm run lint` | Biome checks; warnings are reported in the release gate output. |
-| `npm run test` | Contract, smoke, and boundary tests. |
-| `npm run check:boundaries` | Boundary invariants only. |
+| `npm run lint` | Biome checks plus `scripts/check-hygiene.ts`, which runs the boundary invariants, the skills pin check, and the README and docs drift rules. |
+| `npm run test` | Contract and smoke tests through the sharded runner. |
 | `npm run build` | Production bundle through `tsup`. |
 | `npm run dev` | `tsup --watch`. |
 | `npm run clean` | Remove `dist/`. |

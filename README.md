@@ -465,7 +465,7 @@ list|propose|approve|reject|prune`. Design notes:
 
 ## Status
 
-Clio Coder is experimental software in a soft beta. The current release is
+Clio Coder is an experimental alpha. The current release is
 **v0.3.2**, installable from npm as
 [`@iowarp/clio-coder`](https://www.npmjs.com/package/@iowarp/clio-coder) or
 from source. Interfaces may still move between minor versions, and
@@ -500,7 +500,8 @@ tool, this section is the orientation you need.
 
 ## Orienting in this repository
 
-Do not read broadly. Start from the codewiki, which indexes 927 source files.
+Do not read broadly. Start from the codewiki, which `clio-coder context index`
+builds over the roughly 1,200 source and test files in this repository.
 Use `code_nav` in `entries`, `path`, or `symbol` mode before any wide read.
 The indexed entry points are `src/cli/index.ts`, `src/domains/agents/index.ts`,
 `src/domains/components/index.ts`, `src/domains/config/index.ts`,
@@ -645,9 +646,9 @@ flowchart TB
   DISP --> WORK["src/worker<br/>bounded worker runtime"]
 ```
 
-The largest indexed areas are `src/domains` (392 files), `tests/contracts`
-(236), `src/interactive` (83), `src/cli` (48), `src/tools` (42), `src/engine`
-(40), and `src/core` (35). Compile-time boundaries between domains are
+The largest indexed areas are `src/domains` (430 files), `tests/contracts`
+(370), `src/interactive` (120), `src/cli` (56), `src/tools` (47), `src/engine`
+(42), and `src/core` (42). Compile-time boundaries between domains are
 enforced by a test suite, not by convention. Read
 [docs/architecture.md](docs/architecture.md) before adding a cross-domain
 import.
@@ -668,7 +669,7 @@ Targeted checks when the risk is narrower:
 | Style | `npm run lint` |
 | Contracts | `npm run test:file -- 'tests/contracts/**/*.test.ts'` |
 | Smoke flows | `npm run test:file -- 'tests/smoke/**/*.test.ts'` |
-| Domain boundaries | `npm run check:boundaries` |
+| Domain boundaries | `npm run lint` (the boundary checker runs inside the hygiene lint) |
 | Everything | `npm run test` |
 
 Conventions worth knowing before your first PR: local imports end in `.js`,
@@ -680,9 +681,10 @@ tests use `node:test`, and `any` needs a tracking issue.
 npm run ci:release
 ```
 
-That runs typecheck, Biome, the skills pin check, the production build, the
-contract, smoke, and boundary suites, and the `check-release` dist and package
-audit. Live model validation is separate, manual, and opt-in, because no
+That runs typecheck, Biome and the hygiene checks (which include the
+domain-boundary rules), the skills pin check, the production build, the
+contract and smoke suites, the trace-viewer suite, and the `check-release`
+dist and package audit. Live model validation is separate, manual, and opt-in, because no
 deterministic suite can promise that every local model behaves identically:
 
 ```bash
@@ -726,6 +728,10 @@ locally with interactive blueprints.
 | Topic | Guide |
 | --- | --- |
 | Commands, slash commands, operating posture, keybindings, dispatch, verification, troubleshooting | [commands-and-modes.md](docs/commands-and-modes.md) |
+| Exit code taxonomy, `--help` standard, `--json` event frames, headless output contracts | [exit-codes-and-output.md](docs/exit-codes-and-output.md) |
+| Session lifecycle, ledger format, `/tree`, `/fork`, `/resume`, checkpoints, recovery | [session-lifecycle.md](docs/session-lifecycle.md) |
+| ACP v1 server over stdio: session binding, tool mediation, permissions, error taxonomy | [acp.md](docs/acp.md) |
+| Error remediation and diagnostics keyed by exact user-facing messages | [troubleshooting.md](docs/troubleshooting.md) |
 | Multi-node fleet dispatch: SSH transport, doctor preflight, placement, topologies, receipts | [fleet-dispatch.md](docs/fleet-dispatch.md) |
 | Executable multi-node demo with a reviewer gate and receipt provenance walkthrough | [fleet-demo-runbook.md](docs/fleet-demo-runbook.md) |
 | NDJSON parent-child protocols, watchdog timers, and exit status mapping | [worker-dispatch-mechanics.md](docs/worker-dispatch-mechanics.md) |

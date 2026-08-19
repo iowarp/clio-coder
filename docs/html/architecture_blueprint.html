@@ -657,7 +657,7 @@
         </table>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Boundary Invariants</h3>
-        <p>Boundary rules are test-enforced by <code>npm run check:boundaries</code>. Five rules constrain dependency <strong>direction</strong>, never import <strong>form</strong>:</p>
+        <p>Boundary rules are enforced by the boundary checker that <code>npm run lint</code> runs. Five rules constrain dependency <strong>direction</strong>, never import <strong>form</strong>:</p>
         <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
           <li style="margin-bottom: 0.5rem;"><strong>Rule 1: @earendil-works/* imports stay in <code>src/engine/**</code></strong><br>Only files under <code>src/engine/**</code> may import `@earendil-works/*` packages (value or type-only). Domains take erased shapes from `src/engine/types.ts`.</li>
           <li style="margin-bottom: 0.5rem;"><strong>Rule 2: workers do not value-import domains except runtime rehydration</strong><br><code>src/worker/**</code> may not value-import `src/domains/**` except worker-safe provider runtime rehydration modules (plugins.ts, registry.ts, runtimes/builtins.ts).</li>
@@ -667,7 +667,7 @@
         </ul>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Command Verification</h3>
-        <pre><code>npm run check:boundaries     # check boundaries rule suite
+        <pre><code>npm run lint                 # Biome plus the hygiene and boundary checks
 npm run typecheck            # type check TS
 npm run test                 # run tests suite
 npm run build                # compile build package</code></pre>

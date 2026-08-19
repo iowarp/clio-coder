@@ -57,7 +57,7 @@ Only the first exploratory iteration (`iterationId: "exploratory-1"`) is permitt
 During `clio-coder evolve manifest validate` and `summarize` commands, Clio Coder validates the referenced evidence bundles:
 - **Format Verification**: Every reference in the `evidenceRefs` array must follow the format `run-<id>` or `session-<id>`.
 - **Durable Store Resolution**: Each reference must correspond to a folder that actually exists under `<dataDir>/evidence/`. If any referenced bundle is missing, validation fails and reports a dangling reference issue.
-- **Engine Boundaries**: To maintain domain boundaries (`check:boundaries`), the validation function `validateChangeManifest` is completely decoupled. It accepts a `resolveEvidenceRef` predicate option. The CLI passes a resolver connected to the evidence store, keeping the evolution domain from directly importing the evidence domain.
+- **Engine Boundaries**: To maintain the domain boundaries the lint-time boundary checker enforces, the validation function `validateChangeManifest` is completely decoupled. It accepts a `resolveEvidenceRef` predicate option. The CLI passes a resolver connected to the evidence store, keeping the evolution domain from directly importing the evidence domain.
 
 ### Self-Edit Gate Deferral (Slice 5b)
 
