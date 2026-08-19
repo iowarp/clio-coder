@@ -13,14 +13,12 @@ import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
 	classifyResourceRead,
-	previewResult,
 	renderToolAwaitingApproval,
 	renderToolCallHeader,
 	renderToolExecution,
 	renderToolRunningStatus,
 	renderToolStreamingExecution,
 	renderToolSubline,
-	unwrapResultEnvelope,
 } from "./renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
 import { INLINE_STATUS_INDENT_COLS, type StatusPhase, type VerbRender } from "./status/index.js";
@@ -125,6 +123,10 @@ type ToolSegment = {
 	result?: unknown;
 	/** True once `tool_execution_end` has landed (success or error). */
 	finished: boolean;
+	/** Pi streamed the call row before execution and later starts this same row. */
+	executionStarted: boolean;
+	/** The assistant stream closed this call's argument block. */
+	argsComplete: boolean;
 	/**
 	 * True when the segment was force-settled without its own end event
 	 * (blocked at admission, aborted mid-batch, id reused). A late
@@ -145,13 +147,14 @@ type ToolSegment = {
 	/** Persisted result summary (bytes, truncated, offloadPath, observation) from the chat loop. */
 	resultSummary?: Record<string, unknown> | undefined;
 	/**
-	 * Latest cumulative partial output from `tool_execution_update`. Cleared
+	 * Latest cumulative Pi result from `tool_execution_update`, including the
+	 * display content and structured progress details. Cleared
 	 * back to `undefined` on `tool_execution_end` so the finished `result`
 	 * takes over. Only consumed when `!finished && expanded`. The explicit
 	 * `| undefined` is required under `exactOptionalPropertyTypes: true` so
 	 * the clear path can re-assign `undefined` without a `delete`.
 	 */
-	partialOutput?: string | undefined;
+	partialResult?: unknown;
 	/**
 	 * True while the call is parked at the permission gate. Set/cleared by
 	 * `tool_approval_state` events and cleared by any settle so a denied or
@@ -706,6 +709,11 @@ function renderToolSegmentLines(
 	const hintKey = seg.id === latestHintToolId ? expandKey : undefined;
 	const expanded = verbosity === "verbose" || (verbosity !== "minimal" && seg.expanded);
 	const elapsedMs = seg.startedAtMs !== undefined ? Math.max(0, rawDurationMs(seg.startedAtMs, nowMs)) : undefined;
+	const phase: "forming" | "ready" | "running" = seg.executionStarted
+		? "running"
+		: seg.argsComplete
+			? "ready"
+			: "forming";
 	// A parked call is not executing: the awaiting-approval line replaces the
 	// counting elapsed spinner in both collapsed and expanded form (there is no
 	// body or partial output to expand while the call sits at the gate).
@@ -726,20 +734,20 @@ function renderToolSegmentLines(
 						outcome: seg.settlement,
 						blockReason: seg.blockReason,
 					}
-				: { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs },
+				: { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs, phase },
 			width,
 			hintKey,
 		);
 	}
 	if (!seg.finished) {
-		if (liveToolOutput && seg.partialOutput !== undefined) {
+		if (liveToolOutput && seg.partialResult !== undefined) {
 			return renderToolStreamingExecution(
-				{ toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs },
+				{ toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs, phase },
 				width,
-				seg.partialOutput,
+				seg.partialResult,
 			);
 		}
-		const call = { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs };
+		const call = { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs, phase };
 		return liveToolOutput ? renderToolCallHeader(call, width) : renderToolRunningStatus(call, width);
 	}
 	return renderToolExecution(
@@ -993,7 +1001,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (seg.result === undefined)
 			seg.result = "(no result: the call did not complete; execution was aborted, blocked, or orphaned)";
 		seg.settlement = settlement;
-		seg.partialOutput = undefined;
+		seg.partialResult = undefined;
 		seg.awaitingApproval = undefined;
 	};
 
@@ -1449,6 +1457,50 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				markDirty();
 				return;
 			}
+			if (event.type === "message_update") {
+				const assistantEvent = event.assistantMessageEvent as {
+					type?: unknown;
+					contentIndex?: unknown;
+					partial?: { content?: unknown };
+				};
+				if (
+					assistantEvent.type !== "toolcall_start" &&
+					assistantEvent.type !== "toolcall_delta" &&
+					assistantEvent.type !== "toolcall_end"
+				) {
+					return;
+				}
+				const index = typeof assistantEvent.contentIndex === "number" ? assistantEvent.contentIndex : -1;
+				const content = Array.isArray(assistantEvent.partial?.content) ? assistantEvent.partial.content : [];
+				const block = content[index];
+				if (block === null || typeof block !== "object" || Array.isArray(block)) return;
+				const streamed = block as { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown };
+				if (streamed.type !== "toolCall" || typeof streamed.id !== "string" || streamed.id.length === 0) return;
+				const owner = findToolSegmentOwner(streamed.id);
+				const existing = owner?.segment;
+				if (existing && !existing.finished && !existing.executionStarted) {
+					if (owner) invalidateEntryCache(owner.entry);
+					existing.name = typeof streamed.name === "string" && streamed.name.length > 0 ? streamed.name : existing.name;
+					existing.args = streamed.arguments ?? existing.args;
+					existing.argsComplete = assistantEvent.type === "toolcall_end";
+				} else if (existing === undefined) {
+					const assistant = ensureAssistant();
+					assistant.pending = true;
+					assistant.segments.push({
+						kind: "tool",
+						id: streamed.id,
+						name: typeof streamed.name === "string" && streamed.name.length > 0 ? streamed.name : "tool",
+						args: streamed.arguments ?? {},
+						finished: false,
+						executionStarted: false,
+						argsComplete: assistantEvent.type === "toolcall_end",
+						isError: false,
+						expanded: false,
+					});
+				}
+				markDirty();
+				return;
+			}
 			if (event.type === "text_delta") {
 				const assistant = ensureAssistant();
 				assistant.pending = true;
@@ -1471,6 +1523,19 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_execution_start") {
+				const streamedOwner = findToolSegmentOwner(event.toolCallId);
+				if (streamedOwner !== undefined && !streamedOwner.segment.finished && !streamedOwner.segment.executionStarted) {
+					invalidateEntryCache(streamedOwner.entry);
+					const streamed = streamedOwner.segment;
+					streamed.name = event.toolName;
+					streamed.args = event.args;
+					streamed.executionStarted = true;
+					streamed.argsComplete = true;
+					streamed.startedAtMs = now();
+					streamed.expanded = classifyResourceRead(event.toolName, event.args) === null;
+					markDirty();
+					return;
+				}
 				// A model that reuses a tool-call id across calls would leave the
 				// prior same-id segment unsettled (its end matches the first segment
 				// on lookup). Settle any such orphan now, wherever it lives, so it
@@ -1484,7 +1549,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const assistant = ensureAssistant();
 				// Compact resource reads (SKILL.md, CLIO-CODER.md, AGENTS.md, docs/) stay
 				// collapsed to one labeled line until explicitly expanded.
-				const expanded = assistant.pending === false && classifyResourceRead(event.toolName, event.args) === null;
+				const expanded = classifyResourceRead(event.toolName, event.args) === null;
 				assistant.pending = true;
 				assistant.segments.push({
 					kind: "tool",
@@ -1492,6 +1557,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					name: event.toolName,
 					args: event.args,
 					finished: false,
+					executionStarted: true,
+					argsComplete: true,
 					isError: false,
 					expanded,
 					startedAtMs: now(),
@@ -1514,19 +1581,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_execution_update") {
-				// pi-agent emits `partialResult` as a cumulative tool-result envelope
-				// (the bash tool concatenates its rolling tail buffer on every tick).
-				// Unwrap with the same helper the finished-result path uses, then
-				// REPLACE `partialOutput` rather than appending: the upstream
-				// semantics are cumulative, so appending would double-print every
-				// snapshot. Render dispatch picks up the new buffer on the next
-				// frame via `renderToolSegmentLines`.
+				// pi-agent emits `partialResult` as a cumulative AgentToolResult.
+				// Preserve that full envelope so the renderer can use structured
+				// progress details as well as content. Replace rather than append:
+				// Pi's update semantics are cumulative, and appending would duplicate
+				// every earlier snapshot.
 				const owner = findToolSegmentOwner(event.toolCallId);
 				if (owner) invalidateEntryCache(owner.entry);
 				const tool = owner?.segment;
 				if (tool && !tool.finished) {
-					const unwrapped = unwrapResultEnvelope(event.partialResult);
-					tool.partialOutput = typeof unwrapped === "string" ? unwrapped : previewResult(unwrapped);
+					tool.partialResult = event.partialResult;
 				}
 				markDirty();
 				return;
@@ -1578,23 +1642,35 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// expanded render switches to `renderToolExecution` and stays
 					// stable instead of churning through partial-frame layout. A
 					// denied park settles here too, so the awaiting styling must go.
-					tool.partialOutput = undefined;
+					tool.partialResult = undefined;
 					tool.awaitingApproval = undefined;
 				}
 				markDirty();
 				return;
 			}
 			if (event.type === "message_end") {
+				const current = transcript[transcript.length - 1];
+				let completedStreamedArgs = false;
+				if (current?.role === "assistant") {
+					for (const segment of current.segments) {
+						if (segment.kind !== "tool" || segment.finished || segment.executionStarted || segment.argsComplete) continue;
+						segment.argsComplete = true;
+						completedStreamedArgs = true;
+					}
+					if (completedStreamedArgs) invalidateEntryCache(current);
+				}
 				const text = extractAssistantText(event.message);
 				const thinking = extractAssistantThinking(event.message);
 				const extractedTerminalError = extractAssistantTerminalError(event.message);
-				const current = transcript[transcript.length - 1];
 				const terminalError =
 					current?.role === "assistant"
 						? scopeTerminalErrorAfterSuccessfulTool(current, extractedTerminalError)
 						: extractedTerminalError;
 				const usage = assistantUsage(event.message);
-				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0 && usage === undefined) return;
+				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0 && usage === undefined) {
+					if (completedStreamedArgs) markDirty();
+					return;
+				}
 				const assistant = ensureAssistant();
 				// message_end rewrites exactly one entry: the assistant it lands on.
 				invalidateEntryCache(assistant);

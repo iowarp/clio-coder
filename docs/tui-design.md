@@ -212,11 +212,21 @@ State is signaled through the status pill in the footer and matches the followin
 Drawn as a folded dim marker (`Thinking (N tokens)…` or `Thinking…`), which expands into a body using the `reason` color vertical `│` rail. Cap of 12 lines.
 
 ### 6.3 Tool Ledger
-Tool lines wrap as a single composed block:
+Every Pi tool call owns one stable transcript block for its complete lifecycle. Pi's streamed
+`toolcall_*` message updates first expose the call as `forming call`, the completed argument block
+becomes `ready`, `tool_execution_start` changes the same row to `running`, and cumulative
+`tool_execution_update` results replace the live body until `tool_execution_end` settles it. Rapid
+tool updates are coalesced to terminal frame rate; settlement always renders immediately.
+
+The collapsed form is one composed ledger line:
 ```
-▸ verb object · resource · facts · size ✓ · 230ms · full: path (ctrl+o)
+▸ verb(object) · resource · facts · size ✓ · 230ms · full: path (Alt+O)
 ```
 - Verb is bold `accent`, tail details are `dim`, status glyph is semantic (`✓`/`✗`), and the keyboard shortcut hint is appended at the end. Tool ledgers maintain full terminal width and bypass the prose hanging indent.
+- Expanded calls show the primary argument in the signature and every secondary argument as a typed field list. Multiline argument bodies become line and byte facts, nested objects retain structured rendering, and safety-sensitive values remain redacted.
+- Running calls label `live output` and replace Pi's cumulative partial result in place. Settled calls label `output` and show available exit status, result or observation counts, line count, displayed and total byte sizes, truncation, timeout, tool-token usage, dynamically added tools, context exclusion, and the full-output path. A blocked or aborted admission instead labels its `decision` and does not claim that the tool ran.
+- Text and image tool results keep their text while rendering images as MIME and byte-size placeholders; base64 image data is never written to the terminal.
+- Operator `!` and `!!` bash commands use the same running and settled block as model-initiated bash. The block appears before the process starts, streams the throttled cumulative stdout/stderr tail, and settles in place while the existing `bashExecution` session entry remains the durable record. `!!` continues to exclude that record from model context and says so in the block.
 
 ### 6.4 Editor Rail
 The right-hand label shows `model · thinking`. Thinking level colors map as: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).

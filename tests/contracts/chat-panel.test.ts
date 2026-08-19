@@ -389,6 +389,81 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		ok(rendered.includes("streamed tail line"), `the streamed body still renders after the split, got: ${rendered}`);
 	});
 
+	it("keeps one Pi tool row from streamed arguments through live output and settlement", () => {
+		let clock = 1_000;
+		const panel = createChatPanel({ now: () => clock });
+		const partial = {
+			role: "assistant",
+			content: [
+				{
+					type: "toolCall",
+					id: "streamed-call-1",
+					name: "grep",
+					arguments: { pattern: "AgentToolResult", path: "src", ignoreCase: true },
+				},
+			],
+			api: "openai-completions",
+			provider: "test",
+			model: "fixture",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: {} },
+			stopReason: "pending",
+			timestamp: 0,
+		};
+		panel.applyEvent({
+			type: "message_update",
+			message: partial,
+			assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: "src", partial },
+		} as unknown as ChatLoopEvent);
+		let rendered = strip(panel.render(110).join("\n"));
+		ok(rendered.includes("forming call"), rendered);
+		ok(rendered.includes("grep(AgentToolResult)"), rendered);
+
+		panel.applyEvent({ type: "message_end", message: { ...partial, stopReason: "toolUse" } } as unknown as ChatLoopEvent);
+		rendered = strip(panel.render(110).join("\n"));
+		ok(rendered.includes("ready"), rendered);
+
+		clock = 1_300;
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "streamed-call-1",
+			toolName: "grep",
+			args: { pattern: "AgentToolResult", path: "src", ignoreCase: true },
+		} as ChatLoopEvent);
+		clock = 1_600;
+		panel.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "streamed-call-1",
+			toolName: "grep",
+			partialResult: {
+				content: [{ type: "text", text: "src/engine/types.ts:42" }],
+				details: { observation: { shownCount: 1, totalCount: 3, unit: "matches", shownBytes: 22 } },
+			},
+		} as ChatLoopEvent);
+		rendered = strip(panel.render(110).join("\n"));
+		ok(rendered.includes("running · 300ms"), rendered);
+		ok(rendered.includes("args · 2"), rendered);
+		ok(rendered.includes("path"), rendered);
+		ok(rendered.includes("live output · 1/3 matches · 22B"), rendered);
+		ok(rendered.includes("src/engine/types.ts:42"), rendered);
+
+		clock = 1_700;
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "streamed-call-1",
+			toolName: "grep",
+			result: {
+				content: [{ type: "text", text: "src/engine/types.ts:42" }],
+				details: { observation: { shownCount: 1, totalCount: 3, unit: "matches", shownBytes: 22 } },
+			},
+			isError: false,
+			durationMs: 400,
+		} as ChatLoopEvent);
+		rendered = strip(panel.render(110).join("\n"));
+		strictEqual((rendered.match(/▸ grep\(/g) ?? []).length, 1, rendered);
+		ok(rendered.includes("✓ · 400ms"), rendered);
+		ok(rendered.includes("output · 1/3 matches · 22B"), rendered);
+	});
+
 	it("settles a reused-id orphan stranded in an earlier entry when the id restarts", () => {
 		let clock = 1000;
 		const panel = createChatPanel({ now: () => clock });
@@ -898,7 +973,8 @@ describe("chat-panel agent voice", () => {
 
 describe("chat-panel tool ledger subline", () => {
 	function feedCollapsedRead(panel: ReturnType<typeof createChatPanel>): void {
-		// A streaming turn keeps its tool collapsed to the ledger subline.
+		// Rich non-resource calls expand consistently; explicitly fold this one
+		// to exercise the compact ledger contract without relying on event order.
 		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as ChatLoopEvent);
 		panel.applyEvent({
 			type: "tool_execution_start",
@@ -917,6 +993,7 @@ describe("chat-panel tool ledger subline", () => {
 			isError: false,
 			durationMs: 230,
 		} as ChatLoopEvent);
+		panel.toggleLastToolExpanded();
 		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 	}
 
