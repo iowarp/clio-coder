@@ -1,7 +1,7 @@
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-
+import type { AuthOperationOptions } from "@earendil-works/pi-ai";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { withStateFileLock, withStateFileLockSync } from "../../../core/state-file-lock.js";
 import { clioConfigDir } from "../../../core/xdg.js";
@@ -54,16 +54,26 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 		});
 	}
 
-	async withLockAsync<T>(fn: (current: string | undefined) => Promise<LockResult<T>>): Promise<T> {
+	async withLockAsync<T>(
+		fn: (current: string | undefined) => Promise<LockResult<T>>,
+		options?: AuthOperationOptions,
+	): Promise<T> {
+		options?.signal?.throwIfAborted();
 		this.ensureParentDir();
 		this.ensureFileExists();
-		return withStateFileLock(this.path, async () => {
-			const current = existsSync(this.path) ? await readFile(this.path, "utf8") : undefined;
-			const { result, next } = await fn(current);
-			if (next !== undefined) {
-				atomicWriteSecret(this.path, next);
-			}
-			return result;
-		});
+		return withStateFileLock(
+			this.path,
+			async () => {
+				options?.signal?.throwIfAborted();
+				const current = existsSync(this.path) ? await readFile(this.path, "utf8") : undefined;
+				const { result, next } = await fn(current);
+				options?.signal?.throwIfAborted();
+				if (next !== undefined) {
+					atomicWriteSecret(this.path, next);
+				}
+				return result;
+			},
+			options?.signal ? { signal: options.signal } : {},
+		);
 	}
 }

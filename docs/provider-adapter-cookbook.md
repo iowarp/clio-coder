@@ -77,7 +77,7 @@ Probes discover the current state of a target inference server when Clio starts 
 ### 2.1 Endpoint Probing (`probe`)
 The `probe` method validates endpoint reachability and collects loaded models:
 
-* **Inputs:** `TargetDescriptor` (which holds target `url`, optional `apiKey`, and connection metadata) and `ProbeContext` (which provides timeout signals and credentials).
+* **Inputs:** `TargetDescriptor` (which holds target `url`, optional `apiKey`, and connection metadata) and `ProbeContext` (which provides timeout signals and credentials). Request paths that resolve OAuth through `providers.auth.resolveForTarget` must pass `{ signal }`; Pi 0.84's `AuthOperationOptions` keeps cancellation attached while Clio waits for or mutates its credential store.
 * **Return Value:** A `ProbeResult` indicating:
   * `ok`: True if reachable.
   * `serverVersion`: String identifier of the backend (e.g. `"Ollama/0.1.48"`).

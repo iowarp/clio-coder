@@ -1,3 +1,4 @@
+import type { AuthOperationOptions } from "@earendil-works/pi-ai";
 import type { OAuthLoginCallbacks } from "../../engine/oauth.js";
 import type { AuthCredential, AuthResolution, AuthStatus } from "./auth/index.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
@@ -120,7 +121,11 @@ export interface ProvidersContract {
 	 */
 	auth: {
 		statusForTarget(target: TargetDescriptor, runtime: RuntimeDescriptor): AuthStatus;
-		resolveForTarget(target: TargetDescriptor, runtime: RuntimeDescriptor): Promise<AuthResolution>;
+		resolveForTarget(
+			target: TargetDescriptor,
+			runtime: RuntimeDescriptor,
+			options?: AuthOperationOptions,
+		): Promise<AuthResolution>;
 		getStored(providerId: string): AuthCredential | null;
 		listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }>;
 		setApiKey(providerId: string, key: string): void;

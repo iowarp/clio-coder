@@ -339,6 +339,7 @@ const LOCAL_API_KEY_FALLBACK = "clio-local-target";
 export async function resolveApiKeyForTarget(
 	target: TargetDescriptor,
 	providers: ProvidersContract,
+	signal?: AbortSignal,
 ): Promise<string | undefined> {
 	const runtime = providers.getRuntime(target.runtime);
 	if (!runtime) return undefined;
@@ -348,7 +349,7 @@ export async function resolveApiKeyForTarget(
 	// failed on exactly the local runtimes Clio is built for, while ordinary
 	// turns against the same target succeeded.
 	if (!targetRequiresAuth(target, runtime)) return LOCAL_API_KEY_FALLBACK;
-	const resolved = await providers.auth.resolveForTarget(target, runtime);
+	const resolved = await providers.auth.resolveForTarget(target, runtime, signal ? { signal } : undefined);
 	return resolved.apiKey;
 }
 
@@ -388,7 +389,7 @@ function createBackgroundMemoryModelClient(
 	return {
 		async complete(request) {
 			const apiKey = targetRequiresAuth(refined.target, refined.runtime)
-				? (await providers.auth.resolveForTarget(refined.target, refined.runtime)).apiKey
+				? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
 				: LOCAL_API_KEY_FALLBACK;
 			return completeEngineText({
 				model,

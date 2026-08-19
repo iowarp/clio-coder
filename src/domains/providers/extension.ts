@@ -501,11 +501,14 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				}
 				return authStore.statusForTarget(resolveAuthTarget(target, runtime), { includeFallback: false });
 			},
-			resolveForTarget(target, runtime) {
+			resolveForTarget(target, runtime, options) {
 				if (!targetRequiresAuth(target, runtime)) {
 					return Promise.resolve(authNotRequiredStatus(resolveAuthTarget(target, runtime).providerId));
 				}
-				return authStore.resolveForTarget(resolveAuthTarget(target, runtime), { includeFallback: false });
+				return authStore.resolveForTarget(resolveAuthTarget(target, runtime), {
+					includeFallback: false,
+					...(options?.signal ? { signal: options.signal } : {}),
+				});
 			},
 			getStored(providerId) {
 				return authStore.get(providerId) ?? null;

@@ -419,6 +419,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			state.runtime.agent.abort();
 			cleanupSessionResources(state.runtime.agent.sessionId);
 		}
+		let getCurrentAgentSignal: () => AbortSignal | undefined = () => undefined;
 		const handle = deps.createAgent({
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
@@ -447,10 +448,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (!targetRequiresAuth(target.target, target.runtime)) {
 					return LOCAL_API_KEY_FALLBACK;
 				}
-				const resolved = await deps.providers.auth.resolveForTarget(target.target, target.runtime);
+				const signal = getCurrentAgentSignal();
+				const resolved = await deps.providers.auth.resolveForTarget(
+					target.target,
+					target.runtime,
+					signal ? { signal } : undefined,
+				);
 				return resolved.apiKey;
 			},
 		});
+		getCurrentAgentSignal = () => handle.agent.signal;
 
 		// Build the runtime object before subscribing so the callback closes
 		// over the same heap object the hot-swap path mutates. Reading

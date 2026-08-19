@@ -814,8 +814,16 @@ describe("contracts/compaction credentials", () => {
 	it("sends the real credential for a target that needs one", async () => {
 		const runtime = { ...noAuthRuntime(), tier: "cloud" } as RuntimeDescriptor;
 		const target: TargetDescriptor = { id: "cloud", runtime: runtime.id, url: "https://api.invalid" };
-		const resolved = await resolveApiKeyForTarget(target, providersFor(runtime, "real-key"));
+		const controller = new AbortController();
+		let seenSignal: AbortSignal | undefined;
+		const providers = providersFor(runtime, "real-key");
+		providers.auth.resolveForTarget = async (_target, _runtime, options) => {
+			seenSignal = options?.signal;
+			return { apiKey: "real-key", source: "stored" } as never;
+		};
+		const resolved = await resolveApiKeyForTarget(target, providers, controller.signal);
 		strictEqual(resolved, "real-key", "a target that requires auth is unaffected");
+		strictEqual(seenSignal, controller.signal, "the public provider boundary keeps request cancellation attached");
 	});
 
 	it("sends nothing when the runtime is not registered at all", async () => {

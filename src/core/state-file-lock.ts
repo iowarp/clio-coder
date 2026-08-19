@@ -1,6 +1,7 @@
 import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, utimesSync, writeSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { processAlive, processBirthToken } from "./process-identity.js";
 
 /**
@@ -36,6 +37,8 @@ export const FILE_LOCK_ACQUIRE_TIMEOUT_MS = 20_000;
 export interface StateFileLockOptions {
 	/** Acquisition budget. Default `FILE_LOCK_ACQUIRE_TIMEOUT_MS`. */
 	timeoutMs?: number;
+	/** Cancel an asynchronous lock wait and never enter or commit its critical section. */
+	signal?: AbortSignal;
 	/**
 	 * `run-unlocked` runs `fn` anyway when the lock cannot be taken. Residency
 	 * mutations need it: serializing them is an optimization and must never fail
@@ -158,9 +161,11 @@ export function withStateFileLockSync<T>(targetPath: string, fn: () => T, option
 	const timeoutMs = options.timeoutMs ?? FILE_LOCK_ACQUIRE_TIMEOUT_MS;
 	let held = false;
 	try {
+		options.signal?.throwIfAborted();
 		mkdirSync(dirname(lockPath), { recursive: true });
 		const deadlineMs = Date.now() + timeoutMs;
 		for (let attempt = 1; !tryAcquire(lockPath); attempt += 1) {
+			options.signal?.throwIfAborted();
 			if (Date.now() > deadlineMs) throw timeoutError(lockPath, timeoutMs);
 			// Atomics.wait rather than a timer: the callers of this variant are
 			// inside host APIs that cannot yield.
@@ -168,6 +173,7 @@ export function withStateFileLockSync<T>(targetPath: string, fn: () => T, option
 		}
 		held = true;
 	} catch (err) {
+		options.signal?.throwIfAborted();
 		if (options.onAcquireFailure !== "run-unlocked") throw err;
 	}
 	try {
@@ -186,15 +192,21 @@ export async function withStateFileLock<T>(
 	const timeoutMs = options.timeoutMs ?? FILE_LOCK_ACQUIRE_TIMEOUT_MS;
 	let held = false;
 	try {
+		options.signal?.throwIfAborted();
 		mkdirSync(dirname(lockPath), { recursive: true });
 		const deadlineMs = Date.now() + timeoutMs;
 		for (let attempt = 1; !tryAcquire(lockPath); attempt += 1) {
+			options.signal?.throwIfAborted();
 			if (Date.now() > deadlineMs) throw timeoutError(lockPath, timeoutMs);
 			const base = backoffMs(attempt);
-			await new Promise((resolve) => setTimeout(resolve, base + Math.floor(Math.random() * base)));
+			const delayMs = base + Math.floor(Math.random() * base);
+			if (options.signal) await sleep(delayMs, undefined, { signal: options.signal });
+			else await sleep(delayMs);
 		}
 		held = true;
+		options.signal?.throwIfAborted();
 	} catch (err) {
+		options.signal?.throwIfAborted();
 		if (options.onAcquireFailure !== "run-unlocked") throw err;
 	}
 	const stopRefresh = held ? startRefresh(lockPath) : null;

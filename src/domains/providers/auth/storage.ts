@@ -1,3 +1,4 @@
+import type { AuthOperationOptions } from "@earendil-works/pi-ai";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
@@ -39,7 +40,10 @@ export interface LockResult<T> {
 
 export interface AuthStorageBackend {
 	withLock<T>(fn: (current: string | undefined) => LockResult<T>): T;
-	withLockAsync<T>(fn: (current: string | undefined) => Promise<LockResult<T>>): Promise<T>;
+	withLockAsync<T>(
+		fn: (current: string | undefined) => Promise<LockResult<T>>,
+		options?: AuthOperationOptions,
+	): Promise<T>;
 	/** Where the store lives, for error text. Absent for non-file backends. */
 	describe?(): string;
 }
@@ -516,35 +520,44 @@ export class AuthStorage {
 		providerId: string,
 		signal: AbortSignal,
 	): Promise<{ apiKey: string; credential: OAuthCredential } | null> {
-		return this.backend.withLockAsync(async (current) => {
-			const read = readStorageData(current);
-			if (read.damage !== null) {
-				this.damage = read.damage;
-				throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
-			}
-			const currentData = read.data;
-			this.data = currentData;
-			this.damage = null;
-			const stored = currentData[providerId];
-			if (stored?.type !== "oauth") {
-				return { result: null };
-			}
-			if (Date.now() < stored.expires) {
-				return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored } };
-			}
-			const refreshed = await refreshOAuthCredentials(providerId, stored, signal);
-			const next: OAuthCredential = {
-				type: "oauth",
-				...refreshed,
-				updatedAt: nowIso(),
-			};
-			const merged: AuthStorageData = { ...currentData, [providerId]: next };
-			this.data = merged;
-			return {
-				result: { apiKey: await getOAuthApiKey(providerId, next), credential: next },
-				next: serializeStorageData(merged),
-			};
-		});
+		let latestData: AuthStorageData | undefined;
+		const result = await this.backend.withLockAsync(
+			async (current) => {
+				const read = readStorageData(current);
+				if (read.damage !== null) {
+					this.damage = read.damage;
+					throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
+				}
+				const currentData = read.data;
+				latestData = currentData;
+				const stored = currentData[providerId];
+				if (stored?.type !== "oauth") {
+					return { result: null };
+				}
+				if (Date.now() < stored.expires) {
+					return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored } };
+				}
+				const refreshed = await refreshOAuthCredentials(providerId, stored, signal);
+				const next: OAuthCredential = {
+					type: "oauth",
+					...refreshed,
+					updatedAt: nowIso(),
+				};
+				const merged: AuthStorageData = { ...currentData, [providerId]: next };
+				latestData = merged;
+				return {
+					result: { apiKey: await getOAuthApiKey(providerId, next), credential: next },
+					next: serializeStorageData(merged),
+				};
+			},
+			{ signal },
+		);
+		// Adopt the view only after the backend has committed it. Pi 0.84's
+		// CredentialStore.modify pattern prevents a cancellation between refresh
+		// and persistence from making memory advertise a token disk never received.
+		if (latestData) this.data = latestData;
+		this.damage = null;
+		return result;
 	}
 
 	async resolveApiKey(
