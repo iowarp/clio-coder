@@ -146,14 +146,17 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
 | `/delegate` | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
 | `/agents` | `/agents` | List Clio agents and ACP delegation agents |
+| `/targets` | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
 | `/cost` | `/cost` | Show session token and cost totals |
-| `/context` | `/context [compact [instructions] \| init \| refresh \| reset]` | Context hub: window overlay plus compact, init, refresh, and reset |
+| `/context` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
+| `/fleet` | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
 | `/tasks` | `/tasks` | Show the session task board the agent tracks with the tasks tool |
-| `/memory` | `/memory [seed]` | Inspect task memory or seed it from the newest handoff |
+| `/memory` | `/memory seed` | Inspect task memory or seed it from the newest handoff |
 | `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
 | `/output` | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
+| `/scoped-models` | `/scoped-models` | Open Settings → Models: the Alt+J / Alt+K cycle set and favorites |
 | `/settings` | `/settings [section]` | Open interactive settings |
 | `/resume` | `/resume` | Resume a past session |
 | `/new` | `/new` | Start a fresh session |
