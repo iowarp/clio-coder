@@ -11,6 +11,7 @@ still change interfaces.
 
 ## 0.3.2 - 2026-08-19
 
+- Replaced Clio's copied tool-output truncation implementation with pi-agent-core's UTF-8-safe `truncateHead`, `truncateTail`, `truncateLine`, and `formatSize` primitives. Read, search, context, and shell output retain Clio's 16 KiB per-observation ceiling while sharing Pi's maintained byte and line handling.
 - Gave every slash operation one canonical spelling across parsing, autocomplete, help, documentation, and skill guidance. `/quit`, `/context compact`, `/model`, `/settings`, `/skill <name>`, `/run --agent-profile`, and `/run --runtime` are now the only accepted forms; retired aliases fail closed and remain editable, and prompt templates that collide with built-in commands are diagnosed and ignored consistently in interactive and headless runs.
 - Completed fullscreen prompt navigation by marking every Clio user turn with Pi's OSC 133 semantic prompt sequence, so `Ctrl+Shift+Up` and `Ctrl+Shift+Down` now move between real transcript prompts. Clio's editor chrome and transcript export now use Pi's `stripTerminalSequences` instead of partial local ANSI regexes, and the optional presentation-settings path retains regular-screen defaults.
 - Made OAuth cancellation reach the complete production credential path. Active agent and background-request signals now cross `providers.auth`, credential mutations use Pi 0.84's `AuthOperationOptions`, cancelled lock waiters leave the live holder alone, and a token aborted before persistence never appears in Clio's in-memory credential view.
