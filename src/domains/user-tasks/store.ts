@@ -41,6 +41,15 @@ export interface UserTasksStore {
 	hand(id: string, sessionId?: string): UserTask;
 	done(id: string): UserTask;
 	drop(id: string): UserTask;
+	recordPicked(id: string, sessionId: string, boardTaskId: string): UserTask;
+	recordDone(id: string, sessionId: string, boardTaskId: string): UserTask;
+	reconcile(links: ReadonlyArray<UserTaskBoardLink>, sessionId: string): ReadonlyArray<UserTask>;
+}
+
+export interface UserTaskBoardLink {
+	userTaskId: string;
+	boardTaskId: string;
+	status: "pending" | "active" | "completed" | "blocked" | "cancelled";
 }
 
 export class UserTasksStoreError extends Error {
@@ -181,6 +190,26 @@ export function createUserTasksStore(deps: UserTasksStoreDeps): UserTasksStore {
 		return copyTask(updated);
 	};
 
+	const recordLink = (id: string, status: "picked" | "done", sessionId: string, boardTaskId: string): UserTask => {
+		const file = load();
+		const index = file.tasks.findIndex((task) => task.id === id);
+		const current = file.tasks[index];
+		if (!current) throw new UserTasksStoreError(`operator task ${id} was not found`);
+		if (current.status === "done" || current.status === "dropped") {
+			throw new UserTasksStoreError(`operator task ${id} is ${current.status}; it cannot move to ${status}`);
+		}
+		const updated: UserTask = {
+			...current,
+			status,
+			updatedAt: now(),
+			handedSessionId: sessionId,
+			boardTaskId,
+		};
+		file.tasks[index] = updated;
+		save(file);
+		return copyTask(updated);
+	};
+
 	return {
 		path,
 		snapshot(): ReadonlyArray<UserTask> {
@@ -217,6 +246,49 @@ export function createUserTasksStore(deps: UserTasksStoreDeps): UserTasksStore {
 		},
 		drop(id: string): UserTask {
 			return mutate(id, ["open", "handed", "picked"], "dropped");
+		},
+		recordPicked(id: string, sessionId: string, boardTaskId: string): UserTask {
+			return recordLink(id, "picked", sessionId, boardTaskId);
+		},
+		recordDone(id: string, sessionId: string, boardTaskId: string): UserTask {
+			return recordLink(id, "done", sessionId, boardTaskId);
+		},
+		reconcile(links: ReadonlyArray<UserTaskBoardLink>, sessionId: string): ReadonlyArray<UserTask> {
+			const file = load();
+			let changed = false;
+			for (const [index, current] of file.tasks.entries()) {
+				if (current.status === "done" || current.status === "dropped") continue;
+				const candidates = links.filter((link) => link.userTaskId === current.id);
+				const completed = candidates.find((link) => link.status === "completed");
+				const open = candidates.find((link) => link.status === "active" || link.status === "pending");
+				const link = completed ?? open;
+				if (link) {
+					const status = completed ? "done" : "picked";
+					if (
+						current.status !== status ||
+						current.boardTaskId !== link.boardTaskId ||
+						current.handedSessionId !== sessionId
+					) {
+						file.tasks[index] = {
+							...current,
+							status,
+							boardTaskId: link.boardTaskId,
+							handedSessionId: sessionId,
+							updatedAt: now(),
+						};
+						changed = true;
+					}
+					continue;
+				}
+				if (current.status === "picked") {
+					const repaired: UserTask = { ...current, status: "handed", updatedAt: now() };
+					delete repaired.boardTaskId;
+					file.tasks[index] = repaired;
+					changed = true;
+				}
+			}
+			if (changed) save(file);
+			return file.tasks.map(copyTask);
 		},
 	};
 }

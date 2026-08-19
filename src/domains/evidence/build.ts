@@ -53,6 +53,7 @@ import {
 const MAX_TASK_CHARS = 500;
 const TRANSCRIPT_TEXT_MAX_CHARS = 500;
 const TOOL_PREVIEW_MAX_CHARS = 240;
+const TASK_LEDGER_ROW_LIMIT = 200;
 
 export interface BuildEvidenceOptions {
 	/** Evidence bundles are written under <dataDir>/evidence/. */
@@ -1321,8 +1322,30 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 		];
 	}
 	if (entry.kind === "taskLedger") {
+		const userLinks = entry.subgoals
+			.filter((goal) => goal.origin === "user" && goal.userTaskId)
+			.map((goal) => `${goal.id}:${goal.userTaskId}`)
+			.join(",");
+		const boardId = entry.boardId ?? "legacy";
+		const provenance = userLinks ? ` userLinks=${userLinks}` : "";
+		const evidenceByTaskId = new Map(
+			entry.requiredValidationEvidence.map((item) => [
+				item.id.endsWith(".evidence") ? item.id.slice(0, -".evidence".length) : item.id,
+				item.description,
+			]),
+		);
+		const rows = entry.subgoals.slice(0, TASK_LEDGER_ROW_LIMIT).map((goal) => {
+			const userTaskId = goal.userTaskId ?? "none";
+			const reason = goal.description === undefined ? "none" : previewUnknown(goal.description);
+			const evidence = evidenceByTaskId.has(goal.id) ? previewUnknown(evidenceByTaskId.get(goal.id)) : "none";
+			return `  task board=${boardId} id=${goal.id} title=${previewUnknown(goal.title)} status=${goal.status} origin=${goal.origin ?? "agent"} userTaskId=${userTaskId} reason=${reason} evidence=${evidence}`;
+		});
+		if (entry.subgoals.length > TASK_LEDGER_ROW_LIMIT) {
+			rows.push(`  task rows omitted=${entry.subgoals.length - TASK_LEDGER_ROW_LIMIT}`);
+		}
 		return [
-			`${prefix} taskLedger goals=${entry.goals.length} subgoals=${entry.subgoals.length} activeRuns=${entry.activeRunIds.length} evidence=${entry.requiredValidationEvidence.length}`,
+			`${prefix} taskLedger goals=${entry.goals.length} subgoals=${entry.subgoals.length} activeRuns=${entry.activeRunIds.length} evidence=${entry.requiredValidationEvidence.length} board=${boardId}${provenance}`,
+			...rows,
 		];
 	}
 	if (entry.kind === "decisionLedger") {

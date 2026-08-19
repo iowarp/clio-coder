@@ -8,6 +8,7 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
+import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { AgentLedgerPort } from "../worker/protocol.js";
 import { createArtifactTool } from "./artifact.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
@@ -45,6 +46,8 @@ export interface ToolBootstrapDeps {
 	 * gets a private in-memory board without ledger persistence.
 	 */
 	taskBoard?: TaskBoardStore;
+	/** Project-scoped operator task inbox; interactive orchestrators share it with `/tasks`. */
+	userTasks?: UserTasksStore;
 	/**
 	 * The run's agent-ledger port. The ledger tool is registered unconditionally
 	 * because attestedToolSignature signs the names a bare registry produces and
@@ -430,10 +433,17 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		}),
 	});
 	registry.register({
-		...builtin(createTasksTool({ board: deps.taskBoard ?? createTaskBoardStore() }), {
-			path: "src/tools/tasks.ts",
-			scope: "core",
-		}),
+		...builtin(
+			createTasksTool({
+				board: deps.taskBoard ?? createTaskBoardStore(),
+				...(deps.userTasks ? { userTasks: deps.userTasks } : {}),
+				getSessionId: () => deps.session?.current()?.id ?? null,
+			}),
+			{
+				path: "src/tools/tasks.ts",
+				scope: "core",
+			},
+		),
 	});
 	if (deps.dispatch) {
 		const dispatchRunEvents = createDispatchRunEventRegistry();

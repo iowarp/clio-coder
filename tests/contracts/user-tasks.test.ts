@@ -102,4 +102,24 @@ describe("contracts/user-tasks store", () => {
 		writeFileSync(path, JSON.stringify({ version: 1, nextId: 3, tasks: [task, task] }));
 		throws(() => createUserTasksStore({ cwd }).snapshot(), /duplicate id u2/);
 	});
+
+	it("records durable board provenance and reconciles interrupted second writes by user identity", () => {
+		const store = createUserTasksStore({ cwd: scratch() });
+		const task = store.add("ship it");
+		const picked = store.recordPicked(task.id, "session-1", "t4");
+		strictEqual(picked.status, "picked");
+		strictEqual(picked.boardTaskId, "t4");
+
+		const repairedDone = store.reconcile([{ userTaskId: task.id, boardTaskId: "t4", status: "completed" }], "session-1");
+		strictEqual(repairedDone[0]?.status, "done");
+	});
+
+	it("returns orphaned picked tasks to handed without correlating a reused tN display id", () => {
+		const store = createUserTasksStore({ cwd: scratch() });
+		const task = store.add("operator work");
+		store.recordPicked(task.id, "session-1", "t1");
+		const reconciled = store.reconcile([{ userTaskId: "u999", boardTaskId: "t1", status: "active" }], "session-1");
+		strictEqual(reconciled[0]?.status, "handed");
+		strictEqual(reconciled[0]?.boardTaskId, undefined);
+	});
 });

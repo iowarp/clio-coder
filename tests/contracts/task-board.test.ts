@@ -1,4 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { createTaskNudgeRegistration, TASK_NUDGE_REGISTRATION_ID } from "../../src/domains/middleware/task-nudge.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
@@ -14,6 +17,7 @@ import {
 	taskBoardCounts,
 	toTaskLedgerEntryFields,
 } from "../../src/domains/session/task-board.js";
+import { createUserTasksStore } from "../../src/domains/user-tasks/store.js";
 import { createTasksTool } from "../../src/tools/tasks.js";
 
 function storeWithLog(): { store: TaskBoardStore; appended: TaskLedgerEntryFields[] } {
@@ -232,12 +236,94 @@ describe("contracts/task-board store", () => {
 		);
 	});
 
+	it("picks one operator task with durable provenance and refuses a duplicate link", () => {
+		const { store, appended } = plannedStore();
+		const picked = store.apply({ op: "pick", title: "operator request", userTaskId: "u3" });
+		ok(picked.ok);
+		deepStrictEqual(picked.board.tasks.at(-1), {
+			id: "t4",
+			title: "operator request",
+			status: "pending",
+			origin: "user",
+			userTaskId: "u3",
+		});
+		strictEqual(appended.at(-1)?.subgoals.at(-1)?.origin, "user");
+		strictEqual(appended.at(-1)?.subgoals.at(-1)?.userTaskId, "u3");
+		const duplicate = store.apply({ op: "pick", title: "duplicate", userTaskId: "u3" });
+		ok(!duplicate.ok);
+		ok(duplicate.message.includes("already linked"));
+	});
+
+	it("preserves open operator work across plan and allocates agent ids after it", () => {
+		const { store } = plannedStore();
+		ok(store.apply({ op: "pick", title: "operator request", userTaskId: "u1" }).ok);
+		ok(store.apply({ op: "start", id: "t4" }).ok);
+		const replanned = store.apply({ op: "plan", title: "New agent plan", tasks: ["first", "second"] });
+		ok(replanned.ok);
+		deepStrictEqual(
+			replanned.board.tasks.map((task) => [task.id, task.origin, task.userTaskId]),
+			[
+				["t4", "user", "u1"],
+				["t5", "agent", undefined],
+				["t6", "agent", undefined],
+			],
+		);
+		ok(replanned.notes.some((note) => note.includes("preserved 1 open operator")));
+	});
+
+	it("publishes no linked board mutation when the required ledger append fails", () => {
+		const store = createTaskBoardStore({
+			getSessionId: () => "session-1",
+			readEntries: () => [],
+			createBoardId: () => "board-failed",
+			appendEntry: () => {
+				throw new Error("ledger unavailable");
+			},
+		});
+		const result = store.apply({ op: "pick", title: "operator request", userTaskId: "u1" });
+		ok(!result.ok);
+		ok(result.message.includes("ledger unavailable"));
+		strictEqual(store.snapshot(), null);
+	});
+
+	it("keeps the prior board when a replan preserving operator work cannot append", () => {
+		let rejectAppend = false;
+		const store = createTaskBoardStore({
+			getSessionId: () => "session-1",
+			readEntries: () => [],
+			createBoardId: () => "board-preserved",
+			appendEntry: () => {
+				if (rejectAppend) throw new Error("ledger unavailable");
+			},
+		});
+		ok(store.apply({ op: "pick", title: "operator request", userTaskId: "u1" }).ok);
+		const before = store.snapshot();
+		rejectAppend = true;
+		const replanned = store.apply({ op: "plan", title: "Replacement plan", tasks: ["agent task"] });
+		ok(!replanned.ok);
+		ok(replanned.message.includes("ledger unavailable"));
+		deepStrictEqual(store.snapshot(), before);
+	});
+
+	it("refolds user provenance from the durable task ledger", () => {
+		const { store, appended } = plannedStore();
+		ok(store.apply({ op: "pick", title: "operator request", userTaskId: "u7" }).ok);
+		const entries = appended.map((fields, index) => ({
+			...fields,
+			turnId: `turn-${index}`,
+			timestamp: `2026-07-03T00:0${index}:00.000Z`,
+		}));
+		const folded = foldTaskBoard(entries);
+		strictEqual(folded?.tasks.at(-1)?.origin, "user");
+		strictEqual(folded?.tasks.at(-1)?.userTaskId, "u7");
+	});
+
 	it("refolds from the session ledger when the session switches", () => {
 		let sessionId = "session-a";
 		const boardA: TaskBoardSnapshot = {
 			boardId: "board-a",
 			title: "Board A",
-			tasks: [{ id: "t1", title: "a", status: "pending" }],
+			tasks: [{ id: "t1", title: "a", status: "pending", origin: "agent" }],
 			activeRunIds: [],
 		};
 		const entriesBySession: Record<string, unknown[]> = {
@@ -263,13 +349,13 @@ describe("contracts/task-board store", () => {
 		const boardA: TaskBoardSnapshot = {
 			boardId: "board-a",
 			title: "Board A",
-			tasks: [{ id: "t1", title: "a", status: "pending" }],
+			tasks: [{ id: "t1", title: "a", status: "pending", origin: "agent" }],
 			activeRunIds: [],
 		};
 		const boardB: TaskBoardSnapshot = {
 			boardId: "board-b",
 			title: "Board B (abandoned branch)",
-			tasks: [{ id: "t1", title: "b", status: "active" }],
+			tasks: [{ id: "t1", title: "b", status: "active", origin: "agent" }],
 			activeRunIds: [],
 		};
 		let entries: unknown[] = [
@@ -396,6 +482,118 @@ describe("contracts/task-board tool", () => {
 		const counts = (done.details as { counts: { completed: number; total: number } }).counts;
 		strictEqual(counts.completed, 1);
 		strictEqual(counts.total, 2);
+	});
+
+	it("discovers waiting operator tasks and picks one onto durable board work", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-bridge-"));
+		const userTasks = createUserTasksStore({ cwd });
+		userTasks.add("review the release notes");
+		const { store } = storeWithLog();
+		const tool = createTasksTool({ board: store, userTasks, getSessionId: () => "session-1" });
+		strictEqual(tool.baseActionClass, "read", "project-local task pickup is intentionally ungated");
+		const listed = await tool.run({ action: "list" });
+		ok(listed.kind === "ok");
+		ok(listed.output.includes('operator tasks waiting: u1 "review the release notes"'));
+		const missingId = await tool.run({ action: "pick" });
+		strictEqual(missingId.kind, "error");
+		ok(missingId.kind === "error" && missingId.message.includes("requires an operator task id"));
+		strictEqual(store.snapshot(), null, "an ungated pick without durable uN identity must not mutate the ledger");
+		strictEqual(userTasks.get("u1")?.status, "open");
+
+		const picked = await tool.run({ action: "pick", id: "u1" });
+		strictEqual(picked.kind, "ok");
+		strictEqual(store.snapshot()?.tasks[0]?.origin, "user");
+		strictEqual(store.snapshot()?.tasks[0]?.userTaskId, "u1");
+		strictEqual(userTasks.get("u1")?.status, "picked");
+		strictEqual(userTasks.get("u1")?.boardTaskId, "t1");
+		const duplicate = await tool.run({ action: "pick", id: "u1" });
+		strictEqual(duplicate.kind, "error");
+	});
+
+	it("propagates a linked board completion to the operator inbox", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-complete-"));
+		const userTasks = createUserTasksStore({ cwd });
+		userTasks.add("verify release");
+		const { store } = storeWithLog();
+		const tool = createTasksTool({ board: store, userTasks, getSessionId: () => "session-1" });
+		strictEqual((await tool.run({ action: "pick", id: "u1" })).kind, "ok");
+		strictEqual((await tool.run({ action: "start", id: "t1" })).kind, "ok");
+		const done = await tool.run({ action: "done", id: "t1", note: "tests passed" });
+		strictEqual(done.kind, "ok");
+		strictEqual(userTasks.get("u1")?.status, "done");
+		ok(done.kind === "ok");
+		const details = done.details as { tasks: Array<{ origin?: string; userTaskId?: string }> };
+		strictEqual(details.tasks[0]?.origin, "user");
+		strictEqual(details.tasks[0]?.userTaskId, "u1");
+	});
+
+	it("keeps a successful ledger pickup authoritative when the sidecar write fails", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-sidecar-fail-"));
+		const durableInbox = createUserTasksStore({ cwd });
+		durableInbox.add("durable pickup");
+		const failingInbox = createUserTasksStore({
+			cwd,
+			write: () => {
+				throw new Error("sidecar unavailable");
+			},
+		});
+		const { store, appended } = storeWithLog();
+		const tool = createTasksTool({ board: store, userTasks: failingInbox, getSessionId: () => "session-1" });
+		const result = await tool.run({ action: "pick", id: "u1" });
+		strictEqual(result.kind, "error");
+		ok(result.kind === "error" && result.message.includes("durably picked up"));
+		const details = result.details as { boardId: string; tasks: Array<{ origin?: string; userTaskId?: string }> };
+		strictEqual(details.boardId, store.snapshot()?.boardId);
+		strictEqual(details.tasks[0]?.origin, "user");
+		strictEqual(details.tasks[0]?.userTaskId, "u1");
+		strictEqual(appended.at(-1)?.subgoals[0]?.userTaskId, "u1");
+		strictEqual(durableInbox.get("u1")?.status, "open");
+	});
+
+	it("publishes neither completion nor sidecar done when the required completion append fails", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-completion-ledger-fail-"));
+		const userTasks = createUserTasksStore({ cwd });
+		userTasks.add("must remain picked");
+		let rejectAppend = false;
+		const store = createTaskBoardStore({
+			getSessionId: () => "session-1",
+			readEntries: () => [],
+			createBoardId: () => "board-completion-failure",
+			appendEntry: () => {
+				if (rejectAppend) throw new Error("ledger unavailable");
+			},
+		});
+		const tool = createTasksTool({ board: store, userTasks, getSessionId: () => "session-1" });
+		strictEqual((await tool.run({ action: "pick", id: "u1" })).kind, "ok");
+		strictEqual((await tool.run({ action: "start", id: "t1" })).kind, "ok");
+		rejectAppend = true;
+		const completed = await tool.run({ action: "done", id: "t1", note: "unpersisted evidence" });
+		strictEqual(completed.kind, "error");
+		ok(completed.kind === "error" && completed.message.includes("ledger unavailable"));
+		strictEqual(store.snapshot()?.tasks[0]?.status, "active");
+		strictEqual(userTasks.get("u1")?.status, "picked");
+	});
+
+	it("repairs an interrupted sidecar pickup from the durable board on restart", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-reconcile-"));
+		const userTasks = createUserTasksStore({ cwd });
+		userTasks.add("recover me");
+		const { store, appended } = storeWithLog();
+		ok(store.apply({ op: "pick", title: "recover me", userTaskId: "u1" }).ok);
+		const entries = appended.map((fields, index) => ({
+			...fields,
+			turnId: `turn-${index}`,
+			timestamp: "2026-08-19T12:00:00.000Z",
+		}));
+		const restarted = createTaskBoardStore({
+			getSessionId: () => "session-1",
+			readEntries: () => entries,
+			appendEntry: () => undefined,
+		});
+		const tool = createTasksTool({ board: restarted, userTasks, getSessionId: () => "session-1" });
+		strictEqual((await tool.run({ action: "list" })).kind, "ok");
+		strictEqual(userTasks.get("u1")?.status, "picked");
+		strictEqual(userTasks.get("u1")?.boardTaskId, "t1");
 	});
 });
 

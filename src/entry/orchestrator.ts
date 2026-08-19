@@ -146,6 +146,7 @@ import {
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
+import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
 import {
 	type AcpJsonRpcPeerTransport,
@@ -1196,6 +1197,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// interview fall back to their stated defaults when the tool is absent.
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
 		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();
+	const userTasks = createUserTasksStore({ cwd: process.cwd() });
 	// One task board per orchestrator: the tasks tool mutates it, the turn-end
 	// open-tasks nudge reads it, and the footer/overlay render it. Keyed on the
 	// current session id so resume/fork/new refolds it from taskLedger entries.
@@ -1266,6 +1268,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
 		taskBoard,
+		userTasks,
 		dispatch,
 		bus,
 		...(interactive ? { askUser: askUserBridge } : {}),
@@ -1819,6 +1822,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		getTaskBoard: () => taskBoard.snapshot(),
+		userTasks,
 		getTaskMemoryStatus: () => {
 			ensureTaskMemorySession();
 			const settings = getCurrentSettings();
