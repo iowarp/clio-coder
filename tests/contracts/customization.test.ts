@@ -2,12 +2,13 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { buildCustomizationGraph } from "../../src/cli/config-inspect.js";
 import { SettingsValidationError, settingsPath } from "../../src/core/config.js";
 import { readLayeredSettings, settingsSourceFor, updateLayeredSettings } from "../../src/core/settings-layers.js";
 import { loadOperatorProfile, renderOperatorProfile } from "../../src/domains/context/operator-profile.js";
 import { loadProjectRules, selectActiveRules } from "../../src/domains/context/project-rules.js";
+import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
 // Wrapped in its own describe so the top-level beforeEach/afterEach below
@@ -33,6 +34,16 @@ describe("contracts/customization", () => {
 	}
 
 	describe("contracts/3a scoped settings layering", () => {
+		let isolatedClioEnv: IsolatedClioEnv;
+
+		beforeEach(async () => {
+			isolatedClioEnv = await isolateClioEnv("clio-customization-settings-");
+		});
+
+		afterEach(() => {
+			isolatedClioEnv.restore();
+		});
+
 		it("applies built-in < user < project < project.local precedence with per-key sources", () => {
 			const { cwd, userPath } = scratch();
 			write(userPath, "autonomy: suggest\nmodelSelector:\n  recentLimit: 5\n");
