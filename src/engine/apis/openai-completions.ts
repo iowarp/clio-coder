@@ -23,6 +23,7 @@ import { lmStudioReasoningEffort } from "../../domains/providers/runtimes/common
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import type { LmStudioTargetSettings } from "../../domains/providers/types/target-descriptor.js";
+import { filterGemmaChannelStream } from "../gemma-channel-filter.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
 import { ensureLlamaCppResidency } from "./llamacpp-residency.js";
@@ -729,18 +730,21 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
-						withLocalResidency(
-							model,
-							{
-								...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-								...(options?.signal !== undefined ? { signal: options.signal } : {}),
-							},
-							(requestModel) =>
-								streamOpenAICompletions(
-									requestModel,
-									effectiveContext,
-									withRemainingContextBudget(model, effectiveContext, withSamplers),
-								),
+						filterGemmaChannelStream(
+							withLocalResidency(
+								model,
+								{
+									...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+									...(options?.signal !== undefined ? { signal: options.signal } : {}),
+								},
+								(requestModel) =>
+									streamOpenAICompletions(
+										requestModel,
+										effectiveContext,
+										withRemainingContextBudget(model, effectiveContext, withSamplers),
+									),
+							),
+							resolved.family === "gemma-4",
 						),
 						resolved,
 					),
@@ -759,18 +763,21 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
-						withLocalResidency(
-							model,
-							{
-								...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-								...(options?.signal !== undefined ? { signal: options.signal } : {}),
-							},
-							(requestModel) =>
-								streamSimpleOpenAICompletions(
-									requestModel,
-									effectiveContext,
-									withRemainingContextBudget(model, effectiveContext, withSamplers),
-								),
+						filterGemmaChannelStream(
+							withLocalResidency(
+								model,
+								{
+									...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+									...(options?.signal !== undefined ? { signal: options.signal } : {}),
+								},
+								(requestModel) =>
+									streamSimpleOpenAICompletions(
+										requestModel,
+										effectiveContext,
+										withRemainingContextBudget(model, effectiveContext, withSamplers),
+									),
+							),
+							resolved.family === "gemma-4",
 						),
 						resolved,
 					),
