@@ -69,7 +69,7 @@ clio-coder
 
 In the session:
 
-- `/fleet` opens Settings → Fleet; its node rows show node-a, node-b, and node-c
+- `/settings fleet` opens Settings → Fleet; its node rows show node-a, node-b, and node-c
   online with their capacity.
 - Alt+W toggles the dispatch board, which will fill with per-run cards once
   work starts.
