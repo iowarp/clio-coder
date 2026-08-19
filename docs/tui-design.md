@@ -148,7 +148,7 @@ All TUI overlays and cards support compact widths down to 40 columns:
 
 ## 5. Screen Surfaces & State Choreography
 
-The Clio screen maintains a responsive, four-zone structure: the launchpad / session header, transcript, composer, and footer. `terminal.tuiMode` chooses the renderer at startup. The default `regular` mode uses terminal scrollback. Opt-in `fullscreen` mode uses pi-tui's alternate screen: the launchpad/header and transcript occupy an independently scrollable viewport while the follow-up queue, composer, and footer remain docked at the bottom.
+The Clio screen maintains a responsive, four-zone structure: the launchpad / session header, transcript, composer, and footer. `terminal.tuiMode` chooses the renderer at startup. The default `regular` mode uses terminal scrollback. Opt-in `fullscreen` mode uses the alternate screen: the launchpad/header and transcript occupy an independently scrollable viewport while the follow-up queue, composer, and footer remain docked at the bottom.
 
 In fullscreen mode, `PageUp` and `PageDown` scroll one viewport, `Home` and `End` jump to its bounds, `Ctrl+Shift+Up` and `Ctrl+Shift+Down` jump between semantic prompts, and the mouse wheel scrolls the transcript. Dragging the scrollbar thumb moves the viewport directly. `terminal.fullscreenScrollbar` is `hidden`, `auto` (visible during interaction), or `always`. Manual scrolling suspends follow-end so new output does not steal the operator's position; returning to the bottom resumes it. Both fullscreen settings are restart-scoped because Clio constructs its terminal renderer and component graph once at startup.
 
@@ -212,7 +212,7 @@ State is signaled through the status pill in the footer and matches the followin
 Drawn as a folded dim marker (`Thinking (N tokens)…` or `Thinking…`), which expands into a body using the `reason` color vertical `│` rail. Cap of 12 lines.
 
 ### 6.3 Tool Ledger
-Every Pi tool call owns one stable transcript block for its complete lifecycle. Pi's streamed
+Every tool call owns one stable transcript block for its complete lifecycle. Streamed
 `toolcall_*` message updates first expose the call as `forming call`, the completed argument block
 becomes `ready`, `tool_execution_start` changes the same row to `running`, and cumulative
 `tool_execution_update` results replace the live body until `tool_execution_end` settles it. Rapid
@@ -224,7 +224,7 @@ The collapsed form is one composed ledger line:
 ```
 - Verb is bold `accent`, tail details are `dim`, status glyph is semantic (`✓`/`✗`), and the keyboard shortcut hint is appended at the end. Tool ledgers maintain full terminal width and bypass the prose hanging indent.
 - Expanded calls show the primary argument in the signature and every secondary argument as a typed field list. Multiline argument bodies become line and byte facts, nested objects retain structured rendering, and safety-sensitive values remain redacted.
-- Running calls label `live output` and replace Pi's cumulative partial result in place. Settled calls label `output` and show available exit status, result or observation counts, line count, displayed and total byte sizes, truncation, timeout, tool-token usage, dynamically added tools, context exclusion, and the full-output path. A blocked or aborted admission instead labels its `decision` and does not claim that the tool ran.
+- Running calls label `live output` and replace the cumulative partial result in place. Settled calls label `output` and show available exit status, result or observation counts, line count, displayed and total byte sizes, truncation, timeout, tool-token usage, dynamically added tools, context exclusion, and the full-output path. A blocked or aborted admission instead labels its `decision` and does not claim that the tool ran.
 - A call parked for one-shot approval replaces its running timer with `awaiting approval` and shows the already-sanitized action class, asking safety axis, and target below the row. These facts are transient UI state: approval, denial, abort, or settlement clears them, and they are never reconstructed from the session ledger.
 - Text and image tool results keep their text while rendering images as MIME and byte-size placeholders; base64 image data is never written to the terminal.
 - Successful `edit` and `write` calls render the bounded diff produced by the tool result. Live regular-screen and fullscreen rows color removed and added lines with the `error` and `success` tokens and emphasize changed words; `/resume` replay and `/export` keep the same numbered diff as plain text.
@@ -256,11 +256,11 @@ All other code elements (identifiers, types, function names, punctuation) remain
 ### 6.8 Mermaid and LaTeX
 
 Finalized assistant Markdown renders inline and display LaTeX as terminal-friendly Unicode through
-Pi 0.84's Markdown renderer. For example, `$x^2$` becomes `x²` without requiring an image-capable
+the Markdown renderer. For example, `$x^2$` becomes `x²` without requiring an image-capable
 terminal.
 
-Top-level fenced `mermaid` blocks pass through Pi's width-aware Markdown `transform` hook and the
-same Unicode-diagram strategy used by pi-coding-agent 0.84. Supported flowcharts, state diagrams,
+Top-level fenced `mermaid` blocks pass through the width-aware Markdown `transform` hook and the
+engine's Unicode-diagram strategy. Supported flowcharts, state diagrams,
 class diagrams, entity-relationship diagrams, and sequence diagrams render with quiet `frame`
 borders, plain labels, and `accent` connectors. If a diagram is invalid, unsupported, or wider than
 the transcript content width, Clio leaves the original Mermaid fence visible instead of clipping or
