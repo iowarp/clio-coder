@@ -604,7 +604,7 @@ describe("contracts/skill-evals", () => {
 				"run",
 				"--json",
 				"--json-events",
-				"terminal",
+				"full",
 				"--no-skills",
 				"--autonomy",
 				"full-auto",
@@ -869,6 +869,24 @@ describe("contracts/skill-evals", () => {
 			ok(parsed.transcript.includes("demo, other"), `transcript=${parsed.transcript}`);
 			ok(parsed.transcript.includes("FILE-CONTENT"), `transcript=${parsed.transcript}`);
 			ok(!parsed.transcript.includes("withheld"), `transcript=${parsed.transcript}`);
+		});
+
+		it("reassembles assistant text from the full stream's deltas", () => {
+			const parsed = parseRunStdout(
+				events([
+					{ type: "text_delta", contentIndex: 0, delta: '{"bullets":[' },
+					{ type: "text_delta", contentIndex: 0, delta: '{"index":1,"pass":true}]}' },
+					{
+						type: "message_end",
+						message: {
+							role: "assistant",
+							content: [{ type: "text", streamed: true, textLength: 37 }],
+						},
+					},
+				]),
+			);
+			strictEqual(parsed.finalText, '{"bullets":[{"index":1,"pass":true}]}');
+			strictEqual(parsed.transcript, 'ASSISTANT: {"bullets":[{"index":1,"pass":true}]}');
 		});
 	});
 });
