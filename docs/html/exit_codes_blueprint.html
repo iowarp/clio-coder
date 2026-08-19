@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exit Codes &amp; Machine Output Blueprint (v0.3.2)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .code-pill {
+      display: inline-block;
+      width: 2rem;
+      height: 2rem;
+      line-height: 2rem;
+      text-align: center;
+      border-radius: 50%;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      margin-right: 0.75rem;
+    }
+    .code-0 { background: rgba(16, 185, 129, 0.2); color: var(--color-emerald); border: 1px solid var(--color-emerald); }
+    .code-1 { background: rgba(239, 68, 68, 0.2); color: var(--color-rose); border: 1px solid var(--color-rose); }
+    .code-2 { background: rgba(245, 158, 11, 0.2); color: var(--color-amber); border: 1px solid var(--color-amber); }
+    .code-3 { background: rgba(168, 85, 247, 0.2); color: var(--color-purple); border: 1px solid var(--color-purple); }
+    .event-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Exit Codes</title>
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Exit Codes &amp; Machine-Readable Output</h1>
+          <p>Deterministic CLI exit codes, NDJSON event streams, I/O separation, and flag order rules</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/exit-codes-and-output.md</span>
+            <span class="chip chip-orange">clio-coder docs exit-codes-and-output</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.3.2</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Back</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Populated by shared.js -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="glass-card">
+          <h2>Overview Summary</h2>
+          <p>Clio Coder v0.3.2 enforces strict CLI exit code semantics (0=success, 1=operational failure, 2=usage error, 3=unmeasured harness state) and guarantees linear, non-duplicating NDJSON event streaming over <code>stdout</code> with telemetry separated to <code>stderr</code>.</p>
+        </div>
+
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('exit-taxonomy')">Exit Codes Taxonomy</button>
+          <button type="button" class="tab-btn" onclick="switchTab('json-stream')">NDJSON Streaming</button>
+          <button type="button" class="tab-btn" onclick="switchTab('flag-rules')">Flag Positioning &amp; I/O</button>
+        </div>
+
+        <div id="exit-taxonomy" class="tab-pane active">
+          <h2>Process Exit Codes</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span class="code-pill code-0">0</span>
+                <h3 style="margin: 0;">Success</h3>
+              </div>
+              <p>Clean command settlement, <code>--version</code>, <code>--help</code> invocation, or missing trace database notice without an explicit <code>--db</code> flag.</p>
+            </div>
+            <div class="glass-card">
+              <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span class="code-pill code-1">1</span>
+                <h3 style="margin: 0;">Operational Failure</h3>
+              </div>
+              <p>Model execution error, unreachable target, doctor unresolved diagnosis, explicit missing <code>--db</code>, or evaluation rubric failure.</p>
+            </div>
+            <div class="glass-card">
+              <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span class="code-pill code-2">2</span>
+                <h3 style="margin: 0;">Syntax / Usage Error</h3>
+              </div>
+              <p>Unknown subcommand, invalid flag, missing required argument, global flag placed after subcommand, or data mutation SQL query.</p>
+            </div>
+            <div class="glass-card">
+              <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span class="code-pill code-3">3</span>
+                <h3 style="margin: 0;">Unmeasured State</h3>
+              </div>
+              <p>Specific to <code>skills eval</code>: rubric unparseable, judge timeout, or harness infrastructure failure (distinct from negative verdict).</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="json-stream" class="tab-pane">
+          <h2>Machine-Readable NDJSON Streaming</h2>
+          <p>When running <code>clio-coder run --json</code>, event frames stream incrementally:</p>
+          <div class="event-card">{"type":"session","id":"01912a34...","cwd":"/workspace"}</div>
+          <div class="event-card">{"type":"agent_start","agentId":"coder","model":"qwen3.8-27b"}</div>
+          <div class="event-card">{"type":"turn_start","turnId":"turn-01"}</div>
+          <div class="event-card">{"type":"text_delta","delta":"Analyzing codebase..."}</div>
+          <div class="event-card">{"type":"tool_execution_start","tool":"read","callId":"call-01"}</div>
+          <div class="event-card">{"type":"tool_execution_end","tool":"read","callId":"call-01","ok":true}</div>
+          <div class="event-card">{"type":"turn_end","turnId":"turn-01"}</div>
+          <div class="event-card">{"type":"agent_end","usage":{"totalTokens":4200,"costUsd":0.004}}</div>
+        </div>
+
+        <div id="flag-rules" class="tab-pane">
+          <h2>Flag Positioning &amp; I/O Guarantees</h2>
+          <div class="glass-card">
+            <h3>Global Flag Order Invariant</h3>
+            <p>Global flags (<code>--api-key</code>, <code>--no-context-files</code>, <code>-nc</code>) must precede the subcommand. Incorrect positioning emits exit code 2 with guidance on <code>stderr</code>:</p>
+            <pre><code>error: --api-key is a global option and must come before the subcommand: clio-coder --api-key &lt;key&gt; &lt;command&gt; ...</code></pre>
+          </div>
+          <div class="glass-card">
+            <h3>Standard I/O Separation</h3>
+            <ul>
+              <li><strong>stdout</strong>: Strictly reserved for final deliverables, answers, and NDJSON streams.</li>
+              <li><strong>stderr</strong>: Telemetry, notices, permission advisories, and diagnostics.</li>
+            </ul>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Exit Codes Spec &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+      event.target.classList.add('active');
+      const pane = document.getElementById(tabId);
+      if (pane) pane.classList.add('active');
+    }
+  </script>
+</body>
+</html>

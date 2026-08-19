@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Session Lifecycle &amp; Ledger Blueprint (v0.3.2)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .tree-node {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      transition: all 0.2s ease;
+    }
+    .tree-node.active-path {
+      border-color: var(--color-cyan);
+      background: rgba(6, 182, 212, 0.08);
+    }
+    .tree-node.abandoned {
+      opacity: 0.5;
+      border-style: dashed;
+    }
+    .node-header {
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-dim);
+      font-size: 0.75rem;
+      margin-bottom: 0.35rem;
+    }
+    .role-badge {
+      display: inline-block;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .role-user { background: rgba(6, 182, 212, 0.2); color: var(--color-cyan); }
+    .role-assistant { background: rgba(168, 85, 247, 0.2); color: var(--color-purple); }
+    .role-tool { background: rgba(245, 158, 11, 0.2); color: var(--color-amber); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Session Lifecycle</title>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Session Lifecycle &amp; Context Ledger</h1>
+          <p>On-disk JSONL state, active lineage trees, fork mechanics, and streaming turn settlement</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/session-lifecycle.md</span>
+            <span class="chip chip-orange">clio-coder docs session-lifecycle</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.3.2</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Back</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Populated automatically by shared.js -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="glass-card">
+          <h2>Overview Summary</h2>
+          <p>Clio Coder treats the conversation as a durable directed tree graph written to an append-only JSONL ledger (<code>current.jsonl</code>) with atomic metadata (<code>meta.json</code>) and branch definitions (<code>tree.json</code>). Version 0.3.2 provides complete turn settlement before session switches, self-contained HTML exports, directory-scoped handbook overrides, and process-local prompt history.</p>
+        </div>
+
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('spec-guide')">Specification Guide</button>
+          <button type="button" class="tab-btn" onclick="switchTab('tree-sim')">Lineage Tree Simulator</button>
+        </div>
+
+        <div id="spec-guide" class="tab-pane active">
+          <h2>On-Disk Session Directory Structure</h2>
+          <pre><code>&lt;stateDir&gt;/sessions/&lt;cwdHash&gt;/&lt;sessionId&gt;/
+  meta.json        # ClioSessionMeta JSON document (atomic write, CURRENT_SESSION_FORMAT_VERSION = 3)
+  current.jsonl    # Append-only structured session event ledger (O_APPEND, single write(2) calls)
+  tree.json        # SessionTreeNode[] conversation tree graph for non-destructive branching</code></pre>
+
+          <h2>Core Lifecycle Guarantees</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Streaming Turn Settlement (#114)</h3>
+              <p>When switching sessions via <code>/new</code>, <code>/resume</code>, <code>/tree</code>, or <code>/fork</code> while a model turn is streaming, <code>settleChatBeforeSessionSwitch</code> cancels the stream and awaits completion, ensuring ledger writes commit before the writer is replaced.</p>
+            </div>
+            <div class="glass-card">
+              <h3>Self-Contained HTML Export</h3>
+              <p><code>/export</code> writes a standalone HTML document by default (or Markdown when targeting <code>.md</code>). The export is capped at 2 MiB, converts ANSI styles to inline theme colors, and renders semantic tool rows for the active branch only.</p>
+            </div>
+          </div>
+
+          <h2>Directory Handbooks &amp; Prompt History</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Directory Overrides</h3>
+              <p><code>CLIO-CODER.override.md</code> replaces inherited instructions for its directory subtree while isolating siblings. Malformed files fail closed.</p>
+            </div>
+            <div class="glass-card">
+              <h3>Prompt History (Ctrl+P / Ctrl+N)</h3>
+              <p>Accepted prompts, slash commands, and steering inputs are preserved in process-local history. Rejected inputs stay in the composer without polluting history.</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="tree-sim" class="tab-pane">
+          <h2>Interactive Tree Lineage Simulator</h2>
+          <p>Explore how <code>/tree</code> and <code>/fork</code> isolate the active lineage path from abandoned turns:</p>
+          <div class="tree-node active-path">
+            <div class="node-header"><span>turn-01 (Root)</span><span class="role-badge role-user">user</span></div>
+            <div>"Explore the project repository structure."</div>
+          </div>
+          <div class="tree-node active-path">
+            <div class="node-header"><span>turn-02</span><span class="role-badge role-assistant">assistant</span></div>
+            <div>"Calling find tool to locate build and test scripts..."</div>
+          </div>
+          <div class="tree-node abandoned">
+            <div class="node-header"><span>turn-03a (Abandoned Sibling)</span><span class="role-badge role-tool">tool</span></div>
+            <div>[Branch A] Alternative tool attempt (pruned from context window)</div>
+          </div>
+          <div class="tree-node active-path">
+            <div class="node-header"><span>turn-03b (Active Leaf / Fork Anchor)</span><span class="role-badge role-tool">tool</span></div>
+            <div>[Branch B] Successful inspection (Active Path &amp; Fork Source)</div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Session Lifecycle Spec &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+      event.target.classList.add('active');
+      const pane = document.getElementById(tabId);
+      if (pane) pane.classList.add('active');
+    }
+  </script>
+</body>
+</html>
