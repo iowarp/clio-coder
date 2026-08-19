@@ -30,7 +30,12 @@ interface RouterCall {
  * resident one. A reconciler that unloads before it checks the catalog leaves
  * this router holding nothing, which is exactly what #127 reproduced live.
  */
-function fakeRouter(initial: Array<{ id: string; state: string; tags?: string[] }>, maxInstances?: number) {
+function fakeRouter(
+	initial: Array<{ id: string; state: string; tags?: string[] }>,
+	maxInstances?: number,
+	/** Ids whose load is rejected with this status even though the router lists them. */
+	loadFailures?: ReadonlyMap<string, number>,
+) {
 	const states = new Map(initial.map((entry) => [entry.id, entry.state]));
 	const tags = new Map(initial.map((entry) => [entry.id, entry.tags ?? []]));
 	const calls: RouterCall[] = [];
@@ -55,6 +60,8 @@ function fakeRouter(initial: Array<{ id: string; state: string; tags?: string[] 
 		if (href.endsWith("/models/load")) {
 			const id = String(body.model);
 			if (!states.has(id)) return jsonResponse({ error: "File Not Found" }, 404);
+			const failure = loadFailures?.get(id);
+			if (failure !== undefined) return jsonResponse({ error: "load rejected" }, failure);
 			states.set(id, "loaded");
 			return jsonResponse({ ok: true });
 		}
@@ -118,6 +125,53 @@ describe("contracts/llamacpp residency catalog guard (#127)", () => {
 		strictEqual(notice.targetId, "mini");
 		strictEqual(notice.model, ABSENT);
 		match(notice.message, /does not serve/);
+	});
+
+	it("restores the evicted model when the replacement load is rejected", async () => {
+		// The keep model is in the catalog, so the loadability gate passes and the
+		// reconcile proceeds to evict. The load then fails the way an out-of-memory
+		// or 5xx load does, which the gate cannot predict.
+		const router = fakeRouter(
+			[
+				{ id: RESIDENT, state: "loaded" },
+				{ id: "Qwen3.6-27B-UD-Q4_K_XL-262K", state: "unloaded" },
+			],
+			1,
+			new Map([["Qwen3.6-27B-UD-Q4_K_XL-262K", 500]]),
+		);
+
+		let failure: unknown;
+		try {
+			await ensureLlamaCppResidency(ensureInput(router.fetchImpl, "Qwen3.6-27B-UD-Q4_K_XL-262K"));
+		} catch (error) {
+			failure = error;
+		}
+
+		ok(failure instanceof Error, "the load's own failure still reaches the caller");
+		match((failure as Error).message, /HTTP 500/);
+		deepStrictEqual(router.resident(), [RESIDENT], "the evicted model is put back rather than left unloaded");
+		ok(
+			notices.some((notice) => /restored/.test(notice.message)),
+			"the restore is reported to the operator",
+		);
+	});
+
+	it("restores the evicted model when the replacement load 404s after the listing", async () => {
+		// TOCTOU: the preset passes the gate because it is in the listing, then
+		// disappears before the load. Same P0 shape as the catalog miss, but only
+		// the restore can catch it.
+		const router = fakeRouter(
+			[
+				{ id: RESIDENT, state: "loaded" },
+				{ id: "Qwen3.6-27B-UD-Q4_K_XL-262K", state: "unloaded" },
+			],
+			1,
+			new Map([["Qwen3.6-27B-UD-Q4_K_XL-262K", 404]]),
+		);
+
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, "Qwen3.6-27B-UD-Q4_K_XL-262K")).catch(() => undefined);
+
+		deepStrictEqual(router.resident(), [RESIDENT]);
 	});
 
 	it("still evicts and loads normally when the keep model is in the catalog", async () => {
