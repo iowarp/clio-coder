@@ -226,13 +226,25 @@ type TranscriptEntry =
 	 * The panel is told when that happened through `applyWorkerState`.
 	 */
 	| { role: "worker"; state: WorkerEntryState; folded: boolean }
-	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer };
+	/**
+	 * A block the caller renders itself. Most are settled the moment they are
+	 * appended, but a few (the operator's `!` bash row) keep mutating the state
+	 * their closure reads until the work behind them finishes. Such a block
+	 * declares `isLive`, which keeps it out of the frozen prefix and keeps the
+	 * panel's time-keyed tick running while it is unsettled.
+	 */
+	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer; isLive?: (() => boolean) | undefined };
 
 type WorkerTranscriptEntry = Extract<TranscriptEntry, { role: "worker" }>;
 
 export interface ChatPanel extends Component {
 	appendUser(text: string): void;
-	appendReplayBlock(renderBlock: ReplayBlockRenderer): void;
+	/**
+	 * Append a caller-rendered block. Pass `isLive` when the closure reads state
+	 * that keeps changing after the append, so the panel keeps re-rendering it
+	 * instead of treating the first frame as final.
+	 */
+	appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void;
 	applyEvent(event: ChatLoopEvent): void;
 	/** Mark a just-rehydrated tool segment so its mutation diff remains plain. */
 	markToolReplayed?(toolCallId: string): void;
@@ -1172,18 +1184,22 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	/** True when the entry renders at least one counting elapsed line this frame. */
 	const entryHasRunningTool = (entry: TranscriptEntry): boolean =>
-		entry.role === "assistant" &&
-		entry.segments.some((segment) => segment.kind === "tool" && !segment.finished && segment.startedAtMs !== undefined);
+		(entry.role === "assistant" &&
+			entry.segments.some(
+				(segment) => segment.kind === "tool" && !segment.finished && segment.startedAtMs !== undefined,
+			)) ||
+		(entry.role === "replayBlock" && entry.isLive?.() === true);
 
 	/**
 	 * Settled entries whose render is a pure function of the base key. A live
 	 * worker block is excluded for the same reason a running tool is: the
 	 * reducer mutates its state object in place, so a cached render would keep
-	 * serving the answer as it looked several deltas ago.
+	 * serving the answer as it looked several deltas ago. A replay block that
+	 * declares itself live is excluded on the same grounds.
 	 */
 	const entryIsStable = (entry: TranscriptEntry): boolean =>
 		entry.role === "user" ||
-		entry.role === "replayBlock" ||
+		(entry.role === "replayBlock" && entry.isLive?.() !== true) ||
 		(entry.role === "worker" && !entry.state.pending) ||
 		(entry.role === "assistant" &&
 			!entry.pending &&
@@ -1313,8 +1329,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			transcript.push({ role: "user", text });
 			markDirty();
 		},
-		appendReplayBlock(renderBlock: ReplayBlockRenderer): void {
-			transcript.push({ role: "replayBlock", renderBlock });
+		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void {
+			transcript.push({ role: "replayBlock", renderBlock, isLive });
 			markDirty();
 		},
 		applyWorkerState(state: WorkerEntryState): void {

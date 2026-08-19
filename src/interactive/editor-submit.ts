@@ -153,14 +153,16 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			totalBytes: 0,
 			excludeFromContext: parsed.excludeFromContext,
 		};
-		deps.chatPanel.appendReplayBlock((width) =>
-			renderBashTranscriptExecution(
-				{
-					...execution,
-					...(execution.running ? { elapsedMs: Math.max(0, performance.now() - startedAt) } : {}),
-				},
-				width,
-			),
+		deps.chatPanel.appendReplayBlock(
+			(width) =>
+				renderBashTranscriptExecution(
+					{
+						...execution,
+						...(execution.running ? { elapsedMs: Math.max(0, performance.now() - startedAt) } : {}),
+					},
+					width,
+				),
+			() => execution.running,
 		);
 		deps.ui.requestRender();
 
