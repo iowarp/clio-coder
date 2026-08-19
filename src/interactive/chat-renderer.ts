@@ -1024,10 +1024,9 @@ export function rehydrateChatPanelFromTurns(
 			isError: true,
 		});
 	}
-	// Replay reproduces the settled view: tools collapse to their one-line
-	// ledger summary. The live path collapses tools because they fire while the
-	// assistant is streaming (pending), a state replay cannot reconstruct
-	// per-tool, so collapse them explicitly here. /export re-expands afterward
-	// via toggleAllToolsExpanded; /resume and /fork keep the collapsed form.
+	// Replay favors a compact historical ledger even though fresh non-resource
+	// calls auto-expand for live arguments and output. Collapse reconstructed
+	// tools explicitly; /export re-expands them afterward via
+	// toggleAllToolsExpanded, while /resume and /fork retain the compact form.
 	chatPanel.collapseAllTools();
 }
