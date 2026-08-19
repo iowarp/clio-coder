@@ -574,6 +574,8 @@ describe("contracts/slash-spec", () => {
 			["/new query", { kind: "usage-error", command: "new", reason: "Unexpected argument: query" }],
 			["/tree query", { kind: "usage-error", command: "tree", reason: "Unexpected argument: query" }],
 			["/fork query", { kind: "usage-error", command: "fork", reason: "Unexpected argument: query" }],
+			["/export --json", { kind: "usage-error", command: "export", reason: "Unknown flag: --json" }],
+			["/export a.md b.md", { kind: "usage-error", command: "export", reason: "Unexpected argument: b.md" }],
 			["/hotkeys query", { kind: "unknown-command", token: "hotkeys", text: "/hotkeys query" }],
 		];
 
