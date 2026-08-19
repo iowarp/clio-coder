@@ -1,6 +1,6 @@
-# v0.3.0 Release-Cut Checklist
+# v0.3.2 Release-Cut Checklist
 
-The ordered steps that turn the prepared `v0.3.0` branch into a published
+The ordered steps that turn the prepared `v0.3.2` branch into a published
 release. Everything above the line marked **AUTHORIZATION BOUNDARY** is
 repeatable and reversible and was run during the hardening sessions. Everything
 below it is external or destructive, was deliberately **not run**, and needs an
@@ -13,8 +13,8 @@ or the npm registry.
 
 | Item | State |
 | --- | --- |
-| Branch | `v0.3.0`, local only |
-| `package.json` version | `0.3.0`, **not bumped by the hardening sessions** |
+| Branch | `v0.3.2`, local only |
+| `package.json` version | `0.3.2`, **not bumped by the hardening sessions** |
 | `main` | untouched |
 | Remotes | not contacted |
 | Tags | none created |
@@ -47,19 +47,18 @@ These edit the working tree only. They are reversible with `git checkout` and
 are listed here because the hardening sessions were explicitly scoped out of
 performing them.
 
-11. Decide the released version. The tree currently reads `0.3.0` in
+11. Decide the released version. The tree currently reads `0.3.2` in
     `package.json`. If that is the number to publish, no bump is needed; confirm
     it deliberately rather than by default.
 12. Files carrying a version reference, to update together if the number
     changes:
     - `package.json` (`version`)
-    - `CHANGELOG.md` (the `## 0.3.0 - <date>` heading and its date)
-    - `docs/environment-variables.md` and `docs/tui-design.md` (the
-      `(Version: 0.3.0)` markers on the interactive-blueprint tips)
-    - `docs/html/*.html` (the `Blueprint (v0.3.0)` titles)
+    - `CHANGELOG.md` (the `## 0.3.2 - <date>` heading and its date)
+    - All `docs/*.md` containing `(Version: 0.3.2)` markers for interactive blueprints
+    - `docs/html/*.html` (the `Blueprint (v0.3.2)` titles)
     - `scripts/check-release.mjs` (the measured-at figures in the budget
       comment, if the package size moved materially)
-13. Confirm the `## 0.3.0` section of `CHANGELOG.md` describes every
+13. Confirm the `## 0.3.2` section of `CHANGELOG.md` describes every
     user-visible behavior change in the release, including the ones that alter
     existing behavior:
     - unknown slash commands now fail instead of reaching the model as chat
@@ -67,7 +66,7 @@ performing them.
     - `reset` and `uninstall` exit 1 on partial failure instead of reporting
       success
 14. Re-run `npm run ci:release` after any version edit.
-15. Commit the version and notes as one commit on `v0.3.0`.
+15. Commit the version and notes as one commit on `v0.3.2`.
 
 ---
 
@@ -86,14 +85,13 @@ undone by a local `git` command. **None of them has been run.**
     an empty-state non-TTY launch, `clio-coder configure` to a real target,
     `clio-coder doctor`, one real turn, and `clio-coder uninstall --dry-run`.
 18. **NOT RUN** — Inspect the artifact by hand: `tar -tzf` the tarball, confirm
-    no source maps, no `scripts/`, no `tests/`, no `benchmarks/`, no
-    `apps/trace-viewer`, and that `skills/`, `docs/*.md`, `docs/html/`, the
+    no source maps, no `scripts/`, no `tests/`, no `benchmarks/`, no `apps/workbench` and no `.superpowers` in the tarball, and that `skills/`, `docs/*.md`, `docs/html/`, the
     builtin agents, the model catalogs, and `damage-control-rules.yaml` are all
     present.
 
 ## Part 4: branch integration (destructive to history, NOT run)
 
-19. **NOT RUN** — Decide how `v0.3.0` reaches `main`. The hardening sessions
+19. **NOT RUN** — Decide how `v0.3.2` reaches `main`. The hardening sessions
     were forbidden to merge, rebase, or modify `main`, so no integration
     strategy has been chosen or attempted.
 20. **NOT RUN** — Integrate, then re-run `npm run ci:release` on the integrated
@@ -105,9 +103,9 @@ Push the branch first and wait for `ci` to go green on that commit. The release
 workflow verifies that a successful `ci` run exists for the tagged SHA and fails
 the tag push outright if one does not.
 
-21. **NOT RUN** — `git tag -a v0.3.0 -m "..."`.
+21. **NOT RUN** — `git tag -a v0.3.2 -m "..."`.
 22. **NOT RUN** — `git push origin <branch>`.
-23. **NOT RUN** — `git push origin v0.3.0`.
+23. **NOT RUN** — `git push origin v0.3.2`.
 
 ## Part 6: publication (external and irreversible, NOT run)
 
@@ -116,7 +114,7 @@ the tag push outright if one does not.
     net and not a substitute for step 20.
 25. **NOT RUN** — Decide the dist-tag. Publishing to `latest` makes this the
     default install for every user. An experimental release may warrant
-    `--tag next` instead; the CLI and README both describe v0.3.0 as
+    `--tag next` instead; the CLI and README both describe v0.3.2 as
     experimental, which argues for it.
 26. **NOT RUN** — A published version cannot be replaced. `npm unpublish` is
     restricted and time-limited, and a mistake is corrected by publishing a
