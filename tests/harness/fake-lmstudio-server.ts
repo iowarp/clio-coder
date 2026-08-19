@@ -53,7 +53,13 @@ function sse(response: import("node:http").ServerResponse, values: ReadonlyArray
 }
 
 export async function startFakeLmStudioServer(
-	options: { mode?: FakeLmStudioMode; authToken?: string; greeting?: boolean; failLoads?: number } = {},
+	options: {
+		mode?: FakeLmStudioMode;
+		authToken?: string;
+		greeting?: boolean;
+		failLoads?: number;
+		hostIdentity?: "dynamo" | "zbook";
+	} = {},
 ): Promise<FakeLmStudioFixture> {
 	const mode = options.mode ?? "0.4";
 	let remainingLoadFailures = options.failLoads ?? 0;
@@ -139,6 +145,11 @@ export async function startFakeLmStudioServer(
 			loaded_instances: [],
 		},
 	];
+	if (options.hostIdentity === "dynamo") {
+		const localIndex = models.findIndex((model) => model.loaded_instances[0]?.id === "qwen3.8-27b-dynamo");
+		const local = localIndex >= 0 ? models.splice(localIndex, 1)[0] : undefined;
+		if (local) models.unshift(local);
+	}
 
 	const server = createServer(async (request, response) => {
 		const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
@@ -179,16 +190,34 @@ export async function startFakeLmStudioServer(
 			return json(response, 200, { unloaded: id });
 		}
 		if (path === "/api/v0/models" && request.method === "GET") {
+			const byKey = new Map<string, FakeModel[]>();
+			for (const model of models) {
+				const entries = byKey.get(model.key) ?? [];
+				entries.push(model);
+				byKey.set(model.key, entries);
+			}
 			return json(response, 200, {
-				data: models.map((model) => ({
-					id: model.loaded_instances[0]?.id ?? model.key,
-					compatibility_type: "gguf",
-					state: model.loaded_instances.length > 0 ? "loaded" : "not-loaded",
-					loaded_context_length: model.loaded_instances[0]?.config.context_length,
-					max_context_length: model.max_context_length,
-					type: model.type,
-					capabilities: model.capabilities.trained_for_tool_use ? ["tool_use"] : [],
-				})),
+				data: [...byKey.values()].flatMap((entries) => {
+					const representative = entries[0];
+					if (!representative) return [];
+					const instances = entries.flatMap((model) => model.loaded_instances);
+					const shared = {
+						compatibility_type: "gguf",
+						max_context_length: representative.max_context_length,
+						type: representative.type,
+						capabilities: representative.capabilities.trained_for_tool_use ? ["tool_use"] : [],
+					};
+					if (instances.length === 0) return [{ id: representative.key, state: "not-loaded", ...shared }];
+					return [
+						...instances.map((instance) => ({
+							id: instance.id,
+							state: "loaded",
+							loaded_context_length: instance.config.context_length,
+							...shared,
+						})),
+						{ id: representative.key, state: "not-loaded", ...shared },
+					];
+				}),
 			});
 		}
 		if (path === "/v1/models" && request.method === "GET") {

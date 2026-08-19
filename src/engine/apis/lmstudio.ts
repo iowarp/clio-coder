@@ -7,6 +7,7 @@ import {
 	listLmStudioModels,
 	lmStudioRootUrl,
 	requestLmStudioJson,
+	resolveLmStudioInstance,
 } from "../../domains/providers/runtimes/common/lmstudio-http.js";
 import type { TargetDescriptor } from "../../domains/providers/types/target-descriptor.js";
 import { coResidentContextCeiling, fitLoadContextLength } from "./lmstudio-residency.js";
@@ -19,6 +20,7 @@ interface LmStudioModelMetadata {
 		runtimeId: string;
 		lifecycle?: "user-managed" | "clio-managed";
 		lmstudio?: TargetDescriptor["lmstudio"];
+		lmstudioDefaultModel?: string;
 	};
 }
 
@@ -50,7 +52,7 @@ function targetForModel(model: Model<"openai-completions">): TargetDescriptor | 
 		id: info.targetId,
 		runtime: "lmstudio",
 		url: lmStudioRootUrl(model.baseUrl),
-		defaultModel: model.id,
+		defaultModel: info.lmstudioDefaultModel ?? model.id,
 		...(model.headers ? { auth: { headers: model.headers } } : {}),
 		...(info.lifecycle ? { lifecycle: info.lifecycle } : {}),
 		...(info.lmstudio ? { lmstudio: info.lmstudio } : {}),
@@ -121,22 +123,22 @@ async function loadOwnedInstance(
 	body: Record<string, unknown>,
 	apiKey: string | undefined,
 	signal: AbortSignal | undefined,
-): Promise<void> {
+): Promise<string | undefined> {
 	const data = await post(target, "/api/v1/models/load", body, apiKey, signal);
 	const instanceId = responseInstanceId(data);
 	if (instanceId) ownedInstances(targetKey).add(instanceId);
+	return instanceId;
 }
 
 export async function ensureLmStudioResidency(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal } = {},
-): Promise<void> {
+): Promise<string> {
 	const target = targetForModel(model);
-	if (!target) return;
+	if (!target) return model.id;
 	const info = metadata(model);
-	if (!info) return;
+	if (!info) return model.id;
 	const load = target.lmstudio?.load;
-	if (!load || Object.keys(load).length === 0) return;
 	const ctx = {
 		credentialsPresent: new Set<string>(),
 		httpTimeoutMs: 5_000,
@@ -145,9 +147,38 @@ export async function ensureLmStudioResidency(
 	};
 	const catalog = await listLmStudioModels(target, ctx);
 	if (!catalog.ok) throw new Error(catalog.error ?? "LM Studio model listing failed");
-	if (catalog.tier !== "0.4+") return;
+	const resolution = resolveLmStudioInstance(target, catalog.models, model.id, info.lmstudioDefaultModel);
+	if (resolution.state === "unknown") {
+		const resident = catalog.models.flatMap((entry) => entry.loadedInstances.map((instance) => instance.id));
+		throw new Error(
+			`LM Studio target '${info.targetId}' does not advertise model '${model.id}'. Resident instances: ${resident.length > 0 ? resident.join(", ") : "none"}. Configure an explicit LM Studio load before requesting an unlisted model.`,
+		);
+	}
+	if (resolution.wireModelId !== model.id) {
+		emitResidencyNotice({
+			kind: "co-resident",
+			level: "info",
+			targetId: info.targetId,
+			runtimeId: "lmstudio",
+			model: model.id,
+			message: `LM Studio resolved '${model.id}' to loaded instance '${resolution.wireModelId}' on target '${info.targetId}'.`,
+			detail: { requestedModel: model.id, wireModel: resolution.wireModelId },
+		});
+	}
+	if (resolution.peerTargets.length > 0) {
+		emitResidencyNotice({
+			kind: "co-resident",
+			level: "warning",
+			targetId: info.targetId,
+			runtimeId: "lmstudio",
+			model: resolution.wireModelId,
+			message: `LM Studio instance '${resolution.wireModelId}' is also loaded on ${resolution.peerTargets.join(", ")}; this request may be served by that LM Link peer.`,
+			detail: { peerTargets: resolution.peerTargets.join(", ") },
+		});
+	}
+	if (!load || Object.keys(load).length === 0 || resolution.instance) return resolution.wireModelId;
+	if (catalog.tier !== "0.4+") return resolution.wireModelId;
 	const selected = resolveModel(catalog, model.id);
-	if (selected?.instance) return;
 	const modelKey = selected?.model.key ?? model.id;
 	let instances = catalog.models.flatMap((entry) =>
 		entry.loadedInstances.map((instance) => ({ modelKey: entry.key, identifier: instance.id, instance })),
@@ -197,16 +228,16 @@ export async function ensureLmStudioResidency(
 		}
 	}
 	try {
-		await loadOwnedInstance(target, targetKey, body, options.apiKey, options.signal);
+		return (await loadOwnedInstance(target, targetKey, body, options.apiKey, options.signal)) ?? model.id;
 	} catch (error) {
 		if (plan.decision === "observe" || plan.fallbackEvict.length === 0) throw error;
-		await withResidencyLock(targetKey, async () => {
+		return withResidencyLock(targetKey, async () => {
 			for (const candidate of plan.fallbackEvict) {
 				for (const entry of instances.filter((resident) => resident.modelKey === candidate.modelId)) {
 					await unloadOwnedInstance(target, targetKey, entry.identifier, options.apiKey, options.signal);
 				}
 			}
-			await loadOwnedInstance(target, targetKey, body, options.apiKey, options.signal);
+			return (await loadOwnedInstance(target, targetKey, body, options.apiKey, options.signal)) ?? model.id;
 		});
 	}
 }

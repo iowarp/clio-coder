@@ -69,7 +69,7 @@ describe("contracts/lmstudio REST probe", () => {
 		const server = await fake();
 		const result = await lmstudioRuntime.probe?.(target(server), probeContext);
 		ok(result?.ok, result?.error);
-		ok(result.models?.includes("qwen3.8-27b"));
+		strictEqual(result.models?.includes("qwen3.8-27b"), false);
 		ok(result.models?.includes("qwen3.8-27b-zbook"));
 		ok(result.models?.includes("qwen3.8-27b-dynamo"));
 		strictEqual(result.modelStates?.["qwen3.8-27b-zbook"]?.key, "qwen3.8-27b");
