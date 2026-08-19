@@ -1518,12 +1518,17 @@ describe("contracts/chat-loop stream stall escalation", () => {
 			exhausted?.errorMessage?.includes("stream stalled"),
 			`the stall reason survives into the typed failure, got: ${exhausted?.errorMessage}`,
 		);
-		const terminalAssistant = entries.filter(isAssistantMessageEntry).at(-1);
-		ok(terminalAssistant, "the exhausted run persists a terminal assistant row");
-		ok(
-			String((terminalAssistant?.payload as { errorMessage?: unknown }).errorMessage ?? "").startsWith("stream stalled:"),
-			"the definitive persisted assistant names the stall rather than the provider's generic abort",
-		);
+		const terminalAssistants = entries.filter(isAssistantMessageEntry);
+		strictEqual(terminalAssistants.length, 3, "each attempt persists exactly one terminal assistant row");
+		for (const entry of terminalAssistants) {
+			const payload = entry.payload as { stopReason?: unknown; errorMessage?: unknown };
+			strictEqual(payload.stopReason, "error");
+			ok(
+				String(payload.errorMessage ?? "").startsWith("stream stalled:"),
+				"every persisted attempt names the stall rather than the provider's generic abort",
+			);
+			strictEqual(String(payload.errorMessage ?? "").includes("Request aborted"), false);
+		}
 	});
 
 	it("leaves a long-running tool alone: silence during tool execution is not a stalled stream", async () => {
