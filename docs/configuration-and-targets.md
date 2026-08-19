@@ -532,7 +532,7 @@ Every one of these has an environment override for a single process; see [enviro
 | `compaction.auto` | `true` | boolean | next turn |
 | `compaction.threshold` | `0.8` | number in 0 to 1 | next turn |
 | `compaction.excludeLastTurns` | `6` | integer ≥ 1 | next turn |
-| `defaults.maxTokens` | `32768` | integer ≥ 1 | next turn |
+| `defaults.maxTokens` | `32768` | integer ≥ 0 | next turn |
 | `budget.sessionCeilingUsd` | `5` | number ≥ 0 | immediately |
 | `budget.concurrency` | `auto` | `auto` or integer ≥ 1 | next dispatch |
 | `retry.enabled` | `true` | boolean | next turn |

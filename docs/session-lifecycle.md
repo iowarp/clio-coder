@@ -127,7 +127,7 @@ The `/fork` command (`src/domains/session/tree/fork.ts:forkFromParentTurn`) init
 
 ## 5. Session Resumption (`/resume`) & Working Directory Fallback
 
-When resuming a session via `/resume <sessionId>` or `CLIO_CODER_RESUME_SESSION_ID`:
+When resuming a session via `/resume` or `CLIO_CODER_RESUME_SESSION_ID`:
 1. `src/domains/session/manager.ts:resumeSessionState` loads `meta.json` and runs migrations.
 2. `src/domains/session/cwd-fallback.ts:resolveSessionCwd` probes the recorded `meta.cwd` against the filesystem.
 3. If the directory is invalid, it returns a typed failure reason:
