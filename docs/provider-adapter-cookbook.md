@@ -128,6 +128,12 @@ The `synthesizeModel` method acts as the factory that creates the `pi-ai` compat
   2. Instantiate the adapter client (e.g., building a `pi-ai` OpenAI or Anthropic provider instance).
   3. Bind custom prompt templates and FIM (Fill-in-the-Middle) properties where supported.
 
+
+### 3.1 Stream Filters and Sentinel Stripping
+
+When a model family requires response parsing or sentinel stripping before the payload reaches the core logic, Clio applies runtime-agnostic stream filters during model synthesis. For example, if the resolved model family is `gemma-4`, a dedicated `createGemmaChannelFilter` is applied to intercept and reclassify `<|channel>thought` markers directly from the `text_delta` stream into `thinking_delta` events, dropping orphan channel closers and own-thought labels seamlessly.
+
+
 ---
 
 ## 4. Configuring Reasoning & Thinking Formats
