@@ -5656,11 +5656,11 @@ export function createDispatchBundle(
 			// recordReceipt() and persist(); quarantine tampered ones.
 			try {
 				const recovery = recoverOrphanReceipts(ledger);
-				if (recovery.recovered > 0 || recovery.corrupt > 0 || recovery.abandoned > 0) {
+				if (recovery.recovered > 0 || recovery.corrupt > 0 || recovery.abandoned > 0 || recovery.sealed > 0) {
 					await ledger.persist();
 					if (process.env.CLIO_CODER_INTERACTIVE !== "1") {
 						process.stderr.write(
-							`[dispatch] ledger recovery: recovered=${recovery.recovered} corrupt=${recovery.corrupt} abandoned=${recovery.abandoned} skipped=${recovery.skipped}\n`,
+							`[dispatch] ledger recovery: recovered=${recovery.recovered} sealed=${recovery.sealed} corrupt=${recovery.corrupt} abandoned=${recovery.abandoned} skipped=${recovery.skipped}\n`,
 						);
 					}
 				}
