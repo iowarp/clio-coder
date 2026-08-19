@@ -439,7 +439,7 @@ clio-coder skills install context-handoff   # copy into .clio-coder/skills
 clio-coder skills list                      # confirm Clio sees it
 ```
 
-In a session, `/skill:<name>` on a catalog skill offers the install first, and
+In a session, `/skill <name>` on a catalog skill offers the install first, and
 `context(scope="skills")` shows the model both what is installed and what the
 marketplace can install, so asking Clio about a skill by name works before it
 is installed. The catalog includes [`find-skills`](skills/meta/find-skills/),

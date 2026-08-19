@@ -25,6 +25,8 @@ export interface ResourceList<T> {
 
 export interface ResourceLoaderOptions {
 	cwd?: string;
+	/** Slash-command names prompt templates may not claim. */
+	reservedPromptNames?: ReadonlySet<string>;
 	skills?: () => Pick<LoadSkillsInput, "trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths">;
 }
 
@@ -53,6 +55,7 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 	// trust decision whichever kind is read out of it.
 	const promptOptions = (cwd: string): LoadPromptTemplatesInput => ({
 		cwd,
+		...(options.reservedPromptNames !== undefined ? { reservedNames: options.reservedPromptNames } : {}),
 		...(skillOptions().trustProjectCompatRoots !== undefined
 			? { trustProjectCompatRoots: skillOptions().trustProjectCompatRoots === true }
 			: {}),

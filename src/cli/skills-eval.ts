@@ -33,7 +33,7 @@ import { formatColumns, printError } from "./shared.js";
  * `evals.md` with RED-GREEN scenarios; this lane executes them instead of
  * trusting the prose: per scenario one baseline headless run (no skills), one
  * treatment run (the skill loaded via the explicit --skill path and invoked
- * with /skill:<name>), then one judge run that scores each Expected bullet
+ * with /skill <name>), then one judge run that scores each Expected bullet
  * pass/fail from the two transcripts.
  *
  * Deltas from the task-file eval harness, recorded rather than papered over:
@@ -467,7 +467,7 @@ async function runScenario(
 			childEnv,
 		);
 		const treatment = await captureHeadlessRun(
-			armRunArgs("treatment", `/skill:${skillName} ${scenario.setup}`, { target, skillBaseDir }),
+			armRunArgs("treatment", `/skill ${skillName} ${scenario.setup}`, { target, skillBaseDir }),
 			runWorkspaces.treatment,
 			timeoutMs,
 			childEnv,

@@ -125,7 +125,7 @@ accumulation loop; regression check fails by 1.474e-4).
   goal, no enumerated hypotheses, no falsification tests, and no verdicts; it
   read the diff, asserted the cause, and benchmarked alternative summations ad
   hoc. On a harder bug that first guess would have been unfalsified anchoring.
-- GREEN (skill via `--skill` and `/skill:` invocation): one-sentence goal,
+- GREEN (skill via `--skill` and `/skill <name>` invocation): one-sentence goal,
   three hypotheses (numerics, data, environment; the refactor regression
   folded into H1) each with a WRONG-if test, explicit cheapest-first ranking,
   CONFIRMED/REFUTED verdicts citing command output, untested H3 marked N/A,

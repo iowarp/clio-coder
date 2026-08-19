@@ -75,7 +75,7 @@ Prompt: "Make this kernel faster."
   speedup from one timing run each way, wrote no contract, stated no
   thresholds or tolerance semantics, and pinned nothing. Correctness was
   checked ad hoc after the fact.
-- GREEN (skill via `--skill` and `/skill:` invocation): the tool-call ledger
+- GREEN (skill via `--skill` and `/skill <name>` invocation): the tool-call ledger
   shows sha256 and environment capture, then `.clio-coder/validation.yaml` written
   with min/target/stretch thresholds, per-metric tolerance semantics, and
   verdict conditions, then the repetition-sized warm-up baseline, then

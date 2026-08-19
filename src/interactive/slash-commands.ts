@@ -216,7 +216,10 @@ export async function handleRun(
 	options: RunCommandOptions = {},
 ): Promise<void> {
 	if (options.target && options.workerProfile) {
-		deps.notice("warn", `--target ${options.target} takes precedence; --worker ${options.workerProfile} will be ignored`);
+		deps.notice(
+			"warn",
+			`--target ${options.target} takes precedence; --agent-profile ${options.workerProfile} will be ignored`,
+		);
 	}
 	if (options.target && options.workerRuntime) {
 		deps.notice(
@@ -426,13 +429,6 @@ export interface BuiltinSlashCommand {
 	name: string;
 	description: string;
 	group: SlashCommandGroup;
-	aliases?: ReadonlyArray<string>;
-	/**
-	 * Argument text an alias stands in for, prepended to whatever the operator
-	 * typed after it. `/compact` names a subcommand of `/context`, not the
-	 * command itself, so it cannot be spelled as a bare alias.
-	 */
-	aliasArgs?: Readonly<Record<string, string>>;
 	/** Excluded from /help, autocomplete, and the docs command table. */
 	hidden?: boolean;
 	args?: CommandArgsSpec;
@@ -505,7 +501,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "quit",
 		description: "Exit Clio Coder",
 		group: "Sessions",
-		aliases: ["exit"],
 		kinds: ["quit"],
 		args: {},
 		fromArgs: fromArgsOrUsage("quit", { kind: "quit" }),
@@ -532,7 +527,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "skill",
 		description: "Open the Skills Hub or invoke a skill",
 		group: "Run",
-		aliases: ["skill:", "skills:"],
 		kinds: ["skill-selector", "skill-invocation"],
 		args: {
 			positionals: [
@@ -541,7 +535,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			],
 		},
 		match(trimmed) {
-			if (trimmed === "/skill" || trimmed === "/skill:" || trimmed === "/skills:") {
+			if (trimmed === "/skill") {
 				return { kind: "skill-selector" };
 			}
 			const command = parseSkillCommand(trimmed);
@@ -687,8 +681,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		args: {
 			parseFlagsBeforeRest: true,
 			flags: [
-				{ name: "--agent-profile", aliases: ["--worker-profile", "--worker"], takesValue: true, valueName: "profile" },
-				{ name: "--runtime", aliases: ["--agent-runtime", "--worker-runtime"], takesValue: true, valueName: "runtimeId" },
+				{ name: "--agent-profile", takesValue: true, valueName: "profile" },
+				{ name: "--runtime", takesValue: true, valueName: "runtimeId" },
 				{ name: "--target", takesValue: true, valueName: "id" },
 				{ name: "--model", takesValue: true, valueName: "id" },
 				{ name: "--thinking", takesValue: true, values: RUN_THINKING_LEVELS, valueName: "level" },
@@ -844,8 +838,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "context",
 		description: "Context hub: window overlay plus compact, init, refresh, and reset",
 		group: "Inspect",
-		aliases: ["ctx", "compact"],
-		aliasArgs: { compact: "compact" },
 		kinds: ["context-view", "compact", "init", "context-clear", "context-refresh"],
 		subcommandDescriptions: {
 			compact: "Compact session context",
@@ -1044,7 +1036,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "model",
 		description: "Open model selector or set a model",
 		group: "Configure",
-		aliases: ["models"],
 		kinds: ["model", "model-set"],
 		args: {
 			positionals: [{ name: "pattern", required: false, rest: true }],
@@ -1093,7 +1084,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "settings",
 		description: "Open interactive settings",
 		group: "Configure",
-		aliases: ["config"],
 		kinds: ["settings"],
 		args: { positionals: [{ name: "section", required: false }] },
 		fromArgs(parsed) {
@@ -1174,15 +1164,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 ];
 
 const HANDLER_BY_KIND = new Map<SlashCommandKind, BuiltinSlashCommand>();
-const COMMAND_TERM_OWNER = new Map<string, string>();
+const COMMAND_NAMES = new Set<string>();
 for (const entry of BUILTIN_SLASH_COMMANDS) {
-	for (const term of [entry.name, ...(entry.aliases ?? [])]) {
-		const owner = COMMAND_TERM_OWNER.get(term);
-		if (owner) {
-			throw new Error(`BUILTIN_SLASH_COMMANDS: command term "${term}" is owned by both "${owner}" and "${entry.name}"`);
-		}
-		COMMAND_TERM_OWNER.set(term, entry.name);
+	if (COMMAND_NAMES.has(entry.name)) {
+		throw new Error(`BUILTIN_SLASH_COMMANDS: command name "${entry.name}" is registered more than once`);
 	}
+	COMMAND_NAMES.add(entry.name);
 	for (const kind of entry.kinds) {
 		if (HANDLER_BY_KIND.has(kind)) {
 			throw new Error(`BUILTIN_SLASH_COMMANDS: kind "${kind}" is owned by multiple entries`);
@@ -1193,7 +1180,9 @@ for (const entry of BUILTIN_SLASH_COMMANDS) {
 
 /**
  * A token that could only have been meant as a command: one word of letters,
- * digits, and hyphens after the leading slash.
+ * digits, hyphens, or colons after the leading slash. Colons are included so
+ * retired compact forms such as `/skill:name` fail closed instead of becoming
+ * model input.
  *
  * A spelling that names no command used to match nothing and fall through to
  * the model as prose. Measured: `/compact` was answered "/compact (completed)"
@@ -1208,12 +1197,12 @@ for (const entry of BUILTIN_SLASH_COMMANDS) {
  * `/not/a/command` carry a separator, so they are not one word and still reach
  * the model unchanged.
  *
- * One word followed by prose stays ambiguous: `/compact tidy up` is the defect
+ * One word followed by prose stays ambiguous: `/status please` is the defect
  * and `/tmp is full` is a sentence, and nothing in the text separates them. It
  * resolves as a command, so a sentence that has to open this way needs
  * COMMAND_ESCAPE.
  */
-const COMMAND_SHAPED_TOKEN = /^[A-Za-z][A-Za-z0-9-]*$/u;
+const COMMAND_SHAPED_TOKEN = /^[A-Za-z][A-Za-z0-9:-]*$/u;
 
 /**
  * Prefix that sends a command-shaped line to the model as text.
@@ -1289,9 +1278,6 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 
 export interface CommandReferenceEntry {
 	name: string;
-	aliases: ReadonlyArray<string>;
-	/** Argument text each alias in `aliases` stands in for, when it stands for any. */
-	aliasArgs?: Readonly<Record<string, string>>;
 	usage: string;
 	description: string;
 	group: SlashCommandGroup;
@@ -1308,8 +1294,6 @@ export function commandReference(): ReadonlyArray<CommandReferenceEntry> {
 			.replace(/\n$/, "");
 		return {
 			name: entry.name,
-			aliases: entry.aliases ?? [],
-			...(entry.aliasArgs ? { aliasArgs: entry.aliasArgs } : {}),
 			usage,
 			description: entry.description,
 			group: entry.group,

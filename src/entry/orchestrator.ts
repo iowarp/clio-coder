@@ -170,6 +170,7 @@ import {
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
 import { subscribeLoopGuardStop } from "../interactive/loop-guard-interrupt.js";
+import { BUILTIN_SLASH_COMMANDS } from "../interactive/slash-commands.js";
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
@@ -802,6 +803,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		ExtensionsDomainModule,
 		InteropDomainModule,
 		createResourcesDomainModule({
+			reservedPromptNames: new Set(BUILTIN_SLASH_COMMANDS.map((entry) => entry.name)),
 			skills: () => ({
 				disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
 				...(options.skillPaths && options.skillPaths.length > 0

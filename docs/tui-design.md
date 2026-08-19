@@ -280,7 +280,7 @@ The `/settings` overlay is a full-screen transactional control center:
 
 ### 7.2 Slash Autocomplete Command Palette
 - **Grouped Palette**: Typing `/` opens a grouped command palette (ordered by `Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints and formatted descriptions.
-- **Stem-Gated Aliases**: Aliases (e.g. `/exit`, `/ctx`, `/compact`, `/models`, `/config`) are hidden by default and only surface when the typed stem matches the alias spelling.
+- **One Canonical Spelling**: Autocomplete, help, and parsing expose the same unique slash-command names; no alias rows compete with canonical commands.
 
 ---
 

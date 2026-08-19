@@ -610,7 +610,7 @@
 
     function simulateSelectSkill() {
       const sk = SKILLS[activeSkill];
-      const cmd = `/skill:${sk.name} `;
+      const cmd = `/skill ${sk.name} `;
       document.getElementById("console-output").innerText = `[TUI Editor] Inserted: "${cmd}"`;
       
       const cons = document.getElementById("console-output");

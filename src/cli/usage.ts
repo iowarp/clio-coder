@@ -359,7 +359,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		if (bareIds.length < 3) continue;
 		opportunities.push({
 			kind: "workflow-distiller",
-			suggestion: `bash shape "${shape}" recurs with no skill activation; consider /skill:workflow-distiller to distill it`,
+			suggestion: `bash shape "${shape}" recurs with no skill activation; consider /skill workflow-distiller to distill it`,
 			evidence: `${bareIds.length} sessions: ${bareIds.slice(0, 5).join(", ")}${bareIds.length > 5 ? ", ..." : ""}`,
 		});
 	}

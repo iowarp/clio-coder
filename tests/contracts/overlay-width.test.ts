@@ -423,7 +423,7 @@ describe("contracts/overlay width — /view panes", () => {
 
 /**
  * Esc unwinds one step per press. Every other list overlay clears a typed
- * filter first and closes on the second press; `/models` closed on the first,
+ * filter first and closes on the second press; `/model` closed on the first,
  * so narrowing to one model and reaching for Esc threw away the whole overlay.
  */
 describe("contracts/overlay — model selector Esc hierarchy", () => {

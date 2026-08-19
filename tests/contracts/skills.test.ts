@@ -560,14 +560,14 @@ describe("contracts/skills", () => {
 			strictEqual(result.kind, "ok");
 			if (result.kind === "ok") {
 				ok(result.output.includes("- visible (project): Catalog entry."));
-				ok(result.output.includes("/skill:<name>"));
+				ok(result.output.includes("/skill <name>"));
 				// The listing invites matching and composition but keeps the operator gate.
 				ok(result.output.includes("Match the current task"));
 				ok(result.output.includes("suggest the sequence in order"));
 				ok(result.output.includes("never load one without it"));
 				// Footer anchor: exact reply shape after the entries, with a
 				// no-match guard so routine tasks stay suggestion-free.
-				ok(result.output.includes("Suggested skill: /skill:<name>"));
+				ok(result.output.includes("Suggested skill: /skill <name>"));
 				ok(result.output.includes("wait for the operator to run it"));
 				ok(result.output.includes("If none match, do not mention skills."));
 			}
@@ -590,7 +590,7 @@ describe("contracts/skills", () => {
 			if (result.kind === "ok") {
 				// Pointer only: an at-a-glance count and the suggest protocol, no catalog.
 				ok(result.output.includes('"skills"'));
-				ok(result.output.includes("suggest /skill:<name> to the operator"));
+				ok(result.output.includes("suggest /skill <name> to the operator"));
 				strictEqual(result.output.includes("Pointer."), false);
 			}
 
@@ -626,11 +626,11 @@ describe("contracts/skills", () => {
 	});
 
 	describe("contracts/skills slash-command parity", () => {
-		it("expands /skill:name with trailing args from the loaded list", () => {
+		it("expands /skill name with trailing args from the loaded list", () => {
 			const root = scratchDir();
 			writeSkillDir(root, "expandable", ['name: "expandable"', 'description: "Expand me."'], "FOLLOW STEPS");
 			const list = loadSkills({ roots: [projectRoot(root)] });
-			const expansion = expandSkillInvocationInput("/skill:expandable do the thing", list);
+			const expansion = expandSkillInvocationInput("/skill expandable do the thing", list);
 			strictEqual(expansion.expanded, true);
 			strictEqual(expansion.text, "do the thing");
 			strictEqual(expansion.text.includes("FOLLOW STEPS"), false);
@@ -640,17 +640,17 @@ describe("contracts/skills", () => {
 			}
 		});
 
-		it("expands /skills:name as the interactive plural alias", () => {
+		it("does not expand retired colon or plural skill aliases", () => {
 			const root = scratchDir();
 			writeSkillDir(root, "grill-me", ['name: "grill-me"', 'description: "Interview skill."'], "ASK ONE QUESTION");
 			const list = loadSkills({ roots: [projectRoot(root)] });
-			const expansion = expandSkillInvocationInput("/skills:grill-me about adding science skills", list);
-			strictEqual(expansion.expanded, true);
-			strictEqual(expansion.text, "about adding science skills");
-			strictEqual(expansion.text.includes("ASK ONE QUESTION"), false);
-			if (expansion.expanded) {
-				strictEqual(expansion.skill.name, "grill-me");
-				strictEqual(expansion.triggeredBy, "slash-command");
+			for (const input of [
+				"/skill:grill-me about adding science skills",
+				"/skills:grill-me about adding science skills",
+			]) {
+				const expansion = expandSkillInvocationInput(input, list);
+				strictEqual(expansion.expanded, false);
+				strictEqual(expansion.text, input);
 			}
 		});
 
@@ -705,7 +705,7 @@ describe("contracts/skills", () => {
 				"ASK ONE QUESTION",
 			);
 			const list = loadSkills({ roots: [projectRoot(root)] });
-			const parsed = parsePendingSkillRequests("/skill:grill-me adding more science skills", list);
+			const parsed = parsePendingSkillRequests("/skill grill-me adding more science skills", list);
 			strictEqual(parsed.text, "adding more science skills");
 			strictEqual(parsed.pendingSkillRequests.length, 1);
 			const pending = parsed.pendingSkillRequests[0];
@@ -755,7 +755,7 @@ describe("contracts/skills", () => {
 				resolvePath: (value: string) => value,
 				reload: async () => undefined,
 			};
-			const expanded = await expandInteractiveSubmitAsync("/skill:expandable do the thing", resources);
+			const expanded = await expandInteractiveSubmitAsync("/skill expandable do the thing", resources);
 			strictEqual(expanded.pendingSkillRequests.length, 1);
 			strictEqual(expanded.text, "do the thing");
 			strictEqual(expanded.text.includes("FOLLOW STEPS"), false);
@@ -944,7 +944,7 @@ describe("contracts/skills", () => {
 				// The gate names the model's move: suggest-and-wait, never retry.
 				ok(denied.message.includes("only the operator can activate a skill"));
 				ok(denied.message.includes("do not retry this load"));
-				ok(denied.message.includes("Suggested skill: /skill:<name>"));
+				ok(denied.message.includes("Suggested skill: /skill <name>"));
 				ok(denied.message.includes("wait for the operator"));
 				ok(denied.message.includes("otherwise continue without skills"));
 			}

@@ -164,7 +164,7 @@ describe("contracts/skills-reminder", () => {
 			strictEqual(noneAnywhere.evaluate(turnStart({ conversationMessages: 0 })).length, 0);
 
 			const withSkills = createSkillsReminderRegistration({ countModelVisibleSkills: () => 3 });
-			// The operator already invoked /skill:<name>; the reminder would be noise.
+			// The operator already invoked /skill <name>; the reminder would be noise.
 			strictEqual(withSkills.evaluate(turnStart({ conversationMessages: 0, pendingSkillRequests: 1 })).length, 0);
 			// And that consumed the session's only chance.
 			strictEqual(withSkills.evaluate(turnStart({ sessionId: "s", conversationMessages: 2 })).length, 0);

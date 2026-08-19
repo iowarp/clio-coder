@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { ResourcesContract } from "../../src/domains/resources/index.js";
+import { createResourcesLoader } from "../../src/domains/resources/index.js";
 import {
 	expandPromptTemplateInput,
 	loadPromptTemplates,
@@ -11,6 +12,7 @@ import {
 } from "../../src/domains/resources/prompts/loader.js";
 import { expandInteractiveSubmitAsync } from "../../src/interactive/index.js";
 import {
+	BUILTIN_SLASH_COMMANDS,
 	dispatchSlashCommand,
 	parseSlashCommand,
 	type SlashCommandContext,
@@ -123,11 +125,24 @@ describe("contracts/slash prompt templates", () => {
 		ok(notices[0]?.includes("/help"), notices.join(" | "));
 	});
 
-	it("lets a builtin keep its own spelling against a template of the same name", () => {
-		const home = scratchDir();
-		writePrompt(home, join(".claude", "commands", "help.md"), "Not the help center.\n");
-		const list = loadPromptTemplates({ cwd: scratchDir(), home });
+	it("reserves every builtin spelling against prompt templates in interactive and headless modes", () => {
+		const cwd = scratchDir();
+		const promptPath = join(".clio-coder", "prompts", "help.md");
+		writePrompt(cwd, promptPath, "Not the help center.\n");
+		const loader = createResourcesLoader({
+			cwd,
+			reservedPromptNames: new Set(BUILTIN_SLASH_COMMANDS.map((entry) => entry.name)),
+		});
+		const list = loader.prompts();
 		const { submitted, opened, ctx } = harness(list);
+
+		strictEqual(
+			list.items.some((entry) => entry.name === "help"),
+			false,
+		);
+		const collision = list.diagnostics.find((entry) => entry.type === "collision" && entry.path?.endsWith(promptPath));
+		ok(collision?.message.includes("/help conflicts with the built-in slash command /help"), collision?.message);
+		strictEqual(loader.expandPromptTemplate("/help").expanded, false, "headless expansion reserves the same name");
 
 		dispatchSlashCommand(parseSlashCommand("/help"), ctx);
 

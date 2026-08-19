@@ -131,37 +131,37 @@ clio-coder run \
 
 Slash commands are available inside the TUI. Type `/` at the start of the prompt to open the grouped command palette autocomplete.
 
-The registry table below lists the available interactive slash commands. On a bare `/`, commands are presented in groups (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Aliases are stem-gated: they are hidden by default and only surfaced when the typed stem matches the alias spelling. The "Usage" column details expected arguments, with brackets `[]` indicating optional arguments and angle brackets `<>` indicating required arguments.
+The registry table below lists the available interactive slash commands. On a bare `/`, commands are presented in groups (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Each operation has one canonical spelling; autocomplete, help, and parsing all read the same registry. The "Usage" column details expected arguments, with brackets `[]` indicating optional arguments and angle brackets `<>` indicating required arguments.
 
-| Command | Aliases | Usage | Purpose |
-| --- | --- | --- | --- |
-| `/quit` | `/exit` | `/quit` | Exit Clio Coder |
-| `/help` | - | `/help [query]` | Open the interactive help center showing commands and keys |
-| `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
-| `/prompts` | - | `/prompts` | List prompt templates |
-| `/extensions` | - | `/extensions` | List installed extensions |
-| `/interop` | - | `/interop` | Review other coding agents detected on this machine |
-| `/share` | - | `/share [runId] \| /share export <path> \| /share import [--dry-run] [--force] <path>` | Share a worker result with the main agent, or export and import Clio archives |
-| `/run` | - | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
-| `/delegate` | - | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
-| `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
-| `/targets` | - | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
-| `/cost` | - | `/cost` | Show session token and cost totals |
-| `/context` | `/ctx`, `/compact` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
-| `/fleet` | - | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
-| `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
-| `/memory` | - | `/memory seed` | Inspect task memory or seed it from the newest handoff |
-| `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
-| `/thinking` | - | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
-| `/output` | - | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
-| `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
-| `/scoped-models` | - | `/scoped-models` | Open Settings → Models: the Alt+J / Alt+K cycle set and favorites |
-| `/settings` | `/config` | `/settings [section]` | Open interactive settings |
-| `/resume` | - | `/resume` | Resume a past session |
-| `/new` | - | `/new` | Start a fresh session |
-| `/tree` | - | `/tree` | Open session tree navigator |
-| `/fork` | - | `/fork` | Fork from an assistant turn |
-| `/export` | - | `/export [path]` | Export the session transcript to Markdown |
+| Command | Usage | Purpose |
+| --- | --- | --- |
+| `/quit` | `/quit` | Exit Clio Coder |
+| `/help` | `/help [query]` | Open the interactive help center showing commands and keys |
+| `/skill` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
+| `/prompts` | `/prompts` | List prompt templates |
+| `/extensions` | `/extensions` | List installed extensions |
+| `/interop` | `/interop` | Review other coding agents detected on this machine |
+| `/share` | `/share [runId] \| /share export <path> \| /share import [--dry-run] [--force] <path>` | Share a worker result with the main agent, or export and import Clio archives |
+| `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
+| `/delegate` | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
+| `/agents` | `/agents` | List Clio agents and ACP delegation agents |
+| `/targets` | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
+| `/cost` | `/cost` | Show session token and cost totals |
+| `/context` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
+| `/fleet` | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
+| `/tasks` | `/tasks` | Show the session task board the agent tracks with the tasks tool |
+| `/memory` | `/memory seed` | Inspect task memory or seed it from the newest handoff |
+| `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
+| `/thinking` | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
+| `/output` | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
+| `/model` | `/model [pattern]` | Open model selector or set a model |
+| `/scoped-models` | `/scoped-models` | Open Settings → Models: the Alt+J / Alt+K cycle set and favorites |
+| `/settings` | `/settings [section]` | Open interactive settings |
+| `/resume` | `/resume` | Resume a past session |
+| `/new` | `/new` | Start a fresh session |
+| `/tree` | `/tree` | Open session tree navigator |
+| `/fork` | `/fork` | Fork from an assistant turn |
+| `/export` | `/export [path]` | Export the session transcript to Markdown |
 
 `/context` with no arguments opens the context-window ledger overlay. The
 subcommands own the durable project-context noun: `compact` summarizes older
@@ -173,15 +173,16 @@ context artifacts (`.clio-coder/codewiki.json`, `.clio-coder/state.json`,
 deletes `CLIO-CODER.md`; cancellation makes no changes. Session reset stays `/new`;
 there is deliberately no `/context clear`. The spellings `/context-init`,
 `/context-clear`, and `/context-view` are gone and are not aliased to anything.
-`/compact` is an alias for `/context compact` and carries the same optional
-instructions, so `/compact drop the old turns` runs the compaction the operator
-asked for instead of reporting that the spelling does not exist. `/exit` and
-`/config` are aliases of `/quit` and `/settings` on the same grounds: the
-command exists and the spelling is the one other tools in this class use.
-`/clear` has no counterpart here, so it stays an error that names `/help`.
+There are no slash-command aliases. `/context compact`, `/quit`, `/model`,
+`/settings`, and `/skill <name>` are their only spellings. Retired or foreign
+spellings stay errors that name `/help` instead of guessing which operation the
+operator intended.
 
 Only active commands run. Typing anything command-shaped that the registry does
 not own checks the loaded prompt templates across native and foreign prompt roots.
+Built-in command names are reserved across interactive and headless modes; a
+template with the same basename is omitted from `/prompts` with a collision
+diagnostic instead of shadowing a command on one surface and expanding on another.
 If a matching template is found in an untrusted project root, Clio prints that the
 prompt template comes from an untrusted project root and directs the operator to set
 `skills.trustProjectCompatRoots`, sending nothing to the model. If the token names
@@ -191,9 +192,9 @@ it is never sent to the model. That covers spellings removed outright, such as
 behavior where an unrecognized spelling reached the model as prose and was answered
 conversationally, which left the operator believing a command had run when nothing had.
 
-Command-shaped means one word of letters, digits, and hyphens after the slash, so
+Command-shaped means one word of letters, digits, hyphens, or colons after the slash, so
 paths such as `/home/user/notes.md` still reach the model unchanged. One word
-followed by prose is treated as a command, because `/compact tidy up` and `/tmp is
+followed by prose is treated as a command, because `/status please` and `/tmp is
 full` are indistinguishable. To send such a line as text, escape the slash:
 `\/tmp is full` reaches the model as `/tmp is full`. The escape claims a single
 backslash and only in front of a slash, so `\\server\share` is unchanged, and it
@@ -576,7 +577,7 @@ The Clio TUI has been enhanced to maximize readability, operational focus, and c
 - **Unmistakable Clio Composer:** The input editor features an explicit left section tag reflecting current prompt semantics (`MESSAGE` while idle, `FOLLOW-UP` while Clio runs, and orange `STEER` when Enter steers in-flight execution). Includes the dim placeholder `Ask Clio…  / for commands` and lower-rail hint `Enter send · Shift+Enter newline` at wider widths.
 - **Progressively Disclosed Footer:** The compact footer uses a quiet two-zone status layout that suppresses idle decoration (`tools none`, `◌ idle`, and default-output tags). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge and best current/last-turn receipt. `Alt+U` toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).
 - **Footer Notification Degradation Ladder:** The footer notification badge reserves the severity head (`glyph count noun`) and `[Alt+X] dismiss` tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.
-- **Grouped Slash Command Palette:** Typing `/` opens an autocomplete command palette grouped by operational category (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Aliases are stem-gated and only surface when the typed stem matches the alias.
+- **Grouped Slash Command Palette:** Typing `/` opens an autocomplete command palette grouped by operational category (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Every suggestion is the command's one canonical spelling.
 - **Voice-First Transcript & Receipts:** User (`› `) and assistant (`✦ `) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor output verbosity (`minimal` none, `default` compact dim `turn · in N · out M`, `verbose` full receipt with call counts, cache reads/writes, reasoning provenance, and verification caveats).
 - **Transactional Settings Center:** Open via `/settings` (or deep links `/targets`, `/fleet`, `/scoped-models`, `/thinking`, `/output`). Grouped into `CORE`, `ROUTING`, `RUNTIME`, and `EXPERIENCE` sections. Value edits are transactional: `Enter` opens value pickers/checklists and constructs immutable change plans offering `Apply this session`, `Apply and save globally`, or `Cancel`. Includes the Fleet entity workbench, Targets console table with in-place action drawer, scoped-model checklist, and narrow-terminal drill-down navigation below 72 columns.
 

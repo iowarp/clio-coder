@@ -72,7 +72,7 @@ export const myCustomRuntime: RuntimeDescriptor = {
 
 ## 2. Probing Mechanisms
 
-Probes discover the current state of a target inference server when Clio starts or when `/targets` / `/models` are refreshed.
+Probes discover the current state of a target inference server when Clio starts or when `/targets` or `/model` are refreshed.
 
 ### 2.1 Endpoint Probing (`probe`)
 The `probe` method validates endpoint reachability and collects loaded models:

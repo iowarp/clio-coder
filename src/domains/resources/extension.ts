@@ -10,6 +10,7 @@ export function createResourcesBundle(
 	const config = (): ConfigContract | undefined => context.getContract<ConfigContract>("config");
 	const loader = createResourcesLoader({
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+		...(options.reservedPromptNames !== undefined ? { reservedPromptNames: options.reservedPromptNames } : {}),
 		skills: () => ({
 			...skillOptions(config()?.get().skills.trustProjectCompatRoots === true, options),
 		}),

@@ -30,7 +30,7 @@ reads what this produces.
 
 Distinct from two things it is often confused with:
 
-- `/compact` summarizes *within* the current session; it is ephemeral and lost
+- `/context compact` summarizes *within* the current session; it is ephemeral and lost
   when the process exits. A handoff is a file that outlives the session.
 - `/resume` restores a session's transcript. A handoff carries *intent*:
   decisions, rationale, and blockers that a transcript alone makes expensive to

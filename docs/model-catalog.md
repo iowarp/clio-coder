@@ -12,7 +12,7 @@ Clio Coder treats a selectable model as the intersection of three sources:
 ## Runtime refresh controls
 
 - `/targets` (Settings → Targets): probes every target when it opens; a row's probe action re-probes that target.
-- `/model` or `/models`: `r` refreshes the selected row's target; `R` refreshes all targets.
+- `/model`: `r` refreshes the selected row's target; `R` refreshes all targets.
 - `clio-coder models`: probes live targets by default before printing the CLI model list. Use `--offline` to skip live probing. Former `--probe` and `--no-probe` flags are gone.
 
 Configured `wireModels` and a target `defaultModel` remain selectable before a
@@ -184,6 +184,6 @@ Subscription models are registered and managed as standard HTTP/cloud targets:
 1. Capture raw field notes in docs or a lab notebook.
 2. Add or update a user/project catalog overlay with capabilities and quirks.
 3. Add focused unit/integration coverage when behavior changes engine routing.
-4. Refresh `/models` with `R` and verify the selected row reports the expected source/caps.
+4. Refresh `/model` with `R` and verify the selected row reports the expected source/caps.
 5. Promote the cleaned overlay into the bundled catalog only when the model family is ready to bless for Clio users.
 6. Promote the cleaned field note into a cookbook, guideline, or community blog post.

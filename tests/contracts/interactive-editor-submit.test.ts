@@ -342,7 +342,7 @@ describe("contracts/interactive editor submit", () => {
 
 	it("interrupt while streaming carries the expansion's paths and skill requests, like an idle send", async () => {
 		const harness = createHarness({ streaming: true });
-		harness.setText("use /skill:grill-me on @src/foo.ts");
+		harness.setText("use /skill grill-me on @src/foo.ts");
 		const skillRequest = { name: "grill-me", source: "slash-command" };
 		harness.deps.expandSubmit = async () => ({
 			text: "use grill-me on <file>",
