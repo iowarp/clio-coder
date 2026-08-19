@@ -117,7 +117,7 @@ export function computeRetryDelayMs(
  * initial delay; `done` flips true when the deadline is reached; `cancelled`
  * flips true when a caller aborts via `cancel()` before the deadline.
  */
-export interface RetryCountdownState {
+interface RetryCountdownState {
 	attempt: number;
 	maxAttempts: number;
 	seconds: number;
@@ -125,7 +125,7 @@ export interface RetryCountdownState {
 	cancelled: boolean;
 }
 
-export interface RetryCountdownOptions {
+interface RetryCountdownOptions {
 	/** 1-indexed attempt id displayed to the user, e.g. "Retrying (1/3)". */
 	attempt: number;
 	/** Upper bound displayed alongside `attempt`. */
