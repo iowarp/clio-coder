@@ -40,7 +40,6 @@ export interface ResourcesLoader {
 	): { text: string; pendingSkillRequests: PendingSkillRequest[] };
 	prompts(cwd?: string): ResourceList<PromptTemplate>;
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
-	themes(): ResourceList<never>;
 	resolvePath(value: string, cwd?: string): string;
 	reload(): Promise<void>;
 }
@@ -75,9 +74,6 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		},
 		expandPromptTemplate(text, cwd = defaultCwd) {
 			return expandPromptTemplateInput(text, loadPromptTemplates(promptOptions(cwd)));
-		},
-		themes() {
-			return { items: [], diagnostics: [] };
 		},
 		resolvePath(value, cwd = defaultCwd) {
 			return expandConfigPath(value, { cwd });

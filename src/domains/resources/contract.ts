@@ -19,7 +19,6 @@ export interface ResourcesContract extends DomainContract {
 	): { text: string; pendingSkillRequests: PendingSkillRequest[] };
 	prompts(cwd?: string): ResourceList<PromptTemplate>;
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
-	themes(): ResourceList<never>;
 	resolvePath(value: string, cwd?: string): string;
 	reload(): Promise<void>;
 }

@@ -40,7 +40,6 @@ function resourcesFor(list: PromptTemplateList): ResourcesContract {
 		parsePendingSkillRequests: (text: string) => ({ text, pendingSkillRequests: [] }),
 		prompts: () => list,
 		expandPromptTemplate: (text: string) => expandPromptTemplateInput(text, list),
-		themes: () => ({ items: [], diagnostics: [] }),
 		resolvePath: (value: string) => value,
 		reload: async () => undefined,
 	} as unknown as ResourcesContract;
