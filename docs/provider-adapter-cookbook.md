@@ -150,6 +150,11 @@ answer. llama.cpp and LM Studio do not receive that vLLM-only field. Their remai
 are limited to runtime deltas such as `chat_template_kwargs`, prompt-cache flags, LM Studio TTL and
 draft-model settings, and the exact reasoning-effort spelling their servers accept.
 
+Local OpenAI-compatible model synthesis also declares
+`OpenAICompletionsCompat.supportsFinishReason: false`. Pi then infers `stop` or `toolUse` at the end
+of a complete stream when a local server omits `finish_reason`, instead of turning an otherwise
+valid answer into a provider error. Explicit finish reasons remain authoritative when supplied.
+
 
 ---
 

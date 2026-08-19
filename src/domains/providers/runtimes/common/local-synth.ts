@@ -60,6 +60,7 @@ function localOpenAICompat(caps: CapabilityFlags, runtimeId: string): OpenAIComp
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
 		supportsUsageInStreaming: true,
+		supportsFinishReason: false,
 		maxTokensField: "max_tokens",
 		supportsThinkingTokenBudget: runtimeId === "vllm",
 		supportsStrictMode: false,

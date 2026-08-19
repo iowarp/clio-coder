@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import type { AssistantMessage, AssistantMessageEvent, Context, Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "../../src/domains/providers/types/capability-flags.js";
 import { resetLlamaCppResidencyState } from "../../src/engine/apis/llamacpp-residency.js";
 import {
@@ -55,6 +55,52 @@ function jsonResponse(payload: unknown): Response {
 }
 
 describe("openai-completions thinking preservation", () => {
+	it("accepts local streams that omit finish_reason through pi's compatibility flag", async () => {
+		const model = {
+			id: "local-no-finish-reason",
+			name: "local-no-finish-reason",
+			api: "openai-completions",
+			provider: "openai-compat",
+			baseUrl: "http://local.invalid/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 8192,
+			maxTokens: 1024,
+			compat: {
+				supportsStore: false,
+				supportsDeveloperRole: false,
+				supportsReasoningEffort: false,
+				supportsUsageInStreaming: true,
+				supportsFinishReason: false,
+				maxTokensField: "max_tokens",
+				supportsStrictMode: false,
+			},
+			clio: { targetId: "local", runtimeId: "openai-compat" },
+		} as unknown as Model<"openai-completions">;
+		const responseBody = ['data: {"choices":[{"index":0,"delta":{"content":"hello"}}]}', "", "data: [DONE]", ""].join(
+			"\n",
+		);
+		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+		const events: AssistantMessageEvent[] = [];
+
+		for await (const event of openAICompletionsApiProvider.streamSimple(model, context, {
+			apiKey: "fake-key",
+			fetch: async () =>
+				new Response(responseBody, {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				}),
+		})) {
+			events.push(event);
+		}
+
+		const done = events.find((event) => event.type === "done");
+		ok(done && done.type === "done", "pi should infer a completed local stream");
+		strictEqual(done.reason, "stop");
+		deepStrictEqual(done.message.content, [{ type: "text", text: "hello" }]);
+	});
+
 	it("keeps fallback reasoning usage estimates for local openai-compatible servers", () => {
 		const message = thinkingMessage(usage());
 
