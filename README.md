@@ -20,7 +20,7 @@
 </p>
 
 > [!WARNING]
-> **Experimental v0.3.1 release.** Clio Coder's behavior and interfaces may
+> **Experimental v0.3.2 release.** Clio Coder's behavior and interfaces may
 > break or change without notice. Use version control, review proposed changes,
 > and keep backups when operating on important repositories.
 
@@ -133,7 +133,7 @@ dist-tag instead.
 From source, pinned to this release:
 
 ```bash
-git clone --branch v0.3.1 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.3.2 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
 export PATH="$HOME/.local/bin:$PATH"
@@ -466,7 +466,7 @@ list|propose|approve|reject|prune`. Design notes:
 ## Status
 
 Clio Coder is experimental software in a soft beta. The current release is
-**v0.3.1**, installable from npm as
+**v0.3.2**, installable from npm as
 [`@iowarp/clio-coder`](https://www.npmjs.com/package/@iowarp/clio-coder) or
 from source. Interfaces may still move between minor versions, and
 model-specific behavior varies by target.

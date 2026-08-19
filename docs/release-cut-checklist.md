@@ -14,7 +14,7 @@ or the npm registry.
 | Item | State |
 | --- | --- |
 | Branch | `v0.3.2`, local only |
-| `package.json` version | `0.3.2`, **not bumped by the hardening sessions** |
+| `package.json` version | `0.3.2`, bumped in 606dc0ca after the hardening tickets landed |
 | `main` | untouched |
 | Remotes | not contacted |
 | Tags | none created |
@@ -22,7 +22,7 @@ or the npm registry.
 
 ---
 
-## Part 1: verification (repeatable, already run)
+## Part 1: verification (repeatable; step 10 passes only once step 11's version is set)
 
 1. `npm run typecheck`
 2. `npm run lint`
@@ -47,9 +47,9 @@ These edit the working tree only. They are reversible with `git checkout` and
 are listed here because the hardening sessions were explicitly scoped out of
 performing them.
 
-11. Decide the released version. The tree currently reads `0.3.2` in
-    `package.json`. If that is the number to publish, no bump is needed; confirm
-    it deliberately rather than by default.
+11. Decide the released version. The tree reads `0.3.2` in `package.json`
+    and the top `CHANGELOG.md` heading is `## 0.3.2`; `scripts/check-release.mjs`
+    fails when the two disagree, so step 10 is green only after both are set.
 12. Files carrying a version reference, to update together if the number
     changes:
     - `package.json` (`version`)
