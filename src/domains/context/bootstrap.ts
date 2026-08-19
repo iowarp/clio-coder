@@ -454,6 +454,45 @@ export function packageManager(cwd: string): PackageManager {
 /** A script whose command rewrites the tree cannot serve as a verification gate. */
 const MUTATING_SCRIPT_RE = /(?:^|\s)--(?:fix|write)(?:\s|$)/;
 
+/**
+ * First preset a human could actually invoke: named and not hidden. Hidden
+ * presets exist only to be inherited from, so naming one in the handbook would
+ * hand the agent a command CMake refuses to run.
+ */
+function cmakePresetName(presets: unknown, key: string): string | null {
+	if (typeof presets !== "object" || presets === null || Array.isArray(presets)) return null;
+	const list = (presets as Record<string, unknown>)[key];
+	if (!Array.isArray(list)) return null;
+	for (const entry of list) {
+		if ((entry as Record<string, unknown> | null)?.hidden === true) continue;
+		const name = stringField(entry, "name");
+		if (name !== null) return name;
+	}
+	return null;
+}
+
+/**
+ * CMake presets are the project's own declared configure/build/test recipes,
+ * the same authority package.json scripts carry for Node. A CMake tree without
+ * presets stays silent: nothing there declares a runnable command, and a
+ * guessed `cmake -B build` fails on exactly the toolchain-file and MPI-wrapper
+ * projects this tool targets.
+ */
+function cmakeVerificationLines(cwd: string): string[] {
+	const presets = readJsonFile(join(cwd, "CMakePresets.json"));
+	if (presets === null) return [];
+	const configure = cmakePresetName(presets, "configurePresets");
+	const build = cmakePresetName(presets, "buildPresets");
+	const test = cmakePresetName(presets, "testPresets");
+	const lines: string[] = [];
+	if (configure !== null) {
+		const buildStep = build !== null ? ` then \`cmake --build --preset ${build}\`` : "";
+		lines.push(`Configure with \`cmake --preset ${configure}\`${buildStep}.`);
+	}
+	if (test !== null) lines.push(`Run tests with \`ctest --preset ${test}\`.`);
+	return lines;
+}
+
 function verificationSection(cwd: string): ClioMdSection | null {
 	const scripts = packageScripts(cwd);
 	const pm = packageManager(cwd);
@@ -487,6 +526,7 @@ function verificationSection(cwd: string): ClioMdSection | null {
 	if (hasScript("ci")) {
 		lines.push(`Use ${command("ci")} for the full local gate before committing broad or shared behavior changes.`);
 	}
+	lines.push(...cmakeVerificationLines(cwd));
 	if (lines.length === 0) return null;
 	return { title: "Verification expectations", body: lines.join(" ") };
 }
