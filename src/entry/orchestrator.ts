@@ -1446,7 +1446,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 *     every other id becomes a session override. settings.yaml is untouched.
 	 *   - scope "global": apply live and persist just that leaf as the new
 	 *     default, clearing any prior session override for it.
-	 * Restart-required ids (budget.concurrency, runtimePlugins) cannot apply
+	 * Restart-required ids (budget.concurrency, runtimePlugins,
+	 * terminal.tuiMode, terminal.fullscreenScrollbar) cannot apply
 	 * live, so the overlay only offers "global" for them; the file write is what
 	 * a later restart picks up.
 	 */

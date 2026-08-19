@@ -283,7 +283,7 @@ The `/settings` overlay is a full-screen transactional control center:
   - `Apply this session` (for live-capable settings)
   - `Apply and save globally`
   - `Cancel` (or `Esc`)
-  - Restart-required settings (`budget.concurrency`, `runtimePlugins`) offer only global save and announce `Saved to settings.yaml · restart Clio to apply`.
+  - Restart-required settings (`budget.concurrency`, `runtimePlugins`, `terminal.tuiMode`, and `terminal.fullscreenScrollbar`) offer only global save and announce `Saved to settings.yaml · restart Clio to apply`.
   - Destructive actions (target/profile removal) execute preflight analysis showing affected chat, fleet, and memory routes before confirmation.
 - **Fleet Workbench**: Organizes fleet settings with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Profiles render as one-row summaries with `◆ Edit` affordance; pressing `Enter` drills into profile fields (target, model, thinking level, placement) or destructive removal.
 - **Targets Console Table**: Displays configured targets in an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer (URL, default model, last probe, failure reason). Actions include `Use`, `Connect`, `Probe`, and `Remove`. Active connect/probe operations show the single orange activity indicator.

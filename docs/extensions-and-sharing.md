@@ -193,7 +193,7 @@ compatibility:
   clio: ">=0.2.0"
 ```
 
-Required fields are `manifestVersion: 1`, `id`, `version`, and `description`. `name` defaults to `id` when absent. The current resource kinds are `prompts`, `skills`, and `themes`; theme loading is reserved and currently returns an empty list in the resource loader.
+Required fields are `manifestVersion: 1`, `id`, `version`, and `description`. `name` defaults to `id` when absent. Clio loads `prompts` and `skills`. A manifest may reserve a `themes` path for forward compatibility, but Clio does not load theme resources.
 
 IDs must be lowercase and may include numbers, dots, underscores, and hyphens; they must start/end alphanumeric.
 
