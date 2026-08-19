@@ -151,7 +151,7 @@ export function defaultModelForRuntime(runtimeId: string): string | undefined {
  * about which ids matter.
  */
 export function describeRuntimeModels(entry: ProviderSupportEntry, sample: number): string {
-	if (entry.modelSource === "catalog") return `${entry.modelHints.length} in pi-ai catalog`;
+	if (entry.modelSource === "catalog") return `${entry.modelHints.length} in catalog`;
 	if (entry.modelHints.length === 0) return "-";
 	return entry.modelHints.slice(0, sample).join(", ");
 }

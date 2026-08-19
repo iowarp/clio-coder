@@ -723,7 +723,7 @@ async function askModelChoice(
  */
 function refuseCatalogSeededModel(runtime: RuntimeDescriptor, support: ProviderSupportEntry): void {
 	printError(
-		`--model is required for ${runtime.id}: its ${support.modelHints.length} model ids come from the pi-ai catalog in name order, which recommends none of them`,
+		`--model is required for ${runtime.id}: its ${support.modelHints.length} model ids come from the provider catalog in name order, which recommends none of them`,
 	);
 	process.stderr.write(
 		`  run \`clio-coder configure --runtime ${runtime.id}\` with no other flags to choose from the full list\n`,
@@ -1224,7 +1224,7 @@ async function runInteractive(
 			process.stdout.write(`  ${index + 1}. ${wireModel}${wireModel === model ? "  [default]" : ""}\n`);
 		}
 		if (!model && catalogOrdered) {
-			process.stdout.write(`  listed in pi-ai catalog order, which recommends none of them; pick one.\n`);
+			process.stdout.write(`  listed in provider catalog order, which recommends none of them; pick one.\n`);
 		}
 		for (;;) {
 			const pickedModel = await askModelChoice(rl, "Default target model", wireModels, model);

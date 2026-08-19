@@ -201,7 +201,7 @@ describe("contracts/configure-cli catalog-ordered model ids", () => {
 		for (const runtime of registry().list()) {
 			const entry = buildProviderSupportEntry(runtime);
 			if (entry.modelSource !== "catalog") continue;
-			strictEqual(describeRuntimeModels(entry, 2), `${entry.modelHints.length} in pi-ai catalog`);
+			strictEqual(describeRuntimeModels(entry, 2), `${entry.modelHints.length} in catalog`);
 		}
 	});
 
@@ -214,7 +214,7 @@ describe("contracts/configure-cli catalog-ordered model ids", () => {
 		const index = lines.findIndex((line) => /^ {2}openai\s/.test(line));
 		ok(index >= 0, `no openai row in:\n${result.stdout}`);
 		const row = `${lines[index]}\n${lines[index + 1] ?? ""}`;
-		match(row, /models=\d+ in pi-ai catalog/);
+		match(row, /models=\d+ in catalog/);
 		ok(!/models=gpt-/.test(result.stdout), `a catalog row still samples ids:\n${result.stdout}`);
 	});
 
@@ -225,7 +225,7 @@ describe("contracts/configure-cli catalog-ordered model ids", () => {
 		});
 		strictEqual(result.code, 2, `stdout=${result.stdout}`);
 		match(result.stderr, /--model is required for openai/);
-		match(result.stderr, /pi-ai catalog in name order/);
+		match(result.stderr, /provider catalog in name order/);
 		match(result.stderr, /clio-coder configure --runtime openai/);
 
 		// Refusing means nothing was written: no target, and no gpt-4 anywhere.
