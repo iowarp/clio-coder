@@ -112,7 +112,7 @@ These five enforced boundary rules constrain dependency **direction**, never imp
 
 Only files under `src/engine/**` may import `@earendil-works/*` packages. Since the 0.83.0 engine-boundary rework, no file outside `src/engine/**` may import `@earendil-works/*` at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from `src/engine/types.ts`.
 
-Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations. OpenAI-compatible sampler fields and vLLM thinking budgets flow through Pi's `samplingParams` and `supportsThinkingTokenBudget` contracts; Clio's adapter retains only catalog selection and runtime-specific payload deltas.
+Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations. OpenAI-compatible sampler fields and vLLM thinking budgets flow through Pi's `samplingParams` and `supportsThinkingTokenBudget` contracts; Clio's adapter retains only catalog selection and runtime-specific payload deltas. Tool head/tail truncation, byte formatting, and grep-line clipping likewise flow through pi-agent-core's `truncateHead`, `truncateTail`, `formatSize`, and `truncateLine`; Clio retains only its 16 KiB per-observation default and its exported line-count helper.
 
 ### Rule 2: Workers do not value-import domains except runtime rehydration
 

@@ -19,7 +19,7 @@ import { grepTool } from "../../src/tools/grep.js";
 import { fdIgnoreArgs, rgIgnoreArgs } from "../../src/tools/ignore-policy.js";
 import { DEFAULT_READ_MAX_BYTES, readTool } from "../../src/tools/read.js";
 import { createRegistry } from "../../src/tools/registry.js";
-import { truncateHead, truncateTail } from "../../src/tools/truncate.js";
+import { DEFAULT_MAX_BYTES, truncateHead, truncateTail } from "../../src/tools/truncate.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { extractWebFetchContent } from "../../src/tools/web-fetch.js";
 
@@ -64,6 +64,16 @@ describe("contracts/tool-hardening truncate primitives", () => {
 		// A 3-line, newline-terminated file must count as 3 lines, not 4.
 		const result = truncateHead("a\nb\nc\n", { maxLines: 2000, maxBytes: 64 * 1024 });
 		strictEqual(result.totalLines, 3);
+	});
+
+	it("keeps Clio's 16 KiB observation cap while Pi owns UTF-8-safe truncation", () => {
+		strictEqual(DEFAULT_MAX_BYTES, 16 * 1024);
+		const exact = truncateHead("x".repeat(DEFAULT_MAX_BYTES));
+		strictEqual(exact.truncated, false);
+		const over = truncateTail(`${"x".repeat(DEFAULT_MAX_BYTES)}😀END`);
+		strictEqual(over.truncated, true);
+		strictEqual(over.outputBytes <= DEFAULT_MAX_BYTES, true);
+		strictEqual(over.content.endsWith("😀END"), true);
 	});
 });
 
