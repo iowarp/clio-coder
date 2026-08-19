@@ -13,6 +13,7 @@ export type {
 	AgentState,
 	AgentTool,
 	AgentToolResult,
+	AgentToolUpdateCallback,
 	StreamFn,
 } from "@earendil-works/pi-agent-core";
 export { Agent } from "@earendil-works/pi-agent-core";

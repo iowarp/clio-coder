@@ -21,6 +21,28 @@ interface ShapedBashOutput {
 	details?: ToolResultDetails;
 }
 
+/** Bound a cumulative live snapshot without writing an offload file per tick. */
+function shapeBashProgress(rawOutput: string): ToolResult {
+	const truncation = truncateTail(rawOutput, {
+		maxLines: DEFAULT_MAX_LINES,
+		maxBytes: BASH_DISPLAY_MAX_BYTES - BASH_TAIL_NOTE_RESERVE,
+	});
+	const bytes = Buffer.byteLength(rawOutput, "utf8");
+	return {
+		kind: "ok",
+		output: truncation.content,
+		details: {
+			resultSize: {
+				bytes,
+				shownBytes: truncation.outputBytes,
+				maxBytes: BASH_DISPLAY_MAX_BYTES,
+				truncated: truncation.truncated,
+				policy: "tail",
+			},
+		},
+	};
+}
+
 // Tail-truncate the combined output for display, spilling the full output to a
 // scratch file first when it overflows the display cap. Setting
 // `details.resultSize.offloadPath` tells the registry result-shaper to leave
@@ -132,11 +154,17 @@ export const bashTool: ToolSpec = {
 		}
 		const timeout = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 300_000;
 		try {
-			const result = await runBashCommand(args.command, {
+			const runOptions: Parameters<typeof runBashCommand>[1] = {
 				cwd,
 				timeoutMs: timeout,
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
-			});
+			};
+			if (options?.onUpdate !== undefined) {
+				runOptions.onUpdate = (progress) => {
+					options.onUpdate?.(shapeBashProgress(combineBashOutput(progress)));
+				};
+			}
+			const result = await runBashCommand(args.command, runOptions);
 			const { error, aborted, timedOut, outputCapped } = result;
 			if (aborted) {
 				return { kind: "error", message: "bash: command aborted" };

@@ -25,9 +25,9 @@ import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { formatModelRejection } from "../domains/safety/rejection-feedback.js";
 import { validateEngineToolArguments } from "../engine/ai.js";
-import type { AgentTool, AgentToolResult } from "../engine/types.js";
+import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "../engine/types.js";
 import { applyToolProfile, type ToolProfileName } from "./profiles.js";
-import type { ToolInvokeOptions, ToolRegistry, ToolSpec } from "./registry.js";
+import type { ToolInvokeOptions, ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
 
 /**
  * Lightweight per-call observability hook. Default no-op so unused
@@ -95,6 +95,18 @@ export interface InvokeWorkerToolOptions {
 
 type WorkerAgentToolResult = AgentToolResult<{ kind: "ok" } | { kind: "error" }>;
 type WorkerToolOkDetails = { kind: "ok" } & Record<string, unknown>;
+
+function projectToolResult(result: ToolResult): WorkerAgentToolResult {
+	const details = { ...(result.details ?? {}), kind: result.kind } as { kind: "ok" } | { kind: "error" };
+	if (result.kind === "error") {
+		return { content: [{ type: "text", text: result.message }], details };
+	}
+	return {
+		content: [{ type: "text", text: result.output }],
+		details,
+		...(result.terminate === true ? { terminate: true } : {}),
+	};
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -264,9 +276,17 @@ function toAgentTool(
 		description: spec.description,
 		parameters: spec.parameters,
 		label: spec.metadata?.uiLabel ?? spec.name,
-		async execute(toolCallId: string, params: unknown, signal?: AbortSignal): Promise<WorkerAgentToolResult> {
+		async execute(
+			toolCallId: string,
+			params: unknown,
+			signal?: AbortSignal,
+			onUpdate?: AgentToolUpdateCallback,
+		): Promise<WorkerAgentToolResult> {
 			const options = invokeOptions?.() ?? {};
 			if (toolCallId.length > 0) options.toolCallId = toolCallId;
+			if (onUpdate !== undefined) {
+				options.onUpdate = (partialResult) => onUpdate(projectToolResult(partialResult));
+			}
 			const callInput: RunValidatedToolCallInput = {
 				spec,
 				args: params as Record<string, unknown>,
