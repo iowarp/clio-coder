@@ -7,6 +7,7 @@ import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
+import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
 import { styleTaggedNotice } from "./renderers/notice.js";
@@ -162,6 +163,8 @@ type ToolSegment = {
 	 * while `!finished`.
 	 */
 	awaitingApproval?: boolean | undefined;
+	/** Live, redacted approval facts. Never reconstructed during replay. */
+	approvalView?: ApprovalRequestView | undefined;
 	settlement?: "blocked" | "aborted" | "orphaned" | undefined;
 	/**
 	 * The admission verdict's short reason, present only on a settlement the
@@ -722,7 +725,11 @@ function renderToolSegmentLines(
 	// counting elapsed spinner in both collapsed and expanded form (there is no
 	// body or partial output to expand while the call sits at the gate).
 	if (!seg.finished && seg.awaitingApproval === true) {
-		return renderToolAwaitingApproval({ toolCallId: seg.id, toolName: seg.name, args: seg.args }, width);
+		return renderToolAwaitingApproval(
+			{ toolCallId: seg.id, toolName: seg.name, args: seg.args },
+			width,
+			seg.approvalView,
+		);
 	}
 	if (!expanded) {
 		return renderToolSubline(
@@ -1007,6 +1014,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		seg.settlement = settlement;
 		seg.partialResult = undefined;
 		seg.awaitingApproval = undefined;
+		seg.approvalView = undefined;
 	};
 
 	/**
@@ -1587,6 +1595,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const tool = owner?.segment;
 				if (tool && !tool.finished) {
 					tool.awaitingApproval = event.state === "awaiting-approval" ? true : undefined;
+					tool.approvalView = event.state === "awaiting-approval" ? event.view : undefined;
 					markDirty();
 				}
 				return;
@@ -1655,6 +1664,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// denied park settles here too, so the awaiting styling must go.
 					tool.partialResult = undefined;
 					tool.awaitingApproval = undefined;
+					tool.approvalView = undefined;
 				}
 				markDirty();
 				return;

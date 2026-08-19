@@ -53,6 +53,7 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
+import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { AgentStatusEvent } from "./status/types.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
@@ -131,11 +132,24 @@ export interface ChatNoticeEvent {
  * state here: the parked promise resolves blocked and the segment settles
  * through its ordinary `tool_execution_end`.
  */
-export interface ToolApprovalStateEvent {
-	type: "tool_approval_state";
-	toolCallId: string;
-	state: "awaiting-approval" | "resumed";
-}
+export type ToolApprovalStateEvent =
+	| {
+			type: "tool_approval_state";
+			toolCallId: string;
+			state: "awaiting-approval";
+			/**
+			 * Already-redacted facts shown by the permission overlay. This payload
+			 * exists only on the live event and is never written to the session
+			 * ledger; the transcript renderer must not reconstruct safety facts
+			 * from raw tool arguments.
+			 */
+			view: ApprovalRequestView;
+	  }
+	| {
+			type: "tool_approval_state";
+			toolCallId: string;
+			state: "resumed";
+	  };
 
 export type ChatLoopEvent =
 	| AgentEvent
