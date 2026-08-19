@@ -29,6 +29,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder configure --interop` | Review other coding agents detected on this machine and connect one as a delegation peer. Without a TTY it prints the proposals and writes nothing. |
 | `clio-coder configure --list` | List user-facing runtime ids. |
 | `clio-coder configure --list --all` | List every registered runtime, including aliases. |
+| `clio-coder config [inspect] [--json]` | Print the effective customization graph across settings, context files, rules, skills, prompts, agents, extensions, safety, memory, hooks, and operator profile. |
 | `clio-coder targets [--json] [--probe] [--target <id>]` | List configured targets, health, auth, runtime, model, and capabilities. |
 | `clio-coder targets add` | Add a target interactively or through configure flags. |
 | `clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]` | Point the orchestrator at one target. Without `--fleet-target` the fleet default follows it; with `--fleet-target` the fleet runs on a different node. `--worker-target` and `--worker-model` are accepted aliases from before the worker/fleet rename. |
@@ -145,17 +146,14 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
 | `/delegate` | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
 | `/agents` | `/agents` | List Clio agents and ACP delegation agents |
-| `/targets` | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
 | `/cost` | `/cost` | Show session token and cost totals |
-| `/context` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
-| `/fleet` | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
+| `/context` | `/context [compact [instructions] \| init \| refresh \| reset]` | Context hub: window overlay plus compact, init, refresh, and reset |
 | `/tasks` | `/tasks` | Show the session task board the agent tracks with the tasks tool |
-| `/memory` | `/memory seed` | Inspect task memory or seed it from the newest handoff |
+| `/memory` | `/memory [seed]` | Inspect task memory or seed it from the newest handoff |
 | `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
 | `/output` | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
-| `/scoped-models` | `/scoped-models` | Open Settings → Models: the Alt+J / Alt+K cycle set and favorites |
 | `/settings` | `/settings [section]` | Open interactive settings |
 | `/resume` | `/resume` | Resume a past session |
 | `/new` | `/new` | Start a fresh session |
