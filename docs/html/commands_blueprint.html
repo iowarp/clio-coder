@@ -483,7 +483,7 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
               TUI Slash Command Console
             </h2>
-            <p>Type a slash command (e.g. <code>/settings</code>, <code>/run</code>, <code>/targets</code>, <code>/help</code>) to test Clio's autocomplete and ListOverlay detail pane.</p>
+            <p>Type a slash command (e.g. <code>/settings</code>, <code>/run</code>, <code>/model</code>, <code>/help</code>) to test Clio's autocomplete and ListOverlay detail pane.</p>
             
             <div class="tui-console">
               <div class="tui-line">
@@ -623,27 +623,51 @@
           <tbody>
             <tr>
               <td><span class="badge">Run</span></td>
+              <td><code>/skill</code></td>
+              <td><code>/skill [name] [task]</code></td>
+              <td>Open Skills Hub or invoke a skill</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Run</span></td>
               <td><code>/run</code></td>
-              <td><code>/run &lt;agent&gt; &lt;task&gt;</code></td>
+              <td><code>/run [--agent-profile &lt;profile&gt;] [--runtime &lt;runtimeId&gt;] [--target &lt;id&gt;] [--model &lt;id&gt;] [--thinking &lt;level&gt;] [--tool-profile &lt;minimal-local|science-local|full-agent&gt;] [--require &lt;cap&gt;] [--share] &lt;agent&gt; &lt;task&gt;</code></td>
               <td>Run a fleet agent locally or on remote node</td>
             </tr>
             <tr>
               <td><span class="badge">Run</span></td>
               <td><code>/delegate</code></td>
-              <td><code>/delegate &lt;agent-id&gt; &lt;task&gt;</code></td>
+              <td><code>/delegate [--share] &lt;agent-id&gt; &lt;task&gt;</code></td>
               <td>Run an ACP delegation agent</td>
             </tr>
             <tr>
-              <td><span class="badge">Run</span></td>
+              <td><span class="badge">Inspect</span></td>
+              <td><code>/prompts</code></td>
+              <td><code>/prompts</code></td>
+              <td>List prompt templates</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Inspect</span></td>
+              <td><code>/extensions</code></td>
+              <td><code>/extensions</code></td>
+              <td>List installed extensions</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Inspect</span></td>
+              <td><code>/interop</code></td>
+              <td><code>/interop</code></td>
+              <td>Review other coding agents detected on this machine</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Inspect</span></td>
+              <td><code>/share</code></td>
+              <td><code>/share [runId] | /share export &lt;path&gt; | /share import [--dry-run] [--force] &lt;path&gt;</code></td>
+              <td>Share worker result with main agent, or export/import Clio archives</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Inspect</span></td>
               <td><code>/agents</code></td>
               <td><code>/agents</code></td>
               <td>List Clio agents and ACP delegation agents</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Run</span></td>
-              <td><code>/targets</code></td>
-              <td><code>/targets</code></td>
-              <td>Open Settings → Targets console: health, use, connect, probe, remove</td>
             </tr>
             <tr>
               <td><span class="badge">Inspect</span></td>
@@ -654,14 +678,8 @@
             <tr>
               <td><span class="badge">Inspect</span></td>
               <td><code>/context</code></td>
-              <td><code>/context [compact|init|refresh|reset]</code></td>
+              <td><code>/context [compact [instructions] | init | refresh | reset]</code></td>
               <td>Context hub: window ledger overlay plus compact, init, refresh, reset</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Inspect</span></td>
-              <td><code>/fleet</code></td>
-              <td><code>/fleet</code></td>
-              <td>Open Settings → Fleet workbench: defaults, profiles, agent routes, nodes</td>
             </tr>
             <tr>
               <td><span class="badge">Inspect</span></td>
@@ -683,12 +701,6 @@
             </tr>
             <tr>
               <td><span class="badge">Configure</span></td>
-              <td><code>/settings</code></td>
-              <td><code>/settings [section]</code></td>
-              <td>Open interactive transactional Settings Center</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
               <td><code>/thinking</code></td>
               <td><code>/thinking [level]</code></td>
               <td>Set chat thinking level or open Settings → Orchestrator</td>
@@ -707,33 +719,9 @@
             </tr>
             <tr>
               <td><span class="badge">Configure</span></td>
-              <td><code>/scoped-models</code></td>
-              <td><code>/scoped-models</code></td>
-              <td>Open Settings → Models: Alt+J / Alt+K cycle set checklist</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/skill</code></td>
-              <td><code>/skill [name] [task]</code></td>
-              <td>Open Skills Hub or invoke a skill</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/prompts</code></td>
-              <td><code>/prompts</code></td>
-              <td>List prompt templates</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/extensions</code></td>
-              <td><code>/extensions</code></td>
-              <td>List installed extensions</td>
-            </tr>
-            <tr>
-              <td><span class="badge">Configure</span></td>
-              <td><code>/share</code></td>
-              <td><code>/share export | import &lt;path&gt;</code></td>
-              <td>Export or import Clio archives</td>
+              <td><code>/settings</code></td>
+              <td><code>/settings [section]</code></td>
+              <td>Open interactive transactional Settings Center</td>
             </tr>
             <tr>
               <td><span class="badge">Sessions</span></td>

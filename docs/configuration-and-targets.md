@@ -97,12 +97,12 @@ clio-coder
 Inside the TUI, verify the local surface with:
 
 ```text
-/targets
+/settings targets
 /agents
 /skill
 ```
 
-`/targets` opens Settings → Targets: one row per configured target with its roles (chat, fleet, memory) and probe health, probed live when the section opens. `Enter` on a row offers use for chat and fleet dispatch, connect (API key or OAuth, then a probe), probe, and remove. The chat, fleet, and memory targets are also individual rows in the Orchestrator and Fleet sections.
+`/settings targets` opens Settings → Targets: one row per configured target with its roles (chat, fleet, memory) and probe health, probed live when the section opens. `Enter` on a row offers use for chat and fleet dispatch, connect (API key or OAuth, then a probe), probe, and remove. The chat, fleet, and memory targets are also individual rows in the Orchestrator and Fleet sections.
 
 Only add `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` when you have runtime/model-specific values that should override live probe results.
 
@@ -958,7 +958,7 @@ OAuth refresh follows signal-aware credential mutation. Clio serializes the read
 
 Prefer `--api-key-env` for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by `clio-coder auth status`, `clio-coder targets`, or `clio-coder configure`; only the source (env var name or `stored-api-key`) is shown.
 
-For interactive auth, open `/targets`, select the row, and press `c`. For a stored credential cleanup, use `clio-coder auth logout <target-or-runtime>`.
+For interactive auth, open `/settings targets`, select the row, and press `c`. For a stored credential cleanup, use `clio-coder auth logout <target-or-runtime>`.
 
 ---
 
