@@ -35,6 +35,7 @@ import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
+import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import type {
 	ContextClearCommandOptions,
@@ -650,11 +651,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		tui.requestRender();
 	};
 
-	const startNewSession = (): void => {
+	const startNewSession = async (): Promise<void> => {
 		if (!deps.onNewSession) {
 			emitCommandNotice(slashRuntime.notice, "error", "new", "session contract unavailable");
 			return;
 		}
+		const settlement = settleChatBeforeSessionSwitch(deps.chat);
+		if (settlement) await settlement;
 		deps.onNewSession();
 		deps.observability.resetSession();
 		presentation.resetForNewSession();
