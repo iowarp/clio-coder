@@ -1,6 +1,6 @@
 import { getTerminationCoordinator } from "../core/termination.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
-import { isKeyRelease } from "../engine/tui.js";
+import { isKeyRelease, type Keybinding } from "../engine/tui.js";
 import {
 	type ApplicationClock,
 	type ApplicationController,
@@ -39,7 +39,7 @@ export interface InteractiveInputKeyActionDeps {
 
 export interface InteractiveInputRuntimeDeps {
 	keybindings: {
-		matches(data: string, id: ClioKeybinding): boolean;
+		matches(data: string, id: Keybinding): boolean;
 		leaderTargets(): ReadonlyArray<LeaderTarget>;
 	};
 	dispatchAction: (id: ClioKeybinding, deps: InteractiveInputKeyActionDeps) => boolean;
@@ -217,6 +217,9 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				},
 				(input, id) => deps.keybindings.matches(input, id),
 			),
+		matchesEditorHistory: (data) =>
+			deps.keybindings.matches(data, "tui.editor.historyPrevious") ||
+			deps.keybindings.matches(data, "tui.editor.historyNext"),
 		matchesAction: (data, id) => deps.keybindings.matches(data, id),
 		dispatchAction: (id) => deps.dispatchAction(id, keyActionDeps()),
 		cancelActiveEditorBash: deps.cancelActiveEditorBash,

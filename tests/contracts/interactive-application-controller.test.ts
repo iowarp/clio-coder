@@ -21,6 +21,7 @@ interface Harness {
 	setLeaderPending(value: boolean): void;
 	setLeaderConsumes(value: boolean): void;
 	setOverlayConsumes(value: boolean): void;
+	setEditorHistoryMatches(value: boolean): void;
 	setBashCancels(value: boolean): void;
 	setMatchedAction(value: ClioKeybinding | null): void;
 	emitSigint(): void;
@@ -38,6 +39,7 @@ function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harn
 	let leaderPending = false;
 	let leaderConsumes = false;
 	let overlayConsumes = false;
+	let editorHistoryMatches = false;
 	let bashCancels = false;
 	let matchedAction: ClioKeybinding | null = null;
 	let sigintListener: (() => void) | undefined;
@@ -96,6 +98,11 @@ function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harn
 		routeOverlayKey: () => {
 			events.push("overlay:route");
 			return overlayConsumes;
+		},
+		matchesEditorHistory: () => {
+			if (!editorHistoryMatches) return false;
+			events.push("editor:history-match");
+			return true;
 		},
 		matchesAction: (_data, id) => id === matchedAction,
 		dispatchAction: (id) => {
@@ -174,6 +181,9 @@ function createHarness(overrides: Partial<ApplicationControllerDeps> = {}): Harn
 		setOverlayConsumes: (value) => {
 			overlayConsumes = value;
 		},
+		setEditorHistoryMatches: (value) => {
+			editorHistoryMatches = value;
+		},
 		setBashCancels: (value) => {
 			bashCancels = value;
 		},
@@ -249,6 +259,22 @@ describe("contracts/interactive application controller", () => {
 		harness.setMatchedAction("clio.tool.expand");
 		deepStrictEqual(controller.handleInput("o"), { consume: true });
 		deepStrictEqual(harness.events, ["overlay:route", "leader:route", "action:clio.tool.expand"]);
+	});
+
+	it("lets explicit editor history beat a conflicting app action after overlay routing", () => {
+		const harness = createHarness();
+		harness.setEditorHistoryMatches(true);
+		harness.setMatchedAction("clio.model.cycleForward");
+		const controller = createApplicationController(harness.deps);
+		harness.events.length = 0;
+
+		strictEqual(controller.handleInput("history"), undefined);
+		deepStrictEqual(harness.events, ["overlay:route", "leader:route", "editor:history-match"]);
+
+		harness.events.length = 0;
+		harness.setOverlay("agents");
+		strictEqual(controller.handleInput("history"), undefined);
+		deepStrictEqual(harness.events, ["overlay:route"], "an open overlay remains ahead of editor history");
 	});
 
 	it("keeps the three key-action double-tap clocks independent and inclusive", () => {

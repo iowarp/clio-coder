@@ -165,9 +165,22 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 } as const satisfies KeybindingDefinitions;
 
-/** Full definition table = pi-tui editor/select defaults + Clio app ids. */
+/**
+ * Full definition table = pi-tui editor/select defaults + Clio app ids.
+ * pi-tui 0.84 supplies dedicated prompt-history actions but leaves them
+ * unbound for applications to place. Clio uses the readline-style Ctrl+P and
+ * Ctrl+N pair because its model cycling already lives on Alt+J and Alt+K.
+ */
 export const CLIO_KEYBINDINGS = {
 	...TUI_KEYBINDINGS,
+	"tui.editor.historyPrevious": {
+		...TUI_KEYBINDINGS["tui.editor.historyPrevious"],
+		defaultKeys: "ctrl+p",
+	},
+	"tui.editor.historyNext": {
+		...TUI_KEYBINDINGS["tui.editor.historyNext"],
+		defaultKeys: "ctrl+n",
+	},
 	...CLIO_APP_KEYBINDINGS,
 } as const satisfies KeybindingDefinitions;
 

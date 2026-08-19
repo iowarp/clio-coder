@@ -32,6 +32,12 @@ describe("contracts/steering mode key selection", () => {
 		);
 	});
 
+	it("binds pi-tui's dedicated prompt history actions to Ctrl+P and Ctrl+N", () => {
+		const manager = createKeybindingManagerForTesting();
+		deepStrictEqual(manager.getKeys("tui.editor.historyPrevious"), ["ctrl+p"]);
+		deepStrictEqual(manager.getKeys("tui.editor.historyNext"), ["ctrl+n"]);
+	});
+
 	it("dispatches each chord to its own editor action", () => {
 		const calls: string[] = [];
 		const deps = {

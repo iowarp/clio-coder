@@ -47,8 +47,9 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 			events.push(`set:${next}`);
 		},
 		addToHistory: (entry) => {
-			history.push(entry);
-			events.push(`history:${entry}`);
+			const trimmed = entry.trim();
+			if (history.at(-1) !== trimmed) history.push(trimmed);
+			events.push(`history:${trimmed}`);
 		},
 	};
 	const running = options.running ?? [];
@@ -142,9 +143,11 @@ describe("contracts/interactive editor submit", () => {
 
 		deepStrictEqual(harness.events, [
 			"collapse",
+			"history:first prompt",
 			"set:",
 			"dispatch:first prompt",
 			"render",
+			"history:second prompt",
 			"set:",
 			"dispatch:second prompt",
 			"render",
@@ -157,7 +160,7 @@ describe("contracts/interactive editor submit", () => {
 
 		controller.submitEditorText("  /help topic  ");
 
-		deepStrictEqual(harness.events, ["set:", "dispatch:/help topic", "render"]);
+		deepStrictEqual(harness.events, ["history:/help topic", "set:", "dispatch:/help topic", "render"]);
 	});
 
 	// A token the registry does not claim used to be put back so it could be
@@ -172,7 +175,7 @@ describe("contracts/interactive editor submit", () => {
 		controller.submitEditorText("/thnking off");
 
 		strictEqual(harness.getText(), "");
-		deepStrictEqual(harness.events, ["set:", "dispatch:/thnking off", "render"]);
+		deepStrictEqual(harness.events, ["history:/thnking off", "set:", "dispatch:/thnking off", "render"]);
 	});
 
 	it("returns input a command rejected on its arguments", () => {
@@ -182,6 +185,7 @@ describe("contracts/interactive editor submit", () => {
 		controller.submitEditorText("/context init --no-generate");
 
 		strictEqual(harness.getText(), "/context init --no-generate");
+		deepStrictEqual(harness.history, [], "a rejected command is a draft to correct, not submitted history");
 	});
 
 	// Only the shapes that never reached a handler come back. A command that ran
@@ -196,6 +200,7 @@ describe("contracts/interactive editor submit", () => {
 		harness.setText("explain this repository");
 		controller.submitEditorText("explain this repository");
 		strictEqual(harness.getText(), "");
+		deepStrictEqual(harness.history, ["/help", "explain this repository"]);
 	});
 
 	it("consumes a matching steer mention before slash or chat dispatch", () => {
@@ -252,7 +257,14 @@ describe("contracts/interactive editor submit", () => {
 
 		controller.interruptFromEditor();
 
-		deepStrictEqual(harness.events, ["set:", "set:", "dispatch:just send it", "render", "render"]);
+		deepStrictEqual(harness.events, [
+			"set:",
+			"history:just send it",
+			"set:",
+			"dispatch:just send it",
+			"render",
+			"render",
+		]);
 		deepStrictEqual(harness.submits, []);
 	});
 
@@ -409,6 +421,23 @@ describe("contracts/interactive editor submit", () => {
 
 		strictEqual(controller.hasActiveEditorBash(), false);
 		deepStrictEqual(harness.events, ["ensure-session", "append-bash", "refresh:null", "render"]);
+	});
+
+	it("records an accepted local bash submission but not one refused during streaming", async () => {
+		const accepted = createHarness();
+		accepted.deps.runBash = async () => bashResult();
+		const acceptedController = createEditorSubmitController(accepted.deps);
+		acceptedController.submitEditorText("! pwd");
+		await flushAsync();
+		deepStrictEqual(accepted.history, ["! pwd"]);
+		strictEqual(accepted.getText(), "");
+
+		const refused = createHarness({ streaming: true });
+		refused.setText("! pwd");
+		const refusedController = createEditorSubmitController(refused.deps);
+		refusedController.submitEditorText("! pwd");
+		deepStrictEqual(refused.history, []);
+		strictEqual(refused.getText(), "! pwd");
 	});
 
 	it("restores the leaf the session has when the bash finishes, not the one captured when it started", async () => {
