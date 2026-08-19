@@ -292,7 +292,7 @@ LM Studio can require bearer authentication for its HTTP APIs
 
 ### Loaded instances and LM Link peers
 
-A model id on an LM Studio target is resolved against that host's loaded instances. A key with a loaded instance is never sent bare (which would JIT-load a second copy). An instance id reported loaded by two configured LM Studio targets on different hosts is an LM Link peer projection. This behavior tracks issue #113.
+A model id on an LM Studio target is resolved against that host's loaded instances. A key with a loaded instance is never sent bare (which would JIT-load a second copy). An instance id reported loaded by two configured LM Studio targets on different hosts is an LM Link peer projection. When a bare model key is requested and multiple instances of it are loaded, Clio selects an instance in this order: the target's configured `defaultModel`, then an instance not cross-listed by another configured LM Studio target, and finally the first loaded instance. This behavior tracks issue #113.
 
 
 Prompt-template overrides, system prompts, GPU-offload ratios, KV-cache quantization, parallel slots,
