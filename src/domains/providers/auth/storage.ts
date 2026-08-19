@@ -374,12 +374,23 @@ export class AuthStorage {
 	renameProvider(fromProviderId: string, toProviderId: string, options: { keepSource?: boolean } = {}): void {
 		this.backend.withLock((current) => {
 			const read = readStorageData(current);
-			if (read.damage !== null) throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
 			const source = read.data[fromProviderId];
+			// A rename with nothing to rename writes nothing, so a file this parser
+			// could not fully read is in no danger from it. Refusing on damage before
+			// establishing that turned a hand-edited credentials.yaml into a
+			// permanent `clio-coder upgrade` failure: the lmstudio-native migration
+			// calls this on every upgrade, and it failed even on homes that had never
+			// held an lmstudio-native credential.
 			if (!source) {
-				this.data = read.data;
+				// Adopt the fresh view only when it is the whole file. A damaged read
+				// yields an empty view, and adopting that would report stored
+				// credentials as gone.
+				if (read.damage === null) this.data = read.data;
 				return { result: undefined };
 			}
+			// Past here the rename rewrites the whole file, so a partially readable
+			// one would be serialized back with the unread entries dropped.
+			if (read.damage !== null) throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
 			if (!read.data[toProviderId]) read.data[toProviderId] = source;
 			if (options.keepSource !== true) delete read.data[fromProviderId];
 			this.data = read.data;
