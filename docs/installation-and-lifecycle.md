@@ -68,7 +68,7 @@ with its `registry.yaml` and `skill-marketplace.json`, `src/domains/prompts/frag
 `src/domains/providers/models/`) are read from the installed package root; the `.clio-coder/`
 entries above compose with them and never replace them on disk. Builtin agent recipes bind
 skills straight out of the package catalog; the operator's own session reaches the same
-catalog only as a marketplace, through `clio-coder skills install <name>` or `/skill:<name>`.
+catalog only as a marketplace, through `clio-coder skills install <name>` or `/skill <name>`.
 
 ---
 

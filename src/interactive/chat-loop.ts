@@ -215,11 +215,11 @@ export interface ChatLoop {
 	/**
 	 * Force-run the compaction flow for the current session, swap the agent's
 	 * in-memory `state.messages` for a single bridge message carrying the
-	 * summary, and emit the standard summary notice. Used by the `/compact`
+	 * summary, and emit the standard summary notice. Used by `/context compact`
 	 * slash command so the next user turn ships only the bridge plus the new
 	 * text to the provider (slice 12.5b bug 4). Silent no-op when no session
 	 * or no compaction deps are wired; in both cases emits a user-visible
-	 * notice so the `/compact` handler does not have to mirror the logic.
+	 * notice so the `/context compact` handler does not have to mirror the logic.
 	 */
 	compact(instructions?: string): Promise<void>;
 	/**
@@ -954,7 +954,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// current session" message rather than the "not configured"
 			// banner.
 			if (!deps.session?.current()) {
-				emitNotice("[/compact] no current session to compact; start one with /new or /resume first");
+				emitNotice("[/context compact] no current session to compact; start one with /new or /resume first");
 				return;
 			}
 			let agentRuntime: AgentRuntime | null;
@@ -962,22 +962,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
 				agentRuntime = turnRuntime.ensureRuntime();
 			} catch (err) {
-				emitNotice(`[/compact] ${err instanceof Error ? err.message : String(err)}`);
+				emitNotice(`[/context compact] ${err instanceof Error ? err.message : String(err)}`);
 				return;
 			}
 			if (!agentRuntime) {
-				emitNotice(`[/compact] ${notConfiguredNotice()}`);
+				emitNotice(`[/context compact] ${notConfiguredNotice()}`);
 				return;
 			}
 			let compacted = false;
 			try {
 				compacted = await context.runAutoCompact(agentRuntime, true, instructions, "force");
 			} catch (err) {
-				emitNotice(`[/compact] ${err instanceof Error ? err.message : String(err)}`);
+				emitNotice(`[/context compact] ${err instanceof Error ? err.message : String(err)}`);
 				return;
 			}
 			if (!compacted) {
-				emitNotice("[/compact] nothing to compact; session is empty or no cut crossed");
+				emitNotice("[/context compact] nothing to compact; session is empty or no cut crossed");
 			}
 		},
 	};

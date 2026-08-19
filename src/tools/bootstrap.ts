@@ -165,7 +165,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		),
 		costLatency: "local_fast",
 		promptHint:
-			'Call context with scope="skills" to list installed and marketplace skills; when one matches the task, or the operator names a skill or asks how one works, suggest the operator run /skill:<name> (a marketplace skill is offered for install) and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
+			'Call context with scope="skills" to list installed and marketplace skills; when one matches the task, or the operator names a skill or asks how one works, suggest the operator run /skill <name> (a marketplace skill is offered for install) and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
 	},
 	[ToolNames.CredentialPresent]: {
 		objective: "Check whether a credential key is present without returning its value.",

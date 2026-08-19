@@ -5,7 +5,7 @@
  * With a filter typed, Esc clears the filter and a second Esc closes, while the
  * footer read `[Esc] close` through both. And the same gesture was named four
  * ways across the product: `[type] filter` in `/help`, `[type] search` in
- * `/models` and `/resume`, `[Esc] cancel` in `/resume`, nothing in `/tree`.
+ * `/model` and `/resume`, `[Esc] cancel` in `/resume`, nothing in `/tree`.
  *
  * The footer now states the action for the state the overlay is actually in,
  * and there is one word for each thing.

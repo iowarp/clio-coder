@@ -91,7 +91,7 @@ describe("contracts/prompts", () => {
 		context: {
 			tool: "context",
 			hint:
-				'Call context with scope="skills" to list installed and marketplace skills; when one matches the task, or the operator names a skill or asks how one works, suggest the operator run /skill:<name> (a marketplace skill is offered for install) and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
+				'Call context with scope="skills" to list installed and marketplace skills; when one matches the task, or the operator names a skill or asks how one works, suggest the operator run /skill <name> (a marketplace skill is offered for install) and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
 		},
 		dispatch: {
 			tool: "dispatch",
@@ -873,7 +873,7 @@ describe("contracts/prompts", () => {
 			// The passage tells the agent to check the catalog on skill-shaped tasks
 			// and to suggest matches (or a sequence) to the operator.
 			ok(flat.includes('context (scope="skills")'));
-			ok(flat.includes("/skill:<name>"));
+			ok(flat.includes("/skill <name>"));
 			ok(flat.includes("when skills compose"));
 			// The gate: only the operator activates skills; no self-loading.
 			ok(flat.includes("Only an explicit operator request activates a skill"));

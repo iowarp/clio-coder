@@ -431,7 +431,7 @@ async function runProductionFailureScenario(
 }
 
 describe("contracts/compaction context-island activity (S3 Part A)", () => {
-	it("a forced /compact emits started -> completed around the LLM stage", async () => {
+	it("a forced /context compact emits started -> completed around the LLM stage", async () => {
 		const bus = createSafeEventBus();
 		const activities = compactionActivities(bus);
 		const entries: SessionEntry[] = [];
@@ -629,7 +629,7 @@ describe("contracts/production compaction failure wiring", () => {
 				);
 				ok(visible.includes(cause), `operator-visible notice should expose ${JSON.stringify(cause)}`);
 				ok(
-					visible.includes(mode === "forced" ? "[/compact]" : "auto-compaction failed"),
+					visible.includes(mode === "forced" ? "[/context compact]" : "auto-compaction failed"),
 					"operator-visible wording should identify the failed compaction path",
 				);
 				ok(!visible.includes("nothing to compact"), "a production failure must not render the no-op notice");

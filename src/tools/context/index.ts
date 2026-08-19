@@ -235,7 +235,7 @@ function renderSkillsList(
 		return marketplaceOffered ? "No skills are installed and no marketplace is configured." : "No skills are installed.";
 	}
 	const lines = [
-		"Available skills. Match the current task against the descriptions below: when one fits, suggest the operator run /skill:<name>; when several compose, suggest the sequence in order. Skill bodies load only after an explicit operator request; never load one without it.",
+		"Available skills. Match the current task against the descriptions below: when one fits, suggest the operator run /skill <name>; when several compose, suggest the sequence in order. Skill bodies load only after an explicit operator request; never load one without it.",
 		"",
 	];
 	if (skills.length > 0) {
@@ -248,12 +248,12 @@ function renderSkillsList(
 	}
 	if (marketplace.length > 0) {
 		// Installable rows are suggested exactly like installed ones: the
-		// operator's /skill:<name> prompts to install before it runs, so the
+		// operator's /skill <name> prompts to install before it runs, so the
 		// model's move is the same suggest-and-wait. Only the body is out of
 		// reach until then, which is why the description is all that appears.
 		lines.push(
 			"",
-			"Marketplace (not installed; /skill:<name> offers to install, or `clio-coder skills install <name>`). Suggest these the same way when one matches; their bodies cannot be loaded until the operator installs them:",
+			"Marketplace (not installed; /skill <name> offers to install, or `clio-coder skills install <name>`). Suggest these the same way when one matches; their bodies cannot be loaded until the operator installs them:",
 		);
 		for (const entry of marketplace) {
 			const category = entry.category ? ` [${entry.category}]` : "";
@@ -314,7 +314,7 @@ function withSkillsPointer(deps: ContextToolDeps, snap: WorkspaceSnapshot): Reco
 	if (installed === 0 && installable === 0) return { ...snap };
 	return {
 		...snap,
-		skills: `Skills: ${installed} installed, ${installable} installable from the marketplace. If one matches this task, or the operator names a skill, list them with context(scope="skills") and suggest /skill:<name> to the operator; load only on operator request.`,
+		skills: `Skills: ${installed} installed, ${installable} installable from the marketplace. If one matches this task, or the operator names a skill, list them with context(scope="skills") and suggest /skill <name> to the operator; load only on operator request.`,
 	};
 }
 
@@ -409,7 +409,7 @@ function runSkillsScope(
 		if (installable) {
 			return {
 				kind: "error",
-				message: `context: skill "${name}" is not installed; it is available in the marketplace. Ask the operator to run /skill:${name}, which offers to install it, and wait. Do not retry this load.`,
+				message: `context: skill "${name}" is not installed; it is available in the marketplace. Ask the operator to run /skill ${name}, which offers to install it, and wait. Do not retry this load.`,
 			};
 		}
 		const available = visible.map((item) => item.name).join(", ");

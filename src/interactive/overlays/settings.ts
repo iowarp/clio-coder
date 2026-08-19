@@ -145,7 +145,7 @@ const SETTINGS_SECTION_DESCRIPTIONS = {
 	orchestrator: "Interactive chat routing and the optional proactive-memory model plane.",
 	fleet: "Defaults, profiles, and agent bindings applied to dispatched workers, and where they run.",
 	targets: "Configured inference targets: which one chat and the fleet use, and whether each answers.",
-	models: "The /models picker, favorites, and Alt+J / Alt+K cycling.",
+	models: "The /model picker, favorites, and Alt+J / Alt+K cycling.",
 	budget: "Cost ceiling, per-turn output budget, and worker concurrency.",
 	compaction: "When and how the context window is summarized under pressure.",
 	retry: "Automatic recovery from transient provider and network errors.",
@@ -306,8 +306,8 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles. Enter adds one.",
 	"workers.maxRetries": "Automatic retries for a retryable worker outcome.",
 	scope: "Alt+J and Alt+K model cycle set.",
-	"modelSelector.recentLimit": "How many recently used models /models remembers.",
-	"modelSelector.favorites": "Exact target/model refs pinned in /models.",
+	"modelSelector.recentLimit": "How many recently used models /model remembers.",
+	"modelSelector.favorites": "Exact target/model refs pinned in /model.",
 	"budget.sessionCeilingUsd": "Per-session cost cap.",
 	"defaults.maxTokens": "Output tokens requested per turn, applied to every target.",
 	"budget.concurrency": "Parallel workers allowed during dispatch.",
@@ -381,7 +381,7 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 	},
 	"compaction.auto": {
 		true: "compact automatically before a turn crosses the threshold",
-		false: "context is only compacted when you run /compact",
+		false: "context is only compacted when you run /context compact",
 	},
 	"retry.enabled": {
 		true: "retry transient provider errors automatically",
@@ -1343,7 +1343,7 @@ export function buildSettingItems(
 			values: ["6", "12", "20", "50"],
 		}),
 		settingItem("modelSelector.favorites", favorites.length > 0 ? `${favorites.length} pinned` : "(none)", {
-			affordance: "manage in /models",
+			affordance: "manage in /model",
 			readOnly: true,
 		}),
 		settingItem("budget.sessionCeilingUsd", String(settings.budget.sessionCeilingUsd), {

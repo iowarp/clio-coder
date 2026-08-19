@@ -895,15 +895,8 @@ export function modelVisibleSkills(skills: ReadonlyArray<Skill>): Skill[] {
 
 export function parseSkillCommand(input: string): { name: string; args: string } | null {
 	const trimmed = input.trim();
-	const prefix = trimmed.startsWith("/skill:")
-		? "/skill:"
-		: trimmed.startsWith("/skills:")
-			? "/skills:"
-			: trimmed.startsWith("/skill ")
-				? "/skill "
-				: null;
-	if (!prefix) return null;
-	const rest = trimmed.slice(prefix.length).trim();
+	if (!trimmed.startsWith("/skill ")) return null;
+	const rest = trimmed.slice("/skill ".length).trim();
 	const separator = rest.search(/\s/);
 	const name = separator === -1 ? rest : rest.slice(0, separator);
 	if (name.length === 0) return null;

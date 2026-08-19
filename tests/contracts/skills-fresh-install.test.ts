@@ -124,7 +124,7 @@ describe("contracts/skills fresh install: the marketplace with nothing configure
 			ok(!(installedNames.has(name) && marketplaceNames.includes(name)), `${name} listed twice`);
 		}
 		ok(listing.output.includes("Marketplace (not installed"), listing.output.slice(0, 400));
-		ok(listing.output.includes("/skill:<name> offers to install"), listing.output.slice(0, 400));
+		ok(listing.output.includes("/skill <name> offers to install"), listing.output.slice(0, 400));
 		const sample = marketplaceNames[0];
 		ok(sample, "the host has every catalog skill installed; nothing left to prove here");
 		const category = details.marketplace[0]?.category;
@@ -135,7 +135,7 @@ describe("contracts/skills fresh install: the marketplace with nothing configure
 		strictEqual(load.kind, "error");
 		if (load.kind === "error") {
 			ok(load.message.includes(`skill "${sample}" is not installed`), load.message);
-			ok(load.message.includes(`/skill:${sample}`), load.message);
+			ok(load.message.includes(`/skill ${sample}`), load.message);
 			strictEqual(load.message.includes("unknown skill"), false, load.message);
 		}
 	});

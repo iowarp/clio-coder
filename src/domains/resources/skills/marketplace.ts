@@ -25,7 +25,7 @@ import { loadSkills, type Skill } from "./loader.js";
  * The package fallbacks are what make a fresh npm install a marketplace at
  * all: before them, an operator outside this repository with no env var set
  * had no catalog and no index, so every bare-name install and every
- * `/skill:<name>` for a catalog skill failed. The package catalog is a
+ * `/skill <name>` for a catalog skill failed. The package catalog is a
  * marketplace source only, never a discovery root; catalog skills stay
  * uninstalled until the operator asks, and install copies them out of the
  * package into a Clio root without touching the network.

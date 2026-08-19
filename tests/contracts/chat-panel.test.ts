@@ -640,7 +640,7 @@ describe("chat-panel agent voice", () => {
 	 */
 	it("leaves a leading skill suggestion unglyphed and gives ✦ to the answer after the tool ledger", () => {
 		const suggestion = SKILL_SUGGESTION_ANCHOR.replace("<name>", "tui-design");
-		strictEqual(suggestion, "Suggested skill: /skill:tui-design");
+		strictEqual(suggestion, "Suggested skill: /skill tui-design");
 		ok(suggestion.startsWith(SKILL_SUGGESTION_PREFIX), "a substituted suggestion still carries the shared prefix");
 		ok(!suggestion.includes("<name>"), "no live reply writes the placeholder");
 

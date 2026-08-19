@@ -78,7 +78,7 @@ export interface WorkersSettings {
  *
  * Fields:
  *   - auto: master switch for the chat-loop's pre-request trigger. Manual
- *     /compact still runs when auto=false.
+ *     /context compact still runs when auto=false.
  *   - threshold: context pressure (estimated_tokens / context_window, 0..1)
  *     at which compaction acts: stale observations are masked first, and a
  *     full LLM summary runs if pressure stays above the threshold.
@@ -506,7 +506,7 @@ routing:
 # Alt+J / Alt+K cycling order: plain target ids or "target/model" refs.
 scope: []
 
-# /models focused picker. Favorites are exact "target/model" refs shown before
+# /model focused picker. Favorites are exact "target/model" refs shown before
 # the full search catalog. Recently selected models are runtime state and live
 # in the state dir (recent-models.json), not in this file.
 modelSelector:
@@ -587,7 +587,7 @@ keybindings: {}
 
 # Context compaction controls.
 #   auto              master switch for the pre-request compaction trigger.
-#                     Manual /compact always runs the LLM summary.
+#                     Manual /context compact always runs the LLM summary.
 #   threshold         pressure = estimated_tokens / context_window. Crossing
 #                     it masks stale tool observations first, then runs a
 #                     full LLM summary if pressure stays above the threshold.

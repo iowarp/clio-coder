@@ -175,7 +175,7 @@ export interface InteractiveDeps {
 	 */
 	onForkSession?: (parentTurnId: string) => void;
 	/**
-	 * Run /compact for the current session. Resolves the compaction model
+	 * Run `/context compact` for the current session. Resolves the compaction model
 	 * (settings.compaction.model with fallback to the orchestrator target),
 	 * reads session entries, streams a summary via the session compaction
 	 * engine, and persists a compactionSummary entry.

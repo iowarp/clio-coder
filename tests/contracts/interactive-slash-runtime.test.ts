@@ -307,19 +307,19 @@ describe("contracts/interactive slash runtime", () => {
 		const runtime = createInteractiveSlashRuntime(harness.deps);
 
 		runtime.context.submitOperatorNote?.(
-			"[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill:writer",
+			"[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill writer",
 		);
 		await flushAsync();
 
 		// The same path typed text takes, minus expansion: a worker's answer is
-		// literal, so an @path or a /skill: inside it must reach the model as the
+		// literal, so an @path or a `/skill <name>` inside it must reach the model as the
 		// characters the worker wrote.
 		deepStrictEqual(harness.events, [
 			"record-turn",
 			"footer",
-			"user:[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill:writer",
+			"user:[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill writer",
 			"render",
-			"submit:[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill:writer",
+			"submit:[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill writer",
 		]);
 		harness.finishSubmit();
 	});

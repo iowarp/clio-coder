@@ -613,7 +613,7 @@ describe("contracts/skill-evals", () => {
 				"do the task",
 			]);
 
-			const treatment = armRunArgs("treatment", "/skill:demo do the task", {
+			const treatment = armRunArgs("treatment", "/skill demo do the task", {
 				target: "mini",
 				skillBaseDir: "/skills/demo",
 			});

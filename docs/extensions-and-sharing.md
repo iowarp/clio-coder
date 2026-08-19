@@ -102,10 +102,10 @@ Use in the TUI:
 
 ```text
 /skill
-/skill:hdf5-review review the output validation path
+/skill hdf5-review review the output validation path
 ```
 
-`/skill` opens the Skills Hub with discovered project skills, user skills, and marketplace entries. `/skill:name args` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio-coder run "/skill:name args"` matches the interactive behavior.
+`/skill` opens the Skills Hub with discovered project skills, user skills, and marketplace entries. `/skill <name> [args]` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio-coder run "/skill hdf5-review inspect the writer"` matches the interactive behavior.
 
 Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata, prompt diagnostics, and run receipts. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
 
@@ -116,7 +116,7 @@ The canonical invocation name is the frontmatter `name` when present, otherwise 
 Recognized frontmatter fields:
 
 - `name`, `description`: core identity.
-- `disable-model-invocation: true`: hides the skill from the model-visible catalog while keeping it loadable by `/skill:name`.
+- `disable-model-invocation: true`: hides the skill from the model-visible catalog while keeping it loadable by `/skill <name>`.
 - `allowed-tools`, `disallowed-tools`: parsed as tool policy fields for the loaded skill workflow.
 - `license`, `version`, `compatibility`, and other non-core keys: captured as skill metadata and surfaced when the skill loads through `context`.
 - `source-url`, `registry-id`, `installed-at`, `updated-at`, `audit`: captured as install provenance when present.
@@ -171,7 +171,7 @@ Clio does not call Skills.sh during startup or prompt assembly, and does not emi
 
 ### Prompt envelope and safety
 
-Skill bodies never enter the prompt uninvited. The model discovers skills only through `context(scope="skills")`: a call with no `name` returns a one-line listing (name, scope, description) of model-visible skills, and a body loads only when the pending-skill policy authorizes that name for the turn, which requires an explicit operator invocation such as `/skill:<name>`. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio tools and safety gates, and a loaded skill's `allowed-tools` declaration narrows the tool surface at admission (reason code `skill_surface`) without ever granting anything the host would refuse.
+Skill bodies never enter the prompt uninvited. The model discovers skills only through `context(scope="skills")`: a call with no `name` returns a one-line listing (name, scope, description) of model-visible skills, and a body loads only when the pending-skill policy authorizes that name for the turn, which requires an explicit operator invocation such as `/skill <name>`. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio tools and safety gates, and a loaded skill's `allowed-tools` declaration narrows the tool surface at admission (reason code `skill_surface`) without ever granting anything the host would refuse.
 
 ---
 

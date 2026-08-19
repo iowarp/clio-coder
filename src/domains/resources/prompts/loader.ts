@@ -51,6 +51,8 @@ export interface LoadPromptTemplatesInput {
 	home?: string;
 	/** Opt in to model-visible project compatibility roots (.claude/commands, .codex/prompts). */
 	trustProjectCompatRoots?: boolean;
+	/** Names owned by another command registry and unavailable to templates. */
+	reservedNames?: ReadonlySet<string>;
 }
 
 export type PromptTemplateExpansion =
@@ -189,8 +191,20 @@ export function loadPromptTemplates(input: LoadPromptTemplatesInput = {}): Promp
 	const diagnostics: ResourceDiagnostic[] = [];
 	const candidates = roots.flatMap((root) => loadPromptRoot(root, diagnostics));
 	const resolved = resolveResourceCollisions(candidates);
+	const items: PromptTemplate[] = [];
+	for (const template of resolved.winners) {
+		if (input.reservedNames?.has(template.name) === true) {
+			diagnostics.push({
+				type: "collision",
+				message: `prompt template /${template.name} conflicts with the built-in slash command /${template.name} and was ignored`,
+				path: template.filePath,
+			});
+			continue;
+		}
+		items.push(template);
+	}
 	return {
-		items: [...resolved.winners].sort((a, b) => a.name.localeCompare(b.name)),
+		items: items.sort((a, b) => a.name.localeCompare(b.name)),
 		diagnostics: [...diagnostics, ...resolved.diagnostics],
 	};
 }

@@ -13,7 +13,7 @@ import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 /**
  * The Skills Hub: one multipane surface for every skill Clio can reach.
  * Installed skills group by scope, marketplace rows come from the same local
- * marketplace lookup the installer and `/skill:<name>` resolve through, Enter
+ * marketplace lookup the installer and `/skill <name>` resolve through, Enter
  * inserts the invocation into the editor, and `i` installs in place. The hub
  * lists nothing the resolver cannot resolve; when the lookup is empty the hub
  * says so and names the remedy instead of drawing an inventory.
@@ -82,7 +82,7 @@ export function buildInstalledItems(list: ResourceList<Skill>): ListOverlayItem[
 			detail: () => {
 				const lines = [
 					`# ${skill.name}`,
-					`**Invoke:** \`/skill:${skill.name} [task]\``,
+					`**Invoke:** \`/skill ${skill.name} [task]\``,
 					`**Source:** \`${skill.filePath}\``,
 					`**Scope:** ${skill.scope}/${skill.source}${skill.trusted ? "" : " (untrusted)"}`,
 				];
@@ -119,7 +119,7 @@ export function buildMarketplaceItems(
 			group: GROUP_MARKETPLACE,
 			detail: () => [
 				`# ${skill.name}`,
-				`**Invoke:** \`/skill:${skill.name} [task]\` (prompts to install first)`,
+				`**Invoke:** \`/skill ${skill.name} [task]\` (prompts to install first)`,
 				"**Install now:** press `i`",
 				`**Source:** \`${skill.sourceUrl}\``,
 				`**Origin:** ${skill.origin}${skill.category ? ` (${skill.category})` : ""}${skill.audit ? ` · audit ${skill.audit}` : ""}`,
@@ -201,7 +201,7 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 		onSelect: (item) => {
 			if (item.group === GROUP_DIAGNOSTICS) return;
 			const name = item.id.startsWith("marketplace:") ? item.id.slice("marketplace:".length) : item.id;
-			deps.setEditorText(`/skill:${name} `);
+			deps.setEditorText(`/skill ${name} `);
 			deps.onClose();
 		},
 		actions: {

@@ -41,17 +41,8 @@ export function openHelpOverlay(
 				// Overlay key actions are deliberately not duplicated here: each
 				// overlay's footer hint is the live source of its keys, and a static
 				// copy would rot exactly like the old SLASH_HOTKEYS table did.
-				detail: () => {
-					const lines = [`# Command: /${ref.name}`, `**Usage:** \`${ref.usage}\``, `**Description:** ${ref.description}`];
-					if (ref.aliases.length > 0) {
-						lines.push(`**Aliases:** ${ref.aliases.map((a) => `/${a}`).join(", ")}`);
-					}
-					return lines;
-				},
+				detail: () => [`# Command: /${ref.name}`, `**Usage:** \`${ref.usage}\``, `**Description:** ${ref.description}`],
 			};
-			if (ref.aliases.length > 0) {
-				item.meta = ref.aliases.join(", ");
-			}
 			return item;
 		});
 
