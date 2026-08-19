@@ -536,6 +536,12 @@ function verificationSection(cwd: string): ClioMdSection | null {
 	if (existsSync(join(cwd, "Cargo.toml"))) {
 		lines.push("Run `cargo build` and `cargo test` before handoff.");
 	}
+	// Go's commands are defined by the toolchain, not by each project, so
+	// naming them for any module carries the same confidence as a declared
+	// package script.
+	if (existsSync(join(cwd, "go.mod"))) {
+		lines.push("Run `go build ./...` and `go test ./...` before handoff.");
+	}
 	if (lines.length === 0) return null;
 	return { title: "Verification expectations", body: lines.join(" ") };
 }
