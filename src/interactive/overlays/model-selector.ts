@@ -46,6 +46,13 @@ const MODEL_OVERLAY_MAX_WIDTH = 120;
 const MODEL_OVERLAY_TERMINAL_PADDING = 8;
 const VISIBLE_ROWS = 10;
 const MODEL_MIN_WIDTH = 14;
+/**
+ * Every other column pair is separated by an explicit space. The model cell
+ * instead relies on its own padding, so a label that fills the column exactly
+ * butts straight against the ctx figure. The gutter is reserved inside the
+ * model cell, which keeps the header and the rows on the same column stops.
+ */
+const MODEL_COL_GUTTER = 1;
 const CONTEXT_COL_WIDTH = 7;
 const CAPS_COL_WIDTH = 5;
 const TARGET_COL_WIDTH_NARROW = 8;
@@ -550,6 +557,11 @@ function modelColumns(width: number): ModelColumns {
 	};
 }
 
+/** The model cell, always leaving `MODEL_COL_GUTTER` blank columns before ctx. */
+function fitModelCell(text: string, columnWidth: number): string {
+	return fitCell(truncateMiddle(text, Math.max(1, columnWidth - MODEL_COL_GUTTER)), columnWidth);
+}
+
 function fitCell(text: string, width: number, align: "left" | "right" = "left"): string {
 	const clipped = truncateToWidth(text, width, "", true);
 	const pad = " ".repeat(Math.max(0, width - visibleWidth(clipped)));
@@ -578,7 +590,7 @@ function formatModelHeader(width: number): string {
 	const columns = modelColumns(width);
 	let line =
 		`${" ".repeat(SELECTED_PREFIX_WIDTH)}` +
-		`${fitCell("model", columns.modelWidth)}` +
+		`${fitModelCell("model", columns.modelWidth)}` +
 		`${fitCell("ctx", CONTEXT_COL_WIDTH, "right")} ` +
 		`${fitCell("caps", CAPS_COL_WIDTH)}`;
 	if (columns.showTarget) line += ` ${fitCell("target", columns.targetWidth)}`;
@@ -598,7 +610,7 @@ function formatModelRow(row: ModelRow, width: number, selected: boolean): string
 	const health = theme.fg(healthToken(row), row.healthGlyph);
 	const prefix = `${pointer} ${health} ${activeMark(row)} `;
 	const modelLabel = row.model.length > 0 ? row.model : "(no model ids)";
-	const modelCell = fitCell(truncateMiddle(modelLabel, columns.modelWidth), columns.modelWidth);
+	const modelCell = fitModelCell(modelLabel, columns.modelWidth);
 	const model = selected ? theme.style("accent", modelCell, { bold: true }) : theme.fg("muted", modelCell);
 	let line =
 		prefix +
