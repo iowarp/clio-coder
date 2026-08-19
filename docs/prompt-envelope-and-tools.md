@@ -21,7 +21,16 @@ Prompt extensions can add dynamic fragments for project rules, the operator prof
 
 Prompt templates expand into the operator's user message before submission. They do not alter the compiled system prompt or bypass the trust check on project-scope compatibility roots. The prompt-root locations, frontmatter fields, and trust rules are documented in [extensions-and-sharing.md](extensions-and-sharing.md#prompt-templates).
 
-Arguments after `/template-name` use pi-agent-core's shell-style `parseCommandArgs` parser. Single or double quotes keep spaces inside one argument. The template body may use `$1` through `$9` for positional arguments and `$ARGUMENTS` for every parsed argument joined with spaces. A positional placeholder with no matching argument expands to an empty string. Clio routes both parsing and substitution through pi-agent-core's `parseCommandArgs` and `substituteArgs` exports so the command grammar follows the installed Pi SDK.
+Arguments after `/template-name` use shell-style command argument parsing. Single or double quotes keep spaces inside one argument. The template body may use `$1` through `$9` for positional arguments, `$@`, and `$ARGUMENTS` for every parsed argument joined with spaces, as well as argument slices. A positional placeholder with no matching argument expands to an empty string. Template names that collide with built-in slash commands fail closed with a diagnostic and are excluded from `/prompts`.
+
+## Directory-scoped handbook overrides
+
+In addition to project root `CLIO-CODER.md` handbooks, Clio supports directory-scoped `CLIO-CODER.override.md` files:
+- An override handbook replaces inherited project instructions for its containing directory and all descendants.
+- Sibling directories outside the subtree continue to inherit from the root handbook or their own local overrides.
+- Deeper subtrees within the directory may add further localized guidance.
+- Prompt blocks preserve explicit source paths for attribution and debugging.
+- Malformed override files fail closed rather than injecting partial guidance, and context resets never delete override files.
 
 `wiki.page` and `wiki.plan` (`src/domains/prompts/fragments/wiki/*.md`) load through this same loader, with the same id/version/content-hash contract as every other fragment, but they are consumed differently: `context/wiki/prompts.ts` reads them by id, substitutes per-dispatch `{{token}}` placeholders (a page's path, title, and relative path; the plan file's path), and sends the result as a wiki-generation dispatch's `task`, never as a compiled system prompt. `{{token}}` substitution has no home in the fragment loader itself, the same division `identity.self-awareness`'s `{TOKEN}` placeholders use in `compiler.ts`: the loader hands back a raw body, and the one caller that needs live values fills them in. Both files' bodies open and close on a standalone `---` line that predates their frontmatter and was kept unchanged as body text so the substituted prompt stays byte-identical to what the old hand-rolled `readFileSync` produced.
 
