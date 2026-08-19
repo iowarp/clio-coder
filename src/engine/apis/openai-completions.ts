@@ -227,9 +227,24 @@ function applyLmStudioPayload(
 	if (request?.ttlSeconds !== undefined) next.ttl = request.ttlSeconds;
 	if (request?.draftModel !== undefined) next.draft_model = request.draftModel;
 	if (resolved.thinking.mechanism === "none" || resolved.thinking.mechanism === "always-on") return next;
-	next.reasoning_effort =
+	const resolvedEffort =
 		resolved.request.reasoningEffort ??
 		lmStudioReasoningEffort(resolved.thinking.effectiveLevel, runtimeMetadata(model)?.lmstudioReasoningOptions);
+	switch (request?.reasoning) {
+		case "off":
+			next.reasoning_effort = "none";
+			break;
+		case "on":
+			next.reasoning_effort = "low";
+			break;
+		case "low":
+		case "medium":
+		case "high":
+			next.reasoning_effort = request.reasoning;
+			break;
+		default:
+			next.reasoning_effort = resolvedEffort;
+	}
 	return next;
 }
 
