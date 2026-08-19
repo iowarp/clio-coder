@@ -192,7 +192,10 @@ clio-coder                   # interactive terminal UI
 Inside the TUI, `/settings` shows the target, fleet, and routing the session
 uses (`/targets` and `/fleet` open straight into their sections), `/agents` and
 `/skill` list what it can dispatch and run, and `/help` opens the interactive
-help center.
+help center. `/export` writes a self-contained HTML transcript of the active
+session branch (an explicit `.md` path keeps the Markdown export), and
+Settings → Terminal offers an opt-in fullscreen mode with a sticky composer
+above a scrollable transcript.
 
 ## Bring your own model
 
@@ -410,7 +413,10 @@ Clio loads a local `CLIO-CODER.md` as generated project context on every session
 existing handbook until an explicit replacement action, and can adopt existing
 `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor, and Copilot context with
 provenance and conflict reporting. `CLIO-CODER.md` is a gitignored runtime artifact,
-not canonical repository documentation.
+not canonical repository documentation. A `CLIO-CODER.override.md` in a
+subdirectory starts a replacement boundary: it supersedes inherited handbooks
+for that directory and its descendants, and deeper `CLIO-CODER.md` files can
+still add narrower guidance beneath it.
 
 Alongside it, `clio-coder context index` builds a structural codewiki that the
 `code_nav` tool navigates, so a model can find a symbol without reading half
