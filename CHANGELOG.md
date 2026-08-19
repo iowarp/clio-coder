@@ -12,6 +12,7 @@ still change interfaces.
 ## 0.3.2 - 2026-08-19
 
 - Added a maintained Pi SDK ownership table, thin-wrapper watch list, regression net, and five-step dependency-upgrade checklist so each release identifies upstream fixes that Clio should inherit and Clio-owned deltas that must remain.
+- Added a checked Pi declaration-surface snapshot. Dependency upgrades now fail lint when an imported Pi symbol changes or disappears and report newly exported SDK primitives for review.
 - Rebuilt the tool transcript as one stable Pi lifecycle block from streamed arguments through live progress and settlement. Expanded calls now expose typed secondary arguments, exit status, counts, displayed and total bytes, truncation, timeouts, usage, added tools, context exclusion, and full-output paths; mixed image results never print base64, admission refusals never masquerade as executions, and operator `!`/`!!` bash commands stream and settle with the same grammar as model tools.
 - Let Pi 0.84 assemble Anthropic thinking requests from the active thinking level, including adaptive effort and bounded token budgets. Clio removed its competing Anthropic payload rewrite and retains only the OpenAI Responses summary field that Pi's agent loop does not expose.
 - Aligned resumed and forked custom session entries with pi-agent-core's `convertToLlm` wording. Compaction summaries, branch summaries, and local bash executions now reach the model through Pi's exported message-text helpers instead of Clio-maintained copies, while Clio keeps its own durable ledger format.
