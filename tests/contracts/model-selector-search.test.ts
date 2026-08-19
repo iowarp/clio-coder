@@ -1,6 +1,9 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { ModelOverlayView, type ModelRow } from "../../src/interactive/overlays/model-selector.js";
+
+const stripAnsi = (lines: string[]): string => stripTerminalSequences(lines.join("\n"));
 
 function modelRow(target: string, model: string, overrides: Partial<ModelRow> = {}): ModelRow {
 	return {
@@ -97,5 +100,36 @@ describe("contracts/model selector fuzzy search", () => {
 		search(view, "disconnected");
 
 		strictEqual(view.selectedValue(), "offline/model-b");
+	});
+});
+
+describe("contracts/model selector row layout", () => {
+	it("keeps a gutter between a full-width model id and the ctx column", () => {
+		// The real catalog carries ids long enough to fill the model column
+		// exactly, which used to render "…-distilled-i1262kctx" with no separator.
+		const view = modelView([
+			modelRow("zbook", "qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled-i1", { context: "262kctx" }),
+			modelRow("zbook", "short-id", { context: "262kctx" }),
+		]);
+
+		for (const line of stripAnsi(view.render(94)).split("\n")) {
+			const at = line.indexOf("262kctx");
+			if (at < 0) continue;
+			strictEqual(line[at - 1], " ", `the ctx figure keeps a leading space, got: ${line}`);
+		}
+	});
+
+	it("holds the ctx column at one stop across ids of every length", () => {
+		const view = modelView([
+			modelRow("zbook", "a", { context: "262kctx" }),
+			modelRow("zbook", "qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled-i1", { context: "262kctx" }),
+		]);
+
+		const offsets = stripAnsi(view.render(94))
+			.split("\n")
+			.map((line) => line.indexOf("262kctx"))
+			.filter((at) => at >= 0);
+		strictEqual(offsets.length, 2, "both rows render their ctx figure");
+		strictEqual(offsets[0], offsets[1], "the ctx column does not move with the model id length");
 	});
 });
