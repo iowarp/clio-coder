@@ -11,6 +11,12 @@
  * resources the CLI resolves from the installed package root, and enforces
  * size budgets. Runs in `ci:release`, so a publish cannot ship an unaudited
  * tarball.
+ *
+ * Version coherence: the version in package.json must be the version the top
+ * of CHANGELOG.md describes. `prepublishOnly` runs this gate, so without the
+ * check a publish could ship with the release notes still sitting under an
+ * `## Unreleased` heading, which is what the tree looked like when this was
+ * added.
  */
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
@@ -75,6 +81,63 @@ for (const rel of ENTRIES) {
 	const head = firstLine(join(root, rel));
 	if (head === null) errors.push(`missing ${rel}`);
 	else if (head !== SHEBANG) errors.push(`bad shebang in ${rel}`);
+}
+
+checkVersionCoherence();
+
+/**
+ * The published version and the release notes for it must name the same number.
+ *
+ * `prepublishOnly` runs this gate, and until now nothing in it read
+ * package.json's version at all: the tree could be published with every note
+ * for the release still under `## Unreleased`, or with the version bumped and
+ * the changelog never touched. Both are silent at publish time and permanent
+ * afterwards, because a published version cannot be replaced.
+ *
+ * The rule is deliberately narrow. The first `##` heading in CHANGELOG.md is
+ * the release being cut, so it must read `## <version>` and may carry a date
+ * after it. `## Unreleased` is the pre-cut state and fails by name, since it is
+ * the one wrong heading a release is actually likely to have.
+ */
+function checkVersionCoherence() {
+	let version;
+	try {
+		version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+	} catch (error) {
+		errors.push(`unable to read package.json version: ${error instanceof Error ? error.message : String(error)}`);
+		return;
+	}
+	if (typeof version !== "string" || version.length === 0) {
+		errors.push("package.json has no version");
+		return;
+	}
+
+	let changelog;
+	try {
+		changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+	} catch (error) {
+		errors.push(`unable to read CHANGELOG.md: ${error instanceof Error ? error.message : String(error)}`);
+		return;
+	}
+
+	const heading = changelog.split(/\r?\n/).find((line) => line.startsWith("## "));
+	if (heading === undefined) {
+		errors.push("CHANGELOG.md has no '## <version>' heading");
+		return;
+	}
+	// Everything before an optional " - <date>" is the version the section is for.
+	const named = heading.slice(3).split(" - ")[0].trim();
+	if (named === "Unreleased") {
+		errors.push(
+			`CHANGELOG.md still opens with '## Unreleased'; retitle that section '## ${version} - <date>' before publishing`,
+		);
+		return;
+	}
+	if (named !== version) {
+		errors.push(
+			`package.json version ${version} does not match the top CHANGELOG.md heading '${heading.trim()}'; the release notes and the published version must name the same release`,
+		);
+	}
 }
 
 const entrySet = new Set(ENTRIES);
