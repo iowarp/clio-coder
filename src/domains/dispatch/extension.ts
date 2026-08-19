@@ -373,6 +373,14 @@ const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
 const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
 const ACP_TOOL_SIGNATURE = "acp:unobservable";
 const ACP_SPEC_FINGERPRINT = "acp:unobservable";
+/**
+ * Where the worker process ran when no fleet placement chose a node. This is the
+ * worker's own host, never the host serving the model: a run against a remote
+ * target from this machine is still a local node. Emitted on every run so a
+ * receipt has one node shape, rather than carrying the block only on the paths
+ * that happened to have a placement object.
+ */
+const LOCAL_RUN_NODE: RunNodeIdentity = { id: "local", kind: "local" };
 function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1): RunReceiptDraft {
 	return { ...draft, routeDecision: decision };
 }
@@ -3606,6 +3614,7 @@ export function createDispatchBundle(
 				heartbeatAt: heartbeatIso(acp.heartbeatAt.current),
 				lineage,
 				identity,
+				node: LOCAL_RUN_NODE,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
@@ -3760,6 +3769,8 @@ export function createDispatchBundle(
 				outcomeDetail,
 				lineage,
 				identity,
+				// An ACP peer is spawned by this process, so the run's node is this host.
+				node: LOCAL_RUN_NODE,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
@@ -4602,7 +4613,7 @@ export function createDispatchBundle(
 				pid,
 				lineage,
 				identity,
-				...(placement ? { node: placement.node } : {}),
+				node: placement?.node ?? LOCAL_RUN_NODE,
 				...(placement?.reroutes !== undefined && placement.reroutes.length > 0
 					? { reroutes: [...placement.reroutes] }
 					: {}),
@@ -4813,7 +4824,7 @@ export function createDispatchBundle(
 				outcomeCode,
 				lineage,
 				identity,
-				...(placement ? { node: placement.node } : {}),
+				node: placement?.node ?? LOCAL_RUN_NODE,
 				...receiptAttestationFields(worker.attestation?.() ?? null),
 				...(placement?.reroutes !== undefined && placement.reroutes.length > 0
 					? { reroutes: [...placement.reroutes] }
