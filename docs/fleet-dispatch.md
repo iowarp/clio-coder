@@ -537,7 +537,7 @@ closed while a winner remains unapplied.
 Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 15`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
 include:
 
-- `node`: the fleet node the worker ran on (`id`, `kind`, `host`).
+- `node`: the fleet node the worker ran on (`id`, `kind`, `host`). The `node.id` explicitly identifies the worker process host executing the task, not the model host (which is represented by the `target` id). This behavior tracks issue #120.
 - `reroutes`: dead-node failover hops, oldest first.
 - `gate`: review/compete provenance (role, group, cycle, subject run ids with
   their receipt digests, and the verdict that caused a revise builder).

@@ -291,6 +291,11 @@ LM Studio can require bearer authentication for its HTTP APIs
 `Authorization: Bearer ...` on chat, listing, load, and unload calls. Configure validates the exact
 `/lmstudio-greeting` response before saving a direct `lmstudio` target.
 
+### Loaded instances and LM Link peers
+
+A model id on an LM Studio target is resolved against that host's loaded instances. A key with a loaded instance is never sent bare (which would JIT-load a second copy). An instance id reported loaded by two configured LM Studio targets on different hosts is an LM Link peer projection. This behavior tracks issue #113.
+
+
 Prompt-template overrides, system prompts, GPU-offload ratios, KV-cache quantization, parallel slots,
 context checkpoints, and speculative-decoding variants are not writable through this Clio settings
 block. Set them in LM Studio's My Models load settings or with `lms load`; the CLI is documented at
