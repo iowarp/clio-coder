@@ -15,6 +15,7 @@
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { formatSize } from "../../engine/truncate.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import type { ApprovalRequestView } from "../permission-overlay.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
 import { renderDiffLines } from "./diff.js";
 import { tryRenderJson, tryRenderXml } from "./structured.js";
@@ -468,9 +469,24 @@ const AWAITING_APPROVAL_TAIL = ` ${yellow(GLYPH.phaseBlocked)}${dim(" awaiting a
  * No elapsed counter (nothing is running) and no status glyph (nothing has
  * finished): the awaiting-approval tail is the segment's whole state.
  */
-export function renderToolAwaitingApproval(call: ToolExecutionStart, width: number): string[] {
+export function renderToolAwaitingApproval(
+	call: ToolExecutionStart,
+	width: number,
+	view?: ApprovalRequestView,
+): string[] {
 	const parts = sublineParts({ toolCallId: call.toolCallId, toolName: call.toolName, args: call.args }, undefined, {});
-	return wrapSublineWithTail(parts.lead, AWAITING_APPROVAL_TAIL, width);
+	const lines = wrapSublineWithTail(parts.lead, AWAITING_APPROVAL_TAIL, width);
+	if (view === undefined) return lines;
+	const axis = view.axis.kind === "net" ? `safety-net rail ${view.axis.ruleId}` : `autonomy level ${view.axis.level}`;
+	const facts = [
+		["action", view.actionClass],
+		["axis", axis],
+		...(view.target !== undefined && view.target.length > 0 ? [["target", view.target]] : []),
+	] as const;
+	for (const [label, value] of facts) {
+		lines.push(...indentAndWrap(`${dim(`${label} ·`)} ${value}`, width, false));
+	}
+	return lines;
 }
 
 /**

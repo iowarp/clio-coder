@@ -4,6 +4,7 @@ import { SKILL_SUGGESTION_ANCHOR, SKILL_SUGGESTION_PREFIX } from "../../src/core
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import type { ApprovalRequestView } from "../../src/interactive/permission-overlay.js";
 import { redactToolArgs, renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
 import { fgSequence, GLYPH, SGR_DIM } from "../../src/interactive/theme/index.js";
 import { createTestClock } from "../harness/clock.js";
@@ -18,6 +19,19 @@ const strip = stripTerminalSequences;
  * The tests that need time to move keep their own stepped `now` instead.
  */
 const frozen = createTestClock();
+
+function approvalView(overrides: Partial<ApprovalRequestView> = {}): ApprovalRequestView {
+	return {
+		requestId: "approval-test",
+		tool: "bash",
+		actionClass: "execute",
+		axis: { kind: "net", ruleId: "test-confirm" },
+		origin: { kind: "main" },
+		reason: "approval required",
+		target: "printf ready",
+		...overrides,
+	};
+}
 
 describe("chat-panel live thinking streaming", () => {
 	it("folded render shows token count when pending, shows static label when settled", () => {
@@ -562,10 +576,26 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		ok(!rendered.includes("awaiting approval"), rendered);
 		ok(rendered.includes("500ms"), `pre-park the segment counts elapsed, got: ${rendered}`);
 
-		panel.applyEvent({ type: "tool_approval_state", toolCallId: "park1", state: "awaiting-approval" } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_approval_state",
+			toolCallId: "park1",
+			state: "awaiting-approval",
+			view: approvalView({
+				tool: "dispatch",
+				actionClass: "dispatch",
+				axis: { kind: "net", ruleId: "dispatch-plan-confirm" },
+				target: "fix the flaky test",
+			}),
+		} as ChatLoopEvent);
 		clock = 2500;
 		rendered = strip(panel.render(80).join("\n"));
 		ok(rendered.includes("⏸ awaiting approval"), `a parked call renders the awaiting marker, got: ${rendered}`);
+		ok(rendered.includes("action · dispatch"), `the parked row names its action class, got: ${rendered}`);
+		ok(
+			rendered.includes("axis · safety-net rail dispatch-plan-confirm"),
+			`the parked row names its axis, got: ${rendered}`,
+		);
+		ok(rendered.includes("target · fix the flaky test"), `the parked row names its redacted target, got: ${rendered}`);
 		ok(!rendered.includes("1.5s"), `a parked call must not keep counting elapsed, got: ${rendered}`);
 		ok(!rendered.includes("✓") && !rendered.includes("✗"), rendered);
 
@@ -574,6 +604,7 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		panel.applyEvent({ type: "tool_approval_state", toolCallId: "park1", state: "resumed" } as ChatLoopEvent);
 		rendered = strip(panel.render(80).join("\n"));
 		ok(!rendered.includes("awaiting approval"), `a resumed call sheds the awaiting marker, got: ${rendered}`);
+		ok(!rendered.includes("dispatch-plan-confirm"), `a resumed call sheds transient approval facts, got: ${rendered}`);
 		panel.applyEvent({
 			type: "tool_execution_end",
 			toolCallId: "park1",
@@ -596,7 +627,12 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 			toolName: "bash",
 			args: { command: "rm -rf build" },
 		} as ChatLoopEvent);
-		panel.applyEvent({ type: "tool_approval_state", toolCallId: "park2", state: "awaiting-approval" } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_approval_state",
+			toolCallId: "park2",
+			state: "awaiting-approval",
+			view: approvalView({ target: "rm -rf build" }),
+		} as ChatLoopEvent);
 		ok(strip(panel.render(80).join("\n")).includes("⏸ awaiting approval"));
 		// Operator cancel: the registry resolves the parked promise blocked and
 		// the segment settles through its ordinary tool_execution_end, which the

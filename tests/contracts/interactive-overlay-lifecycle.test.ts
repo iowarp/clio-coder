@@ -14,6 +14,7 @@ import type { PermissionRequiredMeta, ToolRegistry } from "../../src/tools/regis
 describe("contracts/interactive overlay lifecycle", () => {
 	it("hides the permission overlay before publishing and resuming an approved call", () => {
 		const events: string[] = [];
+		const approvalStates: ToolApprovalStateEvent[] = [];
 		let permissionRequired: Parameters<ToolRegistry["onPermissionRequired"]>[0] = () => {};
 		const toolRegistry = {
 			onPermissionRequired: (listener: Parameters<ToolRegistry["onPermissionRequired"]>[0]) => {
@@ -50,7 +51,12 @@ describe("contracts/interactive overlay lifecycle", () => {
 				appendReplayBlock: () => events.push("notice"),
 				requestRender: () => events.push("notice-render"),
 			},
-			chatRenderer: { applyEvent: (event: ToolApprovalStateEvent) => events.push(`chat:${event.state}`) },
+			chatRenderer: {
+				applyEvent: (event: ToolApprovalStateEvent) => {
+					approvalStates.push(event);
+					events.push(`chat:${event.state}`);
+				},
+			},
 			notify: () => {},
 			terminal: { columns: 100 },
 			dispatchBoard: {},
@@ -64,16 +70,35 @@ describe("contracts/interactive overlay lifecycle", () => {
 			showOverlayFrame: () => handle,
 		} as unknown as OverlayLifecycleRuntimeDeps;
 		const lifecycle = createOverlayLifecycle(runtime);
-		const call = { tool: "bash", args: {} } as ClassifierCall;
+		const call = {
+			tool: "bash",
+			args: { command: `printf ready${String.fromCharCode(27)}[31m` },
+		} as ClassifierCall;
 		const decision = {
 			kind: "ask",
 			classification: { actionClass: "execute" },
 			rejection: { short: "approval required", detail: "approval required" },
 		} as SafetyDecision;
-		const meta = { requestId: "req-1", toolCallId: "tool-1" } as PermissionRequiredMeta;
+		const meta = { requestId: "req-1", toolCallId: "tool-1", axis: "net:bash-confirm" } as PermissionRequiredMeta;
 
 		permissionRequired(call, decision, meta);
 		strictEqual(lifecycle.getState(), "permission-confirm");
+		deepStrictEqual(approvalStates, [
+			{
+				type: "tool_approval_state",
+				toolCallId: "tool-1",
+				state: "awaiting-approval",
+				view: {
+					requestId: "req-1",
+					tool: "bash",
+					actionClass: "execute",
+					axis: { kind: "net", ruleId: "bash-confirm" },
+					origin: { kind: "main" },
+					reason: "approval required",
+					target: "printf ready",
+				},
+			},
+		]);
 		events.length = 0;
 		lifecycle.confirmPermission();
 
