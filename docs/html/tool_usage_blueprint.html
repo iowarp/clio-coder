@@ -224,14 +224,14 @@
       2: {
         title: "Mutate Plane (2 Tools)",
         tools: [
-          { name: "write", params: "path, content", desc: "Atomically writes or overwrites entire file contents under write boundary governance." },
-          { name: "edit", params: "path, edits: {oldText, newText}[]", desc: "Surgical matching/patching edits in files. Uses exact, whitespace-relaxed, and fuzzy match strategies." }
+          { name: "write", params: "path, content", desc: "Atomically writes or overwrites entire file contents under write boundary governance. Returns numbered diff with word-level changes." },
+          { name: "edit", params: "path, edits: {oldText, newText}[]", desc: "Surgical matching/patching edits in files. Returns numbered word-level diff with theme color highlighting." }
         ]
       },
       3: {
         title: "Execute Plane (3 Tools)",
         tools: [
-          { name: "bash", params: "command, cwd, timeout_ms", desc: "Executes shell commands within workspace boundaries and timeout limits (default 300,000 ms)." },
+          { name: "bash", params: "command, cwd, timeout_ms", desc: "Executes shell commands within workspace boundaries (default 300,000 ms timeout). Sets AI_AGENT=clio-coder in child environment and streams live output tail." },
           { name: "git", params: "op, path, cached, stat, name_only, limit, cwd", desc: "Runs safe git status, diff, and log inspections." },
           { name: "verify", params: "check, focus", desc: "Runs declared project verification suites (tests, lints, typechecks, builds)." }
         ]
