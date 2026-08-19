@@ -11,6 +11,7 @@ still change interfaces.
 
 ## 0.3.2 - 2026-08-19
 
+- Made `/export` write a themed, self-contained, size-bounded HTML transcript by default, with terminal styling converted to HTML and each tool call kept in a semantic row. Passing a `.md` path preserves the existing plain Markdown export.
 - Ranked `/model` search with Pi's fuzzy matcher and provider-qualified search ordering. Direct `target/model` matches outrank proxy-carried model ids while Clio's availability, authentication, health, runtime, favorites, and recent-model facts remain intact.
 - Routed prompt-template arguments through pi-agent-core's `parseCommandArgs` and `substituteArgs` exports. Templates support quoted arguments, `$1` through `$9`, `$@`, `$ARGUMENTS`, and argument slices without a second Clio parser.
 - Added a maintained Pi SDK ownership table, thin-wrapper watch list, regression net, and five-step dependency-upgrade checklist so each release identifies upstream fixes that Clio should inherit and Clio-owned deltas that must remain.

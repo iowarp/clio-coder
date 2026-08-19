@@ -1146,7 +1146,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "export",
-		description: "Export the session transcript to Markdown",
+		description: "Export a self-contained HTML transcript by default; a .md path writes Markdown",
 		group: "Sessions",
 		kinds: ["export"],
 		args: {

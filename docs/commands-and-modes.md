@@ -161,7 +161,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/new` | `/new` | Start a fresh session |
 | `/tree` | `/tree` | Open session tree navigator |
 | `/fork` | `/fork` | Fork from an assistant turn |
-| `/export` | `/export [path]` | Export the session transcript to Markdown |
+| `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
 
 `/context` with no arguments opens the context-window ledger overlay. The
 subcommands own the durable project-context noun: `compact` summarizes older
