@@ -41,7 +41,7 @@ describe("contracts/agent role tool capability", () => {
 		);
 	});
 
-	it("layers every capability key, not just tools", () => {
+	it("keeps live deployment limits authoritative without changing metadata precedence", () => {
 		const merged = mergeCapabilities(
 			{ ...RUNTIME_DEFAULTS, contextWindow: 8_192 },
 			{ contextWindow: 262_144 },
@@ -50,8 +50,8 @@ describe("contracts/agent role tool capability", () => {
 		);
 		deepStrictEqual(
 			{ contextWindow: merged.contextWindow, vision: merged.vision },
-			{ contextWindow: 262_144, vision: true },
-			"the catalog wins its own key while the probe still supplies keys it alone knows",
+			{ contextWindow: 131_072, vision: true },
+			"the served window wins while the probe still supplies keys it alone knows",
 		);
 	});
 });

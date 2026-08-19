@@ -200,6 +200,14 @@ describe("contracts/model knowledge base", () => {
 		strictEqual(qwen38Quirks?.sampling?.thinking?.temperature, 1);
 		strictEqual(qwen38Quirks?.sampling?.instruct?.temperature, 0.7);
 		strictEqual(qwen38Quirks?.sampling?.instruct?.presencePenalty, 1.5);
+		strictEqual(
+			resolveModelCapabilities(
+				localStatus("Qwen3.8-27B-IQ4_NL-262K", { contextWindow: 131_072 }),
+				"Qwen3.8-27B-IQ4_NL-262K",
+				kb,
+			).contextWindow,
+			131_072,
+		);
 
 		// The qat family's `gemma-4-31b-it-qat` patterns are not substrings of
 		// the 12B or 26B ids, so those must not be captured by it.

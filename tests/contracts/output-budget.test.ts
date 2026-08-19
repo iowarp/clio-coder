@@ -51,4 +51,10 @@ describe("contracts/output-budget", () => {
 		setGlobalDefaultMaxOutputTokens(0);
 		strictEqual(remainingContextMaxTokens(model(1_000_000, 8192), emptyContext, undefined), 8192);
 	});
+
+	it("sizes output against the served context window", () => {
+		setGlobalDefaultMaxOutputTokens(32_768);
+		const context = { systemPrompt: "x".repeat(480_000), messages: [], tools: [] } as unknown as BudgetContext;
+		strictEqual(remainingContextMaxTokens(model(131_072, 131_072), context, undefined), 10_048);
+	});
 });

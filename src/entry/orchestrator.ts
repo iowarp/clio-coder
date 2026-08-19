@@ -464,7 +464,7 @@ function backgroundSharesReasoningModelWithOrchestrator(
 	}
 }
 
-function synthesizeOrchestratorModel(
+export function synthesizeOrchestratorModel(
 	providers: ProvidersContract,
 	target: TargetDescriptor,
 	wireModelId: string,

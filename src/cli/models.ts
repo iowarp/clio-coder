@@ -117,7 +117,7 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 	return 0;
 }
 
-function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersContract): ModelRow[] {
+export function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersContract): ModelRow[] {
 	const rows: ModelRow[] = [];
 	for (const status of entries) {
 		const runtimeId = status.runtime?.id ?? status.target.runtime;
