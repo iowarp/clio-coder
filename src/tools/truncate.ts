@@ -14,7 +14,7 @@ import {
 // head/tail truncation, line limits, grep-line clipping, and size formatting.
 export const DEFAULT_MAX_LINES = 2000;
 export const DEFAULT_MAX_BYTES = 16 * 1024;
-export type { TruncationOptions, TruncationResult };
+export type { TruncationResult };
 export { formatSize, GREP_MAX_LINE_LENGTH, truncateLine };
 
 // Count lines without a trailing-newline phantom entry. Pi uses the same
