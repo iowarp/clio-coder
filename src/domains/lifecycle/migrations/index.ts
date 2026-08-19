@@ -74,23 +74,41 @@ function writeManifest(path: string, manifest: MigrationManifest): void {
 	writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", mode: 0o644 });
 }
 
-export async function runPending(stateDir: string): Promise<MigrationRunResult> {
+/**
+ * Apply every registered migration this state tree has not recorded yet.
+ *
+ * `migrations` defaults to the compiled registry and exists so the ordering
+ * guarantee below can be exercised against a failing migration; production
+ * callers pass one argument.
+ */
+export async function runPending(
+	stateDir: string,
+	migrations: ReadonlyArray<Migration> = REGISTRY,
+): Promise<MigrationRunResult> {
 	mkdirSync(stateDir, { recursive: true });
 	const path = manifestPath(stateDir);
 	const manifest = readManifest(path);
 	const applied = new Set(manifest.applied);
 	const newlyApplied: string[] = [];
-	for (const m of REGISTRY) {
+	// The manifest is written after each `up()` rather than once at the end. A
+	// throw from a later migration used to discard the record of the earlier ones
+	// that had already succeeded, so they re-ran on the next upgrade against a
+	// tree they had already changed. That breaks the at-most-once guarantee this
+	// module's contract states.
+	for (const m of migrations) {
 		if (applied.has(m.id)) continue;
 		await m.up(stateDir);
 		applied.add(m.id);
 		newlyApplied.push(m.id);
+		writeManifest(path, { applied: [...applied] });
 	}
 	const allApplied = [...applied];
+	// Nothing pending still rewrites the manifest, so a home whose file was
+	// missing or unparseable gains a well-formed one.
 	writeManifest(path, { applied: allApplied });
 	return {
 		applied: newlyApplied,
 		allApplied,
-		available: REGISTRY.map((m) => m.id),
+		available: migrations.map((m) => m.id),
 	};
 }

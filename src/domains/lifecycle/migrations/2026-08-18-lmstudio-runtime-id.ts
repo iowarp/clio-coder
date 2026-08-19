@@ -37,7 +37,15 @@ const migration: Migration = {
 			}
 		}
 		if (!existsSync(authStoragePath())) return;
-		openAuthStorage().renameProvider("lmstudio-native", "lmstudio", { keepSource: keepLegacyCredential });
+		// Only reach for the rename when a legacy credential is actually stored.
+		// Most homes this migration runs on never held one, and asking the store
+		// to rename nothing is work that can only fail: it takes the credentials
+		// lock and, before this guard existed, refused outright on a file the
+		// parser could not fully read, which failed every later `clio-coder
+		// upgrade` on that machine.
+		const storage = openAuthStorage();
+		if (!storage.hasStored("lmstudio-native")) return;
+		storage.renameProvider("lmstudio-native", "lmstudio", { keepSource: keepLegacyCredential });
 	},
 };
 
