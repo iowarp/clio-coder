@@ -79,10 +79,10 @@ export interface TurnRecovery {
  * that landed in the same window wins: `activeInterruptReason` is set only by
  * `ChatLoop.cancel`, so the stall reason is dropped rather than retried.
  *
- * The failure gets a new assistant message because the provider's message-end
- * event may already have persisted another object before the run settles. A
- * distinct corrected message is therefore eligible for durable persistence and
- * becomes the final transcript event consumed by headless accounting.
+ * The runtime event seam calls `rewriteStallAbortMessage` before publishing or
+ * persisting `message_end`, so the provider's one terminal message becomes the
+ * corrected ledger row. This post-settlement pass covers engines that settle
+ * without emitting that event and consumes the watchdog reason in either case.
  */
 export function reclassifyStallAbort(
 	state: ChatTurnState,
@@ -91,10 +91,28 @@ export function reclassifyStallAbort(
 	const reason = state.streamStallReason;
 	state.streamStallReason = null;
 	if (reason === null || failure.stopReason !== "aborted" || state.activeInterruptReason !== null) return failure;
-	const message = failure.message
-		? ({ ...failure.message, stopReason: "error", errorMessage: reason } as AgentMessage)
-		: undefined;
-	return { ...failure, stopReason: "error", errorMessage: reason, ...(message ? { message } : {}) };
+	if (failure.message) rewriteStallAbortMessage(state, failure.message, reason);
+	return { ...failure, stopReason: "error", errorMessage: reason };
+}
+
+/** Rewrite the provider's terminal abort object before its event is emitted and persisted. */
+export function rewriteStallAbortMessage(
+	state: ChatTurnState,
+	message: AgentMessage,
+	reason = state.streamStallReason,
+): boolean {
+	if (
+		reason === null ||
+		state.activeInterruptReason !== null ||
+		message.role !== "assistant" ||
+		(message as { stopReason?: unknown }).stopReason !== "aborted"
+	) {
+		return false;
+	}
+	const failure = message as { stopReason?: unknown; errorMessage?: unknown };
+	failure.stopReason = "error";
+	failure.errorMessage = reason;
+	return true;
 }
 
 export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {

@@ -64,7 +64,12 @@ import {
 	type QueuedMessagesSnapshot,
 	type SteeringMode,
 } from "./turn-queues.js";
-import { createTurnRecovery, type RetryStatusEvent, reclassifyStallAbort } from "./turn-recovery.js";
+import {
+	createTurnRecovery,
+	type RetryStatusEvent,
+	reclassifyStallAbort,
+	rewriteStallAbortMessage,
+} from "./turn-recovery.js";
 import { type AssistantDeltaEvent, createTurnRuntime, TurnAdmissionError } from "./turn-runtime.js";
 import { type AgentRuntime, type ChatLoopRunSnapshot, createTurnState } from "./turn-state.js";
 import { isWorkerShareNote } from "./worker-share.js";
@@ -487,6 +492,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitFailureMessage: (message) => emit({ type: "message_end", message }),
 		emitNotice,
 	});
+	const emitRuntimeEvent = (event: AgentEvent | AssistantDeltaEvent): void => {
+		if (event.type === "message_end") rewriteStallAbortMessage(state, event.message);
+		emit(event as ChatLoopEvent);
+	};
 
 	const turnRuntime = createTurnRuntime({
 		state,
@@ -500,7 +509,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		context,
 		middleware,
 		retrySettings,
-		emit,
+		emit: emitRuntimeEvent,
 		emitNotice,
 		toolStartTimes,
 	});
