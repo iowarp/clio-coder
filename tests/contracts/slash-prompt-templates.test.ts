@@ -99,6 +99,50 @@ describe("contracts/slash prompt templates", () => {
 		strictEqual(expanded.text, "Run the demo for alpha.");
 	});
 
+	it("substitutes Pi positional and aggregate arguments through the prompt loader", () => {
+		const root = scratchDir();
+		writePrompt(
+			root,
+			"arguments.md",
+			["$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "all=$ARGUMENTS"].join("\n"),
+		);
+		const list = loadPromptTemplates({ roots: [{ path: root, scope: "project", trusted: true }] });
+
+		const expansion = expandPromptTemplateInput(
+			`/arguments alpha "bravo two" charlie delta echo foxtrot golf hotel india`,
+			list,
+		);
+
+		strictEqual(expansion.expanded, true);
+		if (!expansion.expanded) throw new Error("expected the prompt template to expand");
+		deepStrictEqual(expansion.args, [
+			"alpha",
+			"bravo two",
+			"charlie",
+			"delta",
+			"echo",
+			"foxtrot",
+			"golf",
+			"hotel",
+			"india",
+		]);
+		strictEqual(
+			expansion.text,
+			[
+				"alpha",
+				"bravo two",
+				"charlie",
+				"delta",
+				"echo",
+				"foxtrot",
+				"golf",
+				"hotel",
+				"india",
+				"all=alpha bravo two charlie delta echo foxtrot golf hotel india",
+			].join("\n"),
+		);
+	});
+
 	it("refuses an untrusted template with the loader's reason and sends nothing to the model", () => {
 		const cwd = scratchDir();
 		writePrompt(cwd, join(".claude", "commands", "interopdemo.md"), "Run the demo.\n");

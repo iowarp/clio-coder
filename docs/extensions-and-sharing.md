@@ -50,7 +50,7 @@ description: Focused bug-fix prompt
 argument-hint: "<file> <symptom>"
 ---
 
-Investigate {{1}} for this symptom: {{2}}
+Investigate $1 for this symptom: $2
 
 Return:
 1. likely root cause;

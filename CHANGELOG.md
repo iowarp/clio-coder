@@ -11,6 +11,7 @@ still change interfaces.
 
 ## 0.3.2 - 2026-08-19
 
+- Routed prompt-template arguments through pi-agent-core's `parseCommandArgs` and `substituteArgs` exports. Templates support quoted arguments, `$1` through `$9`, `$@`, `$ARGUMENTS`, and argument slices without a second Clio parser.
 - Added a maintained Pi SDK ownership table, thin-wrapper watch list, regression net, and five-step dependency-upgrade checklist so each release identifies upstream fixes that Clio should inherit and Clio-owned deltas that must remain.
 - Added a checked Pi declaration-surface snapshot. Dependency upgrades now fail lint when an imported Pi symbol changes or disappears and report newly exported SDK primitives for review.
 - Set `AI_AGENT=clio-coder` for spawned commands, fleet workers, registered code steps, and hooks so generic developer tooling can attribute child processes to Clio Coder.
