@@ -203,11 +203,13 @@ describe("contracts/context-refresh", () => {
 	});
 
 	/**
-	 * The index-owned sections state file counts, entry points and where the mass
-	 * of the tree sits. Those are the only handbook facts nothing but the index can
-	 * author, and the only ones that are wrong the moment a file moves. Refresh
-	 * rebuilds the index anyway, so leaving them stale was leaving the handbook
-	 * confidently wrong about the repository it had just re-read.
+	 * The index-owned sections state entry points and where the mass of the tree
+	 * sits. Those are the only handbook facts nothing but the index can author,
+	 * and the only ones that are wrong the moment a file moves. Refresh rebuilds
+	 * the index anyway, so leaving them stale was leaving the handbook confidently
+	 * wrong about the repository it had just re-read. A handbook that still
+	 * carries the retired exact-count sentence loses it on refresh: the count was
+	 * only ever true at generation time.
 	 */
 	it("re-derives the index-owned handbook sections against the rebuilt codewiki", async () => {
 		const cwd = scratchProject();
@@ -231,7 +233,8 @@ describe("contracts/context-refresh", () => {
 		strictEqual(result.clioMd, "updated");
 		const after = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 		strictEqual(after.includes("4096 source files"), false, after);
-		ok(after.includes(`indexes ${result.codewikiEntries} source file`), after);
+		strictEqual(after.includes("currently indexes"), false, after);
+		ok(after.includes("Start orientation with these indexed entry points:"), after);
 		// Sections the index does not author survive untouched, prose and all.
 		ok(after.includes("`src/index.ts` is the only module a change travels through."), after);
 		ok(after.includes("Keep prose byte-stable across refresh."), after);

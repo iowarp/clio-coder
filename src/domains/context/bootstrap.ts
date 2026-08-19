@@ -684,20 +684,21 @@ function stabilizeGeneratedOutput(
 
 /**
  * The handbook sections whose every fact is read straight off the codewiki index:
- * how many files it holds, which modules anchor it, where the mass sits. They are
- * the only sections nothing but the index can author, and equally the only ones
- * that are wrong the moment the tree moves, so `context refresh` re-derives them
- * in place and leaves every other section to its human or model author.
+ * which modules anchor it and where the mass sits. They are the only sections
+ * nothing but the index can author, and equally the only ones that are wrong the
+ * moment the tree moves, so `context refresh` re-derives them in place and leaves
+ * every other section to its human or model author. An exact file count stays
+ * out: the handbook persists between refreshes while the tree keeps moving, so a
+ * precise number is falsified by any single added file and carries no
+ * navigational value the entry-point list does not.
  */
 export function codewikiSections(codewiki: Codewiki): ClioMdSection[] {
 	const sections: ClioMdSection[] = [];
 	const entryPoints = codewikiEntryPoints(codewiki, 8);
-	const indexedCount = indexedSourceFileCount(codewiki);
 	if (entryPoints.length > 0) {
 		sections.push({
 			title: "Context retrieval",
 			body: [
-				`The codewiki currently indexes ${indexedCount} source file${indexedCount === 1 ? "" : "s"}.`,
 				`Start orientation with these indexed entry points: ${entryPoints.map((entry) => `\`${entry}\``).join(", ")}.`,
 				"Use `code_nav` (modes: symbol, path, entries, outline, deps, dependents, wiki) before broad reads when the task is navigational.",
 			].join(" "),
