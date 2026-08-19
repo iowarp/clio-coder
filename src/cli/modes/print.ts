@@ -211,14 +211,22 @@ function countToolStats(stats: Map<string, ToolCallStat>): number {
 	return count;
 }
 
-const TERMINAL_JSON_EVENT_TYPES = new Set([
-	"agent_start",
-	"agent_end",
-	"message_end",
-	"notice",
-	"tool_execution_start",
-	"tool_execution_end",
-]);
+/**
+ * The events `--json-events terminal` lets through, alongside the `turn_start`
+ * and `turn_end` frames this mode synthesizes itself.
+ *
+ * The mode's contract is the run receipt and nothing else. It used to admit
+ * `message_end`, which is the largest event on the stream and carries the
+ * injected system reminders, the operator's prompt, and every thinking block:
+ * "Say OK." produced 39.8 KB. `agent_start` and the two `tool_execution_*`
+ * events are per-step progress, which is what `--json-events full` is for.
+ *
+ * `turn_end` is deliberately absent even though the mode emits one. The
+ * synthesized frame carries `startedAt`, `endedAt`, and `exitCode`; the streamed
+ * event of the same name carries the turn's assistant message instead. Letting
+ * both through would put two different shapes behind one `type` on one stream.
+ */
+const TERMINAL_JSON_EVENT_TYPES = new Set(["agent_end", "notice"]);
 
 function isMainAgentRunKind(value: string): value is RunKind {
 	return value === "http" || value === "sdk" || value === "subprocess";
