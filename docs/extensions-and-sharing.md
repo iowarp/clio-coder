@@ -3,7 +3,7 @@
 > [!TIP]
 > **Interactive Spec Available:** An interactive dashboard is located at [docs/html/extensions_blueprint.html](html/extensions_blueprint.html) (Version: 0.3.2).
 
-Clio Coder has lightweight community-oriented resource packaging. Extensions are filesystem bundles that contribute prompts, skills, and future theme resources. Share archives are portable JSON files for moving project/user Clio resources between machines or collaborators.
+Clio Coder has lightweight community-oriented resource packaging. Extensions are filesystem bundles that contribute prompts and skills. Share archives are portable JSON files for moving project/user Clio resources between machines or collaborators. Themes are built into the engine and are no longer loaded from extensions.
 
 Source of truth: `src/domains/extensions/**`, `src/domains/resources/**`, `src/domains/share/**`, `src/cli/extensions.ts`, and `src/cli/share.ts`.
 
