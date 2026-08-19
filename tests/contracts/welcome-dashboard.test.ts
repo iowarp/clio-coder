@@ -190,10 +190,12 @@ describe("welcome-dashboard and footer integration tests", () => {
 	});
 
 	it("renders the adaptive launchpad with only WORKSPACE, ROUTE, and NEXT decision rows", () => {
+		const cwd = scratchDashboardProject();
 		const stats = deriveWelcomeDashboardStats({
 			providers: mockProviders,
 			observability: mockObservability,
 			getSettings: () => mockSettings,
+			getWorkspaceSnapshot: () => emptyWorkspaceSnapshot(cwd),
 		});
 
 		const lines = buildWelcomeDashboardLines(stats, 100);
@@ -249,12 +251,14 @@ describe("welcome-dashboard and footer integration tests", () => {
 	});
 
 	it("chooses one honest NEXT action from repository readiness", () => {
+		const cwd = scratchDashboardProject();
 		const missing = deriveWelcomeDashboardStats({
 			providers: mockProviders,
 			observability: mockObservability,
 			getSettings: () => mockSettings,
+			getWorkspaceSnapshot: () => emptyWorkspaceSnapshot(cwd),
 			readRepositoryFacts: () => {
-				const { pending: _pending, ...facts } = placeholderRepositoryFacts(process.cwd());
+				const { pending: _pending, ...facts } = placeholderRepositoryFacts(cwd);
 				return facts;
 			},
 		});
