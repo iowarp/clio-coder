@@ -487,6 +487,12 @@ function verificationSection(cwd: string): ClioMdSection | null {
 	if (hasScript("ci")) {
 		lines.push(`Use ${command("ci")} for the full local gate before committing broad or shared behavior changes.`);
 	}
+	// Cargo's commands are defined by the toolchain, not by each project, so
+	// naming them for any Cargo workspace carries the same confidence as a
+	// declared package script.
+	if (existsSync(join(cwd, "Cargo.toml"))) {
+		lines.push("Run `cargo build` and `cargo test` before handoff.");
+	}
 	if (lines.length === 0) return null;
 	return { title: "Verification expectations", body: lines.join(" ") };
 }
