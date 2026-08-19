@@ -115,6 +115,27 @@ describe("contracts/tool-hardening bash tail-biased non-destructive output", () 
 		strictEqual(result.output.trim(), "hello\nworld");
 		strictEqual((result.details as { resultSize?: unknown } | undefined)?.resultSize, undefined);
 	});
+
+	it("streams cumulative snapshots through pi before the terminal result", async () => {
+		const updates: string[] = [];
+		const result = await bashTool.run(
+			{ command: "printf first; sleep 0.15; printf '\\nsecond\\n'" },
+			{
+				onUpdate: (partial) => {
+					if (partial.kind === "ok") updates.push(partial.output);
+				},
+			},
+		);
+
+		strictEqual(result.kind, "ok");
+		ok(updates.length >= 2, `expected an initial/live/final snapshot sequence, got ${updates.length}`);
+		strictEqual(updates[0], "", "pi receives an empty initial snapshot so the UI can show a running body");
+		ok(
+			updates.some((snapshot) => snapshot.includes("first")),
+			JSON.stringify(updates),
+		);
+		ok(updates.at(-1)?.includes("first\nsecond"), JSON.stringify(updates));
+	});
 });
 
 describe("contracts/tool-hardening bash cwd pinning (W5)", () => {
