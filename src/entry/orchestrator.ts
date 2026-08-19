@@ -131,6 +131,7 @@ import { collectSessionEntries } from "../domains/session/compaction/session-ent
 import { estimateTokens } from "../domains/session/compaction/tokens.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
+import { createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import {
@@ -1214,12 +1215,32 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			session?.appendEntry(entry);
 		},
 	});
+	const decisionBoard = createDecisionBoardStore({
+		getSessionId: () => session?.current()?.id ?? null,
+		readEntries: () => {
+			const meta = session?.current();
+			if (!meta) return [];
+			const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
+			return filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), leafTurnId);
+		},
+		getActiveLeafTurnId: () => {
+			const meta = session?.current();
+			return meta ? (session?.tree(meta.id).leafId ?? null) : null;
+		},
+		appendEntry: (entry) => {
+			if (!session) throw new Error("decision board: no session ledger is available");
+			session.appendEntry(entry);
+		},
+	});
 	// getSessionId alone never notices a /tree switch: it moves the active
 	// append point inside the same session, so the id-keyed cache above kept
 	// showing the abandoned branch's board (issue #94). SessionTurnSwitched is
 	// the signal that switch actually happened; invalidate() forces the next
 	// read to refold from the now-current leaf.
-	bus.on(BusChannels.SessionTurnSwitched, () => taskBoard.invalidate());
+	bus.on(BusChannels.SessionTurnSwitched, () => {
+		taskBoard.invalidate();
+		decisionBoard.invalidate();
+	});
 	// Link in-flight dispatch runs to the live board via the ledger's
 	// activeRunIds field: a run is tracked from the moment its child process is
 	// live until it finalizes either way. attach/detach are no-ops when no board
@@ -1557,6 +1578,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		registerDeferredReminderSink: (sink) => {
 			deferredMemoryReminderSink = sink;
+		},
+		onAskUserFinalized: (policy) => {
+			decisionBoard.recordFinalizedInterview(policy);
 		},
 		...(session
 			? {

@@ -11,6 +11,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runEvidenceCommand } from "../../src/cli/evidence.js";
+import type { DomainContext } from "../../src/core/domain-loader.js";
 import {
 	type GateDecisionArtifact,
 	type GateDecisionDraft,
@@ -26,6 +27,7 @@ import type {
 	RunReceiptSafetySummary,
 } from "../../src/domains/dispatch/types.js";
 import { buildEvidence, loadEvidenceGateDecisions } from "../../src/domains/evidence/index.js";
+import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 async function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promise<T> {
@@ -93,6 +95,7 @@ async function sealRun(
 		runtimeKind: "http",
 	},
 	provenance: SealProvenance = {},
+	sessionId: string | null = null,
 ): Promise<{ runId: string; receiptPath: string }> {
 	const ledger = openLedger();
 	const envelope = ledger.create({
@@ -103,7 +106,7 @@ async function sealRun(
 		wireModelId: "test-model",
 		runtimeId: runtime.runtimeId,
 		runtimeKind: runtime.runtimeKind,
-		sessionId: null,
+		sessionId,
 		cwd: "/tmp",
 	});
 	const endedAt = new Date().toISOString();
@@ -178,13 +181,20 @@ async function sealRun(
 		...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
 		...(provenance.safety !== undefined ? { safety: provenance.safety } : {}),
 		...(provenance.autonomyEnforcement !== undefined ? { autonomyEnforcement: provenance.autonomyEnforcement } : {}),
-		sessionId: null,
+		sessionId,
 	});
 	await ledger.persist();
 	const receiptPath = ledger.get(envelope.id)?.receiptPath;
 	if (!receiptPath) throw new Error("fixture receipt path missing");
 	strictEqual(receipt.integrity.version, 15);
 	return { runId: envelope.id, receiptPath };
+}
+
+function stubContext(): DomainContext {
+	return {
+		bus: { emit: () => {}, on: () => () => {} } as unknown as DomainContext["bus"],
+		getContract: () => undefined,
+	};
 }
 
 function readJsonl(path: string): unknown[] {
@@ -238,6 +248,87 @@ describe("contracts/evidence-build", () => {
 			const clean = await captureStderr(() => runEvidenceCommand(["build", "--run", runId]));
 			strictEqual(clean.result, 0, `acp-delegation build failed: ${clean.stderr}`);
 			ok(!clean.stderr.includes("receipt integrity"), clean.stderr);
+		});
+	});
+
+	it("links receipt evidence to branch-anchored interview decisions and attributes operator corrections", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const sessions = createSessionBundle(stubContext());
+			const meta = sessions.contract.create({ cwd: scratch });
+			const user = sessions.contract.append({ parentId: null, kind: "user", payload: { text: "choose scope" } });
+			const assistant = sessions.contract.append({
+				parentId: user.id,
+				kind: "assistant",
+				payload: { text: "scope chosen" },
+			});
+			sessions.contract.appendEntry({
+				kind: "decisionLedger",
+				parentTurnId: user.id,
+				interviewId: "interview-evidence-1",
+				interviewStatus: "complete",
+				startedAt: "2026-08-19T10:00:00.000Z",
+				endedAt: "2026-08-19T10:02:00.000Z",
+				roundCount: 1,
+				summary: "Use focused scope.",
+				decisions: [
+					{
+						key: "scope",
+						value: "focused",
+						label: "Scope",
+						source_question: "Which scope?",
+						status: "active",
+						decidedAt: "2026-08-19T10:01:00.000Z",
+					},
+				],
+			});
+			sessions.contract.appendEntry({
+				kind: "decisionLedger",
+				parentTurnId: assistant.id,
+				interviewId: "interview-evidence-1",
+				interviewStatus: "complete",
+				startedAt: "2026-08-19T10:00:00.000Z",
+				endedAt: "2026-08-19T10:02:00.000Z",
+				roundCount: 1,
+				summary: "Use focused scope.",
+				decisions: [
+					{
+						key: "scope",
+						value: "focused",
+						label: "Scope",
+						source_question: "Which scope?",
+						status: "superseded",
+						decidedAt: "2026-08-19T10:01:00.000Z",
+						revisedAt: "2026-08-19T10:03:00.000Z",
+						correction: "cover every package",
+					},
+				],
+			});
+			await sessions.contract.close();
+
+			const { receiptPath } = await sealRun(undefined, {}, meta.id);
+			const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as { sessionId: string | null };
+			strictEqual(receipt.sessionId, meta.id, "the receipt durably links the evidence build to the interview session");
+			const result = await buildEvidence({
+				dataDir: join(scratch, "data"),
+				stateDir: join(scratch, "state"),
+				sessionId: meta.id,
+			});
+			const transcript = readFileSync(join(result.directory, "transcript.md"), "utf8");
+			ok(
+				transcript.includes(
+					`decisionLedger anchor=${user.id} interview=interview-evidence-1 status=complete startedAt=2026-08-19T10:00:00.000Z endedAt=2026-08-19T10:02:00.000Z`,
+				),
+				transcript,
+			);
+			ok(transcript.includes(`decisionLedger anchor=${assistant.id} interview=interview-evidence-1`), transcript);
+			ok(transcript.includes("decision key=scope status=active decidedAt=2026-08-19T10:01:00.000Z"), transcript);
+			ok(
+				transcript.includes(
+					"decision key=scope status=superseded decidedAt=2026-08-19T10:01:00.000Z revisedAt=2026-08-19T10:03:00.000Z revisionSource=operator",
+				),
+				transcript,
+			);
+			ok(transcript.includes("correctionSource=operator correction=cover every package"), transcript);
 		});
 	});
 

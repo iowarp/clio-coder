@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
+import { foldDecisionBoard } from "../../src/domains/session/decision-board.js";
 import type { SessionEntry, TaskLedgerEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { filterEntriesToActivePath } from "../../src/domains/session/tree/active-path.js";
@@ -583,5 +584,77 @@ describe("contracts/session-tree-continuity", () => {
 		strictEqual(liveLedgers[0]?.goals[0]?.title, forkedLedgers[0]?.goals[0]?.title);
 
 		await second.contract.close();
+	});
+
+	it("/tree and /fork reconstruct finalized and revised decision snapshots identically", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "choose scope" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "scope chosen" } });
+		const baseSnapshot = {
+			kind: "decisionLedger" as const,
+			interviewId: "interview-tree-1",
+			interviewStatus: "complete" as const,
+			startedAt: "2026-08-19T10:00:00.000Z",
+			endedAt: "2026-08-19T10:02:00.000Z",
+			roundCount: 1,
+			summary: "Use focused scope.",
+			decisions: [
+				{
+					key: "scope",
+					value: "focused",
+					status: "active" as const,
+					decidedAt: "2026-08-19T10:01:00.000Z",
+				},
+			],
+		};
+		const baseDecision = baseSnapshot.decisions[0];
+		ok(baseDecision);
+		// Host finalization occurs after the terminal assistant message. Its
+		// originating-user anchor must keep it visible at a1 anyway.
+		contract.appendEntry({ ...baseSnapshot, parentTurnId: u1.id });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "revise scope" } });
+		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "scope revised" } });
+		contract.appendEntry({
+			...baseSnapshot,
+			parentTurnId: a2.id,
+			decisions: [
+				{
+					...baseDecision,
+					status: "superseded",
+					revisedAt: "2026-08-19T10:04:00.000Z",
+					correction: "cover every package",
+				},
+			],
+		});
+
+		const allEntries = sessionEntries(meta.id);
+		const treeFinalized = foldDecisionBoard(filterEntriesToActivePath(allEntries, a1.id));
+		const treeRevised = foldDecisionBoard(filterEntriesToActivePath(allEntries, a2.id));
+		strictEqual(treeFinalized.length, 1);
+		strictEqual(treeFinalized[0]?.decisions[0]?.status, "active");
+		strictEqual(treeRevised[0]?.decisions[0]?.status, "superseded");
+		await contract.close();
+
+		const finalizedForkBundle = createSessionBundle(stubContext());
+		finalizedForkBundle.contract.resume(meta.id);
+		const finalizedFork = finalizedForkBundle.contract.fork(a1.id);
+		const forkFinalized = foldDecisionBoard(sessionEntries(finalizedFork.id));
+		deepStrictEqual(
+			forkFinalized.map(({ turnId: _turnId, timestamp: _timestamp, ...entry }) => entry),
+			treeFinalized.map(({ turnId: _turnId, timestamp: _timestamp, ...entry }) => entry),
+		);
+		await finalizedForkBundle.contract.close();
+
+		const revisedForkBundle = createSessionBundle(stubContext());
+		revisedForkBundle.contract.resume(meta.id);
+		const revisedFork = revisedForkBundle.contract.fork(a2.id);
+		const forkRevised = foldDecisionBoard(sessionEntries(revisedFork.id));
+		deepStrictEqual(
+			forkRevised.map(({ turnId: _turnId, timestamp: _timestamp, ...entry }) => entry),
+			treeRevised.map(({ turnId: _turnId, timestamp: _timestamp, ...entry }) => entry),
+		);
+		await revisedForkBundle.contract.close();
 	});
 });

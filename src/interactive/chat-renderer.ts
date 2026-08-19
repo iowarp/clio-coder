@@ -833,6 +833,7 @@ export function buildReplayAgentMessagesFromTurns(
 			case "label":
 			case "protectedArtifact":
 			case "taskLedger":
+			case "decisionLedger":
 			// A worker's answer is not the operator's words and not the model's.
 			// It reaches the model only when an operator shares it, and a share
 			// is already a user message by the time it lands in the ledger.
@@ -1013,6 +1014,7 @@ export function rehydrateChatPanelFromTurns(
 			}
 			case "label":
 			case "taskLedger":
+			case "decisionLedger":
 				break;
 		}
 	}

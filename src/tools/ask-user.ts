@@ -557,6 +557,17 @@ export async function finalizeAskUserInterview(
 	await persistAskUserTranscript(policy, options);
 }
 
+/** Settle a turn-owned interview, then hand its immutable policy to one durable producer. */
+export async function finalizeAskUserInterviewForHost(
+	policy: AskUserToolPolicy,
+	reason: string,
+	options?: ToolInvokeOptions,
+	onFinalized?: (policy: AskUserToolPolicy) => void,
+): Promise<void> {
+	await finalizeAskUserInterview(policy, reason, options);
+	onFinalized?.(policy);
+}
+
 async function defaultAskUserHandler(): Promise<AskUserResult> {
 	return cancelledAskUserResult();
 }

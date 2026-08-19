@@ -6,6 +6,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { isSkillActivation } from "../../src/core/skill-activation.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import {
+	type DecisionLedgerEntry,
 	isSessionEntry,
 	isSessionHeader,
 	type SessionInfoEntry,
@@ -165,6 +166,85 @@ describe("contracts/persistence", () => {
 		};
 		strictEqual(isSessionEntry(messageEntry), true);
 		strictEqual(isSessionEntry({ kind: "invalid" }), false);
+
+		const decisionEntry: DecisionLedgerEntry = {
+			kind: "decisionLedger",
+			turnId: "decision-ledger-1",
+			parentTurnId: "user-1",
+			timestamp: "2026-04-17T00:03:00.000Z",
+			interviewId: "interview-1",
+			interviewStatus: "complete",
+			startedAt: "2026-04-17T00:00:00.000Z",
+			endedAt: "2026-04-17T00:03:00.000Z",
+			roundCount: 1,
+			decisions: [
+				{
+					key: "scope",
+					value: "focused",
+					status: "active",
+					decidedAt: "2026-04-17T00:01:00.000Z",
+				},
+			],
+		};
+		strictEqual(isSessionEntry(decisionEntry), true);
+		strictEqual(isSessionEntry({ ...decisionEntry, roundCount: -1 }), false);
+		strictEqual(isSessionEntry({ ...decisionEntry, interviewStatus: "active" }), false);
+		strictEqual(
+			isSessionEntry({ ...decisionEntry, decisions: [{ ...decisionEntry.decisions[0], key: "Bad key" }] }),
+			false,
+		);
+		strictEqual(
+			isSessionEntry({
+				...decisionEntry,
+				decisions: [{ ...decisionEntry.decisions[0], status: "superseded" }],
+			}),
+			false,
+			"a superseded record requires revisedAt",
+		);
+		strictEqual(
+			isSessionEntry({
+				...decisionEntry,
+				decisions: [{ ...decisionEntry.decisions[0], correction: "new direction" }],
+			}),
+			false,
+			"an active record cannot carry correction fields",
+		);
+	});
+
+	it("round-trips branch-anchored decision ledger snapshots", () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: scratch });
+		const userTurn = contract.append({ parentId: null, kind: "user", payload: { text: "choose scope" } });
+		const appended = contract.appendEntry({
+			kind: "decisionLedger",
+			parentTurnId: userTurn.id,
+			interviewId: "interview-round-trip",
+			interviewStatus: "complete",
+			startedAt: "2026-04-17T00:00:00.000Z",
+			endedAt: "2026-04-17T00:03:00.000Z",
+			roundCount: 1,
+			summary: "Use focused scope.",
+			transcriptPath: "/tmp/interviews/interview-round-trip.json",
+			decisions: [
+				{
+					key: "scope",
+					value: "focused",
+					label: "Scope",
+					source_question: "Which scope?",
+					status: "active",
+					decidedAt: "2026-04-17T00:01:00.000Z",
+				},
+			],
+		});
+
+		const reopened = openSession(meta.id).turns();
+		const decision = reopened.find(
+			(entry): entry is DecisionLedgerEntry => isSessionEntry(entry) && entry.kind === "decisionLedger",
+		);
+		ok(decision);
+		deepStrictEqual(decision, appended);
+		strictEqual(decision.parentTurnId, userTurn.id);
 	});
 
 	it("persists ordinary turns as structured messages while preserving tree continuity", () => {

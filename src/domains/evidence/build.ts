@@ -1325,6 +1325,23 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 			`${prefix} taskLedger goals=${entry.goals.length} subgoals=${entry.subgoals.length} activeRuns=${entry.activeRunIds.length} evidence=${entry.requiredValidationEvidence.length}`,
 		];
 	}
+	if (entry.kind === "decisionLedger") {
+		const summary = entry.summary === undefined ? "" : ` summary=${previewUnknown(entry.summary)}`;
+		return [
+			`${prefix} decisionLedger anchor=${entry.parentTurnId ?? "none"} interview=${entry.interviewId} status=${entry.interviewStatus} startedAt=${entry.startedAt} endedAt=${entry.endedAt} rounds=${entry.roundCount} decisions=${entry.decisions.length}${summary}`,
+			...entry.decisions.map((decision) => {
+				const label = decision.label === undefined ? "" : ` label=${previewUnknown(decision.label)}`;
+				const sourceQuestion =
+					decision.source_question === undefined ? "" : ` sourceQuestion=${previewUnknown(decision.source_question)}`;
+				const revision = decision.revisedAt === undefined ? "" : ` revisedAt=${decision.revisedAt} revisionSource=operator`;
+				const correction =
+					decision.correction === undefined
+						? ""
+						: ` correctionSource=operator correction=${previewUnknown(decision.correction)}`;
+				return `  decision key=${decision.key} status=${decision.status} decidedAt=${decision.decidedAt}${revision}${label}${sourceQuestion} value=${previewUnknown(decision.value)}${correction}`;
+			}),
+		];
+	}
 	if (entry.kind === "workerRun") {
 		const parent = entry.parentToolCallId === undefined ? "" : ` parentCall=${entry.parentToolCallId}`;
 		return [
