@@ -1,6 +1,6 @@
 # Session Lifecycle
 
-This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in `v0.3.1`.
+This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in `v0.3.2`.
 
 Source implementations: `src/engine/session.ts` and `src/domains/session/`.
 
@@ -43,7 +43,7 @@ export interface ClioSessionMeta {
 }
 ```
 
-Format version `CURRENT_SESSION_FORMAT_VERSION = 3` (`src/engine/session.ts:66`) is stamped on all sessions created in `v0.3.1`. Sessions with missing or earlier format versions trigger schema migrations in `src/domains/session/migrations/` on `/resume`.
+Format version `CURRENT_SESSION_FORMAT_VERSION = 3` (`src/engine/session.ts:66`) is stamped on all sessions created in `v0.3.2`. Sessions with missing or earlier format versions trigger schema migrations in `src/domains/session/migrations/` on `/resume`.
 
 ---
 
@@ -108,10 +108,11 @@ export interface SessionTreeNode {
 
 When an operator branches or switches turns using `/tree` or `Alt+T`, the next append point changes without mutating or deleting historical entries in `current.jsonl`.
 
-The active path filter (`src/domains/session/tree/active-path.ts:filterEntriesToActivePath`) traces ancestry back from the active leaf:
-1. Retains all message entries on the direct ancestral path from leaf to root.
-2. Retains sidecar entries anchored to turns on the active path (`targetTurnId`, `parentTurnId`, or `firstKeptTurnId`).
-3. Retains unanchored global sidecars (`parentTurnId: null`).
+The active path filter (`src/domains/session/tree/active-path.ts`) traces ancestry back from the active leaf:
+1. Resolves all `turnId` identifiers tracing back to the root `null` parent.
+2. Selects all ledger entries explicitly matching these `turnId`s.
+3. Both `/tree` (in-session switch) and `/fork` (new session branch) reconstruct the exact same state, strictly excluding any unanchored sidecar entries (`taskLedger`, routing notices, leafless `workerRun`) that appear after the chosen leaf's position.
+4. For a `/tree` switch, the active pin is persisted to `meta.pinnedLeafTurnId` and cleared on the next append, so a switch survives quit and `/resume` without reverting to the abandoned tip via timestamp inference.
 4. Prunes abandoned sibling branches from the context window supplied to the LLM.
 
 ### Branch Forking (`/fork`)
@@ -119,7 +120,7 @@ The active path filter (`src/domains/session/tree/active-path.ts:filterEntriesTo
 The `/fork` command (`src/domains/session/tree/fork.ts:forkFromParentTurn`) initializes an independent session branched from an arbitrary turn:
 1. Closes the current session writer.
 2. Creates a new session directory and metadata inheriting `cwd`, `model`, and `target` from the parent.
-3. Traces ancestry up to `parentTurnId` and copies only the active path entries into the new session ledger.
+3. Traces ancestry up to `parentTurnId` and copies exactly the active path entries (excluding later unanchored sidecars) into the new session ledger.
 4. Stamps `parentSession` and `parentTurnId` in the new session header.
 
 ---
