@@ -1,10 +1,10 @@
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { AuthOperationOptions } from "@earendil-works/pi-ai";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { withStateFileLock, withStateFileLockSync } from "../../../core/state-file-lock.js";
 import { clioConfigDir } from "../../../core/xdg.js";
+import type { AuthOperationOptions } from "../../../engine/types.js";
 
 import type { AuthStorageBackend, LockResult } from "./storage.js";
 
