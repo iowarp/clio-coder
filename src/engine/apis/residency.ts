@@ -479,6 +479,16 @@ export interface ResidencyAdapter {
 	 */
 	keepModelTags?(): Promise<ReadonlyArray<string> | undefined>;
 	unload(modelId: string): Promise<void>;
+	/**
+	 * Reject with a {@link ResidencyPreconditionError} when the server cannot
+	 * make the keep model resident at all, most often because the model is not
+	 * in its catalog. Consulted only when the plan would evict, and only from
+	 * facts the adapter already holds, so it costs no extra round trip.
+	 *
+	 * Adapters that cannot know this ahead of the load omit the hook, which
+	 * keeps the previous behaviour of letting the load itself report the failure.
+	 */
+	assertLoadable?(): Promise<void>;
 	/** Router-style servers: read the max co-resident instance count. */
 	capacity?(): Promise<number | undefined>;
 	/**
@@ -495,6 +505,23 @@ export interface ResidencyAdapter {
 }
 
 export type ReconcileResult = ResidencyPlan;
+
+/**
+ * Thrown by an adapter's {@link ResidencyAdapter.listResident} when the server
+ * cannot make the keep model resident at all, most often because the model is
+ * not in the server's catalog. It is a precondition failure, not a transport
+ * failure: the reconciler must not evict anything for a load that is already
+ * known to be impossible, because the eviction would succeed, the load would
+ * fail, and the target would be left holding nothing (#127).
+ *
+ * The reconciler answers it with an observe-only decision plus a
+ * `will-not-fit` notice, so the turn continues to the provider call and fails
+ * with the server's own error for the unknown model instead of with a silent
+ * outage on the node.
+ */
+export class ResidencyPreconditionError extends Error {
+	override readonly name = "ResidencyPreconditionError";
+}
 
 /**
  * Gather the resident set and capacity facts, decide, emit notices, and
@@ -575,6 +602,33 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 	};
 
 	const plan = decideResidency(facts);
+
+	// An eviction is only justified if the load it makes room for can succeed.
+	// Unloading first and discovering afterwards that the keep model does not
+	// exist leaves the target serving nothing, which took a shared node out of
+	// service on the live fleet (#127). Nothing has mutated yet at this point,
+	// so refusing here is a clean no-op: the turn continues to the provider call
+	// and fails with the server's own error for the unknown model.
+	if (plan.decision === "reconcile" && plan.evict.length > 0 && adapter.assertLoadable) {
+		try {
+			await adapter.assertLoadable();
+		} catch (error) {
+			if (!(error instanceof ResidencyPreconditionError)) throw error;
+			const notice: ResidencyNotice = {
+				kind: "will-not-fit",
+				level: "error",
+				targetId: adapter.targetId,
+				runtimeId: adapter.runtimeId,
+				model: adapter.keepModelId,
+				message: error.message,
+			};
+			emitResidencyNotice(notice);
+			return { decision: "decline", evict: [], fallbackEvict: [], keepResident: false, notices: [notice] };
+		}
+	}
+
+	// Emitted after the loadability gate so the operator never reads an eviction
+	// notice for a swap that the gate then refuses.
 	for (const notice of plan.notices) emitResidencyNotice(notice);
 
 	if (plan.decision === "reconcile") {
