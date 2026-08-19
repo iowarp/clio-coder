@@ -196,10 +196,10 @@ describe("contracts/lmstudio reasoning and chat wire", () => {
 		ok(probe?.ok, probe?.error);
 		await drainChat(descriptor, { reasoning: "xhigh" });
 		const request = server.requestsFor("/v1/chat/completions").at(-1);
-		strictEqual(request?.body?.reasoning_effort, "high");
+		strictEqual(request?.body?.reasoning_effort, "low");
 	});
 
-	it("maps every documented LM Studio reasoning override onto the resolved effort", async () => {
+	it("maps every documented LM Studio reasoning override when the model advertises the level", async () => {
 		const cases = [
 			["auto", "low"],
 			["off", "none"],
@@ -211,7 +211,11 @@ describe("contracts/lmstudio reasoning and chat wire", () => {
 		for (const [reasoning, expected] of cases) {
 			const server = await fake();
 			const descriptor = target(server, { lmstudio: { request: { reasoning } } });
-			await drainChat(descriptor, { reasoning: "xhigh" });
+			const configured = model(descriptor) as Model<"openai-completions"> & {
+				clio?: { lmstudioReasoningOptions?: ReadonlyArray<string> };
+			};
+			if (configured.clio) configured.clio.lmstudioReasoningOptions = ["none", "low", "medium", "high"];
+			await drainChat(descriptor, { reasoning: "xhigh" }, undefined, configured);
 			strictEqual(server.requestsFor("/v1/chat/completions").at(-1)?.body?.reasoning_effort, expected, reasoning);
 		}
 	});

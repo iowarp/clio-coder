@@ -240,7 +240,7 @@ function applyLmStudioPayload(
 		case "low":
 		case "medium":
 		case "high":
-			next.reasoning_effort = request.reasoning;
+			next.reasoning_effort = lmStudioReasoningEffort(request.reasoning, runtimeMetadata(model)?.lmstudioReasoningOptions);
 			break;
 		default:
 			next.reasoning_effort = resolvedEffort;
