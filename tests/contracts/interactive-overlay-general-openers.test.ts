@@ -9,6 +9,7 @@ import {
 } from "../../src/interactive/overlay-lifecycle.js";
 import type { OpenContextResetOverlayDeps } from "../../src/interactive/overlays/context-reset.js";
 import type { OpenDecisionsOverlayOptions } from "../../src/interactive/overlays/decisions.js";
+import type { OpenTasksOverlayOptions } from "../../src/interactive/tasks-overlay.js";
 
 type GeneralOpenerSeams = {
 	openCostOverlay?: typeof import("../../src/interactive/cost-overlay.js").openCostOverlay;
@@ -173,6 +174,106 @@ describe("contracts/interactive general overlay openers", () => {
 			true,
 			"the single-overlay guard is released before the ordinary user turn",
 		);
+		lifecycle.dispose();
+	});
+
+	it("captures composite task snapshots, uses ordinary handoff submission, and deep-links exact artifact paths", () => {
+		const events: string[] = [];
+		let taskOptions: OpenTasksOverlayOptions | undefined;
+		let viewFilter: string | undefined;
+		let failHand = false;
+		const operatorTask = {
+			id: "u1",
+			title: "review release",
+			note: "check receipts",
+			status: "open" as const,
+			createdAt: "2026-08-19T10:00:00.000Z",
+			updatedAt: "2026-08-19T10:00:00.000Z",
+		};
+		const runtime = makeRuntime({
+			events,
+			app: {
+				getSessionId: () => "session-1",
+				session: {
+					current: () => ({ id: "session-1", cwd: "/workspace" }),
+				} as never,
+				readSessionEntries: () =>
+					[
+						{
+							kind: "taskLedger",
+							turnId: "ledger-1",
+							parentTurnId: null,
+							timestamp: "2026-08-19T10:01:00.000Z",
+							boardId: "board-1",
+							goals: [{ id: "board", title: "Prior", status: "completed" }],
+							subgoals: [{ id: "t1", title: "done", status: "completed", origin: "agent" }],
+							activeRunIds: [],
+							requiredValidationEvidence: [],
+						},
+						{
+							kind: "message",
+							turnId: "artifact-1",
+							parentTurnId: null,
+							timestamp: "2026-08-19T10:02:00.000Z",
+							role: "tool_result",
+							payload: {
+								toolName: "write",
+								isError: false,
+								result: { details: { paths: ["reports/Release Notes.md"] } },
+							},
+						},
+					] as never,
+				userTasks: {
+					snapshot: () => [operatorTask],
+					add: () => operatorTask,
+					hand: () => {
+						if (failHand) throw new Error("sidecar unavailable");
+						return { ...operatorTask, status: "handed" as const, handedSessionId: "session-1" };
+					},
+					done: () => ({ ...operatorTask, status: "done" as const }),
+					drop: () => ({ ...operatorTask, status: "dropped" as const }),
+				} as never,
+			},
+			runtime: {
+				getSlashContext: () => ({ submitChat: (text: string) => events.push(`submit:${text}`) }) as never,
+				openTasksOverlay: (_tui, _getBoard, options) => {
+					taskOptions = options;
+					return { hide: () => events.push("hide:tasks") } as unknown as OverlayHandle;
+				},
+				openViewOverlay: (_tui, options) => {
+					viewFilter = options.initialFilter;
+					return { hide: () => events.push("hide:view") } as unknown as OverlayHandle;
+				},
+			},
+		});
+		const lifecycle = createOverlayLifecycle(runtime);
+		lifecycle.openTasksOverlayState();
+		const snapshot = taskOptions?.getSessionSnapshot?.();
+		strictEqual(snapshot?.history[0]?.boardId, "board-1");
+		strictEqual(snapshot?.artifacts[0]?.path, "reports/Release Notes.md");
+		deepStrictEqual(taskOptions?.getUserTasks?.(), [operatorTask]);
+
+		taskOptions?.onHandUserTask?.("u1");
+		deepStrictEqual(
+			events.filter((event) => event.startsWith("submit:")),
+			[
+				'submit:Operator task u1: review release. check receipts. Pick it up with tasks action="pick" id="u1" and work it when appropriate.',
+			],
+		);
+		failHand = true;
+		let failure = "";
+		try {
+			taskOptions?.onHandUserTask?.("u1");
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
+		}
+		strictEqual(failure, "sidecar unavailable");
+		strictEqual(events.filter((event) => event.startsWith("submit:")).length, 1);
+
+		taskOptions?.onClose?.();
+		taskOptions?.onOpenArtifact?.("reports/Release Notes.md");
+		strictEqual(lifecycle.getState(), "view");
+		strictEqual(viewFilter, "workspace:reports/Release Notes.md");
 		lifecycle.dispose();
 	});
 

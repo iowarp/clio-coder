@@ -20,6 +20,7 @@ export interface InteractiveInputKeyActionDeps {
 	requestShutdown: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
+	openTasks: () => void;
 	openDecisions: () => void;
 	backgroundDispatch: () => void;
 	openModelSelector: () => void;
@@ -63,6 +64,7 @@ export interface InteractiveInputRuntimeDeps {
 		toggleDispatchBoardOverlay(): void;
 		openModelOverlayState(): void;
 		openTreeOverlayState(): void;
+		openTasksOverlayState(): void;
 		openDecisionsOverlayState(): void;
 	};
 	refreshFooter: () => void;
@@ -139,6 +141,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		requestShutdown: () => void controller.shutdown(),
 		toggleStatus: deps.overlay.toggleFooterDashboardState,
 		toggleDispatchBoard: deps.overlay.toggleDispatchBoardOverlay,
+		openTasks: deps.overlay.openTasksOverlayState,
 		openDecisions: deps.overlay.openDecisionsOverlayState,
 		backgroundDispatch: deps.actions.backgroundActiveDispatch,
 		openModelSelector: deps.overlay.openModelOverlayState,

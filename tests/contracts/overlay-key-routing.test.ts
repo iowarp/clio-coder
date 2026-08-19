@@ -231,6 +231,29 @@ describe("modal precedence", () => {
 		strictEqual(routeOverlayKey("c", "decisions", deps, neverMatches), false);
 		strictEqual(routeOverlayKey(ESC, "decisions", deps, neverMatches), false);
 	});
+
+	it("binds Alt+B to the composite board and toggles the focused board closed", () => {
+		strictEqual(CLIO_APP_KEYBINDINGS["clio.tasks.open"].defaultKeys, "alt+b");
+		const manager = createKeybindingManagerForTesting();
+		strictEqual(manager.matches("\x1bb", "clio.tasks.open"), true);
+		let opens = 0;
+		strictEqual(
+			dispatchInteractiveAction("clio.tasks.open", {
+				openTasks: () => {
+					opens += 1;
+				},
+			} as KeyBindingDeps),
+			true,
+		);
+		strictEqual(opens, 1);
+		const { deps, closed } = makeDeps();
+		strictEqual(
+			routeOverlayKey("\x1bb", "tasks", deps, (data, id) => manager.matches(data, id)),
+			true,
+		);
+		strictEqual(closed(), 1);
+		strictEqual(routeOverlayKey("h", "tasks", deps, neverMatches), false);
+	});
 });
 
 describe("list-overlay key routing", () => {

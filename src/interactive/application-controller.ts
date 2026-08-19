@@ -23,6 +23,7 @@ const GLOBAL_ACTION_ORDER = [
 	"clio.thinking.cycle",
 	"clio.session.tree",
 	"clio.dispatchBoard.toggle",
+	"clio.tasks.open",
 	"clio.decisions.open",
 	"clio.dispatch.background",
 	"clio.model.select",

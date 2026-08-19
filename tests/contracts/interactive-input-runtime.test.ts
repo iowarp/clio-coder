@@ -37,6 +37,7 @@ it("constructs the input runtime without a terminal and wires controller-owned a
 			toggleDispatchBoardOverlay: () => events.push("board:toggle"),
 			openModelOverlayState: () => events.push("model:open"),
 			openTreeOverlayState: () => events.push("tree:open"),
+			openTasksOverlayState: () => events.push("tasks:open"),
 			openDecisionsOverlayState: () => events.push("decisions:open"),
 		},
 		refreshFooter: () => events.push("footer:refresh"),

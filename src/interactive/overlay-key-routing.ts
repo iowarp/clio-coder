@@ -159,6 +159,7 @@ export function routeOverlayKey(
 	if (overlayState === "closed") return false;
 	if (
 		(overlayState === "dispatch-board" && matches(data, "clio.dispatchBoard.toggle")) ||
+		(overlayState === "tasks" && matches(data, "clio.tasks.open")) ||
 		(overlayState === "tree" && matches(data, "clio.session.tree")) ||
 		(overlayState === "model" && matches(data, "clio.model.select")) ||
 		(overlayState === "help" && matches(data, "clio.leader"))
