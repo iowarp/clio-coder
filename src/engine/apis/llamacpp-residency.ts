@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import { sleep } from "../../core/timers.js";
 import {
 	type ResidencyAdapter,
+	ResidencyPreconditionError,
 	reconcileResidency,
 	resetResidencyState,
 	residencyManaged,
@@ -234,6 +235,16 @@ export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Pr
 			}
 			snapshot = models;
 			return models.filter(residentModel).map((entry) => ({ modelId: entry.id, tags: entry.tags }));
+		},
+		// The router enumerates every configured preset, resident or not, so a keep
+		// model missing from that listing is one this server cannot load at all.
+		// Reported from the snapshot listResident already fetched, so the check
+		// costs no extra round trip.
+		assertLoadable: async () => {
+			if (snapshot.some((entry) => entry.id === input.keepModelId)) return;
+			throw new ResidencyPreconditionError(
+				`llama.cpp router on '${input.targetId}' does not serve '${input.keepModelId}'; it lists ${snapshot.length} model(s). Residency left the target untouched. Fix the wire model id in settings, or add the preset to the server.`,
+			);
 		},
 		capacity: async () => (await fetchRouterProps(input, fetchImpl)).maxInstances,
 		keepModelTags: async () => snapshot.find((entry) => entry.id === input.keepModelId)?.tags,
