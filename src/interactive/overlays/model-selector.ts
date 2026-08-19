@@ -22,6 +22,7 @@ import {
 } from "../../domains/providers/index.js";
 import {
 	type Component,
+	fuzzyFilter,
 	getKeybindings,
 	matchesKey,
 	type OverlayHandle,
@@ -667,14 +668,18 @@ function formatModelDetail(row: ModelRow, width: number): string[] {
 	];
 }
 
-function matchesQuery(row: ModelRow, query: string): boolean {
-	const tokens = query
-		.toLowerCase()
-		.split(/\s+/)
-		.map((token) => token.trim())
-		.filter(Boolean);
-	if (tokens.length === 0) return true;
-	const haystack = [
+/**
+ * Keep the target-qualified ref ahead of the bare model id. This mirrors
+ * pi-coding-agent's provider-first model-selector search text, so an exact
+ * target/model query ranks ahead of a proxy target carrying that ref as its
+ * model id. Clio's runtime and availability facts remain searchable after the
+ * ranking prefix.
+ */
+function modelSelectorSearchText(row: ModelRow): string {
+	const qualifiedModel = row.model.length > 0 ? `${row.target}/${row.model}` : row.target;
+	return [
+		row.target,
+		qualifiedModel,
 		row.target,
 		row.model,
 		row.runtimeName,
@@ -690,10 +695,11 @@ function matchesQuery(row: ModelRow, query: string): boolean {
 		row.maxTokens,
 		row.authText,
 		row.healthText,
-	]
-		.join(" ")
-		.toLowerCase();
-	return tokens.every((token) => haystack.includes(token));
+	].join(" ");
+}
+
+function filterModelRows(rows: ReadonlyArray<ModelRow>, query: string): ModelRow[] {
+	return fuzzyFilter([...rows], query, modelSelectorSearchText);
 }
 
 function visibleSlice<T>(
@@ -728,7 +734,7 @@ function renderModelOverlayLines(input: {
 	const width = Math.max(1, input.width);
 	const query = input.query.trim();
 	const searching = query.length > 0;
-	const allMatches = input.rows.filter((row) => matchesQuery(row, input.query));
+	const allMatches = filterModelRows(input.rows, input.query);
 	const focusedMatches = allMatches.filter((row) => row.visibleByDefault !== false);
 	const filtered = searching || input.showAll ? allMatches : focusedMatches;
 	const selectableFiltered = filtered.filter((row) => row.selectable).length;
@@ -849,7 +855,7 @@ export class ModelOverlayView implements Component {
 	}
 
 	private filteredRows(): ModelRow[] {
-		const matches = this.rows.filter((row) => matchesQuery(row, this.query));
+		const matches = filterModelRows(this.rows, this.query);
 		if (this.query.trim().length > 0 || this.showAll) return matches;
 		return matches.filter((row) => row.visibleByDefault !== false);
 	}
