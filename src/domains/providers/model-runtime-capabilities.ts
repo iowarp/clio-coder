@@ -364,7 +364,9 @@ export function thinkingLevelFromChoiceLabel(value: string): ThinkingLevel | nul
 	return null;
 }
 
-function acceptsBudgetTokensField(input: Pick<ResolveRuntimeCapabilitiesInput, "apiFamily" | "capabilities">): boolean {
+function acceptsBudgetTokensField(
+	input: Pick<ResolveRuntimeCapabilitiesInput, "runtimeId" | "apiFamily" | "capabilities">,
+): boolean {
 	const format = input.capabilities.thinkingFormat;
 	if (format === "anthropic-extended") {
 		return (
@@ -374,12 +376,13 @@ function acceptsBudgetTokensField(input: Pick<ResolveRuntimeCapabilitiesInput, "
 		);
 	}
 	if (input.apiFamily !== "openai-completions") return false;
+	if (input.runtimeId === "vllm") return true;
 	return format === "openrouter" || format === "zai";
 }
 
 function resolveBudgetEnforcement(
 	mechanism: ThinkingMechanism,
-	input: Pick<ResolveRuntimeCapabilitiesInput, "apiFamily" | "capabilities">,
+	input: Pick<ResolveRuntimeCapabilitiesInput, "runtimeId" | "apiFamily" | "capabilities">,
 ): ThinkingBudgetEnforcement {
 	if (mechanism !== "budget-tokens") return "none";
 	return acceptsBudgetTokensField(input) ? "enforced" : "informational";

@@ -54,13 +54,14 @@ function openAIThinkingFormat(
 	}
 }
 
-function localOpenAICompat(caps: CapabilityFlags): OpenAICompletionsCompat {
+function localOpenAICompat(caps: CapabilityFlags, runtimeId: string): OpenAICompletionsCompat {
 	const compat: OpenAICompletionsCompat = {
 		supportsStore: false,
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
 		supportsUsageInStreaming: true,
 		maxTokensField: "max_tokens",
+		supportsThinkingTokenBudget: runtimeId === "vllm",
 		supportsStrictMode: false,
 	};
 	const thinkingFormat = openAIThinkingFormat(caps);
@@ -111,7 +112,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 	};
 	if (headers) model.headers = headers;
 	if (apiFamily === "openai-completions") {
-		(model as Model<"openai-completions">).compat = localOpenAICompat(caps);
+		(model as Model<"openai-completions">).compat = localOpenAICompat(caps, target.runtime);
 	}
 	if (apiFamily === "anthropic-messages") {
 		(model as Model<"anthropic-messages">).compat = localAnthropicCompat();
