@@ -954,6 +954,8 @@ You have two ways to give Clio an API key:
 - **Environment variable** (`--api-key-env <VAR>`, or the env choice in `clio-coder configure`). Clio stores nothing and reads `$VAR` at call time. This is the recommended default. The wizard suggests it for new credentials and offers `keep` first when a stored credential already exists.
 - **Stored credential** (`--api-key <literal>`, or `clio-coder auth login`). The key is written to `credentials.yaml` (see directory locations) as **plaintext**, protected only by file mode `0600`. There is no encryption and no OS-keychain integration. Any process running as your user, plus backups and dotfile sync, can read it. Clio prints a warning whenever it writes a literal key for this reason.
 
+OAuth refresh follows Pi 0.84's signal-aware credential mutation contract. Clio serializes the read, token exchange, and atomic `credentials.yaml` write under one lock, forwards the active agent or background-request abort signal through `providers.auth`, and cancels a queued lock wait immediately. A cancelled refresh neither continues later nor publishes an uncommitted token into the process-local credential view.
+
 Prefer `--api-key-env` for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by `clio-coder auth status`, `clio-coder targets`, or `clio-coder configure`; only the source (env var name or `stored-api-key`) is shown.
 
 For interactive auth, open `/targets`, select the row, and press `c`. For a stored credential cleanup, use `clio-coder auth logout <target-or-runtime>`.

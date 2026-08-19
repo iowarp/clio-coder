@@ -11,6 +11,7 @@ still change interfaces.
 
 ## 0.3.2 - 2026-08-19
 
+- Made OAuth cancellation reach the complete production credential path. Active agent and background-request signals now cross `providers.auth`, credential mutations use Pi 0.84's `AuthOperationOptions`, cancelled lock waiters leave the live holder alone, and a token aborted before persistence never appears in Clio's in-memory credential view.
 - Fixed refused local commands and unresolved worker steering so Pi's pre-submit editor clearing restores the draft instead of losing it or recording rejected input in prompt history.
 This release hardens the terminal agent. A day of audits against the live code and a Qwen3.8-27B fleet on llama.cpp and LM Studio produced the defects below; every one is fixed here, each code fix carries a regression test, and the tickets (#110 through #134) carry the evidence.
 

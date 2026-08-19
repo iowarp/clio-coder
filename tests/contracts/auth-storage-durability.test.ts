@@ -8,12 +8,13 @@
  * logged in), and the obvious recovery of logging in again taking the file from
  * 211 bytes to 112 with only the new entry left.
  */
-import { ok, strictEqual, throws } from "node:assert/strict";
+import { ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
+import { InMemoryAuthStorageBackend } from "../../src/domains/providers/auth/backend-memory.js";
 import {
 	AuthStorage,
 	type AuthStorageBackend,
@@ -187,5 +188,37 @@ describe("contracts/auth storage durability", () => {
 		const storage = open();
 		throws(() => storage.setApiKey("anthropic", "sk-not-a-real-key"), AuthStorageDamagedError);
 		strictEqual(storage.hasStored("anthropic"), false, "a refused write must not read back as stored in memory");
+	});
+
+	it("serializes in-memory credential mutations and cancels queued work", async () => {
+		const backend = new InMemoryAuthStorageBackend();
+		let releaseFirst: () => void = () => {};
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const first = backend.withLockAsync(async (current) => {
+			strictEqual(current, undefined);
+			await firstGate;
+			return { result: "first", next: "credential-one" };
+		});
+		const controller = new AbortController();
+		let secondRan = false;
+		const second = backend.withLockAsync(
+			async () => {
+				secondRan = true;
+				return { result: "second", next: "credential-two" };
+			},
+			{ signal: controller.signal },
+		);
+
+		controller.abort(new Error("operator cancelled queued credential update"));
+		await rejects(second, /operator cancelled queued credential update/);
+		releaseFirst();
+		strictEqual(await first, "first");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		strictEqual(secondRan, false, "cancelled work never runs after the earlier mutation leaves the lock");
+
+		const current = await backend.withLockAsync(async (value) => ({ result: value }));
+		strictEqual(current, "credential-one", "the cancelled mutation cannot overwrite the committed credential");
 	});
 });
