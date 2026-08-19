@@ -1,7 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { BashCommandResult } from "../../src/core/bash-exec.js";
+import type { BashCommandResult, RunBashCommandOptions } from "../../src/core/bash-exec.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
 import {
 	createEditorSubmitController,
 	type EditorSubmitDeps,
@@ -40,6 +41,7 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 	let clearQueuedCalls = 0;
 	const steers: Array<{ runId: string; text: string }> = [];
 	const notices: Array<{ level: string; text: string; key: string }> = [];
+	const replayBlocks: Array<(width: number) => string[]> = [];
 	const editor: EditorSubmitEditor = {
 		getText: () => text,
 		setText: (next) => {
@@ -91,7 +93,12 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 			refreshChatContextFromSession: (leafTurnId) => events.push(`refresh:${leafTurnId ?? "null"}`),
 			recordSubmittedTurn: () => events.push("record-turn"),
 		},
-		chatPanel: { appendReplayBlock: () => events.push("append-bash") },
+		chatPanel: {
+			appendReplayBlock: (renderBlock) => {
+				events.push("append-bash");
+				replayBlocks.push(renderBlock);
+			},
+		},
 		dispatchCommand: (command) => events.push(`dispatch:${command}`),
 		expandSubmit: async (input) => ({ text: input, images: [] }),
 		notify: (level, message, key) => notices.push({ level, text: message, key }),
@@ -106,6 +113,7 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 		submits,
 		steers,
 		notices,
+		replayBlocks,
 		setText: (next: string) => {
 			text = next;
 		},
@@ -467,7 +475,42 @@ describe("contracts/interactive editor submit", () => {
 		await flushAsync();
 
 		strictEqual(controller.hasActiveEditorBash(), false);
-		deepStrictEqual(harness.events, ["ensure-session", "append-bash", "refresh:null", "render"]);
+		deepStrictEqual(harness.events, ["ensure-session", "append-bash", "render", "refresh:null", "render"]);
+	});
+
+	it("updates one local bash transcript block from live output through settlement", async () => {
+		const harness = createHarness();
+		let receivedOptions: RunBashCommandOptions | undefined;
+		let resolveBash: (result: BashCommandResult) => void = () => {};
+		harness.deps.runBash = (_command, options) => {
+			receivedOptions = options;
+			return new Promise((resolve) => {
+				resolveBash = resolve;
+			});
+		};
+		const controller = createEditorSubmitController(harness.deps);
+
+		strictEqual(controller.runEditorBash("!! npm run typecheck"), true);
+		strictEqual(harness.replayBlocks.length, 1);
+		let rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
+		ok(rendered.includes("bash(npm run typecheck)"), rendered);
+		ok(rendered.includes("running"), rendered);
+		ok(rendered.includes("excluded from model context"), rendered);
+
+		receivedOptions?.onUpdate?.({ stdout: "checking src\n", stderr: "", outputBytes: 13 });
+		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
+		ok(rendered.includes("live output"), rendered);
+		ok(rendered.includes("checking src"), rendered);
+		strictEqual(harness.replayBlocks.length, 1, "progress replaces the same replay block");
+
+		resolveBash({ ...bashResult(), stdout: "checking src\nclean\n" });
+		await flushAsync();
+		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
+		ok(rendered.includes("✓"), rendered);
+		ok(rendered.includes("output · exit 0"), rendered);
+		ok(rendered.includes("clean"), rendered);
+		ok(!rendered.includes("running"), rendered);
+		strictEqual(harness.replayBlocks.length, 1, "settlement keeps the original transcript position");
 	});
 
 	it("records an accepted local bash submission but restores refusals without history", async () => {

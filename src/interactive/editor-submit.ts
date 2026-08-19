@@ -1,10 +1,9 @@
-import { runBashCommand } from "../core/bash-exec.js";
+import { combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import type { ChatLoop } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
-import { renderBashExecutionEntry } from "./chat-renderer.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import {
 	formatSteerCandidates,
@@ -13,6 +12,7 @@ import {
 	resolveSteerTarget,
 } from "./editor-steer.js";
 import { type ExternalEditResult, editTextExternally, resolveExternalEditor } from "./external-editor.js";
+import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
 import { parseSlashCommand, type RunIo, type SlashCommand } from "./slash-commands.js";
 
 const EDITOR_BASH_TIMEOUT_MS = 300_000;
@@ -145,6 +145,24 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			activeEditorBash = null;
 			return true;
 		}
+		const startedAt = performance.now();
+		const execution: BashTranscriptExecution = {
+			command: parsed.command,
+			output: "",
+			running: true,
+			totalBytes: 0,
+			excludeFromContext: parsed.excludeFromContext,
+		};
+		deps.chatPanel.appendReplayBlock((width) =>
+			renderBashTranscriptExecution(
+				{
+					...execution,
+					...(execution.running ? { elapsedMs: Math.max(0, performance.now() - startedAt) } : {}),
+				},
+				width,
+			),
+		);
+		deps.ui.requestRender();
 
 		void (async () => {
 			try {
@@ -152,6 +170,11 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					cwd: deps.getCwd?.() ?? process.cwd(),
 					timeoutMs: EDITOR_BASH_TIMEOUT_MS,
 					signal: abort.signal,
+					onUpdate: (progress) => {
+						execution.output = combineBashOutput(progress);
+						execution.totalBytes = progress.outputBytes;
+						deps.ui.requestRender();
+					},
 				});
 				const input = bashExecutionEntryInput({
 					command: parsed.command,
@@ -168,7 +191,13 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 							timestamp: deps.nowIso?.() ?? new Date().toISOString(),
 						} as SessionEntry);
 				if (entry.kind === "bashExecution") {
-					deps.chatPanel.appendReplayBlock((width) => renderBashExecutionEntry(entry, width));
+					execution.output = entry.output;
+					execution.running = false;
+					execution.exitCode = entry.exitCode;
+					execution.cancelled = entry.cancelled;
+					execution.truncated = entry.truncated;
+					execution.fullOutputPath = entry.fullOutputPath;
+					execution.totalBytes = Math.max(execution.totalBytes ?? 0, Buffer.byteLength(combineBashOutput(result), "utf8"));
 				}
 				// `parentTurnId` was the leaf when the command started and stays the
 				// entry's anchor. The chat leaf is a different question: a prompt
@@ -179,6 +208,8 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				deps.sessionTranscript.refreshChatContextFromSession(deps.session?.tree().leafId ?? parentTurnId);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
+				execution.running = false;
+				execution.error = msg;
 				deps.io.stderr(`[bash] ${msg}\n`);
 			} finally {
 				if (activeEditorBash === abort) activeEditorBash = null;

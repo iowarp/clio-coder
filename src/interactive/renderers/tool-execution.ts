@@ -13,6 +13,7 @@
  */
 
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
+import { formatSize } from "../../engine/truncate.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
 import { type DiffRenderInput, renderUnifiedDiff } from "./diff.js";
@@ -34,7 +35,6 @@ const BODY_INDENT_VISIBLE_WIDTH = 2;
 const HEADER_PREFIX_PLAIN = "▸ ";
 const ARG_PREVIEW_LIMIT = 60;
 const WEB_FETCH_ARG_PREVIEW_LIMIT = 140;
-const RESULT_PREVIEW_LIMIT = 4000;
 const FULL_RESULT_PREVIEW_LIMIT = 60_000;
 const FULL_RESULT_ROW_LIMIT = 120;
 const STREAMING_RESULT_ROW_LIMIT = 20;
@@ -54,6 +54,8 @@ export interface ToolExecutionStart {
 	args: unknown;
 	/** Live elapsed time supplied by the panel for running segments. */
 	elapsedMs?: number | undefined;
+	/** Pi may stream a tool call's arguments before execution starts. */
+	phase?: "forming" | "ready" | "running" | undefined;
 }
 
 export interface ToolExecutionFinished {
@@ -73,6 +75,10 @@ export interface ToolExecutionFinished {
 	 * model reading the same transcript, to guess at the rule.
 	 */
 	blockReason?: string | undefined;
+	/** Structured exit status when the caller has one; text parsing is legacy fallback only. */
+	exitCode?: number | string | null | undefined;
+	/** Local `!!` bash output is visible to the operator but excluded from model context. */
+	excludeFromContext?: boolean | undefined;
 }
 
 export interface ToolBodyRenderOptions {
@@ -218,10 +224,9 @@ function bashExitCodeFromResult(result: unknown): string | null {
 
 /**
  * Map of known tools to their canonical "primary" arg field. When the arg is
- * a string the header summarises it directly and the args body is suppressed
- * because echoing `{"path": "..."}` next to `tool: read(...)` is duplicate
- * noise. Tools not in this map (or with an unexpected arg shape) fall back
- * to a JSON-dump summary plus the full args body.
+ * a string the header summarises it directly and the expanded argument list
+ * omits only that repeated field. Tools not in this map (or with an unexpected
+ * arg shape) fall back to a JSON summary plus their complete redacted fields.
  */
 const PRIMARY_ARG_FIELD: Record<string, string> = {
 	read: "path",
@@ -244,8 +249,8 @@ const PRIMARY_ARG_FIELD: Record<string, string> = {
 
 /**
  * Returns the captured primary-arg string when the header successfully used a
- * known tool's canonical arg, otherwise null. Drives the args-body suppression
- * so `tool: read(README.md)` does not get followed by `{"path": "README.md"}`.
+ * known tool's canonical arg, otherwise null. The argument renderer uses the
+ * same map to omit that one repeated field below `read(README.md)`.
  */
 function capturedPrimaryArg(toolName: string, args: unknown): string | null {
 	const field = PRIMARY_ARG_FIELD[toolName];
@@ -316,12 +321,6 @@ function numberField(record: Record<string, unknown> | null, key: string): numbe
 function stringField(record: Record<string, unknown> | null, key: string): string | null {
 	const value = record?.[key];
 	return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function formatBytes(bytes: number): string {
-	if (bytes < 1024) return `${bytes}B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 function countSummary(observation: Record<string, unknown>): string | null {
@@ -396,7 +395,44 @@ function shownBytesOf(finished: ToolExecutionFinished): number | null {
 	const observation = observationOf(finished);
 	const fromObservation = numberField(observation, "shownBytes");
 	if (fromObservation !== null) return fromObservation;
+	const resultSize = detailsOf(finished.result)?.resultSize;
+	const fromResultSize = isPlainObject(resultSize) ? numberField(resultSize, "shownBytes") : null;
+	if (fromResultSize !== null) return fromResultSize;
 	return numberField(finished.resultSummary ?? null, "bytes");
+}
+
+function totalBytesOf(finished: ToolExecutionFinished): number | null {
+	const observation = observationOf(finished);
+	const fromObservation = numberField(observation, "totalBytes");
+	if (fromObservation !== null) return fromObservation;
+	const resultSize = detailsOf(finished.result)?.resultSize;
+	if (isPlainObject(resultSize)) {
+		const total = numberField(resultSize, "bytes");
+		if (total !== null) return total;
+	}
+	return shownBytesOf(finished);
+}
+
+function resultSizeOf(finished: ToolExecutionFinished): Record<string, unknown> | null {
+	const value = detailsOf(finished.result)?.resultSize;
+	return isPlainObject(value) ? value : null;
+}
+
+function isTruncatedResult(finished: ToolExecutionFinished): boolean {
+	const observation = observationOf(finished);
+	if (observation?.truncated === true) return true;
+	if (resultSizeOf(finished)?.truncated === true) return true;
+	const truncation = detailsOf(finished.result)?.truncation;
+	if (isPlainObject(truncation) && truncation.truncated === true) return true;
+	return finished.resultSummary?.truncated === true;
+}
+
+function structuredExitCode(finished: ToolExecutionFinished): string | null {
+	if (isNonExecutedOutcome(finished.outcome)) return null;
+	if (finished.exitCode !== undefined && finished.exitCode !== null) return String(finished.exitCode);
+	const exitCode = detailsOf(finished.result)?.exitCode;
+	if (typeof exitCode === "number" || typeof exitCode === "string") return String(exitCode);
+	return finished.toolName === "bash" && finished.isError ? bashExitCodeFromResult(finished.result) : null;
 }
 
 /**
@@ -410,7 +446,7 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 	const outcome = outcomeSummary(finished);
 	if (outcome !== null) parts.push(outcome);
 	const bytes = isNonExecutedOutcome(finished.outcome) ? null : shownBytesOf(finished);
-	if (bytes !== null && bytes > 0) parts.push(formatBytes(bytes));
+	if (bytes !== null && bytes > 0) parts.push(formatSize(bytes));
 	const offloadPath = offloadPathOf(finished);
 	return {
 		facts: parts.length > 0 ? dim(` · ${parts.join(" · ")}`) : "",
@@ -436,18 +472,19 @@ export function renderToolAwaitingApproval(call: ToolExecutionStart, width: numb
 }
 
 /**
- * Header status: `undefined` when the call is still in flight (no glyph),
- * `"ok"` for success (green check), `"error"` for failure (red cross). The
+ * Header status follows Pi's call lifecycle before and during execution, then
+ * becomes `"ok"` or `"error"` at settlement. The
  * glyph hangs off the right of the header line so the tool name + args read
  * left-to-right without extra punctuation.
  */
-type HeaderStatus = "ok" | "error" | undefined;
+type HeaderStatus = "forming" | "ready" | "running" | "ok" | "error" | undefined;
 
 /** Keeps a refusal reason to one scannable clause on the status tail. */
 const BLOCK_REASON_LIMIT = 72;
 
 interface StatusMeta {
 	durationMs?: number | undefined;
+	elapsedMs?: number | undefined;
 	exitCode?: string | null;
 	outcome?: ToolExecutionFinished["outcome"];
 	/** Refusal reason, rendered only alongside a non-executed outcome. */
@@ -456,6 +493,12 @@ interface StatusMeta {
 
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === undefined) return "";
+	if (status === "forming") return ` ${dim(GLYPH.queued)}${dim(" forming call")}`;
+	if (status === "ready") return ` ${dim(GLYPH.queued)}${dim(" ready")}`;
+	if (status === "running") {
+		const elapsed = optionalCompactMs(meta.elapsedMs);
+		return ` ${cyan(GLYPH.running)}${dim(elapsed === null ? " running" : ` running · ${elapsed}`)}`;
+	}
 	const duration = optionalCompactMs(meta.durationMs);
 	const durationSuffix = duration ? dim(` · ${duration}`) : "";
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
@@ -615,12 +658,13 @@ function buildSublineBody(
 	outcome?: ToolExecutionFinished["outcome"],
 ): string {
 	if (isNonExecutedOutcome(outcome)) return buildUnknownToolBody(toolName, args);
+	if (status === "forming" || status === "ready") return buildUnknownToolBody(toolName, args);
 	if (toolName === "web_fetch") {
 		const meta = status === undefined ? null : webFetchMeta(result);
 		return `${buildUnknownToolBody(toolName, args)}${meta ? dim(` · ${meta}`) : ""}`;
 	}
 	if (toolName === "bash") {
-		const lead = status === undefined ? "running " : "ran ";
+		const lead = status === "running" || status === undefined ? "running " : "ran ";
 		return (
 			buildFieldSublineBody(args, "command", lead, { wrapInBackticks: true }) ?? buildUnknownToolBody(toolName, args)
 		);
@@ -660,9 +704,7 @@ function sublineParts(
 			tail: `${statusGlyph(status, meta)}${ledger.offload}`,
 		};
 	}
-	const elapsed = optionalCompactMs("elapsedMs" in call ? call.elapsedMs : undefined);
-	const running = elapsed !== null ? dim(` · ${elapsed}`) : "";
-	return { lead: `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${running}`, tail: "" };
+	return { lead: `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}`, tail: statusGlyph(status, meta) };
 }
 
 /**
@@ -708,33 +750,69 @@ function indentAndWrap(line: string, width: number, isError: boolean): string[] 
 	return out;
 }
 
+function scalarArgValue(value: unknown): string | null {
+	if (typeof value === "string") {
+		const lines = value.split("\n").length;
+		const bytes = Buffer.byteLength(value, "utf8");
+		if (lines > 1 || value.length > 160) return dim(`<${lines} lines · ${formatSize(bytes)} text>`);
+		return green(JSON.stringify(value));
+	}
+	if (typeof value === "number") return cyan(String(value));
+	if (typeof value === "boolean") return yellow(String(value));
+	if (value === null) return dim("null");
+	return null;
+}
+
 /**
- * Render the pretty-printed JSON args body. Splits on `\n` first and then
- * applies a line cap so the cut never lands inside an open string or before
- * a closing brace; the previous codepoint-level `truncate` could leave a
- * malformed JSON snippet that broke copy-paste. Mirrors the line-cap strategy
- * `renderResultBlock` already uses for tool output.
+ * Render secondary arguments as a compact typed field list. The primary path,
+ * command, pattern, or query already lives in the call signature; keeping the
+ * rest means `cwd`, timeout, range, glob, and flags no longer disappear merely
+ * because one field was important enough for the header. Nested values retain
+ * the structured JSON renderer, while large strings become byte/line facts
+ * instead of flooding the transcript.
  */
-function renderArgsBody(args: unknown, width: number, isError: boolean): string[] {
+function renderArgsBody(toolName: string, args: unknown, width: number, isError: boolean): string[] {
 	if (isEmptyArgs(args)) return [];
+	const safeArgs = redactToolArgs(args);
+	if (!isPlainObject(safeArgs)) {
+		const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
+		const lines = tryRenderJson(safeArgs, bodyWidth, { lineLimit: ARGS_BODY_LINE_LIMIT });
+		return lines?.flatMap((line) => indentAndWrap(line, width, isError)) ?? [];
+	}
+	const primary = PRIMARY_ARG_FIELD[toolName];
+	const entries = Object.entries(safeArgs).filter(([key]) => key !== primary);
+	if (entries.length === 0) return [];
 	const out: string[] = [];
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
-	const lines = tryRenderJson(redactToolArgs(args), bodyWidth, { lineLimit: ARGS_BODY_LINE_LIMIT });
-	if (!lines) return [];
-	for (const raw of lines) {
-		out.push(...indentAndWrap(raw, width, isError));
+	out.push(...indentAndWrap(`${cyanBold("args")}${dim(` · ${entries.length}`)}`, width, isError));
+	const keyWidth = Math.min(18, Math.max(...entries.map(([key]) => visibleWidth(key))));
+	for (const [key, value] of entries) {
+		const label = `${cyan(key.padEnd(keyWidth))}  `;
+		const scalar = scalarArgValue(value);
+		if (scalar !== null) {
+			out.push(...indentAndWrap(`${label}${scalar}`, width, isError));
+			continue;
+		}
+		out.push(...indentAndWrap(cyan(key), width, isError));
+		const lines = tryRenderJson(value, Math.max(1, bodyWidth - 2), { lineLimit: ARGS_BODY_LINE_LIMIT });
+		for (const line of lines ?? [jsonStringifySafe(value)]) {
+			out.push(...indentAndWrap(`  ${line}`, width, isError));
+			if (out.length >= ARGS_BODY_LINE_LIMIT) break;
+		}
+		if (out.length >= ARGS_BODY_LINE_LIMIT) break;
 	}
+	if (out.length >= ARGS_BODY_LINE_LIMIT) out.push(...indentAndWrap(dim("… more arguments hidden"), width, isError));
 	return out;
 }
 
 /**
  * pi-agent-core wraps tool results in `{ content: [{ type: "text", text }, ...] }`
- * envelopes. Rendering that JSON verbatim hides the actual tool output behind
- * a sea of escaped quotes. When the envelope shape matches, concatenate the
- * text segments and treat the join as the real result; otherwise return the
- * value untouched so callers stringify it normally.
+ * envelopes. Rendering that JSON verbatim hides the actual output and, for a
+ * mixed result, can dump a base64 image into the terminal. Text blocks are
+ * joined, image blocks become compact MIME/size placeholders, and unknown
+ * content blocks are named without serializing their payload.
  */
-export function unwrapResultEnvelope(result: unknown): unknown {
+function unwrapResultEnvelope(result: unknown): unknown {
 	if (typeof result === "string" || result === null || result === undefined) return result;
 	const blocks = Array.isArray(result)
 		? result
@@ -745,16 +823,25 @@ export function unwrapResultEnvelope(result: unknown): unknown {
 	const parts: string[] = [];
 	for (const block of blocks) {
 		if (!isPlainObject(block)) return result;
-		if (block.type !== "text" || typeof block.text !== "string") return result;
-		parts.push(block.text);
+		if (block.type === "text" && typeof block.text === "string") {
+			parts.push(block.text);
+			continue;
+		}
+		if (block.type === "image" && typeof block.data === "string") {
+			const mimeType = typeof block.mimeType === "string" ? block.mimeType : "image/unknown";
+			const padding = block.data.endsWith("==") ? 2 : block.data.endsWith("=") ? 1 : 0;
+			const bytes = Math.max(0, Math.floor((block.data.length * 3) / 4) - padding);
+			parts.push(`[image ${mimeType} · ${formatSize(bytes)}]`);
+			continue;
+		}
+		if (typeof block.type === "string") {
+			parts.push(`[${block.type} content]`);
+			continue;
+		}
+		return result;
 	}
 	if (parts.length === 0) return result;
-	return parts.join("");
-}
-
-export function previewResult(result: unknown): string {
-	if (typeof result === "string") return truncate(result, RESULT_PREVIEW_LIMIT);
-	return truncate(jsonStringifySafe(result), RESULT_PREVIEW_LIMIT);
+	return parts.join("\n");
 }
 
 function isEmptyResult(result: unknown): boolean {
@@ -884,6 +971,79 @@ function asBashArgs(args: unknown): BashArgs | null {
 	return { command: redactSecretString(command) };
 }
 
+function resultLineCount(result: unknown): number {
+	const unwrapped = unwrapResultEnvelope(result);
+	if (typeof unwrapped !== "string" || unwrapped.length === 0) return 0;
+	const normalized = unwrapped.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	const withoutTerminator = normalized.endsWith("\n") ? normalized.slice(0, -1) : normalized;
+	return withoutTerminator.split("\n").length;
+}
+
+function toolUsageFact(result: unknown): string | null {
+	if (!isPlainObject(result) || !isPlainObject(result.usage)) return null;
+	const total = numberField(result.usage, "totalTokens");
+	if (total === null || total <= 0) return null;
+	return `${total} tool token${total === 1 ? "" : "s"}`;
+}
+
+function outputFacts(finished: ToolExecutionFinished): string[] {
+	const parts: string[] = [];
+	if (isNonExecutedOutcome(finished.outcome)) {
+		if (finished.excludeFromContext === true) parts.push("excluded from context");
+		return parts;
+	}
+	const exitCode = structuredExitCode(finished) ?? (finished.toolName === "bash" && !finished.isError ? "0" : null);
+	if (exitCode !== null) parts.push(`exit ${exitCode}`);
+	const observation = observationOf(finished);
+	const count = observation === null ? null : countSummary(observation);
+	if (count !== null) parts.push(count);
+	const lines = resultLineCount(finished.result);
+	if (count === null && lines > 0) parts.push(`${lines} line${lines === 1 ? "" : "s"}`);
+	const shownBytes = shownBytesOf(finished);
+	const totalBytes = totalBytesOf(finished);
+	if (shownBytes !== null && shownBytes > 0) {
+		parts.push(
+			totalBytes !== null && totalBytes > shownBytes
+				? `${formatSize(shownBytes)} shown / ${formatSize(totalBytes)} total`
+				: formatSize(shownBytes),
+		);
+	}
+	if (isTruncatedResult(finished)) parts.push("truncated");
+	const details = detailsOf(finished.result);
+	if (details?.timedOut === true) parts.push("timed out");
+	if (details?.outputCapped === true) parts.push("output capped");
+	const usage = toolUsageFact(finished.result);
+	if (usage !== null) parts.push(usage);
+	if (isPlainObject(finished.result) && Array.isArray(finished.result.addedToolNames)) {
+		const added = finished.result.addedToolNames.filter((name): name is string => typeof name === "string");
+		if (added.length > 0) parts.push(`added ${added.join(", ")}`);
+	}
+	if (isPlainObject(finished.result) && finished.result.terminate === true) parts.push("terminal result");
+	if (finished.excludeFromContext === true) parts.push("excluded from context");
+	return parts;
+}
+
+function renderOutputMeta(
+	finished: ToolExecutionFinished,
+	width: number,
+	isError: boolean,
+	label = "output",
+): string[] {
+	const facts = outputFacts(finished);
+	const suffix = facts.length > 0 ? dim(` · ${facts.join(" · ")}`) : "";
+	return indentAndWrap(`${cyanBold(label)}${suffix}`, width, isError);
+}
+
+function renderOutputFooter(finished: ToolExecutionFinished, width: number, isError: boolean): string[] {
+	const out: string[] = [];
+	const offloadPath = isNonExecutedOutcome(finished.outcome) ? null : offloadPathOf(finished);
+	if (offloadPath !== null) out.push(...indentAndWrap(`${yellow("full output")}  ${offloadPath}`, width, isError));
+	const hint =
+		stringField(resultSizeOf(finished), "followUpHint") ?? stringField(finished.resultSummary ?? null, "followUpHint");
+	if (hint !== null) out.push(...indentAndWrap(`${dim("next")}  ${hint}`, width, isError));
+	return out;
+}
+
 /**
  * Bash subrenderer: emits `$ <cmd>` (full command) on its own line under the
  * rail, then the unwrapped output via the same chain as `renderResultBlock`.
@@ -927,11 +1087,17 @@ function renderResultBlock(
 
 /**
  * Header-only render for a tool call that has not yet finished. Used by the
- * live chat panel between `tool_execution_start` and `tool_execution_end`.
- * No status glyph: the absence of the glyph signals "still running".
+ * live chat panel from streamed argument formation through execution. The
+ * lifecycle tail distinguishes a forming call, a ready call, and a running
+ * call without inventing execution time before Pi starts the tool.
  */
 export function renderToolCallHeader(call: ToolExecutionStart, width: number): string[] {
-	return wrap(headerLine(call.toolName, call.args, undefined), width);
+	return wrap(
+		headerLine(call.toolName, call.args, call.phase ?? "running", {
+			elapsedMs: call.elapsedMs,
+		}),
+		width,
+	);
 }
 
 /** Running-only footer used when an operator pauses live output; execution continues. */
@@ -939,11 +1105,7 @@ export function renderToolRunningStatus(call: ToolExecutionStart, width: number)
 	const elapsed = optionalCompactMs(call.elapsedMs);
 	return [
 		...renderToolCallHeader(call, width),
-		...indentAndWrap(
-			dim(elapsed ? `(running... ${elapsed}; live output hidden)` : "(running; live output hidden)"),
-			width,
-			false,
-		),
+		...indentAndWrap(dim(elapsed ? `live output paused · ${elapsed}` : "live output paused"), width, false),
 	];
 }
 
@@ -952,7 +1114,7 @@ function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): Header
 	// carries a `result` field, so a `ToolExecutionStart` with a stray
 	// `isError: false` (e.g. from a future event-shape change) cannot trip the
 	// finished path. `result` is the type's load-bearing field.
-	if (!("result" in call)) return undefined;
+	if (!("result" in call)) return call.phase ?? "running";
 	return call.isError ? "error" : "ok";
 }
 
@@ -982,13 +1144,13 @@ export function renderToolSubline(
 		"result" in call
 			? {
 					durationMs: call.durationMs,
-					exitCode: call.toolName === "bash" && call.isError ? bashExitCodeFromResult(call.result) : null,
+					exitCode: structuredExitCode(call),
 					outcome: call.outcome,
 					blockReason: call.blockReason,
 				}
-			: {};
+			: { elapsedMs: call.elapsedMs };
 	const parts = sublineParts(call, status, meta);
-	const showHint = status !== undefined && expandKey !== undefined && expandKey.length > 0;
+	const showHint = "result" in call && expandKey !== undefined && expandKey.length > 0;
 	const tail = showHint ? `${parts.tail}${dim(` (${expandKey})`)}` : parts.tail;
 	return wrapSublineWithTail(parts.lead, tail, width);
 }
@@ -1008,7 +1170,7 @@ export function renderToolExecution(
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
-		exitCode: finished.toolName === "bash" && finished.isError ? bashExitCodeFromResult(finished.result) : null,
+		exitCode: structuredExitCode(finished),
 		outcome: finished.outcome,
 		blockReason: finished.blockReason,
 	};
@@ -1023,7 +1185,9 @@ export function renderToolExecution(
 	if (finished.toolName === "edit" && finished.isError === false) {
 		const editArgs = asEditDiffArgs(redactToolArgs(finished.args));
 		if (editArgs !== null) {
+			out.push(...renderOutputMeta(finished, width, false, "change"));
 			out.push(...renderEditDiffBlock(editArgs, width));
+			out.push(...renderOutputFooter(finished, width, false));
 			return out;
 		}
 	}
@@ -1035,20 +1199,35 @@ export function renderToolExecution(
 	if (finished.toolName === "bash") {
 		const bashArgs = asBashArgs(redactToolArgs(finished.args));
 		if (bashArgs !== null) {
+			out.push(...renderArgsBody(finished.toolName, finished.args, width, finished.isError));
+			out.push(
+				...renderOutputMeta(
+					finished,
+					width,
+					finished.isError,
+					isNonExecutedOutcome(finished.outcome) ? "decision" : "output",
+				),
+			);
 			out.push(...renderBashResultBlock(bashArgs, finished.result, width, finished.isError, opts));
+			out.push(...renderOutputFooter(finished, width, finished.isError));
 			return out;
 		}
 	}
 
-	// Suppress the args body when the header already encodes the salient arg
-	// (e.g. `▸ read(README.md)` already shows the path; rendering
-	// `{"path": "README.md"}` underneath is duplicate noise). For tools without
-	// a known primary arg the body still renders so users see what the model
-	// actually invoked.
-	if (capturedPrimaryArg(finished.toolName, finished.args) === null) {
-		out.push(...renderArgsBody(finished.args, width, finished.isError));
-	}
+	// The primary argument already lives in the signature. Keep the secondary
+	// fields below it so flags, ranges, working directories, and timeouts remain
+	// inspectable without repeating the primary value.
+	out.push(...renderArgsBody(finished.toolName, finished.args, width, finished.isError));
+	out.push(
+		...renderOutputMeta(
+			finished,
+			width,
+			finished.isError,
+			isNonExecutedOutcome(finished.outcome) ? "decision" : "output",
+		),
+	);
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
+	out.push(...renderOutputFooter(finished, width, finished.isError));
 	return out;
 }
 
@@ -1065,13 +1244,15 @@ export function renderToolResultOnly(
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
-		exitCode: finished.toolName === "bash" && finished.isError ? bashExitCodeFromResult(finished.result) : null,
+		exitCode: structuredExitCode(finished),
 		outcome: finished.outcome,
 		blockReason: finished.blockReason,
 	};
 	const out: string[] = [];
 	out.push(...wrap(headerLine(finished.toolName, undefined, status, statusMeta), width));
+	out.push(...renderOutputMeta(finished, width, finished.isError));
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
+	out.push(...renderOutputFooter(finished, width, finished.isError));
 	return out;
 }
 
@@ -1079,26 +1260,117 @@ export function renderToolResultOnly(
  * Streaming render for an in-flight tool call whose expanded block should
  * surface the latest partial output. Used by the chat panel between
  * `tool_execution_start` and `tool_execution_end` when the user has expanded
- * the tool segment. The header carries no status glyph (still running), the
- * args body is suppressed when the header captures the primary arg, the
- * partial output renders under the rail capped at `RESULT_LINE_LIMIT` lines,
- * and a dim `(running...)` marker on the trailing line communicates that the
- * block is still being written. An empty `partialOutput` renders
+ * the tool segment. The header carries the running lifecycle tail, secondary
+ * arguments remain visible, and the latest cumulative Pi result renders under
+ * a labeled live-output rail capped at the streaming row limit. An empty result renders
  * `(no output yet)` so the user can distinguish a slow start from a stalled
  * call.
  */
-export function renderToolStreamingExecution(call: ToolExecutionStart, width: number, partialOutput: string): string[] {
+export function renderToolStreamingExecution(
+	call: ToolExecutionStart,
+	width: number,
+	partialResult: unknown,
+): string[] {
 	const out: string[] = [];
-	out.push(...wrap(headerLine(call.toolName, call.args, undefined), width));
-	if (capturedPrimaryArg(call.toolName, call.args) === null) {
-		out.push(...renderArgsBody(call.args, width, false));
-	}
-	if (partialOutput.length === 0) {
+	out.push(...renderToolCallHeader({ ...call, phase: "running" }, width));
+	out.push(...renderArgsBody(call.toolName, call.args, width, false));
+	const partial: ToolExecutionFinished = {
+		toolCallId: call.toolCallId,
+		toolName: call.toolName,
+		args: call.args,
+		result: partialResult,
+		isError: false,
+	};
+	out.push(...renderOutputMeta(partial, width, false, "live output"));
+	const partialOutput = unwrapResultEnvelope(partialResult);
+	if (isEmptyResult(partialOutput)) {
 		out.push(...indentAndWrap(dim("(no output yet)"), width, false));
 	} else {
-		out.push(...renderOutputRows(partialOutput, width, false, STREAMING_RESULT_ROW_LIMIT));
+		if (call.toolName === "bash") {
+			const bashArgs = asBashArgs(redactToolArgs(call.args));
+			if (bashArgs !== null) {
+				const commandLine = `${cyanBold("$")} ${highlightBashCommand(stripShellWrapperForDisplay(bashArgs.command))}`;
+				out.push(...indentAndWrap(commandLine, width, false));
+			}
+		}
+		out.push(
+			...renderOutputRows(resultText(partialOutput, FULL_RESULT_PREVIEW_LIMIT), width, false, STREAMING_RESULT_ROW_LIMIT),
+		);
 	}
-	const elapsed = optionalCompactMs(call.elapsedMs);
-	out.push(...indentAndWrap(dim(elapsed !== null ? `(running... ${elapsed})` : "(running...)"), width, false));
 	return out;
+}
+
+/** Display-only lifecycle for operator-issued `!` and `!!` bash commands. */
+export interface BashTranscriptExecution {
+	command: string;
+	output: string;
+	running: boolean;
+	elapsedMs?: number | undefined;
+	totalBytes?: number | undefined;
+	exitCode?: number | null | undefined;
+	cancelled?: boolean | undefined;
+	truncated?: boolean | undefined;
+	fullOutputPath?: string | undefined;
+	excludeFromContext?: boolean | undefined;
+	error?: string | undefined;
+}
+
+/**
+ * Render local bash with the same call, argument, output, and settlement grammar
+ * as model-initiated bash. This is a view projection only; callers keep Clio's
+ * existing immutable `bashExecution` ledger entry.
+ */
+export function renderBashTranscriptExecution(execution: BashTranscriptExecution, width: number): string[] {
+	const shownBytes = Buffer.byteLength(execution.output, "utf8");
+	const totalBytes = execution.totalBytes ?? shownBytes;
+	const args: Record<string, unknown> = { command: execution.command };
+	if (execution.excludeFromContext === true) args.context = "excluded from model context";
+	const details = {
+		resultSize: {
+			bytes: totalBytes,
+			shownBytes,
+			truncated: execution.truncated === true,
+			policy: "tail",
+			...(execution.fullOutputPath !== undefined ? { offloadPath: execution.fullOutputPath } : {}),
+		},
+	};
+	const result = {
+		content: [{ type: "text", text: execution.output }],
+		details,
+	};
+	if (execution.running) {
+		return renderToolStreamingExecution(
+			{
+				toolCallId: "local-bash",
+				toolName: "bash",
+				args,
+				elapsedMs: execution.elapsedMs,
+				phase: "running",
+			},
+			width,
+			result,
+		);
+	}
+	const message = execution.error?.trim();
+	const output = message
+		? `${execution.output}${execution.output.length > 0 ? "\n\n" : ""}${message}`
+		: execution.output;
+	return renderToolExecution(
+		{
+			toolCallId: "local-bash",
+			toolName: "bash",
+			args,
+			result: { ...result, content: [{ type: "text", text: output }] },
+			isError: execution.cancelled === true || execution.error !== undefined || (execution.exitCode ?? 0) !== 0,
+			exitCode: execution.exitCode,
+			...(execution.cancelled === true ? { outcome: "aborted" as const } : {}),
+			excludeFromContext: execution.excludeFromContext,
+			resultSummary: {
+				bytes: shownBytes,
+				truncated: execution.truncated === true,
+				...(execution.fullOutputPath !== undefined ? { offloadPath: execution.fullOutputPath } : {}),
+			},
+		},
+		width,
+	);
 }
