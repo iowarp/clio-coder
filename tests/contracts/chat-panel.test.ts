@@ -182,6 +182,25 @@ describe("chat-panel voice-first prose gutter", () => {
 		}
 	});
 
+	it("renders Mermaid fences and inline LaTeX through the transcript Markdown component", () => {
+		const markdown = ["The invariant is $x^2$.", "", "```mermaid", "flowchart LR", "  A[Start] --> B[Done]", "```"].join(
+			"\n",
+		);
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: markdown }], stopReason: "stop" },
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+
+		const plain = panel.render(80).map(strip).join("\n");
+		ok(plain.includes("x²"), plain);
+		ok(plain.includes("Start"), plain);
+		ok(plain.includes("Done"), plain);
+		ok(/[┌┐└┘╭╮╰╯]/u.test(plain), plain);
+		ok(!plain.includes("flowchart LR"), plain);
+	});
+
 	it("leaves interleaved tool ledgers on their existing full-width grammar", () => {
 		const width = 40;
 		const panel = createChatPanel({ now: frozen.now });
