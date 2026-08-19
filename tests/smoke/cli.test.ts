@@ -212,7 +212,11 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		const result = await runCli(["definitely-not-a-command"], { env: scratch.env });
 		strictEqual(result.code, 2);
 		match(result.stderr, /unknown subcommand: definitely-not-a-command/);
-		match(result.stdout, /Usage:/);
+		// The usage that explains a rejection goes to stderr with it. It used to
+		// go to stdout, so a mistyped command produced a full page on the stream
+		// the caller was capturing for output.
+		match(result.stderr, /Usage:/);
+		strictEqual(result.stdout, "");
 	});
 
 	it("rejects removed top-level context aliases", async () => {
@@ -220,7 +224,9 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			const result = await runCli([alias, "--help"], { env: scratch.env });
 			strictEqual(result.code, 2, alias);
 			match(result.stderr, new RegExp(`unknown subcommand: ${alias}`));
-			match(result.stdout, /clio-coder context init/);
+			// The usage naming the replacement rides on stderr with the rejection.
+			match(result.stderr, /clio-coder context init/);
+			strictEqual(result.stdout, "", alias);
 		}
 	});
 
