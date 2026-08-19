@@ -11,6 +11,7 @@ still change interfaces.
 
 ## 0.3.2 - 2026-08-19
 
+- Fixed refused local commands and unresolved worker steering so Pi's pre-submit editor clearing restores the draft instead of losing it or recording rejected input in prompt history.
 This release hardens the terminal agent. A day of audits against the live code and a Qwen3.8-27B fleet on llama.cpp and LM Studio produced the defects below; every one is fixed here, each code fix carries a regression test, and the tickets (#110 through #134) carry the evidence.
 
 - Replaced Clio's copied transient-provider regex with Pi 0.84's `isRetryableAssistantError`. DNS and WebSocket failures now enter the bounded retry ladder, quota, usage-limit, and billing failures stop immediately even when they contain an HTTP retry status, and Clio retains only its longer local-model loading delay and cancellable countdown.

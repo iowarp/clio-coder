@@ -221,6 +221,53 @@ describe("contracts/interactive editor submit", () => {
 		deepStrictEqual(harness.events, ["history:@scout inspect only", "set:", "render"]);
 	});
 
+	it("restores unresolved steer mentions without adding them to history", () => {
+		const ambiguous = createHarness({
+			running: [
+				{ runId: "run-123", agentId: "scout" },
+				{ runId: "run-456", agentId: "scout" },
+			],
+		});
+		const ambiguousController = createEditorSubmitController(ambiguous.deps);
+
+		ambiguousController.submitEditorText("@scout inspect only");
+
+		strictEqual(ambiguous.getText(), "@scout inspect only", "Pi cleared the draft before onSubmit");
+		deepStrictEqual(ambiguous.history, []);
+		deepStrictEqual(ambiguous.steers, []);
+		strictEqual(ambiguous.notices[0]?.level, "warning");
+
+		const missing = createHarness({ running: [{ runId: "run-123", agentId: "scout" }] });
+		const missingController = createEditorSubmitController(missing.deps);
+
+		missingController.submitEditorText("@builder inspect only");
+
+		strictEqual(missing.getText(), "@builder inspect only", "Pi cleared the draft before onSubmit");
+		deepStrictEqual(missing.history, []);
+		deepStrictEqual(missing.steers, []);
+		strictEqual(missing.notices[0]?.level, "warning");
+	});
+
+	it("restores a failed steer without adding it to history", () => {
+		const harness = createHarness({ running: [{ runId: "run-123", agentId: "scout" }] });
+		harness.deps.dispatch.steer = () => {
+			throw new Error("queue unavailable");
+		};
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.submitEditorText("@scout inspect only");
+
+		strictEqual(harness.getText(), "@scout inspect only", "Pi cleared the draft before onSubmit");
+		deepStrictEqual(harness.history, []);
+		deepStrictEqual(harness.notices, [
+			{
+				level: "error",
+				text: "steer to @scout failed: queue unavailable",
+				key: "steer:scout",
+			},
+		]);
+	});
+
 	it("queues an expanded follow-up while streaming and clears only after acceptance", async () => {
 		const harness = createHarness({ streaming: true });
 		harness.setText("  next step  ");
@@ -423,21 +470,39 @@ describe("contracts/interactive editor submit", () => {
 		deepStrictEqual(harness.events, ["ensure-session", "append-bash", "refresh:null", "render"]);
 	});
 
-	it("records an accepted local bash submission but not one refused during streaming", async () => {
+	it("records an accepted local bash submission but restores refusals without history", async () => {
 		const accepted = createHarness();
 		accepted.deps.runBash = async () => bashResult();
 		const acceptedController = createEditorSubmitController(accepted.deps);
 		acceptedController.submitEditorText("! pwd");
 		await flushAsync();
 		deepStrictEqual(accepted.history, ["! pwd"]);
+		strictEqual(
+			accepted.events.filter((event) => event === "history:! pwd").length,
+			1,
+			"an accepted command is added to history exactly once",
+		);
 		strictEqual(accepted.getText(), "");
 
 		const refused = createHarness({ streaming: true });
-		refused.setText("! pwd");
 		const refusedController = createEditorSubmitController(refused.deps);
 		refusedController.submitEditorText("! pwd");
 		deepStrictEqual(refused.history, []);
-		strictEqual(refused.getText(), "! pwd");
+		strictEqual(refused.getText(), "! pwd", "Pi cleared the draft before onSubmit");
+
+		let resolveActive: (result: BashCommandResult) => void = () => {};
+		const active = createHarness();
+		active.deps.runBash = () =>
+			new Promise((resolve) => {
+				resolveActive = resolve;
+			});
+		const activeController = createEditorSubmitController(active.deps);
+		activeController.submitEditorText("! first");
+		activeController.submitEditorText("! second");
+		deepStrictEqual(active.history, ["! first"]);
+		strictEqual(active.getText(), "! second", "the refused command is restored after Pi clears it");
+		resolveActive(bashResult());
+		await flushAsync();
 	});
 
 	it("restores the leaf the session has when the bash finishes, not the one captured when it started", async () => {
