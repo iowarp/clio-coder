@@ -36,9 +36,6 @@ export function createResourcesBundle(
 		expandPromptTemplate(text, cwd) {
 			return loader.expandPromptTemplate(text, cwd);
 		},
-		themes() {
-			return loader.themes();
-		},
 		resolvePath(value, cwd) {
 			return loader.resolvePath(value, cwd);
 		},

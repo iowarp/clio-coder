@@ -751,7 +751,6 @@ describe("contracts/skills", () => {
 				},
 				expandPromptTemplate: (text: string) => ({ expanded: false as const, text, args: [], diagnostics: [] }),
 				prompts: () => ({ items: [], diagnostics: [] }),
-				themes: () => ({ items: [], diagnostics: [] }),
 				resolvePath: (value: string) => value,
 				reload: async () => undefined,
 			};
@@ -791,7 +790,6 @@ describe("contracts/skills", () => {
 				},
 				expandPromptTemplate: (text: string) => ({ expanded: false as const, text, args: [], diagnostics: [] }),
 				prompts: () => ({ items: [], diagnostics: [] }),
-				themes: () => ({ items: [], diagnostics: [] }),
 				resolvePath: (value: string) => value,
 				reload: async () => undefined,
 			};
