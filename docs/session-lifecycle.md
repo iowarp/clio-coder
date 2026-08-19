@@ -113,7 +113,7 @@ The active path filter (`src/domains/session/tree/active-path.ts`) traces ancest
 2. Selects all ledger entries explicitly matching these `turnId`s.
 3. Both `/tree` (in-session switch) and `/fork` (new session branch) reconstruct the exact same state, strictly excluding any unanchored sidecar entries (`taskLedger`, routing notices, leafless `workerRun`) that appear after the chosen leaf's position.
 4. For a `/tree` switch, the active pin is persisted to `meta.pinnedLeafTurnId` and cleared on the next append, so a switch survives quit and `/resume` without reverting to the abandoned tip via timestamp inference.
-4. Prunes abandoned sibling branches from the context window supplied to the LLM.
+5. Prunes abandoned sibling branches from the context window supplied to the LLM.
 
 ### Branch Forking (`/fork`)
 
@@ -122,6 +122,10 @@ The `/fork` command (`src/domains/session/tree/fork.ts:forkFromParentTurn`) init
 2. Creates a new session directory and metadata inheriting `cwd`, `model`, and `target` from the parent.
 3. Traces ancestry up to `parentTurnId` and copies exactly the active path entries (excluding later unanchored sidecars) into the new session ledger.
 4. Stamps `parentSession` and `parentTurnId` in the new session header.
+
+### Streaming Turn Settlement During Session Transitions
+
+When an operator issues `/new`, `/resume`, `/tree`, or `/fork` while an assistant turn is actively streaming, `settleChatBeforeSessionSwitch` (`src/interactive/session-switch-settlement.ts`) cancels the in-flight stream and awaits completion. This guarantees that partial assistant records and completed tool executions seal cleanly into the active session ledger before the session writer is replaced, preventing orphaned records in new sessions or unanswered prompts in original sessions (#114). Synchronous session transitions when chat is idle continue to execute immediately.
 
 ---
 
@@ -136,6 +140,10 @@ When resuming a session via `/resume` or `CLIO_CODER_RESUME_SESSION_ID`:
    - `not-a-directory`: The path points to a non-directory file or broken symlink.
 4. The interactive layer displays the `cwd-fallback` overlay prompting the operator to choose a valid workspace directory.
 
+### Model-Facing Custom Entry Replay
+
+When resumed or forked session history is replayed to the model, custom session entries (such as compaction summaries, branch summaries, and operator bash executions) are projected into standardized user-role message text via `src/engine/messages.ts` constants (`COMPACTION_SUMMARY_PREFIX`, `BRANCH_SUMMARY_PREFIX`, `bashExecutionToText`) rather than ad-hoc formats, ensuring deterministic prompt construction across sessions.
+
 ---
 
 ## 6. Session Export
@@ -146,7 +154,28 @@ An explicit path ending in `.md` keeps the plain Markdown form: a heading, UTC e
 
 ---
 
-## 7. Protected-Artifact Write-Ahead Journal
+## 7. Directory Handbooks and Project Overrides
+
+During session context loading, `loadProjectContextFiles` (`src/domains/context/clio-md.ts`) discovers root `CLIO-CODER.md` handbooks and directory-scoped `CLIO-CODER.override.md` files:
+- An override handbook replaces inherited project instructions for its directory and all subdirectories, establishing an explicit subtree boundary.
+- Sibling directories remain unaffected.
+- Subdirectories within the subtree may supply narrower instructions with additional override files.
+- Prompt blocks preserve explicit source paths for provenance.
+- Malformed override files fail closed, and context resets never delete override files.
+
+---
+
+## 8. Prompt History and Input Recovery
+
+The interactive editor provides process-local prompt history via `Ctrl+P` (previous) and `Ctrl+N` (next):
+- Accepted chat prompts, slash commands, local command executions, steering inputs, follow-ups, and interrupt messages are preserved in navigation history.
+- Consecutive duplicates are collapsed.
+- Rejected or malformed commands remain editable in the composer without polluting navigation history.
+- Navigating forward past the newest entry restores the unfinished draft prompt.
+
+---
+
+## 9. Protected-Artifact Write-Ahead Journal
 
 To guarantee that protected artifacts and validation locks survive unexpected crashes between tool execution and ledger commitment, Clio Coder maintains a write-ahead journal (`src/domains/session/protected-artifact-journal.ts`):
 
@@ -158,7 +187,7 @@ To guarantee that protected artifacts and validation locks survive unexpected cr
 
 ---
 
-## 8. In-Session Task Board & Usage Accounting
+## 10. In-Session Task Board & Usage Accounting
 
 - **Task Board** (`src/domains/session/task-board.ts`): Maintains session task items with states (`todo`, `in_progress`, `done`, `failed`). Emits middleware reminders when uncompleted tasks remain before turn end.
 - **Usage Accounting** (`src/domains/session/usage.ts`): Aggregates session token counts across input, output, cache read, cache write, and reasoning tokens. Anchors against provider-reported totals on settled turns.
