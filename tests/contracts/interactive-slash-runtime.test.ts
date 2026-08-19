@@ -12,6 +12,7 @@ import type { DispatchContract, DispatchRequest } from "../../src/domains/dispat
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionEntry } from "../../src/domains/session/index.js";
+import { createUserTasksStore } from "../../src/domains/user-tasks/store.js";
 import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
@@ -91,6 +92,54 @@ function createHarness() {
 }
 
 describe("contracts/interactive slash runtime", () => {
+	it("logs without submitting and hands exactly one operator turn while idle or streaming", async () => {
+		for (const streaming of [false, true]) {
+			const harness = createHarness();
+			const cwd = mkdtempSync(join(tmpdir(), `clio-slash-user-tasks-${streaming ? "stream" : "idle"}-`));
+			const userTasks = createUserTasksStore({ cwd });
+			harness.deps.userTasks = userTasks;
+			harness.deps.chat.getSessionId = () => "session-1";
+			harness.deps.chat.isStreaming = () => streaming;
+			const runtime = createInteractiveSlashRuntime(harness.deps);
+
+			runtime.dispatchCommand("/tasks add write release notes");
+			await flushAsync();
+			strictEqual(userTasks.get("u1")?.status, "open");
+			strictEqual(harness.events.filter((event) => event.startsWith("submit:")).length, 0);
+
+			runtime.dispatchCommand("/tasks hand u1");
+			await flushAsync();
+			strictEqual(userTasks.get("u1")?.status, "handed");
+			strictEqual(userTasks.get("u1")?.handedSessionId, "session-1");
+			deepStrictEqual(
+				harness.events.filter((event) => event.startsWith("submit:")),
+				[
+					'submit:expanded:Operator task u1: write release notes. Pick it up with tasks action="pick" id="u1" and work it when appropriate.',
+				],
+			);
+			harness.finishSubmit();
+		}
+	});
+
+	it("submits nothing when the explicit handoff sidecar mutation fails", async () => {
+		const harness = createHarness();
+		const cwd = mkdtempSync(join(tmpdir(), "clio-slash-user-tasks-failed-hand-"));
+		const durable = createUserTasksStore({ cwd });
+		durable.add("keep local");
+		harness.deps.userTasks = createUserTasksStore({
+			cwd,
+			write: () => {
+				throw new Error("disk full");
+			},
+		});
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+
+		runtime.dispatchCommand("/tasks hand u1");
+		await flushAsync();
+		strictEqual(harness.events.filter((event) => event.startsWith("submit:")).length, 0);
+		strictEqual(durable.get("u1")?.status, "open");
+	});
+
 	// Issue #109: current.jsonl is append-only, so a session pinned by /tree and
 	// not yet extended still holds the abandoned turns after the pin. /export
 	// rehydrated the file unscoped and reproduced them, the same root cause as

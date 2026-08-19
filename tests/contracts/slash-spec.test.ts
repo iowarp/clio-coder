@@ -199,6 +199,62 @@ describe("contracts/slash-spec", () => {
 		);
 	});
 
+	it("parses and executes project operator task subcommands without implicit agent submission", () => {
+		const submitted: string[] = [];
+		const notices: string[] = [];
+		const statusById = new Map<string, "open" | "handed" | "done" | "dropped">();
+		let nextId = 1;
+		const task = (id: string, title: string, status: "open" | "handed" | "done" | "dropped") => ({
+			id,
+			title,
+			status,
+			createdAt: "2026-08-19T12:00:00.000Z",
+			updatedAt: "2026-08-19T12:00:00.000Z",
+		});
+		const ctx = {
+			notice: (_level: string, text: string) => notices.push(text),
+			submitChat: (text: string) => submitted.push(text),
+			openTasks: () => undefined,
+			userTasks: {
+				add: (title: string) => {
+					const id = `u${nextId++}`;
+					statusById.set(id, "open");
+					return task(id, title, "open");
+				},
+				hand: (id: string) => {
+					statusById.set(id, "handed");
+					return task(id, "write release notes", "handed");
+				},
+				done: (id: string) => {
+					statusById.set(id, "done");
+					return task(id, "write release notes", "done");
+				},
+				drop: (id: string) => {
+					statusById.set(id, "dropped");
+					return task(id, "discard draft", "dropped");
+				},
+			},
+		} as unknown as SlashCommandContext;
+
+		dispatchSlashCommand(parseSlashCommand("/tasks add write release notes"), ctx);
+		strictEqual(submitted.length, 0, "logging an inbox task never submits a turn");
+		dispatchSlashCommand(parseSlashCommand("/tasks hand u1"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/tasks done u1"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/tasks drop u2"), ctx);
+
+		deepStrictEqual(
+			[...statusById],
+			[
+				["u1", "done"],
+				["u2", "dropped"],
+			],
+		);
+		deepStrictEqual(submitted, [
+			'Operator task u1: write release notes. Pick it up with tasks action="pick" id="u1" and work it when appropriate.',
+		]);
+		ok(notices.some((notice) => notice.includes("logged operator task u1")));
+	});
+
 	/**
 	 * The same defect one layer out. A removed command matched nothing, fell
 	 * through to `unknown`, and was submitted to the model, which answered
@@ -525,6 +581,12 @@ describe("contracts/slash-spec", () => {
 			["/context query", { kind: "usage-error", command: "context", reason: "Unexpected argument: query" }],
 			["/fleet query", { kind: "usage-error", command: "fleet", reason: "Unexpected argument: query" }],
 			["/tasks query", { kind: "usage-error", command: "tasks", reason: "Unexpected argument: query" }],
+			["/tasks", { kind: "tasks" }],
+			["/tasks add write release notes", { kind: "tasks-add", text: "write release notes" }],
+			["/tasks hand u3", { kind: "tasks-hand", id: "u3" }],
+			["/tasks done u3", { kind: "tasks-done", id: "u3" }],
+			["/tasks drop u3", { kind: "tasks-drop", id: "u3" }],
+			["/tasks add", { kind: "usage-error", command: "tasks", reason: "Missing required argument: text" }],
 			["/memory", { kind: "memory" }],
 			["/memory seed", { kind: "memory-seed" }],
 			["/memory query", { kind: "usage-error", command: "memory", reason: "Unexpected argument: query" }],

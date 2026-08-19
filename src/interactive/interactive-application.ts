@@ -16,6 +16,7 @@ import type { ResourcesContract } from "../domains/resources/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
+import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { createAgentProgress } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
@@ -125,6 +126,8 @@ export interface InteractiveDeps {
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
 	/** Live session task board for the footer tasks row and the /tasks overlay. */
 	getTaskBoard?: () => TaskBoardSnapshot | null;
+	/** Project-scoped operator task inbox used by `/tasks` subcommands. */
+	userTasks?: UserTasksStore;
 	/** Live, read-only task-memory state for status surfaces and the /memory overlay. */
 	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 	/** Newest structured handoff available for an opt-in seed, when enabled. */
@@ -506,6 +509,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(interopSurface ? { interop: interopSurface } : {}),
 		...(deps.agents ? { agents: deps.agents } : {}),
 		...(deps.share ? { share: deps.share } : {}),
+		...(deps.userTasks ? { userTasks: deps.userTasks } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.writeSettings ? { writeSettings: deps.writeSettings } : {}),
 		...(deps.commitSetting ? { commitSetting: deps.commitSetting } : {}),

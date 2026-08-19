@@ -154,7 +154,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/cost` | `/cost` | Show session token and cost totals |
 | `/context` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
 | `/fleet` | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
-| `/tasks` | `/tasks` | Show the session task board the agent tracks with the tasks tool |
+| `/tasks` | `/tasks add <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
 | `/memory` | `/memory seed` | Inspect task memory or seed it from the newest handoff |
 | `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
