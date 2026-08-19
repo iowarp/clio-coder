@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { parseCommandArgs, substituteArgs } from "../../../engine/prompt-templates.js";
 import { INTEROP_AGENT_KINDS } from "../../interop/registry.js";
 import {
 	type ResourceCandidate,
@@ -18,7 +19,6 @@ import {
 	stringField,
 } from "../common-loader.js";
 import { projectCompatTrusted } from "../skills/loader.js";
-import { parseCommandArgs, substituteArgs } from "./substitute.js";
 
 export interface PromptTemplate {
 	name: string;
