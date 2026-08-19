@@ -5,7 +5,7 @@
  * separate state factory. AgentOptions drives the construction; the state is derived
  * from options.initialState on instantiation.
  *
- * pi-agent-core 0.83 requires an explicit stream function on every agent.
+ * pi-agent-core 0.84 requires an explicit stream function on every agent.
  * Clio's default is the compat `streamSimple` dispatcher (the same function the
  * pre-0.81 engine used implicitly); callers may override it for tests.
  */

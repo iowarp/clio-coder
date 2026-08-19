@@ -55,10 +55,10 @@ const USER_GLYPH = GLYPH.user;
 
 /**
  * An assistant turn is a sequence of text and tool segments interleaved in
- * pi-agent-core event order. pi-agent-core emits: `message_start` →
- * `text_delta`+ → `message_end` → `tool_execution_*` → (next) `message_start`
- * → `text_delta`+ → `message_end`, so tool calls always sit BETWEEN the
- * assistant's pre-tool narration and the post-tool summary. Storing a flat
+ * pi-agent-core event order. A tool turn emits assistant `message_update`
+ * events carrying `toolcall_*` formation, then `message_end`, then the
+ * `tool_execution_*` lifecycle before the next assistant message. Tool calls
+ * therefore sit BETWEEN the assistant's pre-tool narration and the post-tool summary. Storing a flat
  * `text` buffer + `tools[]` array (pre-refactor) collapsed that order: all
  * text across the turn concatenated into one line with every tool block
  * appended at the end. The segment list preserves the stream order instead.
@@ -248,8 +248,8 @@ export interface ChatPanel extends Component {
 	/**
 	 * Force every tool segment into its collapsed one-line form. Replay
 	 * (`rehydrateChatPanelFromTurns`) calls this so a resumed or forked
-	 * transcript reproduces the settled live view, where tools are collapsed to
-	 * their ledger summary rather than the expanded body. Idempotent.
+	 * transcript uses compact ledger summaries instead of auto-expanding every
+	 * historical non-resource call. Idempotent.
 	 */
 	collapseAllTools(): void;
 	/**
