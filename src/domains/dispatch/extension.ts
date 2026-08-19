@@ -1774,7 +1774,10 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		...(input.dynamicHash !== null ? { dynamicHash: input.dynamicHash } : {}),
 		agentId: input.req.agentId,
 		task: input.req.task,
-		target: input.target.target,
+		// The configured target may name its runtime by a legacy alias. The attested
+		// document records the resolved runtime instead, so what the worker reads
+		// and what the orchestrator routed on are the same id.
+		target: { ...input.target.target, runtime: input.target.runtime.id },
 		runtime: serializeWorkerRuntimeDescriptor(input.target.runtime),
 		runtimeId: input.target.runtime.id,
 		wireModelId: input.target.wireModelId,
