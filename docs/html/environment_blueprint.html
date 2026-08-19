@@ -154,9 +154,9 @@
                   <td>Internal dispatch execution timeout in milliseconds (15 minutes).</td>
                 </tr>
                 <tr data-cat="guardrail">
-                  <td class="env-name">CLIO_CODER_MAX_RUNS</td>
+                  <td class="env-name">CLIO_CODER_MAX_DISPATCH_RUNS</td>
                   <td><code>1000</code></td>
-                  <td>Dispatch run-ledger retention cap.</td>
+                  <td>Dispatch run-ledger retention cap. The older CLIO_CODER_MAX_RUNS spelling still reads when this one is unset.</td>
                 </tr>
                 <tr data-cat="guardrail">
                   <td class="env-name">CLIO_CODER_READ_MAX_BYTES</td>
@@ -170,7 +170,7 @@
                 </tr>
                 <tr data-cat="knob">
                   <td class="env-name">CLIO_CODER_RIGOR</td>
-                  <td><code>normal</code></td>
+                  <td><code>repo-derived</code></td>
                   <td>Finish-contract evidence validation bar (normal or high).</td>
                 </tr>
                 <tr data-cat="knob">
@@ -275,7 +275,7 @@
             <div class="specs-col">
               <div class="glass-card">
                 <h3>Effective Resolved Paths</h3>
-                <p>Resolution order: <code>env > settings > platform XDG</code></p>
+                <p>Resolution order: <code>per-role env var &gt; CLIO_CODER_HOME &gt; platform default</code></p>
                 
                 <div class="path-row">
                   <span class="path-label">Config Folder</span>
@@ -371,13 +371,13 @@
           state = "~/.local/state/clio-coder";
           cache = "~/.cache/clio-coder";
         } else if (os === "macos") {
-          config = "~/Library/Application Support/clio-coder";
-          data = "~/Library/Application Support/clio-coder";
+          config = "~/Library/Application Support/clio-coder/config";
+          data = "~/Library/Application Support/clio-coder/data";
           state = "~/Library/Application Support/clio-coder/state";
           cache = "~/Library/Caches/clio-coder";
         } else {
-          config = "%APPDATA%\\clio-coder";
-          data = "%LOCALAPPDATA%\\clio-coder";
+          config = "%APPDATA%\\clio-coder\\config";
+          data = "%APPDATA%\\clio-coder\\data";
           state = "%LOCALAPPDATA%\\clio-coder\\state";
           cache = "%LOCALAPPDATA%\\clio-coder\\cache";
         }

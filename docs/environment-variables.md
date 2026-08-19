@@ -2,7 +2,7 @@
 
 Every environment variable the shipped `src/` tree reads, grouped by role. Settings.yaml is the durable home for operator policy; env vars exist for per-process overrides (CI, one-off experiments), directory layout, debugging, and internal plumbing. When prose and source disagree, prefer the source; the table cites the read site.
 
-This page is the complete inventory, and `tests/contracts/environment-variable-inventory.test.ts` fails if `src/` reads a variable that has no row here.
+This page is the complete inventory, and the `environment-variable-inventory` check in `scripts/check-hygiene.ts` (run by `npm run lint`) fails if `src/` reads a variable that has no row here.
 
 > [!TIP]
 > [docs/html/environment_blueprint.html](html/environment_blueprint.html) is a browsable walkthrough of the most commonly set variables with an effective-path resolver. It covers a curated subset, so use the tables below when you need the full list.
