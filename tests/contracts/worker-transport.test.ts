@@ -926,7 +926,7 @@ describe("dispatch records fleet placement", () => {
 		}
 	});
 
-	it("omits node fields entirely when no placement seam is configured", async () => {
+	it("records the local node when no placement seam is configured", async () => {
 		const bundle = makeDispatchBundle(stubContext(), {
 			spawnWorker: () =>
 				fakeSpawnedWorker([
@@ -938,9 +938,10 @@ describe("dispatch records fleet placement", () => {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "no node" });
 			await drain(handle.events);
 			const receipt = await handle.finalPromise;
-			strictEqual("node" in receipt, false);
+			deepStrictEqual(receipt.node, { id: "local", kind: "local" });
 			strictEqual("reroutes" in receipt, false);
 			const envelope = bundle.contract.getRun(receipt.runId);
+			deepStrictEqual(envelope?.node, receipt.node);
 			if (envelope) deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
 		} finally {
 			await bundle.extension.stop?.();
