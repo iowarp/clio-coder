@@ -1163,6 +1163,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			positionals: [{ name: "path", required: false }],
 		},
 		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "export", reason: parsed.error };
 			return { kind: "export", path: parsed.positionals[0] };
 		},
 		handle(command, ctx) {
