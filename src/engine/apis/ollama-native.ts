@@ -32,6 +32,7 @@ import {
 } from "../../domains/providers/index.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { calculateEngineCost } from "../ai.js";
+import { createGemmaChannelFilter } from "../gemma-channel-filter.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import { type ResidencyAdapter, reconcileResidency, residencyManagedFor } from "./residency.js";
@@ -381,6 +382,8 @@ function runStream(
 			let hadToolCall = false;
 			let doneReason: string | undefined;
 			const sentinelStripper = createSentinelStripper();
+			const resolved = resolveModelRuntimeCapabilitiesForModel(model, thinkingLevel);
+			const channelFilter = resolved.family === "gemma-4" ? createGemmaChannelFilter() : null;
 			const closeActiveThinking = () => {
 				if (!activeThinking) return;
 				stream.push({
@@ -446,6 +449,22 @@ function runStream(
 					partial: output,
 				});
 			};
+			const routeText = (content: string) => {
+				if (!channelFilter) {
+					emitText(content);
+					return;
+				}
+				for (const segment of channelFilter.push(content)) {
+					if (segment.kind === "thinking") emitThinking(segment.content);
+					else emitText(segment.content);
+				}
+			};
+			const flushChannel = () => {
+				for (const segment of channelFilter?.flush() ?? []) {
+					if (segment.kind === "thinking") emitThinking(segment.content);
+					else emitText(segment.content);
+				}
+			};
 			for await (const chunk of iterator) {
 				const response = chunk as ChatResponse;
 				const msg = response.message;
@@ -453,15 +472,17 @@ function runStream(
 					emitThinking(msg.thinking);
 				}
 				if (msg?.content && msg.content.length > 0) {
-					emitText(msg.content);
+					routeText(msg.content);
 				}
 				if (msg?.tool_calls && msg.tool_calls.length > 0) {
+					flushChannel();
 					closeActiveText();
 					closeActiveThinking();
 					for (const raw of msg.tool_calls) emitToolCall(raw, output, stream);
 					hadToolCall = true;
 				}
 				if (response.done) {
+					flushChannel();
 					closeActiveText();
 					closeActiveThinking();
 					output.usage.input = response.prompt_eval_count ?? 0;
