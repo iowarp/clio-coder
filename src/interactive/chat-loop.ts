@@ -40,8 +40,8 @@ import { createEngineAgent } from "../engine/agent.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import type { AgentEvent, AgentMessage, ImageContent } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
-import { finalizeAskUserInterview } from "../tools/ask-user.js";
-import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
+import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
+import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import {
 	createAskUserToolPolicy,
 	createPendingSkillToolPolicy,
@@ -355,6 +355,11 @@ export interface CreateChatLoopDeps {
 	 * composition; the loop owns the buffer the reminder lands in.
 	 */
 	registerDeferredReminderSink?: (sink: (message: string) => void) => void;
+	/**
+	 * Host-finalizer seam for branch-anchored interview snapshots. Called once,
+	 * after the ask-user host finalizer has settled the policy and its transcript.
+	 */
+	onAskUserFinalized?: (policy: AskUserToolPolicy) => void;
 	/**
 	 * True while an attached `dispatch` call is running. An interrupt is refused
 	 * in that state; the composition root wires this from the dispatch
@@ -845,7 +850,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
 			} finally {
 				if (askUserPolicy) {
-					await finalizeAskUserInterview(askUserPolicy, "turn_finished", currentToolInvokeOptions());
+					try {
+						await finalizeAskUserInterviewForHost(
+							askUserPolicy,
+							"turn_finished",
+							currentToolInvokeOptions(),
+							deps.onAskUserFinalized,
+						);
+					} catch (error) {
+						emitNotice(
+							`[Clio Coder] interview decisions could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
+							"warning",
+							`decision-ledger:${askUserPolicy.id}`,
+						);
+					}
 				}
 				state.streaming = false;
 				if (state.activeInterruptReason !== null) {

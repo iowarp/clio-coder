@@ -206,6 +206,32 @@ export interface TaskLedgerEntry extends BaseSessionEntry {
 	requiredValidationEvidence: TaskLedgerValidationEvidence[];
 }
 
+export type DecisionStatus = "active" | "superseded";
+
+export interface DecisionRecord {
+	key: string;
+	value: string;
+	label?: string;
+	source_question?: string;
+	status: DecisionStatus;
+	decidedAt: string;
+	revisedAt?: string;
+	correction?: string;
+}
+
+/** One complete, branch-anchored snapshot of a settled operator interview. */
+export interface DecisionLedgerEntry extends BaseSessionEntry {
+	kind: "decisionLedger";
+	interviewId: string;
+	interviewStatus: "complete" | "cancelled";
+	startedAt: string;
+	endedAt: string;
+	roundCount: number;
+	summary?: string;
+	transcriptPath?: string;
+	decisions: DecisionRecord[];
+}
+
 /** Who asked for a dispatched run. Internal runs never reach the transcript, so they never reach this entry. */
 export type WorkerRunOrigin = "user" | "agent";
 
@@ -264,6 +290,7 @@ export type SessionEntry =
 	| ProtectedArtifactEntry
 	| SkillActivationEntry
 	| TaskLedgerEntry
+	| DecisionLedgerEntry
 	| WorkerRunEntry;
 
 export type SessionFileEntry = SessionHeader | SessionEntry;
@@ -288,6 +315,7 @@ export const SESSION_ENTRY_KINDS = [
 	"protectedArtifact",
 	"skillActivation",
 	"taskLedger",
+	"decisionLedger",
 	"workerRun",
 ] as const;
 
@@ -357,6 +385,8 @@ const TASK_LEDGER_EVIDENCE_STATUSES: readonly TaskLedgerEvidenceStatus[] = [
 	"failed",
 	"missing",
 ];
+const DECISION_STATUSES: readonly DecisionStatus[] = ["active", "superseded"];
+const DECISION_INTERVIEW_STATUSES = ["complete", "cancelled"] as const;
 const WORKER_RUN_ORIGINS: readonly WorkerRunOrigin[] = ["user", "agent"];
 const WORKER_RUN_RUNTIME_KINDS: readonly WorkerRunRuntimeKind[] = ["clio", "acp", "claude-sdk", "claude-code"];
 
@@ -392,6 +422,17 @@ function isTaskLedgerEvidence(value: unknown): value is TaskLedgerValidationEvid
 		isOptionalString(value.observedAt) &&
 		isOptionalString(value.notes)
 	);
+}
+
+function isDecisionRecord(value: unknown): value is DecisionRecord {
+	if (!isRecord(value)) return false;
+	if (!isString(value.key) || !/^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(value.key)) return false;
+	if (!isString(value.value) || !isOneOf(value.status, DECISION_STATUSES) || !isString(value.decidedAt)) return false;
+	if (!isOptionalString(value.label) || !isOptionalString(value.source_question)) return false;
+	if (!isOptionalString(value.revisedAt) || !isOptionalString(value.correction)) return false;
+	return value.status === "superseded"
+		? isString(value.revisedAt)
+		: value.revisedAt === undefined && value.correction === undefined;
 }
 
 function isOptionalCompactionUsage(value: unknown): boolean {
@@ -502,6 +543,20 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isStringArray(v.activeRunIds) &&
 				Array.isArray(v.requiredValidationEvidence) &&
 				v.requiredValidationEvidence.every(isTaskLedgerEvidence)
+			);
+		case "decisionLedger":
+			return (
+				isString(v.interviewId) &&
+				isOneOf(v.interviewStatus, DECISION_INTERVIEW_STATUSES) &&
+				isString(v.startedAt) &&
+				isString(v.endedAt) &&
+				isNumber(v.roundCount) &&
+				Number.isInteger(v.roundCount) &&
+				v.roundCount >= 0 &&
+				isOptionalString(v.summary) &&
+				isOptionalString(v.transcriptPath) &&
+				Array.isArray(v.decisions) &&
+				v.decisions.every(isDecisionRecord)
 			);
 		case "workerRun":
 			return (

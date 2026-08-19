@@ -70,6 +70,7 @@ function isValidCutPoint(entry: SessionEntry): boolean {
 		case "label":
 		case "protectedArtifact":
 		case "taskLedger":
+		case "decisionLedger":
 		case "workerRun":
 			return false;
 	}
