@@ -84,6 +84,51 @@ describe("contracts/bootstrap", () => {
 		strictEqual(verification.body.includes("`pnpm run format`"), false, verification.body);
 	});
 
+	/**
+	 * Python has no single scripts manifest, so the section names a runner only
+	 * where the project declares one. A layout that declares nothing stays
+	 * silent rather than being guessed at: a wrong runner in the handbook is
+	 * worse than none.
+	 */
+	it("names the declared pytest runner for a Python project", async () => {
+		writeFileSync(
+			join(scratch, "pyproject.toml"),
+			'[project]\nname = "fixture"\nversion = "0.1.0"\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+			"utf8",
+		);
+		writeFileSync(join(scratch, "main.py"), "def main() -> None: ...\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		ok(verification, "a project with declared pytest configuration must get a verification section");
+		ok(verification.body.includes("`pytest`"), verification.body);
+	});
+
+	it("prefers the declared tox environment over pytest", async () => {
+		writeFileSync(
+			join(scratch, "pyproject.toml"),
+			'[project]\nname = "fixture"\nversion = "0.1.0"\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+			"utf8",
+		);
+		writeFileSync(join(scratch, "tox.ini"), "[tox]\nenvlist = py312\n", "utf8");
+		writeFileSync(join(scratch, "main.py"), "def main() -> None: ...\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		ok(verification, "a project with a tox configuration must get a verification section");
+		ok(verification.body.includes("`tox`"), verification.body);
+		strictEqual(verification.body.includes("`pytest`"), false, verification.body);
+	});
+
+	it("stays silent on a Python project that declares no runner", async () => {
+		writeFileSync(join(scratch, "pyproject.toml"), '[project]\nname = "fixture"\nversion = "0.1.0"\n', "utf8");
+		writeFileSync(join(scratch, "main.py"), "def main() -> None: ...\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		strictEqual(verification, undefined, verification?.body);
+	});
+
 	it("measures the local import extension instead of reading it off the stack", async () => {
 		writeFileSync(
 			join(scratch, "package.json"),

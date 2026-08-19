@@ -454,6 +454,30 @@ export function packageManager(cwd: string): PackageManager {
 /** A script whose command rewrites the tree cannot serve as a verification gate. */
 const MUTATING_SCRIPT_RE = /(?:^|\s)--(?:fix|write)(?:\s|$)/;
 
+/**
+ * Python has no single scripts manifest, so the section names a runner only
+ * where the project declares one: a tox configuration declares `tox`, and a
+ * declared pytest configuration declares `pytest`. An undeclared layout stays
+ * silent rather than guessing `python -m unittest` at a repository that tests
+ * some other way. Tox wins when both are declared because it typically wraps
+ * the pytest run.
+ */
+function pythonVerificationLines(cwd: string): string[] {
+	let pyproject = "";
+	try {
+		pyproject = readFileSync(join(cwd, "pyproject.toml"), "utf8");
+	} catch {
+		pyproject = "";
+	}
+	if (existsSync(join(cwd, "tox.ini")) || pyproject.includes("[tool.tox]")) {
+		return ["Run `tox` before handoff."];
+	}
+	if (existsSync(join(cwd, "pytest.ini")) || pyproject.includes("[tool.pytest.ini_options]")) {
+		return ["Run `pytest` before handoff."];
+	}
+	return [];
+}
+
 function verificationSection(cwd: string): ClioMdSection | null {
 	const scripts = packageScripts(cwd);
 	const pm = packageManager(cwd);
@@ -487,6 +511,7 @@ function verificationSection(cwd: string): ClioMdSection | null {
 	if (hasScript("ci")) {
 		lines.push(`Use ${command("ci")} for the full local gate before committing broad or shared behavior changes.`);
 	}
+	lines.push(...pythonVerificationLines(cwd));
 	if (lines.length === 0) return null;
 	return { title: "Verification expectations", body: lines.join(" ") };
 }
