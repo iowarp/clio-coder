@@ -1,7 +1,7 @@
 # Model Catalog, Runtime Refresh, and Field Notes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.3.2).
 
 Clio Coder treats a selectable model as the intersection of three sources:
 
@@ -60,7 +60,7 @@ A model family is "sanctioned" only when we can say what was tested and under wh
 - quirks needed by the engine (thinking mechanism, sampling, KV cache);
 - failures and "do not use this route yet" notes.
 
-Engine-visible quirks belong in catalog YAML entries under `quirks.kvCache`, `quirks.sampling`, and `quirks.thinking`. Bundled entries under `src/domains/providers/models/**/*.yaml` are for curated Clio-supported families. User/lab/project experiments should start as overlays before they are promoted into source. Free-form notes can live alongside catalog entries and in this docs area for later cookbooks/blog posts.
+Engine-visible quirks belong in catalog YAML entries under `quirks.kvCache`, `quirks.sampling`, and `quirks.thinking`. Bundled entries under `src/domains/providers/models/**/*.yaml` are for curated Clio-supported families. User/lab/project experiments should start as overlays before they are promoted into source. Free-form notes can live alongside catalog entries and in this docs area for later cookbooks/blog posts. Catalog entries for LM Studio (`lmstudio`) no longer promise native SDK behavior or track SDK versions; all routing and capability reporting now reflects the strict HTTP adapter.
 
 ## Local catalog overlays
 
@@ -85,10 +85,11 @@ Overlay files are ordinary YAML lists using the same schema as the bundled
 catalog:
 
 ```yaml
-- family: ornith-1.0-35b-local
+- family: qwen3.8-27b
   matchPatterns:
-    - ornith-1.0-35b
-    - Ornith-1.0-35B-Q4_K_M-262K
+    - qwen3.8-27b
+    - qwen3_8-27b
+    - qwen3-8-27b
   capabilities:
     chat: true
     tools: true
@@ -102,7 +103,7 @@ catalog:
     rerank: false
     fim: false
     contextWindow: 262144
-    maxTokens: 65536
+    maxTokens: 32768
   quirks:
     sampling:
       thinking:
@@ -112,8 +113,7 @@ catalog:
     thinking:
       mechanism: always-on
       guidance: |
-        The serving endpoint separates Qwen-style thinking into
-        reasoning_content while content contains the final answer.
+        Official Qwen3.8-27B chat template. llama.cpp's qwen3_coder parser converts XML tool calls to standard tool_calls JSON.
 ```
 
 Use `settings.yaml` `wireModels` for target inventory. Use overlays for
