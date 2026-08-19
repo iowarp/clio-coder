@@ -204,9 +204,19 @@ works on a real command too, so `\/help` is a question about `/help` rather than
 the help overlay.
 
 A rejected command stays in the input line. The error names the spelling and the
-text is still there to correct, rather than having to be retyped.
+text is still there to correct, rather than having to be retyped. Retired aliases (such as `/targets`, `/fleet`, `/scoped-models`) are no longer recognized as standalone commands and fail closed with `/<token> is not a command. Type /help for the list.`
 
-Configuration lives in one place: the `/settings` overlay. `/targets`, `/fleet`, `/scoped-models`, bare `/thinking`, and bare `/output` are deep links that open it focused on the matching section; `/settings <section>` reaches every other section the same way. `/thinking <level>`, `/output <verbosity>`, and `/model <pattern>` stay as quick setters that apply without opening anything.
+Canonical slash commands include:
+- `/quit`: Exit the interactive session cleanly.
+- `/context compact`: Run immediate LLM context compaction on the active session.
+- `/model [pattern]`: Open the interactive model selector with fuzzy search over provider-qualified search strings (`target/model`), where direct target/model matches outrank proxy-carried IDs.
+- `/settings [section]`: Open the full-screen transactional settings control center.
+- `/skill <name> [args]`: Request a skill workflow; the model calls `context(scope="skills")` before proceeding.
+- `/run [--agent-profile <p>] [--runtime <r>] <task>`: Launch a side run or fleet worker with explicit profile/runtime overrides.
+- `/export [path]`: Export the active session branch. With no path, writes `.clio-coder/exports/<sessionId>-<local-date>.html` (self-contained HTML, capped at 2 MiB, semantic tool rows). An explicit path ending in `.md` writes plain Markdown.
+- `/resume [id]`: Resumes a session. In fullscreen TUI mode, `PageUp`/`PageDown` scroll one viewport, and `Home`/`End` jump to the bounds.
+
+Configuration lives in one place: the `/settings` overlay. `/settings <section>` reaches every section directly. `/thinking <level>`, `/output <verbosity>`, and `/model <pattern>` stay as quick setters that apply without opening anything.
 
 Settings → Targets presents an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. `Enter` opens actions for `Use` (switches active chat target and rebases model), `Connect` (runs the API-key or OAuth flow then probes), `Probe`, and `Remove` (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via `clio-coder targets add`.
 

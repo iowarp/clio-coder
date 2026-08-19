@@ -775,7 +775,7 @@
               <td><span class="badge">Sessions</span></td>
               <td><code>/export</code></td>
               <td><code>/export [path]</code></td>
-              <td>Export session transcript to Markdown</td>
+              <td>Export session transcript to self-contained HTML (default, capped at 2 MiB) or Markdown (.md)</td>
             </tr>
           </tbody>
         </table>
@@ -804,35 +804,32 @@
 
     // Command registry
     const commandsList = [
-      { cmd: "/settings", usage: "/settings [section]", desc: "Opens the transactional Settings Center with CORE, ROUTING, RUNTIME, and EXPERIENCE sections." },
-      { cmd: "/targets", usage: "/targets", desc: "Opens Settings → Targets console table with in-place action drawer (Use, Connect, Probe, Remove)." },
-      { cmd: "/fleet", usage: "/fleet", desc: "Opens Settings → Fleet workbench for worker defaults, profile drilling, and agent route bindings." },
-      { cmd: "/scoped-models", usage: "/scoped-models", desc: "Opens Settings → Models provider-backed cycle set checklist with Space toggle." },
-      { cmd: "/thinking", usage: "/thinking [level]", desc: "Sets thinking level directly or opens Settings → Orchestrator." },
+      { cmd: "/settings", usage: "/settings [section]", desc: "Canonical transactional Settings Center (CORE, ROUTING, RUNTIME, EXPERIENCE). Retired standalone aliases fail closed." },
+      { cmd: "/model", usage: "/model [pattern]", desc: "Fuzzy search and select model from live runtime probes and catalog rows (target/model direct match outranks proxy IDs)." },
+      { cmd: "/thinking", usage: "/thinking [level]", desc: "Quick-sets thinking level (off, minimal, low, medium, high, xhigh, max) or opens Settings → Orchestrator." },
       { cmd: "/output", usage: "/output [verbosity]", desc: "Sets transcript detail (minimal, default, verbose) or opens Settings → Terminal." },
-      { cmd: "/run", usage: "/run <agent> <task>", desc: "Spawns a fleet agent locally to implement changes, verify code, debug unit errors, or update developer docs." },
+      { cmd: "/run", usage: "/run [--agent-profile <p>] [--runtime <r>] <agent> <task>", desc: "Spawns a fleet worker locally or on remote nodes with optional profile/runtime overrides." },
       { cmd: "/delegate", usage: "/delegate <agent-id> <task>", desc: "Run an ACP delegation agent." },
       { cmd: "/agents", usage: "/agents", desc: "List Clio agents and ACP delegation agents." },
-      { cmd: "/model", usage: "/model [pattern]", desc: "Opens the model selector or sets a model from live and configured catalog rows." },
-      { cmd: "/skill", usage: "/skill [name] [task]", desc: "Opens the Skills Hub or invokes a selected skill." },
+      { cmd: "/skill", usage: "/skill <name> [args]", desc: "Requests a skill workflow; the model invokes context(scope='skills') before executing instructions." },
       { cmd: "/view", usage: "/view [filter] | /view verify <runId>", desc: "Browses receipts, dispatch outputs, durable tool output, and compaction summaries." },
       { cmd: "/context", usage: "/context", desc: "Visualizes token sliding window and compaction breakdown." },
-      { cmd: "/context compact", usage: "/context compact [instructions]", desc: "Compact earlier context turns." },
+      { cmd: "/context compact", usage: "/context compact [instructions]", desc: "Immediately executes LLM context compaction on the active session." },
       { cmd: "/context init", usage: "/context init [flags]", desc: "Explore the repo and bootstrap project context: CLIO-CODER.md and codewiki." },
       { cmd: "/context refresh", usage: "/context refresh", desc: "Re-index the codewiki and restamp the CLIO-CODER.md fingerprint footer." },
       { cmd: "/context reset", usage: "/context reset [--all]", desc: "Clear accumulated project context artifacts (CLIO-CODER.md preserved without --all)." },
       { cmd: "/tasks", usage: "/tasks", desc: "Read-only overlay of the session task board with per-task receipts." },
       { cmd: "/memory", usage: "/memory [seed]", desc: "Inspect task memory or seed from newest handoff." },
       { cmd: "/cost", usage: "/cost", desc: "Show session token and cost totals." },
-      { cmd: "/prompts", usage: "/prompts", desc: "List prompt templates." },
+      { cmd: "/prompts", usage: "/prompts", desc: "List prompt templates with shell-style argument expansion." },
       { cmd: "/extensions", usage: "/extensions", desc: "List installed extensions." },
       { cmd: "/share", usage: "/share export <path> | /share import <path>", desc: "Export or import Clio archives." },
       { cmd: "/help", usage: "/help [query]", desc: "Searches available shortcuts and operating posture documentation." },
-      { cmd: "/resume", usage: "/resume", desc: "Resume a past session from history ledger." },
-      { cmd: "/new", usage: "/new", desc: "Start a fresh session." },
-      { cmd: "/tree", usage: "/tree", desc: "Open session tree navigator." },
-      { cmd: "/fork", usage: "/fork", desc: "Fork from an assistant turn." },
-      { cmd: "/export", usage: "/export [path]", desc: "Export session transcript to Markdown." },
+      { cmd: "/resume", usage: "/resume [id]", desc: "Resume a past session. In fullscreen mode, PageUp/PageDown scroll viewports." },
+      { cmd: "/new", usage: "/new", desc: "Start a fresh session; cancels and awaits in-flight streaming turns." },
+      { cmd: "/tree", usage: "/tree", desc: "Open session tree navigator; cancels and awaits in-flight streaming turns." },
+      { cmd: "/fork", usage: "/fork", desc: "Fork from an assistant turn; cancels and awaits in-flight streaming turns." },
+      { cmd: "/export", usage: "/export [path]", desc: "Export session transcript to self-contained HTML (default, capped at 2 MiB) or Markdown (.md)." },
       { cmd: "/quit", usage: "/quit", desc: "Exits clio-coder process cleanly." }
     ];
 
