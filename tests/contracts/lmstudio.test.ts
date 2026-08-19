@@ -186,7 +186,7 @@ describe("contracts/lmstudio reasoning and chat wire", () => {
 		strictEqual("chat_template_kwargs" in (request?.body ?? {}), false);
 	});
 
-	it("clamps configured and dial reasoning to a probed on-off model", async () => {
+	it("keeps an explicit LM Studio reasoning override above the resolved dial", async () => {
 		const server = await fake();
 		const descriptor = target(server, {
 			defaultModel: "coder-unloaded",
@@ -196,7 +196,24 @@ describe("contracts/lmstudio reasoning and chat wire", () => {
 		ok(probe?.ok, probe?.error);
 		await drainChat(descriptor, { reasoning: "xhigh" });
 		const request = server.requestsFor("/v1/chat/completions").at(-1);
-		strictEqual(request?.body?.reasoning_effort, "low");
+		strictEqual(request?.body?.reasoning_effort, "high");
+	});
+
+	it("maps every documented LM Studio reasoning override onto the resolved effort", async () => {
+		const cases = [
+			["auto", "low"],
+			["off", "none"],
+			["on", "low"],
+			["low", "low"],
+			["medium", "medium"],
+			["high", "high"],
+		] as const;
+		for (const [reasoning, expected] of cases) {
+			const server = await fake();
+			const descriptor = target(server, { lmstudio: { request: { reasoning } } });
+			await drainChat(descriptor, { reasoning: "xhigh" });
+			strictEqual(server.requestsFor("/v1/chat/completions").at(-1)?.body?.reasoning_effort, expected, reasoning);
+		}
 	});
 
 	it("keeps the resolver effort map authoritative for LM Studio payloads", async () => {
