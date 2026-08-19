@@ -9,6 +9,7 @@ const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0
 
 function board(overrides: Partial<TaskBoardSnapshot> = {}): TaskBoardSnapshot {
 	return {
+		boardId: "board-overlay",
 		title: "Ship the feature",
 		tasks: [
 			{ id: "t1", title: "design it", status: "pending" },

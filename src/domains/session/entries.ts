@@ -183,6 +183,8 @@ export interface TaskLedgerGoal {
 	status: TaskLedgerStatus;
 	parentGoalId?: string | null;
 	description?: string;
+	origin?: "agent" | "user";
+	userTaskId?: string;
 }
 
 export interface TaskLedgerValidationEvidence {
@@ -197,6 +199,7 @@ export interface TaskLedgerValidationEvidence {
 
 export interface TaskLedgerEntry extends BaseSessionEntry {
 	kind: "taskLedger";
+	boardId?: string;
 	goals: TaskLedgerGoal[];
 	subgoals: TaskLedgerGoal[];
 	activeRunIds: string[];
@@ -372,7 +375,11 @@ function isTaskLedgerGoal(value: unknown): value is TaskLedgerGoal {
 	if (!isString(value.id) || !isString(value.title)) return false;
 	if (!isOneOf(value.status, TASK_LEDGER_STATUSES)) return false;
 	if (value.parentGoalId !== undefined && !isNullableString(value.parentGoalId)) return false;
-	return isOptionalString(value.description);
+	return (
+		isOptionalString(value.description) &&
+		(value.origin === undefined || value.origin === "agent" || value.origin === "user") &&
+		isOptionalString(value.userTaskId)
+	);
 }
 
 function isTaskLedgerEvidence(value: unknown): value is TaskLedgerValidationEvidence {
@@ -487,6 +494,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 			return isSkillActivation(v.activation);
 		case "taskLedger":
 			return (
+				isOptionalString(v.boardId) &&
 				Array.isArray(v.goals) &&
 				v.goals.every(isTaskLedgerGoal) &&
 				Array.isArray(v.subgoals) &&

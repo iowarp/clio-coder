@@ -5,7 +5,9 @@ import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js"
 import { isSessionEntry } from "../../src/domains/session/entries.js";
 import {
 	createTaskBoardStore,
+	foldSessionTaskHistory,
 	foldTaskBoard,
+	LEGACY_TASK_BOARD_ID,
 	type TaskBoardSnapshot,
 	type TaskBoardStore,
 	type TaskLedgerEntryFields,
@@ -16,10 +18,12 @@ import { createTasksTool } from "../../src/tools/tasks.js";
 
 function storeWithLog(): { store: TaskBoardStore; appended: TaskLedgerEntryFields[] } {
 	const appended: TaskLedgerEntryFields[] = [];
+	let nextBoardId = 1;
 	const store = createTaskBoardStore({
 		getSessionId: () => "session-1",
 		readEntries: () => [],
 		appendEntry: (entry) => appended.push(entry),
+		createBoardId: () => `board-${nextBoardId++}`,
 	});
 	return { store, appended };
 }
@@ -57,6 +61,21 @@ describe("contracts/task-board store", () => {
 			],
 		);
 		strictEqual(store.snapshot()?.title, "Ship it");
+		strictEqual(result.board.boardId, "board-1");
+	});
+
+	it("keeps one stable board identity across mutations and mints a new one for plan", () => {
+		const { store, appended } = plannedStore();
+		strictEqual(store.snapshot()?.boardId, "board-1");
+		ok(store.apply({ op: "add", tasks: ["follow-up"] }).ok);
+		ok(store.apply({ op: "start", id: "t1" }).ok);
+		strictEqual(store.snapshot()?.boardId, "board-1");
+		ok(appended.every((entry) => entry.boardId === "board-1"));
+
+		const replanned = store.apply({ op: "plan", title: "Second board", tasks: ["new work"] });
+		ok(replanned.ok);
+		strictEqual(replanned.board.boardId, "board-2");
+		strictEqual(appended.at(-1)?.boardId, "board-2");
 	});
 
 	it("keeps exactly one task active and reports the parked one", () => {
@@ -132,12 +151,18 @@ describe("contracts/task-board store", () => {
 			ok(isSessionEntry(entry), "persisted taskLedger snapshot must satisfy the session entry guard");
 		}
 		const last = appended[appended.length - 1];
+		ok(last);
 		strictEqual(last?.goals[0]?.title, "Ship the feature");
 		strictEqual(last?.subgoals[0]?.status, "completed");
 		deepStrictEqual(
 			last?.requiredValidationEvidence.map((item) => [item.id, item.status, item.description]),
 			[["t1.evidence", "passed", "verified by hand"]],
 		);
+		const envelope = { ...last, turnId: "turn-2", timestamp: new Date().toISOString() };
+		ok(isSessionEntry(envelope));
+		ok(isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "user", userTaskId: "u1" }] }));
+		ok(!isSessionEntry({ ...envelope, boardId: 7 }));
+		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "operator" }] }));
 	});
 
 	it("folds the last ledger snapshot back into the identical board", () => {
@@ -153,9 +178,64 @@ describe("contracts/task-board store", () => {
 		deepStrictEqual(foldTaskBoard(entries), live);
 	});
 
+	it("retains completed work from prior board generations in session history", () => {
+		const { store, appended } = plannedStore();
+		ok(store.apply({ op: "start", id: "t1" }).ok);
+		ok(store.apply({ op: "done", id: "t1", evidence: "verified" }).ok);
+		ok(store.apply({ op: "plan", title: "Follow-up", tasks: ["publish"] }).ok);
+		ok(store.apply({ op: "start", id: "t1" }).ok);
+		const entries = appended.map((fields, index) => ({
+			...fields,
+			turnId: `turn-${index}`,
+			timestamp: `2026-07-03T00:0${index}:00.000Z`,
+		}));
+
+		const history = foldSessionTaskHistory(entries);
+		deepStrictEqual(
+			history.map((item) => [item.boardId, item.title]),
+			[
+				["board-2", "Follow-up"],
+				["board-1", "Ship the feature"],
+			],
+		);
+		strictEqual(history[0]?.tasks[0]?.status, "active");
+		strictEqual(history[1]?.tasks[0]?.status, "completed");
+	});
+
+	it("folds old snapshots as one newest legacy board without aliasing generations", () => {
+		const first: TaskBoardSnapshot = {
+			boardId: "ignored",
+			title: "Old plan",
+			tasks: [{ id: "t1", title: "old identity", status: "completed", evidence: "done" }],
+			activeRunIds: [],
+		};
+		const second: TaskBoardSnapshot = {
+			boardId: "ignored",
+			title: "New plan",
+			tasks: [{ id: "t1", title: "new identity", status: "pending" }],
+			activeRunIds: [],
+		};
+		const withoutBoardId = (board: TaskBoardSnapshot, timestamp: string): unknown => {
+			const { boardId: _boardId, ...fields } = toTaskLedgerEntryFields(board, new Date(timestamp));
+			return { ...fields, turnId: timestamp, timestamp };
+		};
+		const history = foldSessionTaskHistory([
+			withoutBoardId(first, "2026-07-03T00:00:00.000Z"),
+			withoutBoardId(second, "2026-07-03T00:01:00.000Z"),
+		]);
+		strictEqual(history.length, 1);
+		strictEqual(history[0]?.boardId, LEGACY_TASK_BOARD_ID);
+		strictEqual(history[0]?.title, "New plan");
+		deepStrictEqual(
+			history[0]?.tasks.map((task) => task.title),
+			["new identity"],
+		);
+	});
+
 	it("refolds from the session ledger when the session switches", () => {
 		let sessionId = "session-a";
 		const boardA: TaskBoardSnapshot = {
+			boardId: "board-a",
 			title: "Board A",
 			tasks: [{ id: "t1", title: "a", status: "pending" }],
 			activeRunIds: [],
@@ -181,11 +261,13 @@ describe("contracts/task-board store", () => {
 	// SessionTurnSwitched bus signal calls to force the next read to refold.
 	it("does not refold on its own when the session id is unchanged, and does after invalidate()", () => {
 		const boardA: TaskBoardSnapshot = {
+			boardId: "board-a",
 			title: "Board A",
 			tasks: [{ id: "t1", title: "a", status: "pending" }],
 			activeRunIds: [],
 		};
 		const boardB: TaskBoardSnapshot = {
+			boardId: "board-b",
 			title: "Board B (abandoned branch)",
 			tasks: [{ id: "t1", title: "b", status: "active" }],
 			activeRunIds: [],
