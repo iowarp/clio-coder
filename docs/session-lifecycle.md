@@ -138,7 +138,15 @@ When resuming a session via `/resume` or `CLIO_CODER_RESUME_SESSION_ID`:
 
 ---
 
-## 6. Protected-Artifact Write-Ahead Journal
+## 6. Session Export
+
+`/export` replays the active branch through the same transcript projection used by the live TUI and `/resume`. With no path, it writes `.clio-coder/exports/<sessionId>-<local-date>.html`. The HTML document is self-contained, carries the active Clio theme through converted ANSI styles, renders tool calls as semantic tool rows, references no external assets, and is capped at 2 MiB. If the transcript exceeds that limit, the export ends at a complete rendered row and states that later rows were omitted.
+
+An explicit path ending in `.md` keeps the plain Markdown form: a heading, UTC export instant, and a terminal-control-free fenced transcript. Export never changes the ledger or the active tree pin. Both formats follow the pinned active leaf and omit abandoned sibling turns.
+
+---
+
+## 7. Protected-Artifact Write-Ahead Journal
 
 To guarantee that protected artifacts and validation locks survive unexpected crashes between tool execution and ledger commitment, Clio Coder maintains a write-ahead journal (`src/domains/session/protected-artifact-journal.ts`):
 
@@ -150,7 +158,7 @@ To guarantee that protected artifacts and validation locks survive unexpected cr
 
 ---
 
-## 7. In-Session Task Board & Usage Accounting
+## 8. In-Session Task Board & Usage Accounting
 
 - **Task Board** (`src/domains/session/task-board.ts`): Maintains session task items with states (`todo`, `in_progress`, `done`, `failed`). Emits middleware reminders when uncompleted tasks remain before turn end.
 - **Usage Accounting** (`src/domains/session/usage.ts`): Aggregates session token counts across input, output, cache read, cache write, and reasoning tokens. Anchors against provider-reported totals on settled turns.

@@ -27,6 +27,7 @@ import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice, appendOperatorCommand } from "./command-output.js";
+import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
 import {
@@ -334,11 +335,11 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			}
 			try {
 				const turns = deps.readStructuredEntries(sessionId);
-				// Same pure render pipeline as the live panel and /resume replay:
-				// a throwaway panel rehydrated from the ledger, every tool segment
-				// expanded, rendered at a fixed width, ANSI stripped. Unlike the
-				// live view, export renders full tool bodies (no middle-elision or
-				// char truncation) so the transcript reproduces the complete output.
+				// Same pure render pipeline as the live panel and /resume replay: a
+				// throwaway panel is rehydrated from the ledger, every tool segment is
+				// expanded, and the transcript is rendered at a stable width. HTML
+				// converts the resulting ANSI presentation to inline styles; Markdown
+				// keeps the prior plain-text fenced transcript.
 				const exportPanel = createChatPanel({ unboundedToolBodies: true });
 				// Scoped to the leaf the session is on, the same way /resume replays
 				// (issue #107): with a /tree pin persisted and not yet extended, the
@@ -351,24 +352,26 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
 				});
 				exportPanel.toggleAllToolsExpanded();
-				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripTerminalSequences);
+				const ansiLines = exportPanel.render(EXPORT_RENDER_WIDTH);
 				// The operator names this file by the day they ran the export, so the
 				// date in it is their calendar date. The header below keeps the ISO
 				// instant, which is the machine-readable half of the same fact.
-				const date = dateLocal(deps.now?.() ?? new Date());
+				const exportedAt = deps.now?.() ?? new Date();
+				const date = dateLocal(exportedAt);
+				const requestedPath = pathArg?.trim() ?? "";
+				const markdown = requestedPath.toLowerCase().endsWith(".md");
 				const target = resolve(
-					pathArg && pathArg.trim().length > 0 ? pathArg.trim() : join(".clio-coder", "exports", `${sessionId}-${date}.md`),
+					requestedPath.length > 0 ? requestedPath : join(".clio-coder", "exports", `${sessionId}-${date}.html`),
 				);
 				mkdirSync(resolve(target, ".."), { recursive: true });
-				const header = [
-					`# Clio session ${sessionId}`,
-					"",
-					`Exported ${(deps.now?.() ?? new Date()).toISOString()}`,
-					"",
-					"```text",
-				];
-				writeFileSync(target, `${[...header, ...lines, "```", ""].join("\n")}`, "utf8");
-				appendCommandNotice("success", `[/export] wrote ${lines.length} lines to ${target}`);
+				if (markdown) {
+					const lines = ansiLines.map(stripTerminalSequences);
+					const header = [`# Clio session ${sessionId}`, "", `Exported ${exportedAt.toISOString()}`, "", "```text"];
+					writeFileSync(target, `${[...header, ...lines, "```", ""].join("\n")}`, "utf8");
+				} else {
+					writeFileSync(target, renderSessionHtml({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines }), "utf8");
+				}
+				appendCommandNotice("success", `[/export] wrote ${ansiLines.length} lines to ${target}`);
 			} catch (err) {
 				appendCommandNotice("error", `[/export] ${err instanceof Error ? err.message : String(err)}`);
 			}

@@ -126,12 +126,79 @@ describe("contracts/interactive slash runtime", () => {
 		try {
 			runtime.dispatchCommand(`/export ${target}`);
 			const body = readFileSync(target, "utf8");
+			ok(body.startsWith("# Clio session session-pinned\n\n"), body);
+			ok(body.includes("```text\n"), body);
 			ok(!body.includes("\x1b"), "Pi terminal control sequences never cross into the transcript export");
 			ok(body.includes("PROMPT-ONE"), body);
 			ok(body.includes("ANSWER-ONE"), body);
 			ok(!body.includes("PROMPT-TWO"), `u2 is past the pin, got:\n${body}`);
 			ok(!body.includes("ANSWER-TWO"), `a2 is past the pin, got:\n${body}`);
 		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("exports a fixture session as self-contained HTML with semantic tool rows", () => {
+		const ts = "2026-08-15T12:00:00.000Z";
+		const harness = createHarness();
+		harness.deps.chat.getSessionId = () => "session-html";
+		harness.deps.now = () => new Date(ts);
+		harness.deps.readStructuredEntries = () =>
+			[
+				{
+					kind: "message",
+					role: "user",
+					turnId: "u1",
+					parentTurnId: null,
+					timestamp: ts,
+					payload: { text: "Run the fixture" },
+				},
+				{
+					kind: "message",
+					role: "tool_call",
+					turnId: "t1",
+					parentTurnId: "u1",
+					timestamp: ts,
+					payload: { toolCallId: "bash-1", toolName: "bash", args: { command: "printf fixture" } },
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					turnId: "t2",
+					parentTurnId: "t1",
+					timestamp: ts,
+					payload: {
+						toolCallId: "bash-1",
+						toolName: "bash",
+						result: { content: [{ type: "text", text: "fixture" }], details: { exitCode: 0 } },
+						isError: false,
+					},
+				},
+				{
+					kind: "message",
+					role: "assistant",
+					turnId: "a1",
+					parentTurnId: "t2",
+					timestamp: ts,
+					payload: { text: "Fixture complete" },
+				},
+			] as SessionEntry[];
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+		const scratch = mkdtempSync(join(tmpdir(), "clio-export-html-"));
+		const previousCwd = process.cwd();
+		try {
+			process.chdir(scratch);
+			runtime.dispatchCommand("/export");
+			const target = join(scratch, ".clio-coder", "exports", "session-html-2026-08-15.html");
+			const body = readFileSync(target, "utf8");
+			ok(body.startsWith("<!doctype html>"), body.slice(0, 80));
+			ok(body.includes('class="tool-row" data-tool="bash"'), body);
+			ok(body.includes("printf fixture"), body);
+			ok(body.includes("Fixture complete"), body);
+			ok(!body.includes("\x1b"), "raw terminal control sequences must not cross into HTML");
+			ok(!/<(?:link|script)\b[^>]+(?:src|href)=/iu.test(body), "the export must not reference external assets");
+		} finally {
+			process.chdir(previousCwd);
 			rmSync(scratch, { recursive: true, force: true });
 		}
 	});
@@ -154,12 +221,12 @@ describe("contracts/interactive slash runtime", () => {
 					return readdirSync(join(scratch, ".clio-coder", "exports"));
 				});
 
-			ok(exported("America/Chicago").includes("session-1-2026-08-14.md"), exported("America/Chicago").join(", "));
-			ok(exported("Asia/Kolkata").includes("session-1-2026-08-15.md"), exported("Asia/Kolkata").join(", "));
-			ok(exported("UTC").includes("session-1-2026-08-15.md"), exported("UTC").join(", "));
+			ok(exported("America/Chicago").includes("session-1-2026-08-14.html"), exported("America/Chicago").join(", "));
+			ok(exported("Asia/Kolkata").includes("session-1-2026-08-15.html"), exported("Asia/Kolkata").join(", "));
+			ok(exported("UTC").includes("session-1-2026-08-15.html"), exported("UTC").join(", "));
 			// The header inside the file stays UTC: it is the machine-readable half.
 			ok(
-				readFileSync(join(scratch, ".clio-coder", "exports", "session-1-2026-08-15.md"), "utf8").includes(
+				readFileSync(join(scratch, ".clio-coder", "exports", "session-1-2026-08-15.html"), "utf8").includes(
 					"Exported 2026-08-15T02:30:00.000Z",
 				),
 			);
