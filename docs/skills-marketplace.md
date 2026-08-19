@@ -1,7 +1,7 @@
 # Skills Marketplace
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/skills_blueprint.html](html/skills_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/skills_blueprint.html](html/skills_blueprint.html) (Version: 0.3.2).
 
 The Skills Hub (`/skill`) shows project skills, user skills, and the marketplace. Every marketplace row comes from the same local lookup that `clio-coder skills install <name>` and `/skill:<name>` resolve through, so the hub lists nothing it cannot install.
 

@@ -1,6 +1,6 @@
 # Artifact Versions & Serialization Contracts
 
-This document is the canonical registry of all versioned file formats, serialized data structures, integrity digests, and migration rules across Clio Coder in `v0.3.1`.
+This document is the canonical registry of all versioned file formats, serialized data structures, integrity digests, and migration rules across Clio Coder in `v0.3.2`.
 
 ---
 

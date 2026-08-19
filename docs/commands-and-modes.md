@@ -1,7 +1,7 @@
 # Commands and Modes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.3.2).
 
 
 Clio Coder is a terminal-first alpha harness. This page keeps the command
@@ -19,7 +19,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder` | Launch the interactive terminal UI. |
 | `clio-coder run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. |
 | `clio-coder run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively and write a receipt. |
-| `clio-coder acp` | Serve Clio as an ACP v1 agent over stdio for ACP frontends. |
+| `clio-coder acp [--cwd PATH] [--permission-timeout MS]` | Serve Clio as an ACP v1 agent over stdio for ACP frontends. |
 | `clio-coder --version` | Print the installed version. |
 | `clio-coder --api-key <key>` | Override the active target API key for one invocation. |
 | `clio-coder --no-context-files` / `clio-coder -nc` | Skip `CLIO-CODER.md` project-context injection for one invocation. |
