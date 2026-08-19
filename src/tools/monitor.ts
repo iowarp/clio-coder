@@ -14,9 +14,9 @@ import {
 	type RunReceiptVerification,
 } from "../domains/dispatch/types.js";
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
+import { StringEnum } from "../engine/ai.js";
 import type { DispatchRunEventRegistry } from "./dispatch.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
-import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import { receiptEvidenceLabels, workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
 
@@ -715,10 +715,10 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 				Type.String({ description: "Run id from dispatch output or monitor list; omit with mode=list." }),
 			),
 			mode: Type.Optional(
-				stringEnum(
-					["status", "peek", "receipt", "list", "wait", "collect", "tools"],
-					"What to return. Defaults to status when run_id is present and list when it is absent. status, peek, receipt, tools, and wait each observe one run and require a run_id; list takes none. tools answers what a run executed: its tool calls with outcomes, plus per-tool totals from the receipt.",
-				),
+				StringEnum(["status", "peek", "receipt", "list", "wait", "collect", "tools"], {
+					description:
+						"What to return. Defaults to status when run_id is present and list when it is absent. status, peek, receipt, tools, and wait each observe one run and require a run_id; list takes none. tools answers what a run executed: its tool calls with outcomes, plus per-tool totals from the receipt.",
+				}),
 			),
 			batch_id: Type.Optional(Type.String({ description: "Detached batch id from dispatch detach:true (mode=collect)." })),
 			run_ids: Type.Optional(

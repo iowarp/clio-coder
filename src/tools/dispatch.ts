@@ -53,6 +53,7 @@ import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceip
 import { DISPATCH_BRIEFING_MAX_BYTES, type DispatchFailoverMode } from "../domains/dispatch/validation.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import { StringEnum } from "../engine/ai.js";
 import {
 	type CandidateWorktree,
 	type CompeteGroupOwnership,
@@ -99,7 +100,6 @@ import {
 } from "./dispatch-scout.js";
 import { TOOL_PROFILE_NAMES } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
-import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
 	receiptEvidenceLabels,
@@ -2609,7 +2609,9 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 										"Ad-hoc specialist persona to substitute for the recipe body inside the stable worker shell, max 8000 chars.",
 								}),
 							),
-							tool_profile: Type.Optional(stringEnum(TOOL_PROFILE_NAMES, "Narrow this worker's available tools.")),
+							tool_profile: Type.Optional(
+								StringEnum(TOOL_PROFILE_NAMES, { description: "Narrow this worker's available tools." }),
+							),
 							target: Type.Optional(Type.String()),
 							model: Type.Optional(Type.String()),
 							node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
@@ -2620,10 +2622,10 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				),
 			),
 			mode: Type.Optional(
-				stringEnum(
-					["parallel", "sequential", "pipeline", "compete"],
-					"Run tasks concurrently (default), one at a time, as a pipeline where each task receives the previous task's output as input data, or as a compete where N candidates build the same single task in scratch worktrees and a judge picks the winner.",
-				),
+				StringEnum(["parallel", "sequential", "pipeline", "compete"], {
+					description:
+						"Run tasks concurrently (default), one at a time, as a pipeline where each task receives the previous task's output as input data, or as a compete where N candidates build the same single task in scratch worktrees and a judge picks the winner.",
+				}),
 			),
 			detach: Type.Optional(
 				Type.Boolean({
@@ -2696,7 +2698,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					description: "Default ad-hoc specialist persona for dispatched tasks, max 8000 chars.",
 				}),
 			),
-			tool_profile: Type.Optional(stringEnum(TOOL_PROFILE_NAMES, "Default worker tool profile.")),
+			tool_profile: Type.Optional(StringEnum(TOOL_PROFILE_NAMES, { description: "Default worker tool profile." })),
 			target: Type.Optional(Type.String({ description: "Default configured target id (omit for fleet default)." })),
 			model: Type.Optional(Type.String({ description: "Default model override." })),
 			node: Type.Optional(
@@ -2705,13 +2707,13 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			routing: Type.Optional(
 				Type.Object(
 					{
-						posture: Type.Optional(stringEnum(["manual", "quality", "balanced", "latency", "economy"] as const)),
+						posture: Type.Optional(StringEnum(["manual", "quality", "balanced", "latency", "economy"] as const)),
 						maxCostUsd: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
 						deadlineMs: Type.Optional(Type.Integer({ exclusiveMinimum: 0 })),
 						minimumQuality: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 						requiredCapabilities: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
-						locality: Type.Optional(stringEnum(["local-only", "prefer-local", "any"] as const)),
-						failover: Type.Optional(stringEnum(["none", "approved"] as const)),
+						locality: Type.Optional(StringEnum(["local-only", "prefer-local", "any"] as const)),
+						failover: Type.Optional(StringEnum(["none", "approved"] as const)),
 					},
 					{
 						additionalProperties: false,
@@ -2719,7 +2721,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					},
 				),
 			),
-			thinking_level: Type.Optional(stringEnum(THINKING_LEVELS)),
+			thinking_level: Type.Optional(StringEnum(THINKING_LEVELS)),
 			cwd: Type.Optional(Type.String({ description: "Default agent working directory." })),
 			timeout_ms: Type.Optional(Type.Number({ description: "Abort the dispatch after this many ms." })),
 			max_output_bytes: Type.Optional(Type.Number({ description: "Max summary bytes returned." })),

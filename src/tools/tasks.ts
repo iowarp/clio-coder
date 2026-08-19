@@ -7,8 +7,8 @@ import {
 	type TaskBoardTask,
 	taskBoardCounts,
 } from "../domains/session/task-board.js";
+import { StringEnum } from "../engine/ai.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
-import { stringEnum } from "./string-enum.js";
 
 /**
  * The tasks tool: the session task board. The agent declares what it is
@@ -113,7 +113,7 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			"evidence the work actually finished; block parks it with a required reason; drop cancels it; list shows the board. " +
 			"Work that did not happen is blocked or dropped, never done.",
 		parameters: Type.Object({
-			action: stringEnum(TASKS_ACTIONS, "Board action."),
+			action: StringEnum(TASKS_ACTIONS, { description: "Board action." }),
 			title: Type.Optional(Type.String({ description: "Board title (plan)." })),
 			tasks: Type.Optional(Type.Array(Type.String(), { description: "Task titles (plan, add)." })),
 			id: Type.Optional(Type.String({ description: 'Task id like "t2" (start, done, block, drop).' })),
