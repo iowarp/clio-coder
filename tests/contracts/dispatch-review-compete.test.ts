@@ -1343,16 +1343,24 @@ describe("compete dispatch", () => {
 			registry.onPermissionRequired((call, _decision, meta) => {
 				approvals.push({ requestId: meta.requestId, plan: describeDispatchPlan(call.args) });
 			});
+			const applyArgs = { apply_winner: { branch: compete.winner.branch, cwd: repo } };
 			const pendingApply = registry.invoke({
 				tool: ToolNames.Dispatch,
-				args: { apply_winner: { branch: compete.winner.branch, cwd: repo } },
+				args: applyArgs,
 			});
 			await Promise.resolve();
 			strictEqual(approvals.length, 1);
 			const approval = approvals[0];
 			if (approval === undefined) throw new Error("winner approval was not requested");
 			strictEqual(approval.plan.confirmation?.branch, compete.winner.branch);
+			strictEqual(approval.plan.confirmation?.cwd, repo);
 			strictEqual(approval.plan.costCeilingUsd, 5);
+			// Permission and middleware observers receive the prepared argument
+			// identity. Mutating its nested destination after the prompt must not
+			// change the approved branch/repository which the runner executes.
+			applyArgs.apply_winner.branch = "clio/compete/substituted-group/1";
+			applyArgs.apply_winner.cwd = join(repo, "substituted-after-prompt");
+			Reflect.deleteProperty(applyArgs, "apply_winner");
 			await registry.resumeParkedCalls({
 				actionClass: "dispatch",
 				requestId: approval.requestId,
