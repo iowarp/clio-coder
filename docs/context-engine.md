@@ -102,6 +102,17 @@ updating the exact local standard handbook stays with `/context init`.
 
 When bootstrapping across local runtimes such as `llamacpp` where strict grammar/schema enforcement might be rejected by the endpoint, generator logic retries automatically using a bounded prompt-parser fallback. If `--rewrite` was requested but the model generation fails to produce a valid handbook rewrite, `clio-coder context init` prints a notice and exits with code 1 rather than leaving an inconsistent state.
 
+## Generated handbook structure and verification expectations
+
+During handbook generation (`context init` and `clio-coder context init`), Clio derives structural sections directly from workspace manifests and toolchains:
+
+- **Context retrieval**: Derived from the codewiki index, naming primary entry points and directing agents to use `code_nav` for navigation. To prevent staleness across repository mutations, exact volatile file counts are omitted.
+- **Verification expectations**: Synthesized from declared toolchain configuration and manifest files:
+  - **Node.js**: Detects the active package manager (`npm`, `pnpm`, `yarn`, or `bun`) and names declared non-mutating scripts (`typecheck`, `lint`, `format`, `build`, `test`, `ci`, `test:contracts`, `test:smoke`, `check:boundaries`).
+  - **CMake**: Inspects `CMakePresets.json` and emits declared configure, build, and test presets independently.
+  - **Rust / Cargo**: Names `cargo build` and `cargo test` when `Cargo.toml` is present.
+  - **Go**: Names `go build ./...` and `go test ./...` when `go.mod` is present.
+  - **Python**: Detects declared runners (`tox` via `tox.ini` or `[tool.tox]` in `pyproject.toml`; `pytest` via `pytest.ini` or `[tool.pytest.ini_options]` in `pyproject.toml`) and names them without guessing undeclared runners.
 
 ---
 

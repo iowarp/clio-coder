@@ -210,17 +210,9 @@ works on a real command too, so `\/help` is a question about `/help` rather than
 the help overlay.
 
 A rejected command stays in the input line. The error names the spelling and the
-text is still there to correct, rather than having to be retyped. Retired aliases (such as `/targets`, `/fleet`, `/scoped-models`) are no longer recognized as standalone commands and fail closed with `/<token> is not a command. Type /help for the list.`
+text is still there to correct, rather than having to be retyped. Retired spellings (such as `/status`, `/receipts`, `/context-init`, `/context-clear`, `/context-view`, and `/skill:<name>`) are not recognized and fail closed with `/<token> is not a command. Type /help for the list.`
 
-Canonical slash commands include:
-- `/quit`: Exit the interactive session cleanly.
-- `/context compact`: Run immediate LLM context compaction on the active session.
-- `/model [pattern]`: Open the interactive model selector with fuzzy search over provider-qualified search strings (`target/model`), where direct target/model matches outrank proxy-carried IDs.
-- `/settings [section]`: Open the full-screen transactional settings control center.
-- `/skill <name> [args]`: Request a skill workflow; the model calls `context(scope="skills")` before proceeding.
-- `/run [--agent-profile <p>] [--runtime <r>] <task>`: Launch a side run or fleet worker with explicit profile/runtime overrides.
-- `/export [path]`: Export the active session branch. With no path, writes `.clio-coder/exports/<sessionId>-<local-date>.html` (self-contained HTML, capped at 2 MiB, semantic tool rows). An explicit path ending in `.md` writes plain Markdown.
-- `/resume [id]`: Resumes a session. In fullscreen TUI mode, `PageUp`/`PageDown` scroll one viewport, and `Home`/`End` jump to the bounds.
+The accepted spelling of every command is the table under [Interactive Slash Commands](#interactive-slash-commands); there is exactly one per operation, and nothing else is parsed as a command.
 
 Configuration lives in one place: the `/settings` overlay. `/settings <section>` reaches every section directly. `/thinking <level>`, `/output <verbosity>`, and `/model <pattern>` stay as quick setters that apply without opening anything.
 
@@ -366,6 +358,7 @@ editor reserves and can be rebound through `settings.yaml.keybindings`.
 | `Ctrl+G`, then a letter | Portable leader fallback for Alt-letter actions. |
 | `Ctrl+C` | With no overlay: cancel stream, clear input, or press twice to exit. With an overlay open: close/cancel that overlay only. |
 | `Ctrl+D` | Exit when the editor is empty; otherwise delete the next character. It never exits from inside an overlay. |
+| `PageUp` / `PageDown` | In `/resume` and list overlays: scroll the selection by one full page (12 rows). |
 | `Esc` | With an overlay open: clear non-empty filter first, move up drill-down level, then close/cancel. With no overlay: cancel stream/operation or collapse dashboard. |
 
 When scripting Clio inside tmux, prefer `tmux send-keys C-m` for submit/confirm keys instead of the literal `Enter` token; some tmux/terminal combinations do not deliver `Enter` reliably.
