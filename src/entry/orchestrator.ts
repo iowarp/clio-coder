@@ -12,7 +12,6 @@ import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { configureGuardrails } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { rememberRecentModel } from "../core/recent-models.js";
-import { EXPERIMENTAL_RELEASE_WARNING } from "../core/release.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import {
 	applyOverrides,
@@ -224,7 +223,6 @@ function buildBanner(): string {
 	return `
   ${chalk.cyan("Clio Coder")}
   ${chalk.dim(`v${clio} · CLIO: Context Layer for I/O · HPC & scientific software`)}
-  ${chalk.yellow.bold(EXPERIMENTAL_RELEASE_WARNING)}
   ${bannerConfigurationLine()}
 `;
 }

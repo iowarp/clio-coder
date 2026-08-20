@@ -387,7 +387,7 @@
 
       if (state === 'launchpad') {
         html += `
-          <div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.2</span><span class="tui-warn">EXPERIMENTAL</span></div>
+          <div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.2</span></div>
           <div style="margin-bottom:0.75rem;">
             <div>&nbsp;&nbsp;<span class="tui-accent-deep">WORKSPACE</span>&nbsp;&nbsp;<span class="tui-muted">clio-coder &middot; git v0.3.2</span></div>
             <div>&nbsp;&nbsp;<span class="tui-accent-deep">ROUTE</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tui-success">local-lmstudio/qwen &middot; ready</span></div>
@@ -402,7 +402,7 @@
           </div>
         `;
       } else {
-        html += `<div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.2 &middot; EXPERIMENTAL &middot; ctx ready</span></div>`;
+        html += `<div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.2 &middot; clio-coder &middot; git v0.3.2 &middot; local-lmstudio/qwen &middot; ready &middot; ctx ready</span></div>`;
         html += `<div><span class="tui-accent">›</span> <span style="color:#fff;">${cmd}</span></div>`;
 
         if (state === 'thinking') {

@@ -2,7 +2,6 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readClioVersion } from "../core/package-root.js";
-import { EXPERIMENTAL_RELEASE_WARNING } from "../core/release.js";
 import { loadProjectClioMd } from "../domains/context/clio-md.js";
 import { readCodewiki, readCodewikiAsync } from "../domains/context/codewiki/artifact.js";
 import { renderCodewikiDigest } from "../domains/context/codewiki/digest.js";
@@ -372,7 +371,10 @@ function nextValue(stats: WelcomeDashboardStats): string {
 /**
  * The launchpad has one fixed row per decision the operator needs to make.
  * Repository facts may replace text inside NEXT, never rows. After submission,
- * the session header is exactly one line for every width and fact state.
+ * the session header is exactly one line for every width and fact state, and
+ * it carries the same three facts in order: where Clio is working, which
+ * route answers, and what the context is ready for. Maturity caveats belong
+ * in the README, not in a line the operator reads on every turn.
  */
 export function buildWelcomeDashboardLines(
 	stats: WelcomeDashboardStats,
@@ -382,21 +384,18 @@ export function buildWelcomeDashboardLines(
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
 	const title = `${brandMark(theme)} ${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${readClioVersion()}`)}`;
-	const experimental = theme.style("warning", EXPERIMENTAL_RELEASE_WARNING, { bold: true });
 	const tag = (label: string): string => sectionTag(theme, "accentDeep", label, 9);
 	const row = (label: string, value: string): string => `  ${tag(label)}  ${value}`;
+	const workspace = theme.fg("muted", workspaceValue(stats));
+	const route = theme.fg(stats.currentAvailable ? "success" : "warning", routeValue(stats));
+	const next = theme.fg(stats.clioMdStatus === "ok" && !stats.factsPending ? "success" : "warning", nextValue(stats));
 
 	if (mode === "session") {
-		const header = `${title} · ${experimental} · ${theme.fg("muted", nextValue(stats))}`;
+		const header = [title, workspace, route, theme.fg("muted", nextValue(stats))].join(" · ");
 		return [truncateToWidth(header, safeWidth, GLYPH.ellipsis, true)];
 	}
 
-	const body = [
-		`  ${experimental}`,
-		row("WORKSPACE", theme.fg("muted", workspaceValue(stats))),
-		row("ROUTE", theme.fg(stats.currentAvailable ? "success" : "warning", routeValue(stats))),
-		row("NEXT", theme.fg(stats.clioMdStatus === "ok" && !stats.factsPending ? "success" : "warning", nextValue(stats))),
-	];
+	const body = [row("WORKSPACE", workspace), row("ROUTE", route), row("NEXT", next)];
 	if (safeWidth >= MID_MIN) return frame(theme, title, body, safeWidth);
 	return [title, ...body].map((line) => truncateToWidth(line, safeWidth, GLYPH.ellipsis, true));
 }
