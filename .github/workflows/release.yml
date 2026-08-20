@@ -4,7 +4,8 @@ name: release
 # the `ci` workflow has gone green on that same commit. This job does not
 # re-run the test suite. It verifies that ci already passed for the tagged SHA,
 # builds dist/, audits the packed artifact with scripts/check-release.mjs, and
-# creates the GitHub release with the tarball attached.
+# creates the GitHub release with the tarball attached and the version's
+# CHANGELOG.md section as the release body.
 #
 # There is no npm publish path here. Publishing is a manual maintainer step
 # (`npm login && npm publish`), and `prepublishOnly` runs the full `ci:release`
@@ -61,11 +62,27 @@ jobs:
         run: node scripts/check-release.mjs
       - name: Pack tarball for the GitHub release
         run: npm pack
+      # The release body is the CHANGELOG.md section for this version, not
+      # GitHub's generated commit list: the changelog is the user-facing record
+      # the release audit already checks against package.json. An empty
+      # section fails here rather than publishing a release with no notes.
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v version="$version" '
+            /^## / { if (found) exit; if ($2 == version) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md | sed '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "CHANGELOG.md has no \"## $version\" section to use as the release body" >&2
+            exit 1
+          fi
+          echo "release notes: $(wc -l < release-notes.md) lines"
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" ./iowarp-clio-coder-*.tgz \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
+            --title "Clio Coder ${GITHUB_REF_NAME#v}" \
+            --notes-file release-notes.md \
             --verify-tag

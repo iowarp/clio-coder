@@ -2,27 +2,29 @@
 
 The ordered steps that turn the prepared `v0.3.2` branch into a published
 release. Everything above the line marked **AUTHORIZATION BOUNDARY** is
-repeatable and reversible and was run during the hardening sessions. Everything
-below it is external or destructive, was deliberately **not run**, and needs an
-explicit decision from the operator.
-
-Nothing in this checklist has been performed against `main`, a remote, a tag,
-or the npm registry.
+repeatable and reversible and is run locally before the cut. Everything below
+it is external or irreversible and needs an explicit decision from the
+operator. Issue #112 is the release umbrella and carries the live state of
+every step; this page is the procedure.
 
 ## Status of the prepared tree
 
 | Item | State |
 | --- | --- |
-| Branch | `v0.3.2`, local only |
-| `package.json` version | `0.3.2`, bumped in 606dc0ca after the hardening tickets landed |
-| `main` | untouched |
-| Remotes | not contacted |
-| Tags | none created |
-| npm registry | not contacted |
+| Branch | `v0.3.2`, local only; no remote `v0.3.2` branch |
+| `package.json` version | `0.3.2`; the top `CHANGELOG.md` heading is `## 0.3.2 - 2026-08-20` |
+| `main` | fast-forwarded prematurely to `c4c344ba` during Eneko's port integration and pushed. It is an ancestor of `v0.3.2`, must not move backward, and is fast-forwarded again only at Part 4. |
+| `origin/main` | `c4c344ba`, the same premature push |
+| Tags | none for 0.3.2, local or remote |
+| GitHub Release | none for 0.3.2 |
+| npm registry | `@iowarp/clio-coder@0.3.2` absent; `latest` is `0.3.1` |
 
 ---
 
-## Part 1: verification (repeatable; step 10 passes only once step 11's version is set)
+## Part 1: verification (repeatable)
+
+Run against the exact final candidate with `NO_COLOR` unset and
+`TERM=xterm-256color`, so the color-sensitive tests see a real terminal.
 
 1. `npm run typecheck`
 2. `npm run lint` (Biome plus the hygiene checks, which include the boundary invariants and the skills pin check)
@@ -31,110 +33,115 @@ or the npm registry.
 5. `npm run test`
 6. `npm run test:trace-viewer`
 7. `npm run ci` (runs 1 through 6)
-8. `npm run ci` again under the other supported Node major. Both Node 22 and
+8. `npm run ci:release` (7 plus `scripts/check-release.mjs`: dist shebang
+   integrity, version coherence between `package.json` and the top
+   `CHANGELOG.md` heading, the forbidden-file list, the required runtime
+   resources, and the tarball and unpacked size budgets)
+9. Step 8 again under the other supported Node major. Both Node 22 and
    Node 24 must be green; the repo is developed against 22.22.3 and 24.9.0.
-9. `npm run test:lifecycle` for the twenty-case lifecycle matrix against a real
-   `npm pack` installed into a temporary prefix. Case 9 needs `--live` plus
-   `CLIO_CODER_LIFECYCLE_URL` and `CLIO_CODER_LIFECYCLE_MODEL` naming a target whose model
-   is already resident.
-10. `npm run ci:release`, which adds `scripts/check-release.mjs`: dist shebang
-    integrity, version coherence (verifying that `package.json` version matches the top heading in `CHANGELOG.md`), the forbidden-file list, the required runtime resources, and the
-    tarball and unpacked size budgets.
+10. `npm run test:lifecycle` for the twenty-case lifecycle matrix against a real
+    `npm pack` installed into a temporary prefix. Case 9 needs `--live` plus
+    `CLIO_CODER_LIFECYCLE_URL` and `CLIO_CODER_LIFECYCLE_MODEL` naming a target
+    whose model is already resident; report it separately when no such target
+    is available.
+11. `npm pack --dry-run`, then a real `npm pack` into a temporary directory.
+    Inspect the complete file list: `skills/`, `docs/*.md`, `docs/html/`, the
+    builtin agents, the model catalogs, and `damage-control-rules.yaml` are
+    present; `apps/workbench`, `.superpowers`, `tests/`, `scripts/`,
+    `benchmarks/`, scratch files, and source maps are absent. Record the
+    filename, packed and unpacked sizes, integrity, and shasum.
+12. Install that tarball into a clean temporary prefix with empty XDG roots and
+    verify `--version`, `--help`, an empty-state non-TTY launch, `doctor`, and
+    `uninstall --dry-run` without developer-local state.
 
-## Part 2: version and notes (repeatable, NOT run)
+## Part 2: version and notes (repeatable)
 
-These edit the working tree only. They are reversible with `git checkout` and
-are listed here because the hardening sessions were explicitly scoped out of
-performing them.
+13. Files carrying a version reference, to update together if the number
+    changes: `package.json` and `package-lock.json`, the `## 0.3.2 - <date>`
+    heading in `CHANGELOG.md`, the `(Version: 0.3.2)` markers in `docs/*.md`,
+    the `Blueprint (v0.3.2)` titles in `docs/html/*.html`, the `--branch`
+    pin in the README install block (the hygiene lint checks it), and the
+    measured-at figures in `scripts/check-release.mjs` if the package size
+    moved materially.
+14. Confirm the `## 0.3.2` section of `CHANGELOG.md` describes every
+    user-visible behavior change, including the ones that alter existing
+    behavior, and carries no Workbench release narrative. The release workflow
+    uses this section verbatim as the GitHub Release body.
+15. Re-run `npm run ci:release` after any version edit and commit as one
+    commit on `v0.3.2`.
 
-11. Decide the released version. The tree reads `0.3.2` in `package.json`
-    and the top `CHANGELOG.md` heading is `## 0.3.2`; `scripts/check-release.mjs`
-    fails when the two disagree, so step 10 is green only after both are set.
-12. Files carrying a version reference, to update together if the number
-    changes:
-    - `package.json` (`version`)
-    - `CHANGELOG.md` (the `## 0.3.2 - <date>` heading and its date)
-    - All `docs/*.md` containing `(Version: 0.3.2)` markers for interactive blueprints
-    - `docs/html/*.html` (the `Blueprint (v0.3.2)` titles)
-    - `scripts/check-release.mjs` (the measured-at figures in the budget
-      comment, if the package size moved materially)
-13. Confirm the `## 0.3.2` section of `CHANGELOG.md` describes every
-    user-visible behavior change in the release, including the ones that alter
-    existing behavior:
-    - unknown slash commands now fail instead of reaching the model as chat
-    - `--remove-binary` launcher ownership is identity, not a path shape
-    - `reset` and `uninstall` exit 1 on partial failure instead of reporting
-      success
-14. Re-run `npm run ci:release` after any version edit.
-15. Commit the version and notes as one commit on `v0.3.2`.
+## Part 3: present the gate
+
+16. Report to the operator before touching `main`: the exact final `v0.3.2`
+    SHA and clean status, the commits added since the handoff SHA, the gate
+    commands with pass/fail totals for both Node majors, the package version
+    and changelog heading, the tarball audit, the clean-install results and any
+    deferred live check, confirmation that no tag, GitHub Release, or npm
+    version exists yet, the proposed commands for Parts 4 through 6, and the
+    proposed npm dist-tag. The dist-tag is the operator's call; never guess it.
 
 ---
 
 ## AUTHORIZATION BOUNDARY
 
 Every step below leaves the local checkout, is externally visible, or cannot be
-undone by a local `git` command. **None of them has been run.**
+undone by a local `git` command. None of them runs without the operator
+confirming the exact SHA and the commands.
 
-## Part 3: clean-install verification (external, NOT run)
+## Part 4: fast-forward `main`
 
-16. **NOT RUN** — `npm pack` and install the resulting tarball into a fresh
-    temporary prefix on a machine that has never had Clio installed, with empty
-    XDG roots. `npm run test:lifecycle` covers this on the development machine;
-    a second machine is what proves no developer-local state is load-bearing.
-17. **NOT RUN** — From that install, verify: `clio-coder --version`, `clio-coder --help`,
-    an empty-state non-TTY launch, `clio-coder configure` to a real target,
-    `clio-coder doctor`, one real turn, and `clio-coder uninstall --dry-run`.
-18. **NOT RUN** — Inspect the artifact by hand: `tar -tzf` the tarball, confirm
-    no source maps, no `scripts/`, no `tests/`, no `benchmarks/`, no `apps/workbench` and no `.superpowers` in the tarball, and that `skills/`, `docs/*.md`, `docs/html/`, the
-    builtin agents, the model catalogs, and `damage-control-rules.yaml` are all
-    present.
+17. `git fetch origin` immediately before integrating; require `origin/main`
+    to be an ancestor of the reviewed `v0.3.2` tip and confirm no other
+    worktree has `main` checked out.
+18. `git checkout main && git merge --ff-only v0.3.2`. No merge commit, no
+    rebase, no reset. Verify `main` equals the reviewed SHA and is clean.
+19. `git fetch origin` once more; stop on any unexpected remote movement. Then
+    `git push origin main`. Never `--force` or `--force-with-lease`.
 
-## Part 4: branch integration (destructive to history, NOT run)
+## Part 5: exact-SHA CI, tag, GitHub Release
 
-19. **NOT RUN** — Decide how `v0.3.2` reaches `main`. The hardening sessions
-    were forbidden to merge, rebase, or modify `main`, so no integration
-    strategy has been chosen or attempted.
-20. **NOT RUN** — Integrate, then re-run `npm run ci:release` on the integrated
-    result. A gate that passed on the branch has not passed on the merge.
+20. Wait for the `ci` workflow the `main` push triggers. Both the Node 22 and
+    Node 24 jobs must succeed on the exact release SHA. A red or pending run
+    blocks the tag; a flake is rerun only with concrete evidence, never
+    silenced with an unrelated change.
+21. Reconfirm that tag `v0.3.2` and the GitHub Release do not exist, then
+    `git tag -a v0.3.2 -m "Clio Coder 0.3.2"` on the green SHA and
+    `git push origin v0.3.2`.
+22. The tag push triggers `.github/workflows/release.yml`, which requires a
+    successful `ci` run for the tagged SHA, verifies the tag matches
+    `package.json`, builds and audits the artifact, extracts the `## 0.3.2`
+    section of `CHANGELOG.md` as the release body, and attaches the tarball.
+    Do not create a release by hand. Verify the run's SHA, the notes, the
+    attached tarball, and the URL.
 
-## Part 5: tag and push (external, NOT run)
+## Part 6: npm publication (irreversible)
 
-Push the branch first and wait for `ci` to go green on that commit. The release
-workflow verifies that a successful `ci` run exists for the tagged SHA and fails
-the tag push outright if one does not.
+23. `npm whoami` and confirm the registry and account; reconfirm
+    `@iowarp/clio-coder@0.3.2` is still absent.
+24. Obtain the operator's explicit dist-tag decision. `latest` makes this the
+    default install for every user; `--tag next` keeps `0.3.1` as the default.
+25. Run `npm publish` (or `npm publish --tag next`) once. `prepublishOnly`
+    re-runs `ci:release` as a safety net; it is not a substitute for Part 1.
+26. A published version cannot be replaced. `npm unpublish` is restricted and
+    time-limited; a mistake is corrected by publishing a higher version.
 
-21. **NOT RUN** — `git tag -a v0.3.2 -m "..."`.
-22. **NOT RUN** — `git push origin <branch>`.
-23. **NOT RUN** — `git push origin v0.3.2`.
+## Part 7: post-publish verification
 
-## Part 6: publication (external and irreversible, NOT run)
-
-24. **NOT RUN** — `npm publish`. Note that `prepublishOnly` runs
-    `npm run ci:release`, so publication re-gates the tree; that is a safety
-    net and not a substitute for step 20.
-25. **NOT RUN** — Decide the dist-tag. Publishing to `latest` makes this the
-    default install for every user. An experimental release may warrant
-    `--tag next` instead; the CLI and README both describe v0.3.2 as
-    experimental, which argues for it.
-26. **NOT RUN** — A published version cannot be replaced. `npm unpublish` is
-    restricted and time-limited, and a mistake is corrected by publishing a
-    higher version, not by removing the wrong one.
-
-## Part 7: post-publish verification (external, NOT run)
-
-27. **NOT RUN** — On a clean machine, `npm install -g @iowarp/clio-coder` from
-    the registry rather than from a local tarball, then repeat step 17 against
-    it. This is the only step that tests what users actually receive.
-28. **NOT RUN** — Verify `clio-coder upgrade` finds and applies the published
-    version from an installation of the previous release.
-29. **NOT RUN** — Publish the GitHub release with the `CHANGELOG.md` section
-    for this version.
+27. `npm view @iowarp/clio-coder@0.3.2` and the selected dist-tag.
+28. On a clean machine, `npm install -g @iowarp/clio-coder` from the registry
+    rather than from a local tarball, then repeat step 12 against it, plus
+    `configure` to a real target and one real turn when one is authorized.
+    This is the only step that tests what users actually receive.
+29. From an installation of 0.3.1, verify `clio-coder upgrade` finds and
+    applies 0.3.2.
+30. Close #112 with the SHA, CI URL, tag, GitHub Release URL, npm version and
+    dist-tag, tarball evidence, and the post-publish verification.
 
 ---
 
 ## Rollback
 
-There is no rollback for step 24. If a defect is found after publication, the
-correction is a patch release. Before step 24, every step is reversible:
-steps 21 through 23 by deleting the local and remote tag and force-updating the
-branch, and steps 11 through 15 by `git reset`.
+There is no rollback for step 25. Before it, every step is reversible: steps
+21 and 22 by deleting the local and remote tag and the draft release, steps 17
+through 19 by a new forward commit on `main` (never by rewriting it), and
+everything in Parts 1 and 2 by `git checkout`.
