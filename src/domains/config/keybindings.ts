@@ -62,8 +62,9 @@ declare module "@earendil-works/pi-tui" {
  * `ctrl+d`, and the portable `ctrl+g` leader retained because every terminal
  * already transmits them). `Alt + <letter>` decodes from the legacy
  * `ESC <letter>` sequence on meta-capable terminals. The chosen letters avoid
- * pi-tui's editor reserves except for `Alt+D`, which intentionally opens the
- * decision board at the application-input boundary before the editor sees it.
+ * pi-tui's editor reserves except for the approved `Alt+B` and `Alt+D`
+ * application-boundary overrides. They open the task and decision boards
+ * before the editor can interpret those chords as word-back or word-delete.
  * The CSI-u/reserved-key detector in `keybinding-manager.ts` stays as a safety
  * net for user rebinds.
  */
@@ -89,10 +90,12 @@ export const CLIO_APP_KEYBINDINGS = {
 		description: "Toggle the dispatch (workers) board overlay",
 	},
 	"clio.tasks.open": {
+		// Approved application-boundary override of pi-tui editor word-back.
 		defaultKeys: "alt+b",
 		description: "Open the composite session and operator task board",
 	},
 	"clio.decisions.open": {
+		// Approved application-boundary override of pi-tui editor word-delete.
 		defaultKeys: "alt+d",
 		description: "Open the settled interview decision board",
 	},

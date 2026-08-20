@@ -76,6 +76,10 @@ Session ledger entries are attributed to a run by the run id the producer stampe
 
 When a run was chained (pipeline), composed with a persona override, or escalated for a permission, `transcript.md` and `trace.cleaned.jsonl` surface the receipt's provenance field sets, and `clio-coder evidence inspect` prints them as a `provenance <runId>:` block. The field paths, types, and stability labels are documented in the [receipt provenance schema](./observability.md#receipt-fields-for-dispatch-provenance).
 
+### Task and decision provenance
+
+Session evidence retains the two operator-facing bookkeeping ledgers instead of flattening them into prose. A `taskLedger` projection names the stable board id, goal counts, active runs, required evidence, and bounded task rows with status, origin, `userTaskId`, reason, and evidence. This keeps an operator task traceable from the project inbox correlation through agent pickup and completion. A `decisionLedger` projection names the active-path anchor, interview identity and status, timing, round count, summary, and every settled or superseded decision. Operator revisions are explicit through `revisedAt`, `revisionSource=operator`, and the recorded correction text. Both kinds remain session facts in `trace.raw.jsonl`, `trace.cleaned.jsonl`, and the readable transcript; evidence does not reinterpret them as validation results.
+
 ---
 
 ## Evidence Tag Taxonomy and Failure Causes

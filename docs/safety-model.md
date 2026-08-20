@@ -5,7 +5,7 @@
 
 Clio Coder's safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the [IOWarp](https://iowarp.ai) ecosystem developed by the [Gnosis Research Center](https://grc.iit.edu) at Illinois Tech under NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318), Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.
 
-Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, `src/tools/policy.ts`, `src/entry/orchestrator.ts`, `src/domains/dispatch/write-boundary.ts`, and `damage-control-rules.yaml`.
+Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, `src/tools/policy.ts`, `src/entry/orchestrator.ts`, `src/domains/dispatch/write-boundary.ts`, `src/interactive/view/artifacts.ts`, and `damage-control-rules.yaml`.
 
 ---
 
@@ -89,9 +89,13 @@ Clio operates under a single operating posture with a standard, unified visible 
 | INTERACT | `ask_user` | `read` |
 | ARTIFACT | `artifact` | `write` |
 
-`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane; `monitor` and `tasks` never mutate a run or the workspace, so they stay read class inside the ORCHESTRATE plane. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
+`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. `monitor` does not mutate a run or the workspace. The model-facing `tasks` tool is an intentional bookkeeping exception to the everyday meaning of "read": board mutations append full `taskLedger` snapshots to Clio's session ledger, and any action may reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and linked `done` update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with `actionClass: "read"`, so task planning and pickup stay available at every autonomy level without an approval card. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
 
 Target capability, dispatch tool profiles, and recipe constraints can further narrow the tools available to a run. That narrowing is convenience and budget control; safety still lives in code gates.
+
+### Workspace artifact reads
+
+The `/view` workspace category treats a recorded successful write as a durable fact, not as permanent read authority over that pathname. Immediately before every file load, the viewer resolves both the recorded workspace root and selected target through the live filesystem, checks canonical path-segment containment, and reads the canonical target. It does not cache the canonical workspace root between provider construction and load. A file or ancestor directory swapped to a symlink outside the current workspace is refused without reading the outside target. An `ENOENT` from re-resolution or loading keeps the durable `file no longer on disk (recorded at ...)` result instead of dropping the artifact row.
 
 ---
 

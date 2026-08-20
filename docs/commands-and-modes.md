@@ -273,11 +273,22 @@ than a header with nothing under it. The entries are bookkeeping: they cost noth
 in the context window and never become model context, so resuming a session full
 of side runs does not spend the window on them.
 
-The `/tasks` overlay shows the session task board the agent maintains through
-the `tasks` tool: every task with its status, the evidence note recorded when
-it was completed, and the reason recorded when it was blocked or dropped. The
-board persists in the session ledger as `taskLedger` entries, so it survives
-`/resume` and `/fork` and can be audited from the JSONL alone.
+The `/tasks` overlay combines the live session board, terminal task history,
+successful workspace artifacts, and the project-scoped operator task inbox.
+The live board shows every task with its status, operator provenance, completion
+evidence, or block/drop reason. It persists as full `taskLedger` snapshots, so
+stable board history and `userTaskId` pickup links survive `/resume` and `/fork`
+and can be audited from `current.jsonl`. Operator tasks persist separately in
+`.clio-coder/user-tasks.json`; the overlay can add, hand, finish, or drop them.
+The model-facing `tasks` tool's session-ledger and inbox bookkeeping is the
+documented read-class exception described in [the safety model](safety-model.md):
+calls remain audited as `read` and do not grant workspace mutation authority.
+
+The `/decisions` overlay shows completed and cancelled `ask_user` interviews
+from the active branch. It retains settled and superseded values from
+`decisionLedger` snapshots, expands the source question and answer, and lets the
+operator supersede a decision or enter a correction. A correction is submitted
+to the model as an ordinary operator turn after the durable snapshot changes.
 
 The read-only `/memory` overlay keeps durable and session memory attributable
 in one place. It lists approved evidence-backed lessons, then the live task
@@ -322,6 +333,12 @@ setups send Alt directly. Stock macOS Terminal.app needs **Use Option as Meta
 key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 `Ctrl+G` then the Alt binding letter.
 
+`Alt+B` and `Alt+D` are approved application-input boundary overrides of Pi's
+editor word-back and word-delete chords. Clio routes those two bindings before
+the editor sees them so the task and decision boards remain global shortcuts.
+They are intentional exceptions to the other app bindings' avoidance of Pi
+editor reserves and can be rebound through `settings.yaml.keybindings`.
+
 | Binding | Action |
 | --- | --- |
 | `Enter` | Send draft prompt (when idle) or deliver it at the next slot of the active run (when streaming). |
@@ -336,7 +353,8 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Alt+L` | Open the model and targets selector. |
 | `Alt+J` / `Alt+K` | Cycle forward / backward through the scoped model set (when empty, displays a notice directing the operator to `/scoped-models`). |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). |
-| `Alt+D` | Open the settled interview decision board (`/decisions`). |
+| `Alt+B` | Open the composite session and operator task board (`/tasks`). Approved application-boundary override of editor word-back. |
+| `Alt+D` | Open the settled interview decision board (`/decisions`). Approved application-boundary override of editor word-delete. |
 | `Alt+S` / `Ctrl+Alt+B` | Convert an active attached dispatch to a detached background batch. |
 | `Alt+O` | Toggle the newest tool call or worker block between collapsed subline and full body. |
 | `Ctrl+Alt+O` / `Alt+Shift+O` | Toggle all tool calls and worker blocks between collapsed sublines and full bodies. |

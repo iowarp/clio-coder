@@ -213,7 +213,7 @@ describe("modal precedence", () => {
 		}
 	});
 
-	it("binds Alt+D to the decision board and leaves its component in control of modal input", () => {
+	it("keeps the approved application-boundary Alt+D override for the decision board", () => {
 		strictEqual(CLIO_APP_KEYBINDINGS["clio.decisions.open"].defaultKeys, "alt+d");
 		const manager = createKeybindingManagerForTesting();
 		strictEqual(manager.matches("\x1bd", "clio.decisions.open"), true);
@@ -232,7 +232,7 @@ describe("modal precedence", () => {
 		strictEqual(routeOverlayKey(ESC, "decisions", deps, neverMatches), false);
 	});
 
-	it("binds Alt+B to the composite board and toggles the focused board closed", () => {
+	it("keeps the approved application-boundary Alt+B override for the composite task board", () => {
 		strictEqual(CLIO_APP_KEYBINDINGS["clio.tasks.open"].defaultKeys, "alt+b");
 		const manager = createKeybindingManagerForTesting();
 		strictEqual(manager.matches("\x1bb", "clio.tasks.open"), true);
