@@ -1,5 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { makeScratchHome, runCli, seedDoctorFix } from "../harness/spawn.js";
@@ -78,6 +78,53 @@ describe("smoke/compile cache through the built CLI", () => {
 			strictEqual(result.code, 0, result.stderr);
 			ok(existsSync(operatorDir), "the operator's directory is the one Node used");
 			strictEqual(existsSync(join(dir, "cache", "v8-compile-cache")), false, "Clio's default never competes");
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("preserves an operator cache through an equal foreign marker on the direct worker path", async () => {
+		const { env, dir, cleanup } = scratch();
+		try {
+			await seedDoctorFix(dir);
+			const operatorDir = join(dir, "operator-cache");
+			const observation = join(dir, "direct-worker-env.json");
+			const exitProbe = join(dir, "direct-worker-exit-probe.mjs");
+			writeFileSync(
+				exitProbe,
+				`import { writeFileSync } from "node:fs";
+process.on("exit", () => writeFileSync(${JSON.stringify(observation)}, JSON.stringify({
+	cache: process.env.NODE_COMPILE_CACHE ?? null,
+	marker: process.env.CLIO_CODER_INJECTED_COMPILE_CACHE ?? null,
+	disabled: process.env.NODE_DISABLE_COMPILE_CACHE ?? null,
+})));
+`,
+				"utf8",
+			);
+
+			// EOF makes the real worker entry reject its missing WorkerSpec after
+			// it has consumed the direct-handler environment. The preload observes
+			// that final environment without adding a test-only production seam.
+			const result = await runCli(["worker"], {
+				env: {
+					...env,
+					NODE_OPTIONS: `--import=${exitProbe}`,
+					NODE_COMPILE_CACHE: operatorDir,
+					CLIO_CODER_INJECTED_COMPILE_CACHE: operatorDir,
+					NODE_DISABLE_COMPILE_CACHE: "operator-disabled-value",
+				},
+				timeoutMs: 60_000,
+			});
+			strictEqual(result.signal, null, result.stderr);
+			ok(result.code !== null, "the direct worker settled instead of timing out");
+			const observed = JSON.parse(readFileSync(observation, "utf8")) as {
+				cache: string | null;
+				marker: string | null;
+				disabled: string | null;
+			};
+			strictEqual(observed.cache, operatorDir, "the equal foreign marker cannot delete the operator cache");
+			strictEqual(observed.marker, null, "the direct handler strips every foreign provenance marker");
+			strictEqual(observed.disabled, "operator-disabled-value", "the disable control is preserved byte for byte");
 		} finally {
 			cleanup();
 		}
