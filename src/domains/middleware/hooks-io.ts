@@ -15,7 +15,10 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { withClioAgentEnvironment } from "../../core/agent-environment.js";
+import {
+	reportCommitAttributionDiagnostic,
+	withManagedGitCommitAttributionEnvironment,
+} from "../../core/git-commit-attribution.js";
 import {
 	type HookReceiptSink,
 	loadUserHooks,
@@ -157,13 +160,20 @@ export function installUserHooks(options: InstallUserHooksOptions): InstallUserH
 export function spawnSyncCommandRunner(): UserHookCommandRunner {
 	return (argv, options): UserHookCommandResult => {
 		const [command, ...args] = argv;
+		// A user hook is operator automation, not Clio work: the environment is
+		// normalized so a nested seam sees consistent state, but no role is claimed.
+		const attribution = withManagedGitCommitAttributionEnvironment(process.env, {
+			cwd: options.cwd ?? process.cwd(),
+			evidence: {},
+		});
+		reportCommitAttributionDiagnostic(attribution.diagnostic);
 		const result = spawnSync(command ?? "", args, {
 			...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 			timeout: options.timeoutMs,
 			maxBuffer: COMMAND_OUTPUT_MAX_BYTES,
 			encoding: "utf8",
 			shell: false,
-			env: withClioAgentEnvironment(process.env),
+			env: attribution.env,
 		});
 		const timedOut = result.error !== undefined && (result.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
 		return {

@@ -257,6 +257,22 @@ describe("contracts/config", () => {
 		strictEqual(result.settings.budget.concurrency, "auto");
 	});
 
+	it("defaults commit attribution on, validates it strictly, and classifies it as live", () => {
+		strictEqual(DEFAULT_SETTINGS.attribution.gitCommits, true);
+		const disabled = validateSettings({ attribution: { gitCommits: false } });
+		deepStrictEqual(disabled.issues, []);
+		strictEqual(disabled.settings.attribution.gitCommits, false);
+
+		const invalid = validateSettings({ attribution: { gitCommits: "yes", identity: "other" } });
+		deepStrictEqual(invalid.issues.map((issue) => issue.path).sort(), ["attribution.gitCommits", "attribution.identity"]);
+		strictEqual(invalid.settings.attribution.gitCommits, true);
+		deepStrictEqual(diffSettings(DEFAULT_SETTINGS, disabled.settings), {
+			hotReload: ["attribution.gitCommits"],
+			nextTurn: [],
+			restartRequired: [],
+		});
+	});
+
 	it("validates smooth streaming and classifies it as a live presentation setting", () => {
 		for (const mode of ["off", "auto", "on"] as const) {
 			const result = validateSettings({ terminal: { smoothStreaming: mode } });

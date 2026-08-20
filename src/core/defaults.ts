@@ -140,6 +140,11 @@ export interface SkillsSettings {
 	trustProjectCompatRoots: boolean;
 }
 
+export interface AttributionSettings {
+	/** Evidence-aware role trailers on commits created through Clio. */
+	gitCommits: boolean;
+}
+
 export type DelegationToolGovernance = "clio-policy" | "agent-managed" | "deny-all";
 
 /**
@@ -330,6 +335,9 @@ export const DEFAULT_SETTINGS = {
 	skills: {
 		trustProjectCompatRoots: false,
 	} as SkillsSettings,
+	attribution: {
+		gitCommits: true,
+	} as AttributionSettings,
 	delegation: {
 		agents: [] as DelegationAgentConfig[],
 		defaults: {
@@ -553,6 +561,11 @@ terminal:
 # CLIO_CODER_TRUST_PROJECT_SKILLS=1 is set for the process.
 skills:
   trustProjectCompatRoots: false
+
+# Evidence-aware Git commit provenance. The identity and trailer semantics are
+# compiled into Clio; this switch only enables or disables attribution.
+attribution:
+  gitCommits: true
 
 # External coding agents that speak Agent Client Protocol v1 over stdio.
 # These are delegated harnesses, not model targets, so they stay outside

@@ -84,8 +84,10 @@ decision afterward.
   governed by durable leases that survive process death.
 - **Everything is auditable.** Every run seals a receipt covering tokens,
   priced cost, tool activity, safety decisions, routing, worker attestation,
-  and result conformance. Nothing in the audit trail is reconstructed from
-  prose.
+  and result conformance. Default-on scientific commit provenance adds only
+  the assistance, testing, review, and contributor trailers that this evidence
+  justifies; it never replaces the human author. Nothing in the audit trail is
+  reconstructed from prose.
 - **Science is a first-class domain.**
   [clio-kit](https://github.com/iowarp/clio-kit) adds MCP servers for HDF5,
   Slurm, ParaView, Pandas, NetCDF, FITS, Zarr, and ArXiv, and the shipped

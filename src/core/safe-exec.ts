@@ -2,6 +2,11 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { AI_AGENT_NAME } from "./agent-environment.js";
+import {
+	gitCommitAttributionEnabled,
+	reportCommitAttributionDiagnostic,
+	withManagedGitCommitAttributionEnvironment,
+} from "./git-commit-attribution.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export const SAFE_EXEC_DEFAULT_TIMEOUT_MS = 120_000;
@@ -76,6 +81,11 @@ export function runCommandVector(
 		const cwd = resolveSafeCwd(options.cwd, options.workspaceRoot);
 		const timeoutMs = clampTimerDelayMs(options.timeoutMs ?? SAFE_EXEC_DEFAULT_TIMEOUT_MS);
 		const maxOutputBytes = options.maxOutputBytes ?? SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES;
+		const attribution = withManagedGitCommitAttributionEnvironment(buildSafeToolEnv(options.env), {
+			cwd,
+			enabled: gitCommitAttributionEnabled(process.env),
+		});
+		reportCommitAttributionDiagnostic(attribution.diagnostic);
 		let aborted = false;
 		let timedOut = false;
 		let outputCapped = false;
@@ -89,7 +99,7 @@ export function runCommandVector(
 
 		const child = spawn(file, [...args], {
 			cwd,
-			env: buildSafeToolEnv(options.env),
+			env: attribution.env,
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe"],
 		});

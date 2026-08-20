@@ -1,5 +1,10 @@
 import { spawn } from "node:child_process";
 import { AI_AGENT_NAME } from "./agent-environment.js";
+import {
+	gitCommitAttributionEnabled,
+	reportCommitAttributionDiagnostic,
+	withManagedGitCommitAttributionEnvironment,
+} from "./git-commit-attribution.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
@@ -131,6 +136,11 @@ export function combineBashOutput(result: Pick<BashCommandResult, "stdout" | "st
 
 export async function runBashCommand(command: string, options: RunBashCommandOptions = {}): Promise<BashCommandResult> {
 	const plan = await bashSpawnPlan();
+	const attribution = withManagedGitCommitAttributionEnvironment(plan.env, {
+		cwd: options.cwd ?? process.cwd(),
+		enabled: gitCommitAttributionEnabled(process.env),
+	});
+	reportCommitAttributionDiagnostic(attribution.diagnostic);
 	return new Promise((resolve) => {
 		const timeout = clampTimerDelayMs(options.timeoutMs ?? 300_000);
 		let aborted = false;
@@ -149,7 +159,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 
 		const child = spawn("/bin/bash", [plan.mode, command], {
 			...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-			env: plan.env,
+			env: attribution.env,
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe"],
 		});

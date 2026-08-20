@@ -265,8 +265,27 @@ describe("contracts/settings center", () => {
 		strictEqual(byId.get("terminal.tuiMode")?.scope, "restart");
 		strictEqual(byId.get("terminal.fullscreenScrollbar")?.scope, "restart");
 		strictEqual(byId.get("terminal.smoothStreaming")?.scope, "live");
+		strictEqual(byId.get("attribution.gitCommits")?.scope, "live");
 		strictEqual(byId.get("autonomy")?.scope, "live");
 		strictEqual(byId.get("retry.maxRetries")?.scope, "live");
+	});
+
+	it("shows Clio commit provenance in Advanced and applies enable/disable immediately", () => {
+		const settings = settingsWithTargets();
+		const row = buildSettingItems(settings).find((item) => item.id === "attribution.gitCommits");
+		ok(row !== undefined);
+		strictEqual(row.section, "advanced");
+		strictEqual(row.label, "Clio commit provenance");
+		strictEqual(row.currentValue, "enabled");
+		deepStrictEqual(row.values, ["enabled", "disabled"]);
+		strictEqual(
+			row.description,
+			"Add evidence-backed assistance, testing, review, and contributor trailers to commits created through Clio.",
+		);
+		applySettingChange(settings, row.id, "disabled");
+		strictEqual(settings.attribution.gitCommits, false);
+		applySettingChange(settings, row.id, "enabled");
+		strictEqual(settings.attribution.gitCommits, true);
 	});
 
 	it("assigns explicit presentation kinds and independently semantic status segments", () => {
@@ -637,6 +656,11 @@ describe("contracts/settings center", () => {
 				id: "skills.trustProjectCompatRoots",
 				value: "true",
 				assert: (s) => strictEqual(s.skills.trustProjectCompatRoots, true),
+			},
+			{
+				id: "attribution.gitCommits",
+				value: "disabled",
+				assert: (s) => strictEqual(s.attribution.gitCommits, false),
 			},
 			{
 				id: "orchestrator.thinkingLevel",

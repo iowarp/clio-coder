@@ -15,6 +15,7 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { attributeCommitMessage } from "../core/commit-attribution.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -33,6 +34,7 @@ import {
 	renderFleetPrompt,
 	resultContractAuthorship,
 } from "../domains/agents/index.js";
+import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/runtime.js";
 import { type CapacityDrain, capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
@@ -51,6 +53,7 @@ import {
 	withAttemptRole,
 } from "../domains/dispatch/execution-role.js";
 import { type ExecutionPlanResult, executePlan } from "../domains/dispatch/execution-scheduler.js";
+import { deriveFleetCommitAttribution } from "../domains/dispatch/fleet-commit-attribution.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
 import {
 	decideReviewGate,
@@ -296,6 +299,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	]);
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	const agents = loaded.getContract<AgentsContract>("agents");
+	const config = loaded.getContract<ConfigContract>("config");
 	const safety = loaded.getContract<SafetyContract>("safety");
 	const scheduling = loaded.getContract<SchedulingContract>("scheduling");
 	if (!dispatch || !agents || !safety) {
@@ -366,6 +370,13 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	const receipts: RunReceipt[] = [];
 	const receiptsByStep = new Map<string, RunReceipt>();
 	const planStep = (stepId: string) => plan.steps.find((entry) => entry.id === stepId);
+	const attributionEnabled = config?.get().attribution.gitCommits ?? true;
+	// Freshness is coordinator-owned execution state. Worker prose cannot set
+	// either flag: a successful deterministic verification sets the first, and
+	// an integrity-valid independent gate decision sets the second. Any later
+	// workspace agent invalidates both before a commit may read them.
+	let validationFresh = false;
+	let independentReviewFresh = false;
 
 	/**
 	 * The commit message is the words of the agent that produced the work, and
@@ -461,6 +472,10 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				return {
 					assignmentId: handle.runId,
 					result: handle.finalPromise.then((receipt) => {
+						if (step.scope === "workspace") {
+							validationFresh = false;
+							independentReviewFresh = false;
+						}
 						receipts.push(receipt);
 						receiptsByStep.set(step.id, receipt);
 						const envelope = dispatch.getRun(receipt.runId);
@@ -487,19 +502,37 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				const command = commands?.commands.get(step.commandId);
 				if (command === undefined) throw new Error(`fleet code step '${step.id}' has no registered command`);
 				const isCommit = step.commitFrom !== undefined;
+				const evidence = isCommit
+					? deriveFleetCommitAttribution({
+							plan,
+							step,
+							priorResults,
+							validationFresh,
+							independentReviewFresh,
+						})
+					: null;
+				if (!isCommit && step.scope === "workspace" && step.verification !== true) {
+					validationFresh = false;
+					independentReviewFresh = false;
+				}
+				const originalMessage = isCommit ? commitMessageFor(step, priorResults) : null;
 				const outcome = await runCodeStep({
 					stepId: step.id,
 					command,
 					workspaceRoot: process.cwd(),
 					artifactDir: codeStepDir(fleetRootId),
 					signal,
-					...(isCommit
+					...(isCommit && evidence !== null && originalMessage !== null
 						? {
-								substitutions: { commitMessage: commitMessageFor(step, priorResults) },
+								substitutions: {
+									commitMessage: attributeCommitMessage(originalMessage, evidence, attributionEnabled),
+								},
 								requireWorkspaceChanges: true,
+								commitAttribution: { enabled: attributionEnabled, evidence },
 							}
 						: {}),
 				});
+				if (step.verification === true) validationFresh = outcome.report.passed;
 				const recordPath = await writeCodeStepRecord(fleetRootId, outcome.record);
 				if (json) process.stdout.write(`${JSON.stringify({ codeStep: outcome.record })}\n`);
 				else
@@ -540,15 +573,17 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 						needsDecision: `loop '${loop.id}' cycle ${attempt} has no sealed reviewer or subject receipt`,
 					};
 				}
+				const correlation = fleetGateCorrelation(subject, decider);
 				const decided = decideReviewGate({
 					group: `${fleetRootId}:${loop.id}`,
 					cycle: attempt,
 					terminalCycle: terminalAttempt,
 					subjects: [{ runId: subject.runId, digest: subject.integrity.digest }],
 					decider: { runId: decider.runId, digest: decider.integrity.digest },
-					correlation: fleetGateCorrelation(subject, decider),
+					correlation,
 					output: result.output,
 				});
+				independentReviewFresh = decided.verdict === "pass" && correlation.independent;
 				const staged = stagePendingGateDecision(decided.draft);
 				const { path: decisionPath } = materializePendingGateDecision(staged);
 				if (!json) {

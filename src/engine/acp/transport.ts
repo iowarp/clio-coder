@@ -1,6 +1,11 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
+import {
+	gitCommitAttributionEnabled,
+	reportCommitAttributionDiagnostic,
+	withManagedGitCommitAttributionEnvironment,
+} from "../../core/git-commit-attribution.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import {
 	ACP_INTERNAL_ERROR_MESSAGE,
@@ -202,9 +207,18 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 		this.childClosePromise = new Promise((resolve) => {
 			this.resolveChildClose = resolve;
 		});
+		const childEnvironment = options.env ? { ...process.env, ...options.env } : process.env;
+		// A delegated external harness authors its own commits. Clio only
+		// assisted by delegating, so no Co-authored-by is claimed for it.
+		const attribution = withManagedGitCommitAttributionEnvironment(childEnvironment, {
+			cwd: options.cwd ?? process.cwd(),
+			enabled: gitCommitAttributionEnabled(process.env),
+			evidence: { materiallyAssisted: true },
+		});
+		reportCommitAttributionDiagnostic(attribution.diagnostic);
 		this.child = spawn(command, args, {
 			cwd: options.cwd,
-			env: options.env ? { ...process.env, ...options.env } : process.env,
+			env: attribution.env,
 			stdio: ["pipe", "pipe", "pipe"],
 			// POSIX detached children lead a new session/process group whose id is
 			// the child pid. That makes negative-pid signaling safe for this owned

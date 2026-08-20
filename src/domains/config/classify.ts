@@ -27,6 +27,7 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"autonomy",
 	"modelSelector",
 	"terminal.smoothStreaming",
+	"attribution.gitCommits",
 ]);
 
 const NEXT_TURN_FIELDS = new Set<string>([

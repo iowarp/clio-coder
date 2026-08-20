@@ -123,6 +123,8 @@ interface WorkerSpecFields {
 	/** Skill names the agent recipe binds to this run; context(scope=skills) admits exactly these. */
 	agentSkills?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
+	/** Effective commit-attribution setting inherited from the dispatching session. */
+	gitCommitAttribution?: boolean;
 	/**
 	 * Dispatch-time tool profile that narrowed `allowedTools`. Carried so
 	 * black-box external CLI runtimes that cannot mediate per-tool calls can
@@ -610,6 +612,9 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	if (spec.trustProjectCompatRoots !== undefined && typeof spec.trustProjectCompatRoots !== "boolean") {
 		throw new Error("WorkerSpec.trustProjectCompatRoots must be a boolean");
+	}
+	if (spec.gitCommitAttribution !== undefined && typeof spec.gitCommitAttribution !== "boolean") {
+		throw new Error("WorkerSpec.gitCommitAttribution must be a boolean");
 	}
 	readOptionalEnum(spec, "toolProfile", "WorkerSpec", TOOL_PROFILE_NAMES);
 	readOptionalEnum(spec, "product", "WorkerSpec", WORKER_PRODUCTS);
