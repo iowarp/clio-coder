@@ -68,6 +68,9 @@ const worker = spawnNativeWorker(
 	},
 	{ workerEntryPath: ${JSON.stringify(stubEntry)} },
 );
+// The worker leads its own process group; hand its pid to the outer test so
+// even a SIGKILLed parent leaves nothing behind.
+if (worker.pid !== null) console.error("WORKER_PID=" + worker.pid);
 // A regressed stub that never exits must not strand a detached process-group
 // leader or hang the shard: past the deadline, abort the worker and fail.
 const deadline = setTimeout(() => {
@@ -110,8 +113,18 @@ try {
 					resolve(outcome);
 				};
 				// Outer bound: even a hung parent (deadline logic itself regressed)
-				// cannot hold the shard; kill the whole tree and fail the assertion.
+				// cannot hold the shard; kill the worker's own process group first
+				// (it is a detached leader the parent's SIGKILL would orphan), then
+				// the parent, and fail the assertion.
 				const overallDeadline = setTimeout(() => {
+					const pidMatch = stderr.match(/WORKER_PID=(\d+)/);
+					if (pidMatch?.[1]) {
+						try {
+							process.kill(-Number(pidMatch[1]), "SIGKILL");
+						} catch {
+							// already gone
+						}
+					}
 					child.kill("SIGKILL");
 					finish({ code: -1, stderr: `${stderr}\n[test] parent exceeded the outer deadline` });
 				}, 60_000);
