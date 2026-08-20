@@ -56,10 +56,12 @@ node dist/cli/index.js
 The deterministic contracts are
 `tests/contracts/render-pipeline-trace.test.ts`. The real built-CLI acceptance
 harness is `tests/smoke/render-trace-pty.test.ts`; it covers first frame, input
-correlation, resize, grouped writes, paused PTY output, and bounded process
-cleanup. Set `CLIO_CODER_PERF_REPORT=1` while running that test to print its
-observation record. Real PTY acceptance is currently unavailable on Windows;
-the fake-stream frame/backpressure contract remains cross-platform.
+correlation, resize, grouped writes, paused PTY output, adaptive pacing against
+a chunked hermetic provider, a controlled `stdout.write() === false`/`drain`
+boundary, final-frame settlement, and bounded process cleanup. Set
+`CLIO_CODER_PERF_REPORT=1` while running that test to print its observation
+records. Real PTY acceptance is currently unavailable on Windows; the
+fake-stream frame/backpressure contracts remain cross-platform.
 
 ## Import-graph method
 
@@ -366,6 +368,52 @@ These are import observations, not a startup claim or CI threshold. This cut is
 justified by the deterministic absence/presence and worker-exclusion contracts,
 the smaller evaluated graph, exact registration-order and surface contracts,
 and the dispatch reservation, approval, gate, detach, monitor, and steer suites.
+
+## Adaptive stream-pacer observations
+
+`terminal.smoothStreaming` is presentation-only. `off` is the exact existing
+16 ms coalescer and remains the 0.3.2 default. `auto` uses the pacer only on a
+capable local TTY with no accessibility, remote/multiplexer, CI, or observed
+backpressure signal. `on` requests pacing, but frame construction still stops
+behind stdout backpressure. The pacer never republishes slices on the public
+event bus: canonical events, persistence, replay/export, tool formation, and
+cumulative tool state remain synchronous while one presentation queue owns
+only derived visible text/thinking mutations.
+
+The deterministic fake-clock contracts cover semantic classification, FIFO
+generation/epoch ordering, abort and stale-admission rejection, grapheme
+clusters, fractional arrival credit, event-loop suspension, catch-up, the
+oldest-visible deadline, absolute queue byte/grapheme bounds, idle shutdown,
+folded-thinking fidelity, reset/discard accounting, mode changes, final-frame
+settlement, fullscreen frozen scrolling through resize, and bounded no-drain
+cleanup. The PTY arm uses a built CLI, a four-delta localhost provider, a
+4 KiB reply, an 80x24 `xterm-256color` PTY whose reader is paused, and a
+test-only writable shim that makes exactly one real child `stdout.write()`
+return `false` before emitting a delayed `drain`. This is deterministic
+backpressure acceptance, not a claim about a particular SSH kernel buffer.
+
+Five independent processes per supported Node line were measured on the same
+2026-08-19 WSL2 host as the corrected baseline, with the operating-system page
+cache warm and V8 compile caching disabled. Values are median / largest of the
+five observations; they are diagnostic observations, not timing gates.
+
+| Node | Input-to-stdout commit | First ingress-to-stdout commit | Final ingress-to-stdout commit | Controlled backpressure wait |
+| --- | ---: | ---: | ---: | ---: |
+| 22.22.3 | 5.530 / 8.896 ms | 62.909 / 70.274 ms | 37.798 / 56.412 ms | 403.809 / 426.570 ms |
+| 24.9.0 | 5.468 / 7.225 ms | 67.878 / 74.021 ms | 27.901 / 35.750 ms | 402.582 / 418.783 ms |
+
+The command was:
+
+```bash
+NODE_DISABLE_COMPILE_CACHE=1 CLIO_CODER_PERF_REPORT=1 \
+  node --import tsx --import ./tests/harness/tmp-root.ts --test \
+  --test-name-pattern 'paces provider deltas' \
+  tests/smoke/render-trace-pty.test.ts
+```
+
+These endpoints end at stdout commit. Even the PTY reader assertion stops at
+the pseudo-terminal boundary; none of these values is literal token-to-glass
+latency.
 
 ## Reporting checklist
 

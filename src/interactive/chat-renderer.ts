@@ -46,6 +46,13 @@ import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js"
 import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import { renderBashTranscriptExecution, renderToolResultOnly } from "./renderers/tool-execution.js";
+import {
+	classifyStreamEvent,
+	createStreamPacer,
+	type SmoothStreamingMode,
+	type StreamPacer,
+	type StreamPacerSlice,
+} from "./stream-pacer.js";
 import { readWorkerReceiptFactsForReplay } from "./worker-receipts.js";
 import { workerEntriesFromRunEntries } from "./worker-replay.js";
 import type { WorkerReceiptReader } from "./worker-stream.js";
@@ -89,18 +96,35 @@ export interface CreateCoalescingChatRendererDeps {
 	setTimer?: (cb: () => void, ms: number) => unknown;
 	/** Override for tests. Mirrors the clearTimeout signature. */
 	clearTimer?: (id: unknown) => void;
+	/** Monotonic clock shared with the pacer; injectable for deterministic tests. */
+	now?: () => number;
 	/** Sequence captured at canonical projection ingress before this panel consumer runs. */
 	visibleEventSequence?: (event: ChatLoopEvent) => number | null;
 	onQueue?: (eventSeq: number, action: "admit" | "dequeue") => void;
 	onPanelApplied?: (eventSeq: number) => void;
 	/** Legacy aggregate callback retained for non-text cumulative tool-update observations. */
 	onDelta?: () => void;
+	/** Canonical presentation-ingress identity; absent keeps the exact legacy coalescer. */
+	streamIngress?: (event: ChatLoopEvent) => { sequence: number; generation: string | number; ingressAt: number } | null;
+	getSmoothStreamingMode?: () => SmoothStreamingMode;
+	isAutoPacingAllowed?: () => boolean;
+	/** Force and await one actual frame plus any stdout drain. */
+	commitFrame?: (reason?: string) => Promise<unknown>;
 }
 
 export interface CoalescingChatRenderer {
 	applyEvent(event: ChatLoopEvent): void;
 	/** Cancel the pending coalesce timer (if any) and request one synchronous render. */
 	flush(): void;
+	/** Ordered barrier for replay, worker, command-output, and other panel mutations. */
+	mutate(mutation: () => void, reason?: string): void;
+	/** Drop queued presentation content before replacing/resetting the transcript. */
+	reset(mutation: () => void): void;
+	/** Drain paced content and await the first committed frame containing it. */
+	flushAndCommit(reason?: string): Promise<void>;
+	/** Apply a live mode change as an immediate ordered drain boundary. */
+	setSmoothStreamingMode(mode: SmoothStreamingMode): void;
+	dispose(): void;
 }
 
 export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererDeps): CoalescingChatRenderer {
@@ -113,8 +137,13 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 	const coalesceMs = deps.coalesceMs ?? DEFAULT_COALESCE_MS;
 
 	let pendingTimer: unknown = null;
+	let mutationDepth = 0;
+	let transactionNeedsRender = false;
+	let disposed = false;
+	let pacer: StreamPacer | null = null;
 
 	const fireCoalesced = (): void => {
+		if (disposed) return;
 		pendingTimer = null;
 		deps.requestRender();
 	};
@@ -126,31 +155,165 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 		return true;
 	};
 
-	return {
-		applyEvent(event) {
-			if (isTransparentAssistantWrapper(event)) return;
-			const visibleEventSeq = deps.visibleEventSequence?.(event) ?? null;
-			if (visibleEventSeq !== null) deps.onQueue?.(visibleEventSeq, "admit");
-			deps.chatPanel.applyEvent(event);
-			if (visibleEventSeq !== null) {
-				deps.onPanelApplied?.(visibleEventSeq);
-				deps.onQueue?.(visibleEventSeq, "dequeue");
-			}
-			if (DELTA_TYPES.has(event.type)) {
-				deps.onDelta?.();
-				if (pendingTimer !== null) return;
-				pendingTimer = setTimer(fireCoalesced, coalesceMs);
-				return;
-			}
+	const requestTransactionalRender = (coalesce: boolean): void => {
+		if (mutationDepth > 0) {
+			transactionNeedsRender = true;
+			return;
+		}
+		if (!coalesce) {
 			cancelPending();
 			deps.requestRender();
+			return;
+		}
+		deps.onDelta?.();
+		if (pendingTimer === null) pendingTimer = setTimer(fireCoalesced, coalesceMs);
+	};
+	const transaction = (operation: () => void, coalesce = false): void => {
+		mutationDepth += 1;
+		try {
+			operation();
+		} finally {
+			mutationDepth -= 1;
+			if (mutationDepth === 0 && transactionNeedsRender) {
+				transactionNeedsRender = false;
+				requestTransactionalRender(coalesce);
+			}
+		}
+	};
+	const applySlice = (slice: StreamPacerSlice): void => {
+		const event =
+			slice.kind === "text"
+				? ({ type: "text_delta", contentIndex: slice.contentIndex, delta: slice.text, partialText: "" } as const)
+				: ({ type: "thinking_delta", contentIndex: slice.contentIndex, delta: slice.text, partialThinking: "" } as const);
+		deps.chatPanel.applyEvent(event);
+		if (slice.finalForItem) {
+			deps.onPanelApplied?.(slice.sequence);
+			deps.onQueue?.(slice.sequence, "dequeue");
+		}
+		requestTransactionalRender(true);
+	};
+	if (deps.streamIngress && deps.getSmoothStreamingMode) {
+		pacer = createStreamPacer({
+			mode: deps.getSmoothStreamingMode(),
+			onSlice: applySlice,
+			onDiscard: (sequence) => deps.onQueue?.(sequence, "dequeue"),
+			...(deps.now ? { now: deps.now } : {}),
+			...(deps.setTimer ? { setTimer: deps.setTimer } : {}),
+			...(deps.clearTimer ? { clearTimer: deps.clearTimer } : {}),
+			...(deps.isAutoPacingAllowed ? { isAutoPacingAllowed: deps.isAutoPacingAllowed } : {}),
+		});
+	}
+	const syncPacerMode = (): SmoothStreamingMode => {
+		const mode = deps.getSmoothStreamingMode?.() ?? "off";
+		if (pacer && pacer.mode !== mode) transaction(() => pacer?.setMode(mode));
+		return mode;
+	};
+	const drainPacer = (reason: string): void => {
+		if (pacer?.snapshot().queuedItems) pacer.flush(reason);
+	};
+	const applyLegacy = (event: ChatLoopEvent): void => {
+		const visibleEventSeq = deps.visibleEventSequence?.(event) ?? null;
+		if (visibleEventSeq !== null) deps.onQueue?.(visibleEventSeq, "admit");
+		deps.chatPanel.applyEvent(event);
+		if (visibleEventSeq !== null) {
+			deps.onPanelApplied?.(visibleEventSeq);
+			deps.onQueue?.(visibleEventSeq, "dequeue");
+		}
+		if (DELTA_TYPES.has(event.type)) {
+			requestTransactionalRender(true);
+			return;
+		}
+		requestTransactionalRender(false);
+	};
+
+	const renderer: CoalescingChatRenderer = {
+		applyEvent(event) {
+			if (disposed) return;
+			if (isTransparentAssistantWrapper(event)) return;
+			const mode = syncPacerMode();
+			const ingress = deps.streamIngress?.(event) ?? null;
+			if (!pacer || mode === "off") {
+				applyLegacy(event);
+				return;
+			}
+			const classification = classifyStreamEvent(event);
+			if (classification === "paced-display-content") {
+				if (ingress === null) {
+					applyLegacy(event);
+					return;
+				}
+				const delta = event as Extract<ChatLoopEvent, { type: "text_delta" | "thinking_delta" }>;
+				if (delta.delta.length === 0) {
+					applyLegacy(event);
+					return;
+				}
+				deps.onQueue?.(ingress.sequence, "admit");
+				transaction(() => {
+					pacer?.enqueue({
+						sequence: ingress.sequence,
+						generation: ingress.generation,
+						kind: delta.type === "text_delta" ? "text" : "thinking",
+						contentIndex: delta.contentIndex,
+						text: delta.delta,
+						ingressAt: ingress.ingressAt,
+						folded: delta.type === "thinking_delta" && !deps.chatPanel.isThinkingExpanded(),
+					});
+				}, true);
+				return;
+			}
+			if (classification === "cumulative-live-state") {
+				transaction(() => {
+					drainPacer("cumulative-live-state");
+					applyLegacy(event);
+				}, true);
+				return;
+			}
+			transaction(() => {
+				drainPacer(`boundary:${event.type}`);
+				applyLegacy(event);
+			});
 		},
 		flush() {
+			if (disposed) return;
+			transaction(() => drainPacer("explicit-flush"));
 			const wasPending = cancelPending();
-			if (!wasPending) return;
-			deps.requestRender();
+			if (wasPending) deps.requestRender();
+		},
+		mutate(mutation, reason = "panel-mutation") {
+			if (disposed) return;
+			transaction(() => {
+				drainPacer(reason);
+				mutation();
+				requestTransactionalRender(false);
+			});
+		},
+		reset(mutation) {
+			if (disposed) return;
+			transaction(() => {
+				pacer?.invalidateEpoch();
+				mutation();
+				requestTransactionalRender(false);
+			});
+		},
+		async flushAndCommit(reason = "final-frame") {
+			if (disposed) return;
+			transaction(() => drainPacer(reason));
+			cancelPending();
+			if (deps.commitFrame) await deps.commitFrame(reason);
+			else deps.requestRender();
+		},
+		setSmoothStreamingMode(mode) {
+			if (disposed || !pacer || pacer.mode === mode) return;
+			transaction(() => pacer?.setMode(mode));
+		},
+		dispose() {
+			if (disposed) return;
+			transaction(() => pacer?.dispose("renderer-dispose"));
+			cancelPending();
+			disposed = true;
 		},
 	};
+	return renderer;
 }
 
 /**

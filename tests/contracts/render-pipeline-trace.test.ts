@@ -201,6 +201,78 @@ describe("contracts/render pipeline trace", () => {
 		strictEqual(drain.waitMs, 7);
 	});
 
+	it("defers later frame construction while stdout is blocked and coalesces to the newest state", async () => {
+		const harness = createHarness();
+		const terminal = new TraceTerminal(harness.trace, []);
+		const writable = { release: undefined as (() => void) | undefined };
+		const admission = {
+			blocked: true,
+			onWritable(listener: () => void) {
+				writable.release = listener;
+				return () => {
+					if (writable.release === listener) writable.release = undefined;
+				};
+			},
+		};
+		const tui = new InstrumentedTuiMainScreen(terminal, harness.trace, undefined, undefined, admission);
+		let state = "first";
+		let renders = 0;
+		tui.addChild({
+			render: () => {
+				renders += 1;
+				return [state];
+			},
+			invalidate: () => {},
+		});
+
+		tui.requestRender();
+		state = "latest";
+		tui.requestRender();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		strictEqual(renders, 0, "no differential frame is built while the writable is saturated");
+		admission.blocked = false;
+		writable.release?.();
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		strictEqual(renders, 1, "one released render observes the latest presentation model");
+		await harness.close();
+	});
+
+	it("lets one direct final render supersede a deferred blocked request", async () => {
+		const harness = createHarness();
+		const terminal = new TraceTerminal(harness.trace, []);
+		let release: (() => void) | undefined;
+		const admission = {
+			blocked: true,
+			onWritable(listener: () => void) {
+				release = listener;
+				return () => {
+					if (release === listener) release = undefined;
+				};
+			},
+		};
+		const tui = new InstrumentedTuiMainScreen(terminal, harness.trace, undefined, undefined, admission);
+		let renders = 0;
+		tui.addChild({
+			render: () => {
+				renders += 1;
+				return ["latest final state"];
+			},
+			invalidate: () => {},
+		});
+		tui.requestRender();
+		strictEqual(renders, 0);
+		const staleRelease = release;
+		ok(staleRelease);
+		tui.renderNow(true);
+		strictEqual(renders, 1);
+		strictEqual(release, undefined, "the direct final frame removes the older gate listener");
+		admission.blocked = false;
+		staleRelease();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		strictEqual(renders, 1, "gate restoration cannot schedule a duplicate frame after teardown settlement");
+		await harness.close();
+	});
+
 	it("buffers asynchronously, reports bounded drops, and treats write failure as nonfatal", async () => {
 		let appendCalls = 0;
 		const payloads: string[] = [];

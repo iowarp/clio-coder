@@ -207,6 +207,7 @@ terminal:
   outputVerbosity: default
   tuiMode: regular              # regular terminal scrollback or fullscreen sticky layout
   fullscreenScrollbar: auto    # hidden, auto, or always in fullscreen mode
+  smoothStreaming: off         # off, conservative auto, or explicit on
 skills:
   trustProjectCompatRoots: false
 delegation:
@@ -446,7 +447,7 @@ The Settings Center organizes all configuration under four non-selectable group 
 | **RUNTIME** | Budget (`budget`) | `budget.sessionCeilingUsd`, `defaults.maxTokens`, and `budget.concurrency` (restart required). |
 | **RUNTIME** | Compaction (`compaction`) | `compaction.auto`, `compaction.threshold`, and `compaction.excludeLastTurns`. |
 | **RUNTIME** | Retry (`retry`) | `retry.enabled`, `retry.maxRetries`, `retry.baseDelayMs`, and `retry.maxDelayMs`. |
-| **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), and `theme`. |
+| **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), `terminal.smoothStreaming` (`off`, `auto`, `on`), and `theme`. |
 | **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, and `delegation.agents`. |
 
 `retry.streamStallMs` has no Settings Center row; edit it in `settings.yaml`.
@@ -495,6 +496,7 @@ Label to config path mapping:
 | Output detail | `terminal.outputVerbosity` (`minimal`, `default`, or `verbose`) |
 | TUI mode | `terminal.tuiMode` (`regular` or `fullscreen`, restart required) |
 | Fullscreen scrollbar | `terminal.fullscreenScrollbar` (`hidden`, `auto`, or `always`, restart required) |
+| Smooth streaming | `terminal.smoothStreaming` (`off`, `auto`, or `on`, live) |
 | Theme | `theme` |
 | Runtime plugins | `runtimePlugins` |
 | Compaction model | `compaction.model` |
@@ -608,6 +610,7 @@ Generic provider and transport errors are classified by transient retry rules, i
 | `terminal.outputVerbosity` | `default` | `minimal`, `default`, `verbose` | immediately |
 | `terminal.tuiMode` | `regular` | `regular`, `fullscreen` | restart |
 | `terminal.fullscreenScrollbar` | `auto` | `hidden`, `auto`, `always` | restart |
+| `terminal.smoothStreaming` | `off` | `off`, `auto`, `on` | immediately |
 | `modelSelector.favorites` | `[]` | list of strings | immediately |
 | `modelSelector.recentLimit` | `12` | integer ≥ 1 | immediately |
 | `keybindings` | `{}` | map of binding id to a key string or list of them | restart |

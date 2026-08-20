@@ -44,6 +44,10 @@ export interface OpenAICompatToolCallScript {
 
 export interface OpenAICompatFixtureOptions {
 	models?: Array<Record<string, unknown> & { id: string }>;
+	/** Split a text reply into provider-visible SSE deltas for pacing/ordering tests. */
+	replyChunks?: readonly string[];
+	/** Optional deterministic delay between text chunks. */
+	chunkDelayMs?: number;
 	/**
 	 * When set, answer the tool-free completion of every turn with this tool
 	 * call instead of text. Absent, the fixture behaves exactly as before.
@@ -150,15 +154,22 @@ export async function startOpenAICompatFixture(
 			res.end("data: [DONE]\n\n");
 			return;
 		}
-		res.write(
-			`data: ${JSON.stringify({
-				id: "chatcmpl-clio-print",
-				object: "chat.completion.chunk",
-				created: 1,
-				model: "mock-model",
-				choices: [{ index: 0, delta: { content: reply } }],
-			})}\n\n`,
-		);
+		const replyChunks = options.replyChunks ?? [reply];
+		for (let index = 0; index < replyChunks.length; index += 1) {
+			const chunk = replyChunks[index] ?? "";
+			res.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-clio-print",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "mock-model",
+					choices: [{ index: 0, delta: { content: chunk } }],
+				})}\n\n`,
+			);
+			if ((options.chunkDelayMs ?? 0) > 0 && index + 1 < replyChunks.length) {
+				await new Promise<void>((resolve) => setTimeout(resolve, options.chunkDelayMs));
+			}
+		}
 		res.write(
 			`data: ${JSON.stringify({
 				id: "chatcmpl-clio-print",

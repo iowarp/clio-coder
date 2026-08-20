@@ -115,11 +115,12 @@ export interface InteractiveInputRuntimeDeps {
 		disposeSubscriptions(): void;
 	};
 	stopUi: () => void;
+	beforeStopUi?: () => Promise<void>;
 	cancelParkedCalls: (reason: string) => void;
 	onShutdown: () => Promise<void>;
 	reportShutdownFailure?: (step: string, error: unknown) => void;
 	/** Defaults to the process termination coordinator's drain phase. */
-	registerTerminalTeardown?: (teardown: () => void) => void;
+	registerTerminalTeardown?: (teardown: () => void | Promise<void>) => void;
 	registerInputListener: (listener: (data: string) => ApplicationInputResult) => void;
 	onInputIngress?: (action: RenderInputAction, data: string) => void;
 	intervalsToClear?: ReadonlyArray<ApplicationIntervalHandle>;
@@ -265,6 +266,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			() => deps.shutdown.disposeSubscriptions(),
 		],
 		stopUi: deps.stopUi,
+		...(deps.beforeStopUi ? { beforeStopUi: deps.beforeStopUi } : {}),
 		cancelParkedCalls: deps.cancelParkedCalls,
 		onShutdown: deps.onShutdown,
 		registerTerminalTeardown:

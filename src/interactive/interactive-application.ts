@@ -45,6 +45,7 @@ import type {
 	RunIo,
 	TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
+import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
 
 export {
@@ -404,26 +405,44 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 }
 
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
+	const initialSmoothStreaming = resolveSmoothStreamingMode(deps.getSettings?.().terminal.smoothStreaming ?? "off");
+	const initialAutoPacingAllowed = processAutoPacingAllowed(false);
 	const shell = createProcessInteractiveShell({
 		tuiMode: deps.getSettings?.().terminal.tuiMode ?? "regular",
+		streamPacingActive:
+			initialSmoothStreaming === "on" || (initialSmoothStreaming === "auto" && initialAutoPacingAllowed),
 		...(deps.onFirstFrameCommit ? { onFirstFrameCommit: deps.onFirstFrameCommit } : {}),
 	});
 	const { terminal, tui } = shell;
 	const renderTrace = getActiveRenderTrace();
-	const visibleEventSequences = new WeakMap<object, number>();
+	const visibleEventIngress = new WeakMap<
+		object,
+		{ sequence: number; traceSequence: number; generation: number; ingressAt: number }
+	>();
+	let visibleEventSequence = 0;
+	let visibleEventGeneration = 0;
 	const recordChatEventIngress = (event: ChatLoopEvent): void => {
-		if (!renderTrace) return;
 		if (event.type === "agent_start") {
-			renderTrace.beginGeneration();
+			visibleEventGeneration += 1;
+			renderTrace?.beginGeneration();
 			return;
 		}
 		if (event.type !== "text_delta" && event.type !== "thinking_delta") return;
-		const sequence = renderTrace.recordVisibleEvent({
-			kind: event.type === "text_delta" ? "text" : "thinking",
-			contentIndex: event.contentIndex,
-			delta: event.delta,
-		});
-		visibleEventSequences.set(event, sequence);
+		visibleEventSequence += 1;
+		const ingress = {
+			sequence: visibleEventSequence,
+			traceSequence: visibleEventSequence,
+			generation: visibleEventGeneration,
+			ingressAt: performance.now(),
+		};
+		visibleEventIngress.set(event, ingress);
+		if (renderTrace) {
+			ingress.traceSequence = renderTrace.recordVisibleEvent({
+				kind: event.type === "text_delta" ? "text" : "thinking",
+				contentIndex: event.contentIndex,
+				delta: event.delta,
+			});
+		}
 	};
 	let applicationController: ApplicationController;
 	const workspaceFacts = createWorkspaceFacts({
@@ -459,7 +478,11 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		bus: deps.bus,
 		getLeaderArmed: () => leaderArmed,
 		getShutdownArmed: () => shutdownArmed,
-		resolveVisibleEventSequence: (event) => visibleEventSequences.get(event) ?? null,
+		resolveVisibleEventSequence: (event) => visibleEventIngress.get(event)?.traceSequence ?? null,
+		resolveStreamIngress: (event) => visibleEventIngress.get(event) ?? null,
+		commitFrame: (reason) => shell.commitCurrentFrame(reason === "teardown" ? 300 : 30_000),
+		hasObservedBackpressure: () => shell.hasObservedBackpressure(),
+		onSmoothStreamingMode: (_mode, pacingActive) => shell.setStreamPacingActive(pacingActive),
 		providers: deps.providers,
 		dispatch: deps.dispatch,
 		observability: deps.observability,
@@ -499,8 +522,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const agentProgress = createAgentProgress(terminal);
 	const busNoticeSink = {
 		appendReplayBlock: (renderBlock: Parameters<typeof chatPanel.appendReplayBlock>[0]) =>
-			chatPanel.appendReplayBlock(renderBlock),
-		requestRender: () => tui.requestRender(),
+			chatRenderer.mutate(() => chatPanel.appendReplayBlock(renderBlock), "bus-notice"),
+		requestRender: () => {},
 	};
 	const eventProjection = createInteractiveEventProjection({
 		bus: deps.bus,
@@ -529,6 +552,12 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		dismissNotification: (key) => notifications.dismiss(key),
 		appendTranscriptNotice: (level, text) => appendNotice(level, text, busNoticeSink),
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
+		onConfigHotReload: (settings) => {
+			const mode = resolveSmoothStreamingMode(settings.terminal.smoothStreaming);
+			const autoAllowed = processAutoPacingAllowed(shell.hasObservedBackpressure());
+			chatRenderer.setSmoothStreamingMode(mode);
+			shell.setStreamPacingActive(mode === "on" || (mode === "auto" && autoAllowed));
+		},
 	});
 	// The overlay reads the report this process already produced at boot; it
 	// never probes on a keystroke.
@@ -541,7 +570,12 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.session ? { session: deps.session } : {}),
 		providers: deps.providers,
 		chat: deps.chat,
-		chatPanel,
+		chatPanel: {
+			appendReplayBlock: (...args) => chatRenderer.mutate(() => chatPanel.appendReplayBlock(...args), "slash-output"),
+			appendUser: (text) => chatRenderer.mutate(() => chatPanel.appendUser(text), "user-submit"),
+		},
+		beforeSemanticSubmit: () => chatRenderer.flush(),
+		settleVisibleFrame: (reason) => chatRenderer.flushAndCommit(reason),
 		...(deps.resources ? { resources: deps.resources } : {}),
 		...(deps.extensions ? { extensions: deps.extensions } : {}),
 		...(interopSurface ? { interop: interopSurface } : {}),
@@ -600,7 +634,12 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		dispatch: deps.dispatch,
 		...(deps.session ? { session: deps.session } : {}),
 		sessionTranscript,
-		chatPanel,
+		chatPanel: {
+			appendReplayBlock: (...args) =>
+				chatRenderer.mutate(() => chatPanel.appendReplayBlock(...args), "editor-command-output"),
+		},
+		beforeSemanticBoundary: () => chatRenderer.flush(),
+		settleVisibleFrame: (reason) => chatRenderer.flushAndCommit(reason),
 		dispatchCommand: slashRuntime.dispatchCommand,
 		collapseLaunchpadBeforeSubmit: () => presentation.collapseWelcomeDashboard(),
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
@@ -625,8 +664,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	 * because the subscriptions that own the fold are built below.
 	 */
 	const resetTranscript = (): void => {
-		chatPanel.reset();
-		interactiveSubscriptions.workers.reset();
+		chatRenderer.reset(() => {
+			chatPanel.reset();
+			interactiveSubscriptions.workers.reset();
+		});
 	};
 	overlayLifecycle = createOverlayLifecycle({
 		app: deps,
@@ -690,6 +731,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			const current = editor.getText();
 			editor.setText([restored.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
 		}
+		chatRenderer.flush();
 		deps.chat.cancel();
 		deps.toolRegistry?.cancelParkedCalls("run cancelled by operator");
 		footer.refresh();
@@ -745,7 +787,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		// The reducer mutates one state object per assignment, so the panel is
 		// handed that object rather than a copy: a streamed delta reaches the
 		// screen by invalidating a cached render, not by rebuilding the entry.
-		applyWorkerState: (state) => chatPanel.applyWorkerState(state),
+		applyWorkerState: (state) => chatRenderer.mutate(() => chatPanel.applyWorkerState(state), "worker-state"),
 		recordWorkerRun: (fields) => {
 			// A `/run` is an operator action that produced durable state, so it
 			// opens a session the same way a local `!bash` line does. Persistence
@@ -794,7 +836,25 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		editorSubmit,
 		requestRender: () => tui.requestRender(),
 		notifications,
-		chatPanel,
+		chatPanel: {
+			toggleLastToolExpanded: () => chatPanel.toggleLastToolExpanded(),
+			toggleAllToolsExpanded: () => chatPanel.toggleAllToolsExpanded(),
+			toggleLiveToolOutput: () => chatPanel.toggleLiveToolOutput(),
+			toggleLastThinking: () => {
+				let changed = false;
+				chatRenderer.mutate(() => {
+					changed = chatPanel.toggleLastThinking();
+				}, "thinking-visibility");
+				return changed;
+			},
+			toggleAllThinking: () => {
+				let changed = false;
+				chatRenderer.mutate(() => {
+					changed = chatPanel.toggleAllThinking();
+				}, "thinking-visibility");
+				return changed;
+			},
+		},
 		shutdown: {
 			stopTickers: presentation.stopTickers,
 			disposeInteractiveTickers: interactiveTickers.dispose,
@@ -807,6 +867,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			disposeChat: () => deps.chat.dispose(),
 			disposeSubscriptions: interactiveSubscriptions.dispose,
 		},
+		beforeStopUi: (() => {
+			let settlement: Promise<void> | null = null;
+			return () => {
+				settlement ??= chatRenderer.flushAndCommit("teardown").finally(() => chatRenderer.dispose());
+				return settlement;
+			};
+		})(),
 		stopUi: () => shell.stop(),
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
 		onShutdown: async () => {
