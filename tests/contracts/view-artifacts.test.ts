@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -485,6 +485,128 @@ describe("contracts/view-artifacts", () => {
 		} finally {
 			await rm(stateDir, { recursive: true, force: true });
 			await rm(workspace, { recursive: true, force: true });
+		}
+	});
+
+	it("rechecks canonical containment after file and directory symlink swaps", async () => {
+		const stateDir = await scratchDir();
+		const workspace = await scratchDir();
+		const outside = await scratchDir();
+		const directPath = join(workspace, "direct.txt");
+		const nestedPath = join(workspace, "reports", "nested.txt");
+		const outsideDirectPath = join(outside, "direct.txt");
+		const outsideNestedPath = join(outside, "nested.txt");
+		await mkdir(join(workspace, "reports"), { recursive: true });
+		await writeFile(directPath, "inside direct\n");
+		await writeFile(nestedPath, "inside nested\n");
+		await writeFile(outsideDirectPath, "outside direct secret\n");
+		await writeFile(outsideNestedPath, "outside nested secret\n");
+
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "direct-write",
+				parentTurnId: null,
+				timestamp: "2026-08-19T11:00:00.000Z",
+				role: "tool_result",
+				payload: {
+					toolName: "write",
+					result: { content: [{ type: "text", text: "ok" }], details: { paths: ["direct.txt"] } },
+				},
+			},
+			{
+				kind: "message",
+				turnId: "nested-write",
+				parentTurnId: "direct-write",
+				timestamp: "2026-08-19T11:01:00.000Z",
+				role: "tool_result",
+				payload: {
+					toolName: "write",
+					result: { content: [{ type: "text", text: "ok" }], details: { paths: ["reports/nested.txt"] } },
+				},
+			},
+		];
+		const provider = new WorkspaceArtifactProvider({
+			stateDir,
+			sessionMeta: { ...sessionMeta(), cwd: workspace },
+			readSessionEntries: () => entries,
+		});
+
+		try {
+			const artifacts = await provider.list();
+			const direct = artifacts.find((artifact) => artifact.path === directPath);
+			const nested = artifacts.find((artifact) => artifact.path === nestedPath);
+			ok(direct);
+			ok(nested);
+
+			await rm(directPath);
+			await symlink(outsideDirectPath, directPath);
+			await rm(join(workspace, "reports"), { recursive: true });
+			await symlink(outside, join(workspace, "reports"), "dir");
+
+			deepStrictEqual(await direct.load(), {
+				lines: [`refusing to read ${directPath}: canonical target is outside the recorded workspace`],
+				format: "text",
+			});
+			deepStrictEqual(await nested.load(), {
+				lines: [`refusing to read ${nestedPath}: canonical target is outside the recorded workspace`],
+				format: "text",
+			});
+
+			await rm(directPath);
+			deepStrictEqual(await direct.load(), {
+				lines: ["file no longer on disk (recorded at 2026-08-19T11:00:00.000Z)"],
+				format: "text",
+			});
+		} finally {
+			await rm(stateDir, { recursive: true, force: true });
+			await rm(workspace, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
+	});
+
+	it("re-resolves a symlinked workspace root for every artifact load", async () => {
+		const stateDir = await scratchDir();
+		const root = await scratchDir();
+		const originalWorkspace = join(root, "workspace-original");
+		const replacementWorkspace = join(root, "workspace-replacement");
+		const workspaceLink = join(root, "workspace-current");
+		await mkdir(originalWorkspace);
+		await mkdir(replacementWorkspace);
+		await writeFile(join(originalWorkspace, "report.txt"), "original workspace\n");
+		await writeFile(join(replacementWorkspace, "report.txt"), "replacement workspace\n");
+		await symlink(originalWorkspace, workspaceLink, "dir");
+
+		const entry: SessionEntry = {
+			kind: "message",
+			turnId: "report-write",
+			parentTurnId: null,
+			timestamp: "2026-08-19T12:00:00.000Z",
+			role: "tool_result",
+			payload: {
+				toolName: "write",
+				result: { content: [{ type: "text", text: "ok" }], details: { paths: ["report.txt"] } },
+			},
+		};
+		const provider = new WorkspaceArtifactProvider({
+			stateDir,
+			sessionMeta: { ...sessionMeta(), cwd: workspaceLink },
+			readSessionEntries: () => [entry],
+		});
+
+		try {
+			const [artifact] = await provider.list();
+			ok(artifact);
+			await rm(workspaceLink);
+			await symlink(replacementWorkspace, workspaceLink, "dir");
+
+			deepStrictEqual(await artifact.load(), {
+				lines: ["replacement workspace"],
+				format: "text",
+			});
+		} finally {
+			await rm(stateDir, { recursive: true, force: true });
+			await rm(root, { recursive: true, force: true });
 		}
 	});
 
