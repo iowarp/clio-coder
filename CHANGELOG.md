@@ -9,9 +9,13 @@ produced it.
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 still change interfaces.
 
-## 0.3.2 - 2026-08-19
+## 0.3.2 - 2026-08-20
 
-This release upgrades the engine and hardens the terminal agent. The three engine SDK libraries move to 0.84.0, and a pass over the interactive surface ported the behaviors listed first below. A day of audits against the live code and a Qwen3.8-27B fleet on llama.cpp and LM Studio then produced the defects listed after them; every one is fixed here, each code fix carries a regression test, and the tickets (#110 through #134) carry the evidence.
+This release upgrades the engine and hardens the terminal agent. The three engine SDK libraries move to 0.84.0, and a pass over the interactive surface ported the behaviors listed first below. A day of audits against the live code and a Qwen3.8-27B fleet on llama.cpp and LM Studio then produced the defects listed after them; every one is fixed here, each code fix carries a regression test, and the tickets (#110 through #136) carry the evidence.
+
+- Made the `/settings` filter narrow the catalog per keystroke (#135), matching `/model` and `/resume`. The `[/]` editor's draft is now the live query, so rows, section match counts, and the empty state track each character; Enter commits the query and Esc restores the committed one.
+- Named the winning project handbook in `/context` (#136). The overlay showed the preload class only (`full (0.3kB, 11 lines)`) and never said which `CLIO-CODER.md` or `CLIO-CODER.override.md` produced it, which the override semantics make ambiguous; it now lists the effective chain, ancestor to nearest, with workspace-relative paths.
+- Proved at the process boundary that the real built worker entry consumes Clio's injected compile-cache pair before any descendant it spawns can see it (#148). A hermetic smoke drives `dist/worker/entry.js` through one stubbed inference turn whose tool call is a real bash descendant launching a generic Node child; neither inherits Clio's cache directory or marker, while an operator-supplied `NODE_COMPILE_CACHE` reaches both unchanged through matching and mismatched spoofed markers on the direct `clio-coder worker` path.
 
 - Upgraded the three Pi SDK libraries to 0.84.0, bringing Clio the release's provider, OAuth cancellation, terminal rendering, and platform fixes while preserving its own agent loop, session store, and regular-screen TUI behavior. Clio now uses Pi's explicit `TuiMainScreen` renderer and forwards concrete abort signals through built-in and ALCF OAuth refreshes, so a cancelled authentication flow no longer leaves token work running in the background.
 - Added the redacted action class, asking safety axis, and target beneath a tool row parked for approval. The facts use the same transient view as the permission overlay, disappear when the call resumes or settles, and never enter the session ledger.

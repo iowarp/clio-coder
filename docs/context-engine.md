@@ -88,7 +88,7 @@ The compiled session prompt preloads the full rendered project context (the effe
 
 - `/context init` and `clio-coder context init` print `preload: full (N.NkB, N lines)` or `preload: synopsis (reason: size|lines)` after the summary, and warn when a full preload is within 10% of either limit.
 - `clio-coder config inspect` shows the shared preload class and layer position on every effective handbook entry.
-- The `/context` overlay shows a `project preload:` line under the category legend once a session prompt has compiled.
+- The `/context` overlay shows a `project preload:` line under the category legend once a session prompt has compiled, followed by the effective handbook path(s): one `handbook:` line for a single file, or a `handbooks (ancestor → nearest):` list when layered handbooks apply. Paths render workspace-relative; a handbook above the workspace keeps a `~`-shortened or absolute path.
 
 ## Context refresh
 
