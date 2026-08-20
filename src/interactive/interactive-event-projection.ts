@@ -57,6 +57,8 @@ export interface InteractiveEventProjectionDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	getTerminalColumns: () => number;
 	now?: () => number;
+	/** Canonical synchronous ingress hook, before any projection branch consumes the event. */
+	onChatEventIngress?: (event: ChatLoopEvent) => void;
 	applyChatEvent: (event: ChatLoopEvent) => void;
 	setFollowUpMessages: (messages: QueuedChatMessage[]) => void;
 	isAskUserWaiting: () => boolean;
@@ -123,6 +125,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 	const remainingUnsubscribers: Array<() => void> = [];
 	primaryUnsubscribers.push(
 		deps.chat.onEvent((event) => {
+			deps.onChatEventIngress?.(event);
 			if (event.type === "notice") {
 				if (event.surface === "transcript") {
 					deps.applyChatEvent(event);
