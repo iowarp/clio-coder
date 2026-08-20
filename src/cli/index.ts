@@ -18,8 +18,8 @@ process.env.AI_AGENT = AI_AGENT_NAME;
 // else — this is the highest-value cut of the cold module-load tax. Code
 // splitting (tsup.config.ts) keeps each command's transitive heavy externals in
 // its own chunk.
-import { fileURLToPath } from "node:url";
 import { traceBoot } from "../core/boot-trace.js";
+import { incompleteInstallationAdvice } from "../core/incomplete-installation.js";
 import { extractGlobalFlags, parseFlags, printError } from "./argv.js";
 
 const HELP = `Clio Coder command line
@@ -302,27 +302,6 @@ function isCommandToken(token: string): boolean {
  * this repository can act on. The filter on our own output directory keeps a
  * module error raised by a user's extension or hook reporting itself normally.
  */
-function incompleteInstallationAdvice(err: unknown): string | null {
-	if ((err as NodeJS.ErrnoException | undefined)?.code !== "ERR_MODULE_NOT_FOUND") return null;
-	const message = err instanceof Error ? err.message : String(err);
-	let outputDir: string;
-	try {
-		outputDir = fileURLToPath(new URL("../", import.meta.url));
-	} catch {
-		return null;
-	}
-	if (!message.includes(outputDir)) return null;
-	return [
-		`${message}`,
-		"",
-		"This Clio Coder installation is incomplete: the command's own module is missing from",
-		`${outputDir}`,
-		"Reinstall to restore it, using the line that matches how you installed:",
-		"  npm install -g @iowarp/clio-coder    # npm install",
-		"  npm run install:local                # source checkout",
-	].join("\n");
-}
-
 /**
  * Route a subcommand to its registered handler, importing only that command's
  * module. Unknown names fail before loading any command graph.
