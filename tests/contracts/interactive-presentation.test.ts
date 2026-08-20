@@ -138,7 +138,15 @@ function harness() {
 		setAutocompleteProvider: () => log.push("editor.autocomplete"),
 	} as unknown as ClioEditor;
 	const dispatchBoard = component() as DispatchBoardView;
-	const chatRenderer = { applyEvent: () => {}, flush: () => {} } as CoalescingChatRenderer;
+	const chatRenderer = {
+		applyEvent: () => {},
+		flush: () => {},
+		mutate: (mutation: () => void) => mutation(),
+		reset: (mutation: () => void) => mutation(),
+		flushAndCommit: async () => {},
+		setSmoothStreamingMode: () => {},
+		dispose: () => {},
+	} as CoalescingChatRenderer;
 	const io = {} as RunIo;
 	const root = component();
 
