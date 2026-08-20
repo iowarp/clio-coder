@@ -412,11 +412,13 @@ Clio loads a local `CLIO-CODER.md` as generated project context on every session
 `clio-coder context init` grounds a draft in the actual source tree, preserves an
 existing handbook until an explicit replacement action, and can adopt existing
 `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor, and Copilot context with
-provenance and conflict reporting. `CLIO-CODER.md` is a gitignored runtime artifact,
-not canonical repository documentation. A `CLIO-CODER.override.md` in a
-subdirectory starts a replacement boundary: it supersedes inherited handbooks
-for that directory and its descendants, and deeper `CLIO-CODER.md` files can
-still add narrower guidance beneath it.
+provenance and conflict reporting. `CLIO-CODER.md` is generated context, not
+canonical repository documentation: it is human-owned and versioned in your
+repository by default, while Clio's runtime state in `.clio-coder/` is
+gitignored by default. A `CLIO-CODER.override.md` in a subdirectory starts a
+replacement boundary: it supersedes inherited handbooks for that directory
+and its descendants, and deeper `CLIO-CODER.md` files can still add narrower
+guidance beneath it.
 
 Alongside it, `clio-coder context index` builds a structural codewiki that the
 `code_nav` tool navigates, so a model can find a symbol without reading half
