@@ -313,9 +313,12 @@ export function createProcessInteractiveShell(
 				});
 				try {
 					// Even when the writable never drains, issue exactly one bounded
-					// final frame. This finite write commits the newest model state
-					// without reopening ordinary frame production.
-					tui.renderNow(true);
+					// final frame. Preserve the renderer's cursor/history state: forcing
+					// a reset here makes TuiMainScreen repaint from the current physical
+					// column and can concatenate the full frame onto the footer. A direct
+					// differential render is still synchronous and commits every newest
+					// component mutation without reopening ordinary frame production.
+					tui.renderNow(false);
 				} catch (error) {
 					const index = frameWaiters.indexOf(waiter);
 					if (index >= 0) frameWaiters.splice(index, 1);
