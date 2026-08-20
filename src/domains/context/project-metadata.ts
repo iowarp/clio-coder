@@ -112,6 +112,25 @@ function tomlTableValue(raw: string, table: string, key: string): string | null 
 	return null;
 }
 
+/**
+ * Whether a TOML file declares the named top-level table, e.g. `tool.tox`.
+ * A trimmed line must start with `[table]` and carry nothing after it but an
+ * optional `# comment`, the only content TOML itself allows there. A raw
+ * `raw.includes("[table]")` check would also fire on a comment mentioning the
+ * table or a string value that happens to contain the same bracketed text;
+ * anchoring to the start of the line rules both out without a TOML parser,
+ * while still accepting the valid `[table] # comment` form that a plain
+ * equality check would have missed.
+ */
+export function hasTomlTable(raw: string, table: string): boolean {
+	const header = `[${table}]`;
+	return raw.split(/\r?\n/u).some((line) => {
+		const trimmed = line.trim();
+		if (!trimmed.startsWith(header)) return false;
+		return /^\s*(?:#.*)?$/u.test(trimmed.slice(header.length));
+	});
+}
+
 /** One `KEY = value` line from a Doxyfile or an INI-shaped config. */
 function keyEqualsValue(raw: string, key: string): string | null {
 	const match = new RegExp(`^[ \\t]*${key}[ \\t]*(?:\\+?=)[ \\t]*(.+)$`, "mu").exec(raw);
