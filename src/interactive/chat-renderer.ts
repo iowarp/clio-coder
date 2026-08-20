@@ -4,11 +4,13 @@
  * Streaming responses fire text, thinking, and cumulative tool-result updates
  * at very high frequency. The TUI's per-event `requestRender()` call rebuilt the
  * entire transcript on every delta, which scaled linearly with response
- * length and made long answers visibly lag. This wrapper applies every
- * event to the panel synchronously (so internal state stays consistent)
- * but defers `requestRender()` for delta events to a single coalesced
- * timer (~16ms = one frame at 60fps). Non-delta events render
- * synchronously so finalizers like `message_end` are never deferred.
+ * length and made long answers visibly lag. This wrapper applies events to
+ * the panel synchronously (so internal state stays consistent) but defers
+ * `requestRender()` for delta events to a single coalesced timer (~16ms =
+ * one frame at 60fps). Non-delta events render synchronously so finalizers
+ * like `message_end` are never deferred. The one exception is the raw
+ * text/thinking wrapper, which is dropped before the panel entirely; see
+ * `isTransparentAssistantWrapper`.
  */
 
 import type {
@@ -61,6 +63,23 @@ const DELTA_TYPES: ReadonlySet<ChatLoopEvent["type"]> = new Set([
 	"tool_execution_update",
 ]);
 
+/**
+ * A raw `message_update` wrapper whose inner event is a text or thinking
+ * delta is transparent to the transcript: the panel ignores it, and the
+ * derived `text_delta`/`thinking_delta` emitted in the same stack (see
+ * turn-runtime's public-event fan-out) is the canonical display input. Yet
+ * this renderer classified the wrapper as non-delta, so every provider chunk
+ * cancelled the pending coalesce window and requested an immediate render.
+ * The coalescer was defeated exactly while streaming, which is the one time
+ * it matters. Wrappers carrying tool-call formation stay on the synchronous
+ * path, because the panel consumes those directly.
+ */
+function isTransparentAssistantWrapper(event: ChatLoopEvent): boolean {
+	if (event.type !== "message_update") return false;
+	const inner = (event as { assistantMessageEvent?: { type?: unknown } }).assistantMessageEvent;
+	return inner?.type === "text_delta" || inner?.type === "thinking_delta";
+}
+
 export interface CreateCoalescingChatRendererDeps {
 	chatPanel: ChatPanel;
 	requestRender: () => void;
@@ -105,6 +124,7 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 
 	return {
 		applyEvent(event) {
+			if (isTransparentAssistantWrapper(event)) return;
 			deps.chatPanel.applyEvent(event);
 			if (DELTA_TYPES.has(event.type)) {
 				deps.onDelta?.();
