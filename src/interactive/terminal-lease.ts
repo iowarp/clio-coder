@@ -93,19 +93,15 @@ export function instantShellEnabled(env: Readonly<Record<string, string | undefi
 	return env[INSTANT_SHELL_ENV] !== "0";
 }
 
-class RootHost implements Component {
-	constructor(private current: Component) {}
+class RootHost extends VStack {
+	constructor(current: Component) {
+		super();
+		this.replace(current);
+	}
 
 	replace(next: Component): void {
-		this.current = next;
-	}
-
-	render(width: number): string[] {
-		return this.current.render(width);
-	}
-
-	invalidate(): void {
-		this.current.invalidate();
+		this.clear();
+		this.addChild(next, { grow: 1, shrink: 1, minSize: 1 });
 	}
 }
 
