@@ -28,11 +28,8 @@ import { openAgentLedger, readAgentLedger } from "../../src/domains/dispatch/age
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { SpawnedWorker, SpawnedWorkerResult, SpawnOptions } from "../../src/domains/dispatch/worker-spawn.js";
-import {
-	createDispatchBackgroundRegistry,
-	createDispatchRunEventRegistry,
-	createDispatchTool,
-} from "../../src/tools/dispatch.js";
+import { createDispatchRunEventRegistry, createDispatchTool } from "../../src/tools/dispatch.js";
+import { createDispatchBackgroundRegistry } from "../../src/tools/dispatch-background.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import type { AgentLedgerBody, AgentLedgerEntry } from "../../src/worker/protocol.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
