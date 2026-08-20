@@ -240,7 +240,7 @@ describe("contracts/config", () => {
 			budget: { concurrency: 0 },
 			targets: [{ runtime: "openai-compat" }],
 			retry: { maxRetries: 1.5 },
-			terminal: { tuiMode: "windowed", fullscreenScrollbar: "sometimes" },
+			terminal: { tuiMode: "windowed", fullscreenScrollbar: "sometimes", smoothStreaming: "sometimes" },
 		});
 		const paths = result.issues.map((issue) => issue.path).sort();
 		deepStrictEqual(paths, [
@@ -249,11 +249,27 @@ describe("contracts/config", () => {
 			"retry.maxRetries",
 			"targets[0].id",
 			"terminal.fullscreenScrollbar",
+			"terminal.smoothStreaming",
 			"terminal.tuiMode",
 		]);
 		// Invalid fields fall back to defaults on the built settings.
 		strictEqual(result.settings.autonomy, DEFAULT_SETTINGS.autonomy);
 		strictEqual(result.settings.budget.concurrency, "auto");
+	});
+
+	it("validates smooth streaming and classifies it as a live presentation setting", () => {
+		for (const mode of ["off", "auto", "on"] as const) {
+			const result = validateSettings({ terminal: { smoothStreaming: mode } });
+			deepStrictEqual(result.issues, []);
+			strictEqual(result.settings.terminal.smoothStreaming, mode);
+		}
+		const next = structuredClone(DEFAULT_SETTINGS);
+		next.terminal.smoothStreaming = "on";
+		deepStrictEqual(diffSettings(DEFAULT_SETTINGS, next), {
+			hotReload: ["terminal.smoothStreaming"],
+			nextTurn: [],
+			restartRequired: [],
+		});
 	});
 
 	it("validates active routing roles and postures as strict unique lists", () => {

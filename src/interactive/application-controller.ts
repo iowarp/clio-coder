@@ -112,6 +112,8 @@ export interface ApplicationControllerDeps {
 	toggleLastThinking: () => boolean;
 	toggleAllThinking: () => boolean;
 	shutdownDisposers: ReadonlyArray<() => void>;
+	/** Settle the last presentation mutation into an accepted/drained frame. */
+	beforeStopUi?: () => Promise<void>;
 	stopUi: () => void;
 	cancelParkedCalls: (reason: string) => void;
 	onShutdown: () => Promise<void>;
@@ -132,7 +134,7 @@ export interface ApplicationControllerDeps {
 	 * hidden, the last private-mode sequence on the wire being `?25l`, where
 	 * `/quit` on the same build ended with `?25h`.
 	 */
-	registerTerminalTeardown?: (teardown: () => void) => void;
+	registerTerminalTeardown?: (teardown: () => void | Promise<void>) => void;
 }
 
 export type ApplicationInputResult = { consume: true } | undefined;
@@ -255,6 +257,13 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 				release("owned interval", () => deps.intervals.clearInterval(interval));
 			}
 			for (const dispose of deps.shutdownDisposers) release("shutdown disposer", dispose);
+			if (deps.beforeStopUi) {
+				try {
+					await deps.beforeStopUi();
+				} catch (error) {
+					failures.push({ step: "final frame", error });
+				}
+			}
 			release("terminal stop", () => deps.stopUi());
 			release("parked calls", () => deps.cancelParkedCalls("Clio Coder shutting down"));
 			// Reported here rather than as each step fails: the terminal is down by
@@ -396,7 +405,14 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	// Every exit gives the terminal back, including the ones that never reach
 	// this controller. Stopping an already-stopped terminal is a no-op, so the
 	// ordinary path running both is harmless.
-	deps.registerTerminalTeardown?.(() => {
+	deps.registerTerminalTeardown?.(async () => {
+		if (deps.beforeStopUi) {
+			try {
+				await deps.beforeStopUi();
+			} catch (error) {
+				failures.push({ step: "final frame", error });
+			}
+		}
 		release("terminal stop", () => deps.stopUi());
 		reportFailures();
 	});

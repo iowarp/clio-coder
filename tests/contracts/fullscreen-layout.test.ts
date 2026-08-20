@@ -2,7 +2,9 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Component, Terminal } from "../../src/engine/tui.js";
 import { TuiAltScreen } from "../../src/engine/tui.js";
+import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { createCoalescingChatRenderer } from "../../src/interactive/chat-renderer.js";
 import { buildFullscreenLayout, buildLayout } from "../../src/interactive/layout.js";
 
 function linesComponent(lines: string[]): Component {
@@ -14,8 +16,8 @@ function linesComponent(lines: string[]): Component {
 
 class CaptureTerminal implements Terminal {
 	readonly writes: string[] = [];
-	readonly columns = 30;
-	readonly rows = 10;
+	columns = 30;
+	rows = 10;
 	readonly kittyProtocolActive = false;
 	private onInput: (data: string) => void = () => {};
 
@@ -128,6 +130,65 @@ describe("fullscreen transcript layout", () => {
 		tui.renderNow(true);
 		strictEqual(tui.viewportTop, atEnd, "next prompt returns to the following marked user turn");
 
+		tui.stop({ preserveScreen: true });
+	});
+
+	it("preserves a frozen transcript viewport through paced output and a mid-queue resize", () => {
+		const terminal = new CaptureTerminal();
+		const chat = createChatPanel({ now: () => 0 });
+		for (let index = 1; index <= 20; index += 1) chat.appendUser(`prompt-${index}`);
+		const layout = buildFullscreenLayout({
+			banner: linesComponent(["banner"]),
+			chat,
+			editor: linesComponent(["editor"]),
+			footer: linesComponent(["footer"]),
+		});
+		const tui = new TuiAltScreen(terminal);
+		tui.setLayoutRoot(layout.root);
+		tui.start();
+		tui.renderNow(true);
+		tui.scrollToTop();
+		tui.renderNow(true);
+		strictEqual(layout.transcript.scrollTop, 0);
+
+		const timers = new Map<number, () => void>();
+		let timerId = 0;
+		const event = {
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "paced output remains ordered after resize",
+			partialText: "paced output remains ordered after resize",
+		} as ChatLoopEvent;
+		const renderer = createCoalescingChatRenderer({
+			chatPanel: chat,
+			requestRender: () => tui.renderNow(true),
+			streamIngress: (candidate) => (candidate === event ? { sequence: 1, generation: "turn", ingressAt: 0 } : null),
+			getSmoothStreamingMode: () => "on",
+			setTimer: (callback) => {
+				const id = ++timerId;
+				timers.set(id, callback);
+				return id;
+			},
+			clearTimer: (id) => void timers.delete(id as number),
+			now: () => 0,
+		});
+		renderer.applyEvent(event);
+
+		terminal.columns = 20;
+		layout.root.invalidate();
+		tui.renderNow(true);
+		strictEqual(layout.transcript.scrollTop, 0, "resize cannot re-enable follow mode while output is queued");
+		const firstTick = [...timers.values()][0];
+		ok(firstTick);
+		firstTick();
+		strictEqual(layout.transcript.scrollTop, 0, "the first paced slice cannot steal a manually frozen viewport");
+
+		renderer.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		strictEqual(layout.transcript.scrollTop, 0, "the final synchronous drain also preserves scroll position");
+		chat.toggleLastThinking();
+		const transcript = chat.render(terminal.columns).join("\n");
+		ok(transcript.includes("paced output"), transcript);
+		ok(transcript.includes("after resize"), transcript);
 		tui.stop({ preserveScreen: true });
 	});
 });

@@ -1315,6 +1315,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"outputVerbosity",
 				"tuiMode",
 				"fullscreenScrollbar",
+				"smoothStreaming",
 			]);
 			if ("showTerminalProgress" in raw.terminal) {
 				const v = expectBoolean(issues, "terminal.showTerminalProgress", raw.terminal.showTerminalProgress);
@@ -1334,6 +1335,11 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				const v = expectString(issues, "terminal.fullscreenScrollbar", raw.terminal.fullscreenScrollbar);
 				if (v === "hidden" || v === "auto" || v === "always") settings.terminal.fullscreenScrollbar = v;
 				else if (v !== undefined) issues.add("terminal.fullscreenScrollbar", "expected hidden, auto, or always");
+			}
+			if ("smoothStreaming" in raw.terminal) {
+				const v = expectString(issues, "terminal.smoothStreaming", raw.terminal.smoothStreaming);
+				if (v === "off" || v === "auto" || v === "on") settings.terminal.smoothStreaming = v;
+				else if (v !== undefined) issues.add("terminal.smoothStreaming", "expected off, auto, or on");
 			}
 		}
 	}

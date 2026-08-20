@@ -9,6 +9,7 @@ import {
 	createProcessInteractiveShell,
 	type InteractiveShellInterval,
 	type InteractiveShellTui,
+	settleLatestInteractiveFrame,
 } from "../../src/interactive/interactive-shell.js";
 
 interface TestTerminal extends Terminal {
@@ -181,5 +182,27 @@ describe("interactive shell ownership", () => {
 			else process.env.CLIO_CODER_RENDER_TRACE = previous;
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+
+	it("issues one final frame after a permanent no-drain bound instead of abandoning model state", async () => {
+		const waits: number[] = [];
+		let renders = 0;
+		const frameId = await settleLatestInteractiveFrame(
+			{
+				whenWritable: async (timeoutMs) => {
+					waits.push(timeoutMs ?? -1);
+					return false;
+				},
+			},
+			7,
+			async () => {
+				renders += 1;
+				return 41;
+			},
+		);
+
+		strictEqual(frameId, 41);
+		strictEqual(renders, 1);
+		deepStrictEqual(waits, [7], "a failed pre-render wait does not add a second unbounded wait");
 	});
 });

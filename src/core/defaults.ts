@@ -115,6 +115,7 @@ export interface RetrySettings {
 export type OutputVerbosity = "minimal" | "default" | "verbose";
 export type TuiMode = "regular" | "fullscreen";
 export type FullscreenScrollbar = "hidden" | "auto" | "always";
+export type SmoothStreaming = "off" | "auto" | "on";
 
 export interface TerminalSettings {
 	showTerminalProgress: boolean;
@@ -124,6 +125,8 @@ export interface TerminalSettings {
 	tuiMode: TuiMode;
 	/** Fullscreen transcript scrollbar visibility. */
 	fullscreenScrollbar: FullscreenScrollbar;
+	/** Presentation-only pacing for streamed assistant text and thinking. */
+	smoothStreaming: SmoothStreaming;
 }
 
 export interface ModelSelectorSettings {
@@ -322,6 +325,7 @@ export const DEFAULT_SETTINGS = {
 		outputVerbosity: "default",
 		tuiMode: "regular",
 		fullscreenScrollbar: "auto",
+		smoothStreaming: "off",
 	} as TerminalSettings,
 	skills: {
 		trustProjectCompatRoots: false,
@@ -538,6 +542,10 @@ terminal:
   tuiMode: regular
   # hidden, auto (visible while scrolling), or always in fullscreen mode.
   fullscreenScrollbar: auto
+  # off preserves immediate 16ms coalescing; auto paces only on a capable,
+  # accessibility-safe local TTY; on requests pacing but still honors stdout
+  # backpressure. CLIO_CODER_SMOOTH_STREAM overrides this for one process.
+  smoothStreaming: off
 
 # Skills are local prompt resources. Project-local compatibility roots such as
 # .agents/skills, .claude/skills, .codex/skills, .github/skills, and

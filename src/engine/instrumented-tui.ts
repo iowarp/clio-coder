@@ -21,17 +21,64 @@ export interface TuiRenderObserver {
 	endPhase(frame: unknown, phase: TuiRenderPhase, phaseToken: unknown): void;
 }
 
+export interface TuiRenderAdmission {
+	readonly blocked: boolean;
+	onWritable(listener: () => void): () => void;
+}
+
+class DeferredRenderAdmission {
+	private pending = false;
+	private force = false;
+	private release: (() => void) | null = null;
+
+	constructor(
+		private readonly admission: TuiRenderAdmission | undefined,
+		private readonly render: (force: boolean) => void,
+	) {}
+
+	request(force: boolean): boolean {
+		if (!this.admission?.blocked) return false;
+		this.pending = true;
+		this.force ||= force;
+		this.release ??= this.admission.onWritable(() => {
+			this.release?.();
+			this.release = null;
+			if (!this.pending) return;
+			const pendingForce = this.force;
+			this.pending = false;
+			this.force = false;
+			this.render(pendingForce);
+		});
+		return true;
+	}
+
+	/** A direct/final render supersedes any older request held behind the gate. */
+	settled(): void {
+		this.pending = false;
+		this.force = false;
+		this.release?.();
+		this.release = null;
+	}
+}
+
 export class InstrumentedTuiMainScreen extends TuiMainScreen {
 	constructor(
 		terminal: Terminal,
 		private readonly renderObserver: TuiRenderObserver,
 		showHardwareCursor?: boolean,
 		logDirectory?: string,
+		renderAdmission?: TuiRenderAdmission,
 	) {
 		super(terminal, showHardwareCursor, logDirectory);
+		this.deferredAdmission = new DeferredRenderAdmission(renderAdmission, (force) => super.requestRender(force));
+	}
+
+	override requestRender(force = false): void {
+		if (!this.deferredAdmission.request(force)) super.requestRender(force);
 	}
 
 	protected override doRender(): void {
+		this.deferredAdmission.settled();
 		if (this.renderObserver.isEnabled?.() === false) {
 			super.doRender();
 			return;
@@ -75,6 +122,7 @@ export class InstrumentedTuiMainScreen extends TuiMainScreen {
 	}
 
 	private currentFrame: unknown | undefined;
+	private readonly deferredAdmission: DeferredRenderAdmission;
 }
 
 export class InstrumentedTuiAltScreen extends TuiAltScreen {
@@ -86,11 +134,18 @@ export class InstrumentedTuiAltScreen extends TuiAltScreen {
 		showHardwareCursor?: boolean,
 		logDirectory?: string,
 		options?: TuiAltScreenOptions,
+		renderAdmission?: TuiRenderAdmission,
 	) {
 		super(terminal, showHardwareCursor, logDirectory, options);
+		this.deferredAdmission = new DeferredRenderAdmission(renderAdmission, (force) => super.requestRender(force));
+	}
+
+	override requestRender(force = false): void {
+		if (!this.deferredAdmission.request(force)) super.requestRender(force);
 	}
 
 	protected override doRender(): void {
+		this.deferredAdmission.settled();
 		if (this.renderObserver.isEnabled?.() === false) {
 			super.doRender();
 			return;
@@ -132,4 +187,6 @@ export class InstrumentedTuiAltScreen extends TuiAltScreen {
 			this.renderObserver.endPhase(frame, phase, phaseToken);
 		}
 	}
+
+	private readonly deferredAdmission: DeferredRenderAdmission;
 }

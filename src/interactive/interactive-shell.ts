@@ -1,12 +1,5 @@
 import type { Component, Terminal, TuiMode, TuiRenderObserver } from "../engine/tui.js";
-import {
-	InstrumentedTuiAltScreen,
-	InstrumentedTuiMainScreen,
-	ProcessTerminal,
-	type TUI,
-	TuiAltScreen,
-	TuiMainScreen,
-} from "../engine/tui.js";
+import { InstrumentedTuiAltScreen, InstrumentedTuiMainScreen, ProcessTerminal, type TUI } from "../engine/tui.js";
 import {
 	createRenderTrace,
 	type RenderTrace,
@@ -14,6 +7,8 @@ import {
 	traceComponentRenders,
 	traceProcessStdout,
 } from "./render-trace.js";
+import type { StdoutBackpressureGate } from "./stdout-backpressure.js";
+import { installStdoutBackpressureGate } from "./stdout-backpressure.js";
 
 export interface InteractiveShellTui {
 	readonly mode?: TuiMode;
@@ -23,6 +18,7 @@ export interface InteractiveShellTui {
 	start(): void;
 	stop(): void;
 	requestRender(): void;
+	renderNow?(force?: boolean): void;
 }
 
 export interface InteractiveShellInterval {
@@ -51,6 +47,12 @@ export interface InteractiveShell<
 	anchor(): Promise<number>;
 	releaseAnchor(): void;
 	stop(): void;
+	/** Issue the latest model frame and wait a finite bound for stdout drain. */
+	commitCurrentFrame(timeoutMs?: number): Promise<number | null>;
+	/** True after this process has observed stdout saturation at least once. */
+	hasObservedBackpressure(): boolean;
+	/** Enable admission control only while presentation pacing is actually active. */
+	setStreamPacingActive(active: boolean): void;
 	/** Await asynchronous teardown work started by stop(), including trace-file settlement. */
 	settle(): Promise<void>;
 	complete(code: number): void;
@@ -128,6 +130,16 @@ export function createInteractiveShell<TTerminal extends Terminal, TTui extends 
 				}
 			}
 		},
+		async commitCurrentFrame(): Promise<number | null> {
+			if (!tui.renderNow) {
+				tui.requestRender();
+				return null;
+			}
+			tui.renderNow(false);
+			return null;
+		},
+		hasObservedBackpressure: () => false,
+		setStreamPacingActive: () => {},
 		settle(): Promise<void> {
 			return stopSettlement ?? Promise.resolve();
 		},
@@ -150,14 +162,32 @@ export function getActiveRenderTrace(): RenderTrace | null {
 	return activeRenderTrace;
 }
 
+/**
+ * Wait for ordinary admission, but never let a missing drain erase the final
+ * model state. After the finite pre-render bound, exactly one caller-supplied
+ * final frame is still issued; a post-render drain wait is likewise bounded.
+ */
+export async function settleLatestInteractiveFrame(
+	gate: Pick<StdoutBackpressureGate, "whenWritable"> | null,
+	timeoutMs: number,
+	renderFrame: () => Promise<number>,
+): Promise<number> {
+	const writableBeforeRender = gate ? await gate.whenWritable(timeoutMs) : true;
+	const frameId = await renderFrame();
+	if (writableBeforeRender && gate) await gate.whenWritable(timeoutMs);
+	return frameId;
+}
+
 /** Production factories stay here so the composition root does not own them. */
 export function createProcessInteractiveShell(
-	options: { tuiMode?: TuiMode; onFirstFrameCommit?: (frameId: number) => void } = {},
+	options: { tuiMode?: TuiMode; onFirstFrameCommit?: (frameId: number) => void; streamPacingActive?: boolean } = {},
 ): InteractiveShell<ProcessTerminal, TUI> {
 	const tracePath = renderTracePath();
 	let restoreStdout: (() => void) | null = null;
 	let restoreFirstFrameStdout: (() => void) | null = null;
 	let restoreRoot: (() => void) | null = null;
+	let backpressure: StdoutBackpressureGate | null = null;
+	let observedBackpressure = false;
 	if (tracePath) {
 		try {
 			activeRenderTrace = createRenderTrace(tracePath);
@@ -205,21 +235,62 @@ export function createProcessInteractiveShell(
 		beginPhase: () => null,
 		endPhase: () => {},
 	};
-	const renderObserver = trace ?? firstFrameOnlyObserver;
-	return createInteractiveShell({
+	const primaryObserver = trace ?? (options.onFirstFrameCommit ? firstFrameOnlyObserver : null);
+	let committedFrameSequence = 0;
+	const frameWaiters: Array<{ resolve: (frameId: number) => void }> = [];
+	const renderObserver: TuiRenderObserver = {
+		isEnabled: () => frameWaiters.length > 0 || (primaryObserver !== null && (primaryObserver.isEnabled?.() ?? true)),
+		beginFrame: (fields) => ({
+			primary: primaryObserver?.beginFrame(fields),
+			primaryActive: primaryObserver !== null && (primaryObserver.isEnabled?.() ?? true),
+			frameId: ++committedFrameSequence,
+		}),
+		endFrame: (token) => {
+			const frame = token as { primary: unknown; primaryActive: boolean; frameId: number };
+			if (frame.primaryActive) primaryObserver?.endFrame(frame.primary);
+			for (const waiter of frameWaiters.splice(0)) waiter.resolve(frame.frameId);
+		},
+		beginPhase: (token, phase) => {
+			const frame = token as { primary: unknown; primaryActive: boolean };
+			return frame.primaryActive ? primaryObserver?.beginPhase(frame.primary, phase) : null;
+		},
+		endPhase: (token, phase, phaseToken) => {
+			const frame = token as { primary: unknown; primaryActive: boolean };
+			if (frame.primaryActive) primaryObserver?.endPhase(frame.primary, phase, phaseToken);
+		},
+	};
+	const renderAdmission = {
+		get blocked() {
+			return backpressure?.blocked ?? false;
+		},
+		onWritable(listener: () => void) {
+			if (backpressure) return backpressure.onWritable(listener);
+			queueMicrotask(listener);
+			return () => {};
+		},
+	};
+	const setStreamPacingActive = (active: boolean): void => {
+		if (active) {
+			backpressure ??= installStdoutBackpressureGate();
+			return;
+		}
+		if (!backpressure) return;
+		observedBackpressure ||= backpressure.observed;
+		backpressure.restore();
+		backpressure = null;
+	};
+	setStreamPacingActive(options.streamPacingActive === true);
+	const shell = createInteractiveShell({
 		createTerminal: () => new ProcessTerminal(),
 		createTui: (terminal) =>
 			options.tuiMode === "fullscreen"
-				? options.onFirstFrameCommit || trace
-					? new InstrumentedTuiAltScreen(terminal, renderObserver)
-					: new TuiAltScreen(terminal)
-				: options.onFirstFrameCommit || trace
-					? new InstrumentedTuiMainScreen(terminal, renderObserver)
-					: new TuiMainScreen(terminal),
+				? new InstrumentedTuiAltScreen(terminal, renderObserver, undefined, undefined, undefined, renderAdmission)
+				: new InstrumentedTuiMainScreen(terminal, renderObserver, undefined, undefined, renderAdmission),
 		prepareRoot: (root) => {
 			if (trace) restoreRoot = traceComponentRenders(root, trace);
 		},
 		onStop: async () => {
+			setStreamPacingActive(false);
 			restoreRoot?.();
 			restoreRoot = null;
 			restoreStdout?.();
@@ -230,4 +301,30 @@ export function createProcessInteractiveShell(
 			if (trace) await trace.close();
 		},
 	});
+	return {
+		...shell,
+		async commitCurrentFrame(timeoutMs = 30_000): Promise<number | null> {
+			return await settleLatestInteractiveFrame(backpressure, timeoutMs, async () => {
+				const tui = shell.tui as TUI & { renderNow(force?: boolean): void };
+				const waiter: { resolve: (frameId: number) => void } = { resolve: () => {} };
+				const frame = new Promise<number>((resolve) => {
+					waiter.resolve = resolve;
+					frameWaiters.push(waiter);
+				});
+				try {
+					// Even when the writable never drains, issue exactly one bounded
+					// final frame. This finite write commits the newest model state
+					// without reopening ordinary frame production.
+					tui.renderNow(true);
+				} catch (error) {
+					const index = frameWaiters.indexOf(waiter);
+					if (index >= 0) frameWaiters.splice(index, 1);
+					throw error;
+				}
+				return await frame;
+			});
+		},
+		hasObservedBackpressure: () => observedBackpressure || backpressure?.observed === true,
+		setStreamPacingActive,
+	};
 }
