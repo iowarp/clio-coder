@@ -15,8 +15,17 @@
 process.title = "clio-coder-worker";
 
 import { AI_AGENT_NAME } from "../core/agent-environment.js";
+import { deleteInjectedCompileCacheFrom } from "../core/compile-cache.js";
 
 process.env.AI_AGENT = AI_AGENT_NAME;
+
+// Consume the compile-cache pair the dispatcher injected for THIS entry's
+// module graph. Node read NODE_COMPILE_CACHE at bootstrap, before any of this
+// ran, so the worker's own cache stays enabled; deleting the pair here is what
+// keeps it out of every child this process spawns: bash tool commands, hooks,
+// and external runtime subprocesses (claude, antigravity) that would otherwise
+// inherit the unfiltered environment and write into Clio's cache.
+deleteInjectedCompileCacheFrom(process.env);
 
 // Marks this process, and every child a worker's own bash tool spawns, as
 // running inside a dispatched worker rather than the operator's interactive
