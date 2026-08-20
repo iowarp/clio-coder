@@ -378,34 +378,38 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		decision: SafetyDecision,
 		options?: ToolInvokeOptions,
 	): Promise<RegistryVerdict> => {
-		// The hook layer is the only control stage past safety admission. Guards
-		// (loop, protected artifacts, dispatch dedup) are before_tool
-		// registrations; the first block_tool effect decides the verdict.
-		const beforeEffects = runToolHook("before_tool", spec, call, decision, options);
-		const block = firstBlockToolEffect(beforeEffects);
-		if (block) {
-			const verdict = guardBlockedVerdict(decision, call.tool, block.reason);
-			recordRegistryDisposition(call, verdict.decision, "blocked", {
-				reasonCode: GUARD_BLOCK_REASON_CODE,
-				reasons: [block.reason],
-			});
-			return verdict;
-		}
 		try {
-			const preparedArgs = prepareToolArgs(spec, call.args ?? {});
-			const result = shapeToolResult(spec, await spec.run(preparedArgs, options), options);
-			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
-			const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options);
-			return { kind: "ok", result: finalResult, decision };
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			const result = shapeToolResult(spec, { kind: "error", message }, options);
-			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
-			return {
-				kind: "ok",
-				result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options),
-				decision,
-			};
+			// The hook layer is the only control stage past safety admission. Guards
+			// (loop, protected artifacts, dispatch dedup) are before_tool
+			// registrations; the first block_tool effect decides the verdict. Keep
+			// this gate inside the admission cleanup boundary: dispatch may already
+			// own a provisional reservation by the time a guard blocks execution.
+			const beforeEffects = runToolHook("before_tool", spec, call, decision, options);
+			const block = firstBlockToolEffect(beforeEffects);
+			if (block) {
+				const verdict = guardBlockedVerdict(decision, call.tool, block.reason);
+				recordRegistryDisposition(call, verdict.decision, "blocked", {
+					reasonCode: GUARD_BLOCK_REASON_CODE,
+					reasons: [block.reason],
+				});
+				return verdict;
+			}
+			try {
+				const preparedArgs = prepareToolArgs(spec, call.args ?? {});
+				const result = shapeToolResult(spec, await spec.run(preparedArgs, options), options);
+				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
+				const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options);
+				return { kind: "ok", result: finalResult, decision };
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				const result = shapeToolResult(spec, { kind: "error", message }, options);
+				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
+				return {
+					kind: "ok",
+					result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options),
+					decision,
+				};
+			}
 		} finally {
 			disposeAdmissionArgs(spec, call.args ?? {});
 		}
