@@ -59,9 +59,11 @@ current source, tests, and `CHANGELOG.md`.
 | Pi SDK boundary: upstream primitives, attribution, and Clio-owned product policies | [pi-boundary.md](pi-boundary.md) ([Interactive Blueprint](html/pi_boundary_blueprint.html)) |
 
 Every project Clio works in gets its context from a local `CLIO-CODER.md`,
-bootstrapped and maintained by `clio-coder context init`. It is a gitignored
-runtime artifact rather than repository documentation; run
-`clio-coder context init` in this checkout to generate one for Clio's own source.
+bootstrapped and maintained by `clio-coder context init`. It's human-owned and
+versioned by default; this repo's own root `CLIO-CODER.md` is the exception,
+gitignored here for dogfooding so this checkout's copy doesn't collide with
+Clio's own committed docs. Run `clio-coder context init` in this checkout to
+generate one for Clio's own source.
 
 ## Developer Quick Start
 
