@@ -129,7 +129,7 @@ describe("clio broken-state recovery messages", { concurrency: false }, () => {
 		// all printed just as happily.
 		const fresh = await runCli([], { env: scratch.env });
 		strictEqual(fresh.code, 0, `stderr=${fresh.stderr}`);
-		match(fresh.stdout, /EXPERIMENTAL/);
+		match(fresh.stdout, /Clio Coder/);
 		match(fresh.stdout, /no model target configured/);
 		match(fresh.stdout, /clio-coder configure/);
 		ok(!/· ready/.test(fresh.stdout), "an unconfigured install may not describe itself as ready");

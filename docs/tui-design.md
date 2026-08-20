@@ -159,7 +159,7 @@ Interactive startup uses one terminal lease across both boot stages. Stage 0 own
 ### 5.1 Welcome Launchpad & Session Header
 
 - **Pre-Submit Launchpad**: Before the first prompt, renders a compact launchpad at line 0 with bold CAPS section tags (`WORKSPACE`, `ROUTE`, `NEXT`), honest readiness state, and a context-sensitive next action (e.g. `ctx missing · /context init`, `ctx checking…`, or `ctx ready · type a task`). Asynchronous repository probes use height-stable dim placeholders (`factsPending`).
-- **Session Header Collapse**: On first user submission, the launchpad deliberately collapses into an immutable, single-line session header (`>C_ Clio Coder vX.Y.Z · EXPERIMENTAL · ctx ready · type a task`) so the conversation transcript owns the viewport.
+- **Session Header Collapse**: On first user submission, the launchpad deliberately collapses into an immutable, single-line session header (`>C_ Clio Coder vX.Y.Z · <workspace · git branch> · <target·model · ready> · ctx ready · type a task`) so the conversation transcript owns the viewport while the header keeps naming where Clio works, which route answers, and what the context is ready for.
 
 ### 5.2 Composer (ClioEditor)
 

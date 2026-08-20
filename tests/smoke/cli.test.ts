@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -148,11 +148,12 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		match(result.stdout, /clio-coder run \[flags\] <task>/);
 	});
 
-	it("shows the experimental warning in the bare CLI startup banner", async () => {
+	it("brands the bare CLI startup banner without a maturity warning", async () => {
 		const result = await runCli([], { env: scratch.env });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
-		match(result.stdout, /EXPERIMENTAL/);
-		match(result.stdout, /may break or change/i);
+		match(result.stdout, /Clio Coder/);
+		match(result.stdout, /Context Layer for I\/O/);
+		doesNotMatch(result.stdout, /EXPERIMENTAL|may break or change/i);
 	});
 
 	/**

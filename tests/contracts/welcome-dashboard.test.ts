@@ -2,7 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import {
@@ -213,22 +213,32 @@ describe("welcome-dashboard and footer integration tests", () => {
 		ok(!joined.includes(stats.autonomy), "autonomy is already owned by the footer and must not be repainted here");
 	});
 
-	it("retains EXPERIMENTAL as warning metadata in launchpad and session modes", () => {
+	it("collapses to one session header line that names the workspace, the route, and the next action", () => {
 		const stats = deriveWelcomeDashboardStats({
 			providers: mockProviders,
 			observability: mockObservability,
 			getSettings: () => mockSettings,
 		});
 
+		const wide = buildWelcomeDashboardLines(stats, 160, "session");
+		strictEqual(wide.length, 1, "the session header is exactly one line");
+		const header = stripAnsi(wide[0] ?? "");
+		ok(header.startsWith(">C_ Clio Coder v"), header);
+		ok(header.includes(basename(stats.cwd)), `the header names where Clio is working: ${header}`);
+		ok(header.includes("mock-target · gemini-3.5-flash · ready"), `the header names the route: ${header}`);
+		match(header, /ctx (ready|missing|checking)/u, `the header names the next action: ${header}`);
+		ok(!/EXPERIMENTAL|may break/u.test(header), `maturity caveats stay out of the per-turn header: ${header}`);
+
 		for (const width of [120, 80, 40]) {
 			for (const mode of ["launchpad", "session"] as const) {
 				const rendered = buildWelcomeDashboardLines(stats, width, mode).map(stripAnsi).join("\n");
-				ok(rendered.includes("EXPERIMENTAL"), `${mode} width ${width}: ${rendered}`);
+				ok(!/EXPERIMENTAL|may break/u.test(rendered), `${mode} width ${width}: ${rendered}`);
+				if (mode === "session") strictEqual(buildWelcomeDashboardLines(stats, width, mode).length, 1);
 			}
 		}
 	});
 
-	it("keeps the EXPERIMENTAL safety warning bold under NO_COLOR", () => {
+	it("keeps the Clio Coder title bold under NO_COLOR", () => {
 		const source = `
 			import { buildWelcomeDashboardLines } from "./src/interactive/welcome-dashboard.ts";
 			const stats = {
@@ -245,8 +255,8 @@ describe("welcome-dashboard and footer integration tests", () => {
 		strictEqual(child.status, 0, child.stderr);
 		ok(!new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*38(?:;|m)`).test(child.stdout));
 		ok(
-			child.stdout.includes(`${String.fromCharCode(27)}[1mEXPERIMENTAL`),
-			`NO_COLOR must retain a bold EXPERIMENTAL run: ${JSON.stringify(child.stdout)}`,
+			child.stdout.includes(`${String.fromCharCode(27)}[1mClio Coder`),
+			`NO_COLOR must retain a bold title run: ${JSON.stringify(child.stdout)}`,
 		);
 	});
 
@@ -309,7 +319,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 		strictEqual(stats.wikiPageCount, 1);
 		strictEqual(stats.wikiStatus, "fresh");
 		ok(stats.wikiDigestExcerpt.includes("src/index.ts"));
-		strictEqual(buildWelcomeDashboardLines(stats, 120).length, 6);
+		strictEqual(buildWelcomeDashboardLines(stats, 120).length, 5);
 	});
 
 	it("renders every framed line at exactly the requested width (border alignment)", () => {
@@ -372,7 +382,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 		});
 
 		for (const width of [40, 80, 120]) {
-			strictEqual(buildWelcomeDashboardLines(stats, width).length, width < 64 ? 5 : 6, `launchpad width ${width}`);
+			strictEqual(buildWelcomeDashboardLines(stats, width).length, width < 64 ? 4 : 5, `launchpad width ${width}`);
 			strictEqual(buildWelcomeDashboardLines(stats, width, "session").length, 1, `session width ${width}`);
 		}
 	});
