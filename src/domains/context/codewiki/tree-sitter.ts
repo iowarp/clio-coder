@@ -13,7 +13,7 @@ import type {
 	ExtractedSymbol,
 	LanguageExtraction,
 	LanguageExtractor,
-} from "./indexer.js";
+} from "./schema.js";
 
 const { Language, Parser } = TreeSitter;
 

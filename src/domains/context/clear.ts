@@ -2,6 +2,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import type { BootstrapIo } from "./bootstrap.js";
+import { coordinateCodewikiExclusive } from "./codewiki/coordinator.js";
 
 export interface RunContextClearInput {
 	cwd?: string;
@@ -62,18 +63,21 @@ export async function runContextClear(input: RunContextClearInput = {}): Promise
 		return { action: "cancelled", removed: [], preserved: [...PRESERVED_CONTEXT_PATHS] };
 	}
 
-	const removed: string[] = [];
-	for (const relPath of ACCUMULATED_CONTEXT_PATHS) removeIfPresent(cwd, relPath, removed);
+	const { removed, preserved } = await coordinateCodewikiExclusive(cwd, async (workspace) => {
+		const removed: string[] = [];
+		for (const relPath of ACCUMULATED_CONTEXT_PATHS) removeIfPresent(workspace, relPath, removed);
 
-	const preserved = [...PRESERVED_CONTEXT_PATHS];
-	if (input.all === true) {
-		const confirmedAll = await input.confirmAll?.();
-		if (confirmedAll === true) {
-			removeIfPresent(cwd, "CLIO-CODER.md", removed);
-			const index = preserved.indexOf("CLIO-CODER.md");
-			if (index !== -1) preserved.splice(index, 1);
+		const preserved = [...PRESERVED_CONTEXT_PATHS];
+		if (input.all === true) {
+			const confirmedAll = await input.confirmAll?.();
+			if (confirmedAll === true) {
+				removeIfPresent(workspace, "CLIO-CODER.md", removed);
+				const index = preserved.indexOf("CLIO-CODER.md");
+				if (index !== -1) preserved.splice(index, 1);
+			}
 		}
-	}
+		return { removed, preserved };
+	});
 
 	out(
 		input.io,

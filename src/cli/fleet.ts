@@ -34,7 +34,7 @@ import {
 	resultContractAuthorship,
 } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
-import { ContextDomainModule } from "../domains/context/index.js";
+import { ContextDomainModule } from "../domains/context/runtime.js";
 import { type CapacityDrain, capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
 import { runCodeStep } from "../domains/dispatch/code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "../domains/dispatch/code-step-store.js";

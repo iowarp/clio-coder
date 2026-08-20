@@ -3,17 +3,16 @@ import { basename, join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readClioVersion } from "../core/package-root.js";
 import { EXPERIMENTAL_RELEASE_WARNING } from "../core/release.js";
+import { loadProjectClioMd } from "../domains/context/clio-md.js";
+import { readCodewiki, readCodewikiAsync } from "../domains/context/codewiki/artifact.js";
+import { renderCodewikiDigest } from "../domains/context/codewiki/digest.js";
+import { listWikiPages } from "../domains/context/wiki/layout.js";
 import {
-	listWikiPages,
-	loadProjectClioMd,
-	readCodewiki,
-	readCodewikiAsync,
-	renderCodewikiDigest,
 	type WikiStaleness,
 	wikiCompleteness,
 	wikiStaleness,
 	wikiStalenessAsync,
-} from "../domains/context/index.js";
+} from "../domains/context/wiki/staleness.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {

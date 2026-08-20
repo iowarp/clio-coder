@@ -5,7 +5,7 @@ import {
 	renderProjectContextFragment,
 	renderProjectTypeFragment,
 } from "./clio-md.js";
-import { readCodewiki } from "./codewiki/indexer.js";
+import { readCodewiki } from "./codewiki/artifact.js";
 import type { ProjectPromptContext } from "./contract.js";
 import { computeFingerprintCached, isStale } from "./fingerprint.js";
 import { readClioState } from "./state.js";

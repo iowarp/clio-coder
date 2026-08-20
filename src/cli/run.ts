@@ -7,7 +7,7 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
-import { createContextDomainModule } from "../domains/context/index.js";
+import { createContextDomainModule } from "../domains/context/runtime.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
