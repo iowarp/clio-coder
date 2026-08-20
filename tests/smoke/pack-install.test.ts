@@ -12,6 +12,7 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
+	chmodSync,
 	cpSync,
 	existsSync,
 	mkdirSync,
@@ -20,6 +21,7 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -219,64 +221,94 @@ export const clioRuntimes = [{
 		});
 	});
 
-	it("returns the standard reinstall diagnostic when an installed lazy chunk is missing", async () => {
+	it("returns named reinstall guidance when each targeted installed lazy-tool chunk is missing", async () => {
 		const brokenRoot = join(prefix, "node_modules", "@iowarp", "clio-coder-broken");
 		cpSync(installedRoot, brokenRoot, { recursive: true });
-		const chunks = emittedJavaScriptContaining(brokenRoot, "web_fetch: binary or unsupported content type");
-		ok(chunks.size > 0, "the copied install must contain a discoverable web_fetch implementation chunk");
-		const missingNames = [...chunks].map((path) => path.slice(path.lastIndexOf("/") + 1));
-		for (const path of chunks) rmSync(path, { force: true });
-
-		const home = makeScratchHome("clio-pack-broken-lazy-");
-		const coverageDir = mkdtempSync(join(tmpdir(), "clio-pack-broken-lazy-coverage-"));
-		const cwd = join(work, "broken-lazy-foreign-cwd");
-		mkdirSync(cwd, { recursive: true });
 		const brokenBin = join(brokenRoot, "dist", "cli", "index.js");
-		const initialized = await runCliWithCoverage({
-			bin: brokenBin,
-			args: ["doctor", "--fix"],
-			cwd,
-			env: home.env,
-			coverageDir,
-		});
-		strictEqual(initialized.code, 0, `stdout=${initialized.stdout} stderr=${initialized.stderr}`);
-		rmSync(coverageDir, { recursive: true, force: true });
-		mkdirSync(coverageDir, { recursive: true });
-
-		const model = await startOpenAICompatFixture("broken install diagnostic delivered", {
-			toolCall: {
+		const cases = [
+			{
+				name: "dispatch",
+				marker: "dispatch: pending gate evidence recovery failed closed",
+				arguments: { list: true },
+			},
+			{
+				name: "monitor",
+				marker: "collect never blocks; timeout_ms is ignored",
+				arguments: { mode: "list" },
+			},
+			{
+				name: "steer",
+				marker: "steer queued for run",
+				arguments: { run_id: "missing-installed-run", action: "cancel" },
+			},
+			{
 				name: "web_fetch",
+				marker: "web_fetch: binary or unsupported content type",
 				arguments: { url: "http://127.0.0.1:1/must-not-run", format: "raw" },
 			},
-		});
-		seedOpenAICompatToolOrchestrator(join(home.dir, "config"), model.url, "full-auto");
-		try {
-			const result = await runCliWithCoverage({
-				bin: brokenBin,
-				args: ["--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", "fetch"],
-				cwd,
-				env: {
-					...home.env,
-					CLIO_CODER_TEST_OPENAI_KEY: "broken-pack-key",
-					CLIO_CODER_RESIDENCY: "observe",
-				},
-				coverageDir,
+		] as const;
+
+		for (const testCase of cases) {
+			const chunks = emittedJavaScriptContaining(brokenRoot, testCase.marker);
+			ok(chunks.size > 0, `the copied install must contain a discoverable ${testCase.name} implementation chunk`);
+			const saved = [...chunks].map((path) => ({
+				path,
+				contents: readFileSync(path),
+				mode: statSync(path).mode,
+				name: path.slice(path.lastIndexOf("/") + 1),
+			}));
+			for (const chunk of saved) rmSync(chunk.path, { force: true });
+
+			const home = makeScratchHome(`clio-pack-broken-${testCase.name}-`);
+			const coverageDir = mkdtempSync(join(tmpdir(), `clio-pack-broken-${testCase.name}-coverage-`));
+			const cwd = join(work, `broken-${testCase.name}-foreign-cwd`);
+			mkdirSync(cwd, { recursive: true });
+			const model = await startOpenAICompatFixture(`${testCase.name} broken install diagnostic delivered`, {
+				toolCall: { name: testCase.name, arguments: testCase.arguments },
 			});
-			strictEqual(result.code, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
-			const providerHistory = JSON.stringify(model.requests);
-			match(providerHistory, /installation is incomplete/);
-			match(providerHistory, /npm install -g @iowarp\/clio-coder/);
-			match(providerHistory, /npm run install:local/);
-			ok(
-				missingNames.some((name) => providerHistory.includes(name)),
-				"the diagnostic must name the missing chunk",
-			);
-			match(result.stdout, /broken install diagnostic delivered/);
-		} finally {
-			model.server.closeAllConnections();
-			await closeServer(model.server);
-			home.cleanup();
-			rmSync(coverageDir, { recursive: true, force: true });
+			try {
+				const initialized = await runCliWithCoverage({
+					bin: brokenBin,
+					args: ["doctor", "--fix"],
+					cwd,
+					env: home.env,
+					coverageDir,
+				});
+				strictEqual(initialized.code, 0, `tool=${testCase.name} stdout=${initialized.stdout} stderr=${initialized.stderr}`);
+				rmSync(coverageDir, { recursive: true, force: true });
+				mkdirSync(coverageDir, { recursive: true });
+				seedOpenAICompatToolOrchestrator(join(home.dir, "config"), model.url, "full-auto");
+				const result = await runCliWithCoverage({
+					bin: brokenBin,
+					args: ["--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", `invoke ${testCase.name}`],
+					cwd,
+					env: {
+						...home.env,
+						CLIO_CODER_TEST_OPENAI_KEY: "broken-pack-key",
+						CLIO_CODER_RESIDENCY: "observe",
+					},
+					coverageDir,
+				});
+				strictEqual(result.code, 0, `tool=${testCase.name} stdout=${result.stdout} stderr=${result.stderr}`);
+				const providerHistory = JSON.stringify(model.requests);
+				match(providerHistory, /installation is incomplete/);
+				match(providerHistory, /npm install -g @iowarp\/clio-coder/);
+				match(providerHistory, /npm run install:local/);
+				ok(
+					saved.some((chunk) => providerHistory.includes(chunk.name)),
+					`${testCase.name} diagnostic must name its independently missing chunk`,
+				);
+				match(result.stdout, new RegExp(`${testCase.name} broken install diagnostic delivered`));
+			} finally {
+				model.server.closeAllConnections();
+				await closeServer(model.server);
+				home.cleanup();
+				rmSync(coverageDir, { recursive: true, force: true });
+				for (const chunk of saved) {
+					writeFileSync(chunk.path, chunk.contents);
+					chmodSync(chunk.path, chunk.mode);
+				}
+			}
 		}
 	});
 

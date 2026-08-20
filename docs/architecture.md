@@ -136,13 +136,30 @@ must go through the coordinator.
 ## Lazy built-in tool boundary
 
 The registry always owns one complete, immutable `ToolSpec` surface before a
-model turn starts. `context`, `code_nav`, `verify`, and `web_fetch` keep their
+model turn starts. `context`, `code_nav`, `verify`, `web_fetch`, `dispatch`,
+`monitor`, and `steer` keep their
 name, description, TypeBox schema, action class, execution mode, synchronous
 argument hooks, source provenance, and policy metadata in lightweight surface
 modules. `registerAllTools` registers those surfaces in the same order as every
 other built-in; capability discovery, worker attestation, provider schema
 serialization, safety classification, autonomy and permission admission, and
 `before_tool` middleware therefore run without evaluating the implementation.
+The worker composition root imports `core-bootstrap.ts` directly, so its real
+built entry never evaluates the orchestrator-only dispatch, monitor, or steer
+runners. The orchestrator appends those three tools in their historical order.
+
+Dispatch is the one stateful lazy boundary. Its synchronous admission controller
+owns the exact WeakMap/WeakSet identities for trusted plans, parsed requests,
+capacity reservations, Scout plans, and prepared arguments. The dynamically
+loaded runner receives that same controller state; it never reconstructs an
+approved call. A deeply frozen, discriminated execution snapshot also pins the
+normalized requests, mode, review/compete settings, detach flag, timeout, output
+bound, and an `apply_winner` branch plus absolute repository destination before
+middleware or an approval prompt can expose the prepared argument identity. The
+winner destination is part of the rendered and hashed approval artifact.
+Admission disposal is one registry-owned finally boundary, so a
+middleware guard block, ordinary return, or thrown body releases a provisional
+reservation exactly once.
 
 Only the admitted `run` step crosses `src/tools/lazy-tool.ts`. One cached promise
 owns the implementation import, including a deterministic failure, so concurrent

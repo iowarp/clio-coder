@@ -96,7 +96,7 @@ export interface DispatchPlanView {
 	/** Whole-plan deadline for a Scout dependency plan. */
 	deadlineMs?: number;
 	/** Supervised compete-winner confirmation, when this is an apply action. */
-	confirmation?: { branch: string; group: string; index: number };
+	confirmation?: { branch: string; group: string; index: number; cwd?: string };
 }
 
 export const RESOLVED_DISPATCH_PLAN_ARGUMENT = "__clio_resolved_dispatch_plan";
@@ -130,7 +130,7 @@ export interface ResolvedDispatchPlanArtifact {
 	>;
 	costCeilingUsd: number;
 	deadlineMs: number | null;
-	confirmation?: { branch: string; group: string; index: number };
+	confirmation?: { branch: string; group: string; index: number; cwd?: string };
 }
 
 export function withResolvedPlanTaskPin(
@@ -290,7 +290,7 @@ function renderPlanText(
 	];
 	if (confirmation !== undefined) {
 		lines.push(
-			`winner confirmation: group=${safeField(confirmation.group)} candidate=${confirmation.index} branch=${safeField(confirmation.branch)}`,
+			`winner confirmation: group=${safeField(confirmation.group)} candidate=${confirmation.index} branch=${safeField(confirmation.branch)}${confirmation.cwd === undefined ? "" : ` cwd=${safeField(confirmation.cwd)}`}`,
 		);
 	}
 	if (source !== null) {
@@ -544,11 +544,15 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 	if (value.confirmation !== undefined) {
 		if (
 			!isRecord(value.confirmation) ||
-			Object.keys(value.confirmation).sort().join("\u0000") !== "branch\u0000group\u0000index" ||
+			!["branch\u0000group\u0000index", "branch\u0000cwd\u0000group\u0000index"].includes(
+				Object.keys(value.confirmation).sort().join("\u0000"),
+			) ||
 			typeof value.confirmation.branch !== "string" ||
 			value.confirmation.branch.trim().length === 0 ||
 			typeof value.confirmation.group !== "string" ||
 			value.confirmation.group.trim().length === 0 ||
+			(value.confirmation.cwd !== undefined &&
+				(typeof value.confirmation.cwd !== "string" || value.confirmation.cwd.trim().length === 0)) ||
 			!Number.isInteger(value.confirmation.index) ||
 			Number(value.confirmation.index) < 1
 		) {
@@ -558,6 +562,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			branch: value.confirmation.branch.trim(),
 			group: value.confirmation.group.trim(),
 			index: Number(value.confirmation.index),
+			...(value.confirmation.cwd === undefined ? {} : { cwd: value.confirmation.cwd.trim() }),
 		};
 	}
 	if (value.tasks.length === 0 && confirmation === undefined) return null;

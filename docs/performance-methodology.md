@@ -312,6 +312,61 @@ The independently blocking evidence is the absence/presence graph contract,
 credential parity, plugin registry identity, provider behavior suites, and the
 installed foreign-cwd turn.
 
+### Lazy orchestrator controls and worker graph separation
+
+`dispatch`, `monitor`, and `steer` now advertise their unchanged schemas,
+descriptions, source provenance, policy metadata, and execution modes without
+evaluating their runners. Dispatch keeps synchronous plan admission in a
+lightweight controller: the exact argument object and its six identity-sensitive
+WeakMap/WeakSet stores cross into the first-use runner, so dynamic loading cannot
+reconstruct an approval, parsed request, Scout plan, or capacity reservation. A
+deeply frozen discriminated snapshot selects list, ordinary dispatch, or winner
+application and pins the admission-time plan view, normalized requests,
+review/compete settings, detach, timeout, output limit, winner branch, and
+absolute repository destination. The destination is rendered into the approval
+text and hash, so middleware or a permission observer cannot substitute it after
+the prompt.
+The registry owns admission disposal across middleware guard blocks and runner
+settlement. Monitor and steer use the same immutable-surface loader as the
+earlier four lazy tools. The worker entry imports the core bootstrap directly
+and therefore never registers or evaluates these orchestrator-only runners.
+
+The V8 coverage harness now advertises all seven lazy tool schemas in one real
+provider request, proves every implementation root absent, and invokes each in
+a fresh process. For the three orchestrator controls it recursively follows the
+emitted static-import graph, classifies the surface/worker-shared closure, and
+proves the whole runner-exclusive closure absent before admission and present
+after invocation. The three discoverable runner entries total 113,983 bytes
+(`dispatch` 83,800; `monitor` 27,209; `steer` 2,974). A separate run of the real
+built worker entry proves both those roots and their runner-exclusive closures
+absent. The complete proof repeats from an installed tarball in a foreign
+working directory; stable behavior markers, rather than chunk hashes or file
+sizes, identify each entry. Shared dispatch-domain modules are reported as
+shared and are not misrepresented as runner-exclusive savings.
+
+The after-Pi graph is the before point for this cut. Translated modules changed
+from 1,289 files (80 evaluated Clio chunks) to 1,307 files (98 Clio chunks), as
+the stable catalog, worker/core split, admission controller, and first-use
+boundaries add small independently testable modules. Evaluated Clio JavaScript
+fell from 4,941,023 to 4,874,478 bytes because the three runner entries are no
+longer evaluated at startup. Total built JavaScript changed from 126 files and
+5,853,293 bytes to 148 files and 5,914,960 bytes; the package must still ship
+every first-use path. `npm pack --dry-run --json` reports 6,143,415 packed
+bytes, 36,873,628 unpacked bytes, and 1,169 entries.
+
+Ten independent full-entry imports used `NODE_DISABLE_COMPILE_CACHE=1`, a warm
+operating-system page cache, and the same WSL2 host as the preceding cuts:
+
+| Node | Before median / p90 | After median / p90 | Observation |
+| --- | ---: | ---: | --- |
+| 22.22.3 | 518.345 / 534.925 ms | 541.559 / 556.417 ms | no timing improvement in this sample |
+| 24.9.0 | 522.001 / 554.388 ms | 529.888 / 558.958 ms | no timing improvement in this sample |
+
+These are import observations, not a startup claim or CI threshold. This cut is
+justified by the deterministic absence/presence and worker-exclusion contracts,
+the smaller evaluated graph, exact registration-order and surface contracts,
+and the dispatch reservation, approval, gate, detach, monitor, and steer suites.
+
 ## Reporting checklist
 
 Every published observation records:
