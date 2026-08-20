@@ -13,6 +13,7 @@ import {
 } from "../../src/core/commit-attribution.js";
 import {
 	CLIO_GIT_COMMITS_ENABLED_ENV,
+	resetGitCommitAttributionCachesForTests,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../src/core/git-commit-attribution.js";
 
@@ -313,6 +314,35 @@ describe("managed prepare-commit-msg attribution", () => {
 			if (previous === undefined) delete process.env[CLIO_GIT_COMMITS_ENABLED_ENV];
 			else process.env[CLIO_GIT_COMMITS_ENABLED_ENV] = previous;
 		}
+	});
+
+	it("reuses the repository probe per cwd within the cache window and re-probes after it is dropped", () => {
+		const hooksPathOf = (env: NodeJS.ProcessEnv): string | undefined => {
+			const count = Number(env.GIT_CONFIG_COUNT ?? "0");
+			for (let index = 0; index < count; index += 1) {
+				if (env[`GIT_CONFIG_KEY_${index}`] === "core.hooksPath") return env[`GIT_CONFIG_VALUE_${index}`];
+			}
+			return undefined;
+		};
+		resetGitCommitAttributionCachesForTests();
+		const root = mkdtempSync(join(tmpdir(), "clio attribution plain "));
+		const outside = withManagedGitCommitAttributionEnvironment(process.env, { cwd: root, enabled: true });
+		strictEqual(hooksPathOf(outside.env), undefined, "a plain directory gets no managed hooks");
+		strictEqual(outside.diagnostic, null);
+
+		execFileSync("git", ["init", "-q", root]);
+		const cached = withManagedGitCommitAttributionEnvironment(process.env, { cwd: root, enabled: true });
+		strictEqual(hooksPathOf(cached.env), undefined, "the probe taken moments ago is reused for the same cwd");
+
+		resetGitCommitAttributionCachesForTests();
+		const fresh = withManagedGitCommitAttributionEnvironment(process.env, { cwd: root, enabled: true });
+		match(hooksPathOf(fresh.env) ?? "", /git-hooks\/v2$/u, "a fresh probe sees the new repository");
+		const again = withManagedGitCommitAttributionEnvironment(process.env, { cwd: root, enabled: true });
+		strictEqual(hooksPathOf(again.env), hooksPathOf(fresh.env), "the installed hooks directory is reused");
+
+		const elsewhere = mkdtempSync(join(tmpdir(), "clio attribution elsewhere "));
+		const other = withManagedGitCommitAttributionEnvironment(process.env, { cwd: elsewhere, enabled: true });
+		strictEqual(hooksPathOf(other.env), undefined, "a different cwd is probed on its own");
 	});
 
 	it("works in a worktree whose paths contain spaces", () => {
