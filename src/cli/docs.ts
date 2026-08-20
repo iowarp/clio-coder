@@ -19,9 +19,11 @@ const HOST = "127.0.0.1";
 
 const HELP = `clio-coder docs [topic] [--no-open]
 
-Serve Clio Coder's bundled HTML documentation locally and open it in a browser.
-The server binds an ephemeral port on 127.0.0.1 only; it keeps no state, runs no
-daemon, and reaches no external network. Press Ctrl+C to stop it.
+Serve Clio Coder's interactive HTML documentation locally and open it in a
+browser. The blueprints live in docs/html of a source checkout; the npm package
+ships the Markdown guides in docs/ only. The server binds an ephemeral port on
+127.0.0.1, keeps no state, runs no daemon, and reaches no external network.
+Press Ctrl+C to stop it.
 
 Arguments:
   [topic]      deep-link a specific blueprint (for example: safety, configuration,
@@ -62,7 +64,7 @@ export interface DocsMenuEntry {
 	label: string;
 }
 
-/** Resolve the bundled docs/html directory from the installed package root. */
+/** Resolve docs/html from the package root; present in a source checkout, absent from the npm package. */
 export function resolveDocsHtmlDir(): string {
 	return resolve(resolvePackageRoot(), "docs", "html");
 }
@@ -307,7 +309,11 @@ export async function runDocsCommand(args: ReadonlyArray<string> = []): Promise<
 	}
 	const files = listHtmlFiles(htmlDir);
 	if (files.length === 0) {
-		printError(`no bundled HTML docs found at ${htmlDir}`);
+		printError(`no HTML docs at ${htmlDir}`);
+		process.stdout.write(
+			`  the npm package ships the Markdown guides only: ${resolve(resolvePackageRoot(), "docs")}\n` +
+				"  the interactive blueprints are in a source checkout and at https://github.com/iowarp/clio-coder/tree/main/docs/html\n",
+		);
 		return 1;
 	}
 

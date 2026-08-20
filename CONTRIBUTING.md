@@ -93,7 +93,7 @@ What `scripts/check-release.mjs` enforces, and how to respond when it fails:
   a forbidden file appears, fix the `files` allowlist in `package.json`
   rather than deleting the file from the repo.
 - Runtime resources must resolve from the installed package root: prompt
-  fragments, builtin agents, model catalogs, `docs/html`, the 128px logo,
+  fragments, builtin agents, model catalogs, the Markdown guides in `docs/`, the 128px logo,
   and `damage-control-rules.yaml`. A new runtime resource must be listed in
   both package.json `files` and the required list in `check-release.mjs`.
   The double bookkeeping is deliberate: neither edit can silently drop a

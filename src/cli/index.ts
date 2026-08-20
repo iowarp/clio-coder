@@ -63,7 +63,7 @@ Usage:
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder skills               list, inspect, validate, or install skills
-  clio-coder docs [topic]         serve bundled HTML docs on 127.0.0.1 (--no-open to skip browser)
+  clio-coder docs [topic]         serve the HTML docs of a source checkout on 127.0.0.1 (--no-open to skip browser)
   clio-coder dev <command>        harness instruments; run 'clio-coder dev' for the list
   clio-coder --help, -h           this message
   clio-coder --help --all         this message plus every command under 'clio-coder dev'

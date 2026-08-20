@@ -407,8 +407,9 @@ local model behaves identically.
 
 ## Documentation
 
-The full set lives under [docs/](docs/README.md), and `clio-coder docs` serves it
-locally with interactive blueprints. The pages people reach for most:
+The full set lives under [docs/](docs/README.md); from a source checkout,
+`clio-coder docs` serves the interactive blueprints locally. The pages people
+reach for most:
 
 | Topic | Guide |
 | --- | --- |
