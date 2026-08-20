@@ -15,7 +15,7 @@ import { type ClioMdSection, type ParsedClioMd, parseClioMd, serializeClioMd, tr
 import { buildCodewikiCandidate, coordinateCodewikiWrite } from "./codewiki/coordinator.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
-import { type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
+import { hasTomlTable, type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
 import { renderPromptContext } from "./prompt-context.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 import {
@@ -496,6 +496,30 @@ function cmakeVerificationLines(cwd: string): string[] {
 	return lines;
 }
 
+/**
+ * Python has no single scripts manifest, so this names a runner only where the
+ * project declares one: a tox configuration declares `tox`, and a declared
+ * pytest configuration declares `pytest`. An undeclared layout stays silent
+ * rather than guessing `python -m unittest` at a repository that tests some
+ * other way. Tox wins when both are declared because it typically wraps the
+ * pytest run.
+ */
+function pythonVerificationLines(cwd: string): string[] {
+	let pyproject = "";
+	try {
+		pyproject = readFileSync(join(cwd, "pyproject.toml"), "utf8");
+	} catch {
+		pyproject = "";
+	}
+	if (existsSync(join(cwd, "tox.ini")) || hasTomlTable(pyproject, "tool.tox")) {
+		return ["Run `tox` before handoff."];
+	}
+	if (existsSync(join(cwd, "pytest.ini")) || hasTomlTable(pyproject, "tool.pytest.ini_options")) {
+		return ["Run `pytest` before handoff."];
+	}
+	return [];
+}
+
 function verificationSection(cwd: string): ClioMdSection | null {
 	const scripts = packageScripts(cwd);
 	const pm = packageManager(cwd);
@@ -542,6 +566,7 @@ function verificationSection(cwd: string): ClioMdSection | null {
 	if (existsSync(join(cwd, "go.mod"))) {
 		lines.push("Run `go build ./...` and `go test ./...` before handoff.");
 	}
+	lines.push(...pythonVerificationLines(cwd));
 	if (lines.length === 0) return null;
 	return { title: "Verification expectations", body: lines.join(" ") };
 }

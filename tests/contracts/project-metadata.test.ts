@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { readProjectMetadata } from "../../src/domains/context/project-metadata.js";
+import { hasTomlTable, readProjectMetadata } from "../../src/domains/context/project-metadata.js";
 
 const scratchRoots: string[] = [];
 
@@ -216,5 +216,39 @@ describe("contracts/project-metadata", () => {
 		const metadata = readProjectMetadata(cwd);
 		strictEqual(metadata.name, "Fallback");
 		strictEqual(metadata.description, "The README still describes this project adequately");
+	});
+
+	describe("hasTomlTable", () => {
+		it("finds a table declared as its own line", () => {
+			strictEqual(hasTomlTable('[project]\nname = "x"\n\n[tool.tox]\nenvlist = py312\n', "tool.tox"), true);
+		});
+
+		it("ignores the same bracketed name inside a comment", () => {
+			strictEqual(hasTomlTable("# see [tool.tox] for the old config\n", "tool.tox"), false);
+		});
+
+		it("ignores the same bracketed name inside a string value", () => {
+			strictEqual(hasTomlTable('description = "notes: [tool.tox] is mentioned here, not declared"\n', "tool.tox"), false);
+		});
+
+		it("recognizes a valid header line carrying a trailing comment", () => {
+			strictEqual(hasTomlTable("[tool.pytest.ini_options] # project tests\n", "tool.pytest.ini_options"), true);
+			strictEqual(hasTomlTable("[tool.tox]# legacy\n", "tool.tox"), true);
+		});
+
+		it("does not match a table name that is merely a prefix of a longer one", () => {
+			strictEqual(hasTomlTable("[tool.tox.legacy]\n", "tool.tox"), false);
+		});
+
+		it("rejects trailing content on the header line that is not a comment", () => {
+			strictEqual(hasTomlTable("[tool.tox]invalid\n", "tool.tox"), false);
+		});
+
+		it("matches regardless of surrounding indentation", () => {
+			strictEqual(
+				hasTomlTable('   [tool.pytest.ini_options]   \ntestpaths = ["tests"]\n', "tool.pytest.ini_options"),
+				true,
+			);
+		});
 	});
 });
