@@ -176,7 +176,11 @@ export interface ChatSubmitOptions {
 	 * for the two states in which it degrades to `next-slot` instead.
 	 */
 	steering?: SteeringMode;
-	/** Internal Stage 0 handoff: fires once this submit is durably owned by the live turn. */
+	/**
+	 * Fires once this submit owns the live turn (`isStreaming()` is true) and
+	 * the next queued submit may use streaming queue routing. Stage 0 replay
+	 * awaits it; the loop's own admission gate releases on it.
+	 */
 	onAdmitted?: () => void;
 }
 
@@ -464,7 +468,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitQueueUpdateEvent: (messages) => emit({ type: "queue_update", messages }),
 		emitQueuedUserTurn: (entry) => emit({ type: "queued_user_turn", text: entry.text, kind: entry.kind }),
 		emitNotice,
-		submit: (text, options) => api.submit(text, options),
+		// The loop's own resubmits (stranded steers, continuation requests) run
+		// from submit's finally and bypass the admission gate: an interrupt that
+		// holds the gate while awaiting that same run would otherwise deadlock.
+		submit: (text, options) => submitTracked(text, options),
 	});
 
 	const middleware = createTurnMiddleware({
@@ -1030,11 +1037,44 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const submitInner = api.submit.bind(api);
-	api.submit = (text, options) => {
+	const submitTracked: ChatLoop["submit"] = (text, options) => {
 		priorSubmit = activeSubmit;
 		const run = submitInner(text, options);
 		activeSubmit = run.catch(() => {});
 		return run;
+	};
+
+	// FIFO admission gate. Between entry and `state.streaming = true` a fresh
+	// submit awaits the target probe, auto-compaction, and the session prompt
+	// compile; a second submit arriving in that window used to run the same
+	// pipeline concurrently, skip the probe the first one was still awaiting,
+	// append its user turn first, and leave the first to fail on the engine's
+	// active-prompt invariant after its turn was already in the ledger. Each
+	// submit now waits for the previous one to either own the stream or return,
+	// then re-evaluates `state.streaming`, so a prompt typed during boot lands
+	// as the next steer or follow-up in the order it was typed. The gate is
+	// released at admission, not settlement, so steering stays immediate.
+	let admissionTail: Promise<void> | null = null;
+	api.submit = (text, options = {}) => {
+		const previous = admissionTail;
+		let release: () => void = () => {};
+		const ticket = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		admissionTail = ticket;
+		const releaseTicket = (): void => {
+			release();
+			if (admissionTail === ticket) admissionTail = null;
+		};
+		const start = (): Promise<void> =>
+			submitTracked(text, {
+				...options,
+				onAdmitted: () => {
+					releaseTicket();
+					options.onAdmitted?.();
+				},
+			}).finally(releaseTicket);
+		return previous ? previous.then(start) : start();
 	};
 
 	return api;
