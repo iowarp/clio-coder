@@ -1,6 +1,7 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { capacityStatePath, listCapacityLeases } from "../../src/domains/dispatch/capacity-lease.js";
@@ -16,6 +17,7 @@ import {
 	transferDispatchReservationToLease,
 } from "../../src/domains/dispatch/reservation-store.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
@@ -23,7 +25,7 @@ import {
 	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
 	resolvedDispatchPlanFromArgs,
 } from "../../src/tools/dispatch-plan.js";
-import { createRegistry } from "../../src/tools/registry.js";
+import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -288,6 +290,122 @@ describe("dispatch batch reservations", () => {
 			strictEqual(listDispatchReservations()[0]?.status, "rolled_back");
 		} finally {
 			await bundle.extension.stop?.();
+		}
+	});
+
+	it("rolls back a prepared reservation exactly once when before_tool blocks dispatch", async () => {
+		const settings = settingsWithNode(1);
+		const scheduling = schedulingFor(settings, 4);
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings, scheduling }), {
+			previewNode: () => ({ node: { id: "mini", kind: "ssh", host: "mini.test" } }),
+			resolveNode: remotePlacement,
+		});
+		await bundle.extension.start();
+		try {
+			const dispatch = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
+			const dispose = dispatch.disposeAdmissionArguments;
+			let disposalCount = 0;
+			dispatch.disposeAdmissionArguments = (args) => {
+				disposalCount += 1;
+				dispose?.(args);
+			};
+			const middleware = createMiddlewareBundle({
+				ruleDefinitions: [
+					{
+						rule: {
+							id: "test.block-prepared-dispatch",
+							source: "builtin",
+							description: "block dispatch after reservation preparation",
+							enabled: true,
+							hooks: ["before_tool"],
+							effectKinds: ["block_tool"],
+						},
+						toolNames: [ToolNames.Dispatch],
+						effects: [{ kind: "block_tool", reason: "test dispatch guard", severity: "hard-block" }],
+					},
+				],
+			});
+			const registry = createRegistry({
+				safety: createWorkerSafety({ cwd: process.cwd() }),
+				autonomy: () => "full-auto",
+				middleware: middleware.contract,
+			});
+			registry.register(dispatch);
+
+			const verdict = await registry.invoke({
+				tool: ToolNames.Dispatch,
+				args: { tasks: ["one", "two"], mode: "sequential", node: "mini" },
+			});
+
+			strictEqual(verdict.kind, "blocked");
+			strictEqual(disposalCount, 1, "the prepared admission is disposed exactly once");
+			strictEqual(listDispatchReservations().filter((record) => record.status === "active").length, 0);
+			strictEqual(listDispatchReservations()[0]?.status, "rolled_back");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("disposes each prepared admission exactly once on blocked, successful, and throwing paths", async () => {
+		const preparedArgs: Record<string, unknown>[] = [];
+		const disposalCounts = new Map<Record<string, unknown>, number>();
+		let runCount = 0;
+		const spec: ToolSpec = {
+			name: ToolNames.Read,
+			description: "prepared admission cleanup probe",
+			parameters: Type.Object({ mode: Type.String() }),
+			baseActionClass: "read",
+			prepareAdmissionArguments(args) {
+				const prepared = { ...args, prepared: true };
+				preparedArgs.push(prepared);
+				return prepared;
+			},
+			disposeAdmissionArguments(args) {
+				disposalCounts.set(args, (disposalCounts.get(args) ?? 0) + 1);
+			},
+			async run(args) {
+				runCount += 1;
+				if (args.mode === "throw") throw new Error("injected tool failure");
+				return { kind: "ok", output: "done" };
+			},
+		};
+		const middleware = createMiddlewareBundle({
+			ruleDefinitions: [
+				{
+					rule: {
+						id: "test.block-prepared-read",
+						source: "builtin",
+						description: "block one prepared cleanup probe",
+						enabled: true,
+						hooks: ["before_tool"],
+						effectKinds: ["block_tool"],
+					},
+					toolNames: [ToolNames.Read],
+					predicate: (input) => input.toolArgs?.mode === "block",
+					effects: [{ kind: "block_tool", reason: "test cleanup guard", severity: "hard-block" }],
+				},
+			],
+		});
+		const registry = createRegistry({
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			middleware: middleware.contract,
+		});
+		registry.register(spec);
+
+		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { mode: "block" } })).kind, "blocked");
+		const success = await registry.invoke({ tool: ToolNames.Read, args: { mode: "success" } });
+		strictEqual(success.kind, "ok");
+		const failure = await registry.invoke({ tool: ToolNames.Read, args: { mode: "throw" } });
+		strictEqual(failure.kind, "ok");
+		ok(failure.kind === "ok" && failure.result.kind === "error");
+		strictEqual(runCount, 2, "the blocked tool body never runs");
+		strictEqual(preparedArgs.length, 3);
+		for (const prepared of preparedArgs) {
+			strictEqual(disposalCounts.get(prepared), 1, "each prepared object is disposed exactly once");
 		}
 	});
 
