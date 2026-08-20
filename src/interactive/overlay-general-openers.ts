@@ -6,6 +6,7 @@ import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
 import { foldSessionArtifacts } from "../domains/session/session-artifacts.js";
 import { foldSessionTaskHistory } from "../domains/session/task-board.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { TUI } from "../engine/tui.js";
 import { type OpenContextOverlayOptions, openContextOverlay } from "./context-overlay.js";
@@ -149,8 +150,9 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.handle = openTasksOverlayFactory(deps.tui, () => deps.getTaskBoard?.() ?? null, {
 			onClose: deps.closeOverlay,
 			getSessionSnapshot: () => {
-				const entries = deps.readSessionEntries?.() ?? [];
-				const workspace = deps.getSessionMeta()?.cwd ?? process.cwd();
+				const meta = deps.getSessionMeta();
+				const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], meta?.pinnedLeafTurnId ?? undefined);
+				const workspace = meta?.cwd ?? process.cwd();
 				return {
 					history: foldSessionTaskHistory(entries),
 					artifacts: foldSessionArtifacts(entries, { workspace }),

@@ -114,12 +114,20 @@ describe("contracts/user-tasks store", () => {
 		strictEqual(repairedDone[0]?.status, "done");
 	});
 
-	it("returns orphaned picked tasks to handed without correlating a reused tN display id", () => {
-		const store = createUserTasksStore({ cwd: scratch() });
+	it("lets only the owning session release an orphaned pickup across a restart", () => {
+		const cwd = scratch();
+		const store = createUserTasksStore({ cwd });
 		const task = store.add("operator work");
 		store.recordPicked(task.id, "session-1", "t1");
-		const reconciled = store.reconcile([{ userTaskId: "u999", boardTaskId: "t1", status: "active" }], "session-1");
-		strictEqual(reconciled[0]?.status, "handed");
-		strictEqual(reconciled[0]?.boardTaskId, undefined);
+
+		const restarted = createUserTasksStore({ cwd });
+		const foreign = restarted.reconcile([{ userTaskId: "u999", boardTaskId: "t1", status: "active" }], "session-2");
+		strictEqual(foreign[0]?.status, "picked");
+		strictEqual(foreign[0]?.handedSessionId, "session-1");
+		strictEqual(foreign[0]?.boardTaskId, "t1", "a reused display id cannot release another session's link");
+
+		const owner = restarted.reconcile([{ userTaskId: "u999", boardTaskId: "t1", status: "active" }], "session-1");
+		strictEqual(owner[0]?.status, "handed");
+		strictEqual(owner[0]?.boardTaskId, undefined);
 	});
 });

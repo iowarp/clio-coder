@@ -280,7 +280,10 @@ export function createUserTasksStore(deps: UserTasksStoreDeps): UserTasksStore {
 					}
 					continue;
 				}
-				if (current.status === "picked") {
+				// An empty link set is authoritative only for the session recorded as
+				// owning this pickup. Reconciling session B must not release durable
+				// work that session A still owns, or B can pick the same project task.
+				if (current.status === "picked" && current.handedSessionId === sessionId) {
 					const repaired: UserTask = { ...current, status: "handed", updatedAt: now() };
 					delete repaired.boardTaskId;
 					file.tasks[index] = repaired;
