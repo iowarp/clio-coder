@@ -1,6 +1,11 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { AgentMessage } from "../../src/engine/types.js";
+import type { ChatLoop, ChatLoopEvent } from "../../src/interactive/chat-loop.js";
+import { createStatusController } from "../../src/interactive/status/controller.js";
 import { type ReduceContext, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/state-machine.js";
 import { buildSummary } from "../../src/interactive/status/summary.js";
 import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
@@ -17,6 +22,71 @@ function ctx(now: number): ReduceContext {
 }
 
 describe("contracts/status aborted runs keep usage and abort provenance", () => {
+	it("publishes the corrected terminal usage after a rapid abort settlement", () => {
+		let now = 1_000;
+		const chatListeners: Array<(event: ChatLoopEvent) => void> = [];
+		const chat = {
+			getSessionId: () => "session-1",
+			onEvent: (listener: (event: ChatLoopEvent) => void) => {
+				chatListeners.push(listener);
+				return () => {};
+			},
+		} as unknown as ChatLoop;
+		const bus = createSafeEventBus();
+		const controller = createStatusController({
+			chat,
+			bus,
+			providers: { list: () => [] } as unknown as ProvidersContract,
+			now: () => now,
+			setInterval: () => Symbol("interval"),
+			clearInterval: () => {},
+			setTimeout: () => Symbol("timeout"),
+			clearTimeout: () => {},
+		});
+		const delivered: Array<{ inputTokens: number; outputTokens: number }> = [];
+		controller.subscribe((status) => {
+			if (status.phase === "ended" && status.summary) {
+				delivered.push({ inputTokens: status.summary.inputTokens, outputTokens: status.summary.outputTokens });
+			}
+		});
+		const emit = (event: ChatLoopEvent): void => {
+			for (const listener of chatListeners) listener(event);
+		};
+
+		try {
+			emit({ type: "agent_start" } as ChatLoopEvent);
+			now = 47_000;
+			bus.emit(BusChannels.RunAborted, {
+				source: "stream_cancel",
+				runId: null,
+				startedAt: null,
+				elapsedMs: null,
+				at: now,
+				reason: "user cancelled stream",
+			});
+			emit({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "partial" }],
+					stopReason: "aborted",
+					usage: { input: 16_279, output: 10, cacheRead: 0, cacheWrite: 0 },
+				},
+			} as unknown as ChatLoopEvent);
+			emit({
+				type: "agent_end",
+				messages: [{ role: "assistant", content: [], stopReason: "aborted", usage: {} }],
+			} as unknown as ChatLoopEvent);
+
+			strictEqual(controller.current().summary?.inputTokens, 16_279);
+			strictEqual(controller.current().summary?.outputTokens, 10);
+			strictEqual(delivered.at(-1)?.inputTokens, 16_279, "the footer subscriber receives the reconciled receipt");
+			strictEqual(delivered.at(-1)?.outputTokens, 10);
+		} finally {
+			controller.dispose();
+		}
+	});
+
 	it("preserves a provider-reported zero and labels a mixed reasoning total", () => {
 		const base = {
 			startedAt: 0,

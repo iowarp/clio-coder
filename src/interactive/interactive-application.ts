@@ -547,7 +547,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.initialNotices ? { initialNotices: deps.initialNotices } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		getTerminalColumns: () => terminal.columns,
-		onChatEventIngress: recordChatEventIngress,
+		onChatEventIngress: (event) => {
+			recordChatEventIngress(event);
+			presentation.recordChatEvent(event);
+		},
 		applyChatEvent: (event) => chatRenderer.applyEvent(event),
 		setFollowUpMessages: (messages) => followUpQueuePanel.setMessages(messages),
 		isAskUserWaiting: () => overlayLifecycle.isAskUserWaiting(),

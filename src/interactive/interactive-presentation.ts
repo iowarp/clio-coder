@@ -1,12 +1,18 @@
+import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
-import type { ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
+import type {
+	ObservabilityContract,
+	ObservabilitySnapshot,
+	TokenThroughputSnapshot,
+} from "../domains/observability/index.js";
 import { type ProvidersContract, resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { getMarketplaceSkills } from "../domains/resources/skills/marketplace.js";
+import { ceilChars, contentChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { Component, TUI } from "../engine/tui.js";
 import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
@@ -100,6 +106,7 @@ export interface InteractivePresentationDeps {
 	onSmoothStreamingMode?: (mode: SmoothStreamingMode, pacingActive: boolean) => void;
 	scheduleInterval?: (callback: () => void, intervalMs: number) => PresentationTickerHandle;
 	clearScheduledInterval?: (handle: PresentationTickerHandle) => void;
+	now?: () => number;
 	factories?: Partial<InteractivePresentationFactories>;
 }
 
@@ -130,6 +137,8 @@ export interface InteractivePresentation {
 	io: RunIo;
 	root: Component;
 	getObservabilitySnapshot(): ObservabilitySnapshot;
+	/** Fold one raw chat event into the ephemeral throughput shown only while this turn is active. */
+	recordChatEvent(event: ChatLoopEvent): void;
 	recordToolStart(toolCallId: string, toolName: string): void;
 	recordToolEnd(result: PresentationToolEnd): void;
 	setLastTurnSummary(summary: TurnSummary | null): void;
@@ -193,6 +202,7 @@ function willEnterSteerActiveWork(deps: InteractivePresentationDeps, text: strin
 export function createInteractivePresentation(deps: InteractivePresentationDeps): InteractivePresentation {
 	const factories = { ...DEFAULT_FACTORIES, ...deps.factories };
 	const getCwd = deps.getCwd ?? (() => process.cwd());
+	const now = deps.now ?? performance.now.bind(performance);
 	const requestRender = (): void => deps.tui.requestRender();
 	const settings = deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings);
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
@@ -241,6 +251,69 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let footerToolTruncatedResults = 0;
 	let lastTurnSummary: TurnSummary | null = null;
 	let observabilitySnapshot = deps.observability.snapshot();
+	let liveThroughput: {
+		startedAt: number;
+		firstDeltaAt: number | null;
+		settledOutputTokens: number;
+		partialOutputTokens: number;
+	} | null = null;
+	const recordChatEvent = (event: ChatLoopEvent): void => {
+		if (event.type === "agent_start") {
+			liveThroughput = {
+				startedAt: now(),
+				firstDeltaAt: null,
+				settledOutputTokens: 0,
+				partialOutputTokens: 0,
+			};
+			return;
+		}
+		if (event.type === "agent_end") {
+			liveThroughput = null;
+			return;
+		}
+		if (!liveThroughput) return;
+		if (event.type === "message_start" && event.message?.role === "assistant") {
+			liveThroughput.partialOutputTokens = 0;
+			return;
+		}
+		if (event.type === "message_update") {
+			const update = event.assistantMessageEvent as { type?: unknown; partial?: { content?: unknown; payload?: unknown } };
+			if (
+				update.type !== "text_delta" &&
+				update.type !== "thinking_delta" &&
+				update.type !== "toolcall_start" &&
+				update.type !== "toolcall_delta"
+			) {
+				return;
+			}
+			liveThroughput.firstDeltaAt ??= now();
+			liveThroughput.partialOutputTokens = ceilChars(contentChars(update.partial?.payload ?? update.partial?.content));
+			return;
+		}
+		if (event.type === "message_end" && event.message?.role === "assistant") {
+			const output = (event.message as { usage?: { output?: unknown } }).usage?.output;
+			const reported = typeof output === "number" && Number.isFinite(output) && output > 0 ? output : null;
+			liveThroughput.settledOutputTokens += reported ?? liveThroughput.partialOutputTokens;
+			liveThroughput.partialOutputTokens = 0;
+		}
+	};
+	const currentLiveThroughput = (): TokenThroughputSnapshot | null => {
+		if (!liveThroughput || liveThroughput.firstDeltaAt === null) return null;
+		const outputTokens = liveThroughput.settledOutputTokens + liveThroughput.partialOutputTokens;
+		if (outputTokens <= 0) return null;
+		const at = now();
+		const durationMs = Math.max(1, at - liveThroughput.firstDeltaAt);
+		const settings = deps.getSettings?.();
+		return {
+			tokensPerSecond: outputTokens / (durationMs / 1000),
+			outputTokens,
+			durationMs,
+			ttftMs: Math.max(0, liveThroughput.firstDeltaAt - liveThroughput.startedAt),
+			providerId: settings?.orchestrator?.target ?? "",
+			modelId: settings?.orchestrator?.model ?? "",
+			recordedAt: Date.now(),
+		};
+	};
 	let footer: FooterDashboardPanel;
 	const notifications = factories.createNotificationCenter({
 		onChange: () => {
@@ -274,7 +347,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getAgentStatus: () => statusController.current(),
 		getTerminalColumns: () => deps.terminal.columns,
 		getSessionTokens: () => observabilitySnapshot.session.tokens,
-		getTokenThroughput: () => observabilitySnapshot.session.latestThroughput,
+		getTokenThroughput: () =>
+			liveThroughput === null ? observabilitySnapshot.session.latestThroughput : currentLiveThroughput(),
 		getSessionCost: () => observabilitySnapshot.session.cost,
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),
@@ -475,6 +549,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		io,
 		root,
 		getObservabilitySnapshot: () => observabilitySnapshot,
+		recordChatEvent,
 		recordToolStart: (toolCallId, toolName) => {
 			footerActiveTools.add(toolCallId);
 			footerToolCounts.set(toolName, (footerToolCounts.get(toolName) ?? 0) + 1);
@@ -494,6 +569,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			footerToolErrors = 0;
 			footerToolTruncatedResults = 0;
 			lastTurnSummary = null;
+			liveThroughput = null;
 			statusController.reset();
 		},
 		stopTickers,

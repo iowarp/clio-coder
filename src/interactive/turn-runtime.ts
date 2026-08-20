@@ -34,6 +34,7 @@ import {
 	type AssistantCallTiming,
 	type BackendCacheVerdict,
 	backendCacheVerdict,
+	estimatedUsageForInterruptedTurn,
 	extractText,
 	extractThinking,
 	fallbackIdentityPrompt,
@@ -634,7 +635,20 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					enrichedEvent = { ...event, lockedSynthesisSanitized: true } as typeof event;
 				}
 			}
-			const publicEvent = enrichedEvent;
+			let publicEvent = enrichedEvent;
+			if (enrichedEvent.type === "message_end" && enrichedEvent.message?.role === "assistant") {
+				const interruptedUsage = estimatedUsageForInterruptedTurn(enrichedEvent.message, context.promptSideTokens());
+				if (interruptedUsage !== null) {
+					// Persistence records the same estimate, but it does so after the
+					// public event has already fed status. Copy it onto the public event
+					// only: the raw engine message and observability/cost path must remain
+					// provider-reported.
+					publicEvent = {
+						...enrichedEvent,
+						message: { ...enrichedEvent.message, usage: interruptedUsage as unknown as Usage },
+					} as typeof enrichedEvent;
+				}
+			}
 			if (publicEvent?.type === "agent_start") {
 				runStartMessageCount = localRuntime.agent.state.messages.length;
 				streamStartedAt = eventClock;

@@ -758,6 +758,55 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 		const inputTokens = (end?.messages ?? []).reduce((sum, message) => sum + (message.usage?.input ?? 0), 0);
 		strictEqual(inputTokens, 52_000, "the run's real input tokens survive the abort");
 	});
+
+	it("publishes the same interrupted usage estimate that persistence records", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		const holder: { loop?: ReturnType<typeof createChatLoop> } = {};
+		const seen: ChatLoopEvent[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers("local-native"),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				agent.state.messages.push(...inputMessages(input));
+				await agent.emit({ type: "agent_start" } as never);
+				holder.loop?.cancel();
+				const aborted = {
+					role: "assistant",
+					content: [{ type: "text", text: "partial local response" }],
+					stopReason: "aborted",
+					errorMessage: "Request was aborted",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				agent.state.messages.push(aborted);
+				await agent.emit({ type: "message_end", message: aborted });
+				await agent.emit({ type: "agent_end", messages: [aborted] });
+			}),
+		} as never);
+		holder.loop = loop;
+		loop.onEvent((event: ChatLoopEvent) => seen.push(event));
+
+		await loop.submit("write a long answer");
+
+		const publicAbort = seen.find(
+			(event) =>
+				event.type === "message_end" && event.message.role === "assistant" && event.message.stopReason === "aborted",
+		) as { message?: { usage?: Record<string, unknown> } } | undefined;
+		const persistedAbort = entries
+			.filter(isAssistantMessageEntry)
+			.map((entry) => entry.payload as { text?: string; usage?: Record<string, unknown> })
+			.find((payload) => payload.text === "partial local response");
+
+		ok(publicAbort?.message?.usage, "status receives usage for the interrupted partial response");
+		ok((publicAbort?.message?.usage?.input as number) > 0, "the sent prompt is reflected in status usage");
+		ok((publicAbort?.message?.usage?.output as number) > 0, "the streamed partial is reflected in status usage");
+		deepStrictEqual(publicAbort?.message?.usage, persistedAbort?.usage, "status and the durable transcript agree");
+	});
 });
 
 describe("contracts/chat-loop per-turn telemetry", () => {
