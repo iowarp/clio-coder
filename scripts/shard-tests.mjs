@@ -59,9 +59,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { availableParallelism } from "node:os";
-import { relative, resolve, sep } from "node:path";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
+import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -73,6 +73,11 @@ const RUNNER_ARGS = [
 	"--import",
 	"./tests/harness/tmp-root.ts",
 	"--test",
+	// Keep the reporter format stable across supported Node majors. Its destination
+	// is supplied per lane by runLane so reporter writes cannot cross a contract's
+	// temporary process.stdout/process.stderr capture and corrupt the output under
+	// test.
+	"--test-reporter=spec",
 	"--experimental-test-isolation=none",
 ];
 /** Same runner, one file at a time, for `--emit-weights`: no isolation flag, since each process already covers exactly one file. */
@@ -252,7 +257,9 @@ function parseSummary(output) {
 
 function runLane(name, files, forward) {
 	return new Promise((resolvePromise) => {
-		const args = [...RUNNER_ARGS, ...forward, ...files];
+		const reporterDir = mkdtempSync(join(tmpdir(), "clio-shard-reporter-"));
+		const reporterPath = join(reporterDir, `${name}.log`);
+		const args = [...RUNNER_ARGS, `--test-reporter-destination=${reporterPath}`, ...forward, ...files];
 		const child = spawn(process.execPath, args, {
 			cwd: REPO_ROOT,
 			env: process.env,
@@ -267,13 +274,20 @@ function runLane(name, files, forward) {
 			stderr += chunk;
 		});
 		child.on("close", (code) => {
+			let reporter = "";
+			try {
+				reporter = readFileSync(reporterPath, "utf8");
+			} finally {
+				rmSync(reporterDir, { recursive: true, force: true });
+			}
 			resolvePromise({
 				name,
 				files,
 				code: code ?? 1,
 				stdout,
 				stderr,
-				summary: parseSummary(stdout),
+				reporter,
+				summary: parseSummary(reporter),
 			});
 		});
 	});
@@ -354,6 +368,7 @@ async function main() {
 	for (const result of results) {
 		process.stdout.write(result.stdout);
 		process.stderr.write(result.stderr);
+		process.stderr.write(result.reporter);
 		totalTests += result.summary.tests;
 		totalPass += result.summary.pass;
 		totalFail += result.summary.fail;
@@ -372,8 +387,12 @@ async function main() {
 }
 
 main()
-	.then((code) => process.exit(code))
+	.then((code) => {
+		// Let piped stdout/stderr drain. process.exit() can discard the tail of a
+		// lane reporter (including the aggregate summary) under backpressure.
+		process.exitCode = code;
+	})
 	.catch((error) => {
 		process.stderr.write(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
-		process.exit(2);
+		process.exitCode = 2;
 	});
