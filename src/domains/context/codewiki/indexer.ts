@@ -5,73 +5,51 @@ import { dirname, join, relative, resolve } from "node:path";
 import { classifyCHeaderLanguage, isAmbiguousHeaderPath } from "../../../core/c-header-language.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { enumerateWorkspaceFilesAsync, filterWorkspaceFileCandidates } from "../../../core/workspace-files.js";
-import type { ProjectType, SourceProjectType } from "../../session/workspace/project-type.js";
+import type { ProjectType } from "../../session/workspace/project-type.js";
 import { EXCLUDED_DIRS } from "../excluded-dirs.js";
 import { extractCMake, isCMakePath } from "./cmake.js";
 import { type CooperativeSlicer, createSlicer } from "./cooperative.js";
-import { createTreeSitterExtractor, type TreeSitterExtractor } from "./tree-sitter.js";
+import { isIndexablePath, languageForPath } from "./paths.js";
+import {
+	type BuildCodewikiInput,
+	CODEWIKI_VERSION,
+	type Codewiki,
+	type CodewikiEdge,
+	type CodewikiEntry,
+	type CodewikiExternalEdge,
+	type CodewikiFile,
+	type CodewikiFileRole,
+	type CodewikiInternalEdge,
+	type CodewikiLanguage,
+	type CodewikiReadFile,
+	type CodewikiSymbol,
+	type CodewikiSymbolKind,
+	type ExtractedSymbol,
+	type LanguageExtraction,
+	type LanguageExtractor,
+} from "./schema.js";
+import type { TreeSitterExtractor } from "./tree-sitter.js";
 
-export type CodewikiLanguage = SourceProjectType | "config";
-export type CodewikiFileRole = "entry" | "test" | "module" | "config";
-export type CodewikiSymbolKind = "func" | "class" | "method" | "type" | "const" | "var" | "trait" | "iface";
+export {
+	type BuildCodewikiInput,
+	CODEWIKI_VERSION,
+	type Codewiki,
+	type CodewikiEdge,
+	type CodewikiEntry,
+	type CodewikiExternalEdge,
+	type CodewikiFile,
+	type CodewikiFileRole,
+	type CodewikiInternalEdge,
+	type CodewikiLanguage,
+	type CodewikiReadFile,
+	type CodewikiSymbol,
+	type CodewikiSymbolKind,
+	type ExtractedSymbol,
+	type LanguageExtraction,
+	type LanguageExtractor,
+} from "./schema.js";
+
 const CODEWIKI_SYMBOL_KINDS_WITH_SIG = new Set<CodewikiSymbolKind>(["func", "class", "method", "type"]);
-
-export interface CodewikiFile {
-	id: string;
-	path: string;
-	lang: CodewikiLanguage;
-	loc: number;
-	role: CodewikiFileRole;
-	hash: string;
-	imports: string[];
-	summary?: string;
-}
-
-export interface CodewikiSymbol {
-	name: string;
-	kind: CodewikiSymbolKind;
-	fileId: string;
-	line: number;
-	sig?: string;
-}
-
-export interface CodewikiInternalEdge {
-	fileId: string;
-	toFileId: string;
-}
-
-export interface CodewikiExternalEdge {
-	fileId: string;
-	externalModule: string;
-}
-
-export type CodewikiEdge = CodewikiInternalEdge | CodewikiExternalEdge;
-
-export const CODEWIKI_VERSION = 5 as const;
-
-export interface Codewiki {
-	version: typeof CODEWIKI_VERSION;
-	language: ProjectType;
-	files: CodewikiFile[];
-	symbols: CodewikiSymbol[];
-	edges: CodewikiEdge[];
-}
-
-export interface CodewikiEntry {
-	path: string;
-	exports: string[];
-	imports: string[];
-	kind: "entry-point" | "test" | "module";
-	summary?: string;
-}
-
-export interface BuildCodewikiInput {
-	cwd: string;
-	language: ProjectType;
-	generatedAt?: string;
-}
-
-export type CodewikiReadFile = (path: string) => string | null;
 
 export interface CodewikiBuildOptions {
 	readFile?: CodewikiReadFile;
@@ -83,70 +61,14 @@ export interface CodewikiBuildOptions {
 	slicer?: CooperativeSlicer;
 }
 
-export interface ExtractedSymbol {
-	name: string;
-	kind: CodewikiSymbolKind;
-	line: number;
-	sig?: string;
-}
-
-export interface LanguageExtraction {
-	symbols: ExtractedSymbol[];
-	imports: string[];
-}
-
-export interface LanguageExtractor {
-	langs: ReadonlyArray<CodewikiLanguage>;
-	extractImports?(path: string, text: string): string[];
-	extract(path: string, text: string): LanguageExtraction;
-}
-
 let treeSitterExtractorPromise: Promise<TreeSitterExtractor> | null = null;
 
 function loadTreeSitterExtractor(): Promise<TreeSitterExtractor> {
-	treeSitterExtractorPromise ??= createTreeSitterExtractor();
+	treeSitterExtractorPromise ??= import("./tree-sitter.js").then(({ createTreeSitterExtractor }) =>
+		createTreeSitterExtractor(),
+	);
 	return treeSitterExtractorPromise;
 }
-
-const SOURCE_EXTENSIONS = new Map<string, SourceProjectType>([
-	[".ts", "typescript"],
-	[".tsx", "typescript"],
-	[".mts", "typescript"],
-	[".cts", "typescript"],
-	[".js", "javascript"],
-	[".jsx", "javascript"],
-	[".mjs", "javascript"],
-	[".cjs", "javascript"],
-	[".py", "python"],
-	[".pyw", "python"],
-	[".rs", "rust"],
-	[".go", "go"],
-	[".c", "c"],
-	[".h", "c"],
-	[".cc", "c++"],
-	[".cpp", "c++"],
-	[".cxx", "c++"],
-	[".hpp", "c++"],
-	[".hh", "c++"],
-	[".hxx", "c++"],
-	[".cu", "c++"],
-	[".cuh", "c++"],
-	[".java", "java"],
-	[".rb", "ruby"],
-	[".cs", "c#"],
-]);
-
-const CONFIG_FILE_NAMES = new Set([
-	"package.json",
-	"pyproject.toml",
-	"setup.py",
-	"Cargo.toml",
-	"go.mod",
-	"pom.xml",
-	"CMakeLists.txt",
-	"compile_commands.json",
-	"Gemfile",
-]);
 
 const RESOLUTION_EXTENSIONS = [
 	".ts",
@@ -195,11 +117,6 @@ function defaultReadFile(path: string): string | null {
 	}
 }
 
-function extensionOf(name: string): string {
-	const index = name.lastIndexOf(".");
-	return index === -1 ? "" : name.slice(index);
-}
-
 function normalizeRel(cwd: string, filePath: string): string {
 	return relative(cwd, filePath).split("\\").join("/");
 }
@@ -208,24 +125,7 @@ function normalizeInputPath(path: string): string {
 	return path.split("\\").join("/").replace(/^\.\//, "");
 }
 
-function sourceLanguageForPath(relPath: string): SourceProjectType | null {
-	if (relPath.endsWith(".d.ts")) return null;
-	return SOURCE_EXTENSIONS.get(extensionOf(relPath)) ?? null;
-}
-
-function languageForPath(relPath: string): CodewikiLanguage | null {
-	const source = sourceLanguageForPath(relPath);
-	if (source) return source;
-	const name = relPath.split("/").pop() ?? relPath;
-	return CONFIG_FILE_NAMES.has(name) || name.endsWith(".csproj") || name.toLowerCase().endsWith(".cmake")
-		? "config"
-		: null;
-}
-
-export function isIndexablePath(relPath: string): boolean {
-	if (relPath.split("/").some((segment) => EXCLUDED_DIRS.has(segment))) return false;
-	return languageForPath(relPath) !== null;
-}
+export { isIndexablePath } from "./paths.js";
 
 function lineCount(text: string): number {
 	if (text.length === 0) return 0;

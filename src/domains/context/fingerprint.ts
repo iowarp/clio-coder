@@ -4,8 +4,10 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
+import { readCodewiki, readCodewikiAsync } from "./codewiki/artifact.js";
 import { type CooperativeSlicer, createSlicer } from "./codewiki/cooperative.js";
-import { type Codewiki, isIndexablePath, readCodewiki, readCodewikiAsync } from "./codewiki/indexer.js";
+import { isIndexablePath } from "./codewiki/paths.js";
+import type { Codewiki } from "./codewiki/schema.js";
 import { EXCLUDED_DIRS } from "./excluded-dirs.js";
 
 const execFileAsync = promisify(execFile);

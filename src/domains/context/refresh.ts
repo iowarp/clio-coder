@@ -3,8 +3,9 @@ import { join } from "node:path";
 import { detectProjectType } from "../session/workspace/project-type.js";
 import { type BootstrapIo, type BootstrapProgressSink, codewikiSections } from "./bootstrap.js";
 import { serializeClioMd, tryReadClioMd } from "./clio-md.js";
-import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
-import { computeFingerprint, type Fingerprint } from "./fingerprint.js";
+import { coordinateCodewikiWrite } from "./codewiki/coordinator.js";
+import type { Codewiki } from "./codewiki/schema.js";
+import type { Fingerprint } from "./fingerprint.js";
 import { readClioState, writeClioState } from "./state.js";
 import { type RunWikiGenerateResult, runWikiGenerate, type WikiGenerate } from "./wiki/generate.js";
 import { readWikiMeta } from "./wiki/meta.js";
@@ -113,24 +114,30 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	const indexedAt = now().toISOString();
 
 	input.onProgress?.({ phase: "codewiki", status: "started", message: "rebuilding codewiki" });
-	const codewiki = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
-	writeCodewiki(cwd, codewiki);
-	const fingerprint = computeFingerprint(cwd, codewiki);
-	const clioMd = curateClioMd(cwd, codewiki);
-
-	input.onProgress?.({ phase: "state", status: "running", message: "writing state" });
-	writeClioState(cwd, {
-		version: 1,
-		projectType,
-		fingerprint,
-		codewikiVersion: codewiki.version,
-		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
-		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
-		...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
-		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
-		lastSessionAt: prev?.lastSessionAt ?? indexedAt,
-		lastIndexedAt: indexedAt,
+	let fingerprint: Fingerprint | undefined;
+	let clioMd: ClioMdCuration = "absent";
+	const coordinated = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: projectType }), {
+		afterCommit: (result, workspace) => {
+			fingerprint = result.fingerprint;
+			clioMd = curateClioMd(workspace, result.codewiki);
+			input.onProgress?.({ phase: "state", status: "running", message: "writing state" });
+			const latest = readClioState(workspace);
+			writeClioState(workspace, {
+				version: 1,
+				projectType,
+				fingerprint: result.fingerprint,
+				codewikiVersion: result.codewiki.version,
+				...(latest?.contextSources ? { contextSources: latest.contextSources } : {}),
+				...(latest?.contextSourceHash ? { contextSourceHash: latest.contextSourceHash } : {}),
+				...(latest?.lastBootstrap ? { lastBootstrap: latest.lastBootstrap } : {}),
+				...(latest?.lastInitAt ? { lastInitAt: latest.lastInitAt } : {}),
+				lastSessionAt: latest?.lastSessionAt ?? indexedAt,
+				lastIndexedAt: indexedAt,
+			});
+		},
 	});
+	if (!coordinated || !fingerprint) throw new Error("codewiki refresh transaction did not commit");
+	const codewiki = coordinated.codewiki;
 
 	const entries = indexedSourceFileCount(codewiki);
 	let wikiResult: RunWikiGenerateResult | undefined;
@@ -154,7 +161,8 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 		hint = incompleteWikiHint(cwd) ?? (wikiStaleness(cwd).state === "stale" ? STALE_WIKI_REFRESH_HINT : undefined);
 	}
 
-	const handbookNote = clioMd === "updated" ? "; CLIO-CODER.md index sections updated" : "";
+	const committedClioMd = clioMd as ClioMdCuration;
+	const handbookNote = committedClioMd === "updated" ? "; CLIO-CODER.md index sections updated" : "";
 	input.io?.stdout(
 		`clio-coder context refresh: codewiki rebuilt (${entries} source file${entries === 1 ? "" : "s"})${handbookNote}\n`,
 	);
@@ -163,7 +171,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 		action: "refreshed",
 		codewikiEntries: entries,
 		fingerprint,
-		clioMd,
+		clioMd: committedClioMd,
 		...(wikiResult ? { wiki: wikiResult } : {}),
 		...(hint ? { hint } : {}),
 	};

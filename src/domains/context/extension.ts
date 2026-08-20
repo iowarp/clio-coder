@@ -1,29 +1,17 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { BusChannels, type ContextActivityPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { clioDataDir } from "../../core/xdg.js";
 import { loadMemoryRecordsSync } from "../memory/index.js";
-import { detectProjectType } from "../session/workspace/project-type.js";
+import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
 import { runContextClear } from "./clear.js";
 import { loadProjectClioMd } from "./clio-md.js";
-import { createSlicer } from "./codewiki/cooperative.js";
-import {
-	buildCodewiki,
-	type Codewiki,
-	codewikiNeedsBackfill,
-	codewikiPath,
-	parseCodewikiRaw,
-	readCodewikiAsync,
-	syncCodewiki,
-	updateCodewikiPaths,
-	writeCodewiki,
-} from "./codewiki/indexer.js";
+import { codewikiPath } from "./codewiki/artifact.js";
+import { coordinateCodewikiWrite, drainCodewikiWrites } from "./codewiki/coordinator.js";
 import type { ContextContract, ContextState } from "./contract.js";
-import { computeFingerprintAsync, isStale } from "./fingerprint.js";
 import { renderPromptContext } from "./prompt-context.js";
 import { runContextRefresh } from "./refresh.js";
 import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
@@ -40,10 +28,11 @@ function persistState(
 	indexedAt: string,
 	prev: ClioProjectState | null,
 	codewikiVersion: number,
+	projectType: ProjectType,
 ): void {
 	writeClioState(cwd, {
 		version: 1,
-		projectType: prev?.projectType ?? detectProjectType(cwd),
+		projectType: prev?.projectType ?? projectType,
 		fingerprint,
 		codewikiVersion,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
@@ -75,36 +64,27 @@ async function ensureCodewikiFresh(cwd: string): Promise<void> {
 	if (process.env.CLIO_CODER_BOOTSTRAP_GENERATE_CHILD === "1") return;
 	const state = readClioState(cwd);
 	if (!state && !existsSync(codewikiPath(cwd))) return;
-	const slicer = createSlicer();
-	const codewiki = await readCodewikiAsync(cwd);
-	const fingerprint = await computeFingerprintAsync(cwd, codewiki, { slicer });
-	const stale =
-		!state ||
-		isStale(state.fingerprint, fingerprint) ||
-		!existsSync(codewikiPath(cwd)) ||
-		!codewiki ||
-		codewikiNeedsBackfill(codewiki);
-	if (!stale) return;
 	const indexedAt = new Date().toISOString();
-	const projectType = state?.projectType ?? detectProjectType(cwd);
-	const synced = codewiki
-		? await syncCodewiki(cwd, codewiki, { slicer })
-		: await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt }, { slicer });
-	writeCodewiki(cwd, synced);
-	persistState(cwd, await computeFingerprintAsync(cwd, synced, { slicer }), indexedAt, state, synced.version);
+	await coordinateCodewikiWrite(
+		cwd,
+		(current, workspace) => {
+			const language = readClioState(workspace)?.projectType ?? current?.language;
+			return {
+				kind: "ensure",
+				cwd,
+				...(language ? { language } : {}),
+				current,
+				previous: readClioState(workspace)?.fingerprint ?? null,
+			};
+		},
+		{
+			afterCommit: ({ codewiki, fingerprint }, workspace) =>
+				persistState(workspace, fingerprint, indexedAt, readClioState(workspace), codewiki.version, codewiki.language),
+		},
+	);
 }
 
 const CONTEXT_STATE_CACHE_TTL_MS = 1500;
-const CODEWIKI_CACHE_LIMIT = 4;
-
-interface CachedCodewiki {
-	hash: string;
-	codewiki: Codewiki;
-}
-
-function codewikiContentHash(raw: string): string {
-	return createHash("sha256").update(raw).digest("hex");
-}
 
 function memoryCount(): number {
 	try {
@@ -184,44 +164,9 @@ export function createContextBundle(
 	options: ContextBundleOptions = {},
 ): DomainBundle<ContextContract> {
 	let lastCwd = process.cwd();
+	let stopping = false;
 	let startupHints: string[] = [];
 	const contextState = createContextStateReader();
-	const codewikiCache = new Map<string, CachedCodewiki>();
-	const rememberCodewiki = (cwd: string, hash: string, codewiki: Codewiki): void => {
-		codewikiCache.delete(cwd);
-		codewikiCache.set(cwd, { hash, codewiki });
-		while (codewikiCache.size > CODEWIKI_CACHE_LIMIT) {
-			const oldest = codewikiCache.keys().next().value;
-			if (oldest === undefined) break;
-			codewikiCache.delete(oldest);
-		}
-	};
-	const readCachedCodewiki = (cwd: string): Codewiki | null => {
-		let raw: string;
-		try {
-			raw = readFileSync(codewikiPath(cwd), "utf8");
-		} catch {
-			codewikiCache.delete(cwd);
-			return null;
-		}
-		const hash = codewikiContentHash(raw);
-		const cached = codewikiCache.get(cwd);
-		if (cached && cached.hash === hash) {
-			rememberCodewiki(cwd, hash, cached.codewiki);
-			return cached.codewiki;
-		}
-		const codewiki = parseCodewikiRaw(raw);
-		if (!codewiki) {
-			codewikiCache.delete(cwd);
-			return null;
-		}
-		rememberCodewiki(cwd, hash, codewiki);
-		return codewiki;
-	};
-	const writeCachedCodewiki = (cwd: string, codewiki: Codewiki): void => {
-		const serialized = writeCodewiki(cwd, codewiki);
-		rememberCodewiki(cwd, codewikiContentHash(serialized), codewiki);
-	};
 	const onStart = (): void => {
 		lastCwd = process.cwd();
 		void ensureCodewikiFresh(lastCwd).catch(() => {
@@ -237,28 +182,35 @@ export function createContextBundle(
 	// serialize through this queue and stop() drains it before the process exits.
 	let incrementalQueue: Promise<void> = Promise.resolve();
 	const noteFileChanges = (paths: ReadonlyArray<string>, cwd: string = lastCwd): void => {
+		if (stopping) return;
+		const workspace = resolve(cwd);
 		incrementalQueue = incrementalQueue
 			.then(async () => {
 				if (paths.length === 0) return;
-				const codewiki = readCachedCodewiki(cwd);
-				if (!codewiki) return; // Not indexed yet; session start/stop owns first build.
 				const rel = paths
-					.map((p) => (isAbsolute(p) ? relative(cwd, p) : p))
+					.map((p) => (isAbsolute(p) ? relative(workspace, p) : p))
 					.filter((p) => p.length > 0 && !p.startsWith(".."));
 				// Fires after every write the agent makes, mid-turn, with the TUI
 				// mounted; an edge rebuild here is the same cost as one at start.
-				const slicer = createSlicer();
-				const updated = await updateCodewikiPaths(cwd, codewiki, rel, { slicer });
-				if (updated === codewiki) return; // No indexable file actually changed.
-				writeCachedCodewiki(cwd, updated);
-				persistState(
-					cwd,
-					await computeFingerprintAsync(cwd, updated, { slicer }),
-					new Date().toISOString(),
-					readClioState(cwd),
-					updated.version,
+				await coordinateCodewikiWrite(
+					workspace,
+					(current) => (current ? { kind: "incremental", cwd: workspace, current, paths: rel } : null),
+					{
+						requireExisting: true,
+						afterCommit: ({ codewiki, fingerprint, changed }, committedWorkspace) => {
+							if (!changed) return;
+							persistState(
+								committedWorkspace,
+								fingerprint,
+								new Date().toISOString(),
+								readClioState(committedWorkspace),
+								codewiki.version,
+								codewiki.language,
+							);
+						},
+					},
 				);
-				contextState.invalidate(cwd);
+				contextState.invalidate(workspace);
 			})
 			.catch(() => {
 				// Best-effort: never let incremental indexing surface as a tool error.
@@ -271,6 +223,7 @@ export function createContextBundle(
 			unsubscribeSessionStart = _context.bus.on(BusChannels.SessionStart, onStart);
 		},
 		async stop() {
+			stopping = true;
 			unsubscribeSessionStart?.();
 			unsubscribeSessionStart = null;
 			// Everything the session changed already went through noteFileChanges,
@@ -281,7 +234,7 @@ export function createContextBundle(
 			// shutdown budget (issue #99). Out-of-band drift is start's job on the
 			// next session, and a never-indexed cwd stays that way; indexing an
 			// arbitrary directory because a process exited in it is not a favor.
-			await incrementalQueue;
+			await Promise.all([incrementalQueue, drainCodewikiWrites(lastCwd)]);
 			const state = readClioState(lastCwd);
 			if (!state) return;
 			// The fingerprint is left as the last index wrote it. Stamping a fresh
