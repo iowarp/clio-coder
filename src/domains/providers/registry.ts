@@ -11,8 +11,8 @@ export interface RuntimeRegistry {
 	register(desc: RuntimeDescriptor): void;
 	get(id: string): RuntimeDescriptor | null;
 	list(): ReadonlyArray<RuntimeDescriptor>;
-	loadFromDir(dir: string): Promise<ReadonlyArray<string>>;
-	loadFromPackage(packageName: string): Promise<ReadonlyArray<string>>;
+	loadFromDir(dir: string, beforeImport?: () => Promise<void>): Promise<ReadonlyArray<string>>;
+	loadFromPackage(packageName: string, beforeImport?: () => Promise<void>): Promise<ReadonlyArray<string>>;
 	clear(): void;
 }
 
@@ -40,7 +40,7 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 		canonical.clear();
 	};
 
-	const loadFromDir = async (dir: string): Promise<ReadonlyArray<string>> => {
+	const loadFromDir = async (dir: string, beforeImport?: () => Promise<void>): Promise<ReadonlyArray<string>> => {
 		let entries: string[];
 		try {
 			const stat = statSync(dir);
@@ -53,7 +53,7 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 		for (const name of entries) {
 			if (!name.endsWith(".js")) continue;
 			const full = join(dir, name);
-			const desc = await importDescriptor(full, pathToFileURL(full).href);
+			const desc = await importDescriptor(full, pathToFileURL(full).href, beforeImport);
 			if (desc === null) continue;
 			try {
 				register(desc);
@@ -65,9 +65,13 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 		return loaded;
 	};
 
-	const loadFromPackage = async (packageName: string): Promise<ReadonlyArray<string>> => {
+	const loadFromPackage = async (
+		packageName: string,
+		beforeImport?: () => Promise<void>,
+	): Promise<ReadonlyArray<string>> => {
 		let mod: unknown;
 		try {
+			await beforeImport?.();
 			mod = await import(packageName);
 		} catch (err) {
 			process.stderr.write(`[providers] runtime package ${packageName} failed to import: ${describeError(err)}\n`);
@@ -107,9 +111,14 @@ export function getRuntimeRegistry(): RuntimeRegistry {
 	return singleton;
 }
 
-async function importDescriptor(file: string, href: string): Promise<RuntimeDescriptor | null> {
+async function importDescriptor(
+	file: string,
+	href: string,
+	beforeImport?: () => Promise<void>,
+): Promise<RuntimeDescriptor | null> {
 	let mod: unknown;
 	try {
+		await beforeImport?.();
 		mod = await import(href);
 	} catch (err) {
 		process.stderr.write(`[providers] runtime plugin ${file} failed to import: ${describeError(err)}\n`);

@@ -15,7 +15,6 @@ import type {
 	Usage,
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { ApiProvider } from "@earendil-works/pi-ai/compat";
 import {
 	type ChatRequest,
 	type ChatResponse,
@@ -38,6 +37,7 @@ import { remainingContextMaxTokens } from "./output-budget.js";
 import { type ResidencyAdapter, reconcileResidency, residencyManagedFor } from "./residency.js";
 import type { ResidentModelInfo } from "./resident-models.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
+import type { EngineApiProvider } from "./types.js";
 
 const REASONING_CHARS_PER_TOKEN = 4;
 
@@ -520,7 +520,7 @@ function stripReasoning(options: SimpleStreamOptions | undefined): StreamOptions
 	return rest;
 }
 
-export const ollamaNativeApiProvider: ApiProvider<"ollama-native"> = {
+export const ollamaNativeApiProvider: EngineApiProvider<"ollama-native"> = {
 	api: "ollama-native",
 	stream: (model, context, options) => runStream(model, context, options, fallbackThinkingLevel(model)),
 	streamSimple: (model, context, options?: SimpleStreamOptions) =>
