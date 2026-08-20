@@ -176,10 +176,20 @@ export interface ChatSubmitOptions {
 	 * for the two states in which it degrades to `next-slot` instead.
 	 */
 	steering?: SteeringMode;
+	/** Internal Stage 0 handoff: fires once this submit is durably owned by the live turn. */
+	onAdmitted?: () => void;
 }
 
 /** Closing notice an operator interrupt leaves in the transcript and the ledger. */
 const INTERRUPT_CANCEL_REASON = "[Clio Coder] run interrupted by operator; delivering the new message now.";
+const ENGINE_ACTIVE_PROMPT_ERROR =
+	"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.";
+const ACTIVE_PROMPT_NOTICE =
+	"[Clio Coder] another response was already active, so this response could not start. Wait for it to finish, then submit again.";
+
+function operatorFacingEngineError(message: string): string {
+	return message.includes(ENGINE_ACTIVE_PROMPT_ERROR) ? ACTIVE_PROMPT_NOTICE : message;
+}
 
 /**
  * Options for {@link ChatLoop.cancel}. A bare cancel is an operator Esc/Ctrl+C
@@ -791,6 +801,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			// 7. Run the prompt, then route the settled state through recovery.
 			state.streaming = true;
+			try {
+				options.onAdmitted?.();
+			} catch {
+				// Admission observers are bookkeeping only and cannot affect the turn.
+			}
 			const runtimePromptText = submittedText;
 			const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
 			const priorAskUserPolicy = state.currentAskUserPolicy;
@@ -844,7 +859,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						});
 						return;
 					}
-					emitNotice(err instanceof Error ? err.message : String(err));
+					emitNotice(operatorFacingEngineError(message));
 					return;
 				}
 				await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);

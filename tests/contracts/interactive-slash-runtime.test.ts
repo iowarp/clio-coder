@@ -94,6 +94,60 @@ function createHarness() {
 }
 
 describe("contracts/interactive slash runtime", () => {
+	it("acknowledges captured chat admission before draining the next Stage 0 record", async () => {
+		const harness = createHarness();
+		const busyError =
+			"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.";
+		let phase: "idle" | "admitting" | "streaming" = "idle";
+		let releasePreflight = (): void => {};
+		const preflight = new Promise<void>((resolve) => {
+			releasePreflight = resolve;
+		});
+		let releaseTurn = (): void => {};
+		const turn = new Promise<void>((resolve) => {
+			releaseTurn = resolve;
+		});
+		const submitted: string[] = [];
+		const queued: Array<{ text: string; steering: string | undefined }> = [];
+		harness.deps.chat.isStreaming = () => phase === "streaming";
+		harness.deps.chat.submit = async (text, options) => {
+			submitted.push(text);
+			if (phase === "admitting") throw new Error(busyError);
+			if (phase === "streaming") {
+				queued.push({ text, steering: options?.steering });
+				return;
+			}
+			phase = "admitting";
+			await preflight;
+			phase = "streaming";
+			options?.onAdmitted?.();
+			await turn;
+			phase = "idle";
+		};
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+
+		const drain = (async () => {
+			await runtime.admitCommand("ALPHA");
+			await runtime.admitCommand("BRAVO");
+		})();
+		await flushAsync();
+		deepStrictEqual(submitted, ["expanded:ALPHA"], "record two cannot enter while record one is in preflight");
+
+		releasePreflight();
+		await flushAsync();
+		await drain;
+		deepStrictEqual(submitted, ["expanded:ALPHA", "expanded:BRAVO"]);
+		deepStrictEqual(
+			queued,
+			[{ text: "expanded:BRAVO", steering: "end-of-turn" }],
+			"record two uses the live turn's FIFO follow-up queue",
+		);
+		strictEqual(harness.stderr.join("").includes(busyError), false, "the engine invariant cannot leak to the operator");
+
+		releaseTurn();
+		await flushAsync();
+	});
+
 	it("submits one attributed decision correction through the ordinary user-turn path while idle or streaming", async () => {
 		for (const streaming of [false, true]) {
 			const harness = createHarness();

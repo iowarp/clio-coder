@@ -319,6 +319,52 @@ function abortableFirstRun(log: SteeringHarnessLog): Parameters<typeof createSte
 }
 
 describe("contracts/chat-loop steering queue routing", () => {
+	it("acknowledges a fresh turn only after it owns the streaming admission", async () => {
+		const log = emptyLog();
+		const runGate = gate();
+		const loop = createLoop(log, async () => runGate.wait);
+		let acknowledged = false;
+		let streamingAtAcknowledgement = false;
+
+		const run = loop.submit("ALPHA", {
+			onAdmitted: () => {
+				acknowledged = true;
+				streamingAtAcknowledgement = loop.isStreaming();
+			},
+		});
+		await settle();
+
+		strictEqual(acknowledged, true);
+		strictEqual(streamingAtAcknowledgement, true, "the next boot record may now use streaming queue routing");
+		deepStrictEqual(log.prompts, ["ALPHA"]);
+
+		runGate.release();
+		await run;
+	});
+
+	it("replaces the engine's active-prompt invariant with operator-facing text", async () => {
+		const raw =
+			"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.";
+		const loop = createLoop(emptyLog(), async () => {
+			throw new Error(raw);
+		});
+		const notices: string[] = [];
+		loop.onEvent((event) => {
+			if (event.type === "notice") notices.push(event.text);
+		});
+
+		await loop.submit("ALPHA");
+
+		strictEqual(
+			notices.some((notice) => notice.includes(raw)),
+			false,
+		);
+		strictEqual(
+			notices.some((notice) => notice.includes("another response was already active")),
+			true,
+		);
+	});
+
 	it("routes Enter-while-streaming to agent.steer and dequeues the mirror when the engine injects it", async () => {
 		const log = emptyLog();
 		const runGate = gate();
