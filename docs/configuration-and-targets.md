@@ -553,7 +553,7 @@ These are saved defaults, not a live control surface. See [Live routing vs saved
 | --- | --- | --- | --- |
 | `attribution.gitCommits` | `true` | boolean | immediately for subsequent commits |
 
-Enabled attribution adds the compiled identity `Clio Coder <clio-coder@iowarp.ai>` only through evidence-justified role trailers. Assistance requires material creation or editing, testing requires a successful recorded validation command, and review requires a passing independent verifier. `Co-authored-by` is the GitHub/GitLab contributor and avatar compatibility trailer and appears only for material authorship, never for testing or review alone. Disabling the setting leaves commit messages entirely unchanged. Full hook behavior, evidence semantics, platform-avatar behavior, and the account email-verification prerequisite are in [git-commit-provenance.md](git-commit-provenance.md).
+Enabled attribution adds the compiled identity `Clio Coder <clio-coder@iowarp.ai>` only through evidence-justified role trailers. Assistance requires material creation or editing, testing requires a successful recorded validation command, and review requires a passing independent verifier. `Co-authored-by` is the GitHub/GitLab contributor and avatar compatibility trailer and appears only for material authorship, never for testing or review alone. Disabling the setting leaves commit messages entirely unchanged. Full hook behavior, evidence semantics, and how GitHub and GitLab render the identity and avatar once maintainers verify the email are in [git-commit-provenance.md](git-commit-provenance.md).
 
 ### Guardrails
 
