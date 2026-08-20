@@ -90,8 +90,9 @@ describe("contracts/slash prompt templates", () => {
 		const list = loadPromptTemplates({ cwd, home });
 		const { submitted, notices, ctx } = harness(list);
 
-		dispatchSlashCommand(parseSlashCommand("/interopdemo alpha"), ctx);
+		const result = dispatchSlashCommand(parseSlashCommand("/interopdemo alpha"), ctx);
 
+		strictEqual(result, "accepted");
 		deepStrictEqual(submitted, ["/interopdemo alpha"], "the typed line, arguments and all, reaches the submit path");
 		deepStrictEqual(notices, []);
 		const expanded = await expandInteractiveSubmitAsync(submitted[0] as string, resourcesFor(list), cwd);
@@ -161,8 +162,9 @@ describe("contracts/slash prompt templates", () => {
 		const list = loadPromptTemplates({ cwd: scratchDir(), home: scratchDir() });
 		const { submitted, notices, ctx } = harness(list);
 
-		dispatchSlashCommand(parseSlashCommand("/thnking"), ctx);
+		const result = dispatchSlashCommand(parseSlashCommand("/thnking"), ctx);
 
+		strictEqual(result, "rejected");
 		strictEqual(submitted.length, 0);
 		ok(notices[0]?.includes("/thnking is not a command"), notices.join(" | "));
 		ok(notices[0]?.includes("/help"), notices.join(" | "));
