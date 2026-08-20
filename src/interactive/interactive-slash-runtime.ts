@@ -136,6 +136,8 @@ export interface InteractiveSlashRuntime {
 	context: SlashCommandContext;
 	notice: SlashCommandContext["notice"];
 	dispatchCommand(text: string): void;
+	/** Admit captured Stage 0 input without waiting for the model turn to finish. */
+	admitCommand(text: string, signal?: AbortSignal): Promise<void>;
 }
 
 /** Owns slash-command context construction and its asynchronous command state. */
@@ -173,6 +175,8 @@ export function resolveAvailableThinkingLevels(
 
 export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps): InteractiveSlashRuntime {
 	let activeContextInit = false;
+	let latestAdmission: Promise<void> = Promise.resolve();
+	let activeAdmissionSignal: AbortSignal | undefined;
 	const cwd = (): string => deps.getCwd?.() ?? process.cwd();
 	const resources = deps.resources;
 	const userTasks = deps.userTasks;
@@ -186,32 +190,98 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 
 	/** One expanded operator turn into the chat loop: record it, paint it, submit it. */
 	const submitExpanded = (sub: InteractiveSlashSubmitExpansion): void => {
-		void (async () => {
-			try {
-				// Enter while streaming becomes a steer inside chat.submit. The
-				// queue panel shows it until the engine injects it, and the
-				// injection emits queued_user_turn, which is when the transcript
-				// renders it. Appending here too showed the text twice and at
-				// the wrong point in the turn's order.
-				const willQueue = deps.chat.isStreaming();
-				deps.recordSubmittedTurn();
-				deps.refreshFooter();
-				if (!willQueue) deps.chatPanel.appendUser(sub.text);
-				deps.requestRender();
-				deps.beforeSemanticSubmit?.();
-				await deps.chat.submit(sub.text, {
-					...(sub.images.length > 0 ? { images: sub.images } : {}),
-					...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
-					...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
-				});
-				await deps.settleVisibleFrame?.("submit-return");
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
-			} finally {
-				deps.requestRender();
+		try {
+			// Enter while streaming becomes a steer inside chat.submit. The
+			// queue panel shows it until the engine injects it, and the
+			// injection emits queued_user_turn, which is when the transcript
+			// renders it. Appending here too showed the text twice and at
+			// the wrong point in the turn's order.
+			const willQueue = deps.chat.isStreaming();
+			deps.recordSubmittedTurn();
+			deps.refreshFooter();
+			if (!willQueue) deps.chatPanel.appendUser(sub.text);
+			deps.requestRender();
+			deps.beforeSemanticSubmit?.();
+			const turn = deps.chat.submit(sub.text, {
+				...(sub.images.length > 0 ? { images: sub.images } : {}),
+				...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
+				...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
+			});
+			void turn
+				.then(() => deps.settleVisibleFrame?.("submit-return"))
+				.catch((err) => {
+					const msg = err instanceof Error ? err.message : String(err);
+					deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
+				})
+				.finally(deps.requestRender);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
+			deps.requestRender();
+		}
+	};
+
+	const admitChat = async (text: string, signal?: AbortSignal): Promise<void> => {
+		try {
+			signal?.throwIfAborted();
+			const submitted = await deps.expandSubmit(text);
+			signal?.throwIfAborted();
+			const uninstalled = submitted.pendingSkillRequests.find((request) => !request.installed);
+			if (uninstalled && !uninstalled.marketplaceRef) {
+				deps.io.stderr(`Skill "${uninstalled.name}" is not installed and no local marketplace entry is available.\n`);
+				return;
 			}
-		})();
+			if (uninstalled) {
+				void deps
+					.openAskUser([
+						{
+							question: `Skill "${uninstalled.name}" is not installed. Would you like to install it?`,
+							options: [
+								{ label: "Install and run", description: `Install from ${uninstalled.marketplaceRef}` },
+								{ label: "Cancel", description: "Do not install." },
+							],
+						},
+					])
+					.then((res) => {
+						if (res.cancelled || res.answers[0]?.answer !== "Install and run") {
+							deps.io.stderr("Installation cancelled.\n");
+							return;
+						}
+						void (async () => {
+							try {
+								deps.io.stdout(`Installing skill "${uninstalled.name}"...\n`);
+								let configDir: string | undefined;
+								try {
+									configDir = (deps.getConfigDir ?? clioConfigDir)();
+								} catch (configErr) {
+									deps.io.stderr(
+										`Skill install: config dir unavailable (${configErr instanceof Error ? configErr.message : String(configErr)}); continuing without it.\n`,
+									);
+								}
+								(deps.installSkill ?? installSkill)({
+									source: uninstalled.name,
+									cwd: cwd(),
+									...(configDir ? { configDir } : {}),
+								});
+								deps.io.stdout(`Successfully installed "${uninstalled.name}"!\n`);
+								await deps.resources?.reload();
+								const postInstallSubmitted = await deps.expandSubmit(text);
+								submitExpanded(postInstallSubmitted);
+							} catch (err) {
+								deps.io.stderr(
+									`Failed to install skill "${uninstalled.name}": ${err instanceof Error ? err.message : String(err)}\n`,
+								);
+							}
+						})();
+					});
+				return;
+			}
+			submitExpanded(submitted);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
+			deps.requestRender();
+		}
 	};
 	const context: SlashCommandContext = {
 		io: deps.io,
@@ -448,70 +518,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		// worker's output name a file the operator never mentioned.
 		submitOperatorNote: (text) => submitExpanded({ text, images: [], workingContextPaths: [], pendingSkillRequests: [] }),
 		submitChat: (text) => {
-			void (async () => {
-				try {
-					const submitted = await deps.expandSubmit(text);
-					const uninstalled = submitted.pendingSkillRequests.find((request) => !request.installed);
-					if (uninstalled && !uninstalled.marketplaceRef) {
-						deps.io.stderr(`Skill "${uninstalled.name}" is not installed and no local marketplace entry is available.\n`);
-						return;
-					}
-					if (uninstalled) {
-						void deps
-							.openAskUser([
-								{
-									question: `Skill "${uninstalled.name}" is not installed. Would you like to install it?`,
-									options: [
-										{
-											label: "Install and run",
-											description: `Install from ${uninstalled.marketplaceRef}`,
-										},
-										{ label: "Cancel", description: "Do not install." },
-									],
-								},
-							])
-							.then((res) => {
-								if (res.cancelled || res.answers[0]?.answer !== "Install and run") {
-									deps.io.stderr("Installation cancelled.\n");
-									return;
-								}
-								void (async () => {
-									try {
-										deps.io.stdout(`Installing skill "${uninstalled.name}"...\n`);
-										let configDir: string | undefined;
-										try {
-											configDir = (deps.getConfigDir ?? clioConfigDir)();
-										} catch (configErr) {
-											deps.io.stderr(
-												`Skill install: config dir unavailable (${configErr instanceof Error ? configErr.message : String(configErr)}); continuing without it.\n`,
-											);
-										}
-										(deps.installSkill ?? installSkill)({
-											source: uninstalled.name,
-											cwd: cwd(),
-											...(configDir ? { configDir } : {}),
-										});
-										deps.io.stdout(`Successfully installed "${uninstalled.name}"!\n`);
-										await deps.resources?.reload();
-										const postInstallSubmitted = await deps.expandSubmit(text);
-										submitExpanded(postInstallSubmitted);
-									} catch (err) {
-										deps.io.stderr(
-											`Failed to install skill "${uninstalled.name}": ${err instanceof Error ? err.message : String(err)}\n`,
-										);
-									}
-								})();
-							});
-						return;
-					}
-
-					submitExpanded(submitted);
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
-					deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
-					deps.requestRender();
-				}
-			})();
+			latestAdmission = admitChat(text, activeAdmissionSignal);
+			void latestAdmission;
 		},
 		render: deps.requestRender,
 	};
@@ -520,5 +528,18 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		context,
 		notice: appendCommandNotice,
 		dispatchCommand: (text) => dispatchSlashCommand(parseSlashCommand(text), context),
+		admitCommand: async (text, signal) => {
+			signal?.throwIfAborted();
+			const command = parseSlashCommand(text);
+			const before = latestAdmission;
+			const previousSignal = activeAdmissionSignal;
+			activeAdmissionSignal = signal;
+			try {
+				dispatchSlashCommand(command, context);
+			} finally {
+				activeAdmissionSignal = previousSignal;
+			}
+			if (latestAdmission !== before) await latestAdmission;
+		},
 	};
 }

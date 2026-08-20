@@ -20,17 +20,22 @@ export function isBootTraceEnabled(): boolean {
 	return process.env[BOOT_TRACE_ENV] === "1";
 }
 
+/** Build one trace line without choosing an output owner. */
+export function formatBootTrace(phase: string, detail?: string): string | null {
+	if (!isBootTraceEnabled()) return null;
+	const suffix = detail !== undefined && detail.length > 0 ? ` (${detail})` : "";
+	return `[clio:boot] +${performance.now().toFixed(1)}ms ${phase}${suffix}\n`;
+}
+
 /**
  * Stamp a boot phase marker to stderr, e.g. `[clio:boot] +742.1ms cli entry`.
  * `detail` appends a parenthetical (module counts, ids). No-op unless
  * `CLIO_CODER_TRACE_BOOT=1`. Never throws: a diagnostic must not affect boot.
  */
 export function traceBoot(phase: string, detail?: string): void {
-	if (!isBootTraceEnabled()) return;
 	try {
-		const elapsedMs = performance.now();
-		const suffix = detail !== undefined && detail.length > 0 ? ` (${detail})` : "";
-		process.stderr.write(`[clio:boot] +${elapsedMs.toFixed(1)}ms ${phase}${suffix}\n`);
+		const line = formatBootTrace(phase, detail);
+		if (line) process.stderr.write(line);
 	} catch {
 		// Tracing is best-effort; a write failure must never break boot.
 	}

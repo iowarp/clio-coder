@@ -394,7 +394,7 @@ describe("clio-coder acp real-server smoke", { concurrency: false }, () => {
 		const fixture = await startOpenAICompatFixture("acp e2e text reply");
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
-			const client = launch(testEnv());
+			const client = launch({ ...testEnv(), CLIO_CODER_INTERACTIVE: "1" });
 			const init = await client.request<{
 				protocolVersion: number;
 				agentInfo: { name: string };
@@ -439,6 +439,8 @@ describe("clio-coder acp real-server smoke", { concurrency: false }, () => {
 			client.endStdin();
 			const exit = await client.wait();
 			strictEqual(exit.code, 0, `stderr=${exit.stderr}`);
+			strictEqual(exit.stderr.includes("Hydrating session services"), false);
+			strictEqual(exit.stderr.includes("\u001b[?2004h"), false, "ambient interactive state cannot mount an ACP TUI");
 			dumpTranscript("case1-text-turn", client, project, scratch.dir);
 		} finally {
 			await closeServer(fixture.server);

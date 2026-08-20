@@ -45,6 +45,7 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | `CLIO_CODER_SMOOTH_STREAM` | settings value | Per-process override for `terminal.smoothStreaming`: `0`/`off`/`false`, `auto`, or `1`/`on`/`true`. A valid value wins over settings; an invalid value fails safely to `off`. |
 | `CLIO_CODER_REDUCE_MOTION` | off | `1` makes smooth-streaming `auto` use the immediate coalescer. Explicit `on` remains an operator request, while stdout backpressure still pauses frame production. |
 | `CLIO_CODER_SCREEN_READER` | off | `1` makes smooth-streaming `auto` use the immediate coalescer so a screen reader receives the existing low-motion update behavior. |
+| `CLIO_CODER_INSTANT_SHELL` | on | `0` disables the single-owner Stage 0 interactive shell for immediate rollback. Unset or `1` mounts one terminal/editor owner before service hydration; ACP, headless, ordinary non-TTY, and subcommand paths never mount it. An explicit `CLIO_CODER_INTERACTIVE=1` keeps its force-interactive non-TTY behavior. |
 
 ## Directory and install layout
 
@@ -104,6 +105,7 @@ Set by Clio for its own processes; not operator knobs.
 | --- | --- |
 | `CLIO_CODER_WORKER_FAUX` (+ `_MODEL`, `_TEXT`, `_STOP_REASON`, `_ERROR_MESSAGE`) | Fake worker model for tests (`src/engine/ai.ts`). |
 | `CLIO_CODER_TEST_UPGRADE_NO_NETWORK` | Skips npm install during upgrade tests (`src/cli/upgrade.ts`). |
+| `CLIO_CODER_TEST_STAGE1_DELAY_MS`, `CLIO_CODER_TEST_STAGE1_FAIL` | `NODE_ENV=test`-only, bounded instant-shell interleaving and injected hydration failure seams for the built PTY acceptance suite (`src/cli/clio.ts`). |
 | `CLIO_CODER_REQUIRE_HOME_PREFIX` | Test guardrail: abort if resolved directories escape `CLIO_CODER_HOME` (`src/core/init.ts`). |
 
 Variables used only by `scripts/` and `benchmarks/` harnesses (the `CLIO_CODER_LIVE_*` smoke-test family, benchmark fleet configuration, install-script inputs) are not part of the shipped runtime and are documented inline where they are consumed.

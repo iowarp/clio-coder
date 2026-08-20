@@ -284,6 +284,21 @@ frame. The stdout gate stops later frame construction after a false write and
 coalesces to current model state until `drain`; it is not installed for the
 default `off` path and therefore cannot become a second unbounded SSH buffer.
 
+Interactive boot has one terminal owner across its two stages. The
+`TerminalLease` creates one terminal/TUI/root host/editor and owns raw mode,
+decoded input, resize, protocol initialization, signal routing, and teardown.
+Stage 0 mounts a small static shell on that owner. Stage 1 hydrates services and
+atomically replaces the root plus input/signal delegates while preserving the
+editor object and buffer. Submissions accepted before attachment are immutable
+FIFO records shown in the shell and admitted exactly once through the normal
+slash/bash/chat pipeline after attachment. A generation guard rejects a late
+hydration after shutdown; every failure path shares one idempotent close and
+terminal restoration transaction. The built-graph contract bounds the Stage 0
+closure and rejects provider, tool, codewiki, tree-sitter, and orchestrator
+implementation markers. ACP, headless, ordinary non-TTY invocation, help, and
+subcommands never construct a lease; the established explicit
+`CLIO_CODER_INTERACTIVE=1` non-TTY override remains force-interactive.
+
 Tracing is opt-in and content-free. Its bounded asynchronous writer never does
 filesystem append I/O on the render stack, and shutdown awaits a bounded flush.
 See [performance-methodology.md](performance-methodology.md) for vocabulary,

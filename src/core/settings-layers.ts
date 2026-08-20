@@ -24,6 +24,7 @@ import { parse as parseYaml } from "yaml";
 import {
 	applySettingsDelta,
 	type ClioSettings,
+	type SettingsIssue,
 	type SettingsMutator,
 	SettingsValidationError,
 	settingsPath,
@@ -37,6 +38,7 @@ export interface SettingsLayerIssue {
 	origin: SettingsOrigin;
 	path: string;
 	message: string;
+	kind?: SettingsIssue["kind"];
 }
 
 export interface SettingsLayerInfo {
@@ -52,6 +54,9 @@ export interface LayeredSettings {
 	issues: SettingsLayerIssue[];
 	layers: SettingsLayerInfo[];
 }
+
+const STRICT_USER_ISSUES = Symbol("strict-user-issues");
+type InternalLayeredSettings = LayeredSettings & { [STRICT_USER_ISSUES]: SettingsIssue[] };
 
 // Keys whose presence in a project layer means a credential leaked into a
 // committed file. `auth` carries target headers and api keys; the rest cover
@@ -82,16 +87,33 @@ interface RawLayer {
 
 function readRawLayer(origin: SettingsOrigin, path: string, issues: SettingsLayerIssue[]): RawLayer {
 	if (!existsSync(path)) return { origin, path, blob: undefined };
+	let text: string;
+	try {
+		text = readFileSync(path, "utf8");
+	} catch (err) {
+		issues.push({
+			origin,
+			path: "(root)",
+			message: `unreadable: ${err instanceof Error ? err.message : String(err)}`,
+			kind: "unreadable",
+		});
+		return { origin, path, blob: undefined };
+	}
 	let parsed: unknown;
 	try {
-		parsed = parseYaml(readFileSync(path, "utf8"));
+		parsed = parseYaml(text);
 	} catch (err) {
-		issues.push({ origin, path, message: `invalid YAML: ${err instanceof Error ? err.message : String(err)}` });
+		issues.push({
+			origin,
+			path: "(root)",
+			message: `invalid YAML: ${err instanceof Error ? err.message : String(err)}`,
+			kind: "syntax",
+		});
 		return { origin, path, blob: undefined };
 	}
 	if (parsed === null || parsed === undefined) return { origin, path, blob: {} };
 	if (!isRecord(parsed)) {
-		issues.push({ origin, path, message: "settings file must be a mapping at the root" });
+		issues.push({ origin, path: "(root)", message: "settings file must be a mapping at the root" });
 		return { origin, path, blob: undefined };
 	}
 	return { origin, path, blob: parsed };
@@ -223,6 +245,14 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
 	const prepared = prepareProjectLayers(cwd, issues);
 	const { settings, sources } = validateLayerStack(user, prepared, issues);
 
+	const strictUserIssues =
+		user.blob === undefined
+			? []
+			: validateSettings(user.blob).issues.map((issue) => ({
+					path: issue.path,
+					message: issue.message,
+					...(issue.kind ? { kind: issue.kind } : {}),
+				}));
 	return {
 		settings,
 		sources,
@@ -233,7 +263,29 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
 			{ origin: "project", path: prepared.projectFile, present: prepared.projectRaw.blob !== undefined },
 			{ origin: "project.local", path: prepared.localFile, present: prepared.localRaw.blob !== undefined },
 		],
-	};
+		[STRICT_USER_ISSUES]: strictUserIssues,
+	} as InternalLayeredSettings;
+}
+
+/**
+ * Read the complete effective stack once while retaining settings.yaml's
+ * strict launch gate. Project-layer issues remain diagnostics, matching the
+ * established best-effort workspace overlay contract.
+ */
+export function readStrictLayeredSettings(cwd: string, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
+	const layered = readLayeredSettings(cwd, options) as InternalLayeredSettings;
+	const reportedUserIssues = layered.issues
+		.filter((issue) => issue.origin === "user")
+		.map(({ path, message, kind }): SettingsIssue => ({ path, message, ...(kind ? { kind } : {}) }));
+	const userIssues = [...reportedUserIssues, ...layered[STRICT_USER_ISSUES]].filter(
+		(issue, index, all) =>
+			all.findIndex(
+				(candidate) =>
+					candidate.path === issue.path && candidate.message === issue.message && candidate.kind === issue.kind,
+			) === index,
+	);
+	if (userIssues.length > 0) throw new SettingsValidationError(userIssues);
+	return layered;
 }
 
 /**

@@ -12,7 +12,7 @@ import type { Component, TUI } from "../engine/tui.js";
 import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { type CoalescingChatRenderer, createCoalescingChatRenderer } from "./chat-renderer.js";
-import { ClioEditor } from "./clio-editor.js";
+import { ClioEditor, type EditorChrome } from "./clio-editor.js";
 import { createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore } from "./context-activity.js";
 import { createDispatchBoardStore, createDispatchBoardView, type DispatchBoardView } from "./dispatch-board.js";
@@ -71,7 +71,13 @@ export interface InteractivePresentationDeps {
 	sessionTranscript: Pick<SessionTranscript, "liveSessionTurns">;
 	tui: TUI;
 	terminal: { readonly columns: number };
-	mount: (root: Component, editor: Component) => void;
+	mount?: (root: Component, editor: Component) => void;
+	/** Stage 0's exact editor; when present no replacement editor is constructed. */
+	editor?: ClioEditor;
+	/** Stage 0's already-installed keybinding manager and pi-tui global. */
+	keybindings?: ClioKeybindingManager;
+	/** Pending boot submissions remain visible until serial admission removes them. */
+	bootPending?: Component;
 	getSettings?: () => Readonly<ClioSettings>;
 	resources?: Pick<ResourcesContract, "skills">;
 	session?: Pick<SessionContract, "current">;
@@ -118,6 +124,7 @@ export interface InteractivePresentation {
 	announceTaskMemorySeedOffer(): void;
 	collapseWelcomeDashboard(): void;
 	editor: ClioEditor;
+	editorChrome: EditorChrome;
 	dispatchBoard: DispatchBoardView;
 	chatRenderer: CoalescingChatRenderer;
 	io: RunIo;
@@ -188,7 +195,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const getCwd = deps.getCwd ?? (() => process.cwd());
 	const requestRender = (): void => deps.tui.requestRender();
 	const settings = deps.getSettings?.() ?? ({ keybindings: {} } as ClioSettings);
-	const keybindings = factories.createKeybindings(settings);
+	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
 	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
 		deps.workspaceFacts;
 
@@ -307,7 +314,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		requestRender();
 	});
 
-	const editor = factories.createEditor(deps.tui, {
+	const editorChrome: EditorChrome = {
 		getModelLabel: () => {
 			const current = deps.getSettings?.();
 			// The rail is the narrowest of the three, so it drops the spaces.
@@ -330,7 +337,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		willEnterSteer: (text) => willEnterSteerActiveWork(deps, text),
 		getSubmitKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.submit")[0], "Enter"),
 		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Shift+Enter"),
-	});
+	};
+	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
 	editor.focused = true;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
 		listSkills: () => ({
@@ -373,11 +381,20 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			chatRenderer.mutate(() => chatPanel.appendReplayBlock(renderBlock), "command-output"),
 		requestRender: () => {},
 	});
+	const pending: Component = deps.bootPending
+		? {
+				render: (width) => [...(deps.bootPending?.render(width) ?? []), ...followUpQueuePanel.render(width)],
+				invalidate: () => {
+					deps.bootPending?.invalidate();
+					followUpQueuePanel.invalidate();
+				},
+			}
+		: followUpQueuePanel;
 	const root = factories.buildLayout(
 		{
 			banner,
 			chat: chatPanel,
-			pending: followUpQueuePanel,
+			pending,
 			editor,
 			footer: footer.view,
 		},
@@ -386,7 +403,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			fullscreenScrollbar: settings.terminal?.fullscreenScrollbar ?? "auto",
 		},
 	);
-	deps.mount(root, editor);
+	deps.mount?.(root, editor);
 
 	const scheduleInterval = deps.scheduleInterval ?? ((callback, intervalMs) => setInterval(callback, intervalMs));
 	const clearScheduledInterval =
@@ -452,6 +469,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			if (banner.collapseToSessionHeader()) requestRender();
 		},
 		editor,
+		editorChrome,
 		dispatchBoard,
 		chatRenderer,
 		io,

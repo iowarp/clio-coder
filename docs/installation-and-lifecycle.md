@@ -233,6 +233,7 @@ Key lifecycle and operational updates in v0.3.2:
 - Upgraded the underlying engine SDK libraries to 0.84.0 with signal-aware OAuth cancellation.
 - Hardened migration resilience: damaged `credentials.yaml` files no longer block upgrades when no renames are needed (#121); `--skip-migrations` is available as a recovery override.
 - Fullscreen TUI mode (`terminal.tuiMode`, `terminal.fullscreenScrollbar`) is available via Settings → Terminal (restart required). Adaptive presentation pacing is the live `terminal.smoothStreaming` setting; 0.3.2 defaults it to `off`, with conservative `auto` and explicit `on` available from the same section.
+- Interactive launch paints a measured Stage 0 shell on the same terminal and editor that Stage 1 hydrates. Typing, queued submits, resize, and Ctrl+C remain live during hydration; set `CLIO_CODER_INSTANT_SHELL=0` for the legacy fully hydrated first-frame path.
 - Turn settlement is enforced on `/new`, `/resume`, `/tree`, and `/fork` to cleanly commit in-flight streams before session writer replacement (#114).
 - Resumed and forked session entry replays standardize message prefixes through `src/engine/messages.ts`.
 - `AI_AGENT=clio-coder` is set on all child processes for system attribution.
