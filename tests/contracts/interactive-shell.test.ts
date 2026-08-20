@@ -1,8 +1,12 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { Component, Terminal } from "../../src/engine/tui.js";
 import {
 	createInteractiveShell,
+	createProcessInteractiveShell,
 	type InteractiveShellInterval,
 	type InteractiveShellTui,
 } from "../../src/interactive/interactive-shell.js";
@@ -50,6 +54,7 @@ describe("interactive shell ownership", () => {
 		const run = shell.anchor();
 		shell.releaseAnchor();
 		shell.stop();
+		await shell.settle();
 		shell.complete(7);
 
 		strictEqual(await run, 7);
@@ -107,6 +112,37 @@ describe("interactive shell ownership", () => {
 		strictEqual(clears, 1);
 	});
 
+	it("starts teardown synchronously and exposes one idempotent settlement", async () => {
+		const log: string[] = [];
+		let release = (): void => {};
+		const teardown = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const tui: InteractiveShellTui = {
+			addChild: () => {},
+			setFocus: () => {},
+			start: () => {},
+			stop: () => log.push("stop"),
+			requestRender: () => {},
+		};
+		const shell = createInteractiveShell({
+			createTerminal: () => ({ id: "terminal" }) as TestTerminal,
+			createTui: () => tui,
+			onStop: () => {
+				log.push("teardown");
+				return teardown;
+			},
+		});
+
+		shell.stop();
+		shell.stop();
+		const first = shell.settle();
+		strictEqual(shell.settle(), first);
+		deepStrictEqual(log, ["stop", "teardown"]);
+		release();
+		await first;
+	});
+
 	it("registers the fullscreen layout root before focus and rendering start", () => {
 		const log: string[] = [];
 		const root = {} as Component;
@@ -130,5 +166,20 @@ describe("interactive shell ownership", () => {
 		shell.mount(root, editor);
 
 		deepStrictEqual(log, ["add-root", "layout-root", "focus-editor", "start"]);
+	});
+
+	it("keeps an unusable optional trace path nonfatal", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-trace-failure-"));
+		const parentFile = join(dir, "not-a-directory");
+		writeFileSync(parentFile, "occupied", "utf8");
+		const previous = process.env.CLIO_CODER_RENDER_TRACE;
+		process.env.CLIO_CODER_RENDER_TRACE = join(parentFile, "trace.jsonl");
+		try {
+			createProcessInteractiveShell();
+		} finally {
+			if (previous === undefined) delete process.env.CLIO_CODER_RENDER_TRACE;
+			else process.env.CLIO_CODER_RENDER_TRACE = previous;
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

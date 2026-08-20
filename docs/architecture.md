@@ -179,6 +179,34 @@ Clio uses in-process event buses for status and audit surfaces, but safety is no
 - `src/tools/registry.ts` is the admission point for every tool invocation.
 - `src/domains/dispatch/receipt-integrity.ts` and related dispatch files persist receipts used by evidence and cost surfaces.
 
+## Interactive render transactions
+
+The interactive shell owns one concrete pi-tui renderer. Clio's instrumented
+subclasses bracket the renderer's protected `doRender()` seam, so one render
+transaction receives one `frameId` even when regular-screen cursor/IME work
+issues several terminal writes. Protocol, startup, and shutdown writes outside
+a render retain `frameId: null`; they are never fabricated into frames.
+
+The root component is timed in place so its identity and fullscreen layout
+markers do not change. Public pi-tui seams provide component/layout, overlay,
+normalization, and cursor-extraction phases. Viewport selection, diffing, ANSI
+construction, and remaining cursor work are reported honestly as one combined
+remainder because the engine does not expose narrower hooks. The stdout
+boundary records enqueue duration, return value, backpressure, and drain.
+
+Canonical text/thinking events are numbered at the beginning of the primary
+projection, before any consumer. Panel admission/application and the first
+committed frame's high water establish event causality without changing the
+public event object or fan-out order. Input is numbered after terminal protocol
+decoding and before the application controller mutates editor, overlay, scroll,
+or submit state. The first frame whose input high water includes that id is the
+input-to-stdout-commit endpoint.
+
+Tracing is opt-in and content-free. Its bounded asynchronous writer never does
+filesystem append I/O on the render stack, and shutdown awaits a bounded flush.
+See [performance-methodology.md](performance-methodology.md) for vocabulary,
+commands, PTY limitations, and baseline evidence.
+
 ## Command spec
 
 Interactive slash commands in Clio Coder are governed by a unified declarative command specification registry. This declarative system replaces hand-rolled parsing logic with structured specifications that define the names, flags, positionals, and subcommands for each entry. The central registry acts as the single source of truth for command matching, argument parsing, autocomplete suggestion generation, and usage help output. The parser processes user input strings using these declarative specifications to generate structured argument objects and canonical command representations. By deriving all command-related behavior from these specifications, the system ensures consistency across usage help messages and autocomplete overlays.

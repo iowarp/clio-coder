@@ -96,6 +96,12 @@ export {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+export {
+	InstrumentedTuiAltScreen,
+	InstrumentedTuiMainScreen,
+	type TuiRenderObserver,
+	type TuiRenderPhase,
+} from "./instrumented-tui.js";
 export type { SelectListTheme } from "./select-list.js";
 /**
  * SelectList ships from the engine as a thin subclass that honors a design
