@@ -2498,7 +2498,11 @@ export class SettingsCenter implements Component {
 	private submenuComponent: Component | null = null;
 	/** Committed catalog filter; empty means unfiltered. */
 	private filterQuery = "";
-	/** Draft while the filter editor owns input; null when it is closed. */
+	/**
+	 * Draft while the filter editor owns input; null when it is closed. The
+	 * draft narrows the catalog live per keystroke, matching /model and /resume;
+	 * Enter commits it and Esc restores the committed query.
+	 */
 	private filterDraft: string | null = null;
 	/** Local cycle preview for the selected row; committed on Enter. */
 	private pendingValue: string | null = null;
@@ -2658,13 +2662,25 @@ export class SettingsCenter implements Component {
 		}
 		if (data === "\x7f" || data === "\b") {
 			this.filterDraft = draft.slice(0, -1);
+			this.normalizeSelection();
+			this.options.requestRender?.();
 			return;
 		}
-		if (isPrintableInput(data)) this.filterDraft = draft + data;
+		if (isPrintableInput(data)) {
+			this.filterDraft = draft + data;
+			this.normalizeSelection();
+			this.options.requestRender?.();
+		}
+	}
+
+	/** The query the catalog is narrowed by right now: the live draft while the
+	 * filter editor is open, the committed query otherwise. */
+	private effectiveFilterQuery(): string {
+		return (this.filterDraft ?? this.filterQuery).trim();
 	}
 
 	private matchesFilter(item: SettingsCenterItem): boolean {
-		const query = this.filterQuery.trim().toLowerCase();
+		const query = this.effectiveFilterQuery().toLowerCase();
 		if (query.length === 0) return true;
 		return (
 			item.label.toLowerCase().includes(query) ||
@@ -2680,7 +2696,7 @@ export class SettingsCenter implements Component {
 	 */
 	private sections(): SettingsCenterSection[] {
 		const all = buildSettingsSections(this.items);
-		if (this.filterQuery.trim().length === 0) return all;
+		if (this.effectiveFilterQuery().length === 0) return all;
 		return all
 			.map((section) => ({ ...section, items: this.filterSectionItems(section.items) }))
 			.filter((section) => section.items.some((item) => this.isSelectableRow(item)));
@@ -2744,10 +2760,13 @@ export class SettingsCenter implements Component {
 
 	private normalizeSelection(): void {
 		const sections = this.sections();
-		// A filter that hides everything leaves nowhere to drill into, so the stack
-		// sits at its top level and one Esc closes Settings from the empty state.
+		// A committed filter that hides everything leaves nowhere to drill into, so
+		// the stack sits at its top level and one Esc closes Settings from the
+		// empty state. A live draft narrows per keystroke and may pass through the
+		// empty state on its way to a match, so it must not disturb the level:
+		// Esc's first press cancels the draft and lands back where editing began.
 		if (sections.length === 0) {
-			this.level = "sections";
+			if (this.filterDraft === null) this.level = "sections";
 			return;
 		}
 		if (!sections.some((section) => section.id === this.selectedSectionId)) {
@@ -2961,7 +2980,7 @@ export class SettingsCenter implements Component {
 		const theme = clioTheme();
 		return fixedLines(
 			[
-				theme.fg("muted", truncateToWidth(`No settings match “${this.filterQuery}”`, width, ELLIPSIS, true)),
+				theme.fg("muted", truncateToWidth(`No settings match “${this.effectiveFilterQuery()}”`, width, ELLIPSIS, true)),
 				theme.fg("dim", truncateToWidth("/ edit filter · empty Enter clears", width, ELLIPSIS, true)),
 			],
 			width,
@@ -3066,7 +3085,7 @@ export class SettingsCenter implements Component {
 	 */
 	private sectionCatalogRows(): Array<{ line: string; sectionId: SettingsSectionId | null }> {
 		const theme = clioTheme();
-		const filtering = this.filterQuery.trim().length > 0;
+		const filtering = this.effectiveFilterQuery().length > 0;
 		const rows: Array<{ line: string; sectionId: SettingsSectionId | null }> = [];
 		let previousGroup: string | null = null;
 		for (const section of this.sections()) {

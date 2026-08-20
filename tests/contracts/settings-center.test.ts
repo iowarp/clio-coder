@@ -1226,6 +1226,38 @@ describe("contracts/settings center", () => {
 		ok(stripAnsi(center.render(40).join("\n")).includes("Autonomy"), "an empty submit restores the catalog");
 	});
 
+	it("narrows the catalog per keystroke while the filter editor is open (#135)", () => {
+		let renders = 0;
+		const center = new SettingsCenter(buildSettingItems(settingsWithTargets()), {
+			getBodyHeight: () => 24,
+			prepareChange: () => null,
+			onApply: () => undefined,
+			onCancel: () => undefined,
+			requestRender: () => {
+				renders += 1;
+			},
+		});
+		center.handleInput("/");
+		const rendersBeforeTyping = renders;
+		for (const character of "max retries") center.handleInput(character);
+		ok(renders >= rendersBeforeTyping + "max retries".length, "every keystroke requests a repaint");
+		// No Enter yet: the draft alone must already narrow the catalog.
+		let rendered = stripAnsi(center.render(120).join("\n"));
+		ok(rendered.includes("Max retries"), `draft match visible before Enter:\n${rendered}`);
+		ok(!rendered.includes("Autonomy level"), `non-match hidden before Enter:\n${rendered}`);
+		strictEqual(center.getSelection().filter, "", "the query is not committed until Enter");
+
+		// Backspacing the draft widens the catalog again, still before Enter.
+		for (let index = 0; index < "max retries".length; index += 1) center.handleInput("\x7f");
+		rendered = stripAnsi(center.render(120).join("\n"));
+		ok(rendered.includes("Autonomy & Safety"), `an emptied draft restores the catalog:\n${rendered}`);
+
+		// A draft that matches nothing shows the empty state live.
+		for (const character of "zzzznotasetting") center.handleInput(character);
+		rendered = stripAnsi(center.render(120).join("\n"));
+		ok(rendered.includes("No settings match “zzzznotasetting”"), `live empty state:\n${rendered}`);
+	});
+
 	it("restores the previous query when filter editing is cancelled", () => {
 		const center = noopSettingsCenter(24);
 		applyFilter(center, "retry");
