@@ -169,6 +169,25 @@ describe("contracts/bootstrap", () => {
 		strictEqual(verification, undefined, verification?.body);
 	});
 
+	/**
+	 * Cargo's commands are defined by the toolchain, not by each project, so a
+	 * Cargo workspace can be handed `cargo build` and `cargo test` with the same
+	 * confidence a declared package script carries. Before this, any repository
+	 * without a package.json got no verification section at all.
+	 */
+	it("names the Cargo toolchain commands for a Rust workspace", async () => {
+		writeFileSync(join(scratch, "Cargo.toml"), '[package]\nname = "fixture"\nversion = "0.1.0"\n', "utf8");
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "main.rs"), "fn main() {}\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		ok(verification, "a Cargo workspace must get a verification section");
+
+		ok(verification.body.includes("`cargo build`"), verification.body);
+		ok(verification.body.includes("`cargo test`"), verification.body);
+	});
+
 	it("measures the local import extension instead of reading it off the stack", async () => {
 		writeFileSync(
 			join(scratch, "package.json"),
