@@ -41,6 +41,7 @@ function vendorGrammars(): void {
 const entries = {
 	"cli/index": "src/cli/index.ts",
 	"worker/entry": "src/worker/entry.ts",
+	"codewiki/build-worker": "src/domains/context/codewiki/build-worker.ts",
 };
 
 export default defineConfig({

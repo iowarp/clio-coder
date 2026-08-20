@@ -39,8 +39,9 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
-import { type ContextContract, createContextDomainModule } from "../domains/context/index.js";
+import type { ContextContract } from "../domains/context/contract.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
+import { createContextDomainModule } from "../domains/context/runtime.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
@@ -179,7 +180,7 @@ import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.j
 import { registerAllTools } from "../tools/bootstrap.js";
 import { isGitRepository, recoverCleanupReadyCompeteGroups } from "../tools/compete-worktrees.js";
 import { createDispatchBackgroundRegistry } from "../tools/dispatch.js";
-import { coalescePathSink, createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
+import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { createRegistry } from "../tools/registry.js";
 
 export interface BootResult {
@@ -1128,9 +1129,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const unsubscribeMemoryLoop = bus.on(BusChannels.LoopBlocked, () => memoryIntervention.signalLoop());
 	termination.onDrain(() => unsubscribeMemoryLoop());
 	if (contextDomain) {
-		middleware.registerHook(
-			createFileMutationObserver(coalescePathSink((paths) => contextDomain.noteFileChanges(paths))),
-		);
+		middleware.registerHook(createFileMutationObserver(({ paths }) => contextDomain.noteFileChanges(paths)));
 	}
 	// User-defined hooks: extensions and the project (.clio-coder/hooks.yaml,
 	// .clio-coder/hooks.local.yaml) declare a conservative, receipted hook set on the

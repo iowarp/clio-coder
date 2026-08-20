@@ -16,7 +16,7 @@
  * index finds at the requested depth.
  */
 
-import type { Codewiki, CodewikiFile } from "../codewiki/indexer.js";
+import type { Codewiki, CodewikiFile } from "../codewiki/schema.js";
 
 export type WikiDepth = "auto" | "simple" | "medium" | "detailed";
 export type ResolvedWikiDepth = Exclude<WikiDepth, "auto">;

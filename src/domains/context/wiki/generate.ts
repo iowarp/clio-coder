@@ -16,14 +16,9 @@ import { dirname, join } from "node:path";
 import type { ContextActivityPayload } from "../../../core/bus-events.js";
 import { detectProjectType } from "../../session/workspace/project-type.js";
 import type { BootstrapProgressSink } from "../bootstrap.js";
-import {
-	buildCodewiki,
-	type Codewiki,
-	codewikiNeedsBackfill,
-	readCodewiki,
-	writeCodewiki,
-} from "../codewiki/indexer.js";
-import { computeFingerprint, isStale } from "../fingerprint.js";
+import { coordinateCodewikiWrite } from "../codewiki/coordinator.js";
+import type { Codewiki } from "../codewiki/schema.js";
+import type { Fingerprint } from "../fingerprint.js";
 import { readClioState, writeClioState } from "../state.js";
 import { assembleWikiTree, normalizeRepoPath, pageSourceIndex } from "./assemble.js";
 import { isGeneratedWikiFile, listWikiPagesInDir, WIKI_PLAN_FILE, wikiDir, wikiMarkdownFilesInDir } from "./layout.js";
@@ -108,32 +103,42 @@ function indexedSourceFileCount(codewiki: Codewiki): number {
 	return codewiki.files.filter((file) => file.lang !== "config").length;
 }
 
-async function loadOrBuildCodewiki(cwd: string): Promise<Codewiki> {
-	const existing = readCodewiki(cwd);
-	const prev = readClioState(cwd);
-	// Mirror the code_nav demand-load freshness check: a stale index must never
-	// ground the wiki writer prompt, so drift forces a rebuild here too.
-	if (existing && !codewikiNeedsBackfill(existing)) {
-		const fingerprint = computeFingerprint(cwd, existing);
-		if (prev && !isStale(prev.fingerprint, fingerprint)) return existing;
-	}
+async function loadOrBuildCodewiki(cwd: string): Promise<{
+	codewiki: Codewiki;
+	fingerprint: Fingerprint;
+}> {
 	const generatedAt = new Date().toISOString();
 	const projectType = detectProjectType(cwd);
-	const rebuilt = await buildCodewiki({ cwd, language: projectType, generatedAt });
-	writeCodewiki(cwd, rebuilt);
-	writeClioState(cwd, {
-		version: 1,
-		projectType: prev?.projectType ?? projectType,
-		fingerprint: computeFingerprint(cwd, rebuilt),
-		codewikiVersion: rebuilt.version,
-		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
-		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
-		...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
-		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
-		lastSessionAt: prev?.lastSessionAt ?? generatedAt,
-		lastIndexedAt: generatedAt,
-	});
-	return rebuilt;
+	const coordinated = await coordinateCodewikiWrite(
+		cwd,
+		(current, workspace) => ({
+			kind: "ensure",
+			cwd: workspace,
+			language: projectType,
+			current,
+			previous: readClioState(workspace)?.fingerprint ?? null,
+		}),
+		{
+			afterCommit: ({ codewiki, fingerprint, changed }, workspace) => {
+				const prev = readClioState(workspace);
+				if (!changed && prev) return;
+				writeClioState(workspace, {
+					version: 1,
+					projectType: prev?.projectType ?? projectType,
+					fingerprint,
+					codewikiVersion: codewiki.version,
+					...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
+					...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+					...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
+					...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
+					lastSessionAt: prev?.lastSessionAt ?? generatedAt,
+					lastIndexedAt: generatedAt,
+				});
+			},
+		},
+	);
+	if (!coordinated) throw new Error("codewiki wiki transaction did not commit");
+	return { codewiki: coordinated.codewiki, fingerprint: coordinated.worker.fingerprint };
 }
 
 function failed(problems: string[], pages: number): RunWikiGenerateResult {
@@ -411,8 +416,8 @@ export async function runWikiGenerate(
 
 	try {
 		progress(input, { phase: "codewiki", status: "started", message: "loading codewiki for wiki generation" });
-		const codewiki = await loadOrBuildCodewiki(cwd);
-		const sourceTreeHash = computeFingerprint(cwd, codewiki).treeHash;
+		const { codewiki, fingerprint } = await loadOrBuildCodewiki(cwd);
+		const sourceTreeHash = fingerprint.treeHash;
 		const generation = planWikiGeneration(codewiki, input.depth ?? "auto");
 		progress(input, {
 			phase: "codewiki",
