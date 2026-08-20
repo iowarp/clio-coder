@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -19,6 +19,7 @@ import {
 	readPromptCompileManifest,
 	readPromptCompileRecords,
 } from "../../src/domains/session/prompt-manifest.js";
+import { foldTaskBoard } from "../../src/domains/session/task-board.js";
 import {
 	type ClioTurnRecord,
 	createSession,
@@ -209,6 +210,44 @@ describe("contracts/persistence", () => {
 			false,
 			"an active record cannot carry correction fields",
 		);
+	});
+
+	it("rejects contradictory task provenance before persistence and refold", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: scratch });
+		const base = {
+			kind: "taskLedger" as const,
+			parentTurnId: null,
+			boardId: "board-provenance",
+			goals: [{ id: "board", title: "Provenance", status: "active" as const }],
+			activeRunIds: [],
+			requiredValidationEvidence: [],
+		};
+		contract.appendEntry({
+			...base,
+			subgoals: [{ id: "t1", title: "legacy agent task", status: "pending" }],
+		});
+
+		for (const subgoal of [
+			{ id: "t2", title: "missing user id", status: "pending" as const, origin: "user" as const },
+			{ id: "t2", title: "empty user id", status: "pending" as const, origin: "user" as const, userTaskId: "" },
+			{ id: "t2", title: "malformed user id", status: "pending" as const, origin: "user" as const, userTaskId: "t1" },
+			{ id: "t2", title: "agent with user id", status: "pending" as const, origin: "agent" as const, userTaskId: "u1" },
+			{ id: "t2", title: "legacy with user id", status: "pending" as const, userTaskId: "u1" },
+		]) {
+			throws(
+				() => contract.appendEntry({ ...base, subgoals: [subgoal] }),
+				/session\.appendEntry: invalid taskLedger entry/,
+			);
+		}
+
+		const persisted = openSession(meta.id).turns().filter(isSessionEntry);
+		strictEqual(persisted.filter((entry) => entry.kind === "taskLedger").length, 1);
+		const refolded = foldTaskBoard(persisted);
+		strictEqual(refolded?.tasks[0]?.origin, "agent");
+		strictEqual(refolded?.tasks[0]?.userTaskId, undefined);
+		await contract.close();
 	});
 
 	it("round-trips branch-anchored decision ledger snapshots", () => {

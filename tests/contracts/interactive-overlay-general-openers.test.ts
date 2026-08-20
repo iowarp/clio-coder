@@ -182,6 +182,7 @@ describe("contracts/interactive general overlay openers", () => {
 		let taskOptions: OpenTasksOverlayOptions | undefined;
 		let viewFilter: string | undefined;
 		let failHand = false;
+		let sessionEntryReads = 0;
 		const operatorTask = {
 			id: "u1",
 			title: "review release",
@@ -195,10 +196,19 @@ describe("contracts/interactive general overlay openers", () => {
 			app: {
 				getSessionId: () => "session-1",
 				session: {
-					current: () => ({ id: "session-1", cwd: "/workspace" }),
+					current: () => ({ id: "session-1", cwd: "/workspace", pinnedLeafTurnId: "assistant-kept" }),
 				} as never,
-				readSessionEntries: () =>
-					[
+				readSessionEntries: () => {
+					sessionEntryReads += 1;
+					return [
+						{
+							kind: "message",
+							turnId: "user-root",
+							parentTurnId: null,
+							timestamp: "2026-08-19T10:00:00.000Z",
+							role: "user",
+							payload: { text: "root" },
+						},
 						{
 							kind: "taskLedger",
 							turnId: "ledger-1",
@@ -213,7 +223,7 @@ describe("contracts/interactive general overlay openers", () => {
 						{
 							kind: "message",
 							turnId: "artifact-1",
-							parentTurnId: null,
+							parentTurnId: "user-root",
 							timestamp: "2026-08-19T10:02:00.000Z",
 							role: "tool_result",
 							payload: {
@@ -222,7 +232,47 @@ describe("contracts/interactive general overlay openers", () => {
 								result: { details: { paths: ["reports/Release Notes.md"] } },
 							},
 						},
-					] as never,
+						{
+							kind: "message",
+							turnId: "assistant-kept",
+							parentTurnId: "artifact-1",
+							timestamp: "2026-08-19T10:03:00.000Z",
+							role: "assistant",
+							payload: { text: "kept" },
+						},
+						{
+							kind: "message",
+							turnId: "user-abandoned",
+							parentTurnId: "assistant-kept",
+							timestamp: "2026-08-19T10:04:00.000Z",
+							role: "user",
+							payload: { text: "abandoned continuation" },
+						},
+						{
+							kind: "taskLedger",
+							turnId: "ledger-abandoned",
+							parentTurnId: null,
+							timestamp: "2026-08-19T10:05:00.000Z",
+							boardId: "board-abandoned",
+							goals: [{ id: "board", title: "Abandoned", status: "active" }],
+							subgoals: [{ id: "t1", title: "stale", status: "active", origin: "agent" }],
+							activeRunIds: [],
+							requiredValidationEvidence: [],
+						},
+						{
+							kind: "message",
+							turnId: "artifact-abandoned",
+							parentTurnId: "user-abandoned",
+							timestamp: "2026-08-19T10:06:00.000Z",
+							role: "tool_result",
+							payload: {
+								toolName: "write",
+								isError: false,
+								result: { details: { paths: ["reports/Abandoned.md"] } },
+							},
+						},
+					] as never;
+				},
 				userTasks: {
 					snapshot: () => [operatorTask],
 					add: () => operatorTask,
@@ -251,6 +301,15 @@ describe("contracts/interactive general overlay openers", () => {
 		const snapshot = taskOptions?.getSessionSnapshot?.();
 		strictEqual(snapshot?.history[0]?.boardId, "board-1");
 		strictEqual(snapshot?.artifacts[0]?.path, "reports/Release Notes.md");
+		strictEqual(
+			snapshot?.history.some((board) => board.boardId === "board-abandoned"),
+			false,
+		);
+		strictEqual(
+			snapshot?.artifacts.some((artifact) => artifact.path === "reports/Abandoned.md"),
+			false,
+		);
+		strictEqual(sessionEntryReads, 1, "one active-path snapshot feeds both composite folds");
 		deepStrictEqual(taskOptions?.getUserTasks?.(), [operatorTask]);
 
 		taskOptions?.onHandUserTask?.("u1");

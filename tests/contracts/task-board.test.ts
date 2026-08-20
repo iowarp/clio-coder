@@ -167,6 +167,16 @@ describe("contracts/task-board store", () => {
 		ok(isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "user", userTaskId: "u1" }] }));
 		ok(!isSessionEntry({ ...envelope, boardId: 7 }));
 		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "operator" }] }));
+		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "user" }] }));
+		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "user", userTaskId: "" }] }));
+		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "user", userTaskId: "t1" }] }));
+		ok(
+			!isSessionEntry({
+				...envelope,
+				subgoals: [{ ...envelope.subgoals[0], origin: "agent", userTaskId: "u1" }],
+			}),
+		);
+		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: undefined, userTaskId: "u1" }] }));
 	});
 
 	it("folds the last ledger snapshot back into the identical board", () => {
@@ -180,6 +190,37 @@ describe("contracts/task-board store", () => {
 			timestamp: "2026-07-03T00:00:00.000Z",
 		}));
 		deepStrictEqual(foldTaskBoard(entries), live);
+	});
+
+	it("ignores contradictory provenance instead of admitting it during a refold", () => {
+		const board: TaskBoardSnapshot = {
+			boardId: "board-valid",
+			title: "Valid board",
+			tasks: [{ id: "t1", title: "valid", status: "pending", origin: "agent" }],
+			activeRunIds: [],
+		};
+		const valid = {
+			...toTaskLedgerEntryFields(board, new Date("2026-07-03T00:00:00.000Z")),
+			turnId: "ledger-valid",
+			timestamp: "2026-07-03T00:00:00.000Z",
+		};
+		const malformed = [
+			{ ...valid.subgoals[0], origin: "user", userTaskId: undefined },
+			{ ...valid.subgoals[0], origin: "user", userTaskId: "" },
+			{ ...valid.subgoals[0], origin: "user", userTaskId: "task-1" },
+			{ ...valid.subgoals[0], origin: "agent", userTaskId: "u1" },
+			{ ...valid.subgoals[0], origin: undefined, userTaskId: "u1" },
+		];
+		for (const [index, subgoal] of malformed.entries()) {
+			const invalid = {
+				...valid,
+				turnId: `ledger-invalid-${index}`,
+				timestamp: `2026-07-03T00:0${index + 1}:00.000Z`,
+				subgoals: [subgoal],
+			};
+			deepStrictEqual(foldTaskBoard([valid, invalid]), foldTaskBoard([valid]));
+			deepStrictEqual(foldSessionTaskHistory([valid, invalid]), foldSessionTaskHistory([valid]));
+		}
 	});
 
 	it("retains completed work from prior board generations in session history", () => {
@@ -376,6 +417,57 @@ describe("contracts/task-board store", () => {
 
 		store.invalidate();
 		deepStrictEqual(store.snapshot(), boardB, "invalidate() forces the next read to refold");
+	});
+
+	it("exposes a cache-only snapshot while eager reads happen outside repaint consumers", () => {
+		const boardA: TaskBoardSnapshot = {
+			boardId: "board-a",
+			title: "Board A",
+			tasks: [{ id: "t1", title: "a", status: "pending", origin: "agent" }],
+			activeRunIds: [],
+		};
+		const boardB: TaskBoardSnapshot = {
+			boardId: "board-b",
+			title: "Board B",
+			tasks: [{ id: "t1", title: "b", status: "active", origin: "agent" }],
+			activeRunIds: [],
+		};
+		let sessionId = "session-a";
+		let entries: unknown[] = [
+			{ ...toTaskLedgerEntryFields(boardA, new Date()), turnId: "turn-a", timestamp: "2026-07-03T00:00:00.000Z" },
+		];
+		let reads = 0;
+		const store = createTaskBoardStore({
+			getSessionId: () => sessionId,
+			readEntries: () => {
+				reads += 1;
+				return entries;
+			},
+		});
+
+		strictEqual(store.cachedSnapshot(), null);
+		strictEqual(reads, 0);
+		deepStrictEqual(store.snapshot(), boardA, "composition eagerly populates the cache");
+		strictEqual(reads, 1);
+		for (let index = 0; index < 10; index += 1) deepStrictEqual(store.cachedSnapshot(), boardA);
+		strictEqual(reads, 1, "cache reads never reach the ledger");
+
+		entries = [
+			{ ...toTaskLedgerEntryFields(boardB, new Date()), turnId: "turn-b", timestamp: "2026-07-03T00:01:00.000Z" },
+		];
+		store.invalidate();
+		strictEqual(store.cachedSnapshot(), null, "a dirty branch never leaks its prior projection");
+		strictEqual(reads, 1);
+		deepStrictEqual(store.snapshot(), boardB, "the switch boundary eagerly repopulates the cache");
+		strictEqual(reads, 2);
+
+		sessionId = "session-b";
+		strictEqual(store.cachedSnapshot(), null, "a changed session id never leaks the old session's board");
+		strictEqual(reads, 2);
+		deepStrictEqual(store.snapshot(), boardB, "the cross-session boundary eagerly populates the new cache");
+		strictEqual(reads, 3);
+		deepStrictEqual(store.cachedSnapshot(), boardB);
+		strictEqual(reads, 3);
 	});
 
 	it("links and unlinks dispatch runs through the board's activeRunIds", () => {
@@ -594,6 +686,51 @@ describe("contracts/task-board tool", () => {
 		strictEqual((await tool.run({ action: "list" })).kind, "ok");
 		strictEqual(userTasks.get("u1")?.status, "picked");
 		strictEqual(userTasks.get("u1")?.boardTaskId, "t1");
+	});
+
+	it("prevents a picked project task from being duplicated across sessions and restarts", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-cross-session-"));
+		const userTasks = createUserTasksStore({ cwd });
+		userTasks.add("owned by session A");
+		const { store: boardA } = storeWithLog();
+		const toolA = createTasksTool({ board: boardA, userTasks, getSessionId: () => "session-a" });
+		strictEqual((await toolA.run({ action: "pick", id: "u1" })).kind, "ok");
+		deepStrictEqual(
+			[userTasks.get("u1")?.status, userTasks.get("u1")?.handedSessionId, userTasks.get("u1")?.boardTaskId],
+			["picked", "session-a", "t1"],
+		);
+
+		let sessionBAppends = 0;
+		const createSessionBTool = () => {
+			const board = createTaskBoardStore({
+				getSessionId: () => "session-b",
+				readEntries: () => [],
+				appendEntry: () => {
+					sessionBAppends += 1;
+				},
+			});
+			const inbox = createUserTasksStore({ cwd });
+			return { board, inbox, tool: createTasksTool({ board, userTasks: inbox, getSessionId: () => "session-b" }) };
+		};
+
+		for (let restart = 0; restart < 2; restart += 1) {
+			const sessionB = createSessionBTool();
+			const listed = await sessionB.tool.run({ action: "list" });
+			ok(listed.kind === "ok");
+			strictEqual(listed.output.includes("operator tasks waiting: u1"), false);
+			const duplicate = await sessionB.tool.run({ action: "pick", id: "u1" });
+			ok(duplicate.kind === "error" && duplicate.message.includes("is picked"));
+			strictEqual(sessionB.board.snapshot(), null);
+			deepStrictEqual(
+				[
+					sessionB.inbox.get("u1")?.status,
+					sessionB.inbox.get("u1")?.handedSessionId,
+					sessionB.inbox.get("u1")?.boardTaskId,
+				],
+				["picked", "session-a", "t1"],
+			);
+		}
+		strictEqual(sessionBAppends, 0, "neither the session switch nor restart creates duplicate board work");
 	});
 });
 

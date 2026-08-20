@@ -1217,6 +1217,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			session?.appendEntry(entry);
 		},
 	});
+	// Prime the projection once at composition. Interactive repaint paths use
+	// cachedSnapshot() below, so a first paint can never become a ledger read.
+	taskBoard.snapshot();
 	const decisionBoard = createDecisionBoardStore({
 		getSessionId: () => session?.current()?.id ?? null,
 		readEntries: () => {
@@ -1241,6 +1244,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// read to refold from the now-current leaf.
 	bus.on(BusChannels.SessionTurnSwitched, () => {
 		taskBoard.invalidate();
+		// The tree switch is the I/O boundary: refold eagerly here so the 250-ms
+		// island ticker remains a cache-only consumer after changing branches.
+		taskBoard.snapshot();
 		decisionBoard.invalidate();
 	});
 	// Link in-flight dispatch runs to the live board via the ledger's
@@ -1821,7 +1827,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
-		getTaskBoard: () => taskBoard.snapshot(),
+		getTaskBoard: () => taskBoard.cachedSnapshot(),
 		getDecisionBoard: () => decisionBoard.snapshot(),
 		supersedeDecision: (interviewId, key, correction) => decisionBoard.supersede(interviewId, key, correction),
 		userTasks,
@@ -1980,6 +1986,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						try {
 							const previousSessionId = session.current()?.id ?? null;
 							session.resume(sessionId);
+							taskBoard.snapshot();
 							if (previousSessionId !== sessionId) ensureTaskMemorySession();
 						} catch (err) {
 							process.stderr.write(
@@ -1993,11 +2000,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						if (settings.orchestrator.target) input.target = settings.orchestrator.target;
 						if (settings.orchestrator.model) input.model = settings.orchestrator.model;
 						session.create(input);
+						taskBoard.snapshot();
 						ensureTaskMemorySession();
 					},
 					onForkSession: (parentTurnId) => {
 						try {
 							session.fork(parentTurnId);
+							taskBoard.snapshot();
 							ensureTaskMemorySession();
 						} catch (err) {
 							process.stderr.write(

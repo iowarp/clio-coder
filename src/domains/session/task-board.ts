@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { SessionEntry, TaskLedgerGoal, TaskLedgerStatus, TaskLedgerValidationEvidence } from "./entries.js";
+import {
+	isSessionEntry,
+	type TaskLedgerGoal,
+	type TaskLedgerStatus,
+	type TaskLedgerValidationEvidence,
+} from "./entries.js";
 
 /**
  * The session task board: the live state behind the `tasks` tool, the footer
@@ -111,6 +116,12 @@ export interface SessionTaskHistoryBoard {
 export interface TaskBoardStore {
 	/** Current board, refolded from the session ledger after a session switch. */
 	snapshot(): TaskBoardSnapshot | null;
+	/**
+	 * Current in-memory projection only. Unlike snapshot(), this never reads or
+	 * folds the session ledger and returns null rather than leaking a stale board
+	 * when the session id changed or invalidate() has marked the cache dirty.
+	 */
+	cachedSnapshot(): TaskBoardSnapshot | null;
 	/** Durable board generations on the active session path, newest first. */
 	historySnapshot(): ReadonlyArray<SessionTaskHistoryBoard>;
 	/** Apply one mutation, persist the resulting snapshot, and return it. */
@@ -206,9 +217,7 @@ function isTaskLedgerShaped(value: unknown): value is {
 	subgoals: TaskLedgerGoal[];
 	requiredValidationEvidence: TaskLedgerValidationEvidence[];
 } {
-	if (!value || typeof value !== "object") return false;
-	const entry = value as Partial<SessionEntry>;
-	return entry.kind === "taskLedger" && Array.isArray((entry as { goals?: unknown }).goals);
+	return isSessionEntry(value) && value.kind === "taskLedger";
 }
 
 /**
@@ -504,6 +513,10 @@ export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardSt
 		snapshot(): TaskBoardSnapshot | null {
 			syncToSession();
 			return board;
+		},
+		cachedSnapshot(): TaskBoardSnapshot | null {
+			const sessionId = deps.getSessionId?.() ?? null;
+			return !dirty && cachedSessionId === sessionId ? board : null;
 		},
 		historySnapshot(): ReadonlyArray<SessionTaskHistoryBoard> {
 			syncToSession();

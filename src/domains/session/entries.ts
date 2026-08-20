@@ -405,11 +405,11 @@ function isTaskLedgerGoal(value: unknown): value is TaskLedgerGoal {
 	if (!isString(value.id) || !isString(value.title)) return false;
 	if (!isOneOf(value.status, TASK_LEDGER_STATUSES)) return false;
 	if (value.parentGoalId !== undefined && !isNullableString(value.parentGoalId)) return false;
-	return (
-		isOptionalString(value.description) &&
-		(value.origin === undefined || value.origin === "agent" || value.origin === "user") &&
-		isOptionalString(value.userTaskId)
-	);
+	const hasPairedProvenance =
+		value.origin === "user"
+			? isString(value.userTaskId) && /^u[1-9]\d*$/.test(value.userTaskId)
+			: (value.origin === undefined || value.origin === "agent") && value.userTaskId === undefined;
+	return isOptionalString(value.description) && hasPairedProvenance;
 }
 
 function isTaskLedgerEvidence(value: unknown): value is TaskLedgerValidationEvidence {

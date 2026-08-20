@@ -6,6 +6,8 @@ import type { SessionContract } from "../../src/domains/session/contract.js";
 import { foldDecisionBoard } from "../../src/domains/session/decision-board.js";
 import type { SessionEntry, TaskLedgerEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { foldSessionArtifacts } from "../../src/domains/session/session-artifacts.js";
+import { foldSessionTaskHistory } from "../../src/domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../src/domains/session/tree/active-path.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { AgentMessage } from "../../src/engine/types.js";
@@ -538,7 +540,7 @@ describe("contracts/session-tree-continuity", () => {
 	// unanchored sidecar regardless of file position while fork.ts's
 	// sessionEntryBelongsToPath dropped anything written after the fork point;
 	// the same turn reached the two ways produced two different task boards.
-	it("/tree switch and /fork of the same turn reconstruct the same task board", async () => {
+	it("/tree switch and /fork of the same turn reconstruct the same composite task snapshot", async () => {
 		const bundle = createSessionBundle(stubContext());
 		const contract = bundle.contract;
 		const meta = contract.create({ cwd: process.cwd() });
@@ -550,7 +552,16 @@ describe("contracts/session-tree-continuity", () => {
 			goals: [{ id: "board", title: "board as of a1", status: "active" }],
 			...ledgerFields,
 		});
-		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "a1" } });
+		const keptArtifact = contract.append({
+			parentId: u1.id,
+			kind: "tool_result",
+			payload: {
+				toolName: "write",
+				isError: false,
+				result: { details: { paths: ["reports/kept.md"] } },
+			},
+		});
+		const a1 = contract.append({ parentId: keptArtifact.id, kind: "assistant", payload: { text: "a1" } });
 		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "u2" } });
 		contract.appendEntry({
 			kind: "taskLedger",
@@ -558,7 +569,16 @@ describe("contracts/session-tree-continuity", () => {
 			goals: [{ id: "board", title: "board as of a2, on the abandoned branch", status: "active" }],
 			...ledgerFields,
 		});
-		contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "a2" } });
+		const abandonedArtifact = contract.append({
+			parentId: u2.id,
+			kind: "tool_result",
+			payload: {
+				toolName: "write",
+				isError: false,
+				result: { details: { paths: ["reports/abandoned.md"] } },
+			},
+		});
+		contract.append({ parentId: abandonedArtifact.id, kind: "assistant", payload: { text: "a2" } });
 
 		// Reconstruction 1: /tree switch back to a1, then replay/fold as of a1.
 		contract.switchTurn(a1.id);
@@ -568,6 +588,15 @@ describe("contracts/session-tree-continuity", () => {
 		);
 		strictEqual(liveLedgers.length, 1, "only the taskLedger written at or before a1 is visible");
 		strictEqual(liveLedgers[0]?.goals[0]?.title, "board as of a1");
+		const liveComposite = {
+			history: foldSessionTaskHistory(liveEntries),
+			artifacts: foldSessionArtifacts(liveEntries, { workspace: process.cwd() }),
+		};
+		strictEqual(liveComposite.artifacts[0]?.path, "reports/kept.md");
+		strictEqual(
+			liveComposite.artifacts.some((artifact) => artifact.path === "reports/abandoned.md"),
+			false,
+		);
 		await contract.close();
 
 		// Reconstruction 2: /fork at a1 from a fresh contract over the same file.
@@ -579,9 +608,15 @@ describe("contracts/session-tree-continuity", () => {
 		);
 		strictEqual(forkedLedgers.length, 1);
 		strictEqual(forkedLedgers[0]?.goals[0]?.title, "board as of a1");
+		const forkedEntries = sessionEntries(forkedMeta.id);
+		const forkedComposite = {
+			history: foldSessionTaskHistory(forkedEntries),
+			artifacts: foldSessionArtifacts(forkedEntries, { workspace: process.cwd() }),
+		};
 
-		// Same turn, two reconstruction paths, same board.
+		// Same turn, two reconstruction paths, same task history and artifacts.
 		strictEqual(liveLedgers[0]?.goals[0]?.title, forkedLedgers[0]?.goals[0]?.title);
+		deepStrictEqual(forkedComposite, liveComposite);
 
 		await second.contract.close();
 	});

@@ -1,6 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
+import {
+	createTaskBoardStore,
+	type TaskBoardSnapshot,
+	toTaskLedgerEntryFields,
+} from "../../src/domains/session/task-board.js";
 import type { OverlayHandle, OverlayOptions, TUI } from "../../src/engine/tui.js";
 import type { ContextActivitySnapshot } from "../../src/interactive/context-activity.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
@@ -293,6 +297,59 @@ describe("interactive ticker ownership", () => {
 		strictEqual(harness.taskHidden.at(-1), false);
 		strictEqual(harness.boardReads(), fallbackReads, "dispatch priority must not even read the board fallback");
 		deepStrictEqual(harness.log.slice(0, 2), ["rows", "active"]);
+	});
+
+	it("never reaches a throwing ledger reader while repainting the cached board", () => {
+		const boardA: TaskBoardSnapshot = {
+			boardId: "board-cache-a",
+			title: "Cached A",
+			tasks: [{ id: "t1", title: "first", status: "pending", origin: "agent" }],
+			activeRunIds: [],
+		};
+		const boardB: TaskBoardSnapshot = {
+			boardId: "board-cache-b",
+			title: "Cached B",
+			tasks: [{ id: "t1", title: "second", status: "active", origin: "agent" }],
+			activeRunIds: [],
+		};
+		let selected = boardA;
+		let ledgerReads = 0;
+		let ledgerReadsForbidden = false;
+		const store = createTaskBoardStore({
+			getSessionId: () => "session-cache",
+			readEntries: () => {
+				ledgerReads += 1;
+				if (ledgerReadsForbidden) throw new Error("ticker attempted to read the session ledger");
+				return [
+					{
+						...toTaskLedgerEntryFields(selected, new Date("2026-08-19T10:00:00.000Z")),
+						turnId: `ledger-${selected.boardId}`,
+						timestamp: "2026-08-19T10:00:00.000Z",
+					},
+				];
+			},
+		});
+
+		deepStrictEqual(store.snapshot(), boardA, "composition refreshes before ticker construction");
+		strictEqual(ledgerReads, 1);
+		const harness = createHarness();
+		harness.deps.getTaskBoard = () => store.cachedSnapshot();
+		const tickers = createInteractiveTickers(harness.deps);
+		ledgerReadsForbidden = true;
+		for (let index = 0; index < 8; index += 1) harness.tickers[0]?.callback();
+		strictEqual(ledgerReads, 1, "repeated timer repaints remain entirely in memory");
+		strictEqual(harness.taskHidden.at(-1), false);
+
+		ledgerReadsForbidden = false;
+		selected = boardB;
+		store.invalidate();
+		deepStrictEqual(store.snapshot(), boardB, "the session-switch boundary eagerly refreshes away from the ticker");
+		strictEqual(ledgerReads, 2);
+		ledgerReadsForbidden = true;
+		for (let index = 0; index < 8; index += 1) harness.tickers[0]?.callback();
+		strictEqual(ledgerReads, 2, "post-switch repaints use only the new in-memory projection");
+		strictEqual(harness.taskHidden.at(-1), false);
+		tickers.dispose();
 	});
 
 	it("keeps board fallback behind overlay, footer, context, and settled-work gates", () => {

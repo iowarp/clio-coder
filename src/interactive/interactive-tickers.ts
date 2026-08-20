@@ -1,4 +1,4 @@
-import { type TaskBoardSnapshot, taskBoardCounts } from "../domains/session/task-board.js";
+import { type TaskBoardSnapshot, type TaskBoardStore, taskBoardCounts } from "../domains/session/task-board.js";
 import { Text, type TUI, visibleWidth } from "../engine/tui.js";
 import {
 	CONTEXT_ISLAND_WIDTH,
@@ -28,8 +28,8 @@ export interface InteractiveTickersDeps {
 	contextActivityStore: InteractiveContextActivityStore;
 	getOverlayState: () => string;
 	isFooterExpanded: () => boolean;
-	/** Cached current-board projection only; this repaint path must never fold the session ledger. */
-	getTaskBoard?: () => TaskBoardSnapshot | null;
+	/** Bound to TaskBoardStore.cachedSnapshot; repaint must never fold the session ledger. */
+	getTaskBoard?: TaskBoardStore["cachedSnapshot"];
 	scheduleInterval?: (callback: () => void, intervalMs: number) => InteractiveTickerHandle;
 	clearScheduledInterval?: (handle: InteractiveTickerHandle) => void;
 }
