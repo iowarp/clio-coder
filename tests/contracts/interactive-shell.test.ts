@@ -235,4 +235,52 @@ describe("interactive shell ownership", () => {
 		strictEqual(renders, 1);
 		deepStrictEqual(waits, [7], "a failed pre-render wait does not add a second unbounded wait");
 	});
+
+	it("settles the final regular-screen frame without resetting physical cursor history", async () => {
+		const writes: string[] = [];
+		const terminal: Terminal = {
+			columns: 80,
+			rows: 24,
+			kittyProtocolActive: false,
+			start: () => {},
+			stop: () => {},
+			drainInput: async () => {},
+			write: (data) => writes.push(data),
+			moveBy: () => {},
+			hideCursor: () => {},
+			showCursor: () => {},
+			clearLine: () => {},
+			clearFromCursor: () => {},
+			clearScreen: () => {},
+			setTitle: () => {},
+			setProgress: () => {},
+		};
+		let content = "first frame";
+		const component: Component = {
+			render: () => [content],
+			invalidate: () => {},
+		};
+		const shell = createProcessInteractiveShell({
+			testing: { createTerminal: () => terminal as never },
+		});
+		try {
+			shell.mount(component, component);
+			shell.tui.renderNow(false);
+			writes.length = 0;
+			content = "settled frame";
+
+			await shell.commitCurrentFrame();
+
+			const settledWrite = writes.find((write) => write.includes("settled frame"));
+			strictEqual(typeof settledWrite, "string");
+			strictEqual(
+				settledWrite?.slice(0, settledWrite.indexOf("settled frame")).includes("\r"),
+				true,
+				"a final differential frame anchors at column zero before repainting",
+			);
+		} finally {
+			shell.stop();
+			await shell.settle();
+		}
+	});
 });
