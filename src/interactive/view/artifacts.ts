@@ -1,6 +1,6 @@
 import { createReadStream, readFileSync, statSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import {
 	isReceiptIntegrity,
@@ -919,14 +919,37 @@ function workspaceArtifactFormat(path: string): ViewArtifactFormat {
 	return lower.endsWith(".md") || lower.endsWith(".markdown") ? "markdown" : "text";
 }
 
-async function loadWorkspaceArtifact(path: string, recordedAt: string): Promise<ViewArtifactLoadResult> {
+class WorkspaceArtifactContainmentError extends Error {}
+
+async function canonicalWorkspaceArtifactPath(path: string, workspace: string): Promise<string> {
+	// Resolve both sides from the live filesystem for every load. The artifact
+	// row is durable, but neither an earlier lexical check nor an earlier realpath
+	// result is authority after a symlink has changed.
+	const canonicalWorkspace = await realpath(workspace);
+	const canonicalTarget = await realpath(path);
+	const rel = relative(canonicalWorkspace, canonicalTarget);
+	if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+		throw new WorkspaceArtifactContainmentError("canonical target is outside the recorded workspace");
+	}
+	return canonicalTarget;
+}
+
+async function loadWorkspaceArtifact(
+	path: string,
+	workspace: string,
+	recordedAt: string,
+): Promise<ViewArtifactLoadResult> {
 	try {
-		const { lines } = await readTextFileLinesCapped(path);
+		const canonicalPath = await canonicalWorkspaceArtifactPath(path, workspace);
+		const { lines } = await readTextFileLinesCapped(canonicalPath);
 		return { lines, format: workspaceArtifactFormat(path) };
 	} catch (error) {
 		const err = error as NodeJS.ErrnoException;
 		if (err.code === "ENOENT") {
 			return { lines: [`file no longer on disk (recorded at ${recordedAt})`], format: "text" };
+		}
+		if (error instanceof WorkspaceArtifactContainmentError) {
+			return { lines: [`refusing to read ${path}: ${error.message}`], format: "text" };
 		}
 		const message = error instanceof Error ? error.message : String(error);
 		return { lines: [`unable to read ${path}: ${message}`], format: "text" };
@@ -971,7 +994,7 @@ export class WorkspaceArtifactProvider implements ArtifactProvider {
 						String(artifact.overwrites),
 						artifact.turnId,
 					].filter(isNonEmptyString),
-					load: () => loadWorkspaceArtifact(path, artifact.timestamp),
+					load: () => loadWorkspaceArtifact(path, workspace, artifact.timestamp),
 				},
 			];
 		});
