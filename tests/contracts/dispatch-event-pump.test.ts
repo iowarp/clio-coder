@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createWorkerOutputCapture, startDispatchEventPump } from "../../src/domains/dispatch/event-pump.js";
-import { assistantTextFromEvent } from "../../src/tools/dispatch.js";
+import { assistantTextFromEvent } from "../../src/tools/dispatch-event-text.js";
 
 describe("contracts/dispatch event pump", () => {
 	it("does not misclassify a tool-use planning preamble as final worker output", () => {
