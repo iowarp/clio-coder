@@ -181,7 +181,11 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 	unsubscribes.push(
 		deps.chat.onEvent((event: ChatLoopEvent) => {
 			if (event.type === "agent_status") return;
-			apply(event);
+			// RunAborted publishes a provisional ended summary immediately. The
+			// terminal agent_end commonly follows inside the ordinary notification
+			// throttle, but its reconciled usage must still replace that provisional
+			// footer receipt.
+			apply(event, event.type === "agent_end");
 		}),
 	);
 

@@ -53,7 +53,10 @@ function settings(): ClioSettings {
 }
 
 function snapshot(id: string): ObservabilitySnapshot {
-	return { id } as unknown as ObservabilitySnapshot;
+	return {
+		id,
+		session: { latestThroughput: null, tokens: {}, cost: {} },
+	} as unknown as ObservabilitySnapshot;
 }
 
 function harness() {
@@ -72,6 +75,7 @@ function harness() {
 	let editorChrome: EditorChrome | null = null;
 	let layoutOptions: Parameters<InteractivePresentationFactories["buildLayout"]>[1] | undefined;
 	let dispatchRuns: Array<{ runId: string; agentId: string }> = [];
+	let now = 1_000;
 
 	const keybindings = {
 		getKeys: (id: string) => {
@@ -255,6 +259,7 @@ function harness() {
 			log.push("mount");
 		},
 		getSettings: settings,
+		now: () => now,
 		scheduleInterval: (callback, intervalMs) => {
 			const handle: TestTicker = {
 				id: scheduled.length + 1,
@@ -289,6 +294,9 @@ function harness() {
 		},
 		setExpanded: (next: boolean) => {
 			expanded = next;
+		},
+		setNow: (next: number) => {
+			now = next;
 		},
 		counts: () => ({ renders, footerRefreshes, chatInvalidations, workspaceRefreshes }),
 	};
@@ -401,6 +409,64 @@ describe("interactive presentation ownership", () => {
 		const next = snapshot("next");
 		test.emitObservability(next);
 		strictEqual(presentation.getObservabilitySnapshot(), next);
+	});
+
+	it("uses the active turn's advancing throughput instead of the previous settled turn", () => {
+		const test = harness();
+		const previous = {
+			tokensPerSecond: 102,
+			outputTokens: 9_000,
+			durationMs: 86_000,
+			ttftMs: 621,
+			providerId: "local",
+			modelId: "org/model",
+			recordedAt: 900,
+		};
+		test.firstSnapshot.session.latestThroughput = previous;
+		const presentation = createInteractivePresentation(test.deps);
+		const input = test.getFooterDeps();
+		if (!input) throw new Error("footer dependencies were not captured");
+
+		presentation.recordChatEvent({ type: "agent_start" } as ChatLoopEvent);
+		strictEqual(input.getTokenThroughput?.(), null, "the prior turn stays hidden before this turn's first token");
+
+		test.setNow(1_200);
+		presentation.recordChatEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "thinking_delta",
+				partial: { content: [{ type: "thinking", thinking: "a".repeat(400) }] },
+			},
+		} as unknown as ChatLoopEvent);
+		test.setNow(2_200);
+		const first = input.getTokenThroughput?.();
+		strictEqual(first?.outputTokens, 100);
+		strictEqual(first?.ttftMs, 200);
+		strictEqual(first?.tokensPerSecond, 100);
+
+		test.setNow(3_200);
+		presentation.recordChatEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "thinking_delta",
+				partial: { content: [{ type: "thinking", thinking: "b".repeat(800) }] },
+			},
+		} as unknown as ChatLoopEvent);
+		test.setNow(4_200);
+		const second = input.getTokenThroughput?.();
+		strictEqual(second?.outputTokens, 200, "the live output follows the advancing partial response");
+		ok(
+			second?.tokensPerSecond !== first?.tokensPerSecond,
+			"the live rate is recomputed instead of staying byte-identical",
+		);
+		strictEqual(second?.ttftMs, 200, "TTFT belongs to this turn, not the prior settled snapshot");
+
+		const settled = { ...second, outputTokens: 210 } as NonNullable<typeof second>;
+		const next = snapshot("settled");
+		next.session.latestThroughput = settled;
+		test.emitObservability(next);
+		presentation.recordChatEvent({ type: "agent_end", messages: [] } as unknown as ChatLoopEvent);
+		strictEqual(input.getTokenThroughput?.(), settled, "settlement hands ownership back to completed observability");
 	});
 
 	it("clears the terminal status a finished turn left on the footer", () => {
