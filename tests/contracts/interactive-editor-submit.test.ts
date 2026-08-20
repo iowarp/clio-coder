@@ -8,6 +8,7 @@ import {
 	type EditorSubmitDeps,
 	type EditorSubmitEditor,
 } from "../../src/interactive/editor-submit.js";
+import type { SlashCommandDispatchResult } from "../../src/interactive/slash-commands.js";
 
 const flushAsync = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
@@ -22,7 +23,13 @@ const bashResult = (): BashCommandResult => ({
 	outputCapped: false,
 });
 
-function createHarness(options: { streaming?: boolean; running?: Array<{ runId: string; agentId: string }> } = {}) {
+function createHarness(
+	options: {
+		streaming?: boolean;
+		running?: Array<{ runId: string; agentId: string }>;
+		dispatchResult?: SlashCommandDispatchResult;
+	} = {},
+) {
 	let text = "";
 	let streaming = options.streaming ?? false;
 	let restored: string[] = [];
@@ -100,7 +107,10 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 				replayBlocks.push(renderBlock);
 			},
 		},
-		dispatchCommand: (command) => events.push(`dispatch:${command}`),
+		dispatchCommand: (command) => {
+			events.push(`dispatch:${command}`);
+			return options.dispatchResult ?? "accepted";
+		},
 		expandSubmit: async (input) => ({ text: input, images: [] }),
 		notify: (level, message, key) => notices.push({ level, text: message, key }),
 	};
@@ -258,19 +268,26 @@ describe("contracts/interactive editor submit", () => {
 		deepStrictEqual(harness.steers, []);
 	});
 
-	// A token the registry does not claim used to be put back so it could be
-	// corrected in place. The restored text carries no cursor of its own, so the
-	// next keystrokes landed in front of it, the line stopped parsing as a
-	// command, and the whole concatenation went to the model as a chat message
-	// the operator never wrote.
-	it("clears a token that is not a command so the next keystrokes cannot join it", () => {
-		const harness = createHarness();
+	it("restores a token that neither a command nor prompt template claims", () => {
+		const harness = createHarness({ dispatchResult: "rejected" });
 		const controller = createEditorSubmitController(harness.deps);
 
-		controller.submitEditorText("/thnking off");
+		controller.submitEditorText("/compact");
+
+		strictEqual(harness.getText(), "/compact");
+		deepStrictEqual(harness.history, [], "a rejected token remains a draft, not submitted history");
+		deepStrictEqual(harness.events, ["dispatch:/compact", "set:/compact", "render"]);
+	});
+
+	it("clears and records an unknown command token claimed by a prompt template", () => {
+		const harness = createHarness({ dispatchResult: "accepted" });
+		const controller = createEditorSubmitController(harness.deps);
+
+		controller.submitEditorText("/interopdemo alpha");
 
 		strictEqual(harness.getText(), "");
-		deepStrictEqual(harness.events, ["history:/thnking off", "set:", "dispatch:/thnking off", "render"]);
+		deepStrictEqual(harness.history, ["/interopdemo alpha"]);
+		deepStrictEqual(harness.events, ["dispatch:/interopdemo alpha", "history:/interopdemo alpha", "set:", "render"]);
 	});
 
 	it("returns input a command rejected on its arguments", () => {

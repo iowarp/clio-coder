@@ -13,7 +13,7 @@ import {
 } from "./editor-steer.js";
 import { type ExternalEditResult, editTextExternally, resolveExternalEditor } from "./external-editor.js";
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
-import { parseSlashCommand, type RunIo, type SlashCommand } from "./slash-commands.js";
+import { parseSlashCommand, type RunIo, type SlashCommand, type SlashCommandDispatchResult } from "./slash-commands.js";
 
 const EDITOR_BASH_TIMEOUT_MS = 300_000;
 
@@ -27,13 +27,8 @@ const EDITOR_BASH_TIMEOUT_MS = 300_000;
  * operator can see which flag the usage line is complaining about and fix that
  * one token.
  *
- * `unknown-command` used to be restored on the same reasoning and it does not
- * hold. The token matched no command at all, so there is nothing to correct
- * against, and the restored text has no cursor placement of its own: the next
- * keystrokes land in front of the leftover `/token`, which no longer parses as
- * a command, so the whole concatenation goes to the model as a chat message the
- * operator never wrote. An empty line after "is not a command" costs a retype
- * and says exactly what happened.
+ * `unknown-command` cannot be decided here: a prompt template can still claim
+ * it during dispatch. Its post-dispatch verdict is handled at the call site.
  *
  * A command that ran and failed has done work, and chat text belongs to the
  * transcript, so both also leave the line empty.
@@ -88,7 +83,7 @@ export interface EditorSubmitDeps {
 	chatPanel: Pick<ChatPanel, "appendReplayBlock">;
 	beforeSemanticBoundary?: (reason: string) => void;
 	settleVisibleFrame?: (reason: string) => Promise<void>;
-	dispatchCommand: (text: string) => void;
+	dispatchCommand: (text: string) => SlashCommandDispatchResult;
 	dispatchCommandAsync?: (text: string, signal?: AbortSignal) => Promise<void>;
 	/** Idempotently collapses a fresh-session launchpad before any handler can append output. */
 	collapseLaunchpadBeforeSubmit?: () => void;
@@ -333,11 +328,20 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		const command = parseSlashCommand(trimmed);
 		if (isRejectedCommand(command)) {
 			deps.editor.setText(text);
+			deps.dispatchCommand(trimmed);
+		} else if (command.kind === "unknown-command") {
+			const result = deps.dispatchCommand(trimmed);
+			if (result === "rejected") {
+				deps.editor.setText(text);
+			} else {
+				deps.editor.addToHistory(text);
+				deps.editor.setText("");
+			}
 		} else {
 			deps.editor.addToHistory(text);
 			deps.editor.setText("");
+			deps.dispatchCommand(trimmed);
 		}
-		deps.dispatchCommand(trimmed);
 		deps.ui.requestRender();
 	};
 

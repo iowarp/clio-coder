@@ -38,6 +38,7 @@ import {
 	parseSlashCommand,
 	type RunIo,
 	type SlashCommandContext,
+	type SlashCommandDispatchResult,
 	type TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
 import { verifyReceiptFile } from "./view/artifacts.js";
@@ -135,7 +136,7 @@ export interface InteractiveSlashRuntimeDeps {
 export interface InteractiveSlashRuntime {
 	context: SlashCommandContext;
 	notice: SlashCommandContext["notice"];
-	dispatchCommand(text: string): void;
+	dispatchCommand(text: string): SlashCommandDispatchResult;
 	/** Admit captured Stage 0 input without waiting for the model turn to finish. */
 	admitCommand(text: string, signal?: AbortSignal): Promise<void>;
 }

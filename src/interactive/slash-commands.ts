@@ -90,6 +90,8 @@ export type SlashCommand = SlashCommandVariant;
 
 export type SlashCommandKind = SlashCommand["kind"];
 
+export type SlashCommandDispatchResult = "accepted" | "rejected";
+
 export interface RunIo {
 	stdout: (s: string) => void;
 	stderr: (s: string) => void;
@@ -1337,13 +1339,14 @@ export function parseSlashCommand(input: string): SlashCommand {
 /**
  * Dispatches a parsed SlashCommand to its owning registry entry. `empty` is a
  * no-op and `unknown` falls through to chat submission; every other kind
- * resolves to exactly one registry entry at module load.
+ * resolves to exactly one registry entry at module load. The result tells the
+ * editor whether dispatch accepted the line or left it as a correctable draft.
  */
-export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandContext): void {
-	if (command.kind === "empty") return;
+export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandContext): SlashCommandDispatchResult {
+	if (command.kind === "empty") return "rejected";
 	if (command.kind === "unknown") {
 		ctx.submitChat(command.text);
-		return;
+		return "accepted";
 	}
 	if (command.kind === "unknown-command") {
 		// The registry does not own the token, but a prompt template might. The
@@ -1354,25 +1357,26 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		const expansion = ctx.expandPromptTemplate?.(command.text);
 		if (expansion?.expanded === true) {
 			ctx.submitChat(command.text);
-			return;
+			return "accepted";
 		}
 		// A template that exists and refused is not a typo. Its reason reaches the
 		// operator and nothing reaches the model.
 		const refusal = expansion?.expanded === false ? expansion.refusal : undefined;
 		ctx.notice("error", refusal ? refusal.message : `/${command.token} is not a command. Type /help for the list.`);
 		ctx.render();
-		return;
+		return "rejected";
 	}
 	if (command.kind === "usage-error") {
 		const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === command.command);
 		const usage = entry ? ` ${usageNotice(entry)}` : "";
 		ctx.notice("error", `${command.reason}.${usage}`);
 		ctx.render();
-		return;
+		return "rejected";
 	}
 	const entry = HANDLER_BY_KIND.get(command.kind);
-	if (!entry) return;
+	if (!entry) return "rejected";
 	entry.handle(command, ctx);
+	return "accepted";
 }
 
 export interface CommandReferenceEntry {
