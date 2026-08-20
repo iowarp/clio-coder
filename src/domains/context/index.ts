@@ -1,19 +1,3 @@
-import type { DomainModule } from "../../core/domain-loader.js";
-import { type ContextBundleOptions, createContextBundle } from "./extension.js";
-import { ContextManifest } from "./manifest.js";
-
-export const ContextDomainModule: DomainModule = {
-	manifest: ContextManifest,
-	createExtension: createContextBundle,
-};
-
-export function createContextDomainModule(options: ContextBundleOptions = {}): DomainModule {
-	return {
-		manifest: ContextManifest,
-		createExtension: (context) => createContextBundle(context, options),
-	};
-}
-
 export {
 	type AdoptionScanResult,
 	type AdoptionSourcesChangedOptions,
@@ -40,20 +24,25 @@ export {
 } from "./bootstrap.js";
 export { type RunContextClearInput, type RunContextClearResult, runContextClear } from "./clear.js";
 export { loadProjectClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
+export {
+	codewikiEntries,
+	codewikiNeedsBackfill,
+	codewikiPath,
+	parseCodewikiRaw,
+	readCodewiki,
+	readCodewikiAsync,
+	serializeCodewiki,
+	structuralCodewikiHash,
+	writeCodewiki,
+} from "./codewiki/artifact.js";
 export { type CooperativeSlicer, createSlicer, INDEX_SLICE_MS } from "./codewiki/cooperative.js";
 export { renderCodewikiDigest } from "./codewiki/digest.js";
 export {
 	buildCodewiki,
-	CODEWIKI_VERSION,
-	codewikiEntries,
-	codewikiNeedsBackfill,
-	readCodewiki,
-	readCodewikiAsync,
-	structuralCodewikiHash,
 	syncCodewiki,
 	updateCodewikiPaths,
-	writeCodewiki,
 } from "./codewiki/indexer.js";
+export { CODEWIKI_VERSION } from "./codewiki/schema.js";
 export type { ContextContract, ContextState, ProjectPromptContext, ProjectStructuredContext } from "./contract.js";
 export {
 	type ComputeFingerprintAsyncOptions,
@@ -80,6 +69,7 @@ export {
 	type RunContextRefreshResult,
 	runContextRefresh,
 } from "./refresh.js";
+export { type ContextBundleOptions, ContextDomainModule, createContextDomainModule } from "./runtime.js";
 export {
 	type BootstrapGenerationMode,
 	type BootstrapGenerationState,

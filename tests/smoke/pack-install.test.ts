@@ -11,13 +11,14 @@
  */
 import { match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { assertCodewikiLazyLoading } from "../harness/codewiki-module-graph.js";
 import {
 	closeServer,
 	seedOpenAICompatToolOrchestrator,
@@ -183,27 +184,12 @@ describe("smoke/pack-install", { concurrency: false }, () => {
 		}
 	});
 
-	it("indexes a TypeScript fixture with grammars resolved from the pack", async () => {
-		const fixture = join(work, "fixture");
-		mkdirSync(fixture, { recursive: true });
-		writeFileSync(
-			join(fixture, "hello.ts"),
-			"export function greet(name: string): string {\n\treturn name.toUpperCase();\n}\n",
-		);
-		const result = await runNode([bin, "context", "index", "--json"], {
-			cwd: fixture,
-			env: { ...process.env, ...scratch.env },
+	it("keeps tree-sitter lazy and resolves grammars from the installed package", async () => {
+		await assertCodewikiLazyLoading({
+			packageRoot: installedRoot,
+			bin,
+			workRoot: join(work, "installed-codewiki-graph"),
+			env: scratch.env,
 		});
-		strictEqual(result.code, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
-		const payload = JSON.parse(result.stdout) as { indexedSourceFiles: number; codewikiPath: string };
-		strictEqual(payload.indexedSourceFiles, 1);
-		ok(existsSync(payload.codewikiPath), "context index must write the fixture's codewiki");
-		const codewiki = JSON.parse(readFileSync(payload.codewikiPath, "utf8")) as {
-			symbols: Array<{ name: string; kind: string }>;
-		};
-		ok(
-			codewiki.symbols.some((symbol) => symbol.name === "greet"),
-			`the fixture's exported function must be indexed; saw ${JSON.stringify(codewiki.symbols)}`,
-		);
 	});
 });

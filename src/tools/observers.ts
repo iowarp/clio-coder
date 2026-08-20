@@ -46,8 +46,8 @@ export interface FileMutationEvent {
 
 /**
  * Defers file-mutation sinks off the after_tool hot path and coalesces rapid
- * events into one best-effort batch. A process exit before the pending flush
- * can drop the incremental refresh; session stop owns a full rebuild.
+ * events into one best-effort batch. Lifecycle-owned sinks that must drain at
+ * shutdown should admit work synchronously instead of using this convenience.
  */
 export function coalescePathSink(sink: (paths: string[]) => void): (event: FileMutationEvent) => void {
 	const pending = new Set<string>();

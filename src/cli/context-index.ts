@@ -1,11 +1,6 @@
-import {
-	buildCodewiki,
-	type Codewiki,
-	codewikiPath,
-	structuralCodewikiHash,
-	writeCodewiki,
-} from "../domains/context/codewiki/indexer.js";
-import { computeFingerprint } from "../domains/context/fingerprint.js";
+import { codewikiPath, structuralCodewikiHash } from "../domains/context/codewiki/artifact.js";
+import { coordinateCodewikiWrite } from "../domains/context/codewiki/coordinator.js";
+import type { Codewiki } from "../domains/context/codewiki/schema.js";
 import { readClioState, statePath, writeClioState } from "../domains/context/state.js";
 import { detectProjectProfile } from "../domains/session/workspace/project-type.js";
 
@@ -55,22 +50,25 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 	const cwd = process.cwd();
 	const now = new Date().toISOString();
 	const profile = detectProjectProfile(cwd);
-	const codewiki = await buildCodewiki({ cwd, language: profile.projectType });
-	writeCodewiki(cwd, codewiki);
-	const prev = readClioState(cwd);
-	const fingerprint = computeFingerprint(cwd, codewiki);
-	writeClioState(cwd, {
-		version: 1,
-		projectType: profile.projectType,
-		fingerprint,
-		codewikiVersion: codewiki.version,
-		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
-		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
-		...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
-		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
-		lastSessionAt: prev?.lastSessionAt ?? now,
-		lastIndexedAt: now,
+	const coordinated = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: profile.projectType }), {
+		afterCommit: ({ codewiki, fingerprint }, workspace) => {
+			const prev = readClioState(workspace);
+			writeClioState(workspace, {
+				version: 1,
+				projectType: profile.projectType,
+				fingerprint,
+				codewikiVersion: codewiki.version,
+				...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
+				...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+				...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
+				...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
+				lastSessionAt: prev?.lastSessionAt ?? now,
+				lastIndexedAt: now,
+			});
+		},
 	});
+	if (!coordinated) throw new Error("codewiki index transaction did not commit");
+	const codewiki = coordinated.codewiki;
 	const indexed = indexedSourceCount(codewiki);
 	const coverage = profile.sourceFiles === 0 ? 1 : indexed / profile.sourceFiles;
 	const counts = languageCounts(profile);

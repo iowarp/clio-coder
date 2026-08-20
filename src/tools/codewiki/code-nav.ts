@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../../core/tool-names.js";
-import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/context/codewiki/indexer.js";
+import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/context/codewiki/schema.js";
 import { listWikiPages } from "../../domains/context/wiki/layout.js";
 import { readWikiMeta } from "../../domains/context/wiki/meta.js";
 import { wikiCompletenessFromMeta, wikiStaleness } from "../../domains/context/wiki/staleness.js";

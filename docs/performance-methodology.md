@@ -176,6 +176,53 @@ through a real installed headless tool turn from a foreign working directory
 and asserts that neither the packed chunks nor the installed dependency tree
 contains userland Undici.
 
+### Lazy codewiki and tree-sitter
+
+Codewiki's schema, artifact parser, synchronous/asynchronous cached reads, and
+path classification are now separate from the builder. Interactive startup
+loads those lightweight surfaces but does not evaluate the builder or the
+bundled tree-sitter runtime. A real build runs in a dedicated worker thread,
+which dynamically imports tree-sitter and the requested grammar. Session-start
+freshness, parallel `code_nav` demand, incremental mutations, explicit index and
+refresh, bootstrap checkpoints, wiki grounding, and reset share one
+per-workspace FIFO plus a cross-process file lease. The artifact and its state
+metadata commit under that lease, shutdown drains admitted session work, and a
+reset cannot be overtaken by an older build.
+
+The deterministic runtime-graph test locates the generated tree-sitter chunk by
+its bundled source marker, never its hash. V8 coverage proves that nested
+`context index --help` reaches the built index command without evaluating that
+chunk or creating `.clio-coder`, while a real one-file build evaluates it and
+extracts a generator declaration the regex fallback does not recognize. The
+same proof runs against an installed tarball from a foreign working directory.
+
+The after-Undici graph was the before point for this cut. The translated module
+count changed from 1,332 files (54 Clio chunks) to 1,336 (58 Clio chunks): the
+new lightweight coordinator/worker boundary adds four file modules, while the
+formerly bundled tree-sitter code was already represented by one Clio chunk.
+The useful deterministic reduction is evaluation, not file count: the former
+295,539-byte eager tree-sitter/codewiki chunk is absent from the interactive
+graph, and the now-lazy tree-sitter runtime is a 217,988-byte chunk loaded only
+inside the build worker. The current interactive import evaluates 5,015,343
+bytes across its 58 Clio files. Total built JavaScript is 99 files and
+5,812,402 bytes; keeping the worker and lazy chunk in the package is required
+for first-use correctness, so total package bytes are not expected to fall.
+
+Ten independent full-entry imports, with V8 compile caching disabled and a warm
+operating-system page cache on the same WSL2 host, produced:
+
+| Node | Before median / p90 | After median / p90 | Observation |
+| --- | ---: | ---: | --- |
+| 22.22.3 | 605.907 / 646.730 ms | 525.656 / 539.633 ms | lower in this sample |
+| 24.9.0 | 668.652 / 896.238 ms | 539.056 / 574.139 ms | lower in this sample |
+
+These are local import observations, not a universal startup saving or a CI
+threshold. `npm pack --dry-run --json` at this slice reports 6.08 MB packed,
+36.65 MB unpacked, and 1,095 entries. The independently blocking
+evidence is the source-built and installed runtime-coverage contract plus the
+coordinator's generation-order, reset-resurrection, lease-failure, demand,
+incremental, wiki, refresh, and shutdown suites.
+
 ## Reporting checklist
 
 Every published observation records:

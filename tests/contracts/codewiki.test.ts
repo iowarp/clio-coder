@@ -14,6 +14,7 @@ import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { runContextIndexCommand } from "../../src/cli/context-index.js";
+import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import {
 	type Codewiki,
@@ -1147,6 +1148,31 @@ describe("contracts/codewiki", () => {
 		const codewiki = readCodewiki(scratch);
 		ok(codewiki);
 		ok(hasSymbol(codewiki, "src/late.ts", "stopWritten", "const"));
+	});
+
+	it("drains session-start freshness and performs no later write after stop", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "index.ts"), "export const beforeStart = true;\n", "utf8");
+		writeIndexedCodewiki(scratch, await buildCodewiki({ cwd: scratch, language: "typescript" }));
+		writeFileSync(join(scratch, "src", "index.ts"), "export const refreshedAtStart = true;\n", "utf8");
+		const originalCwd = process.cwd();
+		process.chdir(scratch);
+		try {
+			const bus = createSafeEventBus();
+			const bundle = createContextBundle({ bus, getContract: () => undefined });
+			await bundle.extension.start();
+			bus.emit(BusChannels.SessionStart, { at: Date.now() });
+			await bundle.extension.stop?.();
+		} finally {
+			process.chdir(originalCwd);
+		}
+
+		const committed = readCodewiki(scratch);
+		ok(committed);
+		ok(hasSymbol(committed, "src/index.ts", "refreshedAtStart", "const"));
+		const bytesAtStop = readFileSync(codewikiPath(scratch), "utf8");
+		await delay(100);
+		strictEqual(readFileSync(codewikiPath(scratch), "utf8"), bytesAtStop);
 	});
 
 	it("leaves a never-indexed directory alone across context extension start and stop", async () => {
