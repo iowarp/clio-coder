@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import type { Component, Terminal } from "../../src/engine/tui.js";
 import {
 	createInteractiveShell,
 	createProcessInteractiveShell,
+	getActiveRenderTrace,
 	type InteractiveShellInterval,
 	type InteractiveShellTui,
 	settleLatestInteractiveFrame,
@@ -177,6 +178,35 @@ describe("interactive shell ownership", () => {
 		process.env.CLIO_CODER_RENDER_TRACE = join(parentFile, "trace.jsonl");
 		try {
 			createProcessInteractiveShell();
+		} finally {
+			if (previous === undefined) delete process.env.CLIO_CODER_RENDER_TRACE;
+			else process.env.CLIO_CODER_RENDER_TRACE = previous;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rolls back stdout tracing when process TUI construction throws", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-shell-construction-rollback-"));
+		const tracePath = join(dir, "trace.jsonl");
+		const previous = process.env.CLIO_CODER_RENDER_TRACE;
+		const originalWrite = process.stdout.write;
+		process.env.CLIO_CODER_RENDER_TRACE = tracePath;
+		try {
+			throws(
+				() =>
+					createProcessInteractiveShell({
+						testing: {
+							createTerminal: () => ({}) as never,
+							createTui: () => {
+								throw new Error("injected TUI construction failure");
+							},
+						},
+					}),
+				/injected TUI construction failure/u,
+			);
+			strictEqual(process.stdout.write, originalWrite, "the process-global stdout wrapper is restored synchronously");
+			strictEqual(getActiveRenderTrace(), null, "a failed constructor cannot leave a globally active trace");
+			await new Promise<void>((resolve) => setImmediate(resolve));
 		} finally {
 			if (previous === undefined) delete process.env.CLIO_CODER_RENDER_TRACE;
 			else process.env.CLIO_CODER_RENDER_TRACE = previous;

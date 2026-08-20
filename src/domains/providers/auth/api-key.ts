@@ -1,5 +1,5 @@
 import { type ResolveConfigValueOptions, resolveDynamicConfigValue } from "../../../core/resolve-config-value.js";
-import { findEngineEnvKeys, getEngineEnvApiKey } from "../../../engine/oauth.js";
+import { findEngineEnvKeys, getEngineEnvApiKey } from "../../../engine/env-api-keys.js";
 
 export interface EnvironmentApiKeyResolution {
 	apiKey: string | undefined;

@@ -12,6 +12,10 @@ targets and point-in-time measurements; they are not CI timing thresholds.
   that frame's `stdout.write()` calls have returned. It is the event reported as
   `first TUI paint` by the historical boot trace, but its actual endpoint is
   stdout enqueue rather than a displayed pixel.
+- **Stage 0 shell commit** is the first stdout commit from the minimal
+  single-owner interactive shell. **Stage 1 hydration** is the first committed
+  frame after the full application has atomically adopted that same terminal,
+  renderer, root host, and editor.
 - **Ingress-to-stdout-commit** and **input-to-stdout-commit** correlate a
   canonical event or input sequence with the first committed frame whose high
   water includes that sequence.
@@ -45,6 +49,14 @@ bounded asynchronous queue. Slow storage drops old trace records and emits a
 drop count instead of growing without bound. Append failures and append
 timeouts disable tracing without failing the application. Normal shutdown
 awaits the bounded final flush.
+
+With the instant shell active, textual `[clio:boot]` lines retain timestamps
+captured at the Stage 0 commit and Stage 1 committed hydration frame, but their
+stderr output is deliberately deferred until after the TUI stops and terminal
+protocols are restored. The PTY harness detects the visible Stage 0 bytes and
+Stage 1 frame directly, then parses those buffered timestamps after process
+exit. This keeps diagnostic output from corrupting the temporary shell without
+changing the measured endpoints.
 
 ```bash
 CLIO_CODER_RENDER_TRACE=/tmp/clio-render.jsonl \
@@ -415,6 +427,51 @@ These endpoints end at stdout commit. Even the PTY reader assertion stops at
 the pseudo-terminal boundary; none of these values is literal token-to-glass
 latency.
 
+## Instant-shell observations
+
+The instant-shell slice uses one `TerminalLease`; Stage 1 does not start a
+second terminal or reconstruct editor state. The built Stage 0 static closure
+is 5 JavaScript chunks and 90,654 bytes. Its regression limit is 6 chunks and
+110,000 bytes, and the closure must contain no orchestrator, provider, tool,
+codewiki, tree-sitter, or Pi implementation marker. The pre-Stage 0 target/auth
+check uses a data-only runtime manifest, checked against every canonical
+built-in descriptor, and a read-only credential-presence path; it evaluates no
+provider implementation or OAuth flow.
+
+Five independent processes per supported Node line were measured on the same
+2026-08-19 WSL2 x86-64 host, built source checkout, 80x24 `xterm-256color` PTY,
+declared unreachable localhost target, warm operating-system page cache, and
+`NODE_DISABLE_COMPILE_CACHE=1`. Values are median / largest of five diagnostic
+observations, never CI timing gates.
+
+| Node | Stage 0 stdout commit | PTY-observed Stage 0 frame | Stage 1 hydration | Stage 0 frame build |
+| --- | ---: | ---: | ---: | ---: |
+| 22.22.3 | 147.9 / 155.3 ms | 162.946 / 172.604 ms | 926.2 / 956.9 ms | 5.240 / 5.860 ms |
+| 24.9.0 | 148.4 / 157.8 ms | 164.809 / 172.480 ms | 959.7 / 1001.9 ms | 5.386 / 5.791 ms |
+
+The comparable corrected pre-instant-shell first stdout commit baseline was
+1013.9 / 1120.3 ms on Node 22.22.3 and 1061.5 / 1082.3 ms on Node 24.9.0 under
+the same compile-cache-disabled, warm-page-cache method. Stage 1 remains a full
+hydration endpoint; the earlier visible/editor-ready Stage 0 does not erase or
+rename that work.
+
+The command was run five times for each explicit Node binary:
+
+```bash
+NODE_DISABLE_COMPILE_CACHE=1 CLIO_CODER_PERF_REPORT=1 \
+  /path/to/node --import tsx --import ./tests/harness/tmp-root.ts --test \
+  --test-name-pattern 'correlates input and resize' \
+  tests/smoke/render-trace-pty.test.ts
+```
+
+The built-CLI PTY suite additionally covers immediate typing, multiple
+submit-before-hydration admissions, a retained post-submit draft, resize across
+hydration, Ctrl+C on both sides of attachment, SIGTERM during hydration,
+injected Stage 1 failure, protocol-query single execution, raw-mode
+restoration, diagnostics, and bounded process cleanup. The fake lease contract
+checks object identity, FIFO admission, epoch rejection, signal-delegate
+transfer, and idempotent close. PTY receipt is still not literal glass latency.
+
 ## Reporting checklist
 
 Every published observation records:
@@ -429,6 +486,6 @@ Every published observation records:
 8. whether PTY, emulator, SSH, or backpressured-output behavior was involved;
 9. the correctness and package gates run beside the observation.
 
-Stage 0 shell commit and Stage 1 hydration are reported as separate endpoints
-once the single-owner instant-shell path is enabled. Until then there is one
-fully hydrated first-frame endpoint.
+Stage 0 shell commit and Stage 1 hydration are separate endpoints. A report
+must state whether `CLIO_CODER_INSTANT_SHELL` selected the lease or the legacy
+fully hydrated first-frame path.

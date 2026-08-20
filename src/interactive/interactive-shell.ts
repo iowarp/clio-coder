@@ -13,6 +13,7 @@ import { installStdoutBackpressureGate } from "./stdout-backpressure.js";
 export interface InteractiveShellTui {
 	readonly mode?: TuiMode;
 	addChild(component: Component): void;
+	removeChild?(component: Component): void;
 	setLayoutRoot?(component: Component | undefined): void;
 	setFocus(component: Component): void;
 	start(): void;
@@ -55,6 +56,8 @@ export interface InteractiveShell<
 	setStreamPacingActive(active: boolean): void;
 	/** Await asynchronous teardown work started by stop(), including trace-file settlement. */
 	settle(): Promise<void>;
+	/** Resolve after the next render transaction that reaches terminal commit. */
+	nextCommittedFrame(): Promise<number | null>;
 	complete(code: number): void;
 }
 
@@ -143,6 +146,9 @@ export function createInteractiveShell<TTerminal extends Terminal, TTui extends 
 		settle(): Promise<void> {
 			return stopSettlement ?? Promise.resolve();
 		},
+		nextCommittedFrame(): Promise<number | null> {
+			return Promise.resolve(null);
+		},
 		complete(code): void {
 			if (completedCode !== null) return;
 			completedCode = code;
@@ -180,7 +186,16 @@ export async function settleLatestInteractiveFrame(
 
 /** Production factories stay here so the composition root does not own them. */
 export function createProcessInteractiveShell(
-	options: { tuiMode?: TuiMode; onFirstFrameCommit?: (frameId: number) => void; streamPacingActive?: boolean } = {},
+	options: {
+		tuiMode?: TuiMode;
+		onFirstFrameCommit?: (frameId: number) => void;
+		streamPacingActive?: boolean;
+		/** Construction fault seams for process-global rollback contracts. */
+		testing?: {
+			createTerminal?: () => ProcessTerminal;
+			createTui?: (terminal: ProcessTerminal) => TUI;
+		};
+	} = {},
 ): InteractiveShell<ProcessTerminal, TUI> {
 	const tracePath = renderTracePath();
 	let restoreStdout: (() => void) | null = null;
@@ -189,11 +204,16 @@ export function createProcessInteractiveShell(
 	let backpressure: StdoutBackpressureGate | null = null;
 	let observedBackpressure = false;
 	if (tracePath) {
+		let candidate: RenderTrace | null = null;
 		try {
-			activeRenderTrace = createRenderTrace(tracePath);
-			restoreStdout = traceProcessStdout(activeRenderTrace);
+			candidate = createRenderTrace(tracePath);
+			restoreStdout = traceProcessStdout(candidate);
+			activeRenderTrace = candidate;
 		} catch {
 			// A diagnostics path must never prevent the interactive application from starting.
+			restoreStdout?.();
+			restoreStdout = null;
+			void candidate?.close().catch(() => {});
 			activeRenderTrace = null;
 		}
 	} else activeRenderTrace = null;
@@ -279,30 +299,65 @@ export function createProcessInteractiveShell(
 		backpressure.restore();
 		backpressure = null;
 	};
-	setStreamPacingActive(options.streamPacingActive === true);
-	const shell = createInteractiveShell({
-		createTerminal: () => new ProcessTerminal(),
-		createTui: (terminal) =>
-			options.tuiMode === "fullscreen"
-				? new InstrumentedTuiAltScreen(terminal, renderObserver, undefined, undefined, undefined, renderAdmission)
-				: new InstrumentedTuiMainScreen(terminal, renderObserver, undefined, undefined, renderAdmission),
-		prepareRoot: (root) => {
-			if (trace) restoreRoot = traceComponentRenders(root, trace);
-		},
-		onStop: async () => {
-			setStreamPacingActive(false);
-			restoreRoot?.();
-			restoreRoot = null;
-			restoreStdout?.();
-			restoreStdout = null;
-			restoreFirstFrameStdout?.();
-			restoreFirstFrameStdout = null;
-			if (activeRenderTrace === trace) activeRenderTrace = null;
-			if (trace) await trace.close();
-		},
-	});
+	let instrumentationCleanupStarted = false;
+	let instrumentationCleanupPromise: Promise<void> = Promise.resolve();
+	const cleanupInstrumentation = (): Promise<void> => {
+		if (instrumentationCleanupStarted) return instrumentationCleanupPromise;
+		instrumentationCleanupStarted = true;
+		const errors: unknown[] = [];
+		const attempt = (operation: () => void): void => {
+			try {
+				operation();
+			} catch (error) {
+				errors.push(error);
+			}
+		};
+		attempt(() => setStreamPacingActive(false));
+		attempt(() => restoreRoot?.());
+		restoreRoot = null;
+		attempt(() => restoreStdout?.());
+		restoreStdout = null;
+		attempt(() => restoreFirstFrameStdout?.());
+		restoreFirstFrameStdout = null;
+		if (activeRenderTrace === trace) activeRenderTrace = null;
+		instrumentationCleanupPromise = (async () => {
+			if (trace) {
+				try {
+					await trace.close();
+				} catch (error) {
+					errors.push(error);
+				}
+			}
+			if (errors.length > 0) throw new AggregateError(errors, "interactive shell instrumentation cleanup failed");
+		})();
+		return instrumentationCleanupPromise;
+	};
+	let shell: InteractiveShell<ProcessTerminal, TUI>;
+	try {
+		setStreamPacingActive(options.streamPacingActive === true);
+		shell = createInteractiveShell({
+			createTerminal: options.testing?.createTerminal ?? (() => new ProcessTerminal()),
+			createTui: (terminal) =>
+				options.testing?.createTui?.(terminal) ??
+				(options.tuiMode === "fullscreen"
+					? new InstrumentedTuiAltScreen(terminal, renderObserver, undefined, undefined, undefined, renderAdmission)
+					: new InstrumentedTuiMainScreen(terminal, renderObserver, undefined, undefined, renderAdmission)),
+			prepareRoot: (root) => {
+				if (trace) restoreRoot = traceComponentRenders(root, trace);
+			},
+			onStop: cleanupInstrumentation,
+		});
+	} catch (error) {
+		void cleanupInstrumentation().catch(() => {});
+		throw error;
+	}
 	return {
 		...shell,
+		nextCommittedFrame(): Promise<number | null> {
+			return new Promise<number>((resolve) => {
+				frameWaiters.push({ resolve });
+			});
+		},
 		async commitCurrentFrame(timeoutMs = 30_000): Promise<number | null> {
 			return await settleLatestInteractiveFrame(backpressure, timeoutMs, async () => {
 				const tui = shell.tui as TUI & { renderNow(force?: boolean): void };
