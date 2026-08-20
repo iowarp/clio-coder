@@ -2,8 +2,9 @@ import { deepStrictEqual, match, rejects, strictEqual, throws } from "node:asser
 import { describe, it } from "node:test";
 import { terminalLeaseEligible } from "../../src/cli/clio.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { Component, TUI } from "../../src/engine/tui.js";
+import { type Component, type Terminal, type TUI, TuiAltScreen } from "../../src/engine/tui.js";
 import type { InteractiveShell } from "../../src/interactive/interactive-shell.js";
+import { buildFullscreenLayout } from "../../src/interactive/layout.js";
 import {
 	createProcessTerminalLease,
 	instantShellEnabled,
@@ -12,6 +13,29 @@ import {
 
 function component(line: string): Component {
 	return { render: () => [line], invalidate: () => {} };
+}
+
+class FullscreenCaptureTerminal implements Terminal {
+	readonly writes: string[] = [];
+	columns = 80;
+	rows = 16;
+	readonly kittyProtocolActive = false;
+	start(): void {}
+	stop(): void {}
+	drainInput(): Promise<void> {
+		return Promise.resolve();
+	}
+	write(data: string): void {
+		this.writes.push(data);
+	}
+	moveBy(): void {}
+	hideCursor(): void {}
+	showCursor(): void {}
+	clearLine(): void {}
+	clearFromCursor(): void {}
+	clearScreen(): void {}
+	setTitle(): void {}
+	setProgress(): void {}
 }
 
 interface HarnessMetrics {
@@ -175,6 +199,75 @@ function harness(
 }
 
 describe("single-owner terminal lease", () => {
+	it("keeps fullscreen layout structure visible across Stage 0 adoption", async () => {
+		const terminal = new FullscreenCaptureTerminal();
+		const tui = new TuiAltScreen(terminal);
+		const shell = {
+			terminal,
+			tui,
+			mount(root: Component, focus: Component) {
+				tui.addChild(root);
+				tui.setLayoutRoot(root);
+				tui.setFocus(focus);
+				tui.start();
+			},
+			anchor: async () => 0,
+			releaseAnchor() {},
+			stop: () => tui.stop({ preserveScreen: true }),
+			commitCurrentFrame: async () => 1,
+			hasObservedBackpressure: () => false,
+			setStreamPacingActive() {},
+			settle: async () => {},
+			nextCommittedFrame: async () => 1,
+			complete() {},
+		} as unknown as InteractiveShell;
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.terminal.tuiMode = "fullscreen";
+		const lease = createProcessTerminalLease({
+			settings,
+			testing: {
+				shell: shell as ReturnType<
+					typeof import("../../src/interactive/interactive-shell.js").createProcessInteractiveShell
+				>,
+				termination: {
+					installSignalHandlers() {},
+					releaseInterruptOwnership: () => () => {},
+					onDrain() {},
+					shutdown: async () => {},
+				},
+				signals: { on: () => process as never, off: () => process as never },
+				write: () => {},
+			},
+		});
+		try {
+			lease.registerApplicationInput(() => ({ consume: true }));
+			const layout = buildFullscreenLayout({
+				banner: component("HEADER"),
+				chat: { render: () => ["USER FS-OK", "ASSISTANT FS-OK"], invalidate: () => {} },
+				editor: lease.editor,
+				footer: component("FOOTER"),
+			});
+			terminal.writes.length = 0;
+			strictEqual(
+				lease.adopt({
+					root: layout.root,
+					editorChrome: { getModelLabel: () => "ready", getThinkingLabel: () => "off" },
+					admitSubmission: async () => {},
+				}),
+				true,
+			);
+			tui.renderNow(true);
+
+			const frame = terminal.writes.join("");
+			match(frame, /USER FS-OK/u);
+			match(frame, /ASSISTANT FS-OK/u);
+			match(frame, /FOOTER/u);
+			strictEqual(layout.transcript.viewportHeight > 1, true, "the transcript receives the remaining screen rows");
+		} finally {
+			await lease.close();
+		}
+	});
+
 	it("keeps the same root host and editor while draining immutable boot submissions serially", async () => {
 		const h = harness();
 		const host = h.root;
