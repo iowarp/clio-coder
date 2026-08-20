@@ -1,5 +1,4 @@
-import { registerApiProvider } from "@earendil-works/pi-ai/compat";
-
+import { registerEngineApiProvider } from "../api-registry.js";
 import { ollamaNativeApiProvider } from "./ollama-native.js";
 import { openAICompletionsApiProvider } from "./openai-completions.js";
 
@@ -12,6 +11,6 @@ let registered = false;
 export function registerClioApiProviders(): void {
 	if (registered) return;
 	registered = true;
-	registerApiProvider(openAICompletionsApiProvider, "clio");
-	registerApiProvider(ollamaNativeApiProvider, "clio");
+	registerEngineApiProvider(openAICompletionsApiProvider, "clio");
+	registerEngineApiProvider(ollamaNativeApiProvider, "clio");
 }

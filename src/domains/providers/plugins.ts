@@ -15,6 +15,7 @@
 import { join } from "node:path";
 
 import { clioConfigDir } from "../../core/xdg.js";
+import { activateExternalPluginApiBridge } from "../../engine/api-registry.js";
 import type { RuntimeRegistry } from "./registry.js";
 
 interface PluginSettings {
@@ -35,8 +36,9 @@ export async function loadPluginRuntimes(
 	const loaded: string[] = [];
 
 	const pluginDir = join(clioConfigDir(), "runtimes");
+	const packages = extractPluginPackages(settings);
 	try {
-		const ids = await registry.loadFromDir(pluginDir);
+		const ids = await registry.loadFromDir(pluginDir, activateExternalPluginApiBridge);
 		loaded.push(...ids);
 	} catch (err) {
 		process.stderr.write(
@@ -44,9 +46,9 @@ export async function loadPluginRuntimes(
 		);
 	}
 
-	for (const packageName of extractPluginPackages(settings)) {
+	for (const packageName of packages) {
 		try {
-			const ids = await registry.loadFromPackage(packageName);
+			const ids = await registry.loadFromPackage(packageName, activateExternalPluginApiBridge);
 			loaded.push(...ids);
 		} catch (err) {
 			process.stderr.write(

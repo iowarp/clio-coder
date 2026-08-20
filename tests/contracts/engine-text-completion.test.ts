@@ -1,8 +1,8 @@
 import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { completeEngineText } from "../../src/engine/ai.js";
+import { registerEngineFauxProvider as registerFauxProvider } from "../../src/engine/api-registry.js";
 import type { EngineModel } from "../../src/engine/types.js";
 
 describe("contracts/engine text completion", () => {

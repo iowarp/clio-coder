@@ -17,11 +17,14 @@ import type {
 	OAuthSelectPrompt,
 	ProviderAuthInteraction,
 } from "@earendil-works/pi-ai";
-import { findEnvKeys as piFindEnvKeys, getEnvApiKey as piGetEnvApiKey } from "@earendil-works/pi-ai/compat";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { alcfOAuthProvider } from "./alcf-oauth.js";
+import {
+	findEngineEnvKeys as findEngineEnvKeysRaw,
+	getEngineEnvApiKey as getEngineEnvApiKeyRaw,
+} from "./env-api-keys.js";
 
 export type { OAuthCredentials, OAuthLoginCallbacks, OAuthSelectPrompt };
 
@@ -133,7 +136,7 @@ function registry(): Map<string, EngineOAuthProvider> {
 
 export function getEngineEnvApiKey(providerId: string): string | undefined {
 	try {
-		return piGetEnvApiKey(providerId);
+		return getEngineEnvApiKeyRaw(providerId);
 	} catch {
 		return undefined;
 	}
@@ -141,7 +144,7 @@ export function getEngineEnvApiKey(providerId: string): string | undefined {
 
 export function findEngineEnvKeys(providerId: string): string[] | undefined {
 	try {
-		return piFindEnvKeys(providerId);
+		return findEngineEnvKeysRaw(providerId);
 	} catch {
 		return undefined;
 	}

@@ -2,6 +2,7 @@ import {
 	type Api,
 	type AssistantMessage,
 	type AssistantMessageEvent,
+	type AssistantMessageEventStream,
 	type Context,
 	createAssistantMessageEventStream,
 	type Model,
@@ -13,7 +14,7 @@ import {
 	type Tool,
 	type Usage,
 } from "@earendil-works/pi-ai";
-import { type ApiProvider, streamOpenAICompletions, streamSimpleOpenAICompletions } from "@earendil-works/pi-ai/compat";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import {
 	type AppliedThinking,
 	type ResolvedModelRuntimeCapabilities,
@@ -32,6 +33,9 @@ import { ensureLmStudioResidency } from "./lmstudio.js";
 import { LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS, remainingContextMaxTokens } from "./output-budget.js";
 import { residencyManagedFor } from "./residency.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
+import type { EngineApiProvider } from "./types.js";
+
+const piOpenAICompletions = openAICompletionsApi();
 
 /**
  * Average characters-per-token for the English/code reasoning streams pi-ai
@@ -332,9 +336,9 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 }
 
 function stripNeverReasoningFromStream(
-	source: ReturnType<typeof streamOpenAICompletions>,
+	source: AssistantMessageEventStream,
 	resolved: ResolvedModelRuntimeCapabilities,
-): ReturnType<typeof streamOpenAICompletions> {
+): AssistantMessageEventStream {
 	if (!stripsThinking(resolved)) return source;
 	const stripped = createAssistantMessageEventStream();
 	(async () => {
@@ -500,9 +504,7 @@ export function applyOpenAICompatReasoningEstimate(message: AssistantMessage): v
 	}
 }
 
-function withReasoningTokenEstimate(
-	source: ReturnType<typeof streamOpenAICompletions>,
-): ReturnType<typeof streamOpenAICompletions> {
+function withReasoningTokenEstimate(source: AssistantMessageEventStream): AssistantMessageEventStream {
 	const annotated = createAssistantMessageEventStream();
 	(async () => {
 		try {
@@ -532,9 +534,9 @@ function withReasoningTokenEstimate(
  * tool-call events pass through unchanged.
  */
 function stripSentinelsFromStream(
-	source: ReturnType<typeof streamOpenAICompletions>,
+	source: AssistantMessageEventStream,
 	resolved: ResolvedModelRuntimeCapabilities,
-): ReturnType<typeof streamOpenAICompletions> {
+): AssistantMessageEventStream {
 	const sanitized = createAssistantMessageEventStream();
 	(async () => {
 		try {
@@ -620,10 +622,10 @@ function stripSentinelsFromStream(
 }
 
 function guardMalformedToolCalls(
-	source: ReturnType<typeof streamOpenAICompletions>,
+	source: AssistantMessageEventStream,
 	model: Model<"openai-completions">,
 	context: Context,
-): ReturnType<typeof streamOpenAICompletions> {
+): AssistantMessageEventStream {
 	const requiredByTool = new Map<string, ReadonlyArray<string>>();
 	for (const tool of context.tools ?? []) {
 		const required = requiredToolArguments(tool);
@@ -697,8 +699,8 @@ async function ensureLocalResidency(
 function withLocalResidency(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal },
-	sourceFactory: (requestModel: Model<"openai-completions">) => ReturnType<typeof streamOpenAICompletions>,
-): ReturnType<typeof streamOpenAICompletions> {
+	sourceFactory: (requestModel: Model<"openai-completions">) => AssistantMessageEventStream,
+): AssistantMessageEventStream {
 	if (!isManagedLlamaCppModel(model) && !isLmStudioModel(model)) return sourceFactory(model);
 	const stream = createAssistantMessageEventStream();
 	(async () => {
@@ -718,7 +720,7 @@ function withLocalResidency(
 	return stream;
 }
 
-export const openAICompletionsApiProvider: ApiProvider<"openai-completions", OpenAICompletionsOptions> = {
+export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions", OpenAICompletionsOptions> = {
 	api: "openai-completions",
 	stream: (model, context, options) => {
 		// Bare `stream` callers don't communicate thinking state; fall back to
@@ -740,7 +742,7 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 									...(options?.signal !== undefined ? { signal: options.signal } : {}),
 								},
 								(requestModel) =>
-									streamOpenAICompletions(
+									piOpenAICompletions.stream(
 										requestModel,
 										effectiveContext,
 										withRemainingContextBudget(model, effectiveContext, withSamplers),
@@ -773,7 +775,7 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 									...(options?.signal !== undefined ? { signal: options.signal } : {}),
 								},
 								(requestModel) =>
-									streamSimpleOpenAICompletions(
+									piOpenAICompletions.streamSimple(
 										requestModel,
 										effectiveContext,
 										withRemainingContextBudget(model, effectiveContext, withSamplers),
