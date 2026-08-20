@@ -1036,6 +1036,12 @@ testCase(19, "NO_COLOR, non-TTY, SIGINT, and terminal teardown", async () => {
 	});
 	const nonTty = run(launcher, [], { env });
 	const count = (text, needle) => text.split(needle).length - 1;
+	// The single-owner shell restores the terminal exactly once, ending in one
+	// restore group (cursor show, bracketed-paste off, keyboard-protocol pop in
+	// the engine's canonical order). The previous "bracketed paste is disabled
+	// last" phrasing could only hold when restoration ran twice, with a second
+	// stop re-emitting ?2004l after the pop it skipped.
+	const teardownTail = colored.output.slice(colored.output.lastIndexOf("\x1b[?25h")).trimEnd();
 
 	return {
 		command: "clio-coder (pty) with and without NO_COLOR, then piped",
@@ -1047,7 +1053,11 @@ testCase(19, "NO_COLOR, non-TTY, SIGINT, and terminal teardown", async () => {
 			["color is present by default", colorSequences(colored.output).length > 0],
 			["NO_COLOR removes every color sequence", colorSequences(plain.output).length === 0],
 			["NO_COLOR still exits 0", plain.exitCode === 0],
-			["bracketed paste is disabled last", colored.output.trimEnd().endsWith("[?2004l")],
+			["bracketed paste is disabled exactly once", count(colored.output, "\x1b[?2004l") === 1],
+			[
+				"only restore sequences follow the final cursor show",
+				/^\x1b\[\?25h(?:\x1b\[\?2004l|\x1b\[<u|\x1b\[>4;0m)+$/.test(teardownTail),
+			],
 			["the cursor is restored", count(colored.output, "[?25h") > 0],
 			["the keyboard protocol stack is popped", count(colored.output, "[>") === count(colored.output, "[<u")],
 			["the alternate screen is never entered", count(colored.output, "[?1049h") === 0],
