@@ -1231,12 +1231,14 @@ describe("contracts/dispatch", () => {
 		persistentSettings.workers.onPermission = "deny";
 		persistentSettings.workers.escalation = { timeoutMs: 120_000, fallback: "deny" };
 		persistentSettings.skills.trustProjectCompatRoots = false;
+		persistentSettings.attribution.gitCommits = true;
 
 		const sessionView = structuredClone(persistentSettings);
 		sessionView.autonomy = "read-only";
 		sessionView.workers.onPermission = "escalate";
 		sessionView.workers.escalation = { timeoutMs: 4_321, fallback: "fail" };
 		sessionView.skills.trustProjectCompatRoots = true;
+		sessionView.attribution.gitCommits = false;
 
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		const capturedSpecs: WorkerSpec[] = [];
@@ -1268,6 +1270,7 @@ describe("contracts/dispatch", () => {
 			strictEqual(spec.onPermission, "escalate");
 			deepStrictEqual(spec.escalation, { timeoutMs: 4_321, fallback: "fail" });
 			strictEqual(spec.trustProjectCompatRoots, true);
+			strictEqual(spec.gitCommitAttribution, false);
 			deepStrictEqual(
 				spec.budget,
 				{

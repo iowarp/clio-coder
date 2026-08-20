@@ -1852,6 +1852,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	} else if (settings) {
 		spec.trustProjectCompatRoots = settings.skills.trustProjectCompatRoots === true;
 	}
+	spec.gitCommitAttribution = settings?.attribution.gitCommits ?? true;
 	// Non-stall posture (Symphony §10.5): a dispatched worker has no operator
 	// to answer a permission prompt by default, so the resolution policy ships
 	// with the spec and the worker enforces it within bounded time. Under the

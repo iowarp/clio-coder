@@ -27,6 +27,7 @@ current source, tests, and `CHANGELOG.md`.
 | Developer guide to implementing custom model runtimes and inference server integrations | [provider-adapter-cookbook.md](provider-adapter-cookbook.md) ([Interactive Blueprint](html/provider_adapter_blueprint.html)) |
 | Built-in agent recipes, discovery roots, frontmatter schema, and dispatch admission | [built-in-agents.md](built-in-agents.md) ([Interactive Blueprint](html/agents_blueprint.html)) |
 | Artifact browsing, receipt verification, dispatch diagnostics, and observability routing | [observability.md](observability.md) ([Interactive Blueprint](html/observability_blueprint.html)) |
+| Evidence-aware Git commit role trailers, managed-hook safety, and platform identity prerequisites | [git-commit-provenance.md](git-commit-provenance.md) |
 | Where every generated file lands: the working tree, `.clio-coder/`, and the XDG dirs, by audience | [artifact-placement.md](artifact-placement.md) ([Interactive Blueprint](html/artifact_placement_blueprint.html)) |
 | Evidence directory structures, findings, and operator-approved memory retrieval | [evidence-and-memory.md](evidence-and-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |
 | Local YAML eval suites, reports, comparisons, and command evidence | [eval-runner.md](eval-runner.md) ([Interactive Blueprint](html/eval_blueprint.html)) |

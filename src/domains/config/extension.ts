@@ -1,6 +1,7 @@
 import { BusChannels, type ConfigChangePayload } from "../../core/bus-events.js";
 import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { setGitCommitAttributionEnabled } from "../../core/git-commit-attribution.js";
 import { readStrictLayeredSettings, updateLayeredSettings } from "../../core/settings-layers.js";
 import { assertAgentIdNamespace } from "./agent-namespace.js";
 import { type ChangeKind, diffSettings } from "./classify.js";
@@ -83,6 +84,7 @@ export function createConfigBundle(
 		}
 		publishReloadFailure(null);
 		snapshot = next;
+		setGitCommitAttributionEnabled(next.attribution.gitCommits);
 		if (!prev) return;
 		const diff = diffSettings(prev, next);
 		if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: next });
@@ -94,6 +96,7 @@ export function createConfigBundle(
 		async start() {
 			if (initialSettings) snapshot = structuredClone(initialSettings);
 			else snapshot = readStrictLayeredSettings(process.cwd()).settings;
+			setGitCommitAttributionEnabled(snapshot.attribution.gitCommits);
 			watcher = startConfigWatcher(() => onWatcherFire());
 		},
 		async stop() {
@@ -121,6 +124,7 @@ export function createConfigBundle(
 			// a route may name a target supplied only by this workspace.
 			const normalized = updateLayeredSettings(process.cwd(), mutate);
 			snapshot = normalized;
+			setGitCommitAttributionEnabled(normalized.attribution.gitCommits);
 			const diff = diffSettings(previous, normalized);
 			if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: normalized });
 			if (diff.nextTurn.length > 0) dispatch("nextTurn", { diff, settings: normalized });

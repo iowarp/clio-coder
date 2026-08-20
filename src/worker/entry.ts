@@ -16,6 +16,10 @@ process.title = "clio-coder-worker";
 
 import { AI_AGENT_NAME } from "../core/agent-environment.js";
 import { deleteInjectedCompileCacheFrom } from "../core/compile-cache.js";
+import {
+	setGitCommitAttributionEnabled,
+	withManagedGitCommitAttributionEnvironment,
+} from "../core/git-commit-attribution.js";
 
 process.env.AI_AGENT = AI_AGENT_NAME;
 
@@ -130,6 +134,19 @@ async function main(): Promise<number> {
 
 	const spec = await demux.readSpec();
 	process.title = `clio-coder-worker:${spec.agentId}`;
+	const attributionEnabled = spec.gitCommitAttribution ?? true;
+	setGitCommitAttributionEnabled(attributionEnabled);
+	const attribution = withManagedGitCommitAttributionEnvironment(process.env, {
+		cwd: process.cwd(),
+		enabled: attributionEnabled,
+	});
+	for (const key of Object.keys(process.env)) {
+		if (!(key in attribution.env)) Reflect.deleteProperty(process.env, key);
+	}
+	Object.assign(process.env, attribution.env);
+	if (attribution.diagnostic !== null) {
+		process.stderr.write(`[worker] commit attribution: ${attribution.diagnostic}\n`);
+	}
 	// The worker has no settings view of its own; the dispatcher copied the
 	// operator's configured model ids onto the spec so this process protects
 	// the same residents as the orchestrator.

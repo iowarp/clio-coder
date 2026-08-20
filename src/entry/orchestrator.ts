@@ -9,6 +9,7 @@ import { type ClioSettings, readSettings, type SettingsMutator, updateSettings }
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
+import { setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
 import { configureGuardrails } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { rememberRecentModel } from "../core/recent-models.js";
@@ -1289,6 +1290,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let cachedSettingsView: ClioSettings | null = null;
 	const bumpSessionState = (): void => {
 		sessionStateGeneration += 1;
+		// Child-process seams read the effective setting from the environment,
+		// and the session view may override the saved value.
+		setGitCommitAttributionEnabled(getCurrentSettings().attribution.gitCommits);
 	};
 	const getCurrentSettings = (): ClioSettings => {
 		// Recents live in the data dir (core/recent-models.ts), never in
@@ -1313,6 +1317,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return view;
 	};
 	effectiveSettingsForDispatch = getCurrentSettings;
+	bumpSessionState();
+	// The config bundle publishes the saved value on reload; a session-scoped
+	// override must win, so re-derive from the session view after it.
+	const unsubscribeCommitAttributionSync = bus.on(BusChannels.ConfigHotReload, () => bumpSessionState());
+	termination.onDrain(() => unsubscribeCommitAttributionSync());
 	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
 		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().memory.intervention.enabled);
 	};
@@ -1366,11 +1375,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * interleave and drop each other's patches.
 	 */
 	const persistSavedMutation = (mutator: SettingsMutator): void => {
-		if (config?.update) {
-			config.update(mutator);
-			return;
-		}
-		updateSettings(mutator);
+		if (config?.update) config.update(mutator);
+		else updateSettings(mutator);
+		bumpSessionState();
 	};
 	/**
 	 * Apply a routing change with one consistent scope: it takes effect in this

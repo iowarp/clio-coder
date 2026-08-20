@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { attributeCommitMessage } from "../../src/core/commit-attribution.js";
 import { parseFleetCommands } from "../../src/domains/agents/fleet-commands.js";
 import {
 	FleetCommandRegistryMissingError,
@@ -20,6 +21,7 @@ import {
 	type ExecutionStepResult,
 	executePlan,
 } from "../../src/domains/dispatch/execution-scheduler.js";
+import { deriveFleetCommitAttribution } from "../../src/domains/dispatch/fleet-commit-attribution.js";
 import { compileFleetExecutionPlan } from "../../src/domains/dispatch/fleet-plan.js";
 
 // ---------------------------------------------------------------------------
@@ -601,6 +603,68 @@ describe("builtin SDLC fleets", () => {
 				compiled.loops.map((entry) => `${entry.id}:${entry.maxAttempts}`),
 				["suite:3", "review:2"],
 			);
+
+			const trusted = (id: string) =>
+				[id, { succeeded: true, integrityValid: true, receiptDigest: "a".repeat(64) }] as const;
+			const resultMap = new Map([trusted("plan"), trusted("build"), trusted("document")]);
+			const commitPlan = compiled.steps.find((step) => step.id === "commit-plan");
+			const commitCode = compiled.steps.find((step) => step.id === "commit-code");
+			const commitDocs = compiled.steps.find((step) => step.id === "commit-docs");
+			ok(commitPlan?.kind === "code" && commitCode?.kind === "code" && commitDocs?.kind === "code");
+			const planEvidence = deriveFleetCommitAttribution({
+				plan: compiled,
+				step: commitPlan,
+				priorResults: resultMap,
+				validationFresh: false,
+				independentReviewFresh: false,
+			});
+			deepStrictEqual(planEvidence, {
+				materiallyAssisted: true,
+				materiallyAuthored: true,
+				validationSucceeded: false,
+				independentReviewPassed: false,
+				receipt: {
+					version: 15,
+					algorithm: "sha256",
+					digest: "a".repeat(64),
+					integrityValid: true,
+					directlyRelevant: true,
+				},
+			});
+			const planMessage = attributeCommitMessage("Plan", planEvidence);
+			ok(planMessage.includes("Assisted-by:"));
+			ok(planMessage.includes("Co-authored-by:"));
+			strictEqual(planMessage.includes("Tested-by:"), false);
+			strictEqual(planMessage.includes("Reviewed-by:"), false);
+			const codeEvidence = deriveFleetCommitAttribution({
+				plan: compiled,
+				step: commitCode,
+				priorResults: resultMap,
+				validationFresh: true,
+				independentReviewFresh: true,
+			});
+			strictEqual(codeEvidence.materiallyAuthored, true);
+			strictEqual(codeEvidence.validationSucceeded, true);
+			strictEqual(codeEvidence.independentReviewPassed, true);
+			const codeMessage = attributeCommitMessage("Code", codeEvidence);
+			for (const role of ["Assisted-by:", "Tested-by:", "Reviewed-by:", "Co-authored-by:"]) {
+				ok(codeMessage.includes(role), role);
+			}
+			const docsEvidence = deriveFleetCommitAttribution({
+				plan: compiled,
+				step: commitDocs,
+				priorResults: resultMap,
+				validationFresh: true,
+				independentReviewFresh: false,
+			});
+			strictEqual(docsEvidence.materiallyAuthored, true);
+			strictEqual(docsEvidence.validationSucceeded, true);
+			strictEqual(docsEvidence.independentReviewPassed, false);
+			const docsMessage = attributeCommitMessage("Docs", docsEvidence);
+			ok(docsMessage.includes("Assisted-by:"));
+			ok(docsMessage.includes("Tested-by:"));
+			strictEqual(docsMessage.includes("Reviewed-by:"), false);
+			ok(docsMessage.includes("Co-authored-by:"));
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

@@ -150,7 +150,7 @@ const SETTINGS_SECTION_DESCRIPTIONS = {
 	compaction: "When and how the context window is summarized under pressure.",
 	retry: "Automatic recovery from transient provider and network errors.",
 	terminal: "Terminal integration and the Clio color palette.",
-	advanced: "Identity, runtime plugins, delegation timeouts, and links to other surfaces.",
+	advanced: "Commit provenance, runtime plugins, delegation timeouts, and links to other surfaces.",
 } as const satisfies Record<SettingsSectionId, string>;
 
 export const SETTINGS_LABELS_BY_ID = {
@@ -162,6 +162,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"workers.onPermission": "Fleet approvals routing",
 	"delegation.defaults.toolGovernance": "Delegation governance",
 	"skills.trustProjectCompatRoots": "Trust project skill roots",
+	"attribution.gitCommits": "Clio commit provenance",
 	safetyNet: "Safety net",
 	"orchestrator.thinkingLevel": "Thinking level",
 	"orchestrator.target": "Target",
@@ -272,6 +273,7 @@ export const SETTINGS_SECTION_ROWS = {
 	],
 	advanced: [
 		"runtimePlugins",
+		"attribution.gitCommits",
 		"compaction.model",
 		"compaction.systemPrompt",
 		"delegation.defaults.connectTimeoutMs",
@@ -289,6 +291,8 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 		"How a worker resolves an approval ask: deny the call, fail the run, or escalate to this session.",
 	"delegation.defaults.toolGovernance": "Tool policy for delegated external agents.",
 	"skills.trustProjectCompatRoots": "Whether third-party project skill roots are loaded.",
+	"attribution.gitCommits":
+		"Add evidence-backed assistance, testing, review, and contributor trailers to commits created through Clio.",
 	safetyNet: "Always-on rails; tuned in .clio-coder/safety.yaml.",
 	"orchestrator.thinkingLevel": "Reasoning budget for the chat loop.",
 	"orchestrator.target": "Active chat target id.",
@@ -348,6 +352,8 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 	"budget.concurrency": "auto sizes to your machine. A fixed number caps how many workers run at once.",
 	"skills.trustProjectCompatRoots":
 		"Project roots like .claude/skills and .codex/skills are untrusted by default; enabling exposes them to the model.",
+	"attribution.gitCommits":
+		"Role trailers are added only when Clio has trusted evidence for that role. Disabling leaves subsequent commit messages entirely unchanged.",
 	"workers.onPermission":
 		"deny turns the ask into a tool denial and the run continues; fail stops the run as permission_required; escalate forwards the ask to you and falls back per workers.escalation on timeout.",
 	"workers.agentBindings":
@@ -393,6 +399,10 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 	"skills.trustProjectCompatRoots": {
 		true: "load skills from .claude/.codex/.github/etc. project roots",
 		false: "ignore third-party project skill roots",
+	},
+	"attribution.gitCommits": {
+		enabled: "add only the Clio role trailers justified by trusted evidence",
+		disabled: "leave every subsequent commit message byte-for-byte unchanged",
 	},
 	"terminal.showTerminalProgress": {
 		true: "emit OSC 9;4 taskbar/tab progress badges during turns",
@@ -1095,6 +1105,7 @@ function defaultValueFor(id: EditableSettingId): string | undefined {
 	if (isRoutingPath(id)) return undefined;
 	const raw = getAtPath(DEFAULT_SETTINGS, id);
 	if (raw === null || raw === undefined || typeof raw === "object") return undefined;
+	if (id === "attribution.gitCommits") return raw === true ? "enabled" : "disabled";
 	return String(raw);
 }
 
@@ -1407,6 +1418,9 @@ export function buildSettingItems(
 		settingItem("runtimePlugins", settings.runtimePlugins.length > 0 ? settings.runtimePlugins.join(", ") : "(none)", {
 			submenu: editTextSubmenu("Edit runtime plugins comma-separated list", "Restart Clio to load changes."),
 			affordance: "free text",
+		}),
+		settingItem("attribution.gitCommits", settings.attribution.gitCommits ? "enabled" : "disabled", {
+			values: ["enabled", "disabled"],
 		}),
 		settingItem("compaction.model", compaction.model ?? "(orchestrator target)", {
 			submenu: editTextSubmenu("Edit compaction model; blank uses the orchestrator"),
@@ -1774,6 +1788,9 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			return;
 		case "skills.trustProjectCompatRoots":
 			if (value === "true" || value === "false") settings.skills.trustProjectCompatRoots = value === "true";
+			return;
+		case "attribution.gitCommits":
+			if (value === "enabled" || value === "disabled") settings.attribution.gitCommits = value === "enabled";
 			return;
 		case "orchestrator.thinkingLevel":
 			settings.orchestrator.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.orchestrator.thinkingLevel;

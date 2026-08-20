@@ -18,10 +18,19 @@ every step; this page is the procedure.
 | Tags | none for 0.3.2, local or remote |
 | GitHub Release | none for 0.3.2 |
 | npm registry | `@iowarp/clio-coder@0.3.2` absent; `latest` is `0.3.1` |
+| Commit provenance identity | Release-blocking: `clio-coder@iowarp.ai` must be verified on IOWarp-controlled GitHub and GitLab identities, such as `clio-coder-bot` or `iowarp-clio`; use `assets/clio-coder-avatar-512.png` as the platform avatar. |
 
 ---
 
 ## Part 1: verification (repeatable)
+
+Before the local gate, confirm the public commit-provenance email
+`clio-coder@iowarp.ai` is verified on IOWarp-controlled GitHub and GitLab
+identities. An IOWarp identity such as `clio-coder-bot` or `iowarp-clio` is
+appropriate. Upload `assets/clio-coder-avatar-512.png` as the platform account
+avatar if PNG is required; commit data itself cannot carry a logo. This is a
+release prerequisite, not an instruction for Clio to create an account or
+perform a remote operation.
 
 Run against the exact final candidate with `NO_COLOR` unset and
 `TERM=xterm-256color`, so the color-sensitive tests see a real terminal.

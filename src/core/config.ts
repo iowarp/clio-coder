@@ -964,6 +964,7 @@ const TOP_LEVEL_KEYS = [
 	"theme",
 	"terminal",
 	"skills",
+	"attribution",
 	"delegation",
 	"keybindings",
 	"compaction",
@@ -1352,6 +1353,18 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("trustProjectCompatRoots" in raw.skills) {
 				const v = expectBoolean(issues, "skills.trustProjectCompatRoots", raw.skills.trustProjectCompatRoots);
 				if (v !== undefined) settings.skills.trustProjectCompatRoots = v;
+			}
+		}
+	}
+
+	if ("attribution" in raw) {
+		if (!isPlainObject(raw.attribution)) {
+			issues.add("attribution", `expected a map, got ${describe(raw.attribution)}`);
+		} else {
+			issues.unknownKeys("attribution", raw.attribution, ["gitCommits"]);
+			if ("gitCommits" in raw.attribution) {
+				const v = expectBoolean(issues, "attribution.gitCommits", raw.attribution.gitCommits);
+				if (v !== undefined) settings.attribution.gitCommits = v;
 			}
 		}
 	}

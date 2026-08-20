@@ -18,6 +18,12 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { AI_AGENT_NAME } from "../../core/agent-environment.js";
+import type { CommitAttributionEvidence } from "../../core/commit-attribution.js";
+import {
+	gitCommitAttributionEnabled,
+	reportCommitAttributionDiagnostic,
+	withManagedGitCommitAttributionEnvironment,
+} from "../../core/git-commit-attribution.js";
 import { FLEET_COMMAND_BASE_ENV, type FleetCommand } from "../agents/fleet-commands.js";
 import type { CodeReportResult } from "../agents/result-contract.js";
 
@@ -60,6 +66,11 @@ export interface CodeStepRunInput {
 	 * a failure, not a no-op: it means the step it describes produced nothing.
 	 */
 	requireWorkspaceChanges?: boolean;
+	/** Trusted attribution facts for a commit command; omitted uses Clio-authored child-process defaults. */
+	commitAttribution?: {
+		enabled: boolean;
+		evidence: Readonly<CommitAttributionEvidence>;
+	};
 	signal?: AbortSignal;
 }
 
@@ -208,6 +219,12 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 	const [executable, ...args] = argv;
 	if (executable === undefined) throw new Error(`code step: command '${command.id}' has no executable`);
 	return await new Promise<SpawnOutcome>((resolvePromise) => {
+		const attribution = withManagedGitCommitAttributionEnvironment(codeStepEnv(command, input.env ?? process.env), {
+			cwd,
+			enabled: input.commitAttribution?.enabled ?? gitCommitAttributionEnabled(process.env),
+			...(input.commitAttribution?.evidence === undefined ? {} : { evidence: input.commitAttribution.evidence }),
+		});
+		reportCommitAttributionDiagnostic(attribution.diagnostic);
 		const chunks: Buffer[] = [];
 		let outputBytes = 0;
 		let captured = 0;
@@ -216,7 +233,7 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 		let spawnError: string | null = null;
 		const child = spawn(executable, args, {
 			cwd,
-			env: codeStepEnv(command, input.env ?? process.env),
+			env: attribution.env,
 			stdio: ["ignore", "pipe", "pipe"],
 			// The command leads its own process group, so a timeout kills the
 			// whole tree rather than orphaning a test runner's children.

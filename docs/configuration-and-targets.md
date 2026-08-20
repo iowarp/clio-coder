@@ -410,7 +410,7 @@ The routing keys in `settings.yaml` (`orchestrator.*`, `background.*`, `workers.
 
 - Interactive changes (`/model`, Alt+L, `/settings`, Shift+Tab, `/thinking`, Alt+J / Alt+K, `/scoped-models`) apply to the current session immediately and are written back as the defaults for sessions launched later.
 - Writes from other processes, such as a second Clio session, `clio-coder targets use`, `clio-coder configure`, or a manual edit, update the defaults and the shared target catalog. These writes never redirect a running session's chat or fleet routing. The running session shows a notice when the saved defaults diverge from its active routing.
-- Non-routing settings (theme, keybindings, autonomy level, retry, compaction, target catalog entries) still hot-reload into running sessions as before.
+- Non-routing settings (theme, keybindings, autonomy level, retry, compaction, commit attribution, target catalog entries) still hot-reload into running sessions as before.
 - `/resume` and `/new` switch sessions, not routing: the terminal keeps its active target/model/thinking across session switches.
 
 This is what makes several concurrent Clio terminals safe: each one routes through its own state, and `settings.yaml` only decides where the *next* session starts.
@@ -448,7 +448,7 @@ The Settings Center organizes all configuration under four non-selectable group 
 | **RUNTIME** | Compaction (`compaction`) | `compaction.auto`, `compaction.threshold`, and `compaction.excludeLastTurns`. |
 | **RUNTIME** | Retry (`retry`) | `retry.enabled`, `retry.maxRetries`, `retry.baseDelayMs`, and `retry.maxDelayMs`. |
 | **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), `terminal.smoothStreaming` (`off`, `auto`, `on`), and `theme`. |
-| **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, and `delegation.agents`. |
+| **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `attribution.gitCommits`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, and `delegation.agents`. |
 
 `retry.streamStallMs` has no Settings Center row; edit it in `settings.yaml`.
 
@@ -499,6 +499,7 @@ Label to config path mapping:
 | Smooth streaming | `terminal.smoothStreaming` (`off`, `auto`, or `on`, live) |
 | Theme | `theme` |
 | Runtime plugins | `runtimePlugins` |
+| Clio commit provenance | `attribution.gitCommits` (`enabled` or `disabled`, live) |
 | Compaction model | `compaction.model` |
 | Compaction prompt | `compaction.systemPrompt` |
 | Delegate connect (ms) | `delegation.defaults.connectTimeoutMs` |
@@ -545,6 +546,14 @@ These are saved defaults, not a live control surface. See [Live routing vs saved
 | `workers.profiles` | `{}` | map of profile name to a target/model/thinking choice | next dispatch |
 | `workers.agentBindings` | `{}` | map of agent id to a key present in `workers.profiles` | next dispatch |
 | `skills.trustProjectCompatRoots` | `false` | boolean | restart |
+
+### Git commit provenance
+
+| Key | Default | Validation | When it applies |
+| --- | --- | --- | --- |
+| `attribution.gitCommits` | `true` | boolean | immediately for subsequent commits |
+
+Enabled attribution adds the compiled identity `Clio Coder <clio-coder@iowarp.ai>` only through evidence-justified role trailers. Assistance requires material creation or editing, testing requires a successful recorded validation command, and review requires a passing independent verifier. `Co-authored-by` is the GitHub/GitLab contributor and avatar compatibility trailer and appears only for material authorship, never for testing or review alone. Disabling the setting leaves commit messages entirely unchanged. Full hook behavior, evidence semantics, platform-avatar behavior, and the account email-verification prerequisite are in [git-commit-provenance.md](git-commit-provenance.md).
 
 ### Guardrails
 
